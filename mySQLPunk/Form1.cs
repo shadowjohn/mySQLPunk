@@ -605,12 +605,6 @@ namespace mySQLPunk
         }
         public void dialogMyBoxOn(string message, bool can_close)
         {
-            /*
-            var w = new Form() { Size = new Size(0, 0) };
-            (new System.Threading.Thread(CloseIt)).Start();
-            MessageBox.Show("HI");
-            MessageBox.Show(w, "Wait...", "載入中...");
-            */
             dialog.Size = new Size(250, 80);
             dialog.MaximizeBox = false;
             dialog.MinimizeBox = false;
@@ -618,13 +612,16 @@ namespace mySQLPunk
             dialog.ControlBox = false;
             dialog.FormBorderStyle = FormBorderStyle.FixedSingle;
             dialog.StartPosition = FormStartPosition.CenterScreen;
+            dialog.BackColor = Color.White;
+            dialog.ForeColor = Color.FromArgb(51, 51, 51);
 
             dialogLabel.Location = new Point(0, 0);
             dialogLabel.AutoSize = false;
             dialogLabel.Size = new Size(250, 80);
             dialogLabel.TextAlign = ContentAlignment.MiddleCenter;
             dialogLabel.Text = message;
-            dialogLabel.Font = new Font("Arial", 18, FontStyle.Bold);
+            dialogLabel.ForeColor = Color.FromArgb(51, 51, 51);
+            dialogLabel.Font = new Font("Microsoft JhengHei", 18, FontStyle.Bold);
             dialog.Controls.Add(dialogLabel);
             dialog.TopMost = true;
             dialog.Show();

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using utility;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using mySQLPunk.lib;
 
 namespace mySQLPunk.entity
 {
@@ -48,28 +49,43 @@ namespace mySQLPunk.entity
 
             for (int i = 0, max_i = ja.Count; i < max_i; i++)
             {  
-                Dictionary<string, object> doo = new Dictionary<string, object>();
-                foreach (JObject obj in ja[i])
+                List<Dictionary<string, object>> list = ja[i].ToObject<List<Dictionary<string, object>>>();
+                foreach (var conn in list)
                 {
-                    Dictionary<string, object> dictObj = obj.ToObject<Dictionary<string, object>>();
-                    dictObj["isConnect"] = "F";
-                    connections.Add(dictObj);
+                    // 解密帳號密碼
+                    conn["username"] = Crypto.Decrypt(GetVal(conn, "username"));
+                    conn["pwd"] = Crypto.Decrypt(GetVal(conn, "pwd"));
+                    
+                    conn["isConnect"] = "F";
+                    connections.Add(conn);
                 }
             }
         }
         public void setSettingINI()
         {
-            // 將連線清單過濾掉 runtime 的 pdo 物件後存檔
-            List<Dictionary<string, object>> saveData = new List<Dictionary<string, object>>();
+            List<Dictionary<string, object>> saveList = new List<Dictionary<string, object>>();
             foreach (var conn in connections)
             {
-                var copy = new Dictionary<string, object>(conn);
-                if (copy.ContainsKey("pdo")) copy.Remove("pdo");
-                saveData.Add(copy);
+                var item = new Dictionary<string, object>
+                {
+                    { "host", GetVal(conn, "host") },
+                    { "username", Crypto.Encrypt(GetVal(conn, "username")) },
+                    { "pwd", Crypto.Encrypt(GetVal(conn, "pwd")) },
+                    { "port", GetVal(conn, "port") },
+                    { "db_kind", GetVal(conn, "db_kind") },
+                    { "conn_name", GetVal(conn, "conn_name") }
+                };
+                saveList.Add(item);
             }
             string setting_path = my.pwd() + "\\setting.ini";
-            string json = JsonConvert.SerializeObject(saveData, Formatting.Indented);
+            string json = JsonConvert.SerializeObject(saveList, Formatting.Indented);
             my.file_put_contents(setting_path, json);
+        }
+
+        private string GetVal(Dictionary<string, object> dict, string key)
+        {
+            if (dict.ContainsKey(key) && dict[key] != null) return dict[key].ToString();
+            return "";
         }
 
     }
