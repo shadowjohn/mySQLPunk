@@ -31,6 +31,10 @@ namespace mySQLPunk
         private ToolStripStatusLabel lblStatus;
         private ListBox lstCompletion;
         private TabControl tabResults;
+        private Button btnFloat;
+        private Button btnDock;
+        private Form1 _mainHost;
+        private bool _isDocked;
 
         private static readonly string[] Keywords =
         {
@@ -54,14 +58,20 @@ namespace mySQLPunk
         private readonly string connectionHost;
 
         public QueryForm(IDatabase db, string dbName)
-            : this(db, dbName, string.Empty)
+            : this(db, dbName, string.Empty, string.Empty)
         {
         }
 
         public QueryForm(IDatabase db, string dbName, string host)
+            : this(db, dbName, host, string.Empty)
+        {
+        }
+
+        public QueryForm(IDatabase db, string dbName, string host, string initialSql)
         {
             InitializeQueryForm();
             this._db = db;
+            this._databaseName = dbName ?? string.Empty;
             this.currentDatabase = dbName ?? string.Empty;
             this.connectionHost = host ?? string.Empty;
 
@@ -78,6 +88,15 @@ namespace mySQLPunk
                 }
                 this.Text = title;
             }
+
+            if (!string.IsNullOrWhiteSpace(initialSql))
+            {
+                txtSql.Text = initialSql;
+                txtSql.SelectionStart = txtSql.TextLength;
+                txtSql.SelectionLength = 0;
+            }
+
+            LoadTableNames();
         }
 
         private void InitializeQueryForm()
@@ -123,10 +142,29 @@ namespace mySQLPunk
             };
             btnExportCsv.Click += (s, e) => ExportCsv();
 
+            btnFloat = new Button
+            {
+                Text = "Float",
+                Location = new Point(375, 5),
+                Size = new Size(70, 30)
+            };
+            btnFloat.Click += (s, e) => FloatToWindow();
+
+            btnDock = new Button
+            {
+                Text = "Dock",
+                Location = new Point(450, 5),
+                Size = new Size(70, 30),
+                Visible = false
+            };
+            btnDock.Click += (s, e) => DockToMainWindow();
+
             pnlTop.Controls.Add(btnExecute);
             pnlTop.Controls.Add(btnCancel);
             pnlTop.Controls.Add(btnBeautify);
             pnlTop.Controls.Add(btnExportCsv);
+            pnlTop.Controls.Add(btnFloat);
+            pnlTop.Controls.Add(btnDock);
 
             // ── 分割容器 ──
             SplitContainer split = new SplitContainer
@@ -190,6 +228,80 @@ namespace mySQLPunk
             Controls.Add(split);
             Controls.Add(pnlTop);
             Controls.Add(statusStrip);
+        }
+
+        public void SetMainHost(Form1 mainHost)
+        {
+            _mainHost = mainHost;
+        }
+
+        public string GetDisplayTitle()
+        {
+            return Text;
+        }
+
+        public void PrepareForDocking()
+        {
+            if (Visible)
+            {
+                Hide();
+            }
+
+            if (Parent != null)
+            {
+                Parent.Controls.Remove(this);
+            }
+
+            FormBorderStyle = FormBorderStyle.None;
+            TopLevel = false;
+            TopMost = false;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            _isDocked = true;
+            btnFloat.Visible = true;
+            btnDock.Visible = false;
+        }
+
+        public void PrepareForFloating()
+        {
+            if (Visible)
+            {
+                Hide();
+            }
+
+            if (Parent != null)
+            {
+                Parent.Controls.Remove(this);
+            }
+
+            Dock = DockStyle.None;
+            TopLevel = true;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            ShowInTaskbar = true;
+            StartPosition = FormStartPosition.CenterParent;
+            _isDocked = false;
+            btnFloat.Visible = false;
+            btnDock.Visible = _mainHost != null;
+        }
+
+        private void FloatToWindow()
+        {
+            if (_mainHost == null)
+            {
+                return;
+            }
+
+            _mainHost.FloatQueryForm(this);
+        }
+
+        private void DockToMainWindow()
+        {
+            if (_mainHost == null)
+            {
+                return;
+            }
+
+            _mainHost.DockQueryForm(this);
         }
 
         // ── 載入資料表名稱供自動補完 ──
@@ -349,10 +461,8 @@ namespace mySQLPunk
         }
 
         // ── 取得要執行的 SQL 語句 ──
-        private string GetSqlToExecute()
+        private string GetSqlToExecute(string sql)
         {
-            string sql = txtSql.Text;
-
             if (string.IsNullOrWhiteSpace(sql))
             {
                 return sql;
@@ -435,11 +545,13 @@ namespace mySQLPunk
         private async void ExecuteQueryAsync()
         {
             // 優先執行選取文字，否則全文
-            string sql = txtSql.SelectionLength > 0
+            string rawSql = txtSql.SelectionLength > 0
                 ? txtSql.SelectedText.Trim()
                 : txtSql.Text.Trim();
 
-            if (string.IsNullOrEmpty(sql)) return;
+            if (string.IsNullOrEmpty(rawSql)) return;
+
+            string sql = GetSqlToExecute(rawSql);
 
             _cts = new CancellationTokenSource();
             btnExecute.Enabled = false;
@@ -452,7 +564,7 @@ namespace mySQLPunk
             try
             {
                 // 判斷是否為 SELECT/SHOW/EXPLAIN/DESC (顯示結果集) 或 DML (顯示影響行數)
-                string firstWord = GetFirstWord(sql);
+                string firstWord = GetFirstWord(rawSql);
                 bool isQuery = IsSelectStatement(firstWord);
 
                 if (isQuery)
@@ -607,6 +719,10 @@ namespace mySQLPunk
         {
             _cts?.Cancel();
             _cts?.Dispose();
+            if (_mainHost != null)
+            {
+                _mainHost.NotifyQueryFormClosed(this);
+            }
             base.OnFormClosed(e);
         }
     }

@@ -28,6 +28,8 @@ namespace mySQLPunk
         mySQLPunk_main myN = new mySQLPunk_main();
         myinclude my = new myinclude();
         ToolStripButton query_btn = new ToolStripButton(); // 新增查詢按鈕
+        private TabControl queryTabs;
+        private int queryTabCounter = 1;
         public Form1()
         {
             InitializeComponent();
@@ -359,6 +361,10 @@ namespace mySQLPunk
         {
             db_tree.Width = splitContainer3.Width;
             db_tree.Height = splitContainer3.Height - 20;
+            queryTabs = new TabControl();
+            queryTabs.Dock = DockStyle.Fill;
+            queryTabs.Visible = false;
+            splitContainer5.Panel2.Controls.Add(queryTabs);
             List<object> d = new List<object>();
             d.Add(OpenTable);
             d.Add(DesignTable);
@@ -497,8 +503,7 @@ namespace mySQLPunk
                     string host = connInfo.ContainsKey("host") && connInfo["host"] != null
                         ? connInfo["host"].ToString()
                         : string.Empty;
-                    QueryForm qf = new QueryForm(db, dbName, host);
-                    qf.Show();
+                    OpenQuery(db, dbName, host, string.Empty, true);
                 }
                 else
                 {
@@ -506,6 +511,313 @@ namespace mySQLPunk
                 }
             }
         }
+
+        private void OpenSelectedTableInQuery()
+        {
+            if (db_tree.SelectedNode == null)
+            {
+                return;
+            }
+
+            TreeNode node = db_tree.SelectedNode;
+            var pathParts = my.explode("\\", node.FullPath);
+
+            if (pathParts.Length < 4 || pathParts[2] != "Tables")
+            {
+                MessageBox.Show("請先在左側選取一個具體的資料表 (Table)！");
+                return;
+            }
+
+            TreeNode root = node;
+            while (root.Parent != null)
+            {
+                root = root.Parent;
+            }
+
+            var connInfo = myN.connections[root.Index];
+            if (connInfo["isConnect"].ToString() != "T")
+            {
+                MessageBox.Show("請先雙擊連線以開啟資料庫！");
+                return;
+            }
+
+            string dbName = pathParts[1];
+            string tableName = pathParts[3];
+            string host = connInfo.ContainsKey("host") && connInfo["host"] != null
+                ? connInfo["host"].ToString()
+                : string.Empty;
+            string initialSql = "SELECT * FROM `" + tableName.Replace("`", "``") + "` LIMIT 200;";
+
+            OpenQuery((IDatabase)connInfo["pdo"], dbName, host, initialSql, true);
+        }
+
+        private void OpenQuery(IDatabase db, string dbName, string host, string initialSql, bool docked)
+        {
+            QueryForm queryForm = new QueryForm(db, dbName, host, initialSql);
+            queryForm.SetMainHost(this);
+
+            if (docked)
+            {
+                DockQueryForm(queryForm);
+            }
+            else
+            {
+                ShowFloatingQueryForm(queryForm);
+            }
+        }
+
+        public void DockQueryForm(QueryForm queryForm)
+        {
+            if (queryForm == null)
+            {
+                return;
+            }
+
+            TabPage existingPage = FindQueryTab(queryForm);
+            if (existingPage != null)
+            {
+                queryTabs.SelectedTab = existingPage;
+                return;
+            }
+
+            queryForm.PrepareForDocking();
+
+            TabPage page = new TabPage(BuildQueryTabText(queryForm));
+            page.Tag = queryForm;
+            page.Controls.Add(queryForm);
+            queryForm.Dock = DockStyle.Fill;
+            queryTabs.TabPages.Add(page);
+            queryTabs.SelectedTab = page;
+            queryTabs.Visible = true;
+            queryForm.Show();
+            queryForm.BringToFront();
+        }
+
+        public void FloatQueryForm(QueryForm queryForm)
+        {
+            if (queryForm == null)
+            {
+                return;
+            }
+
+            TabPage page = FindQueryTab(queryForm);
+            if (page != null)
+            {
+                queryTabs.TabPages.Remove(page);
+                page.Dispose();
+            }
+
+            queryTabs.Visible = queryTabs.TabPages.Count > 0;
+            ShowFloatingQueryForm(queryForm);
+        }
+
+        public void NotifyQueryFormClosed(QueryForm queryForm)
+        {
+            if (queryForm == null || queryTabs == null)
+            {
+                return;
+            }
+
+            TabPage page = FindQueryTab(queryForm);
+            if (page == null)
+            {
+                return;
+            }
+
+            queryTabs.TabPages.Remove(page);
+            page.Dispose();
+            queryTabs.Visible = queryTabs.TabPages.Count > 0;
+        }
+
+        private void ShowFloatingQueryForm(QueryForm queryForm)
+        {
+            queryForm.PrepareForFloating();
+            queryForm.Show(this);
+            queryForm.BringToFront();
+        }
+
+        private TabPage FindQueryTab(QueryForm queryForm)
+        {
+            if (queryTabs == null)
+            {
+                return null;
+            }
+
+            foreach (TabPage page in queryTabs.TabPages)
+            {
+                if (ReferenceEquals(page.Tag, queryForm))
+                {
+                    return page;
+                }
+            }
+
+            return null;
+        }
+
+        private string BuildQueryTabText(QueryForm queryForm)
+        {
+            string text = queryForm.GetDisplayTitle();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                text = "Query " + queryTabCounter;
+                queryTabCounter++;
+            }
+
+            return text;
+        }
+
+        private void DesignSelectedTable()
+        {
+            DesignTable_Click(this, EventArgs.Empty);
+        }
+
+        private void DumpSelectedTableSql(bool structureOnly)
+        {
+            if (db_tree.SelectedNode == null)
+            {
+                return;
+            }
+
+            TreeNode node = db_tree.SelectedNode;
+            var pathParts = my.explode("\\", node.FullPath);
+
+            if (pathParts.Length < 4 || pathParts[2] != "Tables")
+            {
+                MessageBox.Show("請先在左側選取一個具體的資料表 (Table)！");
+                return;
+            }
+
+            TreeNode root = node;
+            while (root.Parent != null)
+            {
+                root = root.Parent;
+            }
+
+            var connInfo = myN.connections[root.Index];
+            if (connInfo["isConnect"].ToString() != "T")
+            {
+                MessageBox.Show("請先雙擊連線以開啟資料庫！");
+                return;
+            }
+
+            IDatabase db = (IDatabase)connInfo["pdo"];
+            if (!(db is my_mysql))
+            {
+                MessageBox.Show("目前僅支援 MySQL 資料表傾印。", "功能限制", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string dbName = pathParts[1];
+            string tableName = pathParts[3];
+
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Filter = "SQL files (*.sql)|*.sql";
+                dialog.DefaultExt = "sql";
+                dialog.FileName = dbName + "_" + tableName + (structureOnly ? "_schema" : "_data") + ".sql";
+
+                if (dialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    string sql = BuildMySqlTableDump((my_mysql)db, dbName, tableName, structureOnly);
+                    File.WriteAllText(dialog.FileName, sql, Encoding.UTF8);
+                    MessageBox.Show("SQL 檔案已匯出。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("匯出 SQL 失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private static string BuildMySqlTableDump(my_mysql db, string databaseName, string tableName, bool dataOnly)
+        {
+            string safeDatabaseName = databaseName.Replace("`", "``");
+            string safeTableName = tableName.Replace("`", "``");
+            StringBuilder builder = new StringBuilder();
+
+            builder.AppendLine("-- mySQLPunk SQL Dump");
+            builder.AppendLine("-- Database: `" + safeDatabaseName + "`");
+            builder.AppendLine("-- Table: `" + safeTableName + "`");
+            builder.AppendLine("SET NAMES utf8mb4;");
+            builder.AppendLine("USE `" + safeDatabaseName + "`;");
+            builder.AppendLine();
+
+            if (!dataOnly)
+            {
+                DataTable createTableDt = db.SelectSQL("SHOW CREATE TABLE `" + safeDatabaseName + "`.`" + safeTableName + "`;");
+                if (createTableDt.Rows.Count > 0)
+                {
+                    builder.AppendLine("DROP TABLE IF EXISTS `" + safeTableName + "`;");
+                    builder.AppendLine(createTableDt.Rows[0][1].ToString() + ";");
+                    builder.AppendLine();
+                }
+            }
+
+            DataTable dataTable = db.SelectSQL("SELECT * FROM `" + safeDatabaseName + "`.`" + safeTableName + "`;");
+            foreach (DataRow row in dataTable.Rows)
+            {
+                builder.Append("INSERT INTO `");
+                builder.Append(safeTableName);
+                builder.Append("` VALUES (");
+
+                for (int i = 0; i < dataTable.Columns.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        builder.Append(", ");
+                    }
+
+                    builder.Append(ToMySqlLiteral(row[i]));
+                }
+
+                builder.AppendLine(");");
+            }
+
+            return builder.ToString();
+        }
+
+        private static string ToMySqlLiteral(object value)
+        {
+            if (value == null || value == DBNull.Value)
+            {
+                return "NULL";
+            }
+
+            if (value is byte[] bytes)
+            {
+                StringBuilder hex = new StringBuilder(bytes.Length * 2 + 2);
+                hex.Append("0x");
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    hex.Append(bytes[i].ToString("X2"));
+                }
+
+                return hex.ToString();
+            }
+
+            if (value is bool)
+            {
+                return ((bool)value) ? "1" : "0";
+            }
+
+            if (value is string || value is char || value is DateTime || value is Guid)
+            {
+                return "'" + value.ToString().Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+            }
+
+            if (value is IFormattable formattable)
+            {
+                return formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            return "'" + value.ToString().Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+        }
+
         private void Form1_Load(object sender, EventArgs e)
         {
             ApplyModernTheme(this);
@@ -539,18 +851,49 @@ namespace mySQLPunk
             {
                 db_tree.SelectedNode = e.Node;
 
-                // 只有根節點（連線層）才顯示右鍵選單
-                if (e.Node.Parent != null) return;
-
                 ContextMenuStrip menu = new ContextMenuStrip();
 
-                ToolStripMenuItem editItem = new ToolStripMenuItem("編輯連線");
-                editItem.Click += (s, ev) => db_tree_edit_connection(e.Node.Index);
-                menu.Items.Add(editItem);
+                if (e.Node.Parent == null)
+                {
+                    ToolStripMenuItem editItem = new ToolStripMenuItem("編輯連線");
+                    editItem.Click += (s, ev) => db_tree_edit_connection(e.Node.Index);
+                    menu.Items.Add(editItem);
 
-                ToolStripMenuItem deleteItem = new ToolStripMenuItem("刪除連線");
-                deleteItem.Click += (s, ev) => db_tree_delete_connection(e.Node.Index);
-                menu.Items.Add(deleteItem);
+                    ToolStripMenuItem deleteItem = new ToolStripMenuItem("刪除連線");
+                    deleteItem.Click += (s, ev) => db_tree_delete_connection(e.Node.Index);
+                    menu.Items.Add(deleteItem);
+                }
+                else
+                {
+                    var pathParts = my.explode("\\", e.Node.FullPath);
+                    if (pathParts.Length >= 4 && pathParts[2] == "Tables")
+                    {
+                        ToolStripMenuItem openTableItem = new ToolStripMenuItem("開啟資料表");
+                        openTableItem.Click += (s, ev) => OpenSelectedTableInQuery();
+                        menu.Items.Add(openTableItem);
+
+                        ToolStripMenuItem designTableItem = new ToolStripMenuItem("設計資料表");
+                        designTableItem.Click += (s, ev) => DesignSelectedTable();
+                        menu.Items.Add(designTableItem);
+
+                        ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem("傾印 SQL 檔案");
+                        ToolStripMenuItem dumpStructureAndDataItem = new ToolStripMenuItem("結構與資料");
+                        dumpStructureAndDataItem.Click += (s, ev) => DumpSelectedTableSql(false);
+                        dumpSqlItem.DropDownItems.Add(dumpStructureAndDataItem);
+
+                        ToolStripMenuItem dumpDataOnlyItem = new ToolStripMenuItem("僅資料");
+                        dumpDataOnlyItem.Click += (s, ev) => DumpSelectedTableSql(true);
+                        dumpSqlItem.DropDownItems.Add(dumpDataOnlyItem);
+
+                        menu.Items.Add(dumpSqlItem);
+                    }
+                }
+
+                if (menu.Items.Count == 0)
+                {
+                    menu.Dispose();
+                    return;
+                }
 
                 menu.Show(db_tree, e.Location);
             }
