@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.IO;
 using System.Drawing;
 using System.Linq;
 using System.Text;
@@ -31,8 +32,83 @@ namespace mySQLPunk
         {
             InitializeComponent();
         }
-        [DllImport("uxtheme.dll", SetLastError = true, ExactSpelling = true, CharSet = CharSet.Unicode)]
-        public static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
+        
+        public static void ApplyModernTheme(Control parent)
+        {
+            Color baseWhite = Color.White;
+            Color textGray = Color.FromArgb(51, 51, 51);
+            Color borderGray = Color.FromArgb(224, 224, 224);
+            Color professionalBlue = Color.FromArgb(0, 120, 212);
+
+            parent.BackColor = baseWhite;
+            parent.ForeColor = textGray;
+
+            if (parent is Form f)
+            {
+                f.Opacity = 1.0f;
+                f.KeyPreview = true;
+                f.KeyDown += (s, e) => {
+                    if (e.KeyCode == Keys.Escape) f.Close();
+                };
+            }
+
+            foreach (Control c in parent.Controls)
+            {
+                if (c is MenuStrip || c is ToolStrip || c is StatusStrip)
+                {
+                    c.BackColor = Color.FromArgb(245, 245, 245);
+                    c.ForeColor = textGray;
+                    if (c is ToolStrip ts)
+                    {
+                        ts.Renderer = new ToolStripProfessionalRenderer(new ProfessionalColorTable());
+                        ts.ImageScalingSize = new Size(24, 24);
+                        ts.GripStyle = ToolStripGripStyle.Hidden;
+                    }
+                }
+                else if (c is TreeView tv)
+                {
+                    tv.BackColor = baseWhite;
+                    tv.ForeColor = textGray;
+                    tv.LineColor = borderGray;
+                    tv.BorderStyle = BorderStyle.None;
+                    tv.FullRowSelect = true;
+                    tv.ItemHeight = 24;
+                }
+                else if (c is DataGridView dgv)
+                {
+                    dgv.BackgroundColor = Color.FromArgb(240, 240, 240);
+                    dgv.GridColor = borderGray;
+                    dgv.BorderStyle = BorderStyle.None;
+                    dgv.DefaultCellStyle.BackColor = baseWhite;
+                    dgv.DefaultCellStyle.ForeColor = textGray;
+                    dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(245, 245, 245);
+                    dgv.ColumnHeadersDefaultCellStyle.ForeColor = textGray;
+                    dgv.EnableHeadersVisualStyles = true;
+                }
+                else if (c is SplitContainer sc)
+                {
+                    sc.BorderStyle = BorderStyle.None;
+                    sc.SplitterWidth = 1;
+                    ApplyModernTheme(sc.Panel1);
+                    ApplyModernTheme(sc.Panel2);
+                }
+                else
+                {
+                    ApplyModernTheme(c);
+                }
+            }
+        }
+
+        public class CyberpunkColorTable : ProfessionalColorTable
+        {
+            public override Color ToolStripGradientBegin => Color.FromArgb(26, 26, 26);
+            public override Color ToolStripGradientEnd => Color.FromArgb(26, 26, 26);
+            public override Color ToolStripBorder => Color.FromArgb(0, 255, 204);
+            public override Color MenuItemSelected => Color.FromArgb(0, 100, 100);
+            public override Color MenuItemSelectedGradientBegin => Color.FromArgb(0, 100, 100);
+            public override Color MenuItemSelectedGradientEnd => Color.FromArgb(0, 100, 100);
+            public override Color MenuItemBorder => Color.FromArgb(0, 255, 204);
+        }
         public void showTools(string kind)
         {
             switch (kind)
@@ -310,7 +386,6 @@ namespace mySQLPunk
 
             // 初始化 New Query 按鈕
             query_btn.Text = "New Query";
-            this.connection_btn.Image = global::mySQLPunk.Properties.Resources.database;
             query_btn.ImageScaling = ToolStripItemImageScaling.None;
             query_btn.TextImageRelation = TextImageRelation.Overlay;
             query_btn.TextAlign = ContentAlignment.BottomCenter;
@@ -321,6 +396,32 @@ namespace mySQLPunk
 
             // 連結 Design Table 事件
             DesignTable.Click += DesignTable_Click;
+
+            // 嘗試從 image 資料夾載入切好的高解析圖標
+            string imgPath = Path.Combine(Application.StartupPath, "image");
+            LoadIcon(connection_btn, Path.Combine(imgPath, "connection.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(user_btn, Path.Combine(imgPath, "user.png"), global::mySQLPunk.Properties.Resources.user);
+            LoadIcon(table_btn, Path.Combine(imgPath, "table.png"), global::mySQLPunk.Properties.Resources.tables_32);
+            LoadIcon(view_btn, Path.Combine(imgPath, "view.png"), global::mySQLPunk.Properties.Resources.views_32);
+            LoadIcon(query_btn, Path.Combine(imgPath, "query.png"), null);
+        }
+
+        private void LoadIcon(ToolStripItem btn, string path, Image defaultImg)
+        {
+            if (File.Exists(path))
+            {
+                try 
+                { 
+                    btn.Image = Image.FromFile(path);
+                    if (btn is ToolStripButton tsb) tsb.ImageScaling = ToolStripItemImageScaling.SizeToFit;
+                    if (btn is ToolStripDropDownButton tsddb) tsddb.ImageScaling = ToolStripItemImageScaling.SizeToFit;
+                }
+                catch { btn.Image = defaultImg; }
+            }
+            else
+            {
+                btn.Image = defaultImg;
+            }
         }
 
         private void DesignTable_Click(object sender, EventArgs e)
@@ -401,10 +502,14 @@ namespace mySQLPunk
         }
         private void Form1_Load(object sender, EventArgs e)
         {
+            ApplyModernTheme(this);
             UI_init();
             myN.getSettingINI();
             drawLists();
         }
+
+        [DllImport("uxtheme.dll", SetLastError = true, ExactSpelling = true, CharSet = CharSet.Unicode)]
+        public static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
 
         private void menuStrip1_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
         {
@@ -531,9 +636,11 @@ namespace mySQLPunk
         }
         private void db_tree_DoubleClick(object sender, EventArgs e)
         {
+            var tree = (TreeView)sender;
+            if (tree.SelectedNode == null) return;
 
             dialogMyBoxOn("資料載入中...", false);
-            int index = ((TreeView)sender).SelectedNode.Index;            
+            int index = tree.SelectedNode.Index;
             //Console.WriteLine(((TreeView)sender).SelectedNode.FullPath);
             string fullPath = ((TreeView)sender).SelectedNode.FullPath;
             var m = my.explode("\\", fullPath);
@@ -832,6 +939,12 @@ namespace mySQLPunk
             form.oracle_connection_type.Text = "Basic";
             form.oracle_connection_type_selected_trigger_change();
             form.ShowDialog();
+        }
+        public void add_connection(Dictionary<string, object> conn)
+        {
+            myN.connections.Add(conn);
+            myN.setSettingINI();
+            drawLists();
         }
     }
 }

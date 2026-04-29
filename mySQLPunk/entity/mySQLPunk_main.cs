@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -59,7 +59,17 @@ namespace mySQLPunk.entity
         }
         public void setSettingINI()
         {
-
+            // 將連線清單過濾掉 runtime 的 pdo 物件後存檔
+            List<Dictionary<string, object>> saveData = new List<Dictionary<string, object>>();
+            foreach (var conn in connections)
+            {
+                var copy = new Dictionary<string, object>(conn);
+                if (copy.ContainsKey("pdo")) copy.Remove("pdo");
+                saveData.Add(copy);
+            }
+            string setting_path = my.pwd() + "\\setting.ini";
+            string json = JsonConvert.SerializeObject(saveData, Formatting.Indented);
+            my.file_put_contents(setting_path, json);
         }
 
     }

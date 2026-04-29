@@ -154,6 +154,12 @@ namespace mySQLPunk
         {
             // 取得最後一個單字
             int pos = txtSql.SelectionStart;
+            if (pos <= 0)
+            {
+                lstCompletion.Visible = false;
+                return;
+            }
+
             int start = txtSql.Text.LastIndexOfAny(new char[] { ' ', '\n', '\r', '\t' }, pos - 1) + 1;
             string word = txtSql.Text.Substring(start, pos - start).ToUpper();
 
