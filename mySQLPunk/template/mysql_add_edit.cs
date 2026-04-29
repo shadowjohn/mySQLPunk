@@ -19,10 +19,45 @@ namespace mySQLPunk.template
             Form1.ApplyModernTheme(this);
         }
         public Form1 F1 { get; set; }
+        public int editIndex { get; set; } = -1;
 
         private void mysql_add_edit_Load(object sender, EventArgs e)
         {
+            if (F1 == null || editIndex < 0)
+            {
+                return;
+            }
 
+            Dictionary<string, object> conn = F1.get_connection(editIndex);
+            mysql_connection_name.Text = GetValue(conn, "conn_name");
+            mysql_host.Text = GetValue(conn, "host");
+            mysql_port.Text = GetValue(conn, "port");
+            mysql_username.Text = GetValue(conn, "username");
+            mysql_pwd.Text = GetValue(conn, "pwd");
+        }
+
+        private static string GetValue(Dictionary<string, object> conn, string key)
+        {
+            if (conn != null && conn.ContainsKey(key) && conn[key] != null)
+            {
+                return conn[key].ToString();
+            }
+
+            return string.Empty;
+        }
+
+        private Dictionary<string, object> BuildConnection()
+        {
+            Dictionary<string, object> conn = new Dictionary<string, object>();
+            conn["conn_name"] = mysql_connection_name.Text.Trim();
+            conn["host"] = mysql_host.Text.Trim();
+            conn["port"] = mysql_port.Text.Trim();
+            conn["initial_database"] = "";
+            conn["db_kind"] = "mysql";
+            conn["username"] = mysql_username.Text.Trim();
+            conn["pwd"] = mysql_pwd.Text;
+            conn["isConnect"] = "F";
+            return conn;
         }
 
         private void button1_Click(object sender, EventArgs e)
@@ -45,17 +80,23 @@ namespace mySQLPunk.template
         
         private void button2_Click(object sender, EventArgs e)
         {
-            // OK
-            Dictionary<string, object> conn = new Dictionary<string, object>();
-            conn["name"] = mysql_connection_name.Text;
-            conn["ip"] = mysql_host.Text;
-            conn["port"] = mysql_port.Text;
-            conn["kind"] = "mysql";
-            conn["login_id"] = mysql_username.Text;
-            conn["pwd"] = mysql_pwd.Text;
-            conn["isConnect"] = "F";
+            if (F1 == null)
+            {
+                MessageBox.Show("主視窗未初始化！", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
 
-            F1.add_connection(conn);
+            Dictionary<string, object> conn = BuildConnection();
+
+            if (editIndex >= 0)
+            {
+                F1.update_connection(editIndex, conn);
+            }
+            else
+            {
+                F1.add_connection(conn);
+            }
+
             this.Close();
         }
 

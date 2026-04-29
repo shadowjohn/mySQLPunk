@@ -268,8 +268,8 @@ namespace mySQLPunk
             for (int i = 0, max_i = myN.connections.Count; i < max_i; i++)
             {
                 //From : https://stackoverflow.com/questions/3415354/how-to-avoid-winforms-treeview-icon-changes-when-item-selected
-                TreeNode newNode = new TreeNode(myN.connections[i]["name"].ToString(), i, i);
-                switch (myN.connections[i]["kind"].ToString())
+                TreeNode newNode = new TreeNode(myN.connections[i]["conn_name"].ToString(), i, i);
+                switch (myN.connections[i]["db_kind"].ToString())
                 {
                     case "mysql":
                         newNode.ImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 0 : 1;
@@ -397,6 +397,9 @@ namespace mySQLPunk
             // 連結 Design Table 事件
             DesignTable.Click += DesignTable_Click;
 
+            // 連結右鍵選單事件
+            db_tree.NodeMouseClick += db_tree_NodeMouseClick;
+
             // 嘗試從 image 資料夾載入切好的高解析圖標
             string imgPath = Path.Combine(Application.StartupPath, "image");
             LoadIcon(connection_btn, Path.Combine(imgPath, "connection.png"), global::mySQLPunk.Properties.Resources.database);
@@ -491,7 +494,10 @@ namespace mySQLPunk
                 if (connInfo["isConnect"].ToString() == "T")
                 {
                     IDatabase db = (IDatabase)connInfo["pdo"];
-                    QueryForm qf = new QueryForm(db, dbName);
+                    string host = connInfo.ContainsKey("host") && connInfo["host"] != null
+                        ? connInfo["host"].ToString()
+                        : string.Empty;
+                    QueryForm qf = new QueryForm(db, dbName, host);
                     qf.Show();
                 }
                 else
@@ -526,11 +532,90 @@ namespace mySQLPunk
         {
 
         }
+
+        private void db_tree_NodeMouseClick(object sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                db_tree.SelectedNode = e.Node;
+
+                // 只有根節點（連線層）才顯示右鍵選單
+                if (e.Node.Parent != null) return;
+
+                ContextMenuStrip menu = new ContextMenuStrip();
+
+                ToolStripMenuItem editItem = new ToolStripMenuItem("編輯連線");
+                editItem.Click += (s, ev) => db_tree_edit_connection(e.Node.Index);
+                menu.Items.Add(editItem);
+
+                ToolStripMenuItem deleteItem = new ToolStripMenuItem("刪除連線");
+                deleteItem.Click += (s, ev) => db_tree_delete_connection(e.Node.Index);
+                menu.Items.Add(deleteItem);
+
+                menu.Show(db_tree, e.Location);
+            }
+        }
+
+        private void db_tree_edit_connection(int index)
+        {
+            var conn = myN.connections[index];
+            string kind = conn["db_kind"].ToString().ToLower();
+            switch (kind)
+            {
+                case "mysql":
+                    {
+                        mysql_add_edit form = new mysql_add_edit();
+                        form.F1 = this;
+                        form.editIndex = index;
+                        form.ShowDialog();
+                    }
+                    break;
+                case "postgresql":
+                    {
+                        postgresql_add_edit form = new postgresql_add_edit();
+                        form.F1 = this;
+                        form.editIndex = index;
+                        form.ShowDialog();
+                    }
+                    break;
+                case "oracle":
+                    {
+                        oracle_add_edit form = new oracle_add_edit();
+                        form.F1 = this;
+                        form.editIndex = index;
+                        form.oracle_connection_type.Text = "Basic";
+                        form.oracle_connection_type_selected_trigger_change();
+                        form.ShowDialog();
+                    }
+                    break;
+                default:
+                    MessageBox.Show("此連線類型尚未支援編輯：" + kind);
+                    break;
+            }
+        }
+
+        private void db_tree_delete_connection(int index)
+        {
+            var conn = myN.connections[index];
+            string name = conn["conn_name"].ToString();
+            var result = MessageBox.Show(
+                $"確定要刪除連線「{name}」嗎？",
+                "刪除連線",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (result == DialogResult.Yes)
+            {
+                myN.connections.RemoveAt(index);
+                myN.setSettingINI();
+                drawLists();
+            }
+        }
         private void db_tree_second_click(int father_index, int index, string databaseName)
         {
             //MessageBox.Show(father_index + "," + index+","+databaseName);
             //開啟 database
-            switch (myN.connections[father_index]["kind"].ToString())
+            switch (myN.connections[father_index]["db_kind"].ToString())
             {
                 case "postgresql":
                     {
@@ -601,7 +686,7 @@ namespace mySQLPunk
         }
         private void db_tree_third_click(int father_index, int index, string databaseName, string name)
         {
-            MessageBox.Show(father_index + "," + index + "," + name);
+            //MessageBox.Show(father_index + "," + index + "," + name);
         }
         public void dialogMyBoxOn(string message, bool can_close)
         {
@@ -686,15 +771,15 @@ namespace mySQLPunk
             else
             {
                 //連線，展開
-                switch (db["kind"].ToString().ToLower())
+                switch (db["db_kind"].ToString().ToLower())
                 {
                     case "postgresql":
                         {
                             //Server=127.0.0.1;Port=5432;Database=myDataBase;User Id=myUsername;
                             //Password = myPassword;
-                            myN.connections[index]["connString"] = "Server=" + myN.connections[index]["ip"].ToString() + ";" +
+                            myN.connections[index]["connString"] = "Server=" + myN.connections[index]["host"].ToString() + ";" +
                                "Port=" + myN.connections[index]["port"].ToString() + ";" +
-                               "User Id=" + myN.connections[index]["login_id"].ToString() + ";" +
+                               "User Id=" + myN.connections[index]["username"].ToString() + ";" +
                                "Password=" + myN.connections[index]["pwd"].ToString() + ";" +
                                "Database=postgres;";
                             myN.connections[index]["pdo"] = new my_postgresql();
@@ -782,9 +867,9 @@ namespace mySQLPunk
                         break;
                     case "mysql":
                         {
-                            myN.connections[index]["connString"] = "server=" + myN.connections[index]["ip"].ToString() + ";" +
+                            myN.connections[index]["connString"] = "server=" + myN.connections[index]["host"].ToString() + ";" +
                                 "port=" + myN.connections[index]["port"].ToString() + ";" +
-                                "user id=" + myN.connections[index]["login_id"].ToString() + ";" +
+                                "user id=" + myN.connections[index]["username"].ToString() + ";" +
                                 "Password=" + myN.connections[index]["pwd"].ToString() + ";" +
                                 "database=;sslmode=none;charset=utf8;";
                             myN.connections[index]["pdo"] = new my_mysql();
@@ -829,11 +914,11 @@ namespace mySQLPunk
                     case "mssql":
                     case "sqlserver":
                         {
-                            myN.connections[index]["connString"] = "Data Source=" + myN.connections[index]["ip"].ToString() + "," + myN.connections[index]["port"].ToString() + "; " +
+                            myN.connections[index]["connString"] = "Data Source=" + myN.connections[index]["host"].ToString() + "," + myN.connections[index]["port"].ToString() + "; " +
                                 // + "," + myN.connections[index]["port"].ToString() + "
                                 "Integrated Security=True;" +
                                 "Initial Catalog=master;" +
-                                "User ID=" + myN.connections[index]["login_id"].ToString() + ";" +
+                                "User ID=" + myN.connections[index]["username"].ToString() + ";" +
                                 "Password=" + myN.connections[index]["pwd"].ToString() + "";
                             //Console.WriteLine(myN.connections[index]["connString"]);
                             myN.connections[index]["pdo"] = new my_mssql();
@@ -940,6 +1025,18 @@ namespace mySQLPunk
         public void add_connection(Dictionary<string, object> conn)
         {
             myN.connections.Add(conn);
+            myN.setSettingINI();
+            drawLists();
+        }
+
+        public Dictionary<string, object> get_connection(int index)
+        {
+            return myN.connections[index];
+        }
+
+        public void update_connection(int index, Dictionary<string, object> conn)
+        {
+            myN.connections[index] = conn;
             myN.setSettingINI();
             drawLists();
         }

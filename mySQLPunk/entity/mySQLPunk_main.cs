@@ -15,63 +15,45 @@ namespace mySQLPunk.entity
         myinclude my = new myinclude();
         private string the_code = "3WAAwesome";
         public List<Dictionary<string, object>> connections = new List<Dictionary<string, object>>();
+
         public void getSettingINI()
         {
-            /*
-             # setting.ini
-             [
-               {
-                 "name":"",
-                 "ip":"",
-                 "port":"",
-                 "kind":"",
-                 "login_id":"",
-                 "pwd":"",
-                 "isConnect":"F",
-                 "pdo": obj ,
-                 "connString": string
-               }
-             ]
-            */
-            List<Dictionary<string, string>> data = new List<Dictionary<string, string>>();
             string setting_path = my.pwd() + "\\setting.ini";
             if (!my.is_file(setting_path))
             {
                 my.file_put_contents(setting_path, "");
             }
+
+            connections.Clear();
+
             string endata = my.b2s(my.file_get_contents(setting_path));
-            //string dedata = my.dePWD_string(endata, the_code);
-            JArray ja = new JArray();
-            if (endata != "")
+            if (string.IsNullOrWhiteSpace(endata))
             {
-                ja = my.json_decode(endata);
+                return;
             }
 
+            JArray ja = my.json_decode(endata);
             for (int i = 0, max_i = ja.Count; i < max_i; i++)
-            {  
-                List<Dictionary<string, object>> list = ja[i].ToObject<List<Dictionary<string, object>>>();
-                foreach (var conn in list)
-                {
-                    // 解密帳號密碼
-                    conn["username"] = Crypto.Decrypt(GetVal(conn, "username"));
-                    conn["pwd"] = Crypto.Decrypt(GetVal(conn, "pwd"));
-                    
-                    conn["isConnect"] = "F";
-                    connections.Add(conn);
-                }
+            {
+                LoadConnectionToken(ja[i]);
             }
         }
+
         public void setSettingINI()
         {
             List<Dictionary<string, object>> saveList = new List<Dictionary<string, object>>();
-            foreach (var conn in connections)
+            foreach (var sourceConn in connections)
             {
+                var conn = new Dictionary<string, object>(sourceConn);
+                NormalizeConnection(conn);
+
                 var item = new Dictionary<string, object>
                 {
                     { "host", GetVal(conn, "host") },
                     { "username", Crypto.Encrypt(GetVal(conn, "username")) },
                     { "pwd", Crypto.Encrypt(GetVal(conn, "pwd")) },
                     { "port", GetVal(conn, "port") },
+                    { "initial_database", GetVal(conn, "initial_database") },
                     { "db_kind", GetVal(conn, "db_kind") },
                     { "conn_name", GetVal(conn, "conn_name") }
                 };
@@ -80,6 +62,78 @@ namespace mySQLPunk.entity
             string setting_path = my.pwd() + "\\setting.ini";
             string json = JsonConvert.SerializeObject(saveList, Formatting.Indented);
             my.file_put_contents(setting_path, json);
+        }
+
+        private void LoadConnectionToken(JToken token)
+        {
+            if (token == null)
+            {
+                return;
+            }
+
+            if (token.Type == JTokenType.Array)
+            {
+                JArray list = (JArray)token;
+                for (int i = 0, max_i = list.Count; i < max_i; i++)
+                {
+                    LoadConnectionToken(list[i]);
+                }
+                return;
+            }
+
+            Dictionary<string, object> conn = token.ToObject<Dictionary<string, object>>();
+            if (conn == null)
+            {
+                return;
+            }
+
+            NormalizeConnection(conn);
+            conn["username"] = SafeDecrypt(GetVal(conn, "username"));
+            conn["pwd"] = SafeDecrypt(GetVal(conn, "pwd"));
+            conn["isConnect"] = "F";
+            connections.Add(conn);
+        }
+
+        private void NormalizeConnection(Dictionary<string, object> conn)
+        {
+            CopyIfMissing(conn, "name", "conn_name");
+            CopyIfMissing(conn, "ip", "host");
+            CopyIfMissing(conn, "kind", "db_kind");
+            CopyIfMissing(conn, "login_id", "username");
+
+            if (!conn.ContainsKey("initial_database"))
+            {
+                conn["initial_database"] = "";
+            }
+            if (!conn.ContainsKey("isConnect"))
+            {
+                conn["isConnect"] = "F";
+            }
+        }
+
+        private void CopyIfMissing(Dictionary<string, object> conn, string oldKey, string newKey)
+        {
+            if (!conn.ContainsKey(newKey) && conn.ContainsKey(oldKey))
+            {
+                conn[newKey] = conn[oldKey];
+            }
+        }
+
+        private string SafeDecrypt(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "";
+            }
+
+            try
+            {
+                return Crypto.Decrypt(value);
+            }
+            catch
+            {
+                return value;
+            }
         }
 
         private string GetVal(Dictionary<string, object> dict, string key)

@@ -18,6 +18,7 @@ namespace mySQLPunk.template
 
         }
         public Form1 F1 { get; set; }
+        public int editIndex { get; set; } = -1;
 
         private void oracle_add_edit_Load(object sender, EventArgs e)
         {
