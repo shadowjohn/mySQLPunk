@@ -122,6 +122,24 @@
     <Compile Include="lib\my_sqlite.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="template\oracle_add_edit.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="template\oracle_add_edit.Designer.cs">
+      <DependentUpon>oracle_add_edit.cs</DependentUpon>
+    </Compile>
+    <Compile Include="template\postgresql_add_edit.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="template\postgresql_add_edit.Designer.cs">
+      <DependentUpon>postgresql_add_edit.cs</DependentUpon>
+    </Compile>
+    <Compile Include="template\mysql_add_edit.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="template\mysql_add_edit.Designer.cs">
+      <DependentUpon>mysql_add_edit.cs</DependentUpon>
+    </Compile>
     <EmbeddedResource Include="Form1.resx">
       <DependentUpon>Form1.cs</DependentUpon>
     </EmbeddedResource>
@@ -135,6 +153,15 @@
       <DependentUpon>Resources.resx</DependentUpon>
       <DesignTime>True</DesignTime>
     </Compile>
+    <EmbeddedResource Include="template\oracle_add_edit.resx">
+      <DependentUpon>oracle_add_edit.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="template\postgresql_add_edit.resx">
+      <DependentUpon>postgresql_add_edit.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="template\mysql_add_edit.resx">
+      <DependentUpon>mysql_add_edit.cs</DependentUpon>
+    </EmbeddedResource>
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>

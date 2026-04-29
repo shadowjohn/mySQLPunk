@@ -12,7 +12,7 @@ using utility;
 using System.Runtime.InteropServices;
 //using MySql.Data.MySqlClient;
 using my_navicat.lib;
-
+using my_navicat.template;
 namespace my_navicat
 {
 
@@ -21,12 +21,12 @@ namespace my_navicat
         public Form dialog = new Form();
         public Label dialogLabel = new Label();
         public int dialogFlag = 0;
-        Dictionary<string, List<object>> displayTools = new Dictionary<string, List<object>>();
+        public string test = "";
+        public static Dictionary<string, List<object>> displayTools = new Dictionary<string, List<object>>();
         navicat_main myN = new navicat_main();
         myinclude my = new myinclude();
         public Form1()
         {
-
             InitializeComponent();
         }
         [DllImport("uxtheme.dll", SetLastError = true, ExactSpelling = true, CharSet = CharSet.Unicode)]
@@ -714,6 +714,32 @@ namespace my_navicat
         private void tool_Connection_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
         {
 
+        }
+
+        private void mysqlStripMenuItem_Click(object sender, EventArgs e)
+        {
+            //Console.WriteLine(sender.ToString());
+            //MySQL
+            //Form1.ActiveForm.Enabled = false;
+            mysql_add_edit form = new mysql_add_edit();
+            form.F1 = this;
+            form.ShowDialog();            
+        }
+
+        private void postgreSQLToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            postgresql_add_edit form = new postgresql_add_edit();
+            form.F1 = this;
+            form.ShowDialog();
+        }
+
+        private void oracleToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            oracle_add_edit form = new oracle_add_edit();
+            form.F1 = this;
+            form.oracle_connection_type.Text = "Basic";
+            form.oracle_connection_type_selected_trigger_change();
+            form.ShowDialog();
         }
     }
 }

@@ -45,6 +45,16 @@
             this.aboutToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.splitContainer1 = new System.Windows.Forms.SplitContainer();
             this.tool_Connection = new System.Windows.Forms.ToolStrip();
+            this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
+            this.splitContainer2 = new System.Windows.Forms.SplitContainer();
+            this.splitContainer4 = new System.Windows.Forms.SplitContainer();
+            this.label1 = new System.Windows.Forms.Label();
+            this.mTs = new System.Windows.Forms.ToolStrip();
+            this.splitContainer3 = new System.Windows.Forms.SplitContainer();
+            this.db_tree = new System.Windows.Forms.TreeView();
+            this.splitContainer5 = new System.Windows.Forms.SplitContainer();
+            this.table_top = new System.Windows.Forms.DataGridView();
+            this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.connection_btn = new System.Windows.Forms.ToolStripDropDownButton();
             this.mysqlStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.postgreSQLToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -52,13 +62,8 @@
             this.sQLiteToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.sQLServerToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.user_btn = new System.Windows.Forms.ToolStripButton();
-            this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             this.table_btn = new System.Windows.Forms.ToolStripButton();
             this.view_btn = new System.Windows.Forms.ToolStripButton();
-            this.splitContainer2 = new System.Windows.Forms.SplitContainer();
-            this.splitContainer4 = new System.Windows.Forms.SplitContainer();
-            this.label1 = new System.Windows.Forms.Label();
-            this.mTs = new System.Windows.Forms.ToolStrip();
             this.OpenTable = new System.Windows.Forms.ToolStripButton();
             this.DesignTable = new System.Windows.Forms.ToolStripButton();
             this.NewTable = new System.Windows.Forms.ToolStripButton();
@@ -74,11 +79,6 @@
             this.NewFunction = new System.Windows.Forms.ToolStripButton();
             this.DeleteFunction = new System.Windows.Forms.ToolStripButton();
             this.ExecuteFunction = new System.Windows.Forms.ToolStripButton();
-            this.splitContainer3 = new System.Windows.Forms.SplitContainer();
-            this.db_tree = new System.Windows.Forms.TreeView();
-            this.splitContainer5 = new System.Windows.Forms.SplitContainer();
-            this.table_top = new System.Windows.Forms.DataGridView();
-            this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.menuStrip1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.splitContainer1)).BeginInit();
             this.splitContainer1.Panel1.SuspendLayout();
@@ -249,104 +249,10 @@
             this.tool_Connection.Text = "Table";
             this.tool_Connection.ItemClicked += new System.Windows.Forms.ToolStripItemClickedEventHandler(this.tool_Connection_ItemClicked);
             // 
-            // connection_btn
-            // 
-            this.connection_btn.AutoSize = false;
-            this.connection_btn.AutoToolTip = false;
-            this.connection_btn.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.mysqlStripMenuItem,
-            this.postgreSQLToolStripMenuItem,
-            this.oracleToolStripMenuItem,
-            this.sQLiteToolStripMenuItem,
-            this.sQLServerToolStripMenuItem});
-            this.connection_btn.Image = global::my_navicat.Properties.Resources.database;
-            this.connection_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
-            this.connection_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
-            this.connection_btn.Name = "connection_btn";
-            this.connection_btn.Size = new System.Drawing.Size(80, 70);
-            this.connection_btn.Text = "Connection";
-            this.connection_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
-            this.connection_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
-            // 
-            // mysqlStripMenuItem
-            // 
-            this.mysqlStripMenuItem.Name = "mysqlStripMenuItem";
-            this.mysqlStripMenuItem.Size = new System.Drawing.Size(140, 22);
-            this.mysqlStripMenuItem.Text = "MySQL";
-            // 
-            // postgreSQLToolStripMenuItem
-            // 
-            this.postgreSQLToolStripMenuItem.Name = "postgreSQLToolStripMenuItem";
-            this.postgreSQLToolStripMenuItem.Size = new System.Drawing.Size(140, 22);
-            this.postgreSQLToolStripMenuItem.Text = "PostgreSQL";
-            // 
-            // oracleToolStripMenuItem
-            // 
-            this.oracleToolStripMenuItem.Name = "oracleToolStripMenuItem";
-            this.oracleToolStripMenuItem.Size = new System.Drawing.Size(140, 22);
-            this.oracleToolStripMenuItem.Text = "Oracle";
-            // 
-            // sQLiteToolStripMenuItem
-            // 
-            this.sQLiteToolStripMenuItem.Name = "sQLiteToolStripMenuItem";
-            this.sQLiteToolStripMenuItem.Size = new System.Drawing.Size(140, 22);
-            this.sQLiteToolStripMenuItem.Text = "SQLite";
-            // 
-            // sQLServerToolStripMenuItem
-            // 
-            this.sQLServerToolStripMenuItem.Name = "sQLServerToolStripMenuItem";
-            this.sQLServerToolStripMenuItem.Size = new System.Drawing.Size(140, 22);
-            this.sQLServerToolStripMenuItem.Text = "SQL Server";
-            // 
-            // user_btn
-            // 
-            this.user_btn.AutoSize = false;
-            this.user_btn.AutoToolTip = false;
-            this.user_btn.Image = global::my_navicat.Properties.Resources.user;
-            this.user_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
-            this.user_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
-            this.user_btn.Name = "user_btn";
-            this.user_btn.Size = new System.Drawing.Size(80, 70);
-            this.user_btn.Text = "User";
-            this.user_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
-            this.user_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
-            this.user_btn.Click += new System.EventHandler(this.user_btn_Click);
-            // 
             // toolStripSeparator1
             // 
             this.toolStripSeparator1.Name = "toolStripSeparator1";
             this.toolStripSeparator1.Size = new System.Drawing.Size(6, 73);
-            // 
-            // table_btn
-            // 
-            this.table_btn.AutoSize = false;
-            this.table_btn.AutoToolTip = false;
-            this.table_btn.BackgroundImageLayout = System.Windows.Forms.ImageLayout.Stretch;
-            this.table_btn.Checked = true;
-            this.table_btn.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.table_btn.Image = global::my_navicat.Properties.Resources.tables_32;
-            this.table_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
-            this.table_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
-            this.table_btn.Name = "table_btn";
-            this.table_btn.Size = new System.Drawing.Size(80, 70);
-            this.table_btn.Text = "Table";
-            this.table_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
-            this.table_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
-            this.table_btn.Click += new System.EventHandler(this.table_btn_Click);
-            // 
-            // view_btn
-            // 
-            this.view_btn.AutoSize = false;
-            this.view_btn.AutoToolTip = false;
-            this.view_btn.Image = global::my_navicat.Properties.Resources.views_32;
-            this.view_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
-            this.view_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
-            this.view_btn.Name = "view_btn";
-            this.view_btn.Size = new System.Drawing.Size(80, 70);
-            this.view_btn.Text = "View";
-            this.view_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
-            this.view_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
-            this.view_btn.Click += new System.EventHandler(this.view_btn_Click);
             // 
             // splitContainer2
             // 
@@ -417,6 +323,168 @@
             this.mTs.Size = new System.Drawing.Size(960, 25);
             this.mTs.TabIndex = 0;
             this.mTs.Text = "toolStrip1";
+            // 
+            // splitContainer3
+            // 
+            this.splitContainer3.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.splitContainer3.Location = new System.Drawing.Point(0, 0);
+            this.splitContainer3.Name = "splitContainer3";
+            // 
+            // splitContainer3.Panel1
+            // 
+            this.splitContainer3.Panel1.Controls.Add(this.db_tree);
+            this.splitContainer3.Panel1.Resize += new System.EventHandler(this.splitContainer3_Panel1_Resize);
+            // 
+            // splitContainer3.Panel2
+            // 
+            this.splitContainer3.Panel2.Controls.Add(this.splitContainer5);
+            this.splitContainer3.Size = new System.Drawing.Size(1232, 562);
+            this.splitContainer3.SplitterDistance = 267;
+            this.splitContainer3.TabIndex = 0;
+            // 
+            // db_tree
+            // 
+            this.db_tree.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.db_tree.Location = new System.Drawing.Point(0, 0);
+            this.db_tree.Name = "db_tree";
+            this.db_tree.Size = new System.Drawing.Size(121, 97);
+            this.db_tree.TabIndex = 0;
+            this.db_tree.AfterSelect += new System.Windows.Forms.TreeViewEventHandler(this.db_tree_AfterSelect);
+            this.db_tree.DoubleClick += new System.EventHandler(this.db_tree_DoubleClick);
+            // 
+            // splitContainer5
+            // 
+            this.splitContainer5.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.splitContainer5.Location = new System.Drawing.Point(0, 0);
+            this.splitContainer5.Name = "splitContainer5";
+            this.splitContainer5.Orientation = System.Windows.Forms.Orientation.Horizontal;
+            // 
+            // splitContainer5.Panel1
+            // 
+            this.splitContainer5.Panel1.Controls.Add(this.table_top);
+            this.splitContainer5.Panel1.Resize += new System.EventHandler(this.splitContainer5_Panel1_Resize);
+            this.splitContainer5.Size = new System.Drawing.Size(961, 562);
+            this.splitContainer5.SplitterDistance = 243;
+            this.splitContainer5.TabIndex = 0;
+            // 
+            // table_top
+            // 
+            this.table_top.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.ColumnHeader;
+            this.table_top.AutoSizeRowsMode = System.Windows.Forms.DataGridViewAutoSizeRowsMode.AllHeaders;
+            this.table_top.BackgroundColor = System.Drawing.SystemColors.ControlLightLight;
+            this.table_top.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.table_top.Location = new System.Drawing.Point(0, 0);
+            this.table_top.Margin = new System.Windows.Forms.Padding(0);
+            this.table_top.Name = "table_top";
+            this.table_top.RowHeadersWidthSizeMode = System.Windows.Forms.DataGridViewRowHeadersWidthSizeMode.AutoSizeToAllHeaders;
+            this.table_top.RowTemplate.Height = 24;
+            this.table_top.Size = new System.Drawing.Size(240, 150);
+            this.table_top.TabIndex = 0;
+            // 
+            // statusStrip1
+            // 
+            this.statusStrip1.Location = new System.Drawing.Point(0, 677);
+            this.statusStrip1.Name = "statusStrip1";
+            this.statusStrip1.Size = new System.Drawing.Size(1232, 22);
+            this.statusStrip1.TabIndex = 2;
+            this.statusStrip1.Text = "statusStrip1";
+            // 
+            // connection_btn
+            // 
+            this.connection_btn.AutoSize = false;
+            this.connection_btn.AutoToolTip = false;
+            this.connection_btn.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.mysqlStripMenuItem,
+            this.postgreSQLToolStripMenuItem,
+            this.oracleToolStripMenuItem,
+            this.sQLiteToolStripMenuItem,
+            this.sQLServerToolStripMenuItem});
+            this.connection_btn.Image = global::my_navicat.Properties.Resources.database;
+            this.connection_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
+            this.connection_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.connection_btn.Name = "connection_btn";
+            this.connection_btn.Size = new System.Drawing.Size(80, 70);
+            this.connection_btn.Text = "Connection";
+            this.connection_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
+            this.connection_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
+            // 
+            // mysqlStripMenuItem
+            // 
+            this.mysqlStripMenuItem.Name = "mysqlStripMenuItem";
+            this.mysqlStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.mysqlStripMenuItem.Text = "MySQL";
+            this.mysqlStripMenuItem.Click += new System.EventHandler(this.mysqlStripMenuItem_Click);
+            // 
+            // postgreSQLToolStripMenuItem
+            // 
+            this.postgreSQLToolStripMenuItem.Name = "postgreSQLToolStripMenuItem";
+            this.postgreSQLToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.postgreSQLToolStripMenuItem.Text = "PostgreSQL";
+            this.postgreSQLToolStripMenuItem.Click += new System.EventHandler(this.postgreSQLToolStripMenuItem_Click);
+            // 
+            // oracleToolStripMenuItem
+            // 
+            this.oracleToolStripMenuItem.Name = "oracleToolStripMenuItem";
+            this.oracleToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.oracleToolStripMenuItem.Text = "Oracle";
+            this.oracleToolStripMenuItem.Click += new System.EventHandler(this.oracleToolStripMenuItem_Click);
+            // 
+            // sQLiteToolStripMenuItem
+            // 
+            this.sQLiteToolStripMenuItem.Name = "sQLiteToolStripMenuItem";
+            this.sQLiteToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.sQLiteToolStripMenuItem.Text = "SQLite";
+            // 
+            // sQLServerToolStripMenuItem
+            // 
+            this.sQLServerToolStripMenuItem.Name = "sQLServerToolStripMenuItem";
+            this.sQLServerToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.sQLServerToolStripMenuItem.Text = "SQL Server";
+            // 
+            // user_btn
+            // 
+            this.user_btn.AutoSize = false;
+            this.user_btn.AutoToolTip = false;
+            this.user_btn.Image = global::my_navicat.Properties.Resources.user;
+            this.user_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
+            this.user_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.user_btn.Name = "user_btn";
+            this.user_btn.Size = new System.Drawing.Size(80, 70);
+            this.user_btn.Text = "User";
+            this.user_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
+            this.user_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
+            this.user_btn.Click += new System.EventHandler(this.user_btn_Click);
+            // 
+            // table_btn
+            // 
+            this.table_btn.AutoSize = false;
+            this.table_btn.AutoToolTip = false;
+            this.table_btn.BackgroundImageLayout = System.Windows.Forms.ImageLayout.Stretch;
+            this.table_btn.Checked = true;
+            this.table_btn.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.table_btn.Image = global::my_navicat.Properties.Resources.tables_32;
+            this.table_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
+            this.table_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.table_btn.Name = "table_btn";
+            this.table_btn.Size = new System.Drawing.Size(80, 70);
+            this.table_btn.Text = "Table";
+            this.table_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
+            this.table_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
+            this.table_btn.Click += new System.EventHandler(this.table_btn_Click);
+            // 
+            // view_btn
+            // 
+            this.view_btn.AutoSize = false;
+            this.view_btn.AutoToolTip = false;
+            this.view_btn.Image = global::my_navicat.Properties.Resources.views_32;
+            this.view_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
+            this.view_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.view_btn.Name = "view_btn";
+            this.view_btn.Size = new System.Drawing.Size(80, 70);
+            this.view_btn.Text = "View";
+            this.view_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
+            this.view_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
+            this.view_btn.Click += new System.EventHandler(this.view_btn_Click);
             // 
             // OpenTable
             // 
@@ -554,71 +622,6 @@
             this.ExecuteFunction.Size = new System.Drawing.Size(122, 20);
             this.ExecuteFunction.Text = "Execute Function";
             // 
-            // splitContainer3
-            // 
-            this.splitContainer3.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitContainer3.Location = new System.Drawing.Point(0, 0);
-            this.splitContainer3.Name = "splitContainer3";
-            // 
-            // splitContainer3.Panel1
-            // 
-            this.splitContainer3.Panel1.Controls.Add(this.db_tree);
-            this.splitContainer3.Panel1.Resize += new System.EventHandler(this.splitContainer3_Panel1_Resize);
-            // 
-            // splitContainer3.Panel2
-            // 
-            this.splitContainer3.Panel2.Controls.Add(this.splitContainer5);
-            this.splitContainer3.Size = new System.Drawing.Size(1232, 562);
-            this.splitContainer3.SplitterDistance = 267;
-            this.splitContainer3.TabIndex = 0;
-            // 
-            // db_tree
-            // 
-            this.db_tree.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.db_tree.Location = new System.Drawing.Point(0, 0);
-            this.db_tree.Name = "db_tree";
-            this.db_tree.Size = new System.Drawing.Size(121, 97);
-            this.db_tree.TabIndex = 0;
-            this.db_tree.AfterSelect += new System.Windows.Forms.TreeViewEventHandler(this.db_tree_AfterSelect);
-            this.db_tree.DoubleClick += new System.EventHandler(this.db_tree_DoubleClick);
-            // 
-            // splitContainer5
-            // 
-            this.splitContainer5.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitContainer5.Location = new System.Drawing.Point(0, 0);
-            this.splitContainer5.Name = "splitContainer5";
-            this.splitContainer5.Orientation = System.Windows.Forms.Orientation.Horizontal;
-            // 
-            // splitContainer5.Panel1
-            // 
-            this.splitContainer5.Panel1.Controls.Add(this.table_top);
-            this.splitContainer5.Panel1.Resize += new System.EventHandler(this.splitContainer5_Panel1_Resize);
-            this.splitContainer5.Size = new System.Drawing.Size(961, 562);
-            this.splitContainer5.SplitterDistance = 243;
-            this.splitContainer5.TabIndex = 0;
-            // 
-            // table_top
-            // 
-            this.table_top.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.ColumnHeader;
-            this.table_top.AutoSizeRowsMode = System.Windows.Forms.DataGridViewAutoSizeRowsMode.AllHeaders;
-            this.table_top.BackgroundColor = System.Drawing.SystemColors.ControlLightLight;
-            this.table_top.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.table_top.Location = new System.Drawing.Point(0, 0);
-            this.table_top.Margin = new System.Windows.Forms.Padding(0);
-            this.table_top.Name = "table_top";
-            this.table_top.RowHeadersWidthSizeMode = System.Windows.Forms.DataGridViewRowHeadersWidthSizeMode.AutoSizeToAllHeaders;
-            this.table_top.RowTemplate.Height = 24;
-            this.table_top.Size = new System.Drawing.Size(240, 150);
-            this.table_top.TabIndex = 0;
-            // 
-            // statusStrip1
-            // 
-            this.statusStrip1.Location = new System.Drawing.Point(0, 677);
-            this.statusStrip1.Name = "statusStrip1";
-            this.statusStrip1.Size = new System.Drawing.Size(1232, 22);
-            this.statusStrip1.TabIndex = 2;
-            this.statusStrip1.Text = "statusStrip1";
-            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
@@ -627,6 +630,7 @@
             this.Controls.Add(this.statusStrip1);
             this.Controls.Add(this.splitContainer1);
             this.Controls.Add(this.menuStrip1);
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
             this.MainMenuStrip = this.menuStrip1;
             this.Name = "Form1";
             this.Text = "羽山的 Navicat";
