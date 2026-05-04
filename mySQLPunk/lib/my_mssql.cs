@@ -183,6 +183,7 @@ namespace mySQLPunk.lib
         }
 
         public DataTable GetTableStatus(string databaseName) => new DataTable();
+        public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
         public string GetTableCreateStatement(string databaseName, string tableName) => "";
 

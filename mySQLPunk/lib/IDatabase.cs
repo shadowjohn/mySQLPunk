@@ -24,6 +24,7 @@ namespace mySQLPunk.lib
         List<string> GetTables(string databaseName);
         List<string> GetViews(string databaseName);
         DataTable GetColumns(string databaseName, string tableName);
+        DataTable GetIndexes(string databaseName, string tableName);
         DataTable GetTableStatus(string databaseName);
         Dictionary<string, string> GetDatabaseInfo(string databaseName);
         string GetTableCreateStatement(string databaseName, string tableName);

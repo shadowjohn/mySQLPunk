@@ -22,7 +22,7 @@ namespace mySQLPunk.lib
             if (!connection.ToLower().Contains("allowzerodatetime"))
             {
                 if (!connection.EndsWith(";")) connection += ";";
-                connection += "AllowZeroDateTime=True;ConvertZeroDateTime=True;";
+                connection += "AllowZeroDateTime=True;";
             }
             MCT = new MySqlConnection(connection);
         }
@@ -189,6 +189,13 @@ namespace mySQLPunk.lib
             string safeDB = databaseName.Replace("`", "``");
             string safeTable = tableName.Replace("`", "``");
             return SelectSQL($"SHOW FULL COLUMNS FROM `{safeDB}`.`{safeTable}`;");
+        }
+
+        public DataTable GetIndexes(string databaseName, string tableName)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeTable = tableName.Replace("`", "``");
+            return SelectSQL($"SHOW INDEX FROM `{safeDB}`.`{safeTable}`;");
         }
 
         public DataTable GetTableStatus(string databaseName)

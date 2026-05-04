@@ -1994,9 +1994,18 @@ namespace mySQLPunk
             for (int i = 0; i < queryTabs.TabPages.Count; i++)
             {
                 var tabRect = queryTabs.GetTabRect(i);
-                var xRect = GetCloseButtonRect(tabRect);
-                if (xRect.Contains(e.Location))
+                
+                if ((e.Button == MouseButtons.Middle && tabRect.Contains(e.Location)) ||
+                    (e.Button == MouseButtons.Left && GetCloseButtonRect(tabRect).Contains(e.Location)))
                 {
+                    // ── 增加關閉前確認邏輯 ──
+                    TabPage tp = queryTabs.TabPages[i];
+                    var designer = tp.Controls.OfType<TableDesignerForm>().FirstOrDefault();
+                    if (designer != null)
+                    {
+                        if (!designer.ConfirmClose()) return; // 取消關閉
+                    }
+                    
                     queryTabs.TabPages.RemoveAt(i);
                     if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
                     break;
@@ -2006,8 +2015,11 @@ namespace mySQLPunk
 
         private void QueryTabs_MouseDown(object sender, MouseEventArgs e)
         {
-            dragTab = GetTabAt(e.Location);
-            dragStartPos = e.Location;
+            if (e.Button == MouseButtons.Left)
+            {
+                dragTab = GetTabAt(e.Location);
+                dragStartPos = e.Location;
+            }
         }
 
         private void QueryTabs_MouseMove(object sender, MouseEventArgs e)
@@ -2109,6 +2121,17 @@ namespace mySQLPunk
                 if (queryTabs.GetTabRect(i).Contains(position)) return queryTabs.TabPages[i];
             }
             return null;
+        }
+        public void UpdateTabTitle(Form childForm)
+        {
+            foreach (TabPage tp in queryTabs.TabPages)
+            {
+                if (tp.Controls.Contains(childForm))
+                {
+                    tp.Text = childForm.Text;
+                    break;
+                }
+            }
         }
     }
 }
