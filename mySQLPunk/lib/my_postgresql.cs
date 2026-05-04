@@ -186,6 +186,10 @@ namespace mySQLPunk.lib
             return SelectSQL("SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = :tableName", p);
         }
 
+        public DataTable GetTableStatus(string databaseName) => new DataTable();
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
+        public string GetTableCreateStatement(string databaseName, string tableName) => "";
+
         public void Dispose()
         {
             Close();

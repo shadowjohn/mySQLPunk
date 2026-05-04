@@ -186,6 +186,37 @@ namespace mySQLPunk.lib
             return SelectSQL($"SHOW FULL COLUMNS FROM `{safeDB}`.`{safeTable}`;");
         }
 
+        public DataTable GetTableStatus(string databaseName)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            return SelectSQL($"SHOW TABLE STATUS FROM `{safeDB}`;");
+        }
+
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName)
+        {
+            var output = new Dictionary<string, string>();
+            var p = new Dictionary<string, object> { { "db", databaseName } };
+            DataTable dt = SelectSQL("SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = ?db", p);
+            if (dt.Rows.Count > 0)
+            {
+                output["character_set"] = dt.Rows[0]["default_character_set_name"].ToString();
+                output["collation"] = dt.Rows[0]["default_collation_name"].ToString();
+            }
+            return output;
+        }
+
+        public string GetTableCreateStatement(string databaseName, string tableName)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeTable = tableName.Replace("`", "``");
+            DataTable dt = SelectSQL($"SHOW CREATE TABLE `{safeDB}`.`{safeTable}`;");
+            if (dt.Rows.Count > 0)
+            {
+                return dt.Rows[0][1].ToString();
+            }
+            return "";
+        }
+
         public void Dispose()
         {
             Close();

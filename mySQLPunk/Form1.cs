@@ -30,6 +30,17 @@ namespace mySQLPunk
         ToolStripButton query_btn = new ToolStripButton(); // 新增查詢按鈕
         private TabControl queryTabs;
         private int queryTabCounter = 1;
+        private TabPage dragTab = null; // 用於拖拽頁籤
+        private Point dragStartPos;
+
+        // 側邊欄組件
+        private Panel pnlSidebar;
+        private ToolStrip tsSidebar;
+        private RichTextBox rtbDDL;
+        private DataGridView dgvDetails;
+        private ToolStripButton btnInfo;
+        private ToolStripButton btnDDL;
+        private Label lblSidebarTitle;
         public Form1()
         {
             InitializeComponent();
@@ -359,12 +370,38 @@ namespace mySQLPunk
         }
         private void UI_init()
         {
-            db_tree.Width = splitContainer3.Width;
-            db_tree.Height = splitContainer3.Height - 20;
+            splitContainer5.Orientation = Orientation.Vertical;
+            splitContainer5.SplitterDistance = splitContainer5.Width - 300; 
+
+            // 將 table_top 移到 Panel1 並設為 Fill
+            table_top.Parent = splitContainer5.Panel1;
+            table_top.Dock = DockStyle.Fill;
+            table_top.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None; // 必須先關閉 RowHeader 相關自動調整
+            table_top.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.EnableResizing;
+            table_top.RowHeadersVisible = false;
+            table_top.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            table_top.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            table_top.AllowUserToAddRows = false;
+            table_top.BackgroundColor = Color.White;
+            table_top.GridColor = Color.FromArgb(240, 240, 240);
+            table_top.BorderStyle = BorderStyle.None;
+
             queryTabs = new TabControl();
             queryTabs.Dock = DockStyle.Fill;
             queryTabs.Visible = false;
-            splitContainer5.Panel2.Controls.Add(queryTabs);
+            queryTabs.Parent = splitContainer5.Panel1; // 同樣在 Panel1
+
+            // ── 啟用頁籤自定義繪製與拖拽功能 ──
+            queryTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            queryTabs.Padding = new Point(24, 4); // 留更多空間給 X
+            queryTabs.DrawItem += QueryTabs_DrawItem;
+            queryTabs.MouseDown += QueryTabs_MouseDown;
+            queryTabs.MouseMove += QueryTabs_MouseMove;
+            queryTabs.MouseUp += QueryTabs_MouseUp;
+            queryTabs.MouseClick += QueryTabs_MouseClick;
+
+            // 初始化側邊欄 (Sidebar) 在 Panel2
+            InitSidebar();
             List<object> d = new List<object>();
             d.Add(OpenTable);
             d.Add(DesignTable);
@@ -412,7 +449,177 @@ namespace mySQLPunk
             LoadIcon(user_btn, Path.Combine(imgPath, "user.png"), global::mySQLPunk.Properties.Resources.user);
             LoadIcon(table_btn, Path.Combine(imgPath, "table.png"), global::mySQLPunk.Properties.Resources.tables_32);
             LoadIcon(view_btn, Path.Combine(imgPath, "view.png"), global::mySQLPunk.Properties.Resources.views_32);
-            LoadIcon(query_btn, Path.Combine(imgPath, "query.png"), null);
+            // 主工具列樣式調整 (大圖標 + 文字在下)
+            tool_Connection.ImageScalingSize = new Size(32, 32);
+            tool_Connection.Height = 70;
+            tool_Connection.Padding = new Padding(5);
+
+            foreach (ToolStripItem item in tool_Connection.Items)
+            {
+                item.TextImageRelation = TextImageRelation.ImageAboveText;
+                item.TextAlign = ContentAlignment.BottomCenter;
+                if (item is ToolStripButton tsb) tsb.AutoSize = false;
+                if (item is ToolStripDropDownButton tsddb) tsddb.AutoSize = false;
+                item.Size = new Size(70, 65);
+            }
+
+            // 初始化導覽列 (Navigation Bar)
+            Panel pnlNav = new Panel() { Dock = DockStyle.Top, Height = 30, BackColor = Color.FromArgb(245, 245, 245) };
+            Label lblNavTitle = new Label() { Name = "lblNav", Text = " Ready", Font = new Font("Microsoft JhengHei", 9), ForeColor = Color.Gray, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            pnlNav.Controls.Add(lblNavTitle);
+            this.Controls.Add(pnlNav);
+            pnlNav.BringToFront();
+            tool_Connection.BringToFront();
+
+            queryTabs.MouseClick += queryTabs_MouseClick;
+            table_top.CellMouseDown += table_top_CellMouseDown;
+            db_tree.KeyDown += db_tree_KeyDown;
+
+            // 連結工具列事件
+            NewTable.Click += (s, e) => CreateNewTable();
+            DeleteTable.Click += (s, e) => DeleteSelectedTable();
+        }
+
+        private void CreateNewTable()
+        {
+            if (db_tree.SelectedNode == null) return;
+            var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+            if (pathParts.Length < 2) return;
+
+            string dbName = pathParts[1];
+            TreeNode root = db_tree.SelectedNode;
+            while (root.Parent != null) root = root.Parent;
+            IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
+
+            TableDesignerForm tdf = new TableDesignerForm(db, dbName, "");
+            tdf.Text = "New Table";
+            DockDockableForm(tdf);
+        }
+
+        private void DeleteSelectedTable()
+        {
+            if (db_tree.SelectedNode == null) return;
+            var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+            if (pathParts.Length < 4 || pathParts[2] != "Tables") return;
+
+            string dbName = pathParts[1];
+            string tableName = pathParts[3];
+            
+            if (MessageBox.Show($"確定要刪除資料表 「{tableName}」嗎？此操作不可還原！", "警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            {
+                TreeNode root = db_tree.SelectedNode;
+                while (root.Parent != null) root = root.Parent;
+                IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
+
+                var res = db.ExecSQL($"DROP TABLE `{dbName}`.`{tableName}`");
+                if (res["status"] == "OK")
+                {
+                    MessageBox.Show("資料表已刪除。");
+                    // 重新整理樹狀目錄
+                    db_tree.SelectedNode.Parent.Nodes.Remove(db_tree.SelectedNode);
+                }
+                else MessageBox.Show("刪除失敗：" + res["reason"]);
+            }
+        }
+
+        private void queryTabs_MouseClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                for (int i = 0; i < queryTabs.TabCount; ++i)
+                {
+                    if (queryTabs.GetTabRect(i).Contains(e.Location))
+                    {
+                        queryTabs.SelectedIndex = i;
+                        var cms = new ContextMenuStrip();
+                        var itemFloat = new ToolStripMenuItem("Float / Undock");
+                        itemFloat.Click += (s, ev) => {
+                            if (queryTabs.SelectedTab?.Tag is IDockableForm dockable)
+                                FloatDockableForm(dockable);
+                        };
+                        cms.Items.Add(itemFloat);
+                        
+                        var itemClose = new ToolStripMenuItem("Close");
+                        itemClose.Click += (s, ev) => {
+                            TabPage tp = queryTabs.SelectedTab;
+                            if (tp != null)
+                            {
+                                if (tp.Tag is Form f) f.Close();
+                                queryTabs.TabPages.Remove(tp);
+                            }
+                        };
+                        cms.Items.Add(itemClose);
+
+                        cms.Show(queryTabs, e.Location);
+                        break;
+                    }
+                }
+            }
+        }
+
+        private void InitSidebar()
+        {
+            pnlSidebar = new Panel() { Dock = DockStyle.Fill, BackColor = Color.White };
+            
+            // 標題區
+            Panel pnlTitle = new Panel() { Dock = DockStyle.Top, Height = 40, Padding = new Padding(10, 5, 10, 0) };
+            lblSidebarTitle = new Label() { Text = "Object Details", Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold), AutoSize = true, Location = new Point(10, 10) };
+            pnlTitle.Controls.Add(lblSidebarTitle);
+
+            // 切換按鈕 (Info / DDL)
+            string imgPath = Path.Combine(Application.StartupPath, "image");
+            tsSidebar = new ToolStrip() { Dock = DockStyle.Top, GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.Professional };
+            
+            btnInfo = new ToolStripButton("Info") { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            if (File.Exists(Path.Combine(imgPath, "database.png"))) btnInfo.Image = Image.FromFile(Path.Combine(imgPath, "database.png"));
+            else btnInfo.Image = global::mySQLPunk.Properties.Resources.database;
+
+            btnDDL = new ToolStripButton("DDL") { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            if (File.Exists(Path.Combine(imgPath, "queries.png"))) btnDDL.Image = Image.FromFile(Path.Combine(imgPath, "queries.png"));
+            else if (File.Exists(Path.Combine(imgPath, "query.png"))) btnDDL.Image = Image.FromFile(Path.Combine(imgPath, "query.png"));
+            
+            btnInfo.Click += (s, e) => { dgvDetails.Visible = true; rtbDDL.Visible = false; btnInfo.Checked = true; btnDDL.Checked = false; };
+            btnDDL.Click += (s, e) => { dgvDetails.Visible = false; rtbDDL.Visible = true; btnInfo.Checked = false; btnDDL.Checked = true; };
+            tsSidebar.Items.AddRange(new ToolStripItem[] { btnInfo, btnDDL });
+            btnInfo.Checked = true;
+
+            // 內容區 - 詳情表格
+            dgvDetails = new DataGridView()
+            {
+                Dock = DockStyle.Fill,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                RowHeadersVisible = false,
+                ColumnHeadersVisible = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                ReadOnly = true,
+                AllowUserToAddRows = false
+            };
+            dgvDetails.Columns.Add("Key", "Property");
+            dgvDetails.Columns.Add("Value", "Value");
+            dgvDetails.Columns[0].FillWeight = 40;
+            dgvDetails.SelectionMode = DataGridViewSelectionMode.CellSelect;
+            dgvDetails.GridColor = Color.FromArgb(245, 245, 245);
+            dgvDetails.DefaultCellStyle.Font = new Font("Microsoft JhengHei", 9);
+
+            // 內容區 - DDL
+            rtbDDL = new RichTextBox()
+            {
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.None,
+                ReadOnly = true,
+                BackColor = Color.White,
+                Font = new Font("Consolas", 10),
+                Visible = false
+            };
+
+            pnlSidebar.Controls.Add(dgvDetails);
+            pnlSidebar.Controls.Add(rtbDDL);
+            pnlSidebar.Controls.Add(tsSidebar);
+            pnlSidebar.Controls.Add(pnlTitle);
+
+            splitContainer5.Panel2.Controls.Add(pnlSidebar);
+            pnlSidebar.BringToFront();
         }
 
         private void LoadIcon(ToolStripItem btn, string path, Image defaultImg)
@@ -456,7 +663,7 @@ namespace mySQLPunk
                 IDatabase db = (IDatabase)connInfo["pdo"];
 
                 TableDesignerForm tdf = new TableDesignerForm(db, dbName, tableName);
-                tdf.Show();
+                DockDockableForm(tdf);
             }
             else
             {
@@ -546,7 +753,7 @@ namespace mySQLPunk
             string host = connInfo.ContainsKey("host") && connInfo["host"] != null
                 ? connInfo["host"].ToString()
                 : string.Empty;
-            string initialSql = "SELECT * FROM `" + tableName.Replace("`", "``") + "` LIMIT 200;";
+            string initialSql = "SELECT * FROM `" + dbName + "`.`" + tableName.Replace("`", "``") + "` LIMIT 1000;";
 
             OpenQuery((IDatabase)connInfo["pdo"], dbName, host, initialSql, true);
         }
@@ -554,86 +761,92 @@ namespace mySQLPunk
         private void OpenQuery(IDatabase db, string dbName, string host, string initialSql, bool docked)
         {
             QueryForm queryForm = new QueryForm(db, dbName, host, initialSql);
-            queryForm.SetMainHost(this);
-
             if (docked)
             {
-                DockQueryForm(queryForm);
+                DockDockableForm(queryForm);
             }
             else
             {
-                ShowFloatingQueryForm(queryForm);
+                queryForm.SetMainHost(this);
+                queryForm.Show();
             }
         }
 
-        public void DockQueryForm(QueryForm queryForm)
+        public void DockDockableForm(IDockableForm dockable)
         {
-            if (queryForm == null)
+            if (dockable == null) return;
+            Form f = (Form)dockable;
+
+            // 檢查是否已經在 Tab 中
+            foreach (TabPage tp in queryTabs.TabPages)
             {
-                return;
+                if (tp.Tag == dockable)
+                {
+                    queryTabs.SelectedTab = tp;
+                    return;
+                }
             }
 
-            TabPage existingPage = FindQueryTab(queryForm);
-            if (existingPage != null)
-            {
-                queryTabs.SelectedTab = existingPage;
-                return;
-            }
+            table_top.Visible = false;
+            queryTabs.Visible = true;
+            queryTabs.BringToFront();
 
-            queryForm.PrepareForDocking();
+            dockable.SetMainHost(this);
+            dockable.PrepareForDocking();
 
-            TabPage page = new TabPage(BuildQueryTabText(queryForm));
-            page.Tag = queryForm;
-            page.Controls.Add(queryForm);
-            queryForm.Dock = DockStyle.Fill;
+            TabPage page = new TabPage(dockable.GetDisplayTitle());
+            page.Tag = dockable;
+            f.Dock = DockStyle.Fill;
+            page.Controls.Add(f);
             queryTabs.TabPages.Add(page);
             queryTabs.SelectedTab = page;
-            queryTabs.Visible = true;
-            queryForm.Show();
-            queryForm.BringToFront();
+            f.Show();
         }
 
-        public void FloatQueryForm(QueryForm queryForm)
+        public void FloatDockableForm(IDockableForm dockable)
         {
-            if (queryForm == null)
+            if (dockable == null) return;
+            Form f = (Form)dockable;
+
+            foreach (TabPage page in queryTabs.TabPages)
             {
-                return;
+                if (page.Tag == dockable)
+                {
+                    queryTabs.TabPages.Remove(page);
+                    break;
+                }
             }
 
-            TabPage page = FindQueryTab(queryForm);
-            if (page != null)
-            {
-                queryTabs.TabPages.Remove(page);
-                page.Dispose();
-            }
+            dockable.PrepareForFloating();
+            f.Show();
 
-            queryTabs.Visible = queryTabs.TabPages.Count > 0;
-            ShowFloatingQueryForm(queryForm);
+            if (queryTabs.TabPages.Count == 0)
+            {
+                queryTabs.Visible = false;
+                table_top.Visible = true;
+            }
         }
 
-        public void NotifyQueryFormClosed(QueryForm queryForm)
+        public void NotifyDockableFormClosed(IDockableForm dockable)
         {
-            if (queryForm == null || queryTabs == null)
+            if (dockable == null || queryTabs == null) return;
+
+            foreach (TabPage page in queryTabs.TabPages)
             {
-                return;
+                if (page.Tag == dockable)
+                {
+                    queryTabs.TabPages.Remove(page);
+                    page.Dispose();
+                    break;
+                }
             }
 
-            TabPage page = FindQueryTab(queryForm);
-            if (page == null)
+            if (queryTabs.TabPages.Count == 0)
             {
-                return;
+                queryTabs.Visible = false;
+                table_top.Visible = true;
+                table_top.BringToFront();
             }
-
-            queryTabs.TabPages.Remove(page);
-            page.Dispose();
-            queryTabs.Visible = queryTabs.TabPages.Count > 0;
-        }
-
-        private void ShowFloatingQueryForm(QueryForm queryForm)
-        {
-            queryForm.PrepareForFloating();
-            queryForm.Show(this);
-            queryForm.BringToFront();
         }
 
         private TabPage FindQueryTab(QueryForm queryForm)
@@ -842,7 +1055,247 @@ namespace mySQLPunk
 
         private void db_tree_AfterSelect(object sender, TreeViewEventArgs e)
         {
+            if (e.Node == null) return;
 
+            string fullPath = e.Node.FullPath;
+            var pathParts = my.explode("\\", fullPath);
+
+            // 更新導覽列
+            Control[] navControls = this.Controls.Find("lblNav", true);
+            if (navControls.Length > 0) ((Label)navControls[0]).Text = "  " + fullPath.Replace("\\", " > ");
+
+            // 取得根連線資訊
+            TreeNode root = e.Node;
+            while (root.Parent != null) root = root.Parent;
+            int connIndex = root.Index;
+            var connInfo = myN.connections[connIndex];
+
+            if (connInfo["isConnect"].ToString() != "T") return;
+            IDatabase db = (IDatabase)connInfo["pdo"];
+
+            if (pathParts.Length >= 2)
+            {
+                // 選到資料庫及其子節點 (Tables, Table, etc.)
+                table_top.Visible = true;
+                queryTabs.Visible = false;
+                table_top.BringToFront();
+
+                string dbName = pathParts[1];
+                
+                // 如果是 Database 節點或 Tables 節點，側邊欄標題顯示 DB 名稱
+                if (pathParts.Length <= 3)
+                {
+                    lblSidebarTitle.Text = $"Database: {dbName}";
+                    ShowDatabaseObjectList(db, dbName);
+                    ShowDatabaseInfo(db, dbName);
+                }
+                
+                // 如果是 Table 節點，則側邊欄顯示 Table 詳情
+                if (pathParts.Length >= 4 && pathParts[2] == "Tables")
+                {
+                    string tableName = pathParts[3];
+                    lblSidebarTitle.Text = $"Table: {tableName}";
+                    // 只有當 table_top 還沒載入過或是不同 DB 時才重載列表
+                    ShowDatabaseObjectList(db, dbName); 
+                    ShowTableDetails(db, dbName, tableName);
+                }
+            }
+        }
+
+        private void table_top_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+            {
+                table_top.ClearSelection();
+                table_top.Rows[e.RowIndex].Selected = true;
+                
+                // 選取對應的 TreeView 節點以保持同步
+                string tableName = table_top.Rows[e.RowIndex].Cells["名稱"].Value.ToString();
+                SyncTreeWithTable(tableName);
+
+                var cms = new ContextMenuStrip();
+                var itemOpen = new ToolStripMenuItem("開啟資料表");
+                itemOpen.Click += (s, ev) => OpenSelectedTableInQuery();
+                cms.Items.Add(itemOpen);
+                
+                var itemDesign = new ToolStripMenuItem("設計資料表");
+                itemDesign.Click += (s, ev) => DesignSelectedTable();
+                cms.Items.Add(itemDesign);
+
+                var itemDrop = new ToolStripMenuItem("刪除資料表");
+                itemDrop.Click += (s, ev) => DeleteSelectedTable();
+                cms.Items.Add(itemDrop);
+                
+                cms.Show(table_top, table_top.PointToClient(Cursor.Position));
+            }
+        }
+
+        private void SyncTreeWithTable(string tableName)
+        {
+            if (db_tree.SelectedNode == null) return;
+            TreeNode parent = db_tree.SelectedNode;
+            // 如果選到的是 DB 節點，則找 Tables 節點
+            if (parent.Nodes.Count > 0 && parent.Nodes[0].Text == "Tables") parent = parent.Nodes[0];
+            // 如果選到的是 Tables 節點，則直接找子節點
+            
+            foreach (TreeNode node in parent.Nodes)
+            {
+                if (node.Text == tableName)
+                {
+                    db_tree.SelectedNode = node;
+                    break;
+                }
+            }
+        }
+
+        private void db_tree_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape)
+            {
+                if (db_tree.SelectedNode == null) return;
+
+                var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+                
+                // 使用者要求：table 按 esc 沒事，如果在 database 可以關閉 database (連線)
+                if (pathParts.Length <= 2)
+                {
+                    TreeNode root = db_tree.SelectedNode;
+                    while (root.Parent != null) root = root.Parent;
+                    CloseConnection(root.Index);
+                }
+                
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private void CloseConnection(int index)
+        {
+            var conn = myN.connections[index];
+            if (conn["isConnect"].ToString() == "T")
+            {
+                if (conn.ContainsKey("pdo") && conn["pdo"] is IDisposable disp)
+                {
+                    try { disp.Dispose(); } catch { }
+                }
+                
+                conn["isConnect"] = "F";
+                conn["pdo"] = null;
+                
+                TreeNode root = db_tree.Nodes[index];
+                root.Nodes.Clear();
+                // 加回一個虛擬節點以便下次雙擊展開
+                root.Nodes.Add("loading..."); 
+                root.Collapse();
+                
+                // 重設右側與中間面板
+                table_top.DataSource = null;
+                table_top.Visible = true;
+                queryTabs.Visible = false;
+                lblSidebarTitle.Text = "Object Details";
+                dgvDetails.DataSource = null;
+                rtbDDL.Clear();
+
+                Control[] navControls = this.Controls.Find("lblNav", true);
+                if (navControls.Length > 0) ((Label)navControls[0]).Text = " Ready";
+                
+                MessageBox.Show("連線已斷開。");
+            }
+        }
+
+        private void ShowDatabaseObjectList(IDatabase db, string dbName)
+        {
+            try
+            {
+                DataTable dt = db.GetTableStatus(dbName);
+                if (dt == null) return;
+
+                // 轉換為顯示用的格式
+                DataTable displayDt = new DataTable();
+                displayDt.Columns.Add("名稱");
+                displayDt.Columns.Add("自動遞增值");
+                displayDt.Columns.Add("修改日期");
+                displayDt.Columns.Add("資料長度");
+                displayDt.Columns.Add("引擎");
+                displayDt.Columns.Add("列");
+                displayDt.Columns.Add("註解");
+
+                foreach (DataRow row in dt.Rows)
+                {
+                    DataRow newRow = displayDt.NewRow();
+                    newRow["名稱"] = row["Name"];
+                    newRow["自動遞增值"] = row["Auto_increment"];
+                    newRow["修改日期"] = row["Update_time"];
+                    newRow["資料長度"] = FormatBytes(Convert.ToInt64(row["Data_length"]));
+                    newRow["引擎"] = row["Engine"];
+                    newRow["列"] = row["Rows"];
+                    newRow["註解"] = row["Comment"];
+                    displayDt.Rows.Add(newRow);
+                }
+
+                table_top.DataSource = displayDt;
+            }
+            catch { }
+        }
+
+        private void ShowDatabaseInfo(IDatabase db, string dbName)
+        {
+            dgvDetails.Rows.Clear();
+            rtbDDL.Text = "";
+            btnInfo.PerformClick();
+
+            var info = db.GetDatabaseInfo(dbName);
+            if (info.ContainsKey("character_set"))
+            {
+                dgvDetails.Rows.Add("字符集", info["character_set"]);
+                dgvDetails.Rows.Add("定序", info["collation"]);
+            }
+        }
+
+        private void ShowTableDetails(IDatabase db, string dbName, string tableName)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            try
+            {
+                // 取得詳情
+                DataTable dt = db.GetTableStatus(dbName);
+                DataRow[] rows = dt.Select($"Name = '{tableName}'");
+                if (rows.Length > 0)
+                {
+                    DataRow r = rows[0];
+                    dgvDetails.Rows.Add("列", r["Rows"]);
+                    dgvDetails.Rows.Add("引擎", r["Engine"]);
+                    dgvDetails.Rows.Add("自動遞增", r["Auto_increment"]);
+                    dgvDetails.Rows.Add("列格式", r["Row_format"]);
+                    dgvDetails.Rows.Add("修改日期", r["Update_time"]);
+                    dgvDetails.Rows.Add("建立日期", r["Create_time"]);
+                    dgvDetails.Rows.Add("檢查時間", r["Check_time"]);
+                    dgvDetails.Rows.Add("索引長度", FormatBytes(Convert.ToInt64(r["Index_length"])));
+                    dgvDetails.Rows.Add("資料長度", FormatBytes(Convert.ToInt64(r["Data_length"])));
+                    dgvDetails.Rows.Add("最大資料長度", FormatBytes(Convert.ToInt64(r["Max_data_length"])));
+                    dgvDetails.Rows.Add("資料可用空間", FormatBytes(Convert.ToInt64(r["Data_free"])));
+                    dgvDetails.Rows.Add("定序", r["Collation"]);
+                    dgvDetails.Rows.Add("建立選項", r["Create_options"]);
+                    dgvDetails.Rows.Add("註解", r["Comment"]);
+                }
+
+                // 取得 DDL
+                rtbDDL.Text = db.GetTableCreateStatement(dbName, tableName);
+            }
+            catch (Exception ex)
+            {
+                rtbDDL.Text = "Error loading details: " + ex.Message;
+            }
+        }
+
+        private string FormatBytes(long bytes)
+        {
+            string[] suffix = { "B", "KB", "MB", "GB", "TB" };
+            if (bytes == 0) return "0 B";
+            int i = (int)Math.Floor(Math.Log(Math.Abs(bytes), 1024));
+            return Math.Round(bytes / Math.Pow(1024, i), 2) + " " + suffix[i];
         }
 
         private void db_tree_NodeMouseClick(object sender, TreeNodeMouseClickEventArgs e)
@@ -1065,34 +1518,37 @@ namespace mySQLPunk
             if (tree.SelectedNode == null) return;
 
             dialogMyBoxOn("資料載入中...", false);
-            int index = tree.SelectedNode.Index;
-            //Console.WriteLine(((TreeView)sender).SelectedNode.FullPath);
-            string fullPath = ((TreeView)sender).SelectedNode.FullPath;
+            string fullPath = tree.SelectedNode.FullPath;
             var m = my.explode("\\", fullPath);
+
+            // 取得根連線索引 (永遠以最頂層節點為準)
+            TreeNode rootNode = tree.SelectedNode;
+            while (rootNode.Parent != null) rootNode = rootNode.Parent;
+            int index = rootNode.Index;
 
             if (m.Length == 2)
             {
-                //代表是子層
-
-                db_tree_second_click(
-                    ((TreeView)sender).SelectedNode.Parent.Index,
-                    ((TreeView)sender).SelectedNode.Index,
-                    ((TreeView)sender).SelectedNode.Text
-                    );
+                // 代表是資料庫層級
+                db_tree_second_click(index, tree.SelectedNode.Index, tree.SelectedNode.Text);
                 dialogMyBoxOff();
                 return;
             }
             if (m.Length == 3)
             {
-                //代表是點到 view、table 之類層
-                db_tree_third_click(
-                    ((TreeView)sender).SelectedNode.Parent.Parent.Index,
-                    ((TreeView)sender).SelectedNode.Parent.Index,
-                    ((TreeView)sender).SelectedNode.Parent.Text,
-                    ((TreeView)sender).SelectedNode.Text);
+                // 代表是 Tables/Views 群組層級
+                db_tree_third_click(index, tree.SelectedNode.Parent.Index, tree.SelectedNode.Parent.Text, tree.SelectedNode.Text);
                 dialogMyBoxOff();
                 return;
             }
+            if (m.Length == 4)
+            {
+                // 代表是資料表層級 -> 直接開啟
+                OpenSelectedTableInQuery();
+                dialogMyBoxOff();
+                return;
+            }
+
+            // 如果是根連線節點 (m.Length == 1)
             var db = myN.connections[index];
             //連線測試
             if (db["isConnect"].ToString() == "T")
@@ -1382,6 +1838,94 @@ namespace mySQLPunk
             myN.connections[index] = conn;
             myN.setSettingINI();
             drawLists();
+        }
+        // ── 頁籤進階功能實作 ──
+
+        private void QueryTabs_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= queryTabs.TabPages.Count) return;
+            
+            var tabRect = queryTabs.GetTabRect(e.Index);
+            var title = queryTabs.TabPages[e.Index].Text;
+            bool isSelected = (queryTabs.SelectedIndex == e.Index);
+            
+            // 背景
+            Color bgColor = isSelected ? Color.White : Color.FromArgb(240, 240, 240);
+            e.Graphics.FillRectangle(new SolidBrush(bgColor), tabRect);
+
+            // 文字 (置中偏左)
+            Rectangle textRect = new Rectangle(tabRect.X + 4, tabRect.Y, tabRect.Width - 25, tabRect.Height);
+            TextRenderer.DrawText(e.Graphics, title, queryTabs.Font, textRect, Color.Black, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+
+            // 繪製關閉按鈕 (X)
+            var xRect = GetCloseButtonRect(tabRect);
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (Pen p = new Pen(Color.Gray, 1.5f))
+            {
+                // 畫兩條線組成 X
+                e.Graphics.DrawLine(p, xRect.X + 3, xRect.Y + 3, xRect.Right - 3, xRect.Bottom - 3);
+                e.Graphics.DrawLine(p, xRect.Right - 3, xRect.Y + 3, xRect.X + 3, xRect.Bottom - 3);
+            }
+        }
+
+        private Rectangle GetCloseButtonRect(Rectangle tabRect)
+        {
+            return new Rectangle(tabRect.Right - 20, tabRect.Top + (tabRect.Height - 14) / 2, 14, 14);
+        }
+
+        private void QueryTabs_MouseClick(object sender, MouseEventArgs e)
+        {
+            for (int i = 0; i < queryTabs.TabPages.Count; i++)
+            {
+                var tabRect = queryTabs.GetTabRect(i);
+                var xRect = GetCloseButtonRect(tabRect);
+                if (xRect.Contains(e.Location))
+                {
+                    queryTabs.TabPages.RemoveAt(i);
+                    if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
+                    break;
+                }
+            }
+        }
+
+        private void QueryTabs_MouseDown(object sender, MouseEventArgs e)
+        {
+            dragTab = GetTabAt(e.Location);
+            dragStartPos = e.Location;
+        }
+
+        private void QueryTabs_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left || dragTab == null) return;
+            
+            // 只有移動超過一定距離才算拖拽
+            if (Math.Abs(e.X - dragStartPos.X) < 5) return;
+
+            TabPage hoverTab = GetTabAt(e.Location);
+            if (hoverTab != null && hoverTab != dragTab)
+            {
+                int dragIdx = queryTabs.TabPages.IndexOf(dragTab);
+                int dropIdx = queryTabs.TabPages.IndexOf(hoverTab);
+                
+                // 交換頁籤
+                queryTabs.TabPages.RemoveAt(dragIdx);
+                queryTabs.TabPages.Insert(dropIdx, dragTab);
+                queryTabs.SelectedTab = dragTab;
+            }
+        }
+
+        private void QueryTabs_MouseUp(object sender, MouseEventArgs e)
+        {
+            dragTab = null;
+        }
+
+        private TabPage GetTabAt(Point position)
+        {
+            for (int i = 0; i < queryTabs.TabPages.Count; i++)
+            {
+                if (queryTabs.GetTabRect(i).Contains(position)) return queryTabs.TabPages[i];
+            }
+            return null;
         }
     }
 }

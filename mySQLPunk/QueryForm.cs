@@ -9,32 +9,66 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Diagnostics;
+using System.Linq;
 using mySQLPunk.lib;
 
 namespace mySQLPunk
 {
-    public partial class QueryForm : Form
+    public partial class QueryForm : Form, IDockableForm
     {
         private IDatabase _db;
         private string _databaseName;
         private List<string> _tableNames = new List<string>();
         private CancellationTokenSource _cts;
 
-        // UI 元件
+        // UI 元件 (已現代化)
         private RichTextBox txtSql;
         private DataGridView dgvResults;
-        private Button btnExecute;
-        private Button btnCancel;
-        private Button btnBeautify;
-        private Button btnExportCsv;
-        private StatusStrip statusStrip;
-        private ToolStripStatusLabel lblStatus;
         private ListBox lstCompletion;
         private TabControl tabResults;
-        private Button btnFloat;
-        private Button btnDock;
+        private SplitContainer split;
         private Form1 _mainHost;
         private bool _isDocked;
+        private bool _isTableDataMode; 
+
+        // 分頁相關
+        private int _pageSize = 1000;
+        private int _currentPage = 1;
+        private long _totalRows = 0;
+        private string _baseSql = ""; // 不含 LIMIT 的原始 SQL
+
+        // 工具列與狀態列
+        private ToolStrip mainToolStrip;
+        private ToolStrip dataToolStrip;
+        private StatusStrip statusStrip;
+        private ToolStripStatusLabel lblStatus;
+        private ToolStripStatusLabel lblSqlPreview;
+        
+        // 頂部按鈕
+        private ToolStripButton tsBtnExecute;
+        private ToolStripButton tsBtnCancel;
+        private ToolStripButton tsBtnBeautify;
+        private ToolStripButton tsBtnSave;
+        private ToolStripButton tsBtnAdd;
+        private ToolStripButton tsBtnDelete;
+        private ToolStripButton tsBtnRefresh;
+        private ToolStripButton tsBtnExport;
+        private ToolStripButton tsBtnFloat;
+        private ToolStripButton tsBtnDock;
+
+        // 底部資料列操作按鈕
+        private ToolStripButton btnDataAdd;
+        private ToolStripButton btnDataDelete;
+        private ToolStripButton btnDataApply;
+        private ToolStripButton btnDataCancel;
+        private ToolStripButton btnDataRefresh;
+        
+        private ToolStripLabel lblDataPagination;
+        private ToolStripTextBox txtPageSize;
+        private ToolStripButton btnDataFirst;
+        private ToolStripButton btnDataPrev;
+        private ToolStripButton btnDataNext;
+        private ToolStripButton btnDataLast;
 
         private static readonly string[] Keywords =
         {
@@ -97,77 +131,162 @@ namespace mySQLPunk
             }
 
             LoadTableNames();
+            if (initialSql.ToUpper().Trim().StartsWith("SELECT * FROM"))
+            {
+                _baseSql = initialSql.Split(';')[0].Split(new string[] { "LIMIT", "limit" }, StringSplitOptions.None)[0].Trim();
+                SetTableDataMode(true);
+                ExecutePagedQuery(); // 立即載入第一頁資料
+            }
+        }
+
+        private async void CalculateTotalRowsAsync()
+        {
+            if (string.IsNullOrEmpty(_baseSql)) return;
+            
+            // 嘗試解析資料表路徑 (處理 FROM `db`.`table` 或 FROM table 格式)
+            string pattern = @"FROM\s+([`\w\.\x22]+)";
+            Match match = Regex.Match(_baseSql, pattern, RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                string tablePath = match.Groups[1].Value.Trim();
+                
+                // 如果 tablePath 已經包含點 (例如 `db`.`table`)，直接使用
+                // 否則如果 _databaseName 存在，則補上資料庫字首
+                string fullTableName = tablePath;
+                if (!tablePath.Contains(".") && !string.IsNullOrEmpty(_databaseName))
+                {
+                    fullTableName = $"`{_databaseName}`.{tablePath}";
+                }
+
+                string countSql = $"SELECT COUNT(*) FROM {fullTableName}";
+                var dt = await Task.Run(() => _db.SelectSQL(countSql));
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    _totalRows = Convert.ToInt64(dt.Rows[0][0]);
+                    UpdatePaginationUI();
+                }
+            }
+        }
+
+        private void SetTableDataMode(bool active)
+        {
+            _isTableDataMode = active;
+            
+            // 動態切換按鈕可見度
+            tsBtnSave.Visible = active;
+            tsBtnAdd.Visible = active;
+            tsBtnDelete.Visible = active;
+            tsBtnRefresh.Visible = active;
+            
+            tsBtnExecute.Visible = !active;
+            tsBtnBeautify.Visible = !active;
+
+            if (active)
+            {
+                if (split != null) split.Panel1Collapsed = true;
+                this.Text = $"{_databaseName}.{GetTableNameFromSql()} - Table Data";
+                
+                dgvResults.ReadOnly = false;
+                dgvResults.AllowUserToAddRows = true;
+                dgvResults.AllowUserToDeleteRows = true;
+
+                // 立即計算總筆數以初始化分頁 UI
+                CalculateTotalRowsAsync();
+            }
+            else
+            {
+                if (split != null) split.Panel1Collapsed = false;
+            }
+        }
+
+        private string GetTableNameFromSql()
+        {
+            if (string.IsNullOrEmpty(_baseSql)) return "Table";
+            string pattern = @"FROM\s+([`\w\.\x22]+)";
+            Match match = Regex.Match(_baseSql, pattern, RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                string path = match.Groups[1].Value.Replace("`", "").Replace("\"", "");
+                return path.Contains(".") ? path.Split('.').Last() : path;
+            }
+            return "Table";
         }
 
         private void InitializeQueryForm()
         {
-            Size = new Size(1000, 700);
+            Size = new Size(1100, 750);
             StartPosition = FormStartPosition.CenterParent;
             MinimumSize = new Size(600, 400);
 
-            // ── 頂部工具列 ──
-            Panel pnlTop = new Panel { Dock = DockStyle.Top, Height = 40 };
-
-            btnExecute = new Button
-            {
-                Text = "Execute (F5)",
-                Location = new Point(5, 5),
-                Size = new Size(110, 30)
+            // ── 頂部專業工具列 (ToolStrip) ──
+            mainToolStrip = new ToolStrip { 
+                ImageScalingSize = new Size(24, 24), 
+                Padding = new Padding(0, 5, 0, 5),
+                GripStyle = ToolStripGripStyle.Hidden,
+                BackColor = Color.White
             };
-            btnExecute.Click += (s, e) => ExecuteQueryAsync();
+            
+            tsBtnExecute = new ToolStripButton("Execute", null, (s, e) => ExecutePagedQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsBtnCancel = new ToolStripButton("Stop", null, (s, e) => CancelQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Enabled = false };
+            tsBtnBeautify = new ToolStripButton("Beautify", null, (s, e) => BeautifySql()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            
+            tsBtnSave = new ToolStripButton("Save", null, (s, e) => SaveChanges()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
+            tsBtnAdd = new ToolStripButton("Add", null, (s, e) => AddNewRow()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
+            tsBtnDelete = new ToolStripButton("Delete", null, (s, e) => DeleteSelectedRows()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
+            tsBtnRefresh = new ToolStripButton("Refresh", null, (s, e) => ExecutePagedQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
+            
+            tsBtnExport = new ToolStripButton("Export", null, (s, e) => ExportCsv()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsBtnFloat = new ToolStripButton("Float", null, (s, e) => FloatToWindow()) { DisplayStyle = ToolStripItemDisplayStyle.Image };
+            tsBtnDock = new ToolStripButton("Dock", null, (s, e) => DockToMainWindow()) { DisplayStyle = ToolStripItemDisplayStyle.Image, Visible = false };
 
-            btnCancel = new Button
-            {
-                Text = "Cancel",
-                Location = new Point(120, 5),
-                Size = new Size(70, 30),
-                Enabled = false
+            mainToolStrip.Items.AddRange(new ToolStripItem[] { 
+                tsBtnExecute, tsBtnCancel, tsBtnBeautify, 
+                new ToolStripSeparator(), 
+                tsBtnSave, tsBtnAdd, tsBtnDelete, tsBtnRefresh, 
+                new ToolStripSeparator(), 
+                tsBtnExport, 
+                new ToolStripSeparator(), 
+                tsBtnFloat, tsBtnDock 
+            });
+
+            // ── 資料底端工具列 (dataToolStrip) ──
+            dataToolStrip = new ToolStrip { 
+                Dock = DockStyle.Bottom, 
+                GripStyle = ToolStripGripStyle.Hidden,
+                BackColor = Color.FromArgb(242, 242, 242)
             };
-            btnCancel.Click += (s, e) => CancelQuery();
 
-            btnBeautify = new Button
-            {
-                Text = "Beautify",
-                Location = new Point(195, 5),
-                Size = new Size(80, 30)
-            };
-            btnBeautify.Click += (s, e) => BeautifySql();
+            btnDataAdd = new ToolStripButton("+", null, (s, e) => AddNewRow()) { Font = new Font("Segoe UI", 12, FontStyle.Bold) };
+            btnDataDelete = new ToolStripButton("-", null, (s, e) => DeleteSelectedRows()) { Font = new Font("Segoe UI", 12, FontStyle.Bold) };
+            btnDataApply = new ToolStripButton("✓", null, (s, e) => SaveChanges()) { ForeColor = Color.Green, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
+            btnDataCancel = new ToolStripButton("X", null, (s, e) => ExecutePagedQuery()) { ForeColor = Color.Red, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            btnDataRefresh = new ToolStripButton("↻", null, (s, e) => ExecutePagedQuery()) { Font = new Font("Segoe UI", 12, FontStyle.Bold) };
 
-            btnExportCsv = new Button
-            {
-                Text = "Export CSV",
-                Location = new Point(280, 5),
-                Size = new Size(90, 30),
-                Enabled = false
-            };
-            btnExportCsv.Click += (s, e) => ExportCsv();
+            btnDataFirst = new ToolStripButton("|<", null, (s, e) => { _currentPage = 1; ExecutePagedQuery(); });
+            btnDataPrev = new ToolStripButton("<", null, (s, e) => { if (_currentPage > 1) { _currentPage--; ExecutePagedQuery(); } });
+            btnDataNext = new ToolStripButton(">", null, (s, e) => { if (_currentPage < GetTotalPages()) { _currentPage++; ExecutePagedQuery(); } });
+            btnDataLast = new ToolStripButton(">|", null, (s, e) => { _currentPage = GetTotalPages(); ExecutePagedQuery(); });
 
-            btnFloat = new Button
-            {
-                Text = "Float",
-                Location = new Point(375, 5),
-                Size = new Size(70, 30)
-            };
-            btnFloat.Click += (s, e) => FloatToWindow();
+            lblDataPagination = new ToolStripLabel("Page 1 of 1");
+            txtPageSize = new ToolStripTextBox { Text = _pageSize.ToString(), Width = 50 };
+            txtPageSize.TextChanged += (s, e) => { if (int.TryParse(txtPageSize.Text, out int val)) _pageSize = val; };
 
-            btnDock = new Button
-            {
-                Text = "Dock",
-                Location = new Point(450, 5),
-                Size = new Size(70, 30),
-                Visible = false
-            };
-            btnDock.Click += (s, e) => DockToMainWindow();
-
-            pnlTop.Controls.Add(btnExecute);
-            pnlTop.Controls.Add(btnCancel);
-            pnlTop.Controls.Add(btnBeautify);
-            pnlTop.Controls.Add(btnExportCsv);
-            pnlTop.Controls.Add(btnFloat);
-            pnlTop.Controls.Add(btnDock);
+            dataToolStrip.Items.AddRange(new ToolStripItem[] {
+                btnDataAdd, btnDataDelete, btnDataApply, btnDataCancel, btnDataRefresh,
+                new ToolStripSeparator(),
+                new ToolStripLabel(" Limit:"), txtPageSize, new ToolStripLabel("records "),
+                new ToolStripSeparator { Alignment = ToolStripItemAlignment.Right },
+                btnDataLast, btnDataNext, lblDataPagination, btnDataPrev, btnDataFirst
+            });
+            // 設定右側對齊
+            btnDataLast.Alignment = ToolStripItemAlignment.Right;
+            btnDataNext.Alignment = ToolStripItemAlignment.Right;
+            lblDataPagination.Alignment = ToolStripItemAlignment.Right;
+            btnDataPrev.Alignment = ToolStripItemAlignment.Right;
+            btnDataFirst.Alignment = ToolStripItemAlignment.Right;
 
             // ── 分割容器 ──
-            SplitContainer split = new SplitContainer
+            split = new SplitContainer
             {
                 Dock = DockStyle.Fill,
                 Orientation = Orientation.Horizontal,
@@ -221,13 +340,17 @@ namespace mySQLPunk
             split.Panel2.Controls.Add(tabResults);
 
             // ── 狀態列 ──
-            statusStrip = new StatusStrip();
-            lblStatus = new ToolStripStatusLabel("Ready") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-            statusStrip.Items.Add(lblStatus);
+            statusStrip = new StatusStrip { BackColor = Color.White };
+            lblStatus = new ToolStripStatusLabel("Ready");
+            lblSqlPreview = new ToolStripStatusLabel { Spring = true, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.Gray };
+            statusStrip.Items.AddRange(new ToolStripItem[] { lblStatus, lblSqlPreview });
 
-            Controls.Add(split);
-            Controls.Add(pnlTop);
-            Controls.Add(statusStrip);
+            this.Controls.Add(split);
+            this.Controls.Add(mainToolStrip);
+            this.Controls.Add(statusStrip);
+            
+            // 將 dataToolStrip 放到 split.Panel2 的底部 (跟著表格走)
+            split.Panel2.Controls.Add(dataToolStrip);
         }
 
         public void SetMainHost(Form1 mainHost)
@@ -258,8 +381,8 @@ namespace mySQLPunk
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             _isDocked = true;
-            btnFloat.Visible = true;
-            btnDock.Visible = false;
+            tsBtnFloat.Visible = true;
+            tsBtnDock.Visible = false;
         }
 
         public void PrepareForFloating()
@@ -280,28 +403,20 @@ namespace mySQLPunk
             ShowInTaskbar = true;
             StartPosition = FormStartPosition.CenterParent;
             _isDocked = false;
-            btnFloat.Visible = false;
-            btnDock.Visible = _mainHost != null;
+            tsBtnFloat.Visible = false;
+            tsBtnDock.Visible = _mainHost != null;
         }
 
         private void FloatToWindow()
         {
-            if (_mainHost == null)
-            {
-                return;
-            }
-
-            _mainHost.FloatQueryForm(this);
+            if (_mainHost == null) return;
+            _mainHost.FloatDockableForm(this);
         }
 
         private void DockToMainWindow()
         {
-            if (_mainHost == null)
-            {
-                return;
-            }
-
-            _mainHost.DockQueryForm(this);
+            if (_mainHost == null) return;
+            _mainHost.DockDockableForm(this);
         }
 
         // ── 載入資料表名稱供自動補完 ──
@@ -542,6 +657,36 @@ namespace mySQLPunk
         }
 
         // ── 執行查詢 ──
+        private void ExecutePagedQuery()
+        {
+            if (!_isTableDataMode)
+            {
+                ExecuteQueryAsync();
+                return;
+            }
+
+            int offset = (_currentPage - 1) * _pageSize;
+            txtSql.Text = $"{_baseSql} LIMIT {_pageSize} OFFSET {offset};";
+            ExecuteQueryAsync();
+            UpdatePaginationUI();
+        }
+
+         private void UpdatePaginationUI()
+        {
+            int totalPages = GetTotalPages();
+            lblDataPagination.Text = $" Page {_currentPage} of {totalPages} (Total: {_totalRows}) ";
+            btnDataFirst.Enabled = _currentPage > 1;
+            btnDataPrev.Enabled = _currentPage > 1;
+            btnDataNext.Enabled = _currentPage < totalPages;
+            btnDataLast.Enabled = _currentPage < totalPages;
+        }
+
+        private int GetTotalPages()
+        {
+            if (_totalRows <= 0) return 1;
+            return (int)Math.Ceiling((double)_totalRows / _pageSize);
+        }
+
         private async void ExecuteQueryAsync()
         {
             // 優先執行選取文字，否則全文
@@ -552,11 +697,14 @@ namespace mySQLPunk
             if (string.IsNullOrEmpty(rawSql)) return;
 
             string sql = GetSqlToExecute(rawSql);
+            lblSqlPreview.Text = sql; // 更新底部的 SQL 預覽
 
             _cts = new CancellationTokenSource();
-            btnExecute.Enabled = false;
-            btnCancel.Enabled = true;
-            btnExportCsv.Enabled = false;
+            tsBtnExecute.Enabled = false;
+            tsBtnCancel.Enabled = true;
+            tsBtnExport.Enabled = false;
+            tsBtnRefresh.Enabled = false;
+            btnDataRefresh.Enabled = false;
             lblStatus.Text = "Executing...";
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -576,7 +724,7 @@ namespace mySQLPunk
                     sw.Stop();
                     dgvResults.DataSource = dt;
                     AutoResizeColumns(dgvResults);
-                    btnExportCsv.Enabled = dt.Rows.Count > 0;
+                    tsBtnExport.Enabled = dt.Rows.Count > 0;
                     lblStatus.Text = string.Format(
                         "OK  |  {0} rows  |  {1} ms",
                         dt.Rows.Count, sw.ElapsedMilliseconds);
@@ -617,8 +765,10 @@ namespace mySQLPunk
             }
             finally
             {
-                btnExecute.Enabled = true;
-                btnCancel.Enabled = false;
+                tsBtnExecute.Enabled = true;
+                tsBtnCancel.Enabled = false;
+                tsBtnRefresh.Enabled = true;
+                btnDataRefresh.Enabled = true;
                 _cts?.Dispose();
                 _cts = null;
             }
@@ -651,11 +801,36 @@ namespace mySQLPunk
         private static void AutoResizeColumns(DataGridView dgv)
         {
             if (dgv.Columns.Count == 0) return;
+            // ── 資料編輯功能 (Stubs) ──
             // 限制最大欄寬避免超寬欄位讓畫面難以閱讀
             dgv.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.DisplayedCells);
             foreach (DataGridViewColumn col in dgv.Columns)
             {
                 if (col.Width > 300) col.Width = 300;
+            }
+        }
+
+        private void SaveChanges()
+        {
+            MessageBox.Show("儲存變更功能開發中...", "資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void AddNewRow()
+        {
+            if (dgvResults.DataSource is DataTable dt)
+            {
+                dt.Rows.Add(dt.NewRow());
+            }
+        }
+
+        private void DeleteSelectedRows()
+        {
+            if (dgvResults.SelectedRows.Count > 0)
+            {
+                foreach (DataGridViewRow row in dgvResults.SelectedRows)
+                {
+                    if (!row.IsNewRow) dgvResults.Rows.Remove(row);
+                }
             }
         }
 
@@ -721,9 +896,10 @@ namespace mySQLPunk
             _cts?.Dispose();
             if (_mainHost != null)
             {
-                _mainHost.NotifyQueryFormClosed(this);
+                _mainHost.NotifyDockableFormClosed(this);
             }
             base.OnFormClosed(e);
         }
+
     }
 }

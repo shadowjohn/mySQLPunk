@@ -176,6 +176,15 @@ namespace mySQLPunk.lib
             return SelectSQL($"PRAGMA table_info('{safeTable}');");
         }
 
+        public DataTable GetTableStatus(string databaseName) => new DataTable();
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
+        public string GetTableCreateStatement(string databaseName, string tableName)
+        {
+            string safeTable = tableName.Replace("'", "''");
+            DataTable dt = SelectSQL($"SELECT sql FROM sqlite_master WHERE type='table' AND name='{safeTable}';");
+            return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
+        }
+
         public void Dispose()
         {
             Close();

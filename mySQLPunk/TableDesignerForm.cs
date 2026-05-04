@@ -7,7 +7,7 @@ using mySQLPunk.lib;
 
 namespace mySQLPunk
 {
-    public class TableDesignerForm : Form
+    public class TableDesignerForm : Form, IDockableForm
     {
         private IDatabase _db;
         private string _databaseName;
@@ -17,6 +17,10 @@ namespace mySQLPunk
         private Button btnSave;
         private Panel pnlBottom;
         private DataTable _originalDt; // 儲存原始狀態
+        private Form1 _mainHost;
+        private bool _isDocked;
+        private Button btnFloat;
+        private Button btnDock;
 
         public TableDesignerForm(IDatabase db, string databaseName, string tableName)
         {
@@ -50,10 +54,47 @@ namespace mySQLPunk
                 Enabled = true
             };
             btnSave.Click += BtnSave_Click;
+            
+            btnFloat = new Button() { Text = "Float", Location = new Point(140, 10), Size = new Size(70, 30) };
+            btnFloat.Click += (s, e) => _mainHost?.FloatDockableForm(this);
+            
+            btnDock = new Button() { Text = "Dock", Location = new Point(140, 10), Size = new Size(70, 30), Visible = false };
+            btnDock.Click += (s, e) => _mainHost?.DockDockableForm(this);
 
             pnlBottom.Controls.Add(btnSave);
+            pnlBottom.Controls.Add(btnFloat);
+            pnlBottom.Controls.Add(btnDock);
             this.Controls.Add(dgvColumns);
             this.Controls.Add(pnlBottom);
+        }
+
+        public void SetMainHost(Form1 mainHost) => _mainHost = mainHost;
+        public string GetDisplayTitle() => this.Text;
+
+        public void PrepareForDocking()
+        {
+            if (Visible) Hide();
+            if (Parent != null) Parent.Controls.Remove(this);
+            FormBorderStyle = FormBorderStyle.None;
+            TopLevel = false;
+            ShowInTaskbar = false;
+            _isDocked = true;
+            btnFloat.Visible = true;
+            btnDock.Visible = false;
+        }
+
+        public void PrepareForFloating()
+        {
+            if (Visible) Hide();
+            if (Parent != null) Parent.Controls.Remove(this);
+            Dock = DockStyle.None;
+            TopLevel = true;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            ShowInTaskbar = true;
+            StartPosition = FormStartPosition.CenterParent;
+            _isDocked = false;
+            btnFloat.Visible = false;
+            btnDock.Visible = true;
         }
 
         private void LoadColumns()
@@ -197,6 +238,14 @@ namespace mySQLPunk
             {
                 MessageBox.Show("未偵測到任何變動。");
             }
+        }
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            if (_mainHost != null)
+            {
+                _mainHost.NotifyDockableFormClosed(this);
+            }
+            base.OnFormClosed(e);
         }
     }
 }
