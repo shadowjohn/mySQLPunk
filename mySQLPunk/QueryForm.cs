@@ -282,7 +282,8 @@ namespace mySQLPunk
             dataToolStrip = new ToolStrip { 
                 Dock = DockStyle.Bottom, 
                 GripStyle = ToolStripGripStyle.Hidden,
-                BackColor = Color.FromArgb(242, 242, 242)
+                BackColor = Color.FromArgb(242, 242, 242),
+                Height = 35 // 增加高度
             };
 
             btnDataAdd = new ToolStripButton("+", null, (s, e) => AddNewRow()) { Font = new Font("Segoe UI", 12, FontStyle.Bold) };
@@ -296,19 +297,22 @@ namespace mySQLPunk
             btnDataNext = new ToolStripButton(">", null, (s, e) => { if (_currentPage < GetTotalPages()) { _currentPage++; ExecutePagedQuery(); } });
             btnDataLast = new ToolStripButton(">|", null, (s, e) => { _currentPage = GetTotalPages(); ExecutePagedQuery(); });
 
-            lblDataPagination = new ToolStripLabel("Page 1 of 1");
-            txtPageSize = new ToolStripTextBox { Text = _pageSize.ToString(), Width = 50 };
+            ToolStripLabel lblLimit = new ToolStripLabel(" Limit: ") { Margin = new Padding(10, 0, 0, 0) };
+            txtPageSize = new ToolStripTextBox { Text = _pageSize.ToString(), Width = 50, TextBoxTextAlign = HorizontalAlignment.Center };
             txtPageSize.TextChanged += (s, e) => { if (int.TryParse(txtPageSize.Text, out int val)) _pageSize = val; };
+            ToolStripLabel lblRecords = new ToolStripLabel(" records ") { Margin = new Padding(0, 0, 20, 0) };
+
+            btnDataFirst = new ToolStripButton("|<", null, (s, e) => { _currentPage = 1; ExecutePagedQuery(); }) { Alignment = ToolStripItemAlignment.Right };
+            btnDataPrev = new ToolStripButton("<", null, (s, e) => { if (_currentPage > 1) { _currentPage--; ExecutePagedQuery(); } }) { Alignment = ToolStripItemAlignment.Right };
+            lblDataPagination = new ToolStripLabel(" Page 1 of 1 ") { Alignment = ToolStripItemAlignment.Right, Margin = new Padding(10, 0, 10, 0) };
+            btnDataNext = new ToolStripButton(">", null, (s, e) => { if (_currentPage < GetTotalPages()) { _currentPage++; ExecutePagedQuery(); } }) { Alignment = ToolStripItemAlignment.Right };
+            btnDataLast = new ToolStripButton(">|", null, (s, e) => { _currentPage = GetTotalPages(); ExecutePagedQuery(); }) { Alignment = ToolStripItemAlignment.Right };
 
             dataToolStrip.Items.AddRange(new ToolStripItem[] {
                 btnDataAdd, btnDataDelete, btnDataApply, btnDataCancel, btnDataRefresh,
-                new ToolStripSeparator(),
-                new ToolStripLabel(" Limit:"), txtPageSize, new ToolStripLabel("records "),
-                new ToolStripSeparator { Alignment = ToolStripItemAlignment.Right },
+                lblLimit, txtPageSize, lblRecords,
                 btnDataLast, btnDataNext, lblDataPagination, btnDataPrev, btnDataFirst
             });
-            // 設定右側對齊
-            btnDataLast.Alignment = ToolStripItemAlignment.Right;
             btnDataNext.Alignment = ToolStripItemAlignment.Right;
             lblDataPagination.Alignment = ToolStripItemAlignment.Right;
             btnDataPrev.Alignment = ToolStripItemAlignment.Right;
@@ -413,7 +417,8 @@ namespace mySQLPunk
             _isDocked = true;
             tsBtnFloat.Visible = true;
             tsBtnDock.Visible = false;
-            mainMenuStrip.Visible = false; // 嵌入時隱藏選單
+            mainMenuStrip.Visible = false;
+            statusStrip.Visible = false; // 嵌入時隱藏自己的狀態列
         }
 
         public void PrepareForFloating()
@@ -436,7 +441,8 @@ namespace mySQLPunk
             _isDocked = false;
             tsBtnFloat.Visible = false;
             tsBtnDock.Visible = _mainHost != null;
-            mainMenuStrip.Visible = true; // 懸浮時顯示選單
+            mainMenuStrip.Visible = true;
+            statusStrip.Visible = true; // 懸浮時顯示自己的狀態列供 Resize
         }
 
         private void FloatToWindow()
@@ -768,7 +774,7 @@ namespace mySQLPunk
             tsBtnExport.Enabled = false;
             tsBtnRefresh.Enabled = false;
             btnDataRefresh.Enabled = false;
-            lblStatus.Text = "Executing...";
+            UpdateStatus("Executing...");
 
             Stopwatch sw = Stopwatch.StartNew();
 
@@ -788,9 +794,9 @@ namespace mySQLPunk
                     dgvResults.DataSource = dt;
                     AutoResizeColumns(dgvResults);
                     tsBtnExport.Enabled = dt.Rows.Count > 0;
-                    lblStatus.Text = string.Format(
+                    UpdateStatus(string.Format(
                         "OK  |  {0} rows  |  {1} ms",
-                        dt.Rows.Count, sw.ElapsedMilliseconds);
+                        dt.Rows.Count, sw.ElapsedMilliseconds));
                 }
                 else
                 {
@@ -803,8 +809,8 @@ namespace mySQLPunk
 
                     if (result["status"] == "OK")
                     {
-                        lblStatus.Text = string.Format(
-                            "OK  |  {0} ms", sw.ElapsedMilliseconds);
+                        UpdateStatus(string.Format(
+                            "OK  |  {0} ms", sw.ElapsedMilliseconds));
                     }
                     else
                     {
@@ -817,12 +823,12 @@ namespace mySQLPunk
             catch (OperationCanceledException)
             {
                 sw.Stop();
-                lblStatus.Text = "Cancelled.";
+                UpdateStatus("Cancelled.");
             }
             catch (Exception ex)
             {
                 sw.Stop();
-                lblStatus.Text = "Error: " + ex.Message;
+                UpdateStatus("Error: " + ex.Message);
                 MessageBox.Show(ex.Message, "Query Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -834,6 +840,15 @@ namespace mySQLPunk
                 btnDataRefresh.Enabled = true;
                 _cts?.Dispose();
                 _cts = null;
+            }
+        }
+
+        private void UpdateStatus(string msg)
+        {
+            lblStatus.Text = msg;
+            if (_isDocked && _mainHost != null)
+            {
+                _mainHost.UpdateMainStatus(msg);
             }
         }
 

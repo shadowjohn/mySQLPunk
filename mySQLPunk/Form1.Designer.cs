@@ -630,7 +630,7 @@
             this.Controls.Add(this.statusStrip1);
             this.Controls.Add(this.splitContainer1);
             this.Controls.Add(this.menuStrip1);
-            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
             this.MainMenuStrip = this.menuStrip1;
             this.Name = "Form1";
             this.Text = "羽山的 mySQLPunk";

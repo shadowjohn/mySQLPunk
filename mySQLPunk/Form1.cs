@@ -257,6 +257,14 @@ namespace mySQLPunk
                     break;
             }
         }
+        public void UpdateMainStatus(string msg)
+        {
+            if (lblMainStatus != null)
+            {
+                lblMainStatus.Text = msg;
+            }
+        }
+
         public void drawLists()
         {
             ImageList myImageList = new ImageList();
@@ -390,6 +398,39 @@ namespace mySQLPunk
             table_top.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None; // 必須先關閉 RowHeader 相關自動調整
             table_top.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.EnableResizing;
             table_top.RowHeadersVisible = false;
+            
+            // 確保狀態列在最底端且可見 (保留 Resize 功能)
+            statusStrip1.Dock = DockStyle.Bottom;
+            statusStrip1.Visible = true; 
+            statusStrip1.SizingGrip = true; // 恢復 Resize 手柄
+            statusStrip1.SendToBack(); 
+            lblMainStatus = new ToolStripStatusLabel("Ready") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+            statusStrip1.Items.Clear();
+            statusStrip1.Items.Add(lblMainStatus);
+
+            // 確保選單與工具列在最頂端
+            menuStrip1.SendToBack(); // 根據 WinForms 邏輯，SendToBack 反而是 Dock 最頂端
+            tool_Connection.SendToBack(); 
+            
+            // 確保容器高度足夠容納工具列
+            splitContainer1.SplitterDistance = 110;
+            tool_Connection.Dock = DockStyle.Fill;
+            tool_Connection.AutoSize = false;
+            tool_Connection.Height = 110; 
+            tool_Connection.ImageScalingSize = new Size(32, 32);
+            tool_Connection.GripStyle = ToolStripGripStyle.Hidden;
+            tool_Connection.Padding = new Padding(10, 5, 10, 5);
+
+            // 初始化所有頂部工具列按鈕的樣式
+            foreach (ToolStripItem item in tool_Connection.Items)
+            {
+                item.AutoSize = false;
+                item.Size = new Size(90, 85);
+                item.Padding = new Padding(0, 5, 0, 5); // 內部再加一點邊距
+                if (item is ToolStripButton btn) btn.TextImageRelation = TextImageRelation.ImageAboveText;
+                if (item is ToolStripDropDownButton dd) dd.TextImageRelation = TextImageRelation.ImageAboveText;
+            }
+
             table_top.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             table_top.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             table_top.AllowUserToAddRows = false;
@@ -480,10 +521,11 @@ namespace mySQLPunk
             // 初始化 New Query 按鈕
             query_btn.Text = "New Query";
             query_btn.ImageScaling = ToolStripItemImageScaling.None;
-            query_btn.TextImageRelation = TextImageRelation.Overlay;
+            query_btn.TextImageRelation = TextImageRelation.ImageAboveText; // 圖示在文字上方
             query_btn.TextAlign = ContentAlignment.BottomCenter;
             query_btn.AutoSize = false;
-            query_btn.Size = new Size(80, 70);
+            query_btn.Size = new Size(85, 85); // 統一按鈕尺寸
+            query_btn.Margin = new Padding(2);
             query_btn.Click += Query_btn_Click;
             tool_Connection.Items.Add(query_btn);
 
@@ -2022,7 +2064,10 @@ namespace mySQLPunk
                 queryTabs.Visible = true;
                 queryTabs.BackColor = Color.FromArgb(200, 230, 255);
                 if (queryTabs.TabPages.Count == 0)
+                {
+                    statusStrip1.Visible = true; // 拖入時顯示提示
                     lblMainStatus.Text = "Release mouse to dock the window...";
+                }
             }
             else
                 e.Effect = DragDropEffects.None;
@@ -2038,12 +2083,14 @@ namespace mySQLPunk
         {
             queryTabs.BackColor = Color.White;
             if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
+            statusStrip1.Visible = false; // 離開時隱藏
             lblMainStatus.Text = "Ready";
         }
 
         private void QueryTabs_DragDrop(object sender, DragEventArgs e)
         {
             queryTabs.BackColor = Color.White;
+            statusStrip1.Visible = false; // 放下時隱藏
             lblMainStatus.Text = "Ready";
             var dockable = GetDockableFromDrag(e.Data);
             if (dockable != null)
