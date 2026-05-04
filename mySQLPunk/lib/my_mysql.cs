@@ -19,6 +19,11 @@ namespace mySQLPunk.lib
 
         public void SetConn(string connection)
         {
+            if (!connection.ToLower().Contains("allowzerodatetime"))
+            {
+                if (!connection.EndsWith(";")) connection += ";";
+                connection += "AllowZeroDateTime=True;ConvertZeroDateTime=True;";
+            }
             MCT = new MySqlConnection(connection);
         }
         public void setConn(string connection) => SetConn(connection);

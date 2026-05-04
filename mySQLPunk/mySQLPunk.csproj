@@ -217,9 +217,11 @@
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
+    <Content Include="image\add.png" />
     <Content Include="image\backups.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="image\connection.png" />
     <Content Include="image\database.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
@@ -229,12 +231,16 @@
     <Content Include="image\db_open.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="image\delete.png" />
+    <Content Include="image\down.png" />
     <Content Include="image\events.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="image\functions.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="image\insert.png" />
+    <Content Include="image\mysql.ico" />
     <Content Include="image\mysql_close.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
@@ -256,9 +262,11 @@
     <Content Include="image\queries.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="image\query.png" />
     <Content Include="image\reports.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="image\save.png" />
     <Content Include="image\sqlite_close.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
@@ -271,9 +279,12 @@
     <Content Include="image\sqlserver_open.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="image\table.png" />
     <Content Include="image\tables.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="image\up.png" />
+    <Content Include="image\view.png" />
     <Content Include="mysql.ico" />
     <None Include="image\views_32.png" />
     <None Include="image\tables_32.png" />
