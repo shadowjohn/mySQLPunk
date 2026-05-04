@@ -24,6 +24,15 @@ namespace mySQLPunk
         public Label dialogLabel = new Label();
         public int dialogFlag = 0;
         public string test = "";
+        
+        // Windows API 用於實作視窗拖拽接管
+        [DllImport("user32.dll")]
+        public static extern bool ReleaseCapture();
+        [DllImport("user32.dll")]
+        public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+        public const int WM_NCLBUTTONDOWN = 0xA1;
+        public const int HTCAPTION = 0x2;
+
         public static Dictionary<string, List<object>> displayTools = new Dictionary<string, List<object>>();
         mySQLPunk_main myN = new mySQLPunk_main();
         myinclude my = new myinclude();
@@ -41,6 +50,7 @@ namespace mySQLPunk
         private ToolStripButton btnInfo;
         private ToolStripButton btnDDL;
         private Label lblSidebarTitle;
+        private ToolStripStatusLabel lblMainStatus; // 新增主程式狀態標籤
         public Form1()
         {
             InitializeComponent();
@@ -386,6 +396,10 @@ namespace mySQLPunk
             table_top.GridColor = Color.FromArgb(240, 240, 240);
             table_top.BorderStyle = BorderStyle.None;
 
+            // 初始化主狀態標籤
+            lblMainStatus = new ToolStripStatusLabel("Ready") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+            statusStrip1.Items.Add(lblMainStatus);
+
             queryTabs = new TabControl();
             queryTabs.Dock = DockStyle.Fill;
             queryTabs.Visible = false;
@@ -394,11 +408,21 @@ namespace mySQLPunk
             // ── 啟用頁籤自定義繪製與拖拽功能 ──
             queryTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
             queryTabs.Padding = new Point(24, 4); // 留更多空間給 X
+            queryTabs.AllowDrop = true; // 支援拖放回巢
             queryTabs.DrawItem += QueryTabs_DrawItem;
             queryTabs.MouseDown += QueryTabs_MouseDown;
             queryTabs.MouseMove += QueryTabs_MouseMove;
             queryTabs.MouseUp += QueryTabs_MouseUp;
             queryTabs.MouseClick += QueryTabs_MouseClick;
+            queryTabs.DragEnter += QueryTabs_DragEnter;
+            queryTabs.DragDrop += QueryTabs_DragDrop;
+
+            // ── 讓父容器也支援拖放 (解決分頁隱藏無法塞回的問題) ──
+            splitContainer5.Panel1.AllowDrop = true;
+            splitContainer5.Panel1.DragEnter += QueryTabs_DragEnter;
+            splitContainer5.Panel1.DragOver += QueryTabs_DragOver;
+            splitContainer5.Panel1.DragLeave += QueryTabs_DragLeave;
+            splitContainer5.Panel1.DragDrop += QueryTabs_DragDrop;
 
             // 初始化側邊欄 (Sidebar) 在 Panel2
             InitSidebar();
@@ -818,7 +842,14 @@ namespace mySQLPunk
             }
 
             dockable.PrepareForFloating();
+            
+            // 將視窗中心設定在滑鼠位置
+            f.Location = new Point(Cursor.Position.X - f.Width / 2, Cursor.Position.Y - 15);
             f.Show();
+
+            // 強制接管拖拽：讓視窗立刻跟著滑鼠走
+            ReleaseCapture();
+            SendMessage(f.Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
 
             if (queryTabs.TabPages.Count == 0)
             {
@@ -1899,7 +1930,19 @@ namespace mySQLPunk
             if (e.Button != MouseButtons.Left || dragTab == null) return;
             
             // 只有移動超過一定距離才算拖拽
-            if (Math.Abs(e.X - dragStartPos.X) < 5) return;
+            if (Math.Abs(e.X - dragStartPos.X) < 5 && Math.Abs(e.Y - dragStartPos.Y) < 5) return;
+
+            // 檢查是否移出範圍 (拖拽拉出功能)
+            if (!queryTabs.ClientRectangle.Contains(e.Location))
+            {
+                var form = dragTab.Controls.OfType<QueryForm>().FirstOrDefault();
+                if (form != null)
+                {
+                    dragTab = null; // 停止拖拽
+                    FloatDockableForm(form);
+                    return;
+                }
+            }
 
             TabPage hoverTab = GetTabAt(e.Location);
             if (hoverTab != null && hoverTab != dragTab)
@@ -1907,10 +1950,50 @@ namespace mySQLPunk
                 int dragIdx = queryTabs.TabPages.IndexOf(dragTab);
                 int dropIdx = queryTabs.TabPages.IndexOf(hoverTab);
                 
-                // 交換頁籤
                 queryTabs.TabPages.RemoveAt(dragIdx);
                 queryTabs.TabPages.Insert(dropIdx, dragTab);
                 queryTabs.SelectedTab = dragTab;
+            }
+        }
+
+        private void QueryTabs_DragEnter(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(typeof(QueryForm)))
+            {
+                e.Effect = DragDropEffects.Move;
+                queryTabs.Visible = true;
+                queryTabs.BackColor = Color.FromArgb(200, 230, 255);
+                
+                if (queryTabs.TabPages.Count == 0) {
+                    lblMainStatus.Text = "Release mouse to dock the window...";
+                }
+            }
+            else
+                e.Effect = DragDropEffects.None;
+        }
+
+        private void QueryTabs_DragOver(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(typeof(QueryForm)))
+                e.Effect = DragDropEffects.Move;
+        }
+
+        private void QueryTabs_DragLeave(object sender, EventArgs e)
+        {
+            queryTabs.BackColor = Color.White;
+            if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
+            lblMainStatus.Text = "Ready";
+        }
+
+        private void QueryTabs_DragDrop(object sender, DragEventArgs e)
+        {
+            queryTabs.BackColor = Color.White;
+            lblMainStatus.Text = "Ready";
+            
+            var form = e.Data.GetData(typeof(QueryForm)) as QueryForm;
+            if (form != null)
+            {
+                DockDockableForm(form);
             }
         }
 

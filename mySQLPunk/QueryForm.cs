@@ -40,6 +40,7 @@ namespace mySQLPunk
         // 工具列與狀態列
         private ToolStrip mainToolStrip;
         private ToolStrip dataToolStrip;
+        private MenuStrip mainMenuStrip; // 懸浮時顯示的選單
         private StatusStrip statusStrip;
         private ToolStripStatusLabel lblStatus;
         private ToolStripStatusLabel lblSqlPreview;
@@ -218,6 +219,14 @@ namespace mySQLPunk
             StartPosition = FormStartPosition.CenterParent;
             MinimumSize = new Size(600, 400);
 
+            // ── 頂部選單 (平時隱藏) ──
+            mainMenuStrip = new MenuStrip { Visible = false };
+            mainMenuStrip.Items.Add(new ToolStripMenuItem("File"));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem("Edit"));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem("View"));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem("Window"));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem("Help"));
+
             // ── 頂部專業工具列 (ToolStrip) ──
             mainToolStrip = new ToolStrip { 
                 ImageScalingSize = new Size(24, 24), 
@@ -248,6 +257,26 @@ namespace mySQLPunk
                 new ToolStripSeparator(), 
                 tsBtnFloat, tsBtnDock 
             });
+
+            // 支援拖拽回巢邏輯
+            mainToolStrip.MouseDown += (s, e) => {
+                if (!_isDocked && e.Button == MouseButtons.Left)
+                {
+                    // 記錄起始位置，避免輕微晃動誤觸
+                    mainToolStrip.Tag = e.Location;
+                }
+            };
+            mainToolStrip.MouseMove += (s, e) => {
+                if (!_isDocked && e.Button == MouseButtons.Left && mainToolStrip.Tag != null)
+                {
+                    Point startPos = (Point)mainToolStrip.Tag;
+                    if (Math.Abs(e.X - startPos.X) > 5 || Math.Abs(e.Y - startPos.Y) > 5)
+                    {
+                        mainToolStrip.Tag = null; // 清除標記
+                        mainToolStrip.DoDragDrop(this, DragDropEffects.Move);
+                    }
+                }
+            };
 
             // ── 資料底端工具列 (dataToolStrip) ──
             dataToolStrip = new ToolStrip { 
@@ -347,6 +376,7 @@ namespace mySQLPunk
 
             this.Controls.Add(split);
             this.Controls.Add(mainToolStrip);
+            this.Controls.Add(mainMenuStrip); // 加入選單
             this.Controls.Add(statusStrip);
             
             // 將 dataToolStrip 放到 split.Panel2 的底部 (跟著表格走)
@@ -383,6 +413,7 @@ namespace mySQLPunk
             _isDocked = true;
             tsBtnFloat.Visible = true;
             tsBtnDock.Visible = false;
+            mainMenuStrip.Visible = false; // 嵌入時隱藏選單
         }
 
         public void PrepareForFloating()
@@ -405,6 +436,7 @@ namespace mySQLPunk
             _isDocked = false;
             tsBtnFloat.Visible = false;
             tsBtnDock.Visible = _mainHost != null;
+            mainMenuStrip.Visible = true; // 懸浮時顯示選單
         }
 
         private void FloatToWindow()
