@@ -451,6 +451,37 @@ namespace mySQLPunk
             _mainHost.DockDockableForm(this);
         }
 
+        // 攔截 OS 層級視窗移動，提供 dock 提示框並在放開時自動塞回 tab
+        private const int WM_MOVING = 0x0216;
+        private const int WM_EXITSIZEMOVE = 0x0232;
+        private bool _wasOverDropZone = false;
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (_isDocked || _mainHost == null) return;
+
+            if (m.Msg == WM_MOVING)
+            {
+                Control area = _mainHost.GetTabDropArea();
+                bool isOver = area.RectangleToScreen(area.ClientRectangle).Contains(Cursor.Position);
+                if (isOver != _wasOverDropZone)
+                {
+                    _wasOverDropZone = isOver;
+                    if (isOver) _mainHost.ShowDockHint();
+                    else _mainHost.HideDockHint();
+                }
+            }
+            else if (m.Msg == WM_EXITSIZEMOVE)
+            {
+                _mainHost.HideDockHint();
+                _wasOverDropZone = false;
+                Control area = _mainHost.GetTabDropArea();
+                if (this.Bounds.IntersectsWith(area.RectangleToScreen(area.ClientRectangle)))
+                    _mainHost.DockDockableForm(this);
+            }
+        }
+
         // ── 載入資料表名稱供自動補完 ──
         private void LoadTableNames()
         {

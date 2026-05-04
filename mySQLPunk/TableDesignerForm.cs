@@ -97,6 +97,36 @@ namespace mySQLPunk
             btnDock.Visible = true;
         }
 
+        private const int WM_MOVING = 0x0216;
+        private const int WM_EXITSIZEMOVE = 0x0232;
+        private bool _wasOverDropZone = false;
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (_isDocked || _mainHost == null) return;
+
+            if (m.Msg == WM_MOVING)
+            {
+                Control area = _mainHost.GetTabDropArea();
+                bool isOver = area.RectangleToScreen(area.ClientRectangle).Contains(Cursor.Position);
+                if (isOver != _wasOverDropZone)
+                {
+                    _wasOverDropZone = isOver;
+                    if (isOver) _mainHost.ShowDockHint();
+                    else _mainHost.HideDockHint();
+                }
+            }
+            else if (m.Msg == WM_EXITSIZEMOVE)
+            {
+                _mainHost.HideDockHint();
+                _wasOverDropZone = false;
+                Control area = _mainHost.GetTabDropArea();
+                if (this.Bounds.IntersectsWith(area.RectangleToScreen(area.ClientRectangle)))
+                    _mainHost.DockDockableForm(this);
+            }
+        }
+
         private void LoadColumns()
         {
             try

@@ -51,6 +51,7 @@ namespace mySQLPunk
         private ToolStripButton btnDDL;
         private Label lblSidebarTitle;
         private ToolStripStatusLabel lblMainStatus; // 新增主程式狀態標籤
+        private Panel _dockHintOverlay;
         public Form1()
         {
             InitializeComponent();
@@ -417,12 +418,37 @@ namespace mySQLPunk
             queryTabs.DragEnter += QueryTabs_DragEnter;
             queryTabs.DragDrop += QueryTabs_DragDrop;
 
-            // ── 讓父容器也支援拖放 (解決分頁隱藏無法塞回的問題) ──
+            // ── 讓父容器與 table_top 都支援拖放回巢 ──
             splitContainer5.Panel1.AllowDrop = true;
             splitContainer5.Panel1.DragEnter += QueryTabs_DragEnter;
             splitContainer5.Panel1.DragOver += QueryTabs_DragOver;
             splitContainer5.Panel1.DragLeave += QueryTabs_DragLeave;
             splitContainer5.Panel1.DragDrop += QueryTabs_DragDrop;
+
+            // table_top 蓋在 Panel1 上，必須也開 AllowDrop，否則會吃掉 drag 事件
+            table_top.AllowDrop = true;
+            table_top.DragEnter += QueryTabs_DragEnter;
+            table_top.DragOver += QueryTabs_DragOver;
+            table_top.DragLeave += QueryTabs_DragLeave;
+            table_top.DragDrop += QueryTabs_DragDrop;
+
+            // 初始化 dock 提示框 (懸浮視窗拖回時的視覺指引)
+            _dockHintOverlay = new Panel() { Dock = DockStyle.Fill, Visible = false, BackColor = Color.FromArgb(220, 235, 255) };
+            _dockHintOverlay.Paint += (s, e) =>
+            {
+                using (var pen = new Pen(Color.FromArgb(0, 120, 212), 4))
+                    e.Graphics.DrawRectangle(pen, 2, 2, _dockHintOverlay.Width - 5, _dockHintOverlay.Height - 5);
+                const string msg = "釋放滑鼠以嵌入視窗";
+                using (var font = new Font("Microsoft JhengHei", 14, FontStyle.Bold))
+                using (var brush = new SolidBrush(Color.FromArgb(0, 120, 212)))
+                {
+                    var sz = e.Graphics.MeasureString(msg, font);
+                    e.Graphics.DrawString(msg, font, brush,
+                        (_dockHintOverlay.Width - sz.Width) / 2f,
+                        (_dockHintOverlay.Height - sz.Height) / 2f);
+                }
+            };
+            splitContainer5.Panel1.Controls.Add(_dockHintOverlay);
 
             // 初始化側邊欄 (Sidebar) 在 Panel2
             InitSidebar();
@@ -856,6 +882,23 @@ namespace mySQLPunk
                 queryTabs.Visible = false;
                 table_top.Visible = true;
             }
+        }
+
+        // 給懸浮視窗的 WndProc 查詢 drop 目標的螢幕範圍
+        public Control GetTabDropArea() => splitContainer5.Panel1;
+
+        public void ShowDockHint()
+        {
+            if (_dockHintOverlay == null) return;
+            _dockHintOverlay.Visible = true;
+            _dockHintOverlay.BringToFront();
+            _dockHintOverlay.Invalidate();
+        }
+
+        public void HideDockHint()
+        {
+            if (_dockHintOverlay != null)
+                _dockHintOverlay.Visible = false;
         }
 
         public void NotifyDockableFormClosed(IDockableForm dockable)
@@ -1935,11 +1978,11 @@ namespace mySQLPunk
             // 檢查是否移出範圍 (拖拽拉出功能)
             if (!queryTabs.ClientRectangle.Contains(e.Location))
             {
-                var form = dragTab.Controls.OfType<QueryForm>().FirstOrDefault();
-                if (form != null)
+                var dockable = dragTab.Controls.OfType<Form>().OfType<IDockableForm>().FirstOrDefault();
+                if (dockable != null)
                 {
                     dragTab = null; // 停止拖拽
-                    FloatDockableForm(form);
+                    FloatDockableForm(dockable);
                     return;
                 }
             }
@@ -1956,17 +1999,30 @@ namespace mySQLPunk
             }
         }
 
+        // 從 DragDrop 資料中取出任何實作 IDockableForm 的物件
+        private IDockableForm GetDockableFromDrag(IDataObject data)
+        {
+            foreach (string fmt in data.GetFormats(false))
+            {
+                try
+                {
+                    var obj = data.GetData(fmt, false);
+                    if (obj is IDockableForm dock) return dock;
+                }
+                catch { }
+            }
+            return null;
+        }
+
         private void QueryTabs_DragEnter(object sender, DragEventArgs e)
         {
-            if (e.Data.GetDataPresent(typeof(QueryForm)))
+            if (GetDockableFromDrag(e.Data) != null)
             {
                 e.Effect = DragDropEffects.Move;
                 queryTabs.Visible = true;
                 queryTabs.BackColor = Color.FromArgb(200, 230, 255);
-                
-                if (queryTabs.TabPages.Count == 0) {
+                if (queryTabs.TabPages.Count == 0)
                     lblMainStatus.Text = "Release mouse to dock the window...";
-                }
             }
             else
                 e.Effect = DragDropEffects.None;
@@ -1974,7 +2030,7 @@ namespace mySQLPunk
 
         private void QueryTabs_DragOver(object sender, DragEventArgs e)
         {
-            if (e.Data.GetDataPresent(typeof(QueryForm)))
+            if (GetDockableFromDrag(e.Data) != null)
                 e.Effect = DragDropEffects.Move;
         }
 
@@ -1989,12 +2045,9 @@ namespace mySQLPunk
         {
             queryTabs.BackColor = Color.White;
             lblMainStatus.Text = "Ready";
-            
-            var form = e.Data.GetData(typeof(QueryForm)) as QueryForm;
-            if (form != null)
-            {
-                DockDockableForm(form);
-            }
+            var dockable = GetDockableFromDrag(e.Data);
+            if (dockable != null)
+                DockDockableForm(dockable);
         }
 
         private void QueryTabs_MouseUp(object sender, MouseEventArgs e)
