@@ -16,6 +16,7 @@ namespace mySQLPunk.lib
         public NpgsqlParameter PA = null;
 
         public ConnectionState State => MCT?.State ?? ConnectionState.Closed;
+        public string ProviderName => "postgresql";
 
         public void SetConn(string connection)
         {
@@ -190,6 +191,178 @@ namespace mySQLPunk.lib
         public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
         public string GetTableCreateStatement(string databaseName, string tableName) => "";
+
+        public bool TableExists(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "name", tableName } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = :name AND table_type = 'BASE TABLE';", p);
+            return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
+        }
+
+        public bool ViewExists(string databaseName, string viewName)
+        {
+            var p = new Dictionary<string, object> { { "name", viewName } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM information_schema.views WHERE table_schema = 'public' AND table_name = :name;", p);
+            return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
+        }
+
+        public void RenameTable(string databaseName, string oldTableName, string newTableName)
+        {
+            ExecOrThrow("ALTER TABLE public." + QuotePg(oldTableName) + " RENAME TO " + QuotePg(newTableName) + ";");
+        }
+
+        public void RenameView(string databaseName, string oldViewName, string newViewName)
+        {
+            ExecOrThrow("ALTER VIEW public." + QuotePg(oldViewName) + " RENAME TO " + QuotePg(newViewName) + ";");
+        }
+
+        public long CountRows(string databaseName, string tableName)
+        {
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM public." + QuotePg(tableName) + ";");
+            return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
+        }
+
+        public DataTable GetCopyColumns(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "name", tableName } };
+            return SelectSQL(@"
+                SELECT
+                    c.column_name AS ""Name"",
+                    c.data_type AS ""DataType"",
+                    c.is_nullable AS ""IsNullable"",
+                    c.character_maximum_length AS ""MaxLength"",
+                    c.numeric_precision AS ""NumericPrecision"",
+                    c.numeric_scale AS ""NumericScale"",
+                    col_description((quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass::oid, c.ordinal_position) AS ""Comment"",
+                    c.ordinal_position AS ""OrdinalPosition""
+                FROM information_schema.columns c
+                WHERE c.table_schema = 'public' AND c.table_name = :name
+                ORDER BY c.ordinal_position;", p);
+        }
+
+        public DataTable GetCopyIndexes(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "name", tableName } };
+            return SelectSQL(@"
+                SELECT
+                    i.relname AS ""IndexName"",
+                    a.attname AS ""ColumnName"",
+                    CASE WHEN ix.indisunique THEN 0 ELSE 1 END AS ""NonUnique"",
+                    k.ord AS ""SeqInIndex"",
+                    am.amname AS ""IndexType""
+                FROM pg_class t
+                JOIN pg_index ix ON t.oid = ix.indrelid
+                JOIN pg_class i ON i.oid = ix.indexrelid
+                JOIN pg_am am ON i.relam = am.oid
+                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                WHERE t.relname = :name AND NOT ix.indisprimary
+                ORDER BY i.relname, k.ord;", p);
+        }
+
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
+        {
+            List<string> defs = new List<string>();
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
+                defs.Add(QuotePg(row["Name"].ToString()) + " " + MapCopyTypeToPostgreSql(row) + " " + nullable);
+            }
+            ExecOrThrow("CREATE TABLE public." + QuotePg(tableName) + " (" + string.Join(", ", defs.ToArray()) + ");");
+
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                if (!row.Table.Columns.Contains("Comment") || row["Comment"] == DBNull.Value || row["Comment"].ToString().Length == 0) continue;
+                string sql = "COMMENT ON COLUMN public." + QuotePg(tableName) + "." + QuotePg(row["Name"].ToString()) + " IS '" + row["Comment"].ToString().Replace("'", "''") + "';";
+                ExecOrThrow(sql);
+            }
+        }
+
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider)
+        {
+            if (sourceIndexes == null || sourceIndexes.Rows.Count == 0) return;
+            foreach (var group in sourceIndexes.AsEnumerable().GroupBy(r => r["IndexName"].ToString()))
+            {
+                string indexName = group.Key;
+                if (string.IsNullOrEmpty(indexName) || indexName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
+                DataRow first = group.First();
+                bool unique = first.Table.Columns.Contains("NonUnique") && first["NonUnique"] != DBNull.Value &&
+                    (first["NonUnique"].ToString() == "0" || first["NonUnique"].ToString().Equals("False", StringComparison.OrdinalIgnoreCase));
+                List<string> cols = new List<string>();
+                foreach (DataRow row in group.OrderBy(r => Convert.ToInt32(r["SeqInIndex"])))
+                    cols.Add(QuotePg(row["ColumnName"].ToString()));
+                string targetIndexName = tableName + "_" + indexName;
+                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX " + QuotePg(targetIndexName) + " ON public." + QuotePg(tableName) + " (" + string.Join(",", cols.ToArray()) + ");";
+                ExecOrThrow(sql);
+            }
+        }
+
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
+        {
+            return SelectSQL("SELECT * FROM public." + QuotePg(tableName) + " LIMIT " + limit + " OFFSET " + offset + ";");
+        }
+
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows)
+        {
+            if (rows == null || rows.Rows.Count == 0) return;
+            List<string> cols = new List<string>();
+            foreach (DataColumn col in rows.Columns) cols.Add(QuotePg(col.ColumnName));
+            List<string> valueGroups = new List<string>();
+            Dictionary<string, object> p = new Dictionary<string, object>();
+            for (int r = 0; r < rows.Rows.Count; r++)
+            {
+                List<string> vals = new List<string>();
+                for (int c = 0; c < rows.Columns.Count; c++)
+                {
+                    string key = "p" + r + "_" + c;
+                    vals.Add(":" + key);
+                    p[key] = rows.Rows[r][c] == DBNull.Value ? DBNull.Value : rows.Rows[r][c];
+                }
+                valueGroups.Add("(" + string.Join(",", vals.ToArray()) + ")");
+            }
+            string sql = "INSERT INTO public." + QuotePg(tableName) + " (" + string.Join(",", cols.ToArray()) + ") VALUES " + string.Join(",", valueGroups.ToArray()) + ";";
+            ExecOrThrow(sql, p);
+        }
+
+        public string GetViewCreateStatement(string databaseName, string viewName)
+        {
+            var p = new Dictionary<string, object> { { "name", viewName } };
+            DataTable dt = SelectSQL("SELECT pg_get_viewdef(('public.' || quote_ident(:name))::regclass, true);", p);
+            return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
+        }
+
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql)
+        {
+            ExecOrThrow("CREATE VIEW public." + QuotePg(viewName) + " AS " + sourceViewSql.Trim().TrimEnd(';') + ";");
+        }
+
+        private void ExecOrThrow(string sql, Dictionary<string, object> parameters = null)
+        {
+            var res = ExecSQL(sql, parameters);
+            if (!res.ContainsKey("status") || res["status"] != "OK")
+                throw new Exception(res.ContainsKey("reason") ? res["reason"] : "SQL 執行失敗");
+        }
+
+        private static string QuotePg(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+
+        private static bool IsCopyNullable(DataRow row)
+        {
+            return !row.Table.Columns.Contains("IsNullable") || row["IsNullable"] == DBNull.Value || row["IsNullable"].ToString().ToUpper() != "NO";
+        }
+
+        private static string MapCopyTypeToPostgreSql(DataRow row)
+        {
+            string type = row["DataType"].ToString().ToLower();
+            if (type.Contains("bigint")) return "BIGINT";
+            if (type.Contains("smallint")) return "SMALLINT";
+            if (type.Contains("int") || type.Contains("serial")) return "INTEGER";
+            if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("money")) return "NUMERIC(38,10)";
+            if (type.Contains("double") || type.Contains("float") || type.Contains("real")) return "DOUBLE PRECISION";
+            if (type.Contains("bool") || type == "bit") return "BOOLEAN";
+            if (type.Contains("date") || type.Contains("time")) return "TIMESTAMP";
+            if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea") || type.Contains("image")) return "BYTEA";
+            return "TEXT";
+        }
 
         public void Dispose()
         {

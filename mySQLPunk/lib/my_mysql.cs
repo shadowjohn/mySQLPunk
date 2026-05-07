@@ -16,6 +16,7 @@ namespace mySQLPunk.lib
         public MySqlParameter PA = null;
 
         public ConnectionState State => MCT?.State ?? ConnectionState.Closed;
+        public string ProviderName => "mysql";
 
         public void SetConn(string connection)
         {
@@ -227,6 +228,197 @@ namespace mySQLPunk.lib
                 return dt.Rows[0][1].ToString();
             }
             return "";
+        }
+
+        public bool TableExists(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "db", databaseName }, { "name", tableName } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ?db AND table_name = ?name AND table_type = 'BASE TABLE';", p);
+            return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
+        }
+
+        public bool ViewExists(string databaseName, string viewName)
+        {
+            var p = new Dictionary<string, object> { { "db", databaseName }, { "name", viewName } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM information_schema.views WHERE table_schema = ?db AND table_name = ?name;", p);
+            return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
+        }
+
+        public void RenameTable(string databaseName, string oldTableName, string newTableName)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeOld = oldTableName.Replace("`", "``");
+            string safeNew = newTableName.Replace("`", "``");
+            ExecOrThrow("RENAME TABLE `" + safeDB + "`.`" + safeOld + "` TO `" + safeDB + "`.`" + safeNew + "`;");
+        }
+
+        public void RenameView(string databaseName, string oldViewName, string newViewName)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeOld = oldViewName.Replace("`", "``");
+            string safeNew = newViewName.Replace("`", "``");
+            ExecOrThrow("RENAME TABLE `" + safeDB + "`.`" + safeOld + "` TO `" + safeDB + "`.`" + safeNew + "`;");
+        }
+
+        public long CountRows(string databaseName, string tableName)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeTable = tableName.Replace("`", "``");
+            DataTable dt = SelectSQL($"SELECT COUNT(*) FROM `{safeDB}`.`{safeTable}`;");
+            return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
+        }
+
+        public DataTable GetCopyColumns(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "db", databaseName }, { "name", tableName } };
+            return SelectSQL(@"
+                SELECT
+                    COLUMN_NAME AS Name,
+                    DATA_TYPE AS DataType,
+                    IS_NULLABLE AS IsNullable,
+                    CHARACTER_MAXIMUM_LENGTH AS MaxLength,
+                    NUMERIC_PRECISION AS NumericPrecision,
+                    NUMERIC_SCALE AS NumericScale,
+                    COLUMN_COMMENT AS Comment,
+                    ORDINAL_POSITION AS OrdinalPosition
+                FROM information_schema.columns
+                WHERE table_schema = ?db AND table_name = ?name
+                ORDER BY ORDINAL_POSITION;", p);
+        }
+
+        public DataTable GetCopyIndexes(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "db", databaseName }, { "name", tableName } };
+            return SelectSQL(@"
+                SELECT
+                    INDEX_NAME AS IndexName,
+                    COLUMN_NAME AS ColumnName,
+                    NON_UNIQUE AS NonUnique,
+                    SEQ_IN_INDEX AS SeqInIndex,
+                    INDEX_TYPE AS IndexType
+                FROM information_schema.statistics
+                WHERE table_schema = ?db AND table_name = ?name
+                ORDER BY INDEX_NAME, SEQ_IN_INDEX;", p);
+        }
+
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeTable = tableName.Replace("`", "``");
+            List<string> defs = new List<string>();
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                string name = row["Name"].ToString().Replace("`", "``");
+                string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
+                string comment = "";
+                if (row.Table.Columns.Contains("Comment") && row["Comment"] != DBNull.Value && row["Comment"].ToString().Length > 0)
+                    comment = " COMMENT '" + row["Comment"].ToString().Replace("'", "''") + "'";
+                defs.Add("`" + name + "` " + MapCopyTypeToMySql(row) + " " + nullable + comment);
+            }
+            ExecOrThrow("CREATE TABLE `" + safeDB + "`.`" + safeTable + "` (" + string.Join(", ", defs.ToArray()) + ");");
+        }
+
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider)
+        {
+            if (sourceIndexes == null || sourceIndexes.Rows.Count == 0) return;
+            string safeDB = databaseName.Replace("`", "``");
+            string safeTable = tableName.Replace("`", "``");
+            foreach (var group in sourceIndexes.AsEnumerable().GroupBy(r => r["IndexName"].ToString()))
+            {
+                string indexName = group.Key;
+                if (string.IsNullOrEmpty(indexName) || indexName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
+                bool unique = false;
+                DataRow first = group.First();
+                if (first.Table.Columns.Contains("NonUnique") && first["NonUnique"] != DBNull.Value)
+                    unique = first["NonUnique"].ToString() == "0" || first["NonUnique"].ToString().Equals("False", StringComparison.OrdinalIgnoreCase);
+
+                List<string> cols = new List<string>();
+                foreach (DataRow row in group.OrderBy(r => Convert.ToInt32(r["SeqInIndex"])))
+                    cols.Add("`" + row["ColumnName"].ToString().Replace("`", "``") + "`");
+
+                string safeIndex = indexName.Replace("`", "``");
+                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX `" + safeIndex + "` ON `" + safeDB + "`.`" + safeTable + "` (" + string.Join(",", cols.ToArray()) + ");";
+                ExecOrThrow(sql);
+            }
+        }
+
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeTable = tableName.Replace("`", "``");
+            return SelectSQL($"SELECT * FROM `{safeDB}`.`{safeTable}` LIMIT {limit} OFFSET {offset};");
+        }
+
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows)
+        {
+            if (rows == null || rows.Rows.Count == 0) return;
+            string safeDB = databaseName.Replace("`", "``");
+            string safeTable = tableName.Replace("`", "``");
+            List<string> cols = new List<string>();
+            foreach (DataColumn col in rows.Columns) cols.Add("`" + col.ColumnName.Replace("`", "``") + "`");
+
+            List<string> valueGroups = new List<string>();
+            Dictionary<string, object> p = new Dictionary<string, object>();
+            for (int r = 0; r < rows.Rows.Count; r++)
+            {
+                List<string> vals = new List<string>();
+                for (int c = 0; c < rows.Columns.Count; c++)
+                {
+                    string key = "p" + r + "_" + c;
+                    vals.Add("?" + key);
+                    p[key] = rows.Rows[r][c] == DBNull.Value ? DBNull.Value : rows.Rows[r][c];
+                }
+                valueGroups.Add("(" + string.Join(",", vals.ToArray()) + ")");
+            }
+
+            string sql = "INSERT INTO `" + safeDB + "`.`" + safeTable + "` (" + string.Join(",", cols.ToArray()) + ") VALUES " + string.Join(",", valueGroups.ToArray()) + ";";
+            ExecOrThrow(sql, p);
+        }
+
+        public string GetViewCreateStatement(string databaseName, string viewName)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeView = viewName.Replace("`", "``");
+            DataTable dt = SelectSQL($"SHOW CREATE VIEW `{safeDB}`.`{safeView}`;");
+            return dt.Rows.Count > 0 ? dt.Rows[0]["Create View"].ToString() : "";
+        }
+
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql)
+        {
+            string safeDB = databaseName.Replace("`", "``");
+            string safeView = viewName.Replace("`", "``");
+            string sql = System.Text.RegularExpressions.Regex.Replace(
+                sourceViewSql,
+                @"CREATE\s+.*?\s+VIEW\s+(`[^`]+`\.)?`?[^`\s]+`?",
+                "CREATE VIEW `" + safeDB + "`.`" + safeView + "`",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            ExecOrThrow(sql);
+        }
+
+        private void ExecOrThrow(string sql, Dictionary<string, object> parameters = null)
+        {
+            var res = ExecSQL(sql, parameters);
+            if (!res.ContainsKey("status") || res["status"] != "OK")
+                throw new Exception(res.ContainsKey("reason") ? res["reason"] : "SQL 執行失敗");
+        }
+
+        private static bool IsCopyNullable(DataRow row)
+        {
+            return !row.Table.Columns.Contains("IsNullable") || row["IsNullable"] == DBNull.Value || row["IsNullable"].ToString().ToUpper() != "NO";
+        }
+
+        private static string MapCopyTypeToMySql(DataRow row)
+        {
+            string type = row["DataType"].ToString().ToLower();
+            if (type.Contains("bigint")) return "BIGINT";
+            if (type.Contains("int") || type.Contains("serial")) return "INT";
+            if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("money")) return "DECIMAL(38,10)";
+            if (type.Contains("double") || type.Contains("float") || type.Contains("real")) return "DOUBLE";
+            if (type.Contains("bool") || type == "bit") return "TINYINT(1)";
+            if (type.Contains("date") || type.Contains("time")) return "DATETIME";
+            if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea") || type.Contains("image")) return "LONGBLOB";
+            if (type.Contains("text") || type.Contains("json") || type.Contains("xml")) return "LONGTEXT";
+            return "VARCHAR(255)";
         }
 
         public void Dispose()

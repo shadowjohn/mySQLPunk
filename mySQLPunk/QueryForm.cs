@@ -469,8 +469,7 @@ namespace mySQLPunk
 
             if (m.Msg == WM_MOVING)
             {
-                Control area = _mainHost.GetTabDropArea();
-                bool isOver = area.RectangleToScreen(area.ClientRectangle).Contains(Cursor.Position);
+                bool isOver = _mainHost.IsPointInTabDropArea(Cursor.Position);
                 if (isOver != _wasOverDropZone)
                 {
                     _wasOverDropZone = isOver;
@@ -482,8 +481,7 @@ namespace mySQLPunk
             {
                 _mainHost.HideDockHint();
                 _wasOverDropZone = false;
-                Control area = _mainHost.GetTabDropArea();
-                if (this.Bounds.IntersectsWith(area.RectangleToScreen(area.ClientRectangle)))
+                if (_mainHost.IsPointInTabDropArea(Cursor.Position))
                     _mainHost.DockDockableForm(this);
             }
         }

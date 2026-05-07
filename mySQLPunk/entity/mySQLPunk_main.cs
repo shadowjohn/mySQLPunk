@@ -55,7 +55,9 @@ namespace mySQLPunk.entity
                     { "port", GetVal(conn, "port") },
                     { "initial_database", GetVal(conn, "initial_database") },
                     { "db_kind", GetVal(conn, "db_kind") },
-                    { "conn_name", GetVal(conn, "conn_name") }
+                    { "conn_name", GetVal(conn, "conn_name") },
+                    { "path", GetVal(conn, "path") },
+                    { "init_geospatial", GetVal(conn, "init_geospatial") }
                 };
                 saveList.Add(item);
             }

@@ -52,6 +52,17 @@ namespace mySQLPunk
         private Label lblSidebarTitle;
         private ToolStripStatusLabel lblMainStatus; // 新增主程式狀態標籤
         private Panel _dockHintOverlay;
+        private DatabaseCopyItem _treeClipboardItem;
+        private bool _allowTreeLabelEdit = false;
+
+        private class TreeDatabaseTarget
+        {
+            public IDatabase Database;
+            public string DatabaseName;
+            public string ProviderName;
+            public TreeNode DatabaseNode;
+        }
+
         public Form1()
         {
             InitializeComponent();
@@ -259,6 +270,11 @@ namespace mySQLPunk
         }
         public void UpdateMainStatus(string msg)
         {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<string>(UpdateMainStatus), msg);
+                return;
+            }
             if (lblMainStatus != null)
             {
                 lblMainStatus.Text = msg;
@@ -459,14 +475,14 @@ namespace mySQLPunk
             queryTabs.DragEnter += QueryTabs_DragEnter;
             queryTabs.DragDrop += QueryTabs_DragDrop;
 
-            // ── 讓父容器與 table_top 都支援拖放回巢 ──
+            // ── 父容器與 table_top 只負責轉送拖放事件，真正可 dock 的範圍會限制在頁籤列 ──
             splitContainer5.Panel1.AllowDrop = true;
             splitContainer5.Panel1.DragEnter += QueryTabs_DragEnter;
             splitContainer5.Panel1.DragOver += QueryTabs_DragOver;
             splitContainer5.Panel1.DragLeave += QueryTabs_DragLeave;
             splitContainer5.Panel1.DragDrop += QueryTabs_DragDrop;
 
-            // table_top 蓋在 Panel1 上，必須也開 AllowDrop，否則會吃掉 drag 事件
+            // table_top 蓋在 Panel1 上，必須也開 AllowDrop；但內容區不會觸發 dock
             table_top.AllowDrop = true;
             table_top.DragEnter += QueryTabs_DragEnter;
             table_top.DragOver += QueryTabs_DragOver;
@@ -474,7 +490,7 @@ namespace mySQLPunk
             table_top.DragDrop += QueryTabs_DragDrop;
 
             // 初始化 dock 提示框 (懸浮視窗拖回時的視覺指引)
-            _dockHintOverlay = new Panel() { Dock = DockStyle.Fill, Visible = false, BackColor = Color.FromArgb(220, 235, 255) };
+            _dockHintOverlay = new Panel() { Dock = DockStyle.Top, Height = 36, Visible = false, BackColor = Color.FromArgb(220, 235, 255) };
             _dockHintOverlay.Paint += (s, e) =>
             {
                 using (var pen = new Pen(Color.FromArgb(0, 120, 212), 4))
@@ -485,7 +501,7 @@ namespace mySQLPunk
                 {
                     var sz = e.Graphics.MeasureString(msg, font);
                     e.Graphics.DrawString(msg, font, brush,
-                        (_dockHintOverlay.Width - sz.Width) / 2f,
+                        12f,
                         (_dockHintOverlay.Height - sz.Height) / 2f);
                 }
             };
@@ -566,6 +582,10 @@ namespace mySQLPunk
             queryTabs.MouseClick += queryTabs_MouseClick;
             table_top.CellMouseDown += table_top_CellMouseDown;
             db_tree.KeyDown += db_tree_KeyDown;
+            db_tree.LabelEdit = true;
+            db_tree.BeforeLabelEdit += db_tree_BeforeLabelEdit;
+            db_tree.AfterLabelEdit += db_tree_AfterLabelEdit;
+            sQLiteToolStripMenuItem.Click += sQLiteToolStripMenuItem_Click;
 
             // 連結工具列事件
             NewTable.Click += (s, e) => CreateNewTable();
@@ -927,11 +947,40 @@ namespace mySQLPunk
         }
 
         // 給懸浮視窗的 WndProc 查詢 drop 目標的螢幕範圍
-        public Control GetTabDropArea() => splitContainer5.Panel1;
+        public Control GetTabDropArea() => queryTabs;
+
+        public Rectangle GetTabDropScreenBounds()
+        {
+            if (queryTabs == null || splitContainer5 == null) return Rectangle.Empty;
+
+            int headerHeight = 34;
+            if (queryTabs.TabPages.Count > 0)
+            {
+                Rectangle firstTab = queryTabs.GetTabRect(0);
+                if (!firstTab.IsEmpty)
+                    headerHeight = Math.Max(headerHeight, firstTab.Bottom + 6);
+            }
+
+            Rectangle hostBounds = queryTabs.Visible
+                ? queryTabs.RectangleToScreen(queryTabs.ClientRectangle)
+                : splitContainer5.Panel1.RectangleToScreen(splitContainer5.Panel1.ClientRectangle);
+
+            // 只允許頁籤列區域觸發 dock，避免整個內容畫面都變成吸附區。
+            return new Rectangle(hostBounds.Left, hostBounds.Top, hostBounds.Width, headerHeight);
+        }
+
+        public bool IsPointInTabDropArea(Point screenPoint)
+        {
+            Rectangle bounds = GetTabDropScreenBounds();
+            return !bounds.IsEmpty && bounds.Contains(screenPoint);
+        }
 
         public void ShowDockHint()
         {
             if (_dockHintOverlay == null) return;
+            Rectangle bounds = GetTabDropScreenBounds();
+            if (!bounds.IsEmpty)
+                _dockHintOverlay.Height = bounds.Height;
             _dockHintOverlay.Visible = true;
             _dockHintOverlay.BringToFront();
             _dockHintOverlay.Invalidate();
@@ -1266,6 +1315,30 @@ namespace mySQLPunk
 
         private void db_tree_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.Control && e.KeyCode == Keys.C)
+            {
+                CopySelectedDatabaseObjectToInternalClipboard();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            if (e.Control && e.KeyCode == Keys.V)
+            {
+                PasteInternalClipboardToSelectedDatabase();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            if (e.KeyCode == Keys.F2)
+            {
+                BeginRenameSelectedDatabaseObject();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
             if (e.KeyCode == Keys.Escape)
             {
                 if (db_tree.SelectedNode == null) return;
@@ -1282,6 +1355,223 @@ namespace mySQLPunk
                 
                 e.Handled = true;
                 e.SuppressKeyPress = true;
+            }
+        }
+
+        private void BeginRenameSelectedDatabaseObject()
+        {
+            if (!IsRenameableObjectNode(db_tree.SelectedNode))
+            {
+                MessageBox.Show("請先選取單一 Table 或 View。", "重新命名", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            _allowTreeLabelEdit = true;
+            db_tree.SelectedNode.BeginEdit();
+        }
+
+        private void db_tree_BeforeLabelEdit(object sender, NodeLabelEditEventArgs e)
+        {
+            if (!_allowTreeLabelEdit || !IsRenameableObjectNode(e.Node))
+            {
+                e.CancelEdit = true;
+                _allowTreeLabelEdit = false;
+            }
+        }
+
+        private void db_tree_AfterLabelEdit(object sender, NodeLabelEditEventArgs e)
+        {
+            _allowTreeLabelEdit = false;
+            e.CancelEdit = true;
+
+            if (e.Node == null || e.Label == null) return;
+            string newName = e.Label.Trim();
+            string oldName = e.Node.Text;
+            if (newName.Length == 0 || newName == oldName) return;
+
+            RenameDatabaseObjectNode(e.Node, oldName, newName);
+        }
+
+        private bool IsRenameableObjectNode(TreeNode node)
+        {
+            if (node == null) return false;
+            var pathParts = my.explode("\\", node.FullPath);
+            return pathParts.Length >= 4 && (pathParts[2] == "Tables" || pathParts[2] == "Views");
+        }
+
+        private void RenameDatabaseObjectNode(TreeNode node, string oldName, string newName)
+        {
+            DatabaseCopyItem item = BuildCopyItemFromNode(node);
+            if (item == null)
+            {
+                MessageBox.Show("無法取得目前選取物件的連線資訊。", "重新命名", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            try
+            {
+                bool isView = item.ObjectKind == "view";
+                if (isView ? item.Database.ViewExists(item.DatabaseName, newName) : item.Database.TableExists(item.DatabaseName, newName))
+                {
+                    MessageBox.Show("目標名稱已存在：" + newName, "重新命名", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                Cursor = Cursors.WaitCursor;
+                if (isView)
+                    item.Database.RenameView(item.DatabaseName, oldName, newName);
+                else
+                    item.Database.RenameTable(item.DatabaseName, oldName, newName);
+
+                node.Text = newName;
+                db_tree.SelectedNode = node;
+                UpdateMainStatus("Renamed " + item.ObjectKind + ": " + oldName + " -> " + newName);
+                db_tree_AfterSelect(db_tree, new TreeViewEventArgs(node));
+            }
+            catch (Exception ex)
+            {
+                UpdateMainStatus("Rename failed: " + ex.Message);
+                MessageBox.Show("重新命名失敗：" + ex.Message, "重新命名", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+            }
+        }
+
+        private void CopySelectedDatabaseObjectToInternalClipboard()
+        {
+            DatabaseCopyItem item = BuildCopyItemFromNode(db_tree.SelectedNode);
+            if (item == null)
+            {
+                MessageBox.Show("請先選取單一 Table 或 View。", "複製物件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            _treeClipboardItem = item;
+            UpdateMainStatus("Copied " + item.ObjectKind + ": " + item.DatabaseName + "." + item.ObjectName);
+        }
+
+        private async void PasteInternalClipboardToSelectedDatabase()
+        {
+            if (_treeClipboardItem == null)
+            {
+                MessageBox.Show("尚未複製任何 Table 或 View。", "貼上物件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                MessageBox.Show("請先選取目標 database 或其 Tables/Views 節點。", "貼上物件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            DatabaseCopyItem targetItem = new DatabaseCopyItem
+            {
+                Database = target.Database,
+                DatabaseName = target.DatabaseName,
+                ProviderName = target.ProviderName,
+                ObjectKind = _treeClipboardItem.ObjectKind
+            };
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                var service = new DatabaseCopyService(1000);
+                DatabaseCopyResult result = await Task.Run(() => service.Copy(_treeClipboardItem, targetItem, p =>
+                {
+                    if (!string.IsNullOrEmpty(p.Message)) UpdateMainStatus(p.Message);
+                }));
+
+                RefreshDatabaseObjectNodes(target.DatabaseNode);
+                SelectObjectNode(target.DatabaseNode, result.ObjectKind, result.TargetName);
+                UpdateMainStatus("Copy completed: " + result.TargetName + (result.ObjectKind == "table" ? " (" + result.CopiedRows + " rows)" : ""));
+            }
+            catch (Exception ex)
+            {
+                UpdateMainStatus("Copy failed: " + ex.Message);
+                MessageBox.Show("複製失敗：" + ex.Message, "貼上物件", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+            }
+        }
+
+        private DatabaseCopyItem BuildCopyItemFromNode(TreeNode node)
+        {
+            if (node == null) return null;
+            var pathParts = my.explode("\\", node.FullPath);
+            if (pathParts.Length < 4) return null;
+            if (pathParts[2] != "Tables" && pathParts[2] != "Views") return null;
+
+            TreeNode root = node;
+            while (root.Parent != null) root = root.Parent;
+            var connInfo = myN.connections[root.Index];
+            if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return null;
+
+            return new DatabaseCopyItem
+            {
+                Database = db,
+                DatabaseName = pathParts[1],
+                ObjectName = pathParts[3],
+                ObjectKind = pathParts[2] == "Views" ? "view" : "table",
+                ProviderName = db.ProviderName
+            };
+        }
+
+        private TreeDatabaseTarget BuildTargetFromNode(TreeNode node)
+        {
+            if (node == null) return null;
+            var pathParts = my.explode("\\", node.FullPath);
+            if (pathParts.Length < 2) return null;
+
+            TreeNode root = node;
+            while (root.Parent != null) root = root.Parent;
+            var connInfo = myN.connections[root.Index];
+            if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return null;
+
+            TreeNode dbNode = node;
+            while (dbNode.Parent != null && dbNode.Parent.Parent != null) dbNode = dbNode.Parent;
+            if (dbNode.Parent == null) return null;
+
+            return new TreeDatabaseTarget
+            {
+                Database = db,
+                DatabaseName = pathParts[1],
+                ProviderName = db.ProviderName,
+                DatabaseNode = dbNode
+            };
+        }
+
+        private void RefreshDatabaseObjectNodes(TreeNode databaseNode)
+        {
+            if (databaseNode == null) return;
+            TreeNode root = databaseNode;
+            while (root.Parent != null) root = root.Parent;
+            IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
+            databaseNode.Nodes.Clear();
+            PopulateDatabaseChildren(databaseNode, db, databaseNode.Text);
+            databaseNode.Expand();
+        }
+
+        private void SelectObjectNode(TreeNode databaseNode, string objectKind, string objectName)
+        {
+            if (databaseNode == null) return;
+            string groupName = objectKind == "view" ? "Views" : "Tables";
+            foreach (TreeNode group in databaseNode.Nodes)
+            {
+                if (group.Text != groupName) continue;
+                foreach (TreeNode item in group.Nodes)
+                {
+                    if (item.Text == objectName)
+                    {
+                        db_tree.SelectedNode = item;
+                        item.EnsureVisible();
+                        return;
+                    }
+                }
             }
         }
 
@@ -1500,6 +1790,14 @@ namespace mySQLPunk
                         form.ShowDialog();
                     }
                     break;
+                case "sqlite":
+                    {
+                        sqlite_add_edit form = new sqlite_add_edit();
+                        form.F1 = this;
+                        form.editIndex = index;
+                        form.ShowDialog();
+                    }
+                    break;
                 default:
                     MessageBox.Show("此連線類型尚未支援編輯：" + kind);
                     break;
@@ -1525,76 +1823,68 @@ namespace mySQLPunk
         }
         private void db_tree_second_click(int father_index, int index, string databaseName)
         {
-            //MessageBox.Show(father_index + "," + index+","+databaseName);
-            //開啟 database
-            switch (myN.connections[father_index]["db_kind"].ToString())
+            TreeNode databaseNode = db_tree.Nodes[father_index].Nodes[index];
+            if (databaseNode.Nodes.Count > 0) return;
+            if (!(myN.connections[father_index]["pdo"] is IDatabase db)) return;
+
+            PopulateDatabaseChildren(databaseNode, db, databaseName);
+            databaseNode.Expand();
+            databaseNode.ImageIndex = 11;
+            databaseNode.SelectedImageIndex = 11;
+        }
+
+        private void PopulateDatabaseChildren(TreeNode databaseNode, IDatabase db, string databaseName)
+        {
+            TreeNode tablesNode = new TreeNode("Tables");
+            tablesNode.ImageIndex = 12;
+            tablesNode.SelectedImageIndex = 12;
+            databaseNode.Nodes.Add(tablesNode);
+
+            foreach (string tableName in db.GetTables(databaseName))
             {
-                case "postgresql":
-                    {
-
-                    }
-                    break;
-                case "mysql":
-                    if (db_tree.Nodes[father_index].Nodes[index].Nodes.Count == 0)
-                    {
-                        TreeNode newNode = new TreeNode("Tables");
-                        newNode.ImageIndex = 12;
-                        newNode.SelectedImageIndex = 12;
-                        db_tree.Nodes[father_index].Nodes[index].Nodes.Add(newNode);
-                        //查出有哪些 table
-                        string SQL = @"
-                            show tables from `" + databaseName + @"`
-                        ";
-                        //MySqlCommand cmd = new MySqlCommand(SQL, ((MySqlConnection)myN.connections[father_index]["pdo"]));
-                        DataTable dt = ((my_mysql)myN.connections[father_index]["pdo"]).selectSQL_SAFE(SQL);
-                        //List<MySqlParameter> PA = new List<MySqlParameter>();
-                        //cmd.Parameters.AddWithValue("@table", databaseName);
-                        //dt.Load(cmd.ExecuteReader());
-                        for (int i = 0, max_i = dt.Rows.Count; i < max_i; i++)
-                        {
-                            TreeNode tN = new TreeNode(dt.Rows[i]["Tables_in_" + databaseName].ToString());
-                            tN.SelectedImageIndex = 12;
-                            tN.ImageIndex = 12;
-                            db_tree.Nodes[father_index].Nodes[index].Nodes[0].Nodes.Add(tN);
-                        }
-
-                        newNode = new TreeNode("Views");
-                        newNode.ImageIndex = 13;
-                        newNode.SelectedImageIndex = 13;
-                        db_tree.Nodes[father_index].Nodes[index].Nodes.Add(newNode);
-
-                        newNode = new TreeNode("Functions");
-                        newNode.ImageIndex = 14;
-                        newNode.SelectedImageIndex = 14;
-                        db_tree.Nodes[father_index].Nodes[index].Nodes.Add(newNode);
-
-                        newNode = new TreeNode("Events");
-                        newNode.ImageIndex = 15;
-                        newNode.SelectedImageIndex = 15;
-                        db_tree.Nodes[father_index].Nodes[index].Nodes.Add(newNode);
-
-                        newNode = new TreeNode("Queries");
-                        newNode.ImageIndex = 16;
-                        newNode.SelectedImageIndex = 16;
-                        db_tree.Nodes[father_index].Nodes[index].Nodes.Add(newNode);
-
-                        newNode = new TreeNode("Reports");
-                        newNode.ImageIndex = 17;
-                        newNode.SelectedImageIndex = 17;
-                        db_tree.Nodes[father_index].Nodes[index].Nodes.Add(newNode);
-
-                        newNode = new TreeNode("Backups");
-                        newNode.ImageIndex = 18;
-                        newNode.SelectedImageIndex = 18;
-                        db_tree.Nodes[father_index].Nodes[index].Nodes.Add(newNode);
-
-                        db_tree.Nodes[father_index].Nodes[index].Expand();
-
-                        db_tree.Nodes[father_index].Nodes[index].ImageIndex = 11;
-                        db_tree.Nodes[father_index].Nodes[index].SelectedImageIndex = 11;
-                    }
-                    break;
+                TreeNode tN = new TreeNode(tableName);
+                tN.SelectedImageIndex = 12;
+                tN.ImageIndex = 12;
+                tablesNode.Nodes.Add(tN);
             }
+
+            TreeNode viewsNode = new TreeNode("Views");
+            viewsNode.ImageIndex = 13;
+            viewsNode.SelectedImageIndex = 13;
+            databaseNode.Nodes.Add(viewsNode);
+
+            foreach (string viewName in db.GetViews(databaseName))
+            {
+                TreeNode vN = new TreeNode(viewName);
+                vN.SelectedImageIndex = 13;
+                vN.ImageIndex = 13;
+                viewsNode.Nodes.Add(vN);
+            }
+
+            TreeNode newNode = new TreeNode("Functions");
+            newNode.ImageIndex = 14;
+            newNode.SelectedImageIndex = 14;
+            databaseNode.Nodes.Add(newNode);
+
+            newNode = new TreeNode("Events");
+            newNode.ImageIndex = 15;
+            newNode.SelectedImageIndex = 15;
+            databaseNode.Nodes.Add(newNode);
+
+            newNode = new TreeNode("Queries");
+            newNode.ImageIndex = 16;
+            newNode.SelectedImageIndex = 16;
+            databaseNode.Nodes.Add(newNode);
+
+            newNode = new TreeNode("Reports");
+            newNode.ImageIndex = 17;
+            newNode.SelectedImageIndex = 17;
+            databaseNode.Nodes.Add(newNode);
+
+            newNode = new TreeNode("Backups");
+            newNode.ImageIndex = 18;
+            newNode.SelectedImageIndex = 18;
+            databaseNode.Nodes.Add(newNode);
         }
         private void db_tree_third_click(int father_index, int index, string databaseName, string name)
         {
@@ -1754,6 +2044,18 @@ namespace mySQLPunk
                                     myN.connections[index]["isConnect"] = "T";
                                     db_tree.Nodes[index].SelectedImageIndex = 1;
                                     db_tree.Nodes[index].ImageIndex = 1;
+                                    if (!((my_sqlite)myN.connections[index]["pdo"]).SpatiaLiteEnabled)
+                                    {
+                                        MessageBox.Show(
+                                            "SQLite 已連線，但 SpatiaLite 載入失敗：\r\n" + ((my_sqlite)myN.connections[index]["pdo"]).SpatiaLiteLoadError,
+                                            "SpatiaLite",
+                                            MessageBoxButtons.OK,
+                                            MessageBoxIcon.Warning);
+                                    }
+                                    else
+                                    {
+                                        UpdateMainStatus("SQLite + SpatiaLite ready");
+                                    }
                                     //取得 databases 列表
                                     string SQL = @"
                                     select 'main' AS `Database`;
@@ -1937,6 +2239,14 @@ namespace mySQLPunk
             form.oracle_connection_type_selected_trigger_change();
             form.ShowDialog();
         }
+
+        private void sQLiteToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            sqlite_add_edit form = new sqlite_add_edit();
+            form.F1 = this;
+            form.ShowDialog();
+        }
+
         public void add_connection(Dictionary<string, object> conn)
         {
             myN.connections.Add(conn);
@@ -2070,11 +2380,13 @@ namespace mySQLPunk
 
         private void QueryTabs_DragEnter(object sender, DragEventArgs e)
         {
-            if (GetDockableFromDrag(e.Data) != null)
+            bool canDock = GetDockableFromDrag(e.Data) != null && IsPointInTabDropArea(new Point(e.X, e.Y));
+            if (canDock)
             {
                 e.Effect = DragDropEffects.Move;
                 queryTabs.Visible = true;
                 queryTabs.BackColor = Color.FromArgb(200, 230, 255);
+                ShowDockHint();
                 if (queryTabs.TabPages.Count == 0)
                 {
                     statusStrip1.Visible = true; // 拖入時顯示提示
@@ -2087,13 +2399,23 @@ namespace mySQLPunk
 
         private void QueryTabs_DragOver(object sender, DragEventArgs e)
         {
-            if (GetDockableFromDrag(e.Data) != null)
+            bool canDock = GetDockableFromDrag(e.Data) != null && IsPointInTabDropArea(new Point(e.X, e.Y));
+            if (canDock)
+            {
                 e.Effect = DragDropEffects.Move;
+                ShowDockHint();
+            }
+            else
+            {
+                e.Effect = DragDropEffects.None;
+                HideDockHint();
+            }
         }
 
         private void QueryTabs_DragLeave(object sender, EventArgs e)
         {
             queryTabs.BackColor = Color.White;
+            HideDockHint();
             if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
             statusStrip1.Visible = false; // 離開時隱藏
             lblMainStatus.Text = "Ready";
@@ -2102,10 +2424,11 @@ namespace mySQLPunk
         private void QueryTabs_DragDrop(object sender, DragEventArgs e)
         {
             queryTabs.BackColor = Color.White;
+            HideDockHint();
             statusStrip1.Visible = false; // 放下時隱藏
             lblMainStatus.Text = "Ready";
             var dockable = GetDockableFromDrag(e.Data);
-            if (dockable != null)
+            if (dockable != null && IsPointInTabDropArea(new Point(e.X, e.Y)))
                 DockDockableForm(dockable);
         }
 

@@ -16,6 +16,7 @@ namespace mySQLPunk.lib
         public SqlParameter PA = null;
 
         public ConnectionState State => MCT?.State ?? ConnectionState.Closed;
+        public string ProviderName => "mssql";
 
         public void SetConn(string connection)
         {
@@ -186,6 +187,212 @@ namespace mySQLPunk.lib
         public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
         public string GetTableCreateStatement(string databaseName, string tableName) => "";
+
+        public bool TableExists(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "name", tableName } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @name AND TABLE_TYPE = 'BASE TABLE';", p);
+            return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
+        }
+
+        public bool ViewExists(string databaseName, string viewName)
+        {
+            var p = new Dictionary<string, object> { { "name", viewName } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @name;", p);
+            return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
+        }
+
+        public void RenameTable(string databaseName, string oldTableName, string newTableName)
+        {
+            RenameSqlServerObject(databaseName, oldTableName, newTableName);
+        }
+
+        public void RenameView(string databaseName, string oldViewName, string newViewName)
+        {
+            RenameSqlServerObject(databaseName, oldViewName, newViewName);
+        }
+
+        public long CountRows(string databaseName, string tableName)
+        {
+            DataTable dt = SelectSQL("SELECT COUNT_BIG(*) FROM [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "];");
+            return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
+        }
+
+        public DataTable GetCopyColumns(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "name", tableName } };
+            return SelectSQL(@"
+                SELECT
+                    c.COLUMN_NAME AS Name,
+                    c.DATA_TYPE AS DataType,
+                    c.IS_NULLABLE AS IsNullable,
+                    c.CHARACTER_MAXIMUM_LENGTH AS MaxLength,
+                    c.NUMERIC_PRECISION AS NumericPrecision,
+                    c.NUMERIC_SCALE AS NumericScale,
+                    CAST(ep.value AS NVARCHAR(4000)) AS Comment,
+                    c.ORDINAL_POSITION AS OrdinalPosition
+                FROM [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.COLUMNS c
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.name = c.TABLE_NAME
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns sc ON sc.object_id = o.object_id AND sc.name = c.COLUMN_NAME
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.extended_properties ep ON ep.major_id = sc.object_id AND ep.minor_id = sc.column_id AND ep.name = 'MS_Description'
+                WHERE c.TABLE_SCHEMA = 'dbo' AND c.TABLE_NAME = @name
+                ORDER BY c.ORDINAL_POSITION;", p);
+        }
+
+        public DataTable GetCopyIndexes(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "name", tableName } };
+            return SelectSQL(@"
+                SELECT
+                    i.name AS IndexName,
+                    c.name AS ColumnName,
+                    CASE WHEN i.is_unique = 1 THEN 0 ELSE 1 END AS NonUnique,
+                    ic.key_ordinal AS SeqInIndex,
+                    i.type_desc AS IndexType
+                FROM [" + EscapeSqlServerName(databaseName) + @"].sys.indexes i
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.object_id = i.object_id
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
+                WHERE o.name = @name AND i.name IS NOT NULL AND i.is_primary_key = 0 AND i.is_unique_constraint = 0
+                ORDER BY i.name, ic.key_ordinal;", p);
+        }
+
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
+        {
+            List<string> defs = new List<string>();
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
+                defs.Add("[" + EscapeSqlServerName(row["Name"].ToString()) + "] " + MapCopyTypeToSqlServer(row) + " " + nullable);
+            }
+            ExecOrThrow("CREATE TABLE [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" + string.Join(", ", defs.ToArray()) + ");");
+
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                if (!row.Table.Columns.Contains("Comment") || row["Comment"] == DBNull.Value || row["Comment"].ToString().Length == 0) continue;
+                var p = new Dictionary<string, object> { { "value", row["Comment"].ToString() } };
+                string sql = "EXEC [" + EscapeSqlServerName(databaseName) + "].sys.sp_addextendedproperty @name=N'MS_Description', @value=@value, @level0type=N'SCHEMA', @level0name=N'dbo', @level1type=N'TABLE', @level1name=N'" + EscapeSqlLiteral(tableName) + "', @level2type=N'COLUMN', @level2name=N'" + EscapeSqlLiteral(row["Name"].ToString()) + "';";
+                ExecOrThrow(sql, p);
+            }
+        }
+
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider)
+        {
+            if (sourceIndexes == null || sourceIndexes.Rows.Count == 0) return;
+            foreach (var group in sourceIndexes.AsEnumerable().GroupBy(r => r["IndexName"].ToString()))
+            {
+                string indexName = group.Key;
+                if (string.IsNullOrEmpty(indexName) || indexName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
+                DataRow first = group.First();
+                bool unique = first.Table.Columns.Contains("NonUnique") && first["NonUnique"] != DBNull.Value &&
+                    (first["NonUnique"].ToString() == "0" || first["NonUnique"].ToString().Equals("False", StringComparison.OrdinalIgnoreCase));
+                List<string> cols = new List<string>();
+                foreach (DataRow row in group.OrderBy(r => Convert.ToInt32(r["SeqInIndex"])))
+                    cols.Add("[" + EscapeSqlServerName(row["ColumnName"].ToString()) + "]");
+                string targetIndexName = tableName + "_" + indexName;
+                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX [" + EscapeSqlServerName(targetIndexName) + "] ON [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" + string.Join(",", cols.ToArray()) + ");";
+                ExecOrThrow(sql);
+            }
+        }
+
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
+        {
+            return SelectSQL("SELECT * FROM [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] ORDER BY (SELECT NULL) OFFSET " + offset + " ROWS FETCH NEXT " + limit + " ROWS ONLY;");
+        }
+
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows)
+        {
+            if (rows == null || rows.Rows.Count == 0) return;
+            List<string> cols = new List<string>();
+            foreach (DataColumn col in rows.Columns) cols.Add("[" + EscapeSqlServerName(col.ColumnName) + "]");
+            List<string> valueGroups = new List<string>();
+            Dictionary<string, object> p = new Dictionary<string, object>();
+            for (int r = 0; r < rows.Rows.Count; r++)
+            {
+                List<string> vals = new List<string>();
+                for (int c = 0; c < rows.Columns.Count; c++)
+                {
+                    string key = "p" + r + "_" + c;
+                    vals.Add("@" + key);
+                    p[key] = rows.Rows[r][c] == DBNull.Value ? DBNull.Value : rows.Rows[r][c];
+                }
+                valueGroups.Add("(" + string.Join(",", vals.ToArray()) + ")");
+            }
+            string sql = "INSERT INTO [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" + string.Join(",", cols.ToArray()) + ") VALUES " + string.Join(",", valueGroups.ToArray()) + ";";
+            ExecOrThrow(sql, p);
+        }
+
+        public string GetViewCreateStatement(string databaseName, string viewName)
+        {
+            var p = new Dictionary<string, object> { { "fullName", databaseName + ".dbo." + viewName } };
+            DataTable dt = SelectSQL("SELECT OBJECT_DEFINITION(OBJECT_ID(@fullName));", p);
+            return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
+        }
+
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql)
+        {
+            string sql = System.Text.RegularExpressions.Regex.Replace(
+                sourceViewSql,
+                @"CREATE\s+VIEW\s+(\[[^\]]+\]\.)?(\[[^\]]+\]\.)?\[[^\]]+\]",
+                "CREATE VIEW [dbo].[" + EscapeSqlServerName(viewName) + "]",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            string originalDb = MCT.Database;
+            try
+            {
+                MCT.ChangeDatabase(databaseName);
+                ExecOrThrow(sql);
+            }
+            finally
+            {
+                MCT.ChangeDatabase(originalDb);
+            }
+        }
+
+        private void ExecOrThrow(string sql, Dictionary<string, object> parameters = null)
+        {
+            var res = ExecSQL(sql, parameters);
+            if (!res.ContainsKey("status") || res["status"] != "OK")
+                throw new Exception(res.ContainsKey("reason") ? res["reason"] : "SQL 執行失敗");
+        }
+
+        private void RenameSqlServerObject(string databaseName, string oldName, string newName)
+        {
+            string originalDb = MCT.Database;
+            try
+            {
+                MCT.ChangeDatabase(databaseName);
+                string sql = "EXEC sp_rename N'dbo." + EscapeSqlLiteral(oldName) + "', N'" + EscapeSqlLiteral(newName) + "', N'OBJECT';";
+                ExecOrThrow(sql);
+            }
+            finally
+            {
+                MCT.ChangeDatabase(originalDb);
+            }
+        }
+
+        private static string EscapeSqlServerName(string name) => name.Replace("]", "]]");
+        private static string EscapeSqlLiteral(string value) => value.Replace("'", "''");
+
+        private static bool IsCopyNullable(DataRow row)
+        {
+            return !row.Table.Columns.Contains("IsNullable") || row["IsNullable"] == DBNull.Value || row["IsNullable"].ToString().ToUpper() != "NO";
+        }
+
+        private static string MapCopyTypeToSqlServer(DataRow row)
+        {
+            string type = row["DataType"].ToString().ToLower();
+            if (type.Contains("bigint")) return "BIGINT";
+            if (type.Contains("smallint")) return "SMALLINT";
+            if (type.Contains("tinyint")) return "TINYINT";
+            if (type.Contains("int") || type.Contains("serial")) return "INT";
+            if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("money")) return "DECIMAL(38,10)";
+            if (type.Contains("double") || type.Contains("float")) return "FLOAT";
+            if (type.Contains("real")) return "REAL";
+            if (type.Contains("bool") || type == "bit") return "BIT";
+            if (type.Contains("date") || type.Contains("time")) return "DATETIME2";
+            if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea") || type.Contains("image")) return "VARBINARY(MAX)";
+            return "NVARCHAR(MAX)";
+        }
 
         public void Dispose()
         {

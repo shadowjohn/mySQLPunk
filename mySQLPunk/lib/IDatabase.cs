@@ -10,6 +10,7 @@ namespace mySQLPunk.lib
         void Open();
         void Close();
         ConnectionState State { get; }
+        string ProviderName { get; }
 
         // 核心查詢 (同步)
         DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null);
@@ -28,5 +29,20 @@ namespace mySQLPunk.lib
         DataTable GetTableStatus(string databaseName);
         Dictionary<string, string> GetDatabaseInfo(string databaseName);
         string GetTableCreateStatement(string databaseName, string tableName);
+
+        // 物件複製用 API
+        bool TableExists(string databaseName, string tableName);
+        bool ViewExists(string databaseName, string viewName);
+        void RenameTable(string databaseName, string oldTableName, string newTableName);
+        void RenameView(string databaseName, string oldViewName, string newViewName);
+        long CountRows(string databaseName, string tableName);
+        DataTable GetCopyColumns(string databaseName, string tableName);
+        DataTable GetCopyIndexes(string databaseName, string tableName);
+        void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider);
+        void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider);
+        DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit);
+        void InsertTableBatch(string databaseName, string tableName, DataTable rows);
+        string GetViewCreateStatement(string databaseName, string viewName);
+        void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql);
     }
 }
