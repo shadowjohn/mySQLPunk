@@ -404,6 +404,14 @@ namespace mySQLPunk
             return Text;
         }
 
+        public string DatabaseName => _databaseName ?? string.Empty;
+
+        public string ConnectionHost => connectionHost ?? string.Empty;
+
+        public string CurrentSql => txtSql == null ? string.Empty : txtSql.Text;
+
+        public string CurrentStatus => lblStatus == null ? string.Empty : lblStatus.Text;
+
         public void PrepareForDocking()
         {
             if (Visible)

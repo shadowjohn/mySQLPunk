@@ -81,6 +81,14 @@ namespace mySQLPunk
             public TreeNode Node;
         }
 
+        private class OpenQueryTabInfo
+        {
+            public int DisplayIndex;
+            public int TabIndex;
+            public TabPage Page;
+            public QueryForm Query;
+        }
+
         public Form1()
         {
             Localization.Load();
@@ -701,6 +709,7 @@ namespace mySQLPunk
 
             queryTabs.MouseClick += queryTabs_MouseClick;
             table_top.CellMouseDown += table_top_CellMouseDown;
+            table_top.CellDoubleClick += table_top_CellDoubleClick;
             db_tree.KeyDown += db_tree_KeyDown;
             db_tree.LabelEdit = true;
             db_tree.BeforeLabelEdit += db_tree_BeforeLabelEdit;
@@ -1491,6 +1500,7 @@ namespace mySQLPunk
             queryTabs.TabPages.Add(page);
             queryTabs.SelectedTab = page;
             f.Show();
+            RefreshQueriesGroupIfSelected();
         }
 
         public void FloatDockableForm(IDockableForm dockable)
@@ -1590,6 +1600,7 @@ namespace mySQLPunk
                 table_top.Visible = true;
                 table_top.BringToFront();
             }
+            RefreshQueriesGroupIfSelected();
         }
 
         private TabPage FindQueryTab(QueryForm queryForm)
@@ -2488,6 +2499,16 @@ namespace mySQLPunk
                     itemDrop.Click += (s, ev) => DeleteSelectedFunction();
                     cms.Items.Add(itemDrop);
                 }
+                else if (groupName == "Queries")
+                {
+                    var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenQuery"));
+                    itemOpen.Click += (s, ev) => OpenSelectedQueryTabFromGrid();
+                    cms.Items.Add(itemOpen);
+
+                    var itemClose = new ToolStripMenuItem(Localization.T("Tool.CloseQuery"));
+                    itemClose.Click += (s, ev) => CloseSelectedQueryTabFromGrid();
+                    cms.Items.Add(itemClose);
+                }
 
                 if (cms.Items.Count == 0)
                 {
@@ -2500,6 +2521,65 @@ namespace mySQLPunk
             }
         }
 
+        private void table_top_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            string groupName = GetCurrentGridGroupName(e.RowIndex);
+            if (groupName == "Queries")
+            {
+                ActivateQueryTabFromGridRow(e.RowIndex);
+            }
+        }
+
+        private bool OpenSelectedQueryTabFromGrid()
+        {
+            if (table_top.SelectedRows.Count == 0) return false;
+            return ActivateQueryTabFromGridRow(table_top.SelectedRows[0].Index);
+        }
+
+        private bool CloseSelectedQueryTabFromGrid()
+        {
+            if (table_top.SelectedRows.Count == 0) return false;
+            int tabIndex = GetQueryTabIndexFromGridRow(table_top.SelectedRows[0].Index);
+            if (tabIndex < 0 || tabIndex >= queryTabs.TabPages.Count) return false;
+
+            TabPage page = queryTabs.TabPages[tabIndex];
+            if (page.Tag is QueryForm queryForm)
+            {
+                queryForm.Close();
+            }
+            else
+            {
+                queryTabs.TabPages.Remove(page);
+                page.Dispose();
+            }
+
+            RefreshQueriesGroupIfSelected();
+            return true;
+        }
+
+        private bool ActivateQueryTabFromGridRow(int rowIndex)
+        {
+            int tabIndex = GetQueryTabIndexFromGridRow(rowIndex);
+            if (tabIndex < 0 || tabIndex >= queryTabs.TabPages.Count) return false;
+
+            table_top.Visible = false;
+            queryTabs.Visible = true;
+            queryTabs.SelectedIndex = tabIndex;
+            queryTabs.BringToFront();
+            UpdateMainStatus("Query tab opened: " + queryTabs.TabPages[tabIndex].Text);
+            return true;
+        }
+
+        private int GetQueryTabIndexFromGridRow(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= table_top.Rows.Count || !table_top.Columns.Contains("分頁索引")) return -1;
+            object value = table_top.Rows[rowIndex].Cells["分頁索引"].Value;
+            if (value == null || value == DBNull.Value) return -1;
+            int tabIndex;
+            return int.TryParse(value.ToString(), out tabIndex) ? tabIndex : -1;
+        }
+
         private string GetCurrentGridGroupName(int rowIndex)
         {
             if (table_top.Columns.Contains("類型") && rowIndex >= 0 && rowIndex < table_top.Rows.Count)
@@ -2509,12 +2589,16 @@ namespace mySQLPunk
                 {
                     return "Views";
                 }
+                if (typeValue != null && string.Equals(typeValue.ToString(), "Query", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Queries";
+                }
             }
 
             if (db_tree.SelectedNode != null)
             {
                 var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions"))
+                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Queries"))
                 {
                     return pathParts[2];
                 }
@@ -2975,6 +3059,25 @@ namespace mySQLPunk
                     displayDt.Rows.Add(row);
                 }
             }
+            else if (string.Equals(groupName, "Queries", StringComparison.OrdinalIgnoreCase))
+            {
+                displayDt.Columns.Add("資料庫");
+                displayDt.Columns.Add("編號");
+                displayDt.Columns.Add("分頁索引");
+                displayDt.Columns.Add("SQL");
+                foreach (OpenQueryTabInfo queryInfo in GetOpenQueryTabs(dbName))
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = queryInfo.Page.Text;
+                    row["類型"] = "Query";
+                    row["狀態"] = string.IsNullOrWhiteSpace(queryInfo.Query.CurrentStatus) ? "Ready" : queryInfo.Query.CurrentStatus;
+                    row["資料庫"] = queryInfo.Query.DatabaseName;
+                    row["編號"] = queryInfo.DisplayIndex;
+                    row["分頁索引"] = queryInfo.TabIndex;
+                    row["SQL"] = BuildQueryPreview(queryInfo.Query.CurrentSql);
+                    displayDt.Rows.Add(row);
+                }
+            }
             else
             {
                 DataRow row = displayDt.NewRow();
@@ -2985,6 +3088,57 @@ namespace mySQLPunk
             }
 
             table_top.DataSource = displayDt;
+            if (table_top.Columns.Contains("分頁索引"))
+            {
+                table_top.Columns["分頁索引"].Visible = false;
+            }
+        }
+
+        private List<OpenQueryTabInfo> GetOpenQueryTabs(string databaseName)
+        {
+            List<OpenQueryTabInfo> tabs = new List<OpenQueryTabInfo>();
+            if (queryTabs == null) return tabs;
+
+            for (int i = 0; i < queryTabs.TabPages.Count; i++)
+            {
+                TabPage page = queryTabs.TabPages[i];
+                QueryForm query = page.Tag as QueryForm;
+                if (query == null) continue;
+                if (!string.Equals(query.DatabaseName, databaseName ?? string.Empty, StringComparison.OrdinalIgnoreCase)) continue;
+
+                tabs.Add(new OpenQueryTabInfo
+                {
+                    DisplayIndex = tabs.Count + 1,
+                    TabIndex = i,
+                    Page = page,
+                    Query = query
+                });
+            }
+
+            return tabs;
+        }
+
+        private static string BuildQueryPreview(string sql)
+        {
+            if (string.IsNullOrWhiteSpace(sql)) return string.Empty;
+            string preview = sql.Replace("\r", " ").Replace("\n", " ").Trim();
+            while (preview.Contains("  ")) preview = preview.Replace("  ", " ");
+            return preview.Length <= 120 ? preview : preview.Substring(0, 117) + "...";
+        }
+
+        private void RefreshQueriesGroupIfSelected()
+        {
+            if (db_tree.SelectedNode == null) return;
+            var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+            if (pathParts.Length < 3 || pathParts[2] != "Queries") return;
+
+            TreeNode root = db_tree.SelectedNode;
+            while (root.Parent != null) root = root.Parent;
+            if (root.Index < 0 || root.Index >= myN.connections.Count) return;
+            var connInfo = myN.connections[root.Index];
+            if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return;
+
+            ShowDatabaseGroupList(db, pathParts[1], "Queries", connInfo);
         }
 
         private DataTable GetDatabaseEvents(IDatabase db, string dbName)

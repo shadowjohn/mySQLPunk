@@ -74,6 +74,8 @@ namespace mySQLPunk
             Add("Tool.CreateBackup", "建立備份", "Create Backup");
             Add("Tool.StructureAndData", "結構與資料", "Structure and Data");
             Add("Tool.DataOnly", "僅資料", "Data Only");
+            Add("Tool.OpenQuery", "開啟查詢", "Open Query");
+            Add("Tool.CloseQuery", "關閉查詢", "Close Query");
 
             Add("Sidebar.Connections", "連線", "Connections");
             Add("Sidebar.ObjectDetails", "物件詳細資料", "Object Details");
