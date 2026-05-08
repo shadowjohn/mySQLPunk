@@ -593,7 +593,7 @@ namespace mySQLPunk
 
                 try
                 {
-                    myN.exportConnections(dialog.FileName);
+                    ExportConnectionsToFile(dialog.FileName);
                     UpdateMainStatus(Localization.T("Status.ConnectionsExported"));
                     MessageBox.Show(Localization.T("Status.ConnectionsExported"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -621,14 +621,69 @@ namespace mySQLPunk
 
                 try
                 {
-                    myN.importConnections(dialog.FileName);
-                    drawLists();
+                    ImportConnectionsFromFile(dialog.FileName);
                     UpdateMainStatus(Localization.T("Status.ConnectionsImported"));
                     MessageBox.Show(Localization.T("Status.ConnectionsImported"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show(Localization.T("Status.ImportFailed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private bool ExportConnectionsToFile(string targetPath)
+        {
+            if (string.IsNullOrWhiteSpace(targetPath))
+            {
+                return false;
+            }
+
+            string dir = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            myN.exportConnections(targetPath);
+            return true;
+        }
+
+        private int ImportConnectionsFromFile(string sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+            {
+                return -1;
+            }
+
+            CloseAllConnectionsBeforeImport();
+            myN.importConnections(sourcePath);
+            drawLists();
+            return myN.connections.Count;
+        }
+
+        private void CloseAllConnectionsBeforeImport()
+        {
+            foreach (Dictionary<string, object> conn in myN.connections)
+            {
+                if (conn == null) continue;
+
+                try
+                {
+                    if (conn.ContainsKey("pdo") && conn["pdo"] is IDatabase db)
+                    {
+                        db.Close();
+                        db.Dispose();
+                    }
+                }
+                catch
+                {
+                }
+
+                conn["isConnect"] = "F";
+                if (conn.ContainsKey("pdo"))
+                {
+                    conn.Remove("pdo");
                 }
             }
         }
