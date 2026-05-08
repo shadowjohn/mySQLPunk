@@ -63,7 +63,7 @@ namespace mySQLPunk.lib
             {
                 foreach (var key in key_value.Keys)
                 {
-                    cmd.Parameters.Add(new SQLiteParameter("?" + key, key_value[key]));
+                    cmd.Parameters.Add(new SQLiteParameter("@" + key, key_value[key]));
                 }
                 using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
@@ -167,7 +167,7 @@ namespace mySQLPunk.lib
                 {
                     foreach (var key in m.Keys)
                     {
-                        cmd.Parameters.Add(new SQLiteParameter("?" + key, m[key]));
+                        cmd.Parameters.Add(new SQLiteParameter("@" + key, m[key]));
                     }
                     cmd.ExecuteNonQuery();
                 }
@@ -191,7 +191,7 @@ namespace mySQLPunk.lib
                 {
                     foreach (var key in parameters.Keys)
                     {
-                        cmd.Parameters.Add(new SQLiteParameter("?" + key, parameters[key]));
+                        cmd.Parameters.Add(new SQLiteParameter("@" + key, parameters[key]));
                     }
                 }
                 using (var reader = await cmd.ExecuteReaderAsync())
@@ -213,7 +213,7 @@ namespace mySQLPunk.lib
                     {
                         foreach (var key in parameters.Keys)
                         {
-                            cmd.Parameters.Add(new SQLiteParameter("?" + key, parameters[key]));
+                            cmd.Parameters.Add(new SQLiteParameter("@" + key, parameters[key]));
                         }
                     }
                     await cmd.ExecuteNonQueryAsync();
@@ -374,14 +374,14 @@ namespace mySQLPunk.lib
         public bool TableExists(string databaseName, string tableName)
         {
             var p = new Dictionary<string, object> { { "name", tableName } };
-            DataTable dt = SelectSQL("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?name;", p);
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=@name;", p);
             return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
         }
 
         public bool ViewExists(string databaseName, string viewName)
         {
             var p = new Dictionary<string, object> { { "name", viewName } };
-            DataTable dt = SelectSQL("SELECT COUNT(*) FROM sqlite_master WHERE type='view' AND name=?name;", p);
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM sqlite_master WHERE type='view' AND name=@name;", p);
             return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
         }
 
@@ -505,7 +505,7 @@ namespace mySQLPunk.lib
                 for (int c = 0; c < rows.Columns.Count; c++)
                 {
                     string key = "p" + r + "_" + c;
-                    vals.Add("?" + key);
+                    vals.Add("@" + key);
                     p[key] = rows.Rows[r][c] == DBNull.Value ? DBNull.Value : rows.Rows[r][c];
                 }
                 valueGroups.Add("(" + string.Join(",", vals.ToArray()) + ")");
@@ -517,7 +517,7 @@ namespace mySQLPunk.lib
         public string GetViewCreateStatement(string databaseName, string viewName)
         {
             var p = new Dictionary<string, object> { { "name", viewName } };
-            DataTable dt = SelectSQL("SELECT sql FROM sqlite_master WHERE type='view' AND name=?name;", p);
+            DataTable dt = SelectSQL("SELECT sql FROM sqlite_master WHERE type='view' AND name=@name;", p);
             return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
         }
 
@@ -572,7 +572,7 @@ namespace mySQLPunk.lib
                 foreach (var key in m.Keys)
                 {
                     keys.Add(key);
-                    qa.Add("?" + key);
+                    qa.Add("@" + key);
                 }
                 string SQL = @"
                 INSERT INTO `" + table + @"`" +
@@ -585,7 +585,7 @@ namespace mySQLPunk.lib
                 MC = new SQLiteCommand(SQL, MCT);
                 foreach (var key in m.Keys)
                 {
-                    PA = new SQLiteParameter("?" + key, m[key]);
+                    PA = new SQLiteParameter("@" + key, m[key]);
                     MC.Parameters.Add(PA);
                 }
                 LAST_ID = Convert.ToInt32(MC.ExecuteScalar());
@@ -605,11 +605,11 @@ namespace mySQLPunk.lib
             Dictionary<string, object> output = new Dictionary<string, object>();
             try
             {
-                whereSQL = whereSQL.Replace("@", "?");
+                whereSQL = whereSQL.Replace("?", "@");
                 List<string> fields = new List<string>();
                 foreach (var key in m.Keys)
                 {
-                    fields.Add("`" + key + "`=?" + key);
+                    fields.Add("`" + key + "`=@" + key);
                 }
                 string SQL = @"
                 UPDATE `" + table + @"` SET " +
@@ -622,12 +622,12 @@ namespace mySQLPunk.lib
                 MC = new SQLiteCommand(SQL, MCT);
                 foreach (var key in m.Keys)
                 {
-                    PA = new SQLiteParameter("?" + key, m[key]);
+                    PA = new SQLiteParameter("@" + key, m[key]);
                     MC.Parameters.Add(PA);
                 }
                 foreach (var key in wm.Keys)
                 {
-                    PA = new SQLiteParameter("?" + key, wm[key]);
+                    PA = new SQLiteParameter("@" + key, wm[key]);
                     MC.Parameters.Add(PA);
                 }
                 MC.ExecuteScalar();

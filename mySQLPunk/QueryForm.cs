@@ -1338,6 +1338,7 @@ namespace mySQLPunk
         {
             if (_db is my_postgresql || _db is my_oracle) return ":" + parameterName;
             if (_db is my_mssql) return "@" + parameterName;
+            if (_db is my_sqlite) return "@" + parameterName;
             return "?" + parameterName;
         }
 
