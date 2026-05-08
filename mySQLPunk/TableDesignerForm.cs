@@ -26,10 +26,12 @@ namespace mySQLPunk
         private TabControl tcMain;
         private TabPage tpColumns, tpIndexes, tpOptions, tpComment, tpSqlPreview;
         private RichTextBox rtbSqlPreview;
+        private TextBox txtTableName;
         private TextBox txtTableComment;
         private ComboBox cbEngine;
         private Panel pnlColumnProperties; // 屬性面板
         private bool _isModified = false;
+        private bool IsNewTable => string.IsNullOrWhiteSpace(_tableName);
 
         public bool IsModified 
         { 
@@ -60,7 +62,17 @@ namespace mySQLPunk
         private void UpdateTitle()
         {
             string prefix = _isModified ? "* " : "";
-            this.Text = $"{prefix}Design Table - {_tableName}";
+            string tableTitle = _tableName;
+            if (string.IsNullOrWhiteSpace(tableTitle) && txtTableName != null)
+            {
+                tableTitle = txtTableName.Text.Trim();
+            }
+            if (string.IsNullOrWhiteSpace(tableTitle))
+            {
+                tableTitle = "New Table";
+            }
+
+            this.Text = $"{prefix}Design Table - {tableTitle}";
             if (_mainHost != null) _mainHost.UpdateTabTitle(this);
         }
 
@@ -149,14 +161,30 @@ namespace mySQLPunk
             // 3. 選項分頁
             tpOptions = new TabPage("選項");
             TableLayoutPanel tlpOptions = new TableLayoutPanel() { Dock = DockStyle.Top, Height = 200, RowCount = 4, ColumnCount = 2, Padding = new Padding(20) };
-            tlpOptions.Controls.Add(new Label() { Text = "引擎:", Anchor = AnchorStyles.Left }, 0, 0);
-            cbEngine = new ComboBox() { Width = 200 };
-            tlpOptions.Controls.Add(cbEngine, 1, 0);
+            tlpOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            tlpOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            tlpOptions.Controls.Add(new Label() { Text = "資料表名稱:", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+            txtTableName = new TextBox() { Width = 260, Text = _tableName, ReadOnly = !IsNewTable };
+            txtTableName.TextChanged += (s, e) =>
+            {
+                if (IsNewTable) MarkAsModified();
+                UpdateTitle();
+            };
+            tlpOptions.Controls.Add(txtTableName, 1, 0);
+
+            tlpOptions.Controls.Add(new Label() { Text = "引擎:", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+            cbEngine = new ComboBox() { Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
+            cbEngine.Items.AddRange(new object[] { "InnoDB", "MyISAM", "MEMORY" });
+            cbEngine.SelectedItem = "InnoDB";
+            cbEngine.SelectedIndexChanged += (s, e) => MarkAsModified();
+            tlpOptions.Controls.Add(cbEngine, 1, 1);
             tpOptions.Controls.Add(tlpOptions);
 
             // 4. 註解分頁
             tpComment = new TabPage("註解");
             txtTableComment = new TextBox() { Dock = DockStyle.Fill, Multiline = true };
+            txtTableComment.TextChanged += (s, e) => MarkAsModified();
             tpComment.Controls.Add(txtTableComment);
 
             // 5. SQL 預覽分頁
@@ -321,19 +349,16 @@ namespace mySQLPunk
         {
             try
             {
+                DataTable displayDt = CreateColumnsDisplayTable();
+
+                if (IsNewTable)
+                {
+                    _originalDt = displayDt.Copy();
+                    BindColumns(displayDt);
+                    return;
+                }
+
                 DataTable rawDt = _db.GetColumns(_databaseName, _tableName);
-                
-                // 建立統一格式的表格
-                DataTable displayDt = new DataTable();
-                displayDt.Columns.Add("Name");
-                displayDt.Columns.Add("Type");
-                displayDt.Columns.Add("Length");
-                displayDt.Columns.Add("Decimals");
-                displayDt.Columns.Add("NotNull", typeof(bool));
-                displayDt.Columns.Add("PK", typeof(bool));
-                displayDt.Columns.Add("Default");
-                displayDt.Columns.Add("Comment");
-                displayDt.Columns.Add("_OldName"); // 隱藏欄位，用來追蹤重新命名
 
                 foreach (DataRow row in rawDt.Rows)
                 {
@@ -399,23 +424,42 @@ namespace mySQLPunk
                 }
 
                 _originalDt = displayDt.Copy();
-                dgvColumns.DataSource = displayDt;
-
-                // 只有顯示時用中文標題
-                dgvColumns.Columns["Name"].HeaderText = "名稱";
-                dgvColumns.Columns["Type"].HeaderText = "類型";
-                dgvColumns.Columns["Length"].HeaderText = "長度";
-                dgvColumns.Columns["Decimals"].HeaderText = "小數位數";
-                dgvColumns.Columns["NotNull"].HeaderText = "不是 Null";
-                dgvColumns.Columns["PK"].HeaderText = "主鍵";
-                dgvColumns.Columns["Default"].HeaderText = "預設";
-                dgvColumns.Columns["Comment"].HeaderText = "註解";
-                dgvColumns.Columns["_OldName"].Visible = false;
+                BindColumns(displayDt);
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"無法載入欄位資訊: {ex.Message}");
             }
+        }
+
+        private DataTable CreateColumnsDisplayTable()
+        {
+            DataTable displayDt = new DataTable();
+            displayDt.Columns.Add("Name");
+            displayDt.Columns.Add("Type");
+            displayDt.Columns.Add("Length");
+            displayDt.Columns.Add("Decimals");
+            displayDt.Columns.Add("NotNull", typeof(bool));
+            displayDt.Columns.Add("PK", typeof(bool));
+            displayDt.Columns.Add("Default");
+            displayDt.Columns.Add("Comment");
+            displayDt.Columns.Add("_OldName");
+            return displayDt;
+        }
+
+        private void BindColumns(DataTable displayDt)
+        {
+            dgvColumns.DataSource = displayDt;
+
+            dgvColumns.Columns["Name"].HeaderText = "名稱";
+            dgvColumns.Columns["Type"].HeaderText = "類型";
+            dgvColumns.Columns["Length"].HeaderText = "長度";
+            dgvColumns.Columns["Decimals"].HeaderText = "小數位數";
+            dgvColumns.Columns["NotNull"].HeaderText = "不是 Null";
+            dgvColumns.Columns["PK"].HeaderText = "主鍵";
+            dgvColumns.Columns["Default"].HeaderText = "預設";
+            dgvColumns.Columns["Comment"].HeaderText = "註解";
+            dgvColumns.Columns["_OldName"].Visible = false;
         }
 
         private void GeneratePreviewSql()
@@ -428,6 +472,12 @@ namespace mySQLPunk
 
             DataTable currentDt = (DataTable)dgvColumns.DataSource;
             if (currentDt == null) return;
+
+            if (IsNewTable)
+            {
+                rtbSqlPreview.Text = BuildMySqlCreateTableSql(currentDt);
+                return;
+            }
 
             List<string> changes = new List<string>();
             string prevCol = null;
@@ -590,6 +640,206 @@ namespace mySQLPunk
             }
         }
 
+        private string BuildMySqlCreateTableSql(DataTable currentDt)
+        {
+            string tableName = GetTableNameForSave();
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                return "-- 請先在「選項」分頁輸入資料表名稱。";
+            }
+
+            List<string> definitions = new List<string>();
+            List<string> primaryColumns = new List<string>();
+
+            foreach (DataRow row in currentDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                string columnName = GetRowString(row, "Name").Trim();
+                if (string.IsNullOrWhiteSpace(columnName)) continue;
+
+                definitions.Add("  " + BuildMySqlColumnDefinition(row));
+
+                if (row["PK"] != DBNull.Value && (bool)row["PK"])
+                {
+                    primaryColumns.Add(QuoteMySqlIdentifier(columnName));
+                }
+            }
+
+            if (definitions.Count == 0)
+            {
+                return "-- 請至少新增一個欄位。";
+            }
+
+            foreach (string indexDefinition in BuildMySqlCreateIndexDefinitions(primaryColumns))
+            {
+                definitions.Add("  " + indexDefinition);
+            }
+
+            string engine = cbEngine?.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(engine)) engine = "InnoDB";
+
+            string comment = txtTableComment?.Text.Trim() ?? "";
+            string commentSql = string.IsNullOrWhiteSpace(comment)
+                ? ""
+                : " COMMENT=" + EscapeMySqlStringLiteral(comment);
+
+            return "CREATE TABLE " + QuoteMySqlIdentifier(_databaseName) + "." + QuoteMySqlIdentifier(tableName) + " (\n" +
+                   string.Join(",\n", definitions) + "\n" +
+                   ") ENGINE=" + engine + " DEFAULT CHARSET=utf8mb4" + commentSql + ";";
+        }
+
+        private string BuildMySqlColumnDefinition(DataRow row)
+        {
+            string columnName = GetRowString(row, "Name").Trim();
+            string columnType = GetRowString(row, "Type").Trim();
+            if (string.IsNullOrWhiteSpace(columnType)) columnType = "varchar";
+
+            string length = GetRowString(row, "Length").Trim();
+            string decimals = GetRowString(row, "Decimals").Trim();
+            string typeFull = columnType;
+            if (!string.IsNullOrWhiteSpace(length))
+            {
+                typeFull += "(" + length;
+                if (!string.IsNullOrWhiteSpace(decimals)) typeFull += "," + decimals;
+                typeFull += ")";
+            }
+
+            bool notNull = row["NotNull"] != DBNull.Value && (bool)row["NotNull"];
+            string defaultValue = GetRowString(row, "Default").Trim();
+            string comment = GetRowString(row, "Comment");
+
+            List<string> parts = new List<string>
+            {
+                QuoteMySqlIdentifier(columnName),
+                typeFull,
+                notNull ? "NOT NULL" : "NULL"
+            };
+
+            if (!string.IsNullOrWhiteSpace(defaultValue))
+            {
+                parts.Add("DEFAULT " + FormatMySqlDefault(defaultValue));
+            }
+
+            if (!string.IsNullOrWhiteSpace(comment))
+            {
+                parts.Add("COMMENT " + EscapeMySqlStringLiteral(comment));
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        private List<string> BuildMySqlCreateIndexDefinitions(List<string> primaryColumns)
+        {
+            List<string> definitions = new List<string>();
+            DataTable currentIdxDt = dgvIndexes.DataSource as DataTable;
+
+            if (currentIdxDt != null)
+            {
+                foreach (DataRow row in currentIdxDt.Rows)
+                {
+                    if (row.RowState == DataRowState.Deleted) continue;
+
+                    string indexName = GetRowString(row, "名稱").Trim();
+                    string type = GetRowString(row, "索引類型").Trim().ToUpperInvariant();
+                    string columns = GetRowString(row, "欄位").Trim();
+                    if (string.IsNullOrWhiteSpace(type)) type = "NORMAL";
+                    if (string.IsNullOrWhiteSpace(columns)) continue;
+
+                    string columnList = FormatMySqlIndexColumns(columns);
+                    if (string.IsNullOrWhiteSpace(columnList)) continue;
+
+                    if (type == "PRIMARY")
+                    {
+                        definitions.Add("PRIMARY KEY (" + columnList + ")");
+                        primaryColumns.Clear();
+                    }
+                    else if (type == "UNIQUE")
+                    {
+                        if (string.IsNullOrWhiteSpace(indexName)) continue;
+                        definitions.Add("UNIQUE KEY " + QuoteMySqlIdentifier(indexName) + " (" + columnList + ")");
+                    }
+                    else if (type == "FULLTEXT")
+                    {
+                        if (string.IsNullOrWhiteSpace(indexName)) continue;
+                        definitions.Add("FULLTEXT KEY " + QuoteMySqlIdentifier(indexName) + " (" + columnList + ")");
+                    }
+                    else if (type == "SPATIAL")
+                    {
+                        if (string.IsNullOrWhiteSpace(indexName)) continue;
+                        definitions.Add("SPATIAL KEY " + QuoteMySqlIdentifier(indexName) + " (" + columnList + ")");
+                    }
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(indexName)) continue;
+                        definitions.Add("KEY " + QuoteMySqlIdentifier(indexName) + " (" + columnList + ")");
+                    }
+                }
+            }
+
+            if (primaryColumns.Count > 0)
+            {
+                definitions.Insert(0, "PRIMARY KEY (" + string.Join(", ", primaryColumns) + ")");
+            }
+
+            return definitions;
+        }
+
+        private string GetTableNameForSave()
+        {
+            return IsNewTable ? (txtTableName?.Text.Trim() ?? "") : _tableName;
+        }
+
+        private static string GetRowString(DataRow row, string columnName)
+        {
+            if (!row.Table.Columns.Contains(columnName) || row[columnName] == DBNull.Value)
+                return "";
+            return row[columnName].ToString();
+        }
+
+        private static string FormatMySqlDefault(string value)
+        {
+            string upper = value.ToUpperInvariant();
+            if (upper == "NULL" || upper == "CURRENT_TIMESTAMP" || upper == "CURRENT_TIMESTAMP()")
+            {
+                return value;
+            }
+
+            decimal numericValue;
+            if (decimal.TryParse(value, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out numericValue))
+            {
+                return value;
+            }
+
+            return EscapeMySqlStringLiteral(value);
+        }
+
+        private static string FormatMySqlIndexColumns(string columns)
+        {
+            string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            List<string> formattedCols = new List<string>();
+            foreach (string rawCol in rawCols)
+            {
+                string col = rawCol.Trim();
+                if (!string.IsNullOrWhiteSpace(col))
+                {
+                    formattedCols.Add(QuoteMySqlIdentifier(col));
+                }
+            }
+
+            return string.Join(", ", formattedCols);
+        }
+
+        private static string QuoteMySqlIdentifier(string name)
+        {
+            return "`" + name.Replace("`", "``") + "`";
+        }
+
+        private static string EscapeMySqlStringLiteral(string value)
+        {
+            return "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+        }
+
         private void BtnSave_Click(object sender, EventArgs e)
         {
             GeneratePreviewSql();
@@ -597,7 +847,7 @@ namespace mySQLPunk
             
             if (sql.StartsWith("--"))
             {
-                MessageBox.Show("未偵測到任何變動。");
+                MessageBox.Show(sql.TrimStart('-', ' '), "無法儲存", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -607,9 +857,15 @@ namespace mySQLPunk
                 if (res["status"] == "OK")
                 {
                     MessageBox.Show("儲存成功！");
+                    if (IsNewTable)
+                    {
+                        _tableName = GetTableNameForSave();
+                        if (txtTableName != null) txtTableName.ReadOnly = true;
+                    }
                     IsModified = false;
                     LoadColumns(); // 重新載入
                     LoadIndexes();
+                    UpdateTitle();
                 }
                 else
                 {
@@ -621,6 +877,13 @@ namespace mySQLPunk
         private void AddColumn(bool insert)
         {
             DataTable dt = (DataTable)dgvColumns.DataSource;
+            if (dt == null)
+            {
+                dt = CreateColumnsDisplayTable();
+                BindColumns(dt);
+                _originalDt = dt.Copy();
+            }
+
             DataRow newRow = dt.NewRow();
             newRow["Name"] = "new_column";
             newRow["Type"] = "varchar";
@@ -632,6 +895,8 @@ namespace mySQLPunk
                 dt.Rows.InsertAt(newRow, dgvColumns.CurrentRow.Index);
             else
                 dt.Rows.Add(newRow);
+
+            MarkAsModified();
         }
 
         private void DeleteColumn()
@@ -667,6 +932,7 @@ namespace mySQLPunk
             newRow["索引類型"] = "NORMAL";
             newRow["索引方法"] = "BTREE";
             dt.Rows.Add(newRow);
+            MarkAsModified();
         }
 
         private void DeleteIndex()
@@ -696,14 +962,16 @@ namespace mySQLPunk
         {
             try
             {
+                DataTable displayIdx = CreateIndexesDisplayTable();
+
+                if (IsNewTable)
+                {
+                    _originalIdxDt = displayIdx.Copy();
+                    BindIndexes(displayIdx);
+                    return;
+                }
+
                 DataTable rawIdx = _db.GetIndexes(_databaseName, _tableName);
-                DataTable displayIdx = new DataTable();
-                displayIdx.Columns.Add("名稱");
-                displayIdx.Columns.Add("欄位");
-                displayIdx.Columns.Add("索引類型");
-                displayIdx.Columns.Add("索引方法");
-                displayIdx.Columns.Add("註解");
-                displayIdx.Columns.Add("_OldName");
 
                 // MySQL 索引是按 Key_name 分多列，我們需要分組
                 var indexGroups = new Dictionary<string, List<DataRow>>();
@@ -738,36 +1006,59 @@ namespace mySQLPunk
                 }
 
                 _originalIdxDt = displayIdx.Copy();
-                dgvIndexes.DataSource = displayIdx;
-
-                // 移除舊的文字欄位，改用 ComboBox 欄位
-                if (dgvIndexes.Columns.Contains("索引類型") && !(dgvIndexes.Columns["索引類型"] is DataGridViewComboBoxColumn))
-                {
-                    int idx = dgvIndexes.Columns["索引類型"].Index;
-                    dgvIndexes.Columns.RemoveAt(idx);
-                    var cb = new DataGridViewComboBoxColumn() { 
-                        Name = "索引類型", HeaderText = "索引類型", DataPropertyName = "索引類型",
-                        Items = { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" },
-                        FlatStyle = FlatStyle.Flat
-                    };
-                    dgvIndexes.Columns.Insert(idx, cb);
-                }
-                
-                if (dgvIndexes.Columns.Contains("索引方法") && !(dgvIndexes.Columns["索引方法"] is DataGridViewComboBoxColumn))
-                {
-                    int idx = dgvIndexes.Columns["索引方法"].Index;
-                    dgvIndexes.Columns.RemoveAt(idx);
-                    var cb = new DataGridViewComboBoxColumn() { 
-                        Name = "索引方法", HeaderText = "索引方法", DataPropertyName = "索引方法",
-                        Items = { "BTREE", "HASH" },
-                        FlatStyle = FlatStyle.Flat
-                    };
-                    dgvIndexes.Columns.Insert(idx, cb);
-                }
-
-                if (dgvIndexes.Columns.Contains("_OldName")) dgvIndexes.Columns["_OldName"].Visible = false;
+                BindIndexes(displayIdx);
             }
             catch { /* 暫時不處理錯誤 */ }
+        }
+
+        private DataTable CreateIndexesDisplayTable()
+        {
+            DataTable displayIdx = new DataTable();
+            displayIdx.Columns.Add("名稱");
+            displayIdx.Columns.Add("欄位");
+            displayIdx.Columns.Add("索引類型");
+            displayIdx.Columns.Add("索引方法");
+            displayIdx.Columns.Add("註解");
+            displayIdx.Columns.Add("_OldName");
+            return displayIdx;
+        }
+
+        private void BindIndexes(DataTable displayIdx)
+        {
+            dgvIndexes.DataSource = displayIdx;
+
+            // 移除舊的文字欄位，改用 ComboBox 欄位
+            if (dgvIndexes.Columns.Contains("索引類型") && !(dgvIndexes.Columns["索引類型"] is DataGridViewComboBoxColumn))
+            {
+                int idx = dgvIndexes.Columns["索引類型"].Index;
+                dgvIndexes.Columns.RemoveAt(idx);
+                var cb = new DataGridViewComboBoxColumn()
+                {
+                    Name = "索引類型",
+                    HeaderText = "索引類型",
+                    DataPropertyName = "索引類型",
+                    FlatStyle = FlatStyle.Flat
+                };
+                cb.Items.AddRange(new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" });
+                dgvIndexes.Columns.Insert(idx, cb);
+            }
+
+            if (dgvIndexes.Columns.Contains("索引方法") && !(dgvIndexes.Columns["索引方法"] is DataGridViewComboBoxColumn))
+            {
+                int idx = dgvIndexes.Columns["索引方法"].Index;
+                dgvIndexes.Columns.RemoveAt(idx);
+                var cb = new DataGridViewComboBoxColumn()
+                {
+                    Name = "索引方法",
+                    HeaderText = "索引方法",
+                    DataPropertyName = "索引方法",
+                    FlatStyle = FlatStyle.Flat
+                };
+                cb.Items.AddRange(new object[] { "BTREE", "HASH" });
+                dgvIndexes.Columns.Insert(idx, cb);
+            }
+
+            if (dgvIndexes.Columns.Contains("_OldName")) dgvIndexes.Columns["_OldName"].Visible = false;
         }
 
         private Image GetIcon(string path)

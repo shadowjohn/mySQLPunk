@@ -37,6 +37,20 @@ namespace mySQLPunk
         private long _totalRows = 0;
         private string _baseSql = ""; // 不含 LIMIT 的原始 SQL
 
+        private class TableColumnInfo
+        {
+            public string Name { get; set; }
+            public bool IsPrimaryKey { get; set; }
+            public bool IsAutoIncrement { get; set; }
+        }
+
+        private class DataSaveResult
+        {
+            public int Inserted { get; set; }
+            public int Updated { get; set; }
+            public int Deleted { get; set; }
+        }
+
         // 工具列與狀態列
         private ToolStrip mainToolStrip;
         private ToolStrip dataToolStrip;
@@ -787,6 +801,10 @@ namespace mySQLPunk
                     DataTable dt = await Task.Run(
                         () => _db.SelectSQL(sql),
                         _cts.Token);
+                    if (_isTableDataMode)
+                    {
+                        dt.AcceptChanges();
+                    }
 
                     sw.Stop();
                     dgvResults.DataSource = dt;
@@ -886,9 +904,290 @@ namespace mySQLPunk
             }
         }
 
-        private void SaveChanges()
+        private async void SaveChanges()
         {
-            MessageBox.Show("儲存變更功能開發中...", "資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (!_isTableDataMode)
+            {
+                MessageBox.Show("只有開啟資料表資料時才能儲存變更。", "資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!(_db is my_mysql))
+            {
+                MessageBox.Show("目前資料列儲存只支援 MySQL。", "功能限制", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            DataTable dt = dgvResults.DataSource as DataTable;
+            if (dt == null)
+            {
+                MessageBox.Show("目前沒有可儲存的資料。", "資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            dgvResults.EndEdit();
+            BindingContext[dgvResults.DataSource]?.EndCurrentEdit();
+
+            DataTable changes = dt.GetChanges();
+            if (changes == null || changes.Rows.Count == 0)
+            {
+                MessageBox.Show("沒有偵測到資料變更。", "資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            DialogResult answer = MessageBox.Show(
+                "即將儲存目前資料表的新增、修改與刪除資料列，確定要繼續？",
+                "確認儲存",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (answer != DialogResult.Yes) return;
+
+            tsBtnSave.Enabled = false;
+            btnDataApply.Enabled = false;
+            tsBtnRefresh.Enabled = false;
+            btnDataRefresh.Enabled = false;
+            UpdateStatus("Saving changes...");
+
+            try
+            {
+                DataSaveResult result = await Task.Run(() => SaveMySqlTableChanges(dt));
+                dt.AcceptChanges();
+                UpdateStatus($"Saved. Inserted: {result.Inserted}, Updated: {result.Updated}, Deleted: {result.Deleted}");
+                CalculateTotalRowsAsync();
+                MessageBox.Show("資料已儲存。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus("Save failed: " + ex.Message);
+                MessageBox.Show("儲存失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                tsBtnSave.Enabled = true;
+                btnDataApply.Enabled = true;
+                tsBtnRefresh.Enabled = true;
+                btnDataRefresh.Enabled = true;
+            }
+        }
+
+        private DataSaveResult SaveMySqlTableChanges(DataTable dt)
+        {
+            string tableName = GetTableNameFromSql();
+            if (string.IsNullOrWhiteSpace(_databaseName) || string.IsNullOrWhiteSpace(tableName))
+            {
+                throw new Exception("無法判斷要儲存的資料表。");
+            }
+
+            List<TableColumnInfo> columns = GetMySqlTableColumns(tableName);
+            List<string> primaryKeys = columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
+            DataSaveResult result = new DataSaveResult();
+
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState == DataRowState.Unchanged || row.RowState == DataRowState.Detached)
+                {
+                    continue;
+                }
+
+                if (row.RowState == DataRowState.Added)
+                {
+                    if (IsAddedRowEmpty(row, columns))
+                    {
+                        continue;
+                    }
+
+                    ExecuteMySqlInsert(tableName, columns, row);
+                    result.Inserted++;
+                }
+                else if (row.RowState == DataRowState.Modified)
+                {
+                    ExecuteMySqlUpdate(tableName, columns, primaryKeys, row);
+                    result.Updated++;
+                }
+                else if (row.RowState == DataRowState.Deleted)
+                {
+                    ExecuteMySqlDelete(tableName, columns, primaryKeys, row);
+                    result.Deleted++;
+                }
+            }
+
+            return result;
+        }
+
+        private List<TableColumnInfo> GetMySqlTableColumns(string tableName)
+        {
+            DataTable columnTable = _db.GetColumns(_databaseName, tableName);
+            List<TableColumnInfo> columns = new List<TableColumnInfo>();
+
+            foreach (DataRow row in columnTable.Rows)
+            {
+                string name = row["Field"].ToString();
+                columns.Add(new TableColumnInfo
+                {
+                    Name = name,
+                    IsPrimaryKey = row.Table.Columns.Contains("Key") && row["Key"].ToString() == "PRI",
+                    IsAutoIncrement = row.Table.Columns.Contains("Extra") &&
+                        row["Extra"].ToString().IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0
+                });
+            }
+
+            return columns;
+        }
+
+        private void ExecuteMySqlInsert(string tableName, List<TableColumnInfo> columns, DataRow row)
+        {
+            Dictionary<string, object> parameters = new Dictionary<string, object>();
+            List<string> fieldSql = new List<string>();
+            List<string> valueSql = new List<string>();
+            int index = 0;
+
+            foreach (TableColumnInfo column in columns)
+            {
+                if (!row.Table.Columns.Contains(column.Name)) continue;
+
+                object value = row[column.Name, DataRowVersion.Current];
+                if (column.IsAutoIncrement && IsDbNull(value)) continue;
+
+                string parameterName = "p" + index;
+                fieldSql.Add(QuoteMySqlIdentifier(column.Name));
+                valueSql.Add("?" + parameterName);
+                parameters[parameterName] = NormalizeDbValue(value);
+                index++;
+            }
+
+            if (fieldSql.Count == 0)
+            {
+                throw new Exception("新增資料列沒有可寫入的欄位。");
+            }
+
+            string sql = "INSERT INTO " + GetMySqlQualifiedTableName(tableName) +
+                         " (" + string.Join(", ", fieldSql) + ") VALUES (" + string.Join(", ", valueSql) + ");";
+            ExecMySqlOrThrow(sql, parameters);
+        }
+
+        private void ExecuteMySqlUpdate(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
+        {
+            Dictionary<string, object> parameters = new Dictionary<string, object>();
+            List<string> setSql = new List<string>();
+            int index = 0;
+
+            foreach (TableColumnInfo column in columns)
+            {
+                if (!row.Table.Columns.Contains(column.Name)) continue;
+                if (primaryKeys.Contains(column.Name)) continue;
+                if (!HasColumnChanged(row, column.Name)) continue;
+
+                string parameterName = "p" + index;
+                setSql.Add(QuoteMySqlIdentifier(column.Name) + " = ?" + parameterName);
+                parameters[parameterName] = NormalizeDbValue(row[column.Name, DataRowVersion.Current]);
+                index++;
+            }
+
+            if (setSql.Count == 0) return;
+
+            string whereSql = BuildMySqlWhereClause(row, columns, primaryKeys, parameters, ref index);
+            string sql = "UPDATE " + GetMySqlQualifiedTableName(tableName) +
+                         " SET " + string.Join(", ", setSql) +
+                         " WHERE " + whereSql + " LIMIT 1;";
+            ExecMySqlOrThrow(sql, parameters);
+        }
+
+        private void ExecuteMySqlDelete(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
+        {
+            Dictionary<string, object> parameters = new Dictionary<string, object>();
+            int index = 0;
+            string whereSql = BuildMySqlWhereClause(row, columns, primaryKeys, parameters, ref index);
+            string sql = "DELETE FROM " + GetMySqlQualifiedTableName(tableName) +
+                         " WHERE " + whereSql + " LIMIT 1;";
+            ExecMySqlOrThrow(sql, parameters);
+        }
+
+        private string BuildMySqlWhereClause(
+            DataRow row,
+            List<TableColumnInfo> columns,
+            List<string> primaryKeys,
+            Dictionary<string, object> parameters,
+            ref int index)
+        {
+            List<string> targetColumns = primaryKeys.Count > 0
+                ? primaryKeys
+                : columns.Where(c => row.Table.Columns.Contains(c.Name)).Select(c => c.Name).ToList();
+            List<string> clauses = new List<string>();
+
+            foreach (string columnName in targetColumns)
+            {
+                object value = row[columnName, DataRowVersion.Original];
+                if (IsDbNull(value))
+                {
+                    clauses.Add(QuoteMySqlIdentifier(columnName) + " IS NULL");
+                }
+                else
+                {
+                    string parameterName = "p" + index;
+                    clauses.Add(QuoteMySqlIdentifier(columnName) + " = ?" + parameterName);
+                    parameters[parameterName] = NormalizeDbValue(value);
+                    index++;
+                }
+            }
+
+            if (clauses.Count == 0)
+            {
+                throw new Exception("無法建立安全的 WHERE 條件。");
+            }
+
+            return string.Join(" AND ", clauses);
+        }
+
+        private void ExecMySqlOrThrow(string sql, Dictionary<string, object> parameters)
+        {
+            Dictionary<string, string> result = _db.ExecSQL(sql, parameters);
+            if (!result.ContainsKey("status") || result["status"] != "OK")
+            {
+                string reason = result.ContainsKey("reason") ? result["reason"] : "未知錯誤";
+                throw new Exception(reason);
+            }
+        }
+
+        private static bool IsAddedRowEmpty(DataRow row, List<TableColumnInfo> columns)
+        {
+            foreach (TableColumnInfo column in columns)
+            {
+                if (!row.Table.Columns.Contains(column.Name)) continue;
+                if (!IsDbNull(row[column.Name, DataRowVersion.Current]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool HasColumnChanged(DataRow row, string columnName)
+        {
+            object original = row[columnName, DataRowVersion.Original];
+            object current = row[columnName, DataRowVersion.Current];
+            if (IsDbNull(original) && IsDbNull(current)) return false;
+            return !object.Equals(original, current);
+        }
+
+        private string GetMySqlQualifiedTableName(string tableName)
+        {
+            return QuoteMySqlIdentifier(_databaseName) + "." + QuoteMySqlIdentifier(tableName);
+        }
+
+        private static string QuoteMySqlIdentifier(string name)
+        {
+            return "`" + name.Replace("`", "``") + "`";
+        }
+
+        private static bool IsDbNull(object value)
+        {
+            return value == null || value == DBNull.Value;
+        }
+
+        private static object NormalizeDbValue(object value)
+        {
+            return IsDbNull(value) ? DBNull.Value : value;
         }
 
         private void AddNewRow()
