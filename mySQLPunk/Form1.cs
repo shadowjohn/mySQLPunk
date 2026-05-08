@@ -1328,6 +1328,16 @@ namespace mySQLPunk
 
         private void OpenSelectedTableInQuery()
         {
+            OpenSelectedTableQuery(false);
+        }
+
+        private void OpenSelectedTableAllColumnsInQuery()
+        {
+            OpenSelectedTableQuery(true);
+        }
+
+        private void OpenSelectedTableQuery(bool explicitColumns)
+        {
             if (db_tree.SelectedNode == null)
             {
                 return;
@@ -1360,9 +1370,11 @@ namespace mySQLPunk
             string host = connInfo.ContainsKey("host") && connInfo["host"] != null
                 ? connInfo["host"].ToString()
                 : string.Empty;
-            string initialSql = "SELECT * FROM " + QuoteDumpIdentifier((IDatabase)connInfo["pdo"], tableName) + ";";
+            IDatabase db = (IDatabase)connInfo["pdo"];
+            string initialSql = BuildTableSelectSql(db, dbName, tableName, explicitColumns);
 
-            OpenQuery((IDatabase)connInfo["pdo"], dbName, host, initialSql, true);
+            OpenQuery(db, dbName, host, initialSql, true);
+            UpdateMainStatus((explicitColumns ? "SELECT columns opened: " : "SELECT * opened: ") + tableName);
         }
 
         private void OpenSelectedViewInQuery()
@@ -1376,6 +1388,45 @@ namespace mySQLPunk
 
             string initialSql = "SELECT * FROM " + QuoteDumpIdentifier(selection.Database, selection.ObjectName) + ";";
             OpenQuery(selection.Database, selection.DatabaseName, selection.Host, initialSql, true);
+        }
+
+        private static string BuildTableSelectSql(IDatabase db, string databaseName, string tableName, bool explicitColumns)
+        {
+            if (!explicitColumns)
+            {
+                return "SELECT * FROM " + BuildQualifiedObjectName(db, databaseName, tableName) + ";";
+            }
+
+            string selectList = BuildTableSelectColumnList(db, databaseName, tableName);
+            return "SELECT " + selectList + Environment.NewLine +
+                   "FROM " + BuildQualifiedObjectName(db, databaseName, tableName) + ";";
+        }
+
+        private static string BuildTableSelectColumnList(IDatabase db, string databaseName, string tableName)
+        {
+            try
+            {
+                DataTable columns = db.GetColumns(databaseName, tableName);
+                List<string> names = new List<string>();
+                foreach (DataRow row in columns.Rows)
+                {
+                    string columnName = FirstColumnValue(row, "Field", "name", "Name", "COLUMN_NAME", "column_name");
+                    if (!string.IsNullOrWhiteSpace(columnName))
+                    {
+                        names.Add(QuoteDumpIdentifier(db, columnName));
+                    }
+                }
+
+                if (names.Count > 0)
+                {
+                    return string.Join(", ", names.ToArray());
+                }
+            }
+            catch
+            {
+            }
+
+            return "*";
         }
 
         private DatabaseObjectSelection GetSelectedDatabaseObject()
@@ -1825,6 +1876,57 @@ namespace mySQLPunk
                     MessageBox.Show("匯出 SQL 失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void DumpSelectedDatabaseSqlWithDialog()
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Backup.SelectDatabase"), Localization.T("Tool.DumpSql"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*";
+                dialog.DefaultExt = "sql";
+                dialog.FileName = target.DatabaseName + "_dump_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".sql";
+
+                if (dialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    DumpSelectedDatabaseSqlToFile(dialog.FileName);
+                    MessageBox.Show("SQL 檔案已匯出。", Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("匯出 SQL 失敗：" + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private bool DumpSelectedDatabaseSqlToFile(string targetPath)
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                return false;
+            }
+
+            string dir = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            File.WriteAllText(targetPath, BuildDatabaseDump(target.Database, target.DatabaseName), Encoding.UTF8);
+            UpdateMainStatus("SQL dump created: " + targetPath);
+            return true;
         }
 
         private void ImportSqlWithDialog()
@@ -2595,15 +2697,17 @@ namespace mySQLPunk
                 }
                 else if (groupName == "Tables")
                 {
-                    var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenTable"));
+                    var itemOpen = new ToolStripMenuItem(Localization.T("Tool.SelectStar"));
                     itemOpen.Click += (s, ev) => OpenSelectedTableInQuery();
                     cms.Items.Add(itemOpen);
+
+                    var itemSelectColumns = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
+                    itemSelectColumns.Click += (s, ev) => OpenSelectedTableAllColumnsInQuery();
+                    cms.Items.Add(itemSelectColumns);
 
                     var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                     itemDesign.Click += (s, ev) => DesignSelectedTable();
                     cms.Items.Add(itemDesign);
-
-                    cms.Items.Add(CreateTableDumpMenuItem());
 
                     var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                     itemDrop.Click += (s, ev) => DeleteSelectedTable();
@@ -4674,17 +4778,25 @@ namespace mySQLPunk
                 {
                     AddPasteObjectMenuItem(menu);
                 }
+                if (pathParts.Length == 2)
+                {
+                    ToolStripMenuItem dumpDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                    dumpDatabaseItem.Click += (s, ev) => DumpSelectedDatabaseSqlWithDialog();
+                    menu.Items.Add(dumpDatabaseItem);
+                }
                 if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                 {
-                    ToolStripMenuItem openTableItem = new ToolStripMenuItem(Localization.T("Tool.OpenTable"));
+                    ToolStripMenuItem openTableItem = new ToolStripMenuItem(Localization.T("Tool.SelectStar"));
                     openTableItem.Click += (s, ev) => OpenSelectedTableInQuery();
                     menu.Items.Add(openTableItem);
+
+                    ToolStripMenuItem selectColumnsItem = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
+                    selectColumnsItem.Click += (s, ev) => OpenSelectedTableAllColumnsInQuery();
+                    menu.Items.Add(selectColumnsItem);
 
                     ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                     designTableItem.Click += (s, ev) => DesignSelectedTable();
                     menu.Items.Add(designTableItem);
-
-                    menu.Items.Add(CreateTableDumpMenuItem());
 
                     AddCopyRenameObjectMenuItems(menu);
                 }

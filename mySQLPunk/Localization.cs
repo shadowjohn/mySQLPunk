@@ -70,6 +70,8 @@ namespace mySQLPunk
             Add("Tool.ExecuteFunction", "執行函式", "Execute Function");
             Add("Tool.EditConnection", "編輯連線", "Edit Connection");
             Add("Tool.DeleteConnection", "刪除連線", "Delete Connection");
+            Add("Tool.SelectStar", "SELECT *", "SELECT *");
+            Add("Tool.SelectAllColumns", "SELECT 全部欄位", "SELECT All Columns");
             Add("Tool.DumpSql", "傾印 SQL 檔案", "Dump SQL File");
             Add("Tool.CreateBackup", "建立備份", "Create Backup");
             Add("Tool.StructureAndData", "結構與資料", "Structure and Data");
