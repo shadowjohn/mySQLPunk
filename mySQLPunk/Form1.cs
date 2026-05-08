@@ -71,6 +71,34 @@ namespace mySQLPunk
             public Dictionary<string, object> ConnectionInfo;
         }
 
+        private static int GetConnectionIconIndex(string dbKind, bool isConnected)
+        {
+            switch ((dbKind ?? string.Empty).ToLowerInvariant())
+            {
+                case "mysql":
+                    return isConnected ? 1 : 0;
+                case "postgresql":
+                    return isConnected ? 3 : 2;
+                case "oracle":
+                    return isConnected ? 5 : 4;
+                case "sqlite":
+                    return isConnected ? 7 : 6;
+                case "mssql":
+                case "sqlserver":
+                    return isConnected ? 9 : 8;
+                default:
+                    return isConnected ? 11 : 10;
+            }
+        }
+
+        private static void ApplyConnectionNodeIcon(TreeNode node, string dbKind, bool isConnected)
+        {
+            if (node == null) return;
+            int iconIndex = GetConnectionIconIndex(dbKind, isConnected);
+            node.ImageIndex = iconIndex;
+            node.SelectedImageIndex = iconIndex;
+        }
+
         private class DatabaseObjectSelection
         {
             public IDatabase Database;
@@ -368,29 +396,10 @@ namespace mySQLPunk
             {
                 //From : https://stackoverflow.com/questions/3415354/how-to-avoid-winforms-treeview-icon-changes-when-item-selected
                 TreeNode newNode = new TreeNode(myN.connections[i]["conn_name"].ToString(), i, i);
-                switch (myN.connections[i]["db_kind"].ToString())
-                {
-                    case "mysql":
-                        newNode.ImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 0 : 1;
-                        newNode.SelectedImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 0 : 1;
-                        break;
-                    case "postgresql":
-                        newNode.ImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 2 : 3;
-                        newNode.SelectedImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 2 : 3;
-                        break;
-                    case "oracle":
-                        newNode.ImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 4 : 5;
-                        newNode.SelectedImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 4 : 5;
-                        break;
-                    case "sqlite":
-                        newNode.ImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 6 : 7;
-                        newNode.SelectedImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 6 : 7;
-                        break;
-                    case "sqlserver":
-                        newNode.ImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 8 : 9;
-                        newNode.SelectedImageIndex = (myN.connections[i]["isConnect"].ToString() == "F") ? 8 : 9;
-                        break;
-                }
+                ApplyConnectionNodeIcon(
+                    newNode,
+                    myN.connections[i]["db_kind"].ToString(),
+                    myN.connections[i]["isConnect"].ToString() != "F");
 
                 db_tree.Nodes.Add(newNode);
             }
@@ -4988,8 +4997,7 @@ namespace mySQLPunk
                                 {
                                     ((my_postgresql)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    db_tree.Nodes[index].SelectedImageIndex = 1;
-                                    db_tree.Nodes[index].ImageIndex = 1;
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
                                     //取得 databases 列表
                                     string SQL = @"
                                         SELECT
@@ -5013,8 +5021,7 @@ namespace mySQLPunk
                                 {
                                     Console.WriteLine(ex.Message);
                                     myN.connections[index]["isConnect"] = "F";
-                                    //db_tree.Nodes[index].ImageIndex = 0;
-                                    //db_tree.Nodes[index].SelectedImageIndex = 0;                                
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
                                     ((TreeView)sender).SelectedNode.Collapse();
                                 }
 
@@ -5034,8 +5041,7 @@ namespace mySQLPunk
                                 {
                                     ((my_sqlite)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    db_tree.Nodes[index].SelectedImageIndex = 1;
-                                    db_tree.Nodes[index].ImageIndex = 1;
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
                                     if (!((my_sqlite)myN.connections[index]["pdo"]).SpatiaLiteEnabled)
                                     {
                                         MessageBox.Show(
@@ -5066,8 +5072,7 @@ namespace mySQLPunk
                                 {
                                     Console.WriteLine(ex.Message);
                                     myN.connections[index]["isConnect"] = "F";
-                                    //db_tree.Nodes[index].ImageIndex = 0;
-                                    //db_tree.Nodes[index].SelectedImageIndex = 0;                                
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
                                     ((TreeView)sender).SelectedNode.Collapse();
                                 }
 
@@ -5090,8 +5095,7 @@ namespace mySQLPunk
                                 {
                                     ((my_mysql)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    db_tree.Nodes[index].SelectedImageIndex = 1;
-                                    db_tree.Nodes[index].ImageIndex = 1;
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
                                     //取得 databases 列表
                                     string SQL = @"
                                     show databases;
@@ -5112,8 +5116,7 @@ namespace mySQLPunk
                                 {
                                     Console.WriteLine(ex.Message);
                                     myN.connections[index]["isConnect"] = "F";
-                                    //db_tree.Nodes[index].ImageIndex = 0;
-                                    //db_tree.Nodes[index].SelectedImageIndex = 0;                                
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
                                     ((TreeView)sender).SelectedNode.Collapse();
                                 }
 
@@ -5131,8 +5134,7 @@ namespace mySQLPunk
                                 {
                                     ((my_oracle)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    db_tree.Nodes[index].SelectedImageIndex = 5;
-                                    db_tree.Nodes[index].ImageIndex = 5;
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
                                     List<string> schemas = ((my_oracle)myN.connections[index]["pdo"]).GetDatabases();
                                     for (int i = 0, max_i = schemas.Count; i < max_i; i++)
                                     {
@@ -5147,6 +5149,7 @@ namespace mySQLPunk
                                 {
                                     Console.WriteLine(ex.Message);
                                     myN.connections[index]["isConnect"] = "F";
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
                                     ((TreeView)sender).SelectedNode.Collapse();
                                 }
 
@@ -5182,8 +5185,7 @@ namespace mySQLPunk
                                 {
                                     ((my_mssql)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    db_tree.Nodes[index].SelectedImageIndex = 9;
-                                    db_tree.Nodes[index].ImageIndex = 9;
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
                                     //取得 databases 列表
                                     string SQL = @"
                                   select [name] as [Database] from sys.databases WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb')
@@ -5204,8 +5206,7 @@ namespace mySQLPunk
                                 {
                                     Console.WriteLine(ex.Message);
                                     myN.connections[index]["isConnect"] = "F";
-                                    //db_tree.Nodes[index].ImageIndex = 0;
-                                    //db_tree.Nodes[index].SelectedImageIndex = 0;                                
+                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
                                     ((TreeView)sender).SelectedNode.Collapse();
                                 }
 
