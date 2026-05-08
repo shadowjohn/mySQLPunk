@@ -2534,9 +2534,7 @@ namespace mySQLPunk
                     itemDesign.Click += (s, ev) => DesignSelectedTable();
                     cms.Items.Add(itemDesign);
 
-                    var itemDump = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
-                    itemDump.Click += (s, ev) => DumpSelectedTableSql(false);
-                    cms.Items.Add(itemDump);
+                    cms.Items.Add(CreateTableDumpMenuItem());
 
                     var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                     itemDrop.Click += (s, ev) => DeleteSelectedTable();
@@ -2582,6 +2580,21 @@ namespace mySQLPunk
                 ThemeManager.ApplyToolStrip(cms);
                 cms.Show(table_top, table_top.PointToClient(Cursor.Position));
             }
+        }
+
+        private ToolStripMenuItem CreateTableDumpMenuItem()
+        {
+            ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+
+            ToolStripMenuItem dumpStructureAndDataItem = new ToolStripMenuItem(Localization.T("Tool.StructureAndData"));
+            dumpStructureAndDataItem.Click += (s, ev) => DumpSelectedTableSql(false);
+            dumpSqlItem.DropDownItems.Add(dumpStructureAndDataItem);
+
+            ToolStripMenuItem dumpDataOnlyItem = new ToolStripMenuItem(Localization.T("Tool.DataOnly"));
+            dumpDataOnlyItem.Click += (s, ev) => DumpSelectedTableSql(true);
+            dumpSqlItem.DropDownItems.Add(dumpDataOnlyItem);
+
+            return dumpSqlItem;
         }
 
         private void table_top_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
@@ -4586,16 +4599,7 @@ namespace mySQLPunk
                         designTableItem.Click += (s, ev) => DesignSelectedTable();
                         menu.Items.Add(designTableItem);
 
-                        ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
-                        ToolStripMenuItem dumpStructureAndDataItem = new ToolStripMenuItem(Localization.T("Tool.StructureAndData"));
-                        dumpStructureAndDataItem.Click += (s, ev) => DumpSelectedTableSql(false);
-                        dumpSqlItem.DropDownItems.Add(dumpStructureAndDataItem);
-
-                        ToolStripMenuItem dumpDataOnlyItem = new ToolStripMenuItem(Localization.T("Tool.DataOnly"));
-                        dumpDataOnlyItem.Click += (s, ev) => DumpSelectedTableSql(true);
-                        dumpSqlItem.DropDownItems.Add(dumpDataOnlyItem);
-
-                        menu.Items.Add(dumpSqlItem);
+                        menu.Items.Add(CreateTableDumpMenuItem());
                     }
                     else if (pathParts.Length >= 4 && pathParts[2] == "Views")
                     {
