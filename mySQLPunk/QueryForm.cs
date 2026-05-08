@@ -1422,29 +1422,10 @@ namespace mySQLPunk
 
                 try
                 {
-                    StringBuilder sb = new StringBuilder();
-
-                    // 標頭
-                    for (int c = 0; c < dt.Columns.Count; c++)
-                    {
-                        if (c > 0) sb.Append(',');
-                        sb.Append(CsvEscape(dt.Columns[c].ColumnName));
-                    }
-                    sb.AppendLine();
-
-                    // 資料
-                    foreach (DataRow row in dt.Rows)
-                    {
-                        for (int c = 0; c < dt.Columns.Count; c++)
-                        {
-                            if (c > 0) sb.Append(',');
-                            sb.Append(CsvEscape(row[c]?.ToString() ?? ""));
-                        }
-                        sb.AppendLine();
-                    }
-
-                    File.WriteAllText(dlg.FileName, sb.ToString(), Encoding.UTF8);
-                    lblStatus.Text = string.Format("Exported {0} rows to {1}", dt.Rows.Count, dlg.FileName);
+                    int exportedRows;
+                    string csv = BuildCsv(dt, out exportedRows);
+                    File.WriteAllText(dlg.FileName, csv, Encoding.UTF8);
+                    lblStatus.Text = string.Format("Exported {0} rows to {1}", exportedRows, dlg.FileName);
                 }
                 catch (Exception ex)
                 {
@@ -1454,9 +1435,40 @@ namespace mySQLPunk
             }
         }
 
+        private static string BuildCsv(DataTable dt, out int exportedRows)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+
+            exportedRows = 0;
+            StringBuilder sb = new StringBuilder();
+
+            for (int c = 0; c < dt.Columns.Count; c++)
+            {
+                if (c > 0) sb.Append(',');
+                sb.Append(CsvEscape(dt.Columns[c].ColumnName));
+            }
+            sb.AppendLine();
+
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                for (int c = 0; c < dt.Columns.Count; c++)
+                {
+                    if (c > 0) sb.Append(',');
+                    sb.Append(CsvEscape(row[c] == DBNull.Value ? string.Empty : row[c].ToString()));
+                }
+                sb.AppendLine();
+                exportedRows++;
+            }
+
+            return sb.ToString();
+        }
+
         private static string CsvEscape(string value)
         {
-            if (value.Contains(",") || value.Contains("\"") || value.Contains("\n"))
+            value = value ?? string.Empty;
+            if (value.Contains(",") || value.Contains("\"") || value.Contains("\r") || value.Contains("\n"))
                 return "\"" + value.Replace("\"", "\"\"") + "\"";
             return value;
         }
