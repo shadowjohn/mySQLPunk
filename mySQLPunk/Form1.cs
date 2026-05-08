@@ -1175,32 +1175,46 @@ namespace mySQLPunk
 
         private void DeleteSelectedTable()
         {
-            if (db_tree.SelectedNode == null) return;
+            DropSelectedTable(true);
+        }
+
+        private bool DropSelectedTable(bool confirm)
+        {
+            if (db_tree.SelectedNode == null) return false;
             var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
             if (pathParts.Length < 4 || pathParts[2] != "Tables")
             {
                 MessageBox.Show("請先在左側選取一個具體的資料表 (Table)！");
-                return;
+                return false;
             }
 
             string dbName = pathParts[1];
             string tableName = pathParts[3];
-            
-            if (MessageBox.Show($"確定要刪除資料表 「{tableName}」嗎？此操作不可還原！", "警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
-            {
-                TreeNode root = db_tree.SelectedNode;
-                while (root.Parent != null) root = root.Parent;
-                IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
 
-                var res = db.ExecSQL("DROP TABLE " + BuildQualifiedObjectName(db, dbName, tableName));
-                if (res["status"] == "OK")
-                {
-                    MessageBox.Show("資料表已刪除。");
-                    // 重新整理樹狀目錄
-                    db_tree.SelectedNode.Parent.Nodes.Remove(db_tree.SelectedNode);
-                }
-                else MessageBox.Show("刪除失敗：" + res["reason"]);
+            if (confirm && MessageBox.Show($"確定要刪除資料表 「{tableName}」嗎？此操作不可還原！", "警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                return false;
             }
+
+            TreeNode selectedNode = db_tree.SelectedNode;
+            TreeNode parent = selectedNode.Parent;
+            TreeNode root = selectedNode;
+            while (root.Parent != null) root = root.Parent;
+            IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
+
+            var res = db.ExecSQL("DROP TABLE " + BuildQualifiedObjectName(db, dbName, tableName));
+            if (res.ContainsKey("status") && res["status"] == "OK")
+            {
+                parent.Nodes.Remove(selectedNode);
+                db_tree.SelectedNode = parent;
+                ShowDatabaseGroupList(db, dbName, "Tables");
+                UpdateMainStatus("Table deleted: " + tableName);
+                if (confirm) MessageBox.Show("資料表已刪除。");
+                return true;
+            }
+
+            MessageBox.Show("刪除失敗：" + (res.ContainsKey("reason") ? res["reason"] : "unknown error"));
+            return false;
         }
 
         private void queryTabs_MouseClick(object sender, MouseEventArgs e)
@@ -4985,6 +4999,10 @@ namespace mySQLPunk
                     ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                     designTableItem.Click += (s, ev) => DesignSelectedTable();
                     menu.Items.Add(designTableItem);
+
+                    ToolStripMenuItem deleteTableItem = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
+                    deleteTableItem.Click += (s, ev) => DeleteSelectedTable();
+                    menu.Items.Add(deleteTableItem);
 
                     AddCopyRenameObjectMenuItems(menu);
                 }
