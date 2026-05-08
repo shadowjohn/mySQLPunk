@@ -70,6 +70,16 @@ namespace mySQLPunk
             public TreeNode DatabaseNode;
         }
 
+        private class DatabaseObjectSelection
+        {
+            public IDatabase Database;
+            public string DatabaseName;
+            public string ObjectName;
+            public string GroupName;
+            public string Host;
+            public TreeNode Node;
+        }
+
         public Form1()
         {
             Localization.Load();
@@ -188,6 +198,28 @@ namespace mySQLPunk
                                 }
                                 ((ToolStripButton)displayTools[k][2]).Enabled = true; //New View
                                 ((ToolStripButton)displayTools[k][4]).Enabled = true; //View Export Wizard
+                            }
+                            else
+                            {
+                                foreach (var item in displayTools[k])
+                                {
+                                    ((ToolStripButton)item).Visible = false;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                case "點到View本身":
+                    {
+                        foreach (var k in displayTools.Keys)
+                        {
+                            if (k == "views")
+                            {
+                                foreach (var item in displayTools[k])
+                                {
+                                    ((ToolStripButton)item).Visible = true;
+                                    ((ToolStripButton)item).Enabled = true;
+                                }
                             }
                             else
                             {
@@ -622,8 +654,17 @@ namespace mySQLPunk
             ConfigureMainToolbar(imgPath);
             ApplyLanguage();
 
-            // 連結 Design Table 事件
+            // 連結第二層工具列事件
+            OpenTable.Click += (s, e) => OpenSelectedTableInQuery();
             DesignTable.Click += DesignTable_Click;
+            NewTable.Click += (s, e) => CreateNewTable();
+            DeleteTable.Click += (s, e) => DeleteSelectedTable();
+            ExportWizard.Click += (s, e) => DumpSelectedTableSql(false);
+            OpenView.Click += (s, e) => OpenSelectedViewInQuery();
+            DesignView.Click += (s, e) => ShowSelectedViewDefinition();
+            NewView.Click += (s, e) => CreateNewView();
+            DeleteView.Click += (s, e) => DeleteSelectedView();
+            View_ExportWizard.Click += (s, e) => DumpSelectedViewSql();
 
             // 連結右鍵選單事件
             db_tree.NodeMouseClick += db_tree_NodeMouseClick;
@@ -652,9 +693,6 @@ namespace mySQLPunk
             closeToolStripMenuItem.Click -= CloseToolStripMenuItem_Click;
             closeToolStripMenuItem.Click += CloseToolStripMenuItem_Click;
 
-            // 連結工具列事件
-            NewTable.Click += (s, e) => CreateNewTable();
-            DeleteTable.Click += (s, e) => DeleteSelectedTable();
         }
 
         private void ConfigureMainMenu()
@@ -816,7 +854,11 @@ namespace mySQLPunk
         {
             if (db_tree.SelectedNode == null) return;
             var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-            if (pathParts.Length < 4 || pathParts[2] != "Tables") return;
+            if (pathParts.Length < 4 || pathParts[2] != "Tables")
+            {
+                MessageBox.Show("請先在左側選取一個具體的資料表 (Table)！");
+                return;
+            }
 
             string dbName = pathParts[1];
             string tableName = pathParts[3];
@@ -827,7 +869,7 @@ namespace mySQLPunk
                 while (root.Parent != null) root = root.Parent;
                 IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
 
-                var res = db.ExecSQL($"DROP TABLE `{dbName}`.`{tableName}`");
+                var res = db.ExecSQL("DROP TABLE " + BuildQualifiedObjectName(db, dbName, tableName));
                 if (res["status"] == "OK")
                 {
                     MessageBox.Show("資料表已刪除。");
@@ -1187,6 +1229,112 @@ namespace mySQLPunk
             OpenQuery((IDatabase)connInfo["pdo"], dbName, host, initialSql, true);
         }
 
+        private void OpenSelectedViewInQuery()
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection == null || selection.GroupName != "Views")
+            {
+                MessageBox.Show("請先在左側選取一個具體的檢視 (View)！");
+                return;
+            }
+
+            string initialSql = "SELECT * FROM " + QuoteDumpIdentifier(selection.Database, selection.ObjectName) + ";";
+            OpenQuery(selection.Database, selection.DatabaseName, selection.Host, initialSql, true);
+        }
+
+        private DatabaseObjectSelection GetSelectedDatabaseObject()
+        {
+            if (db_tree.SelectedNode == null) return null;
+
+            TreeNode node = db_tree.SelectedNode;
+            var pathParts = my.explode("\\", node.FullPath);
+            if (pathParts.Length < 4) return null;
+            if (pathParts[2] != "Tables" && pathParts[2] != "Views") return null;
+
+            TreeNode root = node;
+            while (root.Parent != null) root = root.Parent;
+            var connInfo = myN.connections[root.Index];
+            if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return null;
+
+            return new DatabaseObjectSelection
+            {
+                Database = db,
+                DatabaseName = pathParts[1],
+                ObjectName = pathParts[3],
+                GroupName = pathParts[2],
+                Host = connInfo.ContainsKey("host") && connInfo["host"] != null ? connInfo["host"].ToString() : string.Empty,
+                Node = node
+            };
+        }
+
+        private void ShowSelectedViewDefinition()
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection == null || selection.GroupName != "Views")
+            {
+                MessageBox.Show("請先在左側選取一個具體的檢視 (View)！");
+                return;
+            }
+
+            lblSidebarTitle.Text = "View: " + selection.ObjectName;
+            ShowDatabaseGroupList(selection.Database, selection.DatabaseName, "Views");
+            ShowViewDetails(selection.Database, selection.DatabaseName, selection.ObjectName);
+            btnDDL.PerformClick();
+        }
+
+        private void CreateNewView()
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                MessageBox.Show("請先選取一個已展開的資料庫或 Views 節點。", "新增檢視", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string initialSql = "CREATE VIEW " + QuoteDumpIdentifier(target.Database, "new_view") + " AS" + Environment.NewLine +
+                                "SELECT *" + Environment.NewLine +
+                                "FROM " + QuoteDumpIdentifier(target.Database, "table_name") + ";";
+            OpenQuery(target.Database, target.DatabaseName, string.Empty, initialSql, true);
+            UpdateMainStatus("New view SQL template opened.");
+        }
+
+        private void DeleteSelectedView()
+        {
+            DropSelectedView(true);
+        }
+
+        private bool DropSelectedView(bool confirm)
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection == null || selection.GroupName != "Views")
+            {
+                MessageBox.Show("請先在左側選取一個具體的檢視 (View)！");
+                return false;
+            }
+
+            if (confirm && MessageBox.Show($"確定要刪除檢視 「{selection.ObjectName}」嗎？此操作不可還原！", "警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                return false;
+            }
+
+            var res = selection.Database.ExecSQL("DROP VIEW " + BuildQualifiedObjectName(selection.Database, selection.DatabaseName, selection.ObjectName));
+            if (res.ContainsKey("status") && res["status"] == "OK")
+            {
+                TreeNode parent = db_tree.SelectedNode.Parent;
+                parent.Nodes.Remove(db_tree.SelectedNode);
+                db_tree.SelectedNode = parent;
+                ShowDatabaseGroupList(selection.Database, selection.DatabaseName, "Views");
+                UpdateMainStatus("View deleted: " + selection.ObjectName);
+                if (confirm) MessageBox.Show("檢視已刪除。");
+                return true;
+            }
+            else
+            {
+                MessageBox.Show("刪除失敗：" + (res.ContainsKey("reason") ? res["reason"] : "unknown error"));
+                return false;
+            }
+        }
+
         private void OpenQuery(IDatabase db, string dbName, string host, string initialSql, bool docked)
         {
             QueryForm queryForm = new QueryForm(db, dbName, host, initialSql);
@@ -1423,6 +1571,39 @@ namespace mySQLPunk
             }
         }
 
+        private void DumpSelectedViewSql()
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection == null || selection.GroupName != "Views")
+            {
+                MessageBox.Show("請先在左側選取一個具體的檢視 (View)！");
+                return;
+            }
+
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Filter = "SQL files (*.sql)|*.sql";
+                dialog.DefaultExt = "sql";
+                dialog.FileName = selection.DatabaseName + "_" + selection.ObjectName + "_view.sql";
+
+                if (dialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    string sql = BuildViewDump(selection.Database, selection.DatabaseName, selection.ObjectName);
+                    File.WriteAllText(dialog.FileName, sql, Encoding.UTF8);
+                    MessageBox.Show("SQL 檔案已匯出。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("匯出 SQL 失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
         private static string BuildTableDump(IDatabase db, string databaseName, string tableName, bool dataOnly)
         {
             StringBuilder builder = new StringBuilder();
@@ -1486,6 +1667,29 @@ namespace mySQLPunk
             return builder.ToString();
         }
 
+        private static string BuildViewDump(IDatabase db, string databaseName, string viewName)
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("-- mySQLPunk SQL Dump");
+            builder.AppendLine("-- Provider: " + db.ProviderName);
+            builder.AppendLine("-- Database: " + databaseName);
+            builder.AppendLine("-- View: " + viewName);
+            if (db is my_mysql)
+            {
+                builder.AppendLine("SET NAMES utf8mb4;");
+                builder.AppendLine("USE " + QuoteDumpIdentifier(db, databaseName) + ";");
+            }
+            builder.AppendLine();
+
+            string ddl = db.GetViewCreateStatement(databaseName, viewName);
+            if (!string.IsNullOrWhiteSpace(ddl))
+            {
+                builder.AppendLine(ddl.TrimEnd().TrimEnd(';') + ";");
+            }
+
+            return builder.ToString();
+        }
+
         private static string QuoteDumpIdentifier(IDatabase db, string name)
         {
             if (db is my_mysql)
@@ -1501,6 +1705,31 @@ namespace mySQLPunk
                 return "\"" + name.Replace("\"", "\"\"") + "\"";
             }
             return name;
+        }
+
+        private static string BuildQualifiedObjectName(IDatabase db, string databaseName, string objectName)
+        {
+            if (db is my_mysql)
+            {
+                return QuoteDumpIdentifier(db, databaseName) + "." + QuoteDumpIdentifier(db, objectName);
+            }
+            if (db is my_mssql)
+            {
+                return QuoteDumpIdentifier(db, databaseName) + ".[dbo]." + QuoteDumpIdentifier(db, objectName);
+            }
+            if (db is my_postgresql)
+            {
+                return "\"public\"." + QuoteDumpIdentifier(db, objectName);
+            }
+            if (db is my_sqlite)
+            {
+                return QuoteDumpIdentifier(db, objectName);
+            }
+            if (db is my_oracle)
+            {
+                return QuoteDumpIdentifier(db, databaseName) + "." + QuoteDumpIdentifier(db, objectName);
+            }
+            return QuoteDumpIdentifier(db, objectName);
         }
 
         private static string ToSqlLiteral(object value)
@@ -1640,6 +1869,7 @@ namespace mySQLPunk
                     lblSidebarTitle.Text = $"Database: {dbName}";
                     ShowDatabaseObjectList(db, dbName);
                     ShowDatabaseInfo(db, dbName);
+                    showTools("點到展開的資料庫");
                 }
                 else if (pathParts.Length == 3)
                 {
@@ -1647,6 +1877,9 @@ namespace mySQLPunk
                     lblSidebarTitle.Text = $"{groupName}: {dbName}";
                     ShowDatabaseGroupList(db, dbName, groupName);
                     ShowDatabaseInfo(db, dbName);
+                    if (groupName == "Tables") showTools("點到Tables");
+                    else if (groupName == "Views") showTools("點到Views本身");
+                    else if (groupName == "Functions") showTools("點到Functions本身");
                 }
                 
                 // 如果是 Table 節點，則側邊欄顯示 Table 詳情
@@ -1657,6 +1890,7 @@ namespace mySQLPunk
                     // 只有當 table_top 還沒載入過或是不同 DB 時才重載列表
                     ShowDatabaseObjectList(db, dbName); 
                     ShowTableDetails(db, dbName, tableName);
+                    showTools("點到Table本身");
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Views")
                 {
@@ -1664,6 +1898,7 @@ namespace mySQLPunk
                     lblSidebarTitle.Text = $"View: {viewName}";
                     ShowDatabaseGroupList(db, dbName, "Views");
                     ShowViewDetails(db, dbName, viewName);
+                    showTools("點到View本身");
                 }
             }
         }
@@ -1676,41 +1911,94 @@ namespace mySQLPunk
                 table_top.Rows[e.RowIndex].Selected = true;
                 
                 // 選取對應的 TreeView 節點以保持同步
-                string tableName = table_top.Rows[e.RowIndex].Cells["名稱"].Value.ToString();
-                SyncTreeWithTable(tableName);
+                string objectName = table_top.Rows[e.RowIndex].Cells["名稱"].Value.ToString();
+                string groupName = GetCurrentGridGroupName(e.RowIndex);
+                SyncTreeWithDatabaseObject(objectName, groupName);
 
                 var cms = new ContextMenuStrip();
-                var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenTable"));
-                itemOpen.Click += (s, ev) => OpenSelectedTableInQuery();
-                cms.Items.Add(itemOpen);
-                
-                var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
-                itemDesign.Click += (s, ev) => DesignSelectedTable();
-                cms.Items.Add(itemDesign);
+                if (groupName == "Views")
+                {
+                    var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenView"));
+                    itemOpen.Click += (s, ev) => OpenSelectedViewInQuery();
+                    cms.Items.Add(itemOpen);
 
-                var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
-                itemDrop.Click += (s, ev) => DeleteSelectedTable();
-                cms.Items.Add(itemDrop);
+                    var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
+                    itemDesign.Click += (s, ev) => ShowSelectedViewDefinition();
+                    cms.Items.Add(itemDesign);
+
+                    var itemDump = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                    itemDump.Click += (s, ev) => DumpSelectedViewSql();
+                    cms.Items.Add(itemDump);
+
+                    var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
+                    itemDrop.Click += (s, ev) => DeleteSelectedView();
+                    cms.Items.Add(itemDrop);
+                }
+                else if (groupName == "Tables")
+                {
+                    var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenTable"));
+                    itemOpen.Click += (s, ev) => OpenSelectedTableInQuery();
+                    cms.Items.Add(itemOpen);
+
+                    var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
+                    itemDesign.Click += (s, ev) => DesignSelectedTable();
+                    cms.Items.Add(itemDesign);
+
+                    var itemDump = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                    itemDump.Click += (s, ev) => DumpSelectedTableSql(false);
+                    cms.Items.Add(itemDump);
+
+                    var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
+                    itemDrop.Click += (s, ev) => DeleteSelectedTable();
+                    cms.Items.Add(itemDrop);
+                }
                 
                 ThemeManager.ApplyToolStrip(cms);
                 cms.Show(table_top, table_top.PointToClient(Cursor.Position));
             }
         }
 
-        private void SyncTreeWithTable(string tableName)
+        private string GetCurrentGridGroupName(int rowIndex)
+        {
+            if (table_top.Columns.Contains("類型") && rowIndex >= 0 && rowIndex < table_top.Rows.Count)
+            {
+                object typeValue = table_top.Rows[rowIndex].Cells["類型"].Value;
+                if (typeValue != null && string.Equals(typeValue.ToString(), "View", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Views";
+                }
+            }
+
+            if (db_tree.SelectedNode != null)
+            {
+                var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables"))
+                {
+                    return pathParts[2];
+                }
+            }
+
+            return "Tables";
+        }
+
+        private void SyncTreeWithDatabaseObject(string objectName, string groupName)
         {
             if (db_tree.SelectedNode == null) return;
-            TreeNode parent = db_tree.SelectedNode;
-            // 如果選到的是 DB 節點，則找 Tables 節點
-            if (parent.Nodes.Count > 0 && parent.Nodes[0].Text == "Tables") parent = parent.Nodes[0];
-            // 如果選到的是 Tables 節點，則直接找子節點
-            
-            foreach (TreeNode node in parent.Nodes)
+
+            TreeNode databaseNode = GetSelectedDatabaseNode();
+            if (databaseNode == null) return;
+
+            foreach (TreeNode group in databaseNode.Nodes)
             {
-                if (node.Text == tableName)
+                if (!string.Equals(group.Text, groupName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                foreach (TreeNode node in group.Nodes)
                 {
-                    db_tree.SelectedNode = node;
-                    break;
+                    if (node.Text == objectName)
+                    {
+                        db_tree.SelectedNode = node;
+                        return;
+                    }
                 }
             }
         }
@@ -2240,6 +2528,24 @@ namespace mySQLPunk
 
                         menu.Items.Add(dumpSqlItem);
                     }
+                    else if (pathParts.Length >= 4 && pathParts[2] == "Views")
+                    {
+                        ToolStripMenuItem openViewItem = new ToolStripMenuItem(Localization.T("Tool.OpenView"));
+                        openViewItem.Click += (s, ev) => OpenSelectedViewInQuery();
+                        menu.Items.Add(openViewItem);
+
+                        ToolStripMenuItem designViewItem = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
+                        designViewItem.Click += (s, ev) => ShowSelectedViewDefinition();
+                        menu.Items.Add(designViewItem);
+
+                        ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                        dumpSqlItem.Click += (s, ev) => DumpSelectedViewSql();
+                        menu.Items.Add(dumpSqlItem);
+
+                        ToolStripMenuItem deleteViewItem = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
+                        deleteViewItem.Click += (s, ev) => DeleteSelectedView();
+                        menu.Items.Add(deleteViewItem);
+                    }
                 }
 
                 if (menu.Items.Count == 0)
@@ -2452,8 +2758,9 @@ namespace mySQLPunk
             }
             if (m.Length == 4)
             {
-                // 代表是資料表層級 -> 直接開啟
-                OpenSelectedTableInQuery();
+                // 代表是資料表或檢視層級 -> 直接開啟
+                if (m[2] == "Views") OpenSelectedViewInQuery();
+                else OpenSelectedTableInQuery();
                 dialogMyBoxOff();
                 return;
             }
