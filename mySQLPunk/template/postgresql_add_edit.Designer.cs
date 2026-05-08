@@ -106,7 +106,7 @@
             this.postgresql_port.Name = "postgresql_port";
             this.postgresql_port.Size = new System.Drawing.Size(55, 27);
             this.postgresql_port.TabIndex = 7;
-            this.postgresql_port.Text = "3306";
+            this.postgresql_port.Text = "5432";
             // 
             // postgresql_host
             // 
@@ -225,7 +225,7 @@
             this.postgresql_initial_database.Name = "postgresql_initial_database";
             this.postgresql_initial_database.Size = new System.Drawing.Size(167, 27);
             this.postgresql_initial_database.TabIndex = 11;
-            this.postgresql_initial_database.Text = "template1";
+            this.postgresql_initial_database.Text = "postgres";
             // 
             // postgresql_add_edit
             // 

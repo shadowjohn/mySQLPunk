@@ -106,7 +106,7 @@ namespace mySQLPunk
             Add("Common.ConnectionNameColon", "連線名稱:", "Connection Name:");
             Add("Common.Host", "主機 / IP", "Host / IP");
             Add("Common.HostName", "主機名稱 / IP 位址", "Host Name / IP Address");
-            Add("Common.HostNameColon", "主機名稱/IP 位址:", "Host Name/IP Address:");
+            Add("Common.HostNameColon", "主機名稱 / IP 位址:", "Host Name/IP Address:");
             Add("Common.Port", "連接埠", "Port");
             Add("Common.PortColon", "連接埠:", "Port:");
             Add("Common.InitialDatabase", "初始資料庫", "Initial Database");
@@ -132,6 +132,7 @@ namespace mySQLPunk
             Add("Common.SQLiteFile", "SQLite 檔案", "SQLite File");
             Add("Common.InitGeospatial", "初始化 geospatial / SpatiaLite metadata", "Initialize geospatial / SpatiaLite metadata");
             Add("Common.ServiceName", "Service Name", "Service Name");
+            Add("Common.ServiceNameSid", "Service Name / SID", "Service Name/SID");
             Add("Common.SID", "SID", "SID");
             Add("Common.ConnectionType", "連線類型", "Connection Type");
             Add("Common.NetServiceName", "Net Service Name", "Net Service Name");

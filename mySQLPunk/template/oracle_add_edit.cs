@@ -27,7 +27,7 @@ namespace mySQLPunk.template
         private void oracle_add_edit_Load(object sender, EventArgs e)
         {
             comboBox1.DropDownStyle = ComboBoxStyle.DropDown;
-            label4.Text = "Port:";
+            label4.Text = Localization.T("Common.PortColon");
 
             if (oracle_connection_type.SelectedIndex < 0)
             {

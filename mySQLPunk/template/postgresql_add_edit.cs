@@ -32,8 +32,8 @@ namespace mySQLPunk.template
             Dictionary<string, object> conn = F1.get_connection(editIndex);
             postgresql_connection_name.Text = GetValue(conn, "conn_name");
             postgresql_host.Text = GetValue(conn, "host");
-            postgresql_port.Text = GetValue(conn, "port");
-            postgresql_initial_database.Text = GetValue(conn, "initial_database");
+            postgresql_port.Text = string.IsNullOrWhiteSpace(GetValue(conn, "port")) ? "5432" : GetValue(conn, "port");
+            postgresql_initial_database.Text = string.IsNullOrWhiteSpace(GetValue(conn, "initial_database")) ? "postgres" : GetValue(conn, "initial_database");
             postgresql_username.Text = GetValue(conn, "username");
             postgresql_pwd.Text = GetValue(conn, "pwd");
         }
