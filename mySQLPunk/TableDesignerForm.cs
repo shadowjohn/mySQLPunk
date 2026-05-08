@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
+using System.Text;
 using System.Windows.Forms;
 using mySQLPunk.lib;
 using System.Diagnostics;
@@ -1955,7 +1956,8 @@ namespace mySQLPunk
 
             try
             {
-                foreach (string statement in SplitSqlStatements(sql))
+                List<string> statements = _db is my_mssql ? SplitSqlServerStatements(sql) : SplitSqlStatements(sql);
+                foreach (string statement in statements)
                 {
                     if (string.IsNullOrWhiteSpace(statement)) continue;
 
@@ -2169,6 +2171,63 @@ namespace mySQLPunk
             string last = sql.Substring(start).Trim();
             if (last.Length > 0) statements.Add(last);
             return statements;
+        }
+
+        private static List<string> SplitSqlServerStatements(string sql)
+        {
+            List<string> statements = new List<string>();
+            StringBuilder pending = new StringBuilder();
+            string normalizedSql = (sql ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+            string[] lines = normalizedSql.Split('\n');
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                string trimmed = line.TrimStart();
+                if (StartsSqlServerDesignerBatch(trimmed))
+                {
+                    FlushSplitStatements(pending, statements);
+
+                    StringBuilder batch = new StringBuilder();
+                    batch.AppendLine(line);
+                    while (i + 1 < lines.Length)
+                    {
+                        i++;
+                        batch.AppendLine(lines[i]);
+                        string batchLine = lines[i].TrimStart();
+                        if (batchLine.StartsWith("IF @constraintName", StringComparison.OrdinalIgnoreCase) ||
+                            batchLine.StartsWith("IF @primaryKeyName", StringComparison.OrdinalIgnoreCase))
+                        {
+                            break;
+                        }
+                    }
+
+                    string batchSql = batch.ToString().Trim();
+                    if (!string.IsNullOrWhiteSpace(batchSql)) statements.Add(batchSql);
+                    continue;
+                }
+
+                pending.AppendLine(line);
+            }
+
+            FlushSplitStatements(pending, statements);
+            return statements;
+        }
+
+        private static bool StartsSqlServerDesignerBatch(string statement)
+        {
+            return statement.StartsWith("DECLARE @constraintName", StringComparison.OrdinalIgnoreCase) ||
+                   statement.StartsWith("DECLARE @primaryKeyName", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void FlushSplitStatements(StringBuilder pending, List<string> statements)
+        {
+            if (pending.Length == 0) return;
+            foreach (string statement in SplitSqlStatements(pending.ToString()))
+            {
+                if (!string.IsNullOrWhiteSpace(statement)) statements.Add(statement);
+            }
+            pending.Clear();
         }
 
         private void AddColumn(bool insert)
