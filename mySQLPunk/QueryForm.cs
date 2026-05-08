@@ -895,12 +895,17 @@ namespace mySQLPunk
             }
             finally
             {
-                tsBtnExecute.Enabled = true;
-                tsBtnCancel.Enabled = false;
-                tsBtnRefresh.Enabled = true;
-                btnDataRefresh.Enabled = true;
-                _cts?.Dispose();
+                if (!IsDisposed && !Disposing)
+                {
+                    tsBtnExecute.Enabled = true;
+                    tsBtnCancel.Enabled = false;
+                    tsBtnRefresh.Enabled = true;
+                    btnDataRefresh.Enabled = true;
+                }
+
+                CancellationTokenSource cts = _cts;
                 _cts = null;
+                cts?.Dispose();
             }
         }
 
@@ -1450,8 +1455,10 @@ namespace mySQLPunk
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
-            _cts?.Cancel();
-            _cts?.Dispose();
+            CancellationTokenSource cts = _cts;
+            _cts = null;
+            cts?.Cancel();
+            cts?.Dispose();
             if (_mainHost != null)
             {
                 _mainHost.NotifyDockableFormClosed(this);

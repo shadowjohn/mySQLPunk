@@ -255,6 +255,28 @@ namespace mySQLPunk
                         }
                     }
                     break;
+                case "點到Function本身":
+                    {
+                        foreach (var k in displayTools.Keys)
+                        {
+                            if (k == "functions")
+                            {
+                                foreach (var item in displayTools[k])
+                                {
+                                    ((ToolStripButton)item).Visible = true;
+                                    ((ToolStripButton)item).Enabled = true;
+                                }
+                            }
+                            else
+                            {
+                                foreach (var item in displayTools[k])
+                                {
+                                    ((ToolStripButton)item).Visible = false;
+                                }
+                            }
+                        }
+                    }
+                    break;
             }
         }
         public void UpdateMainStatus(string msg)
@@ -667,6 +689,10 @@ namespace mySQLPunk
             NewView.Click += (s, e) => CreateNewView();
             DeleteView.Click += (s, e) => DeleteSelectedView();
             View_ExportWizard.Click += (s, e) => DumpSelectedViewSql();
+            DesignFunction.Click += (s, e) => ShowSelectedFunctionDefinition();
+            NewFunction.Click += (s, e) => CreateNewFunction();
+            DeleteFunction.Click += (s, e) => DeleteSelectedFunction();
+            ExecuteFunction.Click += (s, e) => ExecuteSelectedFunction();
 
             // 連結右鍵選單事件
             db_tree.NodeMouseClick += db_tree_NodeMouseClick;
@@ -1251,7 +1277,7 @@ namespace mySQLPunk
             TreeNode node = db_tree.SelectedNode;
             var pathParts = my.explode("\\", node.FullPath);
             if (pathParts.Length < 4) return null;
-            if (pathParts[2] != "Tables" && pathParts[2] != "Views") return null;
+            if (pathParts[2] != "Tables" && pathParts[2] != "Views" && pathParts[2] != "Functions") return null;
 
             TreeNode root = node;
             while (root.Parent != null) root = root.Parent;
@@ -1298,6 +1324,91 @@ namespace mySQLPunk
                                 "FROM " + QuoteDumpIdentifier(target.Database, "table_name") + ";";
             OpenQuery(target.Database, target.DatabaseName, string.Empty, initialSql, true);
             UpdateMainStatus("New view SQL template opened.");
+        }
+
+        private void CreateNewFunction()
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                MessageBox.Show("請先選取一個已展開的資料庫或 Functions 節點。", "新增函式", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), BuildFunctionTemplate(target.Database, target.DatabaseName), true);
+            UpdateMainStatus("New function SQL template opened.");
+        }
+
+        private void ShowSelectedFunctionDefinition()
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection == null || selection.GroupName != "Functions")
+            {
+                MessageBox.Show("請先在左側選取一個具體的函式或程序 (Function/Procedure)！");
+                return;
+            }
+
+            lblSidebarTitle.Text = "Function: " + selection.ObjectName;
+            ShowDatabaseGroupList(selection.Database, selection.DatabaseName, "Functions");
+            ShowFunctionDetails(selection.Database, selection.DatabaseName, selection.ObjectName);
+            btnDDL.PerformClick();
+        }
+
+        private void ExecuteSelectedFunction()
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection == null || selection.GroupName != "Functions")
+            {
+                MessageBox.Show("請先在左側選取一個具體的函式或程序 (Function/Procedure)！");
+                return;
+            }
+
+            string initialSql = BuildFunctionExecuteSql(selection.Database, selection.DatabaseName, selection.ObjectName, GetSelectedFunctionType(selection));
+            OpenQuery(selection.Database, selection.DatabaseName, selection.Host, initialSql, true);
+            UpdateMainStatus("Function execution SQL opened: " + selection.ObjectName);
+        }
+
+        private void DeleteSelectedFunction()
+        {
+            DropSelectedFunction(true);
+        }
+
+        private bool DropSelectedFunction(bool confirm)
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection == null || selection.GroupName != "Functions")
+            {
+                MessageBox.Show("請先在左側選取一個具體的函式或程序 (Function/Procedure)！");
+                return false;
+            }
+
+            if (selection.Database is my_sqlite)
+            {
+                MessageBox.Show("SQLite 不支援資料庫內建 stored function。", "刪除函式", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            if (confirm && MessageBox.Show($"確定要刪除函式或程序「{selection.ObjectName}」嗎？此操作不可還原！", "警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                return false;
+            }
+
+            string routineType = GetSelectedFunctionType(selection);
+            string dropKind = IsProcedureRoutine(routineType) ? "PROCEDURE" : "FUNCTION";
+            Dictionary<string, string> res = selection.Database.ExecSQL("DROP " + dropKind + " " + BuildQualifiedObjectName(selection.Database, selection.DatabaseName, selection.ObjectName));
+            if (res.ContainsKey("status") && res["status"] == "OK")
+            {
+                TreeNode parent = db_tree.SelectedNode.Parent;
+                parent.Nodes.Remove(db_tree.SelectedNode);
+                db_tree.SelectedNode = parent;
+                ShowDatabaseGroupList(selection.Database, selection.DatabaseName, "Functions");
+                UpdateMainStatus("Function deleted: " + selection.ObjectName);
+                if (confirm) MessageBox.Show("函式或程序已刪除。");
+                return true;
+            }
+
+            MessageBox.Show("刪除失敗：" + (res.ContainsKey("reason") ? res["reason"] : "unknown error"));
+            return false;
         }
 
         private void DeleteSelectedView()
@@ -2016,6 +2127,112 @@ namespace mySQLPunk
             return QuoteDumpIdentifier(db, objectName);
         }
 
+        private static string BuildFunctionTemplate(IDatabase db, string databaseName)
+        {
+            if (db is my_sqlite)
+            {
+                return "-- SQLite does not store functions in the database schema." + Environment.NewLine +
+                       "-- Application-defined SQLite functions must be registered by the client connection." + Environment.NewLine +
+                       "SELECT 1;";
+            }
+
+            if (db is my_mysql)
+            {
+                return "DELIMITER $$" + Environment.NewLine +
+                       "CREATE FUNCTION " + QuoteDumpIdentifier(db, "new_function") + "()" + Environment.NewLine +
+                       "RETURNS INT" + Environment.NewLine +
+                       "DETERMINISTIC" + Environment.NewLine +
+                       "BEGIN" + Environment.NewLine +
+                       "    RETURN 1;" + Environment.NewLine +
+                       "END$$" + Environment.NewLine +
+                       "DELIMITER ;";
+            }
+
+            if (db is my_postgresql)
+            {
+                return "CREATE OR REPLACE FUNCTION \"public\"." + QuoteDumpIdentifier(db, "new_function") + "()" + Environment.NewLine +
+                       "RETURNS integer" + Environment.NewLine +
+                       "LANGUAGE sql" + Environment.NewLine +
+                       "AS $$" + Environment.NewLine +
+                       "    SELECT 1;" + Environment.NewLine +
+                       "$$;";
+            }
+
+            if (db is my_mssql)
+            {
+                return "CREATE FUNCTION [dbo]." + QuoteDumpIdentifier(db, "new_function") + "()" + Environment.NewLine +
+                       "RETURNS INT" + Environment.NewLine +
+                       "AS" + Environment.NewLine +
+                       "BEGIN" + Environment.NewLine +
+                       "    RETURN 1;" + Environment.NewLine +
+                       "END;";
+            }
+
+            if (db is my_oracle)
+            {
+                string owner = string.IsNullOrWhiteSpace(databaseName) ? "USER" : QuoteDumpIdentifier(db, databaseName.ToUpperInvariant());
+                return "CREATE OR REPLACE FUNCTION " + owner + "." + QuoteDumpIdentifier(db, "NEW_FUNCTION") + Environment.NewLine +
+                       "RETURN NUMBER" + Environment.NewLine +
+                       "AS" + Environment.NewLine +
+                       "BEGIN" + Environment.NewLine +
+                       "    RETURN 1;" + Environment.NewLine +
+                       "END;" + Environment.NewLine +
+                       "/";
+            }
+
+            return "CREATE FUNCTION new_function() RETURNS INT BEGIN RETURN 1; END;";
+        }
+
+        private static string BuildFunctionExecuteSql(IDatabase db, string databaseName, string routineName, string routineType)
+        {
+            bool isProcedure = IsProcedureRoutine(routineType);
+            string qualifiedName = BuildQualifiedObjectName(db, databaseName, routineName);
+
+            if (db is my_mssql)
+            {
+                return isProcedure ? "EXEC " + qualifiedName + ";" : "SELECT " + qualifiedName + "();";
+            }
+
+            if (db is my_oracle)
+            {
+                return isProcedure ? "BEGIN" + Environment.NewLine + "    " + qualifiedName + "();" + Environment.NewLine + "END;" :
+                    "SELECT " + qualifiedName + "() FROM dual;";
+            }
+
+            if (isProcedure)
+            {
+                return "CALL " + qualifiedName + "();";
+            }
+
+            return "SELECT " + qualifiedName + "();";
+        }
+
+        private static bool IsProcedureRoutine(string routineType)
+        {
+            return !string.IsNullOrWhiteSpace(routineType) &&
+                   routineType.IndexOf("procedure", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private string GetSelectedFunctionType(DatabaseObjectSelection selection)
+        {
+            if (selection == null) return "Function";
+
+            DataRow match = GetDatabaseFunctions(selection.Database, selection.DatabaseName).Rows
+                .Cast<DataRow>()
+                .FirstOrDefault(row => string.Equals(row["Name"].ToString(), selection.ObjectName, StringComparison.OrdinalIgnoreCase));
+            return match == null ? "Function" : match["Type"].ToString();
+        }
+
+        private static string GetTargetHost(TreeDatabaseTarget target)
+        {
+            if (target == null || target.ConnectionInfo == null || !target.ConnectionInfo.ContainsKey("host") || target.ConnectionInfo["host"] == null)
+            {
+                return string.Empty;
+            }
+
+            return target.ConnectionInfo["host"].ToString();
+        }
+
         private static string ToSqlLiteral(object value)
         {
             if (value == null || value == DBNull.Value)
@@ -2191,6 +2408,14 @@ namespace mySQLPunk
                     ShowDatabaseGroupList(db, dbName, "Events", connInfo);
                     ShowEventDetails(db, dbName, eventName);
                 }
+                if (pathParts.Length >= 4 && pathParts[2] == "Functions")
+                {
+                    string functionName = pathParts[3];
+                    lblSidebarTitle.Text = $"Function: {functionName}";
+                    ShowDatabaseGroupList(db, dbName, "Functions", connInfo);
+                    ShowFunctionDetails(db, dbName, functionName);
+                    showTools("點到Function本身");
+                }
             }
         }
 
@@ -2249,6 +2474,20 @@ namespace mySQLPunk
                     itemBackup.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
                     cms.Items.Add(itemBackup);
                 }
+                else if (groupName == "Functions")
+                {
+                    var itemExecute = new ToolStripMenuItem(Localization.T("Tool.ExecuteFunction"));
+                    itemExecute.Click += (s, ev) => ExecuteSelectedFunction();
+                    cms.Items.Add(itemExecute);
+
+                    var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignFunction"));
+                    itemDesign.Click += (s, ev) => ShowSelectedFunctionDefinition();
+                    cms.Items.Add(itemDesign);
+
+                    var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteFunction"));
+                    itemDrop.Click += (s, ev) => DeleteSelectedFunction();
+                    cms.Items.Add(itemDrop);
+                }
 
                 if (cms.Items.Count == 0)
                 {
@@ -2275,7 +2514,7 @@ namespace mySQLPunk
             if (db_tree.SelectedNode != null)
             {
                 var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups"))
+                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions"))
                 {
                     return pathParts[2];
                 }
@@ -2723,6 +2962,19 @@ namespace mySQLPunk
                     displayDt.Rows.Add(row);
                 }
             }
+            else if (string.Equals(groupName, "Functions", StringComparison.OrdinalIgnoreCase))
+            {
+                displayDt.Columns.Add("回傳型別");
+                foreach (DataRow functionRow in GetDatabaseFunctions(db, dbName).Rows)
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = functionRow["Name"];
+                    row["類型"] = functionRow["Type"];
+                    row["狀態"] = functionRow["Status"];
+                    row["回傳型別"] = functionRow["ReturnType"];
+                    displayDt.Rows.Add(row);
+                }
+            }
             else
             {
                 DataRow row = displayDt.NewRow();
@@ -2786,11 +3038,70 @@ namespace mySQLPunk
             return events;
         }
 
+        private DataTable GetDatabaseFunctions(IDatabase db, string dbName)
+        {
+            DataTable functions = CreateDatabaseFunctionTable();
+
+            if (db is my_sqlite)
+            {
+                return functions;
+            }
+
+            if (db is my_mysql)
+            {
+                string safeDb = EscapeSqlLiteral(dbName);
+                AppendDatabaseFunctionsFromQuery(functions, db,
+                    "SELECT ROUTINE_NAME AS Name, ROUTINE_TYPE AS Type, COALESCE(DATA_TYPE, '') AS ReturnType, IS_DETERMINISTIC AS Status, COALESCE(ROUTINE_DEFINITION, '') AS DDL " +
+                    "FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA='" + safeDb + "' ORDER BY ROUTINE_TYPE, ROUTINE_NAME;");
+                return functions;
+            }
+
+            if (db is my_postgresql)
+            {
+                AppendDatabaseFunctionsFromQuery(functions, db,
+                    "SELECT p.proname AS \"Name\", CASE WHEN p.prokind = 'p' THEN 'Procedure' ELSE 'Function' END AS \"Type\", " +
+                    "COALESCE(pg_catalog.pg_get_function_result(p.oid), '') AS \"ReturnType\", COALESCE(l.lanname, '') AS \"Status\", pg_catalog.pg_get_functiondef(p.oid) AS \"DDL\" " +
+                    "FROM pg_catalog.pg_proc p INNER JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace " +
+                    "LEFT JOIN pg_catalog.pg_language l ON l.oid = p.prolang WHERE n.nspname = 'public' ORDER BY p.proname;");
+                return functions;
+            }
+
+            if (db is my_mssql)
+            {
+                AppendDatabaseFunctionsFromQuery(functions, db,
+                    "SELECT o.name AS [Name], CASE WHEN o.type = 'P' THEN 'Procedure' ELSE 'Function' END AS [Type], '' AS [ReturnType], o.type_desc AS [Status], " +
+                    "COALESCE(OBJECT_DEFINITION(o.object_id), '') AS [DDL] FROM [" + EscapeSqlServerName(dbName) + "].sys.objects o " +
+                    "WHERE o.type IN ('FN','IF','TF','FS','FT','P') ORDER BY o.type_desc, o.name;");
+                return functions;
+            }
+
+            if (db is my_oracle)
+            {
+                string owner = EscapeSqlLiteral(dbName.ToUpperInvariant());
+                AppendDatabaseFunctionsFromQuery(functions, db,
+                    "SELECT OBJECT_NAME AS Name, OBJECT_TYPE AS Type, '' AS ReturnType, STATUS AS Status, '' AS DDL " +
+                    "FROM ALL_OBJECTS WHERE OWNER='" + owner + "' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME");
+            }
+
+            return functions;
+        }
+
         private static DataTable CreateDatabaseEventTable()
         {
             DataTable dt = new DataTable();
             dt.Columns.Add("Name");
             dt.Columns.Add("Type");
+            dt.Columns.Add("Status");
+            dt.Columns.Add("DDL");
+            return dt;
+        }
+
+        private static DataTable CreateDatabaseFunctionTable()
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("Name");
+            dt.Columns.Add("Type");
+            dt.Columns.Add("ReturnType");
             dt.Columns.Add("Status");
             dt.Columns.Add("DDL");
             return dt;
@@ -2816,6 +3127,33 @@ namespace mySQLPunk
                 DataRow row = target.NewRow();
                 row["Name"] = GetColumnValue(sourceRow, "Name");
                 row["Type"] = GetColumnValue(sourceRow, "Type");
+                row["Status"] = GetColumnValue(sourceRow, "Status");
+                row["DDL"] = GetColumnValue(sourceRow, "DDL");
+                if (row["Name"].ToString().Length > 0) target.Rows.Add(row);
+            }
+        }
+
+        private static void AppendDatabaseFunctionsFromQuery(DataTable target, IDatabase db, string sql)
+        {
+            try
+            {
+                AppendDatabaseFunctions(target, db.SelectSQL(sql));
+            }
+            catch
+            {
+                // Routine metadata can be hidden by provider permissions. Keep the Functions group usable.
+            }
+        }
+
+        private static void AppendDatabaseFunctions(DataTable target, DataTable source)
+        {
+            if (source == null) return;
+            foreach (DataRow sourceRow in source.Rows)
+            {
+                DataRow row = target.NewRow();
+                row["Name"] = GetColumnValue(sourceRow, "Name");
+                row["Type"] = GetColumnValue(sourceRow, "Type");
+                row["ReturnType"] = GetColumnValue(sourceRow, "ReturnType");
                 row["Status"] = GetColumnValue(sourceRow, "Status");
                 row["DDL"] = GetColumnValue(sourceRow, "DDL");
                 if (row["Name"].ToString().Length > 0) target.Rows.Add(row);
@@ -2967,6 +3305,35 @@ namespace mySQLPunk
             }
         }
 
+        private void ShowFunctionDetails(IDatabase db, string dbName, string functionName)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            try
+            {
+                DataRow match = GetDatabaseFunctions(db, dbName).Rows
+                    .Cast<DataRow>()
+                    .FirstOrDefault(row => string.Equals(row["Name"].ToString(), functionName, StringComparison.OrdinalIgnoreCase));
+
+                if (match == null)
+                {
+                    rtbDDL.Text = "Function not found: " + functionName;
+                    return;
+                }
+
+                dgvDetails.Rows.Add("類型", match["Type"]);
+                dgvDetails.Rows.Add("名稱", match["Name"]);
+                dgvDetails.Rows.Add("回傳型別", match["ReturnType"]);
+                dgvDetails.Rows.Add("狀態", match["Status"]);
+                rtbDDL.Text = match["DDL"].ToString();
+            }
+            catch (Exception ex)
+            {
+                rtbDDL.Text = "Error loading function details: " + ex.Message;
+            }
+        }
+
         private string FormatBytes(long bytes)
         {
             string[] suffix = { "B", "KB", "MB", "GB", "TB" };
@@ -3034,6 +3401,20 @@ namespace mySQLPunk
                         ToolStripMenuItem deleteViewItem = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
                         deleteViewItem.Click += (s, ev) => DeleteSelectedView();
                         menu.Items.Add(deleteViewItem);
+                    }
+                    else if (pathParts.Length >= 4 && pathParts[2] == "Functions")
+                    {
+                        ToolStripMenuItem executeFunctionItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteFunction"));
+                        executeFunctionItem.Click += (s, ev) => ExecuteSelectedFunction();
+                        menu.Items.Add(executeFunctionItem);
+
+                        ToolStripMenuItem designFunctionItem = new ToolStripMenuItem(Localization.T("Tool.DesignFunction"));
+                        designFunctionItem.Click += (s, ev) => ShowSelectedFunctionDefinition();
+                        menu.Items.Add(designFunctionItem);
+
+                        ToolStripMenuItem deleteFunctionItem = new ToolStripMenuItem(Localization.T("Tool.DeleteFunction"));
+                        deleteFunctionItem.Click += (s, ev) => DeleteSelectedFunction();
+                        menu.Items.Add(deleteFunctionItem);
                     }
                 }
 
@@ -3165,6 +3546,14 @@ namespace mySQLPunk
             newNode.SelectedImageIndex = 14;
             databaseNode.Nodes.Add(newNode);
 
+            foreach (DataRow functionRow in GetDatabaseFunctions(db, databaseName).Rows)
+            {
+                TreeNode functionNode = new TreeNode(functionRow["Name"].ToString());
+                functionNode.ImageIndex = 14;
+                functionNode.SelectedImageIndex = 14;
+                newNode.Nodes.Add(functionNode);
+            }
+
             newNode = new TreeNode("Events");
             newNode.ImageIndex = 15;
             newNode.SelectedImageIndex = 15;
@@ -3264,6 +3653,7 @@ namespace mySQLPunk
                 // 代表是資料表或檢視層級 -> 直接開啟
                 if (m[2] == "Views") OpenSelectedViewInQuery();
                 else if (m[2] == "Events") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                else if (m[2] == "Functions") ExecuteSelectedFunction();
                 else OpenSelectedTableInQuery();
                 dialogMyBoxOff();
                 return;
