@@ -1305,9 +1305,14 @@ namespace mySQLPunk
                     }
                     continue;
                 }
-                if (type == "FULLTEXT" || type == "SPATIAL")
+                if (type == "FULLTEXT")
                 {
-                    unsupported.Add("非 MySQL 尚未支援 " + type + " 索引：" + indexName);
+                    unsupported.Add("非 MySQL 尚未支援 FULLTEXT 索引：" + indexName);
+                    continue;
+                }
+                if (type == "SPATIAL" && !SupportsSpatialIndex())
+                {
+                    unsupported.Add("此資料庫尚未支援 SPATIAL 索引：" + indexName);
                     continue;
                 }
 
@@ -1324,6 +1329,11 @@ namespace mySQLPunk
         private bool SupportsDynamicPrimaryKeyChange()
         {
             return _db is my_mssql || _db is my_postgresql || _db is my_oracle;
+        }
+
+        private bool SupportsSpatialIndex()
+        {
+            return _db is my_postgresql;
         }
 
         private string BuildDropPrimaryKeyStatement()
@@ -1443,6 +1453,12 @@ namespace mySQLPunk
             string indexName = GetRowString(row, "名稱").Trim();
             string type = GetRowString(row, "索引類型").Trim().ToUpperInvariant();
             string columns = GetRowString(row, "欄位").Trim();
+            if (type == "SPATIAL" && _db is my_postgresql)
+            {
+                return "CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
+                       " ON " + GetQualifiedDesignerTableName(_tableName) +
+                       " USING GIST (" + FormatGenericIndexColumns(columns) + ");";
+            }
             string unique = type == "UNIQUE" ? "UNIQUE " : "";
             return "CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
                    " ON " + GetQualifiedDesignerTableName(_tableName) +
@@ -1616,11 +1632,20 @@ namespace mySQLPunk
                 string columns = GetRowString(row, "欄位").Trim();
                 if (string.IsNullOrWhiteSpace(columns)) continue;
                 if (type == "PRIMARY") continue;
-                if (type == "FULLTEXT" || type == "SPATIAL") continue;
+                if (type == "FULLTEXT") continue;
+                if (type == "SPATIAL" && !SupportsSpatialIndex()) continue;
                 if (string.IsNullOrWhiteSpace(indexName)) indexName = tableName + "_idx";
 
                 string columnList = FormatGenericIndexColumns(columns);
                 if (string.IsNullOrWhiteSpace(columnList)) continue;
+
+                if (type == "SPATIAL" && _db is my_postgresql)
+                {
+                    statements.Add("CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
+                                   " ON " + GetQualifiedDesignerTableName(tableName) +
+                                   " USING GIST (" + columnList + ");");
+                    continue;
+                }
 
                 string unique = type == "UNIQUE" ? "UNIQUE " : "";
                 statements.Add("CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
@@ -2559,6 +2584,11 @@ namespace mySQLPunk
             if (_db is my_mysql)
             {
                 return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" };
+            }
+
+            if (_db is my_postgresql)
+            {
+                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "SPATIAL" };
             }
 
             return new object[] { "NORMAL", "UNIQUE", "PRIMARY" };
