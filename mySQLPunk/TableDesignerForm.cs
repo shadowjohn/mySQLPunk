@@ -1240,6 +1240,7 @@ namespace mySQLPunk
             List<string> statements = new List<string>();
             DataTable currentIdxDt = dgvIndexes.DataSource as DataTable;
             if (currentIdxDt == null || _originalIdxDt == null) return statements;
+            bool sqlServerPrimaryKeyDropAdded = false;
 
             foreach (DataRow original in _originalIdxDt.Rows)
             {
@@ -1248,7 +1249,17 @@ namespace mySQLPunk
                 if (IsPrimaryIndexName(oldName))
                 {
                     if (!HasMatchingIndex(currentIdxDt, original))
-                        unsupported.Add("PRIMARY KEY 修改需要資料庫特定 constraint 名稱：" + _tableName);
+                    {
+                        if (_db is my_mssql)
+                        {
+                            statements.Add(BuildSqlServerDropPrimaryKeyStatement());
+                            sqlServerPrimaryKeyDropAdded = true;
+                        }
+                        else
+                        {
+                            unsupported.Add("PRIMARY KEY 修改需要資料庫特定 constraint 名稱：" + _tableName);
+                        }
+                    }
                     continue;
                 }
 
@@ -1268,7 +1279,29 @@ namespace mySQLPunk
                 if (type == "PRIMARY")
                 {
                     if (!HasOriginalMatchingIndex(current))
-                        unsupported.Add("PRIMARY KEY 修改需要資料庫特定 constraint 名稱：" + _tableName);
+                    {
+                        if (_db is my_mssql)
+                        {
+                            string columns = GetRowString(current, "欄位").Trim();
+                            if (string.IsNullOrWhiteSpace(columns))
+                            {
+                                unsupported.Add("PRIMARY KEY 缺少欄位：" + _tableName);
+                            }
+                            else
+                            {
+                                if (!sqlServerPrimaryKeyDropAdded && HasOriginalPrimaryIndex())
+                                {
+                                    statements.Add(BuildSqlServerDropPrimaryKeyStatement());
+                                    sqlServerPrimaryKeyDropAdded = true;
+                                }
+                                statements.Add(BuildSqlServerAddPrimaryKeyStatement(current));
+                            }
+                        }
+                        else
+                        {
+                            unsupported.Add("PRIMARY KEY 修改需要資料庫特定 constraint 名稱：" + _tableName);
+                        }
+                    }
                     continue;
                 }
                 if (type == "FULLTEXT" || type == "SPATIAL")
@@ -1285,6 +1318,31 @@ namespace mySQLPunk
             }
 
             return statements;
+        }
+
+        private string BuildSqlServerDropPrimaryKeyStatement()
+        {
+            string database = QuoteDesignerIdentifier(_databaseName);
+            return "DECLARE @primaryKeyName nvarchar(128);\r\n" +
+                   "SELECT @primaryKeyName = kc.name\r\n" +
+                   "FROM " + database + ".sys.key_constraints kc\r\n" +
+                   "INNER JOIN " + database + ".sys.tables t ON t.object_id = kc.parent_object_id\r\n" +
+                   "INNER JOIN " + database + ".sys.schemas s ON s.schema_id = t.schema_id\r\n" +
+                   "WHERE kc.[type] = 'PK' AND s.name = N'dbo' AND t.name = N'" + EscapeSqlServerLiteral(_tableName) + "';\r\n" +
+                   "IF @primaryKeyName IS NOT NULL EXEC(N'ALTER TABLE " + GetQualifiedDesignerTableName(_tableName).Replace("'", "''") + " DROP CONSTRAINT [' + REPLACE(@primaryKeyName, ']', ']]') + N']');";
+        }
+
+        private string BuildSqlServerAddPrimaryKeyStatement(DataRow row)
+        {
+            string indexName = GetRowString(row, "名稱").Trim();
+            if (string.IsNullOrWhiteSpace(indexName) || IsPrimaryIndexName(indexName))
+            {
+                indexName = "PK_" + _tableName;
+            }
+
+            return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                   " ADD CONSTRAINT " + QuoteDesignerIdentifier(indexName) +
+                   " PRIMARY KEY (" + FormatGenericIndexColumns(GetRowString(row, "欄位").Trim()) + ");";
         }
 
         private string BuildDropIndexStatement(string indexName)
@@ -1343,6 +1401,16 @@ namespace mySQLPunk
             foreach (DataRow original in _originalIdxDt.Rows)
             {
                 if (!IsIndexChanged(original, current)) return true;
+            }
+            return false;
+        }
+
+        private bool HasOriginalPrimaryIndex()
+        {
+            if (_originalIdxDt == null) return false;
+            foreach (DataRow row in _originalIdxDt.Rows)
+            {
+                if (IsPrimaryIndexName(GetRowString(row, "名稱").Trim())) return true;
             }
             return false;
         }
