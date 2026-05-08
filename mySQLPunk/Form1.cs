@@ -5054,6 +5054,26 @@ namespace mySQLPunk
                     ToolStripMenuItem dumpDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
                     dumpDatabaseItem.Click += (s, ev) => DumpSelectedDatabaseSqlWithDialog();
                     menu.Items.Add(dumpDatabaseItem);
+
+                    ToolStripMenuItem importSqlItem = new ToolStripMenuItem(Localization.T("Tool.ImportWizard"));
+                    importSqlItem.Click += (s, ev) => ImportSqlWithDialog();
+                    menu.Items.Add(importSqlItem);
+
+                    ToolStripMenuItem backupDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
+                    backupDatabaseItem.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
+                    menu.Items.Add(backupDatabaseItem);
+                }
+                if (pathParts.Length == 3 && pathParts[2] == "Tables")
+                {
+                    ToolStripMenuItem importSqlItem = new ToolStripMenuItem(Localization.T("Tool.ImportWizard"));
+                    importSqlItem.Click += (s, ev) => ImportSqlWithDialog();
+                    menu.Items.Add(importSqlItem);
+                }
+                if (pathParts.Length == 3 && pathParts[2] == "Backups")
+                {
+                    ToolStripMenuItem backupDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
+                    backupDatabaseItem.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
+                    menu.Items.Add(backupDatabaseItem);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                 {
