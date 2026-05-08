@@ -305,7 +305,16 @@ namespace mySQLPunk
 
             ToolStripLabel lblLimit = new ToolStripLabel(Localization.T("Query.Limit")) { Margin = new Padding(10, 0, 0, 0) };
             txtPageSize = new ToolStripTextBox { Text = _pageSize.ToString(), Width = 50, TextBoxTextAlign = HorizontalAlignment.Center };
-            txtPageSize.TextChanged += (s, e) => { if (int.TryParse(txtPageSize.Text, out int val)) _pageSize = val; };
+            txtPageSize.Leave += (s, e) => ApplyPageSizeFromInput();
+            txtPageSize.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                {
+                    ApplyPageSizeFromInput();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                }
+            };
             ToolStripLabel lblRecords = new ToolStripLabel(Localization.T("Query.Records")) { Margin = new Padding(0, 0, 20, 0) };
 
             btnDataFirst = new ToolStripButton("|<", null, (s, e) => { _currentPage = 1; ExecutePagedQuery(); }) { Alignment = ToolStripItemAlignment.Right };
@@ -747,6 +756,11 @@ namespace mySQLPunk
                 return;
             }
 
+            EnsureValidPageSize();
+            int totalPages = GetTotalPages();
+            if (_currentPage < 1) _currentPage = 1;
+            if (_currentPage > totalPages) _currentPage = totalPages;
+
             int offset = (_currentPage - 1) * _pageSize;
             ExecuteTablePageAsync(offset);
         }
@@ -806,6 +820,7 @@ namespace mySQLPunk
 
          private void UpdatePaginationUI()
         {
+            EnsureValidPageSize();
             int totalPages = GetTotalPages();
             lblDataPagination.Text = Localization.Format("Query.PageFormat", _currentPage, totalPages, _totalRows);
             btnDataFirst.Enabled = _currentPage > 1;
@@ -816,8 +831,31 @@ namespace mySQLPunk
 
         private int GetTotalPages()
         {
+            EnsureValidPageSize();
             if (_totalRows <= 0) return 1;
             return (int)Math.Ceiling((double)_totalRows / _pageSize);
+        }
+
+        private void ApplyPageSizeFromInput()
+        {
+            int parsed;
+            if (txtPageSize == null || !int.TryParse(txtPageSize.Text, out parsed) || parsed <= 0)
+            {
+                EnsureValidPageSize();
+                if (txtPageSize != null) txtPageSize.Text = _pageSize.ToString();
+                UpdateStatus("Page size must be greater than 0.");
+                return;
+            }
+
+            _pageSize = parsed;
+            _currentPage = 1;
+            if (txtPageSize.Text != _pageSize.ToString()) txtPageSize.Text = _pageSize.ToString();
+            UpdatePaginationUI();
+        }
+
+        private void EnsureValidPageSize()
+        {
+            if (_pageSize <= 0) _pageSize = 1000;
         }
 
         private async void ExecuteQueryAsync()
