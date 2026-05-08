@@ -915,7 +915,7 @@ namespace mySQLPunk
             statements.Add("ALTER TABLE " + QuoteDesignerIdentifier(tempTableName) +
                            " RENAME TO " + QuoteDesignerIdentifier(_tableName) + ";");
 
-            foreach (string indexStatement in BuildGenericCreateIndexStatements(_tableName))
+            foreach (string indexStatement in BuildSqliteRebuildIndexStatements(currentDt, _tableName))
             {
                 statements.Add(indexStatement);
             }
@@ -923,6 +923,82 @@ namespace mySQLPunk
             statements.Add("COMMIT;");
             statements.Add("PRAGMA foreign_keys=ON;");
             return string.Join("\r\n", statements.ToArray());
+        }
+
+        private List<string> BuildSqliteRebuildIndexStatements(DataTable currentDt, string tableName)
+        {
+            List<string> statements = new List<string>();
+            DataTable currentIdxDt = dgvIndexes.DataSource as DataTable;
+            if (currentIdxDt == null) return statements;
+
+            Dictionary<string, string> columnNameMap = BuildCurrentColumnNameMap(currentDt);
+
+            foreach (DataRow row in currentIdxDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                string indexName = GetRowString(row, "名稱").Trim();
+                string type = GetRowString(row, "索引類型").Trim().ToUpperInvariant();
+                string columns = RemapIndexColumns(GetRowString(row, "欄位").Trim(), columnNameMap);
+                if (string.IsNullOrWhiteSpace(columns)) continue;
+                if (type == "PRIMARY") continue;
+                if (type == "FULLTEXT" || type == "SPATIAL") continue;
+                if (string.IsNullOrWhiteSpace(indexName)) indexName = tableName + "_idx";
+
+                string columnList = FormatGenericIndexColumns(columns);
+                if (string.IsNullOrWhiteSpace(columnList)) continue;
+
+                string unique = type == "UNIQUE" ? "UNIQUE " : "";
+                statements.Add("CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
+                               " ON " + QuoteDesignerIdentifier(tableName) +
+                               " (" + columnList + ");");
+            }
+
+            return statements;
+        }
+
+        private static Dictionary<string, string> BuildCurrentColumnNameMap(DataTable currentDt)
+        {
+            Dictionary<string, string> map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (currentDt == null) return map;
+
+            foreach (DataRow row in currentDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                string currentName = GetRowString(row, "Name").Trim();
+                if (string.IsNullOrWhiteSpace(currentName)) continue;
+
+                string oldName = GetRowString(row, "_OldName").Trim();
+                if (!string.IsNullOrWhiteSpace(oldName)) map[oldName] = currentName;
+                map[currentName] = currentName;
+            }
+
+            return map;
+        }
+
+        private static string RemapIndexColumns(string columns, Dictionary<string, string> columnNameMap)
+        {
+            if (string.IsNullOrWhiteSpace(columns)) return "";
+
+            string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            List<string> mappedCols = new List<string>();
+            foreach (string rawCol in rawCols)
+            {
+                string expression = rawCol.Trim();
+                string columnName = GetIndexColumnName(expression);
+                if (string.IsNullOrWhiteSpace(columnName)) continue;
+
+                string mappedName;
+                if (!columnNameMap.TryGetValue(columnName, out mappedName))
+                {
+                    continue;
+                }
+
+                mappedCols.Add(mappedName + GetIndexDirectionSuffix(expression));
+            }
+
+            return string.Join(", ", mappedCols.ToArray());
         }
 
         private DataRow FindOriginalColumn(string oldName)
@@ -1621,21 +1697,29 @@ namespace mySQLPunk
 
         private static string FormatIndexColumn(string columnExpression, Func<string, string> quoteIdentifier)
         {
-            string direction = "";
-            string columnName = columnExpression.Trim();
+            return quoteIdentifier(GetIndexColumnName(columnExpression)) + GetIndexDirectionSuffix(columnExpression);
+        }
 
+        private static string GetIndexColumnName(string columnExpression)
+        {
+            string columnName = (columnExpression ?? "").Trim();
             if (EndsWithIndexDirection(columnName, "ASC"))
             {
-                direction = " ASC";
-                columnName = columnName.Substring(0, columnName.Length - 3).TrimEnd();
+                return columnName.Substring(0, columnName.Length - 3).TrimEnd();
             }
-            else if (EndsWithIndexDirection(columnName, "DESC"))
+            if (EndsWithIndexDirection(columnName, "DESC"))
             {
-                direction = " DESC";
-                columnName = columnName.Substring(0, columnName.Length - 4).TrimEnd();
+                return columnName.Substring(0, columnName.Length - 4).TrimEnd();
             }
+            return columnName;
+        }
 
-            return quoteIdentifier(columnName) + direction;
+        private static string GetIndexDirectionSuffix(string columnExpression)
+        {
+            string value = (columnExpression ?? "").Trim();
+            if (EndsWithIndexDirection(value, "ASC")) return " ASC";
+            if (EndsWithIndexDirection(value, "DESC")) return " DESC";
+            return "";
         }
 
         private static bool EndsWithIndexDirection(string value, string direction)
