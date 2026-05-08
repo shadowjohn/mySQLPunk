@@ -198,7 +198,7 @@ namespace mySQLPunk
             if (strip == null) return;
             strip.BackColor = SurfaceColor;
             strip.ForeColor = TextColor;
-            strip.Renderer = new ToolStripProfessionalRenderer(new ThemedColorTable());
+            strip.Renderer = new ThemedToolStripRenderer();
             strip.GripStyle = ToolStripGripStyle.Hidden;
 
             foreach (ToolStripItem item in strip.Items)
@@ -225,7 +225,7 @@ namespace mySQLPunk
 
             dropDown.DropDown.BackColor = SurfaceColor;
             dropDown.DropDown.ForeColor = TextColor;
-            dropDown.DropDown.Renderer = new ToolStripProfessionalRenderer(new ThemedColorTable());
+            dropDown.DropDown.Renderer = new ThemedToolStripRenderer();
             foreach (ToolStripItem child in dropDown.DropDownItems)
             {
                 ApplyToolStripItem(child);
@@ -290,6 +290,30 @@ namespace mySQLPunk
             public override Color ButtonPressedGradientEnd => SelectionColor;
             public override Color ButtonCheckedGradientBegin => SelectionColor;
             public override Color ButtonCheckedGradientEnd => SelectionColor;
+        }
+
+        private class ThemedToolStripRenderer : ToolStripProfessionalRenderer
+        {
+            public ThemedToolStripRenderer() : base(new ThemedColorTable())
+            {
+            }
+
+            protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+            {
+                using (SolidBrush brush = new SolidBrush(SurfaceColor))
+                {
+                    e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.ToolStrip.Size));
+                }
+            }
+
+            protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+            {
+                using (Pen pen = new Pen(BorderColor))
+                {
+                    Rectangle bounds = new Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+                    e.Graphics.DrawLine(pen, bounds.Left, bounds.Bottom, bounds.Right, bounds.Bottom);
+                }
+            }
         }
     }
 }

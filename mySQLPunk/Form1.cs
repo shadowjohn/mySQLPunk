@@ -1557,12 +1557,16 @@ namespace mySQLPunk
             int statusHeight = statusStrip1.Visible ? statusStrip1.Height : 0;
 
             menuStrip1.Dock = DockStyle.None;
+            menuStrip1.AutoSize = false;
+            menuStrip1.BackColor = ThemeManager.SurfaceColor;
             menuStrip1.Location = new Point(0, 0);
-            menuStrip1.Width = ClientSize.Width;
+            menuStrip1.Size = new Size(ClientSize.Width, menuHeight);
 
             statusStrip1.Dock = DockStyle.None;
+            statusStrip1.AutoSize = false;
+            statusStrip1.BackColor = ThemeManager.SurfaceColor;
             statusStrip1.Location = new Point(0, Math.Max(menuHeight, ClientSize.Height - statusHeight));
-            statusStrip1.Width = ClientSize.Width;
+            statusStrip1.Size = new Size(ClientSize.Width, statusHeight);
             statusStrip1.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
 
             splitContainer1.Dock = DockStyle.None;
