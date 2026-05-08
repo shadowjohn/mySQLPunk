@@ -103,6 +103,13 @@ namespace mySQLPunk
             "Index Catalog"
         };
 
+        private static readonly string[] DatabaseBIReportNames =
+        {
+            "Object Distribution",
+            "Table Size Summary",
+            "Row Count Ranking"
+        };
+
         public Form1()
         {
             Localization.Load();
@@ -340,6 +347,7 @@ namespace mySQLPunk
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\backups.png"));  //18
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\user.png"));  //19
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\model.png"));  //20
+            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\bi.png"));  //21
 
             // Assign the ImageList to the TreeView.
 
@@ -2456,6 +2464,12 @@ namespace mySQLPunk
                     lblSidebarTitle.Text = $"Model: {modelName}";
                     ShowDatabaseModel(db, dbName, modelName);
                 }
+                if (pathParts.Length >= 4 && pathParts[2] == "BI")
+                {
+                    string biName = pathParts[3];
+                    lblSidebarTitle.Text = $"BI: {biName}";
+                    ShowDatabaseBIReport(db, dbName, biName, connInfo);
+                }
                 if (pathParts.Length >= 4 && pathParts[2] == "Reports")
                 {
                     string reportName = pathParts[3];
@@ -2640,12 +2654,16 @@ namespace mySQLPunk
                 {
                     return "Models";
                 }
+                if (typeValue != null && string.Equals(typeValue.ToString(), "BI", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "BI";
+                }
             }
 
             if (db_tree.SelectedNode != null)
             {
                 var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Users" || pathParts[2] == "Models" || pathParts[2] == "Queries" || pathParts[2] == "Reports"))
+                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Users" || pathParts[2] == "Models" || pathParts[2] == "BI" || pathParts[2] == "Queries" || pathParts[2] == "Reports"))
                 {
                     return pathParts[2];
                 }
@@ -3131,6 +3149,19 @@ namespace mySQLPunk
                     row["類型"] = "Model";
                     row["狀態"] = "Ready";
                     row["描述"] = GetDatabaseModelDescription(modelName);
+                    displayDt.Rows.Add(row);
+                }
+            }
+            else if (string.Equals(groupName, "BI", StringComparison.OrdinalIgnoreCase))
+            {
+                displayDt.Columns.Add("描述");
+                foreach (string biName in DatabaseBIReportNames)
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = biName;
+                    row["類型"] = "BI";
+                    row["狀態"] = "Ready";
+                    row["描述"] = GetDatabaseBIDescription(biName);
                     displayDt.Rows.Add(row);
                 }
             }
@@ -3637,6 +3668,156 @@ namespace mySQLPunk
             return string.Empty;
         }
 
+        private void ShowDatabaseBIReport(IDatabase db, string dbName, string biName, Dictionary<string, object> connInfo = null)
+        {
+            table_top.DataSource = BuildDatabaseBIReport(db, dbName, biName, connInfo);
+            ShowBIDetails(db, dbName, biName);
+        }
+
+        private DataTable BuildDatabaseBIReport(IDatabase db, string dbName, string biName, Dictionary<string, object> connInfo = null)
+        {
+            if (string.Equals(biName, "Table Size Summary", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildTableSizeSummaryBI(db, dbName);
+            }
+
+            if (string.Equals(biName, "Row Count Ranking", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildRowCountRankingBI(db, dbName);
+            }
+
+            return BuildObjectDistributionBI(db, dbName);
+        }
+
+        private DataTable BuildObjectDistributionBI(IDatabase db, string dbName)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("類別");
+            dt.Columns.Add("數量", typeof(int));
+            dt.Columns.Add("佔比");
+
+            int tableCount = GetTablesSafe(db, dbName).Count;
+            int viewCount = GetViewsSafe(db, dbName).Count;
+            int functionCount = GetDatabaseFunctions(db, dbName).Rows.Count;
+            int eventCount = GetDatabaseEvents(db, dbName).Rows.Count;
+            int total = tableCount + viewCount + functionCount + eventCount;
+
+            AddBIDistributionRow(dt, "Tables", tableCount, total);
+            AddBIDistributionRow(dt, "Views", viewCount, total);
+            AddBIDistributionRow(dt, "Functions", functionCount, total);
+            AddBIDistributionRow(dt, "Events", eventCount, total);
+            return dt;
+        }
+
+        private DataTable BuildTableSizeSummaryBI(IDatabase db, string dbName)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("資料表");
+            dt.Columns.Add("列數");
+            dt.Columns.Add("資料長度");
+            dt.Columns.Add("索引長度");
+            dt.Columns.Add("引擎");
+            dt.Columns.Add("註解");
+
+            DataTable status = GetTableStatusSafe(db, dbName);
+            foreach (DataRow source in status.Rows)
+            {
+                DataRow row = dt.NewRow();
+                row["資料表"] = FirstColumnValue(source, "Name", "NAME", "TABLE_NAME");
+                row["列數"] = FirstColumnValue(source, "Rows", "ROWS", "NUM_ROWS");
+                row["資料長度"] = FormatBytesValue(FirstColumnValue(source, "Data_length", "DATA_LENGTH"));
+                row["索引長度"] = FormatBytesValue(FirstColumnValue(source, "Index_length", "INDEX_LENGTH"));
+                row["引擎"] = FirstColumnValue(source, "Engine", "ENGINE");
+                row["註解"] = FirstColumnValue(source, "Comment", "COMMENTS");
+                if (!string.IsNullOrWhiteSpace(row["資料表"].ToString())) dt.Rows.Add(row);
+            }
+
+            return dt;
+        }
+
+        private DataTable BuildRowCountRankingBI(IDatabase db, string dbName)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("排名", typeof(int));
+            dt.Columns.Add("名稱");
+            dt.Columns.Add("類型");
+            dt.Columns.Add("列數", typeof(long));
+            dt.Columns.Add("狀態");
+
+            List<Tuple<string, string, long, string>> rows = new List<Tuple<string, string, long, string>>();
+            foreach (string tableName in GetTablesSafe(db, dbName))
+            {
+                rows.Add(GetBIObjectRowCount(db, dbName, tableName, "Table"));
+            }
+            foreach (string viewName in GetViewsSafe(db, dbName))
+            {
+                rows.Add(GetBIObjectRowCount(db, dbName, viewName, "View"));
+            }
+
+            int rank = 1;
+            foreach (Tuple<string, string, long, string> item in rows.OrderByDescending(r => r.Item3).ThenBy(r => r.Item1))
+            {
+                DataRow row = dt.NewRow();
+                row["排名"] = rank++;
+                row["名稱"] = item.Item1;
+                row["類型"] = item.Item2;
+                row["列數"] = item.Item3;
+                row["狀態"] = item.Item4;
+                dt.Rows.Add(row);
+            }
+
+            return dt;
+        }
+
+        private static void AddBIDistributionRow(DataTable dt, string name, int count, int total)
+        {
+            DataRow row = dt.NewRow();
+            row["類別"] = name;
+            row["數量"] = count;
+            row["佔比"] = total <= 0 ? "0%" : Math.Round(count * 100m / total, 2).ToString() + "%";
+            dt.Rows.Add(row);
+        }
+
+        private static DataTable GetTableStatusSafe(IDatabase db, string dbName)
+        {
+            try { return db.GetTableStatus(dbName) ?? new DataTable(); }
+            catch { return new DataTable(); }
+        }
+
+        private Tuple<string, string, long, string> GetBIObjectRowCount(IDatabase db, string dbName, string objectName, string objectType)
+        {
+            try
+            {
+                return Tuple.Create(objectName, objectType, db.CountRows(dbName, objectName), "Ready");
+            }
+            catch (Exception ex)
+            {
+                return Tuple.Create(objectName, objectType, 0L, ex.Message);
+            }
+        }
+
+        private string FormatBytesValue(string value)
+        {
+            long bytes;
+            if (!long.TryParse(value, out bytes)) return value ?? string.Empty;
+            return FormatBytes(bytes);
+        }
+
+        private static string GetDatabaseBIDescription(string biName)
+        {
+            if (string.Equals(biName, "Table Size Summary", StringComparison.OrdinalIgnoreCase))
+            {
+                return "彙整資料表列數、資料長度、索引長度與引擎";
+            }
+
+            if (string.Equals(biName, "Row Count Ranking", StringComparison.OrdinalIgnoreCase))
+            {
+                return "依列數排序資料表與檢視";
+            }
+
+            return "統計資料庫物件類別分布";
+        }
+
         private DataTable GetDatabaseEvents(IDatabase db, string dbName)
         {
             DataTable events = CreateDatabaseEventTable();
@@ -4125,6 +4306,19 @@ namespace mySQLPunk
                           "-- " + GetDatabaseModelDescription(modelName);
         }
 
+        private void ShowBIDetails(IDatabase db, string dbName, string biName)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            dgvDetails.Rows.Add("類型", "BI");
+            dgvDetails.Rows.Add("名稱", biName);
+            dgvDetails.Rows.Add("資料庫", dbName);
+            dgvDetails.Rows.Add("Provider", db.ProviderName);
+            rtbDDL.Text = "-- BI: " + biName + Environment.NewLine +
+                          "-- " + GetDatabaseBIDescription(biName);
+        }
+
         private void ShowReportDetails(IDatabase db, string dbName, string reportName)
         {
             dgvDetails.Rows.Clear();
@@ -4387,6 +4581,19 @@ namespace mySQLPunk
                 newNode.Nodes.Add(modelNode);
             }
 
+            newNode = new TreeNode("BI");
+            newNode.ImageIndex = 21;
+            newNode.SelectedImageIndex = 21;
+            databaseNode.Nodes.Add(newNode);
+
+            foreach (string biName in DatabaseBIReportNames)
+            {
+                TreeNode biNode = new TreeNode(biName);
+                biNode.ImageIndex = 21;
+                biNode.SelectedImageIndex = 21;
+                newNode.Nodes.Add(biNode);
+            }
+
             newNode = new TreeNode("Events");
             newNode.ImageIndex = 15;
             newNode.SelectedImageIndex = 15;
@@ -4497,6 +4704,7 @@ namespace mySQLPunk
                 else if (m[2] == "Functions") ExecuteSelectedFunction();
                 else if (m[2] == "Users") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Models") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                else if (m[2] == "BI") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Reports") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else OpenSelectedTableInQuery();
                 dialogMyBoxOff();
@@ -4846,7 +5054,7 @@ namespace mySQLPunk
         private void bi_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("bi");
-            UpdateMainStatus(Localization.T("Status.BISelected"));
+            SelectDatabaseGroupNode("BI");
         }
 
         private void SelectDatabaseGroupNode(string groupName)
