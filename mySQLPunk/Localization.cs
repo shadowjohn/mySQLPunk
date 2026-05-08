@@ -91,6 +91,7 @@ namespace mySQLPunk
             Add("Status.SelectTab", "請先選取要關閉的分頁。", "Select a tab to close first.");
             Add("Status.TabClosed", "分頁已關閉。", "Tab closed.");
             Add("Status.ConnectionClosed", "連線已斷開。", "Connection closed.");
+            Add("Status.ConnectionAlreadyOpen", "連線已開啟：{0}", "Connection already open: {0}");
             Add("Status.ConnectionsExported", "連線設定已匯出。", "Connections exported.");
             Add("Status.ConnectionsImported", "連線設定已匯入。", "Connections imported.");
             Add("Status.ExportFailed", "匯出失敗：", "Export failed: ");

@@ -3053,7 +3053,11 @@ namespace mySQLPunk
                 Control[] navControls = this.Controls.Find("lblNav", true);
                 if (navControls.Length > 0) ((Label)navControls[0]).Text = " " + Localization.T("Status.Ready");
                 
-                MessageBox.Show(Localization.T("Status.ConnectionClosed"));
+                UpdateMainStatus(Localization.T("Status.ConnectionClosed"));
+                if (SystemInformation.UserInteractive)
+                {
+                    MessageBox.Show(Localization.T("Status.ConnectionClosed"));
+                }
             }
         }
 
@@ -4941,8 +4945,8 @@ namespace mySQLPunk
             //連線測試
             if (db["isConnect"].ToString() == "T")
             {
-                //展開
-                //收合
+                tree.SelectedNode.Expand();
+                UpdateMainStatus(Localization.Format("Status.ConnectionAlreadyOpen", tree.SelectedNode.Text));
                 //((TreeView)sender).SelectedNode.Toggle();
                 /*switch (((TreeView)sender).SelectedNode.IsExpanded)
                 {
@@ -4957,6 +4961,8 @@ namespace mySQLPunk
             }
             else
             {
+                db_tree.Nodes[index].Nodes.Clear();
+
                 //連線，展開
                 switch (db["db_kind"].ToString().ToLower())
                 {
