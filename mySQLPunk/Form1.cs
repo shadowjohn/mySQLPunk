@@ -96,6 +96,13 @@ namespace mySQLPunk
             "Object Inventory"
         };
 
+        private static readonly string[] DatabaseModelNames =
+        {
+            "Schema Overview",
+            "Column Catalog",
+            "Index Catalog"
+        };
+
         public Form1()
         {
             Localization.Load();
@@ -332,6 +339,7 @@ namespace mySQLPunk
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\reports.png"));  //17
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\backups.png"));  //18
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\user.png"));  //19
+            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\model.png"));  //20
 
             // Assign the ImageList to the TreeView.
 
@@ -2442,6 +2450,12 @@ namespace mySQLPunk
                     ShowDatabaseGroupList(db, dbName, "Users", connInfo);
                     ShowUserDetails(db, dbName, userName, connInfo);
                 }
+                if (pathParts.Length >= 4 && pathParts[2] == "Models")
+                {
+                    string modelName = pathParts[3];
+                    lblSidebarTitle.Text = $"Model: {modelName}";
+                    ShowDatabaseModel(db, dbName, modelName);
+                }
                 if (pathParts.Length >= 4 && pathParts[2] == "Reports")
                 {
                     string reportName = pathParts[3];
@@ -2622,12 +2636,16 @@ namespace mySQLPunk
                 {
                     return "Users";
                 }
+                if (typeValue != null && string.Equals(typeValue.ToString(), "Model", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Models";
+                }
             }
 
             if (db_tree.SelectedNode != null)
             {
                 var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Users" || pathParts[2] == "Queries" || pathParts[2] == "Reports"))
+                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Users" || pathParts[2] == "Models" || pathParts[2] == "Queries" || pathParts[2] == "Reports"))
                 {
                     return pathParts[2];
                 }
@@ -3103,6 +3121,19 @@ namespace mySQLPunk
                     displayDt.Rows.Add(row);
                 }
             }
+            else if (string.Equals(groupName, "Models", StringComparison.OrdinalIgnoreCase))
+            {
+                displayDt.Columns.Add("描述");
+                foreach (string modelName in DatabaseModelNames)
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = modelName;
+                    row["類型"] = "Model";
+                    row["狀態"] = "Ready";
+                    row["描述"] = GetDatabaseModelDescription(modelName);
+                    displayDt.Rows.Add(row);
+                }
+            }
             else if (string.Equals(groupName, "Queries", StringComparison.OrdinalIgnoreCase))
             {
                 displayDt.Columns.Add("資料庫");
@@ -3349,6 +3380,261 @@ namespace mySQLPunk
             string sqlitePath = GetSQLiteDatabasePath(connInfo, db);
             if (string.IsNullOrWhiteSpace(sqlitePath)) return "(unknown SQLite file)";
             return File.Exists(sqlitePath) ? sqlitePath : "Missing source: " + sqlitePath;
+        }
+
+        private void ShowDatabaseModel(IDatabase db, string dbName, string modelName)
+        {
+            table_top.DataSource = BuildDatabaseModel(db, dbName, modelName);
+            ShowModelDetails(db, dbName, modelName);
+        }
+
+        private DataTable BuildDatabaseModel(IDatabase db, string dbName, string modelName)
+        {
+            if (string.Equals(modelName, "Column Catalog", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildColumnCatalogModel(db, dbName);
+            }
+
+            if (string.Equals(modelName, "Index Catalog", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildIndexCatalogModel(db, dbName);
+            }
+
+            return BuildSchemaOverviewModel(db, dbName);
+        }
+
+        private DataTable BuildSchemaOverviewModel(IDatabase db, string dbName)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("名稱");
+            dt.Columns.Add("類型");
+            dt.Columns.Add("欄位數");
+            dt.Columns.Add("索引數");
+            dt.Columns.Add("列數");
+            dt.Columns.Add("狀態");
+
+            foreach (string tableName in GetTablesSafe(db, dbName))
+            {
+                DataRow row = dt.NewRow();
+                row["名稱"] = tableName;
+                row["類型"] = "Table";
+                row["欄位數"] = GetColumnsSafe(db, dbName, tableName).Rows.Count.ToString();
+                row["索引數"] = GetDistinctIndexCount(GetIndexesSafe(db, dbName, tableName)).ToString();
+                row["列數"] = GetObjectRowCountText(db, dbName, tableName);
+                row["狀態"] = "Ready";
+                dt.Rows.Add(row);
+            }
+
+            foreach (string viewName in GetViewsSafe(db, dbName))
+            {
+                DataRow row = dt.NewRow();
+                row["名稱"] = viewName;
+                row["類型"] = "View";
+                row["欄位數"] = GetColumnsSafe(db, dbName, viewName).Rows.Count.ToString();
+                row["索引數"] = "0";
+                row["列數"] = GetObjectRowCountText(db, dbName, viewName);
+                row["狀態"] = "Ready";
+                dt.Rows.Add(row);
+            }
+
+            return dt;
+        }
+
+        private DataTable BuildColumnCatalogModel(IDatabase db, string dbName)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("物件");
+            dt.Columns.Add("類型");
+            dt.Columns.Add("欄位");
+            dt.Columns.Add("資料型別");
+            dt.Columns.Add("允許空值");
+            dt.Columns.Add("鍵");
+            dt.Columns.Add("預設值");
+
+            AppendColumnCatalogRows(dt, db, dbName, GetTablesSafe(db, dbName), "Table");
+            AppendColumnCatalogRows(dt, db, dbName, GetViewsSafe(db, dbName), "View");
+            return dt;
+        }
+
+        private void AppendColumnCatalogRows(DataTable target, IDatabase db, string dbName, IEnumerable<string> objectNames, string objectType)
+        {
+            foreach (string objectName in objectNames)
+            {
+                DataTable columns = GetColumnsSafe(db, dbName, objectName);
+                foreach (DataRow column in columns.Rows)
+                {
+                    DataRow row = target.NewRow();
+                    row["物件"] = objectName;
+                    row["類型"] = objectType;
+                    row["欄位"] = GetModelColumnName(column);
+                    row["資料型別"] = GetModelColumnType(column);
+                    row["允許空值"] = GetModelNullable(column);
+                    row["鍵"] = GetModelKey(column);
+                    row["預設值"] = GetModelDefault(column);
+                    target.Rows.Add(row);
+                }
+            }
+        }
+
+        private DataTable BuildIndexCatalogModel(IDatabase db, string dbName)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("資料表");
+            dt.Columns.Add("索引");
+            dt.Columns.Add("欄位");
+            dt.Columns.Add("唯一");
+            dt.Columns.Add("順序");
+            dt.Columns.Add("索引類型");
+
+            foreach (string tableName in GetTablesSafe(db, dbName))
+            {
+                DataTable indexes = GetIndexesSafe(db, dbName, tableName);
+                if (indexes.Rows.Count == 0)
+                {
+                    DataRow row = dt.NewRow();
+                    row["資料表"] = tableName;
+                    row["索引"] = "(no explicit indexes)";
+                    row["欄位"] = "";
+                    row["唯一"] = "";
+                    row["順序"] = "";
+                    row["索引類型"] = "";
+                    dt.Rows.Add(row);
+                    continue;
+                }
+
+                foreach (DataRow index in indexes.Rows)
+                {
+                    DataRow row = dt.NewRow();
+                    row["資料表"] = tableName;
+                    row["索引"] = GetModelIndexName(index);
+                    row["欄位"] = GetModelIndexColumn(index);
+                    row["唯一"] = GetModelIndexUnique(index);
+                    row["順序"] = GetModelIndexSequence(index);
+                    row["索引類型"] = GetModelIndexType(index);
+                    dt.Rows.Add(row);
+                }
+            }
+
+            return dt;
+        }
+
+        private static string GetDatabaseModelDescription(string modelName)
+        {
+            if (string.Equals(modelName, "Column Catalog", StringComparison.OrdinalIgnoreCase))
+            {
+                return "列出資料表與檢視欄位、型別、空值與鍵資訊";
+            }
+
+            if (string.Equals(modelName, "Index Catalog", StringComparison.OrdinalIgnoreCase))
+            {
+                return "列出資料表索引、欄位順序與唯一性";
+            }
+
+            return "彙整資料表與檢視的欄位數、索引數與列數";
+        }
+
+        private static DataTable GetColumnsSafe(IDatabase db, string dbName, string objectName)
+        {
+            try { return db.GetColumns(dbName, objectName) ?? new DataTable(); }
+            catch { return new DataTable(); }
+        }
+
+        private static DataTable GetIndexesSafe(IDatabase db, string dbName, string tableName)
+        {
+            try { return db.GetIndexes(dbName, tableName) ?? new DataTable(); }
+            catch { return new DataTable(); }
+        }
+
+        private static int GetDistinctIndexCount(DataTable indexes)
+        {
+            if (indexes == null || indexes.Rows.Count == 0) return 0;
+            HashSet<string> names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataRow row in indexes.Rows)
+            {
+                string name = GetModelIndexName(row);
+                if (!string.IsNullOrWhiteSpace(name)) names.Add(name);
+            }
+            return names.Count;
+        }
+
+        private static string GetObjectRowCountText(IDatabase db, string dbName, string objectName)
+        {
+            try { return db.CountRows(dbName, objectName).ToString(); }
+            catch (Exception ex) { return ex.Message; }
+        }
+
+        private static string GetModelColumnName(DataRow row)
+        {
+            return FirstColumnValue(row, "Field", "name", "COLUMN_NAME", "column_name");
+        }
+
+        private static string GetModelColumnType(DataRow row)
+        {
+            return FirstColumnValue(row, "Type", "type", "DATA_TYPE", "data_type");
+        }
+
+        private static string GetModelNullable(DataRow row)
+        {
+            string explicitValue = FirstColumnValue(row, "Null", "IS_NULLABLE", "is_nullable", "NULLABLE");
+            if (!string.IsNullOrWhiteSpace(explicitValue)) return explicitValue;
+
+            string notNull = FirstColumnValue(row, "notnull");
+            if (notNull == "1") return "NO";
+            if (notNull == "0") return "YES";
+            return "";
+        }
+
+        private static string GetModelKey(DataRow row)
+        {
+            string key = FirstColumnValue(row, "Key");
+            if (!string.IsNullOrWhiteSpace(key)) return key;
+
+            string pk = FirstColumnValue(row, "pk");
+            if (pk == "1") return "PK";
+            return "";
+        }
+
+        private static string GetModelDefault(DataRow row)
+        {
+            return FirstColumnValue(row, "Default", "dflt_value", "COLUMN_DEFAULT", "column_default", "DATA_DEFAULT");
+        }
+
+        private static string GetModelIndexName(DataRow row)
+        {
+            return FirstColumnValue(row, "Key_name", "KEY_NAME", "IndexName", "INDEX_NAME");
+        }
+
+        private static string GetModelIndexColumn(DataRow row)
+        {
+            return FirstColumnValue(row, "Column_name", "COLUMN_NAME", "ColumnName");
+        }
+
+        private static string GetModelIndexUnique(DataRow row)
+        {
+            string nonUnique = FirstColumnValue(row, "Non_unique", "NON_UNIQUE", "NonUnique");
+            if (nonUnique == "0" || nonUnique.Equals("False", StringComparison.OrdinalIgnoreCase)) return "Yes";
+            if (nonUnique == "1" || nonUnique.Equals("True", StringComparison.OrdinalIgnoreCase)) return "No";
+            return "";
+        }
+
+        private static string GetModelIndexSequence(DataRow row)
+        {
+            return FirstColumnValue(row, "Seq_in_index", "SEQ_IN_INDEX", "SeqInIndex");
+        }
+
+        private static string GetModelIndexType(DataRow row)
+        {
+            return FirstColumnValue(row, "Index_type", "INDEX_TYPE", "IndexType");
+        }
+
+        private static string FirstColumnValue(DataRow row, params string[] names)
+        {
+            foreach (string name in names)
+            {
+                string value = GetColumnValue(row, name);
+                if (!string.IsNullOrWhiteSpace(value)) return value;
+            }
+            return string.Empty;
         }
 
         private DataTable GetDatabaseEvents(IDatabase db, string dbName)
@@ -3826,6 +4112,19 @@ namespace mySQLPunk
             }
         }
 
+        private void ShowModelDetails(IDatabase db, string dbName, string modelName)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            dgvDetails.Rows.Add("類型", "Model");
+            dgvDetails.Rows.Add("名稱", modelName);
+            dgvDetails.Rows.Add("資料庫", dbName);
+            dgvDetails.Rows.Add("Provider", db.ProviderName);
+            rtbDDL.Text = "-- Model: " + modelName + Environment.NewLine +
+                          "-- " + GetDatabaseModelDescription(modelName);
+        }
+
         private void ShowReportDetails(IDatabase db, string dbName, string reportName)
         {
             dgvDetails.Rows.Clear();
@@ -4075,6 +4374,19 @@ namespace mySQLPunk
                 newNode.Nodes.Add(userNode);
             }
 
+            newNode = new TreeNode("Models");
+            newNode.ImageIndex = 20;
+            newNode.SelectedImageIndex = 20;
+            databaseNode.Nodes.Add(newNode);
+
+            foreach (string modelName in DatabaseModelNames)
+            {
+                TreeNode modelNode = new TreeNode(modelName);
+                modelNode.ImageIndex = 20;
+                modelNode.SelectedImageIndex = 20;
+                newNode.Nodes.Add(modelNode);
+            }
+
             newNode = new TreeNode("Events");
             newNode.ImageIndex = 15;
             newNode.SelectedImageIndex = 15;
@@ -4184,6 +4496,7 @@ namespace mySQLPunk
                 else if (m[2] == "Events") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Functions") ExecuteSelectedFunction();
                 else if (m[2] == "Users") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                else if (m[2] == "Models") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Reports") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else OpenSelectedTableInQuery();
                 dialogMyBoxOff();
@@ -4527,7 +4840,7 @@ namespace mySQLPunk
         private void model_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("model");
-            UpdateMainStatus(Localization.T("Status.ModelSelected"));
+            SelectDatabaseGroupNode("Models");
         }
 
         private void bi_btn_Click(object sender, EventArgs e)
