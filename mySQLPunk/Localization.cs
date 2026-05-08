@@ -84,7 +84,14 @@ namespace mySQLPunk
             Add("Status.ModelSelected", "模型功能入口已選取。", "Models section selected.");
             Add("Status.BISelected", "BI 功能入口已選取。", "BI section selected.");
             Add("Status.SelectExpandedDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
+            Add("Status.SelectConnection", "請先選取一個連線。", "Select a connection first.");
+            Add("Status.SelectTab", "請先選取要關閉的分頁。", "Select a tab to close first.");
+            Add("Status.TabClosed", "分頁已關閉。", "Tab closed.");
             Add("Status.ConnectionClosed", "連線已斷開。", "Connection closed.");
+            Add("Status.ConnectionsExported", "連線設定已匯出。", "Connections exported.");
+            Add("Status.ConnectionsImported", "連線設定已匯入。", "Connections imported.");
+            Add("Status.ExportFailed", "匯出失敗：", "Export failed: ");
+            Add("Status.ImportFailed", "匯入失敗：", "Import failed: ");
             Add("Status.ThemeChanged", "主題已切換。", "Theme changed.");
             Add("Status.OptionsApplied", "選項已套用。", "Options applied.");
 
@@ -129,6 +136,10 @@ namespace mySQLPunk
             Add("ConnectionWizard.Recent", "最近使用過的", "Recent");
             Add("ConnectionWizard.All", "全部", "All");
             Add("ConnectionWizard.Search", "搜尋", "Search");
+            Add("Connection.ExportTitle", "匯出連線設定", "Export Connections");
+            Add("Connection.ImportTitle", "匯入連線設定", "Import Connections");
+            Add("Connection.JsonFilter", "JSON 檔案 (*.json)|*.json|所有檔案 (*.*)|*.*", "JSON files (*.json)|*.json|All files (*.*)|*.*");
+            Add("Connection.ImportReplaceConfirm", "匯入會取代目前所有連線設定，是否繼續？", "Importing will replace all current connection settings. Continue?");
 
             Add("Query.Query", "查詢", "Query");
             Add("Query.Execute", "執行", "Execute");

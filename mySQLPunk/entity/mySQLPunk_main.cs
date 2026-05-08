@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.IO;
 using utility;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -41,6 +42,29 @@ namespace mySQLPunk.entity
 
         public void setSettingINI()
         {
+            string setting_path = my.pwd() + "\\setting.ini";
+            my.file_put_contents(setting_path, BuildSettingsJson());
+        }
+
+        public void exportConnections(string path)
+        {
+            File.WriteAllText(path, BuildSettingsJson(), Encoding.UTF8);
+        }
+
+        public void importConnections(string path)
+        {
+            string json = File.ReadAllText(path, Encoding.UTF8);
+            JArray ja = JArray.Parse(json);
+            connections.Clear();
+            for (int i = 0, max_i = ja.Count; i < max_i; i++)
+            {
+                LoadConnectionToken(ja[i]);
+            }
+            setSettingINI();
+        }
+
+        private string BuildSettingsJson()
+        {
             List<Dictionary<string, object>> saveList = new List<Dictionary<string, object>>();
             foreach (var sourceConn in connections)
             {
@@ -62,9 +86,7 @@ namespace mySQLPunk.entity
                 };
                 saveList.Add(item);
             }
-            string setting_path = my.pwd() + "\\setting.ini";
-            string json = JsonConvert.SerializeObject(saveList, Formatting.Indented);
-            my.file_put_contents(setting_path, json);
+            return JsonConvert.SerializeObject(saveList, Formatting.Indented);
         }
 
         private void LoadConnectionToken(JToken token)

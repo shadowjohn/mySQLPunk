@@ -375,6 +375,88 @@ namespace mySQLPunk
 
         }
 
+        private void OpenConnectionToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            TreeNode root = GetSelectedConnectionRoot();
+            if (root == null)
+            {
+                UpdateMainStatus(Localization.T("Status.SelectConnection"));
+                return;
+            }
+
+            db_tree.SelectedNode = root;
+            db_tree_DoubleClick(db_tree, EventArgs.Empty);
+        }
+
+        private void CloseConnectionToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            TreeNode root = GetSelectedConnectionRoot();
+            if (root == null)
+            {
+                UpdateMainStatus(Localization.T("Status.SelectConnection"));
+                return;
+            }
+
+            CloseConnection(root.Index);
+        }
+
+        private void ExportToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Title = Localization.T("Connection.ExportTitle");
+                dialog.Filter = Localization.T("Connection.JsonFilter");
+                dialog.FileName = "mysqlpunk-connections.json";
+                dialog.DefaultExt = "json";
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                try
+                {
+                    myN.exportConnections(dialog.FileName);
+                    UpdateMainStatus(Localization.T("Status.ConnectionsExported"));
+                    MessageBox.Show(Localization.T("Status.ConnectionsExported"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(Localization.T("Status.ExportFailed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void ImportConnectionsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = Localization.T("Connection.ImportTitle");
+                dialog.Filter = Localization.T("Connection.JsonFilter");
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                DialogResult answer = MessageBox.Show(
+                    Localization.T("Connection.ImportReplaceConfirm"),
+                    Localization.T("Common.Confirm"),
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (answer != DialogResult.Yes) return;
+
+                try
+                {
+                    myN.importConnections(dialog.FileName);
+                    drawLists();
+                    UpdateMainStatus(Localization.T("Status.ConnectionsImported"));
+                    MessageBox.Show(Localization.T("Status.ConnectionsImported"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(Localization.T("Status.ImportFailed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void CloseToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            CloseSelectedTab();
+        }
+
         private void exitToolStripMenuItem_Click(object sender, EventArgs e)
         {
             Application.Exit();
@@ -551,6 +633,16 @@ namespace mySQLPunk
             sQLServerToolStripMenuItem.Click += sQLServerToolStripMenuItem_Click;
             newConnectionToolStripMenuItem.Click -= NewConnectionToolStripMenuItem_Click;
             newConnectionToolStripMenuItem.Click += NewConnectionToolStripMenuItem_Click;
+            openConnectionToolStripMenuItem.Click -= OpenConnectionToolStripMenuItem_Click;
+            openConnectionToolStripMenuItem.Click += OpenConnectionToolStripMenuItem_Click;
+            closeConnectionToolStripMenuItem.Click -= CloseConnectionToolStripMenuItem_Click;
+            closeConnectionToolStripMenuItem.Click += CloseConnectionToolStripMenuItem_Click;
+            exportToolStripMenuItem.Click -= ExportToolStripMenuItem_Click;
+            exportToolStripMenuItem.Click += ExportToolStripMenuItem_Click;
+            importConnectionsToolStripMenuItem.Click -= ImportConnectionsToolStripMenuItem_Click;
+            importConnectionsToolStripMenuItem.Click += ImportConnectionsToolStripMenuItem_Click;
+            closeToolStripMenuItem.Click -= CloseToolStripMenuItem_Click;
+            closeToolStripMenuItem.Click += CloseToolStripMenuItem_Click;
 
             // 連結工具列事件
             NewTable.Click += (s, e) => CreateNewTable();
@@ -1828,6 +1920,45 @@ namespace mySQLPunk
                 
                 MessageBox.Show(Localization.T("Status.ConnectionClosed"));
             }
+        }
+
+        private TreeNode GetSelectedConnectionRoot()
+        {
+            TreeNode node = db_tree.SelectedNode;
+            if (node == null) return null;
+
+            while (node.Parent != null)
+            {
+                node = node.Parent;
+            }
+
+            return node.Index >= 0 && node.Index < myN.connections.Count ? node : null;
+        }
+
+        private void CloseSelectedTab()
+        {
+            if (queryTabs == null || queryTabs.SelectedTab == null)
+            {
+                UpdateMainStatus(Localization.T("Status.SelectTab"));
+                return;
+            }
+
+            TabPage page = queryTabs.SelectedTab;
+            TableDesignerForm designer = page.Controls.OfType<TableDesignerForm>().FirstOrDefault();
+            if (designer != null && !designer.ConfirmClose())
+            {
+                return;
+            }
+
+            Form form = page.Tag as Form;
+            if (form != null)
+            {
+                form.Close();
+            }
+
+            queryTabs.TabPages.Remove(page);
+            if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
+            UpdateMainStatus(Localization.T("Status.TabClosed"));
         }
 
         private void ShowDatabaseObjectList(IDatabase db, string dbName)
