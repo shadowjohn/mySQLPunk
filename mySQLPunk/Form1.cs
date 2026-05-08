@@ -505,20 +505,20 @@ namespace mySQLPunk
             menuStrip1.BringToFront();
             
             // 確保容器高度足夠容納工具列
-            splitContainer1.SplitterDistance = 72;
+            splitContainer1.SplitterDistance = 86;
             tool_Connection.Dock = DockStyle.Fill;
             tool_Connection.AutoSize = false;
-            tool_Connection.Height = 72;
+            tool_Connection.Height = 86;
             tool_Connection.ImageScalingSize = new Size(32, 32);
             tool_Connection.GripStyle = ToolStripGripStyle.Hidden;
-            tool_Connection.Padding = new Padding(10, 2, 10, 2);
+            tool_Connection.Padding = new Padding(10, 8, 10, 4);
 
             // 初始化所有頂部工具列按鈕的樣式
             foreach (ToolStripItem item in tool_Connection.Items)
             {
                 item.AutoSize = false;
-                item.Size = new Size(72, 65);
-                item.Padding = new Padding(0, 2, 0, 2);
+                item.Size = new Size(72, 74);
+                item.Padding = new Padding(0, 4, 0, 2);
                 if (item is ToolStripButton btn) btn.TextImageRelation = TextImageRelation.ImageAboveText;
                 if (item is ToolStripDropDownButton dd) dd.TextImageRelation = TextImageRelation.ImageAboveText;
             }
@@ -998,16 +998,17 @@ namespace mySQLPunk
             });
 
             tool_Connection.ImageScalingSize = new Size(32, 32);
-            tool_Connection.Height = 72;
-            tool_Connection.Padding = new Padding(10, 2, 10, 2);
+            tool_Connection.Height = 86;
+            tool_Connection.Padding = new Padding(10, 8, 10, 4);
 
             foreach (ToolStripItem item in tool_Connection.Items)
             {
                 item.TextImageRelation = TextImageRelation.ImageAboveText;
                 item.TextAlign = ContentAlignment.BottomCenter;
                 item.AutoSize = false;
-                item.Size = new Size(72, 65);
-                item.Margin = new Padding(2, 0, 2, 0);
+                item.Size = new Size(72, 74);
+                item.Margin = new Padding(2, 2, 2, 0);
+                item.Padding = new Padding(0, 4, 0, 2);
             }
         }
 
@@ -1025,16 +1026,39 @@ namespace mySQLPunk
             {
                 try 
                 { 
-                    btn.Image = Image.FromFile(path);
-                    if (btn is ToolStripButton tsb) tsb.ImageScaling = ToolStripItemImageScaling.SizeToFit;
-                    if (btn is ToolStripDropDownButton tsddb) tsddb.ImageScaling = ToolStripItemImageScaling.SizeToFit;
+                    using (Image image = Image.FromFile(path))
+                    {
+                        btn.Image = CreateToolbarIcon(image);
+                    }
+                    btn.ImageScaling = ToolStripItemImageScaling.None;
                 }
-                catch { btn.Image = defaultImg; }
+                catch { btn.Image = CreateToolbarIcon(defaultImg); }
             }
             else
             {
-                btn.Image = defaultImg;
+                btn.Image = CreateToolbarIcon(defaultImg);
             }
+        }
+
+        private static Image CreateToolbarIcon(Image source)
+        {
+            Bitmap bitmap = new Bitmap(32, 32);
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(Color.Transparent);
+                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+
+                float scale = Math.Min(30f / source.Width, 30f / source.Height);
+                int width = Math.Max(1, (int)Math.Round(source.Width * scale));
+                int height = Math.Max(1, (int)Math.Round(source.Height * scale));
+                int x = (32 - width) / 2;
+                int y = (32 - height) / 2;
+                graphics.DrawImage(source, new Rectangle(x, y, width, height));
+            }
+
+            return bitmap;
         }
 
         private void DesignTable_Click(object sender, EventArgs e)
