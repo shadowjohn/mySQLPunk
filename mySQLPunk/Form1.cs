@@ -2932,87 +2932,100 @@ namespace mySQLPunk
                 string groupName = GetCurrentGridGroupName(e.RowIndex);
                 SyncTreeWithDatabaseObject(objectName, groupName);
 
-                var cms = new ContextMenuStrip();
-                if (groupName == "Views")
-                {
-                    var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenView"));
-                    itemOpen.Click += (s, ev) => OpenSelectedViewInQuery();
-                    cms.Items.Add(itemOpen);
-
-                    var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
-                    itemDesign.Click += (s, ev) => ShowSelectedViewDefinition();
-                    cms.Items.Add(itemDesign);
-
-                    var itemDump = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
-                    itemDump.Click += (s, ev) => DumpSelectedViewSql();
-                    cms.Items.Add(itemDump);
-
-                    var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
-                    itemDrop.Click += (s, ev) => DeleteSelectedView();
-                    cms.Items.Add(itemDrop);
-
-                    AddCopyRenameObjectMenuItems(cms);
-                }
-                else if (groupName == "Tables")
-                {
-                    var itemOpen = new ToolStripMenuItem(Localization.T("Tool.SelectStar"));
-                    itemOpen.Click += (s, ev) => OpenSelectedTableInQuery();
-                    cms.Items.Add(itemOpen);
-
-                    var itemSelectColumns = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
-                    itemSelectColumns.Click += (s, ev) => OpenSelectedTableAllColumnsInQuery();
-                    cms.Items.Add(itemSelectColumns);
-
-                    var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
-                    itemDesign.Click += (s, ev) => DesignSelectedTable();
-                    cms.Items.Add(itemDesign);
-
-                    var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
-                    itemDrop.Click += (s, ev) => DeleteSelectedTable();
-                    cms.Items.Add(itemDrop);
-
-                    AddCopyRenameObjectMenuItems(cms);
-                }
-                else if (groupName == "Backups")
-                {
-                    var itemBackup = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
-                    itemBackup.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
-                    cms.Items.Add(itemBackup);
-                }
-                else if (groupName == "Functions")
-                {
-                    var itemExecute = new ToolStripMenuItem(Localization.T("Tool.ExecuteFunction"));
-                    itemExecute.Click += (s, ev) => ExecuteSelectedFunction();
-                    cms.Items.Add(itemExecute);
-
-                    var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignFunction"));
-                    itemDesign.Click += (s, ev) => ShowSelectedFunctionDefinition();
-                    cms.Items.Add(itemDesign);
-
-                    var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteFunction"));
-                    itemDrop.Click += (s, ev) => DeleteSelectedFunction();
-                    cms.Items.Add(itemDrop);
-                }
-                else if (groupName == "Queries")
-                {
-                    var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenQuery"));
-                    itemOpen.Click += (s, ev) => OpenSelectedQueryTabFromGrid();
-                    cms.Items.Add(itemOpen);
-
-                    var itemClose = new ToolStripMenuItem(Localization.T("Tool.CloseQuery"));
-                    itemClose.Click += (s, ev) => CloseSelectedQueryTabFromGrid();
-                    cms.Items.Add(itemClose);
-                }
-
-                if (cms.Items.Count == 0)
-                {
-                    cms.Dispose();
-                    return;
-                }
-                
+                ContextMenuStrip cms = BuildGridContextMenu(groupName);
+                if (cms == null) return;
                 ThemeManager.ApplyToolStrip(cms);
                 cms.Show(table_top, table_top.PointToClient(Cursor.Position));
             }
+        }
+
+        private ContextMenuStrip BuildGridContextMenu(string groupName)
+        {
+            var cms = new ContextMenuStrip();
+            if (groupName == "Views")
+            {
+                var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenView"));
+                itemOpen.Click += (s, ev) => OpenSelectedViewInQuery();
+                cms.Items.Add(itemOpen);
+
+                var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
+                itemDesign.Click += (s, ev) => ShowSelectedViewDefinition();
+                cms.Items.Add(itemDesign);
+
+                var itemDump = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                itemDump.Click += (s, ev) => DumpSelectedViewSql();
+                cms.Items.Add(itemDump);
+
+                var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
+                itemDrop.Click += (s, ev) => DeleteSelectedView();
+                cms.Items.Add(itemDrop);
+
+                AddCopyRenameObjectMenuItems(cms);
+            }
+            else if (groupName == "Tables")
+            {
+                var itemOpen = new ToolStripMenuItem(Localization.T("Tool.SelectStar"));
+                itemOpen.Click += (s, ev) => OpenSelectedTableInQuery();
+                cms.Items.Add(itemOpen);
+
+                var itemSelectColumns = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
+                itemSelectColumns.Click += (s, ev) => OpenSelectedTableAllColumnsInQuery();
+                cms.Items.Add(itemSelectColumns);
+
+                var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
+                itemDesign.Click += (s, ev) => DesignSelectedTable();
+                cms.Items.Add(itemDesign);
+
+                var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
+                itemDrop.Click += (s, ev) => DeleteSelectedTable();
+                cms.Items.Add(itemDrop);
+
+                AddCopyRenameObjectMenuItems(cms);
+            }
+            else if (groupName == "Backups")
+            {
+                var itemBackup = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
+                itemBackup.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
+                cms.Items.Add(itemBackup);
+            }
+            else if (groupName == "Functions")
+            {
+                var itemExecute = new ToolStripMenuItem(Localization.T("Tool.ExecuteFunction"));
+                itemExecute.Click += (s, ev) => ExecuteSelectedFunction();
+                cms.Items.Add(itemExecute);
+
+                var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignFunction"));
+                itemDesign.Click += (s, ev) => ShowSelectedFunctionDefinition();
+                cms.Items.Add(itemDesign);
+
+                var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteFunction"));
+                itemDrop.Click += (s, ev) => DeleteSelectedFunction();
+                cms.Items.Add(itemDrop);
+            }
+            else if (groupName == "Queries")
+            {
+                var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenQuery"));
+                itemOpen.Click += (s, ev) => OpenSelectedQueryTabFromGrid();
+                cms.Items.Add(itemOpen);
+
+                var itemClose = new ToolStripMenuItem(Localization.T("Tool.CloseQuery"));
+                itemClose.Click += (s, ev) => CloseSelectedQueryTabFromGrid();
+                cms.Items.Add(itemClose);
+            }
+            else if (IsDetailsOnlyGroup(groupName))
+            {
+                var itemOpenDetails = new ToolStripMenuItem(Localization.T("Tool.OpenDetails"));
+                itemOpenDetails.Click += (s, ev) => ShowSelectedTreeNodeDetails();
+                cms.Items.Add(itemOpenDetails);
+            }
+
+            if (cms.Items.Count == 0)
+            {
+                cms.Dispose();
+                return null;
+            }
+
+            return cms;
         }
 
         private ToolStripMenuItem CreateTableDumpMenuItem()
@@ -5096,6 +5109,12 @@ namespace mySQLPunk
                     deleteFunctionItem.Click += (s, ev) => DeleteSelectedFunction();
                     menu.Items.Add(deleteFunctionItem);
                 }
+                else if (pathParts.Length >= 4 && IsDetailsOnlyGroup(pathParts[2]))
+                {
+                    ToolStripMenuItem openDetailsItem = new ToolStripMenuItem(Localization.T("Tool.OpenDetails"));
+                    openDetailsItem.Click += (s, ev) => ShowSelectedTreeNodeDetails();
+                    menu.Items.Add(openDetailsItem);
+                }
             }
 
             if (menu.Items.Count == 0)
@@ -5127,6 +5146,23 @@ namespace mySQLPunk
             pasteItem.Enabled = _treeClipboardItem != null;
             pasteItem.Click += (s, ev) => PasteInternalClipboardToSelectedDatabase();
             menu.Items.Add(pasteItem);
+        }
+
+        private static bool IsDetailsOnlyGroup(string groupName)
+        {
+            return string.Equals(groupName, "Events", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(groupName, "Users", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(groupName, "Models", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(groupName, "BI", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(groupName, "Other", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(groupName, "Reports", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool ShowSelectedTreeNodeDetails()
+        {
+            if (db_tree.SelectedNode == null) return false;
+            db_tree_AfterSelect(db_tree, new TreeViewEventArgs(db_tree.SelectedNode));
+            return true;
         }
 
         private void db_tree_edit_connection(int index)

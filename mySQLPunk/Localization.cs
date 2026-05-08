@@ -87,6 +87,7 @@ namespace mySQLPunk
             Add("Tool.DataOnly", "僅資料", "Data Only");
             Add("Tool.OpenQuery", "開啟查詢", "Open Query");
             Add("Tool.CloseQuery", "關閉查詢", "Close Query");
+            Add("Tool.OpenDetails", "開啟詳細資料", "Open Details");
             Add("Tool.CopyObject", "複製物件", "Copy Object");
             Add("Tool.PasteObject", "貼上物件", "Paste Object");
             Add("Tool.RenameObject", "重新命名", "Rename");
