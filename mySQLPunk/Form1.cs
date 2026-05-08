@@ -37,6 +37,13 @@ namespace mySQLPunk
         mySQLPunk_main myN = new mySQLPunk_main();
         myinclude my = new myinclude();
         ToolStripButton query_btn = new ToolStripButton(); // 新增查詢按鈕
+        ToolStripButton function_btn = new ToolStripButton();
+        ToolStripButton other_btn = new ToolStripButton();
+        ToolStripButton query_section_btn = new ToolStripButton();
+        ToolStripButton backup_btn = new ToolStripButton();
+        ToolStripButton auto_run_btn = new ToolStripButton();
+        ToolStripButton model_btn = new ToolStripButton();
+        ToolStripButton bi_btn = new ToolStripButton();
         private TabControl queryTabs;
         private int queryTabCounter = 1;
         private TabPage dragTab = null; // 用於拖拽頁籤
@@ -352,6 +359,14 @@ namespace mySQLPunk
             List<object> btns = new List<object>();
             btns.Add(table_btn);
             btns.Add(view_btn);
+            btns.Add(function_btn);
+            btns.Add(user_btn);
+            btns.Add(other_btn);
+            btns.Add(query_section_btn);
+            btns.Add(backup_btn);
+            btns.Add(auto_run_btn);
+            btns.Add(model_btn);
+            btns.Add(bi_btn);
             for (int i = 0, max_i = btns.Count; i < max_i; i++)
             {
                 ((ToolStripButton)btns[i]).Checked = false;
@@ -362,7 +377,6 @@ namespace mySQLPunk
                 case "user":
                     user_btn.BackColor = Color.LightBlue;
                     user_btn.Checked = true;
-
                     break;
                 case "table":
                     table_btn.BackColor = Color.LightBlue;
@@ -371,6 +385,34 @@ namespace mySQLPunk
                 case "view":
                     view_btn.BackColor = Color.LightBlue;
                     view_btn.Checked = true;
+                    break;
+                case "function":
+                    function_btn.BackColor = Color.LightBlue;
+                    function_btn.Checked = true;
+                    break;
+                case "other":
+                    other_btn.BackColor = Color.LightBlue;
+                    other_btn.Checked = true;
+                    break;
+                case "query":
+                    query_section_btn.BackColor = Color.LightBlue;
+                    query_section_btn.Checked = true;
+                    break;
+                case "backup":
+                    backup_btn.BackColor = Color.LightBlue;
+                    backup_btn.Checked = true;
+                    break;
+                case "auto":
+                    auto_run_btn.BackColor = Color.LightBlue;
+                    auto_run_btn.Checked = true;
+                    break;
+                case "model":
+                    model_btn.BackColor = Color.LightBlue;
+                    model_btn.Checked = true;
+                    break;
+                case "bi":
+                    bi_btn.BackColor = Color.LightBlue;
+                    bi_btn.Checked = true;
                     break;
             }
         }
@@ -534,42 +576,14 @@ namespace mySQLPunk
             table_top.Width = splitContainer5.Width;
             table_top.Height = splitContainer5.Height;
 
-            // 初始化 New Query 按鈕
-            query_btn.Text = "New Query";
-            query_btn.ImageScaling = ToolStripItemImageScaling.None;
-            query_btn.TextImageRelation = TextImageRelation.ImageAboveText; // 圖示在文字上方
-            query_btn.TextAlign = ContentAlignment.BottomCenter;
-            query_btn.AutoSize = false;
-            query_btn.Size = new Size(85, 85); // 統一按鈕尺寸
-            query_btn.Margin = new Padding(2);
-            query_btn.Click += Query_btn_Click;
-            tool_Connection.Items.Add(query_btn);
+            string imgPath = Path.Combine(Application.StartupPath, "image");
+            ConfigureMainToolbar(imgPath);
 
             // 連結 Design Table 事件
             DesignTable.Click += DesignTable_Click;
 
             // 連結右鍵選單事件
             db_tree.NodeMouseClick += db_tree_NodeMouseClick;
-
-            // 嘗試從 image 資料夾載入切好的高解析圖標
-            string imgPath = Path.Combine(Application.StartupPath, "image");
-            LoadIcon(connection_btn, Path.Combine(imgPath, "connection.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(user_btn, Path.Combine(imgPath, "user.png"), global::mySQLPunk.Properties.Resources.user);
-            LoadIcon(table_btn, Path.Combine(imgPath, "table.png"), global::mySQLPunk.Properties.Resources.tables_32);
-            LoadIcon(view_btn, Path.Combine(imgPath, "view.png"), global::mySQLPunk.Properties.Resources.views_32);
-            // 主工具列樣式調整 (大圖標 + 文字在下)
-            tool_Connection.ImageScalingSize = new Size(32, 32);
-            tool_Connection.Height = 70;
-            tool_Connection.Padding = new Padding(5);
-
-            foreach (ToolStripItem item in tool_Connection.Items)
-            {
-                item.TextImageRelation = TextImageRelation.ImageAboveText;
-                item.TextAlign = ContentAlignment.BottomCenter;
-                if (item is ToolStripButton tsb) tsb.AutoSize = false;
-                if (item is ToolStripDropDownButton tsddb) tsddb.AutoSize = false;
-                item.Size = new Size(70, 65);
-            }
 
             // 初始化導覽列 (Navigation Bar)
             Panel pnlNav = new Panel() { Dock = DockStyle.Top, Height = 30, BackColor = Color.FromArgb(245, 245, 245) };
@@ -732,6 +746,90 @@ namespace mySQLPunk
 
             splitContainer5.Panel2.Controls.Add(pnlSidebar);
             pnlSidebar.BringToFront();
+        }
+
+        private void ConfigureMainToolbar(string imgPath)
+        {
+            ConfigureToolbarItem(connection_btn, "連線");
+            ConfigureToolbarItem(query_btn, "新增查詢");
+            ConfigureToolbarItem(table_btn, "資料表");
+            ConfigureToolbarItem(view_btn, "檢視");
+            ConfigureToolbarItem(function_btn, "函式");
+            ConfigureToolbarItem(user_btn, "使用者");
+            ConfigureToolbarItem(other_btn, "其它");
+            ConfigureToolbarItem(query_section_btn, "查詢");
+            ConfigureToolbarItem(backup_btn, "備份");
+            ConfigureToolbarItem(auto_run_btn, "自動執行");
+            ConfigureToolbarItem(model_btn, "模型");
+            ConfigureToolbarItem(bi_btn, "BI");
+
+            query_btn.Click -= Query_btn_Click;
+            query_btn.Click += Query_btn_Click;
+            function_btn.Click -= function_btn_Click;
+            function_btn.Click += function_btn_Click;
+            other_btn.Click -= other_btn_Click;
+            other_btn.Click += other_btn_Click;
+            query_section_btn.Click -= query_section_btn_Click;
+            query_section_btn.Click += query_section_btn_Click;
+            backup_btn.Click -= backup_btn_Click;
+            backup_btn.Click += backup_btn_Click;
+            auto_run_btn.Click -= auto_run_btn_Click;
+            auto_run_btn.Click += auto_run_btn_Click;
+            model_btn.Click -= model_btn_Click;
+            model_btn.Click += model_btn_Click;
+            bi_btn.Click -= bi_btn_Click;
+            bi_btn.Click += bi_btn_Click;
+
+            LoadIcon(connection_btn, Path.Combine(imgPath, "connection.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(query_btn, Path.Combine(imgPath, "new_query.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(table_btn, Path.Combine(imgPath, "table.png"), global::mySQLPunk.Properties.Resources.tables_32);
+            LoadIcon(view_btn, Path.Combine(imgPath, "view.png"), global::mySQLPunk.Properties.Resources.views_32);
+            LoadIcon(function_btn, Path.Combine(imgPath, "functions.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(user_btn, Path.Combine(imgPath, "user.png"), global::mySQLPunk.Properties.Resources.user);
+            LoadIcon(other_btn, Path.Combine(imgPath, "other.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(query_section_btn, Path.Combine(imgPath, "query_section.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(backup_btn, Path.Combine(imgPath, "backups.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(auto_run_btn, Path.Combine(imgPath, "auto_run.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(model_btn, Path.Combine(imgPath, "model.png"), global::mySQLPunk.Properties.Resources.database);
+            LoadIcon(bi_btn, Path.Combine(imgPath, "bi.png"), global::mySQLPunk.Properties.Resources.database);
+
+            tool_Connection.Items.Clear();
+            tool_Connection.Items.AddRange(new ToolStripItem[]
+            {
+                connection_btn,
+                query_btn,
+                table_btn,
+                view_btn,
+                function_btn,
+                user_btn,
+                other_btn,
+                query_section_btn,
+                backup_btn,
+                auto_run_btn,
+                model_btn,
+                bi_btn
+            });
+
+            tool_Connection.ImageScalingSize = new Size(32, 32);
+            tool_Connection.Height = 70;
+            tool_Connection.Padding = new Padding(5);
+
+            foreach (ToolStripItem item in tool_Connection.Items)
+            {
+                item.TextImageRelation = TextImageRelation.ImageAboveText;
+                item.TextAlign = ContentAlignment.BottomCenter;
+                item.AutoSize = false;
+                item.Size = new Size(72, 65);
+                item.Margin = new Padding(2, 0, 2, 0);
+            }
+        }
+
+        private static void ConfigureToolbarItem(ToolStripItem item, string text)
+        {
+            item.Text = text;
+            item.AutoToolTip = false;
+            item.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            item.ImageScaling = ToolStripItemImageScaling.None;
         }
 
         private void LoadIcon(ToolStripItem btn, string path, Image defaultImg)
@@ -2224,16 +2322,100 @@ namespace mySQLPunk
         private void table_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("table");
+            SelectDatabaseGroupNode("Tables");
+            showTools("點到Tables");
         }
 
         private void view_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("view");
+            SelectDatabaseGroupNode("Views");
+            showTools("點到Views本身");
         }
 
         private void user_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("user");
+            UpdateMainStatus("使用者功能入口已選取。");
+        }
+
+        private void function_btn_Click(object sender, EventArgs e)
+        {
+            thirty_two_change("function");
+            SelectDatabaseGroupNode("Functions");
+            showTools("點到Functions本身");
+        }
+
+        private void other_btn_Click(object sender, EventArgs e)
+        {
+            thirty_two_change("other");
+            UpdateMainStatus("其它功能入口已選取。");
+        }
+
+        private void query_section_btn_Click(object sender, EventArgs e)
+        {
+            thirty_two_change("query");
+            SelectDatabaseGroupNode("Queries");
+        }
+
+        private void backup_btn_Click(object sender, EventArgs e)
+        {
+            thirty_two_change("backup");
+            SelectDatabaseGroupNode("Backups");
+        }
+
+        private void auto_run_btn_Click(object sender, EventArgs e)
+        {
+            thirty_two_change("auto");
+            SelectDatabaseGroupNode("Events");
+        }
+
+        private void model_btn_Click(object sender, EventArgs e)
+        {
+            thirty_two_change("model");
+            UpdateMainStatus("模型功能入口已選取。");
+        }
+
+        private void bi_btn_Click(object sender, EventArgs e)
+        {
+            thirty_two_change("bi");
+            UpdateMainStatus("BI 功能入口已選取。");
+        }
+
+        private void SelectDatabaseGroupNode(string groupName)
+        {
+            TreeNode databaseNode = GetSelectedDatabaseNode();
+            if (databaseNode == null)
+            {
+                UpdateMainStatus("請先選取一個已展開的資料庫。");
+                return;
+            }
+
+            foreach (TreeNode child in databaseNode.Nodes)
+            {
+                if (string.Equals(child.Text, groupName, StringComparison.OrdinalIgnoreCase))
+                {
+                    db_tree.SelectedNode = child;
+                    child.EnsureVisible();
+                    return;
+                }
+            }
+
+            UpdateMainStatus("目前資料庫沒有 " + groupName + " 節點。");
+        }
+
+        private TreeNode GetSelectedDatabaseNode()
+        {
+            TreeNode node = db_tree.SelectedNode;
+            if (node == null) return null;
+            if (node.Parent == null) return null;
+
+            while (node.Parent != null && node.Parent.Parent != null)
+            {
+                node = node.Parent;
+            }
+
+            return node.Parent == null ? null : node;
         }
 
         private void tool_Connection_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
