@@ -2591,7 +2591,51 @@ namespace mySQLPunk
             if (groupName == "Queries")
             {
                 ActivateQueryTabFromGridRow(e.RowIndex);
+                return;
             }
+
+            ActivateDatabaseObjectFromGridRow(e.RowIndex, groupName);
+        }
+
+        private bool ActivateDatabaseObjectFromGridRow(int rowIndex, string groupName)
+        {
+            if (rowIndex < 0 || rowIndex >= table_top.Rows.Count || !table_top.Columns.Contains("名稱")) return false;
+
+            object value = table_top.Rows[rowIndex].Cells["名稱"].Value;
+            if (value == null || value == DBNull.Value) return false;
+
+            string objectName = value.ToString();
+            if (string.IsNullOrWhiteSpace(objectName)) return false;
+
+            SyncTreeWithDatabaseObject(objectName, groupName);
+            if (db_tree.SelectedNode == null) return false;
+
+            if (groupName == "Tables")
+            {
+                OpenSelectedTableInQuery();
+                return true;
+            }
+
+            if (groupName == "Views")
+            {
+                OpenSelectedViewInQuery();
+                return true;
+            }
+
+            if (groupName == "Functions")
+            {
+                ExecuteSelectedFunction();
+                return true;
+            }
+
+            if (groupName == "Events" || groupName == "Users" || groupName == "Models" ||
+                groupName == "BI" || groupName == "Other" || groupName == "Reports")
+            {
+                db_tree_AfterSelect(db_tree, new TreeViewEventArgs(db_tree.SelectedNode));
+                return true;
+            }
+
+            return false;
         }
 
         private bool OpenSelectedQueryTabFromGrid()
@@ -2675,6 +2719,10 @@ namespace mySQLPunk
                 if (typeValue != null && string.Equals(typeValue.ToString(), "Other", StringComparison.OrdinalIgnoreCase))
                 {
                     return "Other";
+                }
+                if (typeValue != null && string.Equals(typeValue.ToString(), "Report", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Reports";
                 }
             }
 
