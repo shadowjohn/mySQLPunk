@@ -450,6 +450,8 @@ namespace mySQLPunk
             splitContainer5.Orientation = Orientation.Vertical;
             splitContainer5.SplitterDistance = splitContainer5.Width - 300; 
 
+            ConfigureMainMenu();
+
             // 將 table_top 移到 Panel1 並設為 Fill
             table_top.Parent = splitContainer5.Panel1;
             table_top.Dock = DockStyle.Fill;
@@ -466,25 +468,26 @@ namespace mySQLPunk
             statusStrip1.Items.Clear();
             statusStrip1.Items.Add(lblMainStatus);
 
-            // 確保選單與工具列在最頂端
-            menuStrip1.SendToBack(); // 根據 WinForms 邏輯，SendToBack 反而是 Dock 最頂端
-            tool_Connection.SendToBack(); 
+            // 確保上方只有兩排：選單列 + 圖示工具列。
+            menuStrip1.Dock = DockStyle.Top;
+            menuStrip1.Visible = true;
+            menuStrip1.BringToFront();
             
             // 確保容器高度足夠容納工具列
-            splitContainer1.SplitterDistance = 110;
+            splitContainer1.SplitterDistance = 72;
             tool_Connection.Dock = DockStyle.Fill;
             tool_Connection.AutoSize = false;
-            tool_Connection.Height = 110; 
+            tool_Connection.Height = 72;
             tool_Connection.ImageScalingSize = new Size(32, 32);
             tool_Connection.GripStyle = ToolStripGripStyle.Hidden;
-            tool_Connection.Padding = new Padding(10, 5, 10, 5);
+            tool_Connection.Padding = new Padding(10, 2, 10, 2);
 
             // 初始化所有頂部工具列按鈕的樣式
             foreach (ToolStripItem item in tool_Connection.Items)
             {
                 item.AutoSize = false;
-                item.Size = new Size(90, 85);
-                item.Padding = new Padding(0, 5, 0, 5); // 內部再加一點邊距
+                item.Size = new Size(72, 65);
+                item.Padding = new Padding(0, 2, 0, 2);
                 if (item is ToolStripButton btn) btn.TextImageRelation = TextImageRelation.ImageAboveText;
                 if (item is ToolStripDropDownButton dd) dd.TextImageRelation = TextImageRelation.ImageAboveText;
             }
@@ -585,12 +588,6 @@ namespace mySQLPunk
             // 連結右鍵選單事件
             db_tree.NodeMouseClick += db_tree_NodeMouseClick;
 
-            // 初始化導覽列 (Navigation Bar)
-            Panel pnlNav = new Panel() { Dock = DockStyle.Top, Height = 30, BackColor = Color.FromArgb(245, 245, 245) };
-            Label lblNavTitle = new Label() { Name = "lblNav", Text = " Ready", Font = new Font("Microsoft JhengHei", 9), ForeColor = Color.Gray, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            pnlNav.Controls.Add(lblNavTitle);
-            this.Controls.Add(pnlNav);
-            pnlNav.BringToFront();
             tool_Connection.BringToFront();
 
             queryTabs.MouseClick += queryTabs_MouseClick;
@@ -604,6 +601,30 @@ namespace mySQLPunk
             // 連結工具列事件
             NewTable.Click += (s, e) => CreateNewTable();
             DeleteTable.Click += (s, e) => DeleteSelectedTable();
+        }
+
+        private void ConfigureMainMenu()
+        {
+            檔案ToolStripMenuItem.Text = "檔案";
+            ttToolStripMenuItem.Text = "視窗";
+            helpToolStripMenuItem.Text = "說明";
+
+            ToolStripMenuItem editMenu = new ToolStripMenuItem("編輯");
+            ToolStripMenuItem viewMenu = new ToolStripMenuItem("檢視");
+            ToolStripMenuItem favoriteMenu = new ToolStripMenuItem("我的最愛");
+            ToolStripMenuItem toolsMenu = new ToolStripMenuItem("工具");
+
+            menuStrip1.Items.Clear();
+            menuStrip1.Items.AddRange(new ToolStripItem[]
+            {
+                檔案ToolStripMenuItem,
+                editMenu,
+                viewMenu,
+                favoriteMenu,
+                toolsMenu,
+                ttToolStripMenuItem,
+                helpToolStripMenuItem
+            });
         }
 
         private void CreateNewTable()
@@ -811,8 +832,8 @@ namespace mySQLPunk
             });
 
             tool_Connection.ImageScalingSize = new Size(32, 32);
-            tool_Connection.Height = 70;
-            tool_Connection.Padding = new Padding(5);
+            tool_Connection.Height = 72;
+            tool_Connection.Padding = new Padding(10, 2, 10, 2);
 
             foreach (ToolStripItem item in tool_Connection.Items)
             {
