@@ -579,17 +579,19 @@ namespace mySQLPunk
             ToolStripMenuItem themeMenu = new ToolStripMenuItem(Localization.T("Menu.Theme"));
             ToolStripMenuItem lightMenu = new ToolStripMenuItem(Localization.T("Menu.ThemeLight"));
             ToolStripMenuItem darkMenu = new ToolStripMenuItem(Localization.T("Menu.ThemeDark"));
+            ToolStripMenuItem optionsMenu = new ToolStripMenuItem(Localization.T("Menu.Options"));
             zhMenu.Checked = !Localization.IsEnglish;
             enMenu.Checked = Localization.IsEnglish;
-            zhMenu.Click += (s, e) => ChangeLanguage(Localization.TraditionalChinese);
-            enMenu.Click += (s, e) => ChangeLanguage(Localization.English);
+            zhMenu.Click += (s, e) => ApplyPreferences(Localization.TraditionalChinese, ThemeManager.CurrentTheme, "Status.LanguageChanged");
+            enMenu.Click += (s, e) => ApplyPreferences(Localization.English, ThemeManager.CurrentTheme, "Status.LanguageChanged");
             languageMenu.DropDownItems.AddRange(new ToolStripItem[] { zhMenu, enMenu });
             lightMenu.Checked = !ThemeManager.IsDark;
             darkMenu.Checked = ThemeManager.IsDark;
-            lightMenu.Click += (s, e) => ChangeTheme(ThemeManager.Light);
-            darkMenu.Click += (s, e) => ChangeTheme(ThemeManager.Dark);
+            lightMenu.Click += (s, e) => ApplyPreferences(Localization.CurrentLanguage, ThemeManager.Light, "Status.ThemeChanged");
+            darkMenu.Click += (s, e) => ApplyPreferences(Localization.CurrentLanguage, ThemeManager.Dark, "Status.ThemeChanged");
             themeMenu.DropDownItems.AddRange(new ToolStripItem[] { lightMenu, darkMenu });
-            toolsMenu.DropDownItems.AddRange(new ToolStripItem[] { languageMenu, themeMenu });
+            optionsMenu.Click += (s, e) => OpenOptionsDialog();
+            toolsMenu.DropDownItems.AddRange(new ToolStripItem[] { optionsMenu, new ToolStripSeparator(), languageMenu, themeMenu });
 
             menuStrip1.Items.Clear();
             menuStrip1.Items.AddRange(new ToolStripItem[]
@@ -604,9 +606,21 @@ namespace mySQLPunk
             });
         }
 
-        private void ChangeLanguage(string language)
+        private void OpenOptionsDialog()
+        {
+            using (OptionsForm form = new OptionsForm())
+            {
+                if (form.ShowDialog(this) == DialogResult.OK)
+                {
+                    ApplyPreferences(form.SelectedLanguage, form.SelectedTheme, "Status.OptionsApplied");
+                }
+            }
+        }
+
+        private void ApplyPreferences(string language, string theme, string statusKey)
         {
             Localization.SetLanguage(language, true);
+            ThemeManager.SetTheme(theme, true);
             ApplyLanguage();
             foreach (Form form in Application.OpenForms)
             {
@@ -616,24 +630,11 @@ namespace mySQLPunk
                 TableDesignerForm designerForm = form as TableDesignerForm;
                 if (designerForm != null) designerForm.ApplyLanguage();
                 Localization.ApplyTo(form);
-            }
-            UpdateMainStatus(Localization.T("Status.LanguageChanged"));
-        }
-
-        private void ChangeTheme(string theme)
-        {
-            ThemeManager.SetTheme(theme, true);
-            ApplyLanguage();
-            foreach (Form form in Application.OpenForms)
-            {
-                if (form == this) continue;
-                QueryForm queryForm = form as QueryForm;
                 if (queryForm != null) queryForm.ApplyTheme();
-                TableDesignerForm designerForm = form as TableDesignerForm;
                 if (designerForm != null) designerForm.ApplyTheme();
                 ThemeManager.ApplyTo(form);
             }
-            UpdateMainStatus(Localization.T("Status.ThemeChanged"));
+            UpdateMainStatus(Localization.T(statusKey));
         }
 
         private void ApplyLanguage()

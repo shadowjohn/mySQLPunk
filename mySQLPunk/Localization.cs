@@ -31,6 +31,7 @@ namespace mySQLPunk
             Add("Menu.Theme", "主題", "Theme");
             Add("Menu.ThemeLight", "亮色", "Light");
             Add("Menu.ThemeDark", "暗色", "Dark");
+            Add("Menu.Options", "選項...", "Options...");
             Add("Menu.NewConnection", "新增連線", "New Connection");
             Add("Menu.OpenConnection", "開啟連線", "Open Connection");
             Add("Menu.CloseConnection", "關閉連線", "Close Connection");
@@ -85,6 +86,7 @@ namespace mySQLPunk
             Add("Status.SelectExpandedDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
             Add("Status.ConnectionClosed", "連線已斷開。", "Connection closed.");
             Add("Status.ThemeChanged", "主題已切換。", "Theme changed.");
+            Add("Status.OptionsApplied", "選項已套用。", "Options applied.");
 
             Add("Common.ConnectionName", "連線名稱", "Connection Name");
             Add("Common.ConnectionNameColon", "連線名稱:", "Connection Name:");
@@ -165,6 +167,24 @@ namespace mySQLPunk
             Add("Designer.Default", "預設", "Default");
             Add("Designer.IndexType", "索引類型", "Index Type");
             Add("Designer.IndexMethod", "索引方法", "Index Method");
+
+            Add("Options.Title", "選項", "Options");
+            Add("Options.General", "一般", "General");
+            Add("Options.ThemeLabel", "佈景主題:", "Theme:");
+            Add("Options.LanguageLabel", "語言:", "Language:");
+            Add("Options.Light", "亮色", "Light");
+            Add("Options.Dark", "深色", "Dark");
+            Add("Options.Navigation", "導覽", "Navigation");
+            Add("Options.AutoComplete", "自動完成程式碼", "Code Completion");
+            Add("Options.Editor", "編輯器", "Editor");
+            Add("Options.Record", "記錄", "Log");
+            Add("Options.AI", "AI", "AI");
+            Add("Options.AutoRecovery", "自動復原", "Auto Recovery");
+            Add("Options.FileLocation", "檔案位置", "File Locations");
+            Add("Options.Connection", "連線能力", "Connectivity");
+            Add("Options.Environment", "環境", "Environment");
+            Add("Options.Advanced", "進階", "Advanced");
+            Add("Options.RestartNote", "* 部分已開啟視窗可能需要重新開啟才能完整套用。", "* Some open windows may need to be reopened to fully apply changes.");
         }
 
         public static string CurrentLanguage
