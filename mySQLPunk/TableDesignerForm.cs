@@ -1142,7 +1142,14 @@ namespace mySQLPunk
                                    (GetBool(current, "NotNull") ? " NOT NULL;" : " NULL;"));
                 }
                 if (defaultChanged)
-                    unsupported.Add("SQL Server 修改既有 DEFAULT 需要先定位並刪除 default constraint：" + columnName);
+                {
+                    statements.Add(BuildSqlServerDropDefaultConstraintStatement(columnName));
+                    string defaultValue = GetRowString(current, "Default").Trim();
+                    if (!string.IsNullOrWhiteSpace(defaultValue))
+                    {
+                        statements.Add(BuildSqlServerAddDefaultConstraintStatement(columnName, defaultValue));
+                    }
+                }
                 if (commentChanged)
                     unsupported.Add("SQL Server 欄位註解需透過 extended property 另行處理：" + columnName);
                 return statements;
@@ -1174,6 +1181,26 @@ namespace mySQLPunk
             }
 
             return statements;
+        }
+
+        private string BuildSqlServerDropDefaultConstraintStatement(string columnName)
+        {
+            string database = QuoteDesignerIdentifier(_databaseName);
+            return "DECLARE @constraintName nvarchar(128);\r\n" +
+                   "SELECT @constraintName = dc.name\r\n" +
+                   "FROM " + database + ".sys.default_constraints dc\r\n" +
+                   "INNER JOIN " + database + ".sys.columns c ON c.default_object_id = dc.object_id\r\n" +
+                   "INNER JOIN " + database + ".sys.tables t ON t.object_id = c.object_id\r\n" +
+                   "INNER JOIN " + database + ".sys.schemas s ON s.schema_id = t.schema_id\r\n" +
+                   "WHERE s.name = N'dbo' AND t.name = N'" + EscapeSqlServerLiteral(_tableName) + "' AND c.name = N'" + EscapeSqlServerLiteral(columnName) + "';\r\n" +
+                   "IF @constraintName IS NOT NULL EXEC(N'ALTER TABLE " + GetQualifiedDesignerTableName(_tableName).Replace("'", "''") + " DROP CONSTRAINT [' + REPLACE(@constraintName, ']', ']]') + N']');";
+        }
+
+        private string BuildSqlServerAddDefaultConstraintStatement(string columnName, string defaultValue)
+        {
+            return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                   " ADD DEFAULT " + FormatGenericDefault(defaultValue) +
+                   " FOR " + QuoteDesignerIdentifier(columnName) + ";";
         }
 
         private List<string> BuildGenericAlterIndexStatements(List<string> unsupported)
