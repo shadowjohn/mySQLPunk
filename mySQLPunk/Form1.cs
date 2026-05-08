@@ -106,6 +106,33 @@ namespace mySQLPunk
             return host + "," + port;
         }
 
+        private static string BuildConnectionFailureMessage(string providerName, Exception ex)
+        {
+            string provider = string.IsNullOrWhiteSpace(providerName) ? "Database" : providerName;
+            string reason = ex == null ? "Unknown error" : ex.Message;
+            return provider + " 連線失敗：" + reason;
+        }
+
+        private void HandleConnectionOpenFailure(int index, TreeView tree, string providerName, Exception ex)
+        {
+            string message = BuildConnectionFailureMessage(providerName, ex);
+            Console.WriteLine(message);
+            if (index >= 0 && index < myN.connections.Count)
+            {
+                myN.connections[index]["isConnect"] = "F";
+                if (db_tree != null && index < db_tree.Nodes.Count)
+                {
+                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
+                }
+            }
+            if (tree != null && tree.SelectedNode != null)
+            {
+                tree.SelectedNode.Collapse();
+            }
+            UpdateMainStatus(message);
+            MessageBox.Show(message, providerName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
         private class DatabaseObjectSelection
         {
             public IDatabase Database;
@@ -5026,10 +5053,7 @@ namespace mySQLPunk
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine(ex.Message);
-                                    myN.connections[index]["isConnect"] = "F";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
-                                    ((TreeView)sender).SelectedNode.Collapse();
+                                    HandleConnectionOpenFailure(index, (TreeView)sender, "PostgreSQL", ex);
                                 }
 
                             }
@@ -5077,10 +5101,7 @@ namespace mySQLPunk
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine(ex.Message);
-                                    myN.connections[index]["isConnect"] = "F";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
-                                    ((TreeView)sender).SelectedNode.Collapse();
+                                    HandleConnectionOpenFailure(index, (TreeView)sender, "SQLite", ex);
                                 }
 
                             }
@@ -5121,10 +5142,7 @@ namespace mySQLPunk
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine(ex.Message);
-                                    myN.connections[index]["isConnect"] = "F";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
-                                    ((TreeView)sender).SelectedNode.Collapse();
+                                    HandleConnectionOpenFailure(index, (TreeView)sender, "MySQL", ex);
                                 }
 
                             }
@@ -5154,10 +5172,7 @@ namespace mySQLPunk
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine(ex.Message);
-                                    myN.connections[index]["isConnect"] = "F";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
-                                    ((TreeView)sender).SelectedNode.Collapse();
+                                    HandleConnectionOpenFailure(index, (TreeView)sender, "Oracle", ex);
                                 }
 
                             }
@@ -5212,13 +5227,7 @@ namespace mySQLPunk
                                 }
                                 catch (Exception ex)
                                 {
-                                    string message = "SQL Server 連線失敗：" + ex.Message;
-                                    Console.WriteLine(message);
-                                    myN.connections[index]["isConnect"] = "F";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
-                                    ((TreeView)sender).SelectedNode.Collapse();
-                                    UpdateMainStatus(message);
-                                    MessageBox.Show(message, "SQL Server", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                    HandleConnectionOpenFailure(index, (TreeView)sender, "SQL Server", ex);
                                 }
 
                             }
