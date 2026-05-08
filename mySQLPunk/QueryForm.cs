@@ -1345,9 +1345,10 @@ namespace mySQLPunk
         private bool ResultsHaveDataRows()
         {
             if (dgvResults == null) return false;
-            foreach (DataGridViewRow row in dgvResults.Rows)
+            for (int i = 0; i < dgvResults.Rows.Count; i++)
             {
-                if (!row.IsNewRow) return true;
+                DataGridViewRow row = dgvResults.Rows[i];
+                if (row != null && !row.IsNewRow) return true;
             }
             return false;
         }

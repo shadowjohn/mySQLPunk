@@ -817,6 +817,7 @@ namespace mySQLPunk
                 if (HasTextChanged(original, current, "Decimals")) return true;
                 if (HasBoolChanged(original, current, "NotNull")) return true;
                 if (HasTextChanged(original, current, "Default")) return true;
+                if (HasBoolChanged(original, current, "PK")) return true;
                 if (_originalDt.Rows.IndexOf(original) != visibleIndex) return true;
 
                 visibleIndex++;
