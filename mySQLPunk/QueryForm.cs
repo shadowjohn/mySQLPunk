@@ -179,9 +179,10 @@ namespace mySQLPunk
             }
 
             LoadTableNames();
-            if (initialSql.ToUpper().Trim().StartsWith("SELECT * FROM"))
+            string tableDataBaseSql;
+            if (TryBuildTableDataBaseSql(initialSql, out tableDataBaseSql))
             {
-                _baseSql = initialSql.Split(';')[0].Split(new string[] { "LIMIT", "limit" }, StringSplitOptions.None)[0].Trim();
+                _baseSql = tableDataBaseSql;
                 SetTableDataMode(true);
                 ExecutePagedQuery(); // 立即載入第一頁資料
             }
@@ -253,6 +254,34 @@ namespace mySQLPunk
                 return path.Contains(".") ? path.Split('.').Last() : path;
             }
             return "Table";
+        }
+
+        private static bool TryBuildTableDataBaseSql(string sql, out string baseSql)
+        {
+            baseSql = "";
+            if (string.IsNullOrWhiteSpace(sql)) return false;
+
+            string candidate = sql.Trim();
+            int semicolonIndex = candidate.IndexOf(';');
+            if (semicolonIndex >= 0)
+            {
+                candidate = candidate.Substring(0, semicolonIndex);
+            }
+
+            candidate = Regex.Replace(candidate, @"\s+", " ").Trim();
+            candidate = Regex.Replace(candidate, @"\s+LIMIT\s+\d+(?:\s*,\s*\d+)?\s*$", "", RegexOptions.IgnoreCase).Trim();
+            if (!Regex.IsMatch(candidate, @"^SELECT\s+.+?\s+FROM\s+[`""\[\]\w\.]+$", RegexOptions.IgnoreCase))
+            {
+                return false;
+            }
+
+            if (Regex.IsMatch(candidate, @"\s+(WHERE|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|UNION|LIMIT|OFFSET|FETCH)\s+", RegexOptions.IgnoreCase))
+            {
+                return false;
+            }
+
+            baseSql = candidate;
+            return true;
         }
 
         private void InitializeQueryForm()
