@@ -331,6 +331,7 @@ namespace mySQLPunk
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\queries.png"));  //16
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\reports.png"));  //17
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\backups.png"));  //18
+            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\user.png"));  //19
 
             // Assign the ImageList to the TreeView.
 
@@ -2434,6 +2435,13 @@ namespace mySQLPunk
                     ShowFunctionDetails(db, dbName, functionName);
                     showTools("點到Function本身");
                 }
+                if (pathParts.Length >= 4 && pathParts[2] == "Users")
+                {
+                    string userName = pathParts[3];
+                    lblSidebarTitle.Text = $"User: {userName}";
+                    ShowDatabaseGroupList(db, dbName, "Users", connInfo);
+                    ShowUserDetails(db, dbName, userName, connInfo);
+                }
                 if (pathParts.Length >= 4 && pathParts[2] == "Reports")
                 {
                     string reportName = pathParts[3];
@@ -2606,12 +2614,20 @@ namespace mySQLPunk
                 {
                     return "Queries";
                 }
+                if (typeValue != null && (string.Equals(typeValue.ToString(), "User", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(typeValue.ToString(), "Role", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(typeValue.ToString(), "Connection", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(typeValue.ToString(), "Current User", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(typeValue.ToString(), "Superuser", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return "Users";
+                }
             }
 
             if (db_tree.SelectedNode != null)
             {
                 var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Queries"))
+                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Users" || pathParts[2] == "Queries" || pathParts[2] == "Reports"))
                 {
                     return pathParts[2];
                 }
@@ -3072,6 +3088,21 @@ namespace mySQLPunk
                     displayDt.Rows.Add(row);
                 }
             }
+            else if (string.Equals(groupName, "Users", StringComparison.OrdinalIgnoreCase))
+            {
+                displayDt.Columns.Add("主機");
+                displayDt.Columns.Add("來源");
+                foreach (DataRow userRow in GetDatabaseUsers(db, dbName, connInfo).Rows)
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = userRow["Name"];
+                    row["類型"] = userRow["Type"];
+                    row["狀態"] = userRow["Status"];
+                    row["主機"] = userRow["Host"];
+                    row["來源"] = userRow["Source"];
+                    displayDt.Rows.Add(row);
+                }
+            }
             else if (string.Equals(groupName, "Queries", StringComparison.OrdinalIgnoreCase))
             {
                 displayDt.Columns.Add("資料庫");
@@ -3419,6 +3450,64 @@ namespace mySQLPunk
             return functions;
         }
 
+        private DataTable GetDatabaseUsers(IDatabase db, string dbName, Dictionary<string, object> connInfo = null)
+        {
+            DataTable users = CreateDatabaseUserTable();
+
+            if (db is my_sqlite)
+            {
+                DataRow row = users.NewRow();
+                row["Name"] = "SQLite connection";
+                row["Type"] = "Connection";
+                row["Host"] = GetSQLiteDatabasePath(connInfo, db);
+                row["Status"] = "SQLite has no database users";
+                row["Source"] = "SQLite file";
+                users.Rows.Add(row);
+                return users;
+            }
+
+            if (db is my_mysql)
+            {
+                AppendDatabaseUsersFromQuery(users, db,
+                    "SELECT User AS Name, 'User' AS Type, Host AS Host, " +
+                    "CASE WHEN account_locked = 'Y' THEN 'Locked' ELSE 'Open' END AS Status, 'mysql.user' AS Source " +
+                    "FROM mysql.user ORDER BY User, Host;");
+                if (users.Rows.Count == 0)
+                {
+                    AppendDatabaseUsersFromQuery(users, db,
+                        "SELECT CURRENT_USER() AS Name, 'Current User' AS Type, '' AS Host, 'Active' AS Status, 'CURRENT_USER()' AS Source;");
+                }
+                return users;
+            }
+
+            if (db is my_postgresql)
+            {
+                AppendDatabaseUsersFromQuery(users, db,
+                    "SELECT rolname AS \"Name\", CASE WHEN rolsuper THEN 'Superuser' ELSE 'Role' END AS \"Type\", '' AS \"Host\", " +
+                    "CASE WHEN rolcanlogin THEN 'Login' ELSE 'No login' END AS \"Status\", 'pg_roles' AS \"Source\" " +
+                    "FROM pg_roles ORDER BY rolname;");
+                return users;
+            }
+
+            if (db is my_mssql)
+            {
+                AppendDatabaseUsersFromQuery(users, db,
+                    "SELECT name AS [Name], type_desc AS [Type], '' AS [Host], authentication_type_desc AS [Status], " +
+                    "'sys.database_principals' AS [Source] FROM [" + EscapeSqlServerName(dbName) + "].sys.database_principals " +
+                    "WHERE type NOT IN ('A','G','R','X') AND name NOT LIKE '##%' ORDER BY name;");
+                return users;
+            }
+
+            if (db is my_oracle)
+            {
+                AppendDatabaseUsersFromQuery(users, db,
+                    "SELECT USERNAME AS Name, 'User' AS Type, '' AS Host, ACCOUNT_STATUS AS Status, 'ALL_USERS' AS Source " +
+                    "FROM ALL_USERS ORDER BY USERNAME");
+            }
+
+            return users;
+        }
+
         private static DataTable CreateDatabaseEventTable()
         {
             DataTable dt = new DataTable();
@@ -3437,6 +3526,17 @@ namespace mySQLPunk
             dt.Columns.Add("ReturnType");
             dt.Columns.Add("Status");
             dt.Columns.Add("DDL");
+            return dt;
+        }
+
+        private static DataTable CreateDatabaseUserTable()
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("Name");
+            dt.Columns.Add("Type");
+            dt.Columns.Add("Host");
+            dt.Columns.Add("Status");
+            dt.Columns.Add("Source");
             return dt;
         }
 
@@ -3478,6 +3578,18 @@ namespace mySQLPunk
             }
         }
 
+        private static void AppendDatabaseUsersFromQuery(DataTable target, IDatabase db, string sql)
+        {
+            try
+            {
+                AppendDatabaseUsers(target, db.SelectSQL(sql));
+            }
+            catch
+            {
+                // User catalogs vary by provider permissions. Keep the Users group usable.
+            }
+        }
+
         private static void AppendDatabaseFunctions(DataTable target, DataTable source)
         {
             if (source == null) return;
@@ -3489,6 +3601,21 @@ namespace mySQLPunk
                 row["ReturnType"] = GetColumnValue(sourceRow, "ReturnType");
                 row["Status"] = GetColumnValue(sourceRow, "Status");
                 row["DDL"] = GetColumnValue(sourceRow, "DDL");
+                if (row["Name"].ToString().Length > 0) target.Rows.Add(row);
+            }
+        }
+
+        private static void AppendDatabaseUsers(DataTable target, DataTable source)
+        {
+            if (source == null) return;
+            foreach (DataRow sourceRow in source.Rows)
+            {
+                DataRow row = target.NewRow();
+                row["Name"] = GetColumnValue(sourceRow, "Name");
+                row["Type"] = GetColumnValue(sourceRow, "Type");
+                row["Host"] = GetColumnValue(sourceRow, "Host");
+                row["Status"] = GetColumnValue(sourceRow, "Status");
+                row["Source"] = GetColumnValue(sourceRow, "Source");
                 if (row["Name"].ToString().Length > 0) target.Rows.Add(row);
             }
         }
@@ -3664,6 +3791,38 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 rtbDDL.Text = "Error loading function details: " + ex.Message;
+            }
+        }
+
+        private void ShowUserDetails(IDatabase db, string dbName, string userName, Dictionary<string, object> connInfo = null)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            try
+            {
+                DataRow match = GetDatabaseUsers(db, dbName, connInfo).Rows
+                    .Cast<DataRow>()
+                    .FirstOrDefault(row => string.Equals(row["Name"].ToString(), userName, StringComparison.OrdinalIgnoreCase));
+
+                if (match == null)
+                {
+                    rtbDDL.Text = "User not found: " + userName;
+                    return;
+                }
+
+                dgvDetails.Rows.Add("類型", match["Type"]);
+                dgvDetails.Rows.Add("名稱", match["Name"]);
+                dgvDetails.Rows.Add("主機", match["Host"]);
+                dgvDetails.Rows.Add("狀態", match["Status"]);
+                dgvDetails.Rows.Add("來源", match["Source"]);
+                rtbDDL.Text = "-- User: " + match["Name"] + Environment.NewLine +
+                              "-- Source: " + match["Source"] + Environment.NewLine +
+                              "-- Status: " + match["Status"];
+            }
+            catch (Exception ex)
+            {
+                rtbDDL.Text = "Error loading user details: " + ex.Message;
             }
         }
 
@@ -3900,6 +4059,22 @@ namespace mySQLPunk
                 newNode.Nodes.Add(functionNode);
             }
 
+            newNode = new TreeNode("Users");
+            newNode.ImageIndex = 19;
+            newNode.SelectedImageIndex = 19;
+            databaseNode.Nodes.Add(newNode);
+
+            TreeNode root = databaseNode;
+            while (root.Parent != null) root = root.Parent;
+            Dictionary<string, object> connInfo = root.Index >= 0 && root.Index < myN.connections.Count ? myN.connections[root.Index] : null;
+            foreach (DataRow userRow in GetDatabaseUsers(db, databaseName, connInfo).Rows)
+            {
+                TreeNode userNode = new TreeNode(userRow["Name"].ToString());
+                userNode.ImageIndex = 19;
+                userNode.SelectedImageIndex = 19;
+                newNode.Nodes.Add(userNode);
+            }
+
             newNode = new TreeNode("Events");
             newNode.ImageIndex = 15;
             newNode.SelectedImageIndex = 15;
@@ -4008,6 +4183,7 @@ namespace mySQLPunk
                 if (m[2] == "Views") OpenSelectedViewInQuery();
                 else if (m[2] == "Events") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Functions") ExecuteSelectedFunction();
+                else if (m[2] == "Users") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Reports") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else OpenSelectedTableInQuery();
                 dialogMyBoxOff();
@@ -4314,7 +4490,7 @@ namespace mySQLPunk
         private void user_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("user");
-            UpdateMainStatus(Localization.T("Status.UserSelected"));
+            SelectDatabaseGroupNode("Users");
         }
 
         private void function_btn_Click(object sender, EventArgs e)
