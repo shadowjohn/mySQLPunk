@@ -597,6 +597,8 @@ namespace mySQLPunk
             db_tree.BeforeLabelEdit += db_tree_BeforeLabelEdit;
             db_tree.AfterLabelEdit += db_tree_AfterLabelEdit;
             sQLiteToolStripMenuItem.Click += sQLiteToolStripMenuItem_Click;
+            sQLServerToolStripMenuItem.Click -= sQLServerToolStripMenuItem_Click;
+            sQLServerToolStripMenuItem.Click += sQLServerToolStripMenuItem_Click;
 
             // 連結工具列事件
             NewTable.Click += (s, e) => CreateNewTable();
@@ -1944,6 +1946,15 @@ namespace mySQLPunk
                         form.ShowDialog();
                     }
                     break;
+                case "mssql":
+                case "sqlserver":
+                    {
+                        sqlserver_add_edit form = new sqlserver_add_edit();
+                        form.F1 = this;
+                        form.editIndex = index;
+                        form.ShowDialog();
+                    }
+                    break;
                 default:
                     MessageBox.Show("此連線類型尚未支援編輯：" + kind);
                     break;
@@ -2277,12 +2288,22 @@ namespace mySQLPunk
                     case "mssql":
                     case "sqlserver":
                         {
-                            myN.connections[index]["connString"] = "Data Source=" + myN.connections[index]["host"].ToString() + "," + myN.connections[index]["port"].ToString() + "; " +
-                                // + "," + myN.connections[index]["port"].ToString() + "
-                                "Integrated Security=True;" +
-                                "Initial Catalog=master;" +
-                                "User ID=" + myN.connections[index]["username"].ToString() + ";" +
-                                "Password=" + myN.connections[index]["pwd"].ToString() + "";
+                            var builder = new System.Data.SqlClient.SqlConnectionStringBuilder();
+                            string host = myN.connections[index].ContainsKey("host") ? myN.connections[index]["host"].ToString() : "";
+                            string port = myN.connections[index].ContainsKey("port") ? myN.connections[index]["port"].ToString() : "";
+                            builder.DataSource = string.IsNullOrWhiteSpace(port) ? host : host + "," + port;
+                            builder.InitialCatalog = myN.connections[index].ContainsKey("initial_database") && !string.IsNullOrWhiteSpace(myN.connections[index]["initial_database"].ToString())
+                                ? myN.connections[index]["initial_database"].ToString()
+                                : "master";
+                            bool trusted = myN.connections[index].ContainsKey("trusted_connection") && myN.connections[index]["trusted_connection"].ToString() == "T";
+                            builder.IntegratedSecurity = trusted;
+                            builder.TrustServerCertificate = true;
+                            if (!trusted)
+                            {
+                                builder.UserID = myN.connections[index].ContainsKey("username") ? myN.connections[index]["username"].ToString() : "";
+                                builder.Password = myN.connections[index].ContainsKey("pwd") ? myN.connections[index]["pwd"].ToString() : "";
+                            }
+                            myN.connections[index]["connString"] = builder.ConnectionString;
                             //Console.WriteLine(myN.connections[index]["connString"]);
                             myN.connections[index]["pdo"] = new my_mssql();
                             //((MySqlConnection)myN.connections[index]["pdo"]).ConnectionString = myN.connections[index]["connString"].ToString();
@@ -2293,8 +2314,8 @@ namespace mySQLPunk
                                 {
                                     ((my_mssql)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    db_tree.Nodes[index].SelectedImageIndex = 1;
-                                    db_tree.Nodes[index].ImageIndex = 1;
+                                    db_tree.Nodes[index].SelectedImageIndex = 9;
+                                    db_tree.Nodes[index].ImageIndex = 9;
                                     //取得 databases 列表
                                     string SQL = @"
                                   select [name] as [Database] from sys.databases WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb')
@@ -2473,6 +2494,13 @@ namespace mySQLPunk
         private void sQLiteToolStripMenuItem_Click(object sender, EventArgs e)
         {
             sqlite_add_edit form = new sqlite_add_edit();
+            form.F1 = this;
+            form.ShowDialog();
+        }
+
+        private void sQLServerToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            sqlserver_add_edit form = new sqlserver_add_edit();
             form.F1 = this;
             form.ShowDialog();
         }

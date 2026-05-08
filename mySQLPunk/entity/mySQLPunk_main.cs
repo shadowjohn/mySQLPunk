@@ -57,7 +57,8 @@ namespace mySQLPunk.entity
                     { "db_kind", GetVal(conn, "db_kind") },
                     { "conn_name", GetVal(conn, "conn_name") },
                     { "path", GetVal(conn, "path") },
-                    { "init_geospatial", GetVal(conn, "init_geospatial") }
+                    { "init_geospatial", GetVal(conn, "init_geospatial") },
+                    { "trusted_connection", GetVal(conn, "trusted_connection") }
                 };
                 saveList.Add(item);
             }
@@ -110,6 +111,10 @@ namespace mySQLPunk.entity
             if (!conn.ContainsKey("isConnect"))
             {
                 conn["isConnect"] = "F";
+            }
+            if (!conn.ContainsKey("trusted_connection"))
+            {
+                conn["trusted_connection"] = "F";
             }
         }
 

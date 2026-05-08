@@ -440,6 +440,7 @@
             this.sQLServerToolStripMenuItem.Name = "sQLServerToolStripMenuItem";
             this.sQLServerToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
             this.sQLServerToolStripMenuItem.Text = "SQL Server";
+            this.sQLServerToolStripMenuItem.Click += new System.EventHandler(this.sQLServerToolStripMenuItem_Click);
             // 
             // user_btn
             // 
