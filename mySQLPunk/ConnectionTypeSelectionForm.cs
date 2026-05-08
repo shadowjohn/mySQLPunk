@@ -41,11 +41,11 @@ namespace mySQLPunk
             string imagePath = Path.Combine(Application.StartupPath, "image");
             options = new List<ConnectionTypeOption>
             {
-                new ConnectionTypeOption(MySql, "MySQL", Color.FromArgb(52, 168, 83), Path.Combine(imagePath, "mysql_open.png")),
-                new ConnectionTypeOption(PostgreSql, "PostgreSQL", Color.FromArgb(66, 133, 244), Path.Combine(imagePath, "postgresql_open.png")),
-                new ConnectionTypeOption(SqlServer, "SQL Server", Color.FromArgb(245, 166, 35), Path.Combine(imagePath, "sqlserver_open.png")),
-                new ConnectionTypeOption(Oracle, "Oracle", Color.FromArgb(230, 0, 18), Path.Combine(imagePath, "oracle_open.png")),
-                new ConnectionTypeOption(Sqlite, "SQLite", Color.FromArgb(64, 196, 180), Path.Combine(imagePath, "sqlite_open.png"))
+                new ConnectionTypeOption(MySql, "MySQL", Color.FromArgb(0, 117, 143), Path.Combine(imagePath, "brand_mysql.png")),
+                new ConnectionTypeOption(PostgreSql, "PostgreSQL", Color.FromArgb(51, 103, 145), Path.Combine(imagePath, "brand_postgresql.png")),
+                new ConnectionTypeOption(SqlServer, "SQL Server", Color.FromArgb(190, 44, 44), Path.Combine(imagePath, "brand_sqlserver.png")),
+                new ConnectionTypeOption(Oracle, "Oracle", Color.FromArgb(198, 24, 24), Path.Combine(imagePath, "brand_oracle.png")),
+                new ConnectionTypeOption(Sqlite, "SQLite", Color.FromArgb(0, 109, 165), Path.Combine(imagePath, "brand_sqlite.png"))
             };
 
             Label titleLabel = new Label
