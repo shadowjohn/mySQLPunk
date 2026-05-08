@@ -176,6 +176,19 @@ namespace mySQLPunk
             public QueryForm Query;
         }
 
+        private class QueryHistoryEntry
+        {
+            public DateTime ExecutedAt;
+            public string DatabaseName;
+            public string Sql;
+            public string Status;
+            public int Rows;
+            public long ElapsedMilliseconds;
+            public bool IsQuery;
+        }
+
+        private readonly List<QueryHistoryEntry> _queryHistory = new List<QueryHistoryEntry>();
+
         private static readonly string[] DatabaseReportNames =
         {
             "Database Summary",
@@ -896,7 +909,7 @@ namespace mySQLPunk
             ttToolStripMenuItem.DropDownItems.Clear();
             ttToolStripMenuItem.DropDownItems.Add(windowCloseMenu);
             dataDictionaryMenu.Click += (s, e) => SelectDatabaseGroupNode("Models");
-            queryHistoryMenu.Click += (s, e) => SelectDatabaseGroupNode("Queries");
+            queryHistoryMenu.Click += (s, e) => ShowQueryHistoryForSelectedDatabase();
             backupsMenu.Click += (s, e) => SelectDatabaseGroupNode("Backups");
             diagnosticsMenu.Click += (s, e) => ShowSelectedOtherTool("Connection Diagnostics");
             capabilitiesMenu.Click += (s, e) => ShowSelectedOtherTool("Provider Capabilities");
@@ -959,6 +972,37 @@ namespace mySQLPunk
 
             thirty_two_change("other");
             ShowDatabaseOtherTool(target.Database, target.DatabaseName, toolName, target.ConnectionInfo);
+        }
+
+        private void ShowQueryHistoryForSelectedDatabase()
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                TreeNode databaseNode = GetSelectedDatabaseNode();
+                target = BuildTargetFromNode(databaseNode);
+            }
+
+            if (target == null)
+            {
+                UpdateMainStatus(Localization.T("Status.SelectExpandedDatabase"));
+                return;
+            }
+
+            EnsureDatabaseGroupNodes(target.DatabaseNode);
+            foreach (TreeNode child in target.DatabaseNode.Nodes)
+            {
+                if (string.Equals(child.Text, "Queries", StringComparison.OrdinalIgnoreCase))
+                {
+                    db_tree.SelectedNode = child;
+                    child.EnsureVisible();
+                    break;
+                }
+            }
+
+            thirty_two_change("query");
+            table_top.DataSource = BuildQueryHistoryTable(target.DatabaseName);
+            UpdateMainStatus("Query history loaded: " + target.DatabaseName);
         }
 
         private void AddViewGroupMenuItem(ToolStripMenuItem viewMenu, string text, string groupName)
@@ -3445,7 +3489,7 @@ namespace mySQLPunk
             return new TreeDatabaseTarget
             {
                 Database = db,
-                DatabaseName = pathParts[1],
+                DatabaseName = dbNode.Text,
                 ProviderName = db.ProviderName,
                 DatabaseNode = dbNode,
                 ConnectionInfo = connInfo
@@ -3785,6 +3829,68 @@ namespace mySQLPunk
             string preview = sql.Replace("\r", " ").Replace("\n", " ").Trim();
             while (preview.Contains("  ")) preview = preview.Replace("  ", " ");
             return preview.Length <= 120 ? preview : preview.Substring(0, 117) + "...";
+        }
+
+        public void RecordQueryHistory(string databaseName, string sql, string status, long elapsedMilliseconds, int rows, bool isQuery)
+        {
+            if (string.IsNullOrWhiteSpace(sql)) return;
+
+            _queryHistory.Insert(0, new QueryHistoryEntry
+            {
+                ExecutedAt = DateTime.Now,
+                DatabaseName = databaseName ?? string.Empty,
+                Sql = sql,
+                Status = string.IsNullOrWhiteSpace(status) ? "OK" : status,
+                Rows = rows,
+                ElapsedMilliseconds = elapsedMilliseconds,
+                IsQuery = isQuery
+            });
+
+            while (_queryHistory.Count > 200)
+            {
+                _queryHistory.RemoveAt(_queryHistory.Count - 1);
+            }
+
+            DataTable currentTable = table_top == null ? null : table_top.DataSource as DataTable;
+            if (currentTable != null && currentTable.Columns.Contains("耗時(ms)"))
+            {
+                TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+                string activeDatabaseName = target == null ? databaseName : target.DatabaseName;
+                table_top.DataSource = BuildQueryHistoryTable(activeDatabaseName);
+            }
+        }
+
+        private DataTable BuildQueryHistoryTable(string databaseName)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("時間");
+            dt.Columns.Add("資料庫");
+            dt.Columns.Add("類型");
+            dt.Columns.Add("狀態");
+            dt.Columns.Add("列數");
+            dt.Columns.Add("耗時(ms)");
+            dt.Columns.Add("SQL");
+
+            foreach (QueryHistoryEntry entry in _queryHistory)
+            {
+                if (!string.IsNullOrWhiteSpace(databaseName) &&
+                    !string.Equals(entry.DatabaseName, databaseName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                DataRow row = dt.NewRow();
+                row["時間"] = entry.ExecutedAt.ToString("yyyy-MM-dd HH:mm:ss");
+                row["資料庫"] = entry.DatabaseName;
+                row["類型"] = entry.IsQuery ? "Query" : "Command";
+                row["狀態"] = entry.Status;
+                row["列數"] = entry.Rows >= 0 ? entry.Rows.ToString() : "";
+                row["耗時(ms)"] = entry.ElapsedMilliseconds.ToString();
+                row["SQL"] = BuildQueryPreview(entry.Sql);
+                dt.Rows.Add(row);
+            }
+
+            return dt;
         }
 
         private void RefreshQueriesGroupIfSelected()

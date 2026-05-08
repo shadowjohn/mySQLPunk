@@ -908,9 +908,11 @@ namespace mySQLPunk
                     dgvResults.DataSource = dt;
                     AutoResizeColumns(dgvResults);
                     tsBtnExport.Enabled = dt.Rows.Count > 0;
-                    UpdateStatus(string.Format(
+                    string status = string.Format(
                         "OK  |  {0} rows  |  {1} ms",
-                        dt.Rows.Count, sw.ElapsedMilliseconds));
+                        dt.Rows.Count, sw.ElapsedMilliseconds);
+                    UpdateStatus(status);
+                    _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, dt.Rows.Count, true);
                 }
                 else
                 {
@@ -923,12 +925,16 @@ namespace mySQLPunk
 
                     if (result["status"] == "OK")
                     {
-                        UpdateStatus(string.Format(
-                            "OK  |  {0} ms", sw.ElapsedMilliseconds));
+                        string status = string.Format(
+                            "OK  |  {0} ms", sw.ElapsedMilliseconds);
+                        UpdateStatus(status);
+                        _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
                     }
                     else
                     {
-                        lblStatus.Text = "Error: " + result["reason"];
+                        string status = "Error: " + result["reason"];
+                        lblStatus.Text = status;
+                        _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
                         MessageBox.Show(result["reason"], "Execute Error",
                             MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
@@ -942,7 +948,9 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 sw.Stop();
-                UpdateStatus("Error: " + ex.Message);
+                string status = "Error: " + ex.Message;
+                UpdateStatus(status);
+                _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
                 MessageBox.Show(ex.Message, "Query Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
