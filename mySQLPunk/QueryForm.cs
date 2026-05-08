@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Data;
 using System.Drawing;
 using System.IO;
@@ -105,6 +106,7 @@ namespace mySQLPunk
         private ToolStripMenuItem menuWindowDock;
         private ToolStripMenuItem menuWindowClose;
         private ToolStripMenuItem menuHelpAbout;
+        private ContextMenuStrip resultsContextMenu;
 
         private static readonly string[] Keywords =
         {
@@ -208,6 +210,7 @@ namespace mySQLPunk
             
             tsBtnExecute.Visible = !active;
             tsBtnBeautify.Visible = !active;
+            RefreshResultsContextMenu();
 
             if (active)
             {
@@ -399,6 +402,8 @@ namespace mySQLPunk
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells,
                 ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
             };
+            dgvResults.CellMouseDown += DgvResults_CellMouseDown;
+            RefreshResultsContextMenu();
             tabData.Controls.Add(dgvResults);
             tabResults.TabPages.Add(tabData);
 
@@ -1140,6 +1145,7 @@ namespace mySQLPunk
             if (tsBtnDock != null) tsBtnDock.Text = Localization.T("Query.Dock");
             if (tabResults != null && tabResults.TabPages.Count > 0) tabResults.TabPages[0].Text = Localization.T("Query.Results");
             if (lblStatus != null && (lblStatus.Text == "Ready" || lblStatus.Text == "就緒")) lblStatus.Text = Localization.T("Status.Ready");
+            RefreshResultsContextMenu();
             UpdatePaginationUI();
             Localization.ApplyTo(this);
             ApplyTheme();
@@ -1191,9 +1197,224 @@ namespace mySQLPunk
             {
                 dgvResults.BackgroundColor = ThemeManager.WindowBackColor;
                 dgvResults.GridColor = ThemeManager.GridColor;
+                if (dgvResults.ContextMenuStrip != null) ThemeManager.ApplyToolStrip(dgvResults.ContextMenuStrip);
             }
             if (lblSqlPreview != null) lblSqlPreview.ForeColor = ThemeManager.MutedTextColor;
             if (lblStatus != null) lblStatus.ForeColor = ThemeManager.TextColor;
+        }
+
+        private void RefreshResultsContextMenu()
+        {
+            if (dgvResults == null) return;
+
+            if (resultsContextMenu == null)
+            {
+                resultsContextMenu = new ContextMenuStrip();
+                resultsContextMenu.Opening += ResultsContextMenu_Opening;
+                dgvResults.ContextMenuStrip = resultsContextMenu;
+            }
+
+            PopulateResultsContextMenu(resultsContextMenu);
+            ThemeManager.ApplyToolStrip(resultsContextMenu);
+        }
+
+        private ContextMenuStrip BuildResultsContextMenu()
+        {
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.Opening += ResultsContextMenu_Opening;
+            PopulateResultsContextMenu(menu);
+            return menu;
+        }
+
+        private void PopulateResultsContextMenu(ContextMenuStrip menu)
+        {
+            if (menu == null) return;
+            menu.Items.Clear();
+            AddResultsMenuItem(menu, "copyCells", Localization.T("Query.CopySelectedCells"), (s, e) => CopyResultsSelectionToClipboard(false));
+            AddResultsMenuItem(menu, "copyHeaders", Localization.T("Query.CopyWithHeaders"), (s, e) => CopyResultsSelectionToClipboard(true));
+            AddResultsMenuItem(menu, "copyRows", Localization.T("Query.CopySelectedRows"), (s, e) => CopySelectedResultRowsToClipboard());
+            menu.Items.Add(new ToolStripSeparator());
+            AddResultsMenuItem(menu, "selectAll", Localization.T("Query.SelectAll"), (s, e) => dgvResults.SelectAll());
+            AddResultsMenuItem(menu, "export", Localization.T("Query.Export"), (s, e) => ExportCsv());
+
+            if (_isTableDataMode)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                AddResultsMenuItem(menu, "addRow", Localization.T("Query.Add"), (s, e) => AddNewRow());
+                AddResultsMenuItem(menu, "deleteRow", Localization.T("Query.Delete"), (s, e) => DeleteSelectedRows());
+                AddResultsMenuItem(menu, "saveRows", Localization.T("Query.Save"), (s, e) => SaveChanges());
+            }
+        }
+
+        private static void AddResultsMenuItem(ContextMenuStrip menu, string name, string text, EventHandler onClick)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(text);
+            item.Name = name;
+            item.Click += onClick;
+            menu.Items.Add(item);
+        }
+
+        private void ResultsContextMenu_Opening(object sender, CancelEventArgs e)
+        {
+            ContextMenuStrip menu = sender as ContextMenuStrip;
+            if (menu == null) return;
+
+            bool hasData = ResultsHaveDataRows();
+            bool hasSelection = HasResultsSelection();
+            SetResultsMenuItemEnabled(menu, "copyCells", hasSelection);
+            SetResultsMenuItemEnabled(menu, "copyHeaders", hasSelection);
+            SetResultsMenuItemEnabled(menu, "copyRows", GetSelectedResultRows().Count > 0);
+            SetResultsMenuItemEnabled(menu, "selectAll", hasData);
+            SetResultsMenuItemEnabled(menu, "export", hasData);
+            SetResultsMenuItemEnabled(menu, "addRow", dgvResults != null && dgvResults.DataSource is DataTable);
+            SetResultsMenuItemEnabled(menu, "deleteRow", GetSelectedResultRows().Count > 0);
+            SetResultsMenuItemEnabled(menu, "saveRows", dgvResults != null && dgvResults.DataSource is DataTable);
+        }
+
+        private static void SetResultsMenuItemEnabled(ContextMenuStrip menu, string name, bool enabled)
+        {
+            ToolStripItem[] items = menu.Items.Find(name, false);
+            if (items.Length > 0)
+            {
+                items[0].Enabled = enabled;
+            }
+        }
+
+        private void DgvResults_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (dgvResults.Rows[e.RowIndex].Cells[e.ColumnIndex].Selected) return;
+
+            dgvResults.ClearSelection();
+            dgvResults.CurrentCell = dgvResults.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            dgvResults.Rows[e.RowIndex].Cells[e.ColumnIndex].Selected = true;
+        }
+
+        private bool ResultsHaveDataRows()
+        {
+            if (dgvResults == null) return false;
+            foreach (DataGridViewRow row in dgvResults.Rows)
+            {
+                if (!row.IsNewRow) return true;
+            }
+            return false;
+        }
+
+        private bool HasResultsSelection()
+        {
+            if (dgvResults == null) return false;
+            if (dgvResults.GetCellCount(DataGridViewElementStates.Selected) > 0) return true;
+            return GetSelectedResultRows().Count > 0;
+        }
+
+        private void CopyResultsSelectionToClipboard(bool includeHeaders)
+        {
+            if (!HasResultsSelection()) return;
+
+            DataGridViewClipboardCopyMode previousMode = dgvResults.ClipboardCopyMode;
+            try
+            {
+                dgvResults.ClipboardCopyMode = includeHeaders
+                    ? DataGridViewClipboardCopyMode.EnableAlwaysIncludeHeaderText
+                    : DataGridViewClipboardCopyMode.EnableWithoutHeaderText;
+
+                DataObject data = dgvResults.GetClipboardContent();
+                if (data != null)
+                {
+                    Clipboard.SetDataObject(data, true);
+                    UpdateStatus(Localization.T("Query.CopiedToClipboard"));
+                }
+            }
+            finally
+            {
+                dgvResults.ClipboardCopyMode = previousMode;
+            }
+        }
+
+        private void CopySelectedResultRowsToClipboard()
+        {
+            string text = BuildSelectedRowsClipboardText(false);
+            if (string.IsNullOrEmpty(text)) return;
+
+            Clipboard.SetText(text);
+            UpdateStatus(Localization.T("Query.CopiedToClipboard"));
+        }
+
+        private string BuildSelectedRowsClipboardText(bool includeHeaders)
+        {
+            List<DataGridViewRow> rows = GetSelectedResultRows();
+            if (rows.Count == 0) return string.Empty;
+
+            List<DataGridViewColumn> columns = GetVisibleResultColumns();
+            if (columns.Count == 0) return string.Empty;
+
+            StringBuilder sb = new StringBuilder();
+            if (includeHeaders)
+            {
+                AppendClipboardLine(sb, columns.Select(c => c.HeaderText));
+            }
+
+            foreach (DataGridViewRow row in rows)
+            {
+                AppendClipboardLine(sb, columns.Select(c => FormatClipboardValue(row.Cells[c.Index].Value)));
+            }
+
+            return sb.ToString().TrimEnd('\r', '\n');
+        }
+
+        private List<DataGridViewRow> GetSelectedResultRows()
+        {
+            List<DataGridViewRow> rows = new List<DataGridViewRow>();
+            if (dgvResults == null) return rows;
+
+            if (dgvResults.SelectedRows.Count > 0)
+            {
+                rows.AddRange(dgvResults.SelectedRows.Cast<DataGridViewRow>().Where(r => !r.IsNewRow));
+            }
+            else if (dgvResults.SelectedCells.Count > 0)
+            {
+                rows.AddRange(dgvResults.SelectedCells
+                    .Cast<DataGridViewCell>()
+                    .Where(c => c.RowIndex >= 0)
+                    .Select(c => dgvResults.Rows[c.RowIndex])
+                    .Where(r => !r.IsNewRow));
+            }
+            else if (dgvResults.CurrentCell != null && dgvResults.CurrentCell.RowIndex >= 0)
+            {
+                DataGridViewRow currentRow = dgvResults.Rows[dgvResults.CurrentCell.RowIndex];
+                if (!currentRow.IsNewRow) rows.Add(currentRow);
+            }
+
+            return rows
+                .GroupBy(r => r.Index)
+                .OrderBy(g => g.Key)
+                .Select(g => g.First())
+                .ToList();
+        }
+
+        private List<DataGridViewColumn> GetVisibleResultColumns()
+        {
+            if (dgvResults == null) return new List<DataGridViewColumn>();
+            return dgvResults.Columns
+                .Cast<DataGridViewColumn>()
+                .Where(c => c.Visible)
+                .OrderBy(c => c.DisplayIndex)
+                .ToList();
+        }
+
+        private static void AppendClipboardLine(StringBuilder sb, IEnumerable<string> values)
+        {
+            sb.AppendLine(string.Join("\t", values.Select(FormatClipboardValue)));
+        }
+
+        private static string FormatClipboardValue(object value)
+        {
+            if (value == null || value == DBNull.Value) return string.Empty;
+            return Convert.ToString(value)
+                .Replace("\r\n", " ")
+                .Replace('\r', ' ')
+                .Replace('\n', ' ')
+                .Replace('\t', ' ');
         }
 
         private static string GetFirstWord(string sql)
@@ -1691,6 +1912,12 @@ namespace mySQLPunk
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            if (dgvResults != null)
+            {
+                dgvResults.ContextMenuStrip = null;
+            }
+            resultsContextMenu = null;
+
             CancellationTokenSource cts = _cts;
             _cts = null;
             cts?.Cancel();

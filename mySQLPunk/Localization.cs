@@ -178,6 +178,10 @@ namespace mySQLPunk
             Add("Query.SaveSql", "儲存 SQL...", "Save SQL...");
             Add("Query.Cut", "剪下", "Cut");
             Add("Query.Copy", "複製", "Copy");
+            Add("Query.CopySelectedCells", "複製選取儲存格", "Copy Selected Cells");
+            Add("Query.CopyWithHeaders", "複製含欄位名稱", "Copy With Headers");
+            Add("Query.CopySelectedRows", "複製選取資料列", "Copy Selected Rows");
+            Add("Query.CopiedToClipboard", "已複製到剪貼簿。", "Copied to clipboard.");
             Add("Query.Paste", "貼上", "Paste");
             Add("Query.SelectAll", "全選", "Select All");
             Add("Query.SqlEditor", "SQL 編輯器", "SQL Editor");
