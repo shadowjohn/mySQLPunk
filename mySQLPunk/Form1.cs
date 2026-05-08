@@ -2184,6 +2184,13 @@ namespace mySQLPunk
                     ShowViewDetails(db, dbName, viewName);
                     showTools("點到View本身");
                 }
+                if (pathParts.Length >= 4 && pathParts[2] == "Events")
+                {
+                    string eventName = pathParts[3];
+                    lblSidebarTitle.Text = $"Event: {eventName}";
+                    ShowDatabaseGroupList(db, dbName, "Events", connInfo);
+                    ShowEventDetails(db, dbName, eventName);
+                }
             }
         }
 
@@ -2705,6 +2712,17 @@ namespace mySQLPunk
                 row["路徑"] = string.IsNullOrWhiteSpace(sqlitePath) ? "(logical backup)" : sqlitePath;
                 displayDt.Rows.Add(row);
             }
+            else if (string.Equals(groupName, "Events", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (DataRow eventRow in GetDatabaseEvents(db, dbName).Rows)
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = eventRow["Name"];
+                    row["類型"] = eventRow["Type"];
+                    row["狀態"] = eventRow["Status"];
+                    displayDt.Rows.Add(row);
+                }
+            }
             else
             {
                 DataRow row = displayDt.NewRow();
@@ -2715,6 +2733,116 @@ namespace mySQLPunk
             }
 
             table_top.DataSource = displayDt;
+        }
+
+        private DataTable GetDatabaseEvents(IDatabase db, string dbName)
+        {
+            DataTable events = CreateDatabaseEventTable();
+
+            if (db is my_sqlite)
+            {
+                AppendDatabaseEventsFromQuery(events, db,
+                    "SELECT name AS Name, 'Trigger' AS Type, tbl_name AS Status, COALESCE(sql, '') AS DDL " +
+                    "FROM sqlite_master WHERE type='trigger' ORDER BY name;");
+                return events;
+            }
+
+            if (db is my_mysql)
+            {
+                string safeDb = EscapeSqlLiteral(dbName);
+                AppendDatabaseEventsFromQuery(events, db,
+                    "SELECT EVENT_NAME AS Name, 'Event' AS Type, STATUS AS Status, EVENT_DEFINITION AS DDL " +
+                    "FROM information_schema.EVENTS WHERE EVENT_SCHEMA='" + safeDb + "' ORDER BY EVENT_NAME;");
+                AppendDatabaseEventsFromQuery(events, db,
+                    "SELECT TRIGGER_NAME AS Name, 'Trigger' AS Type, EVENT_MANIPULATION AS Status, ACTION_STATEMENT AS DDL " +
+                    "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='" + safeDb + "' ORDER BY TRIGGER_NAME;");
+                return events;
+            }
+
+            if (db is my_postgresql)
+            {
+                AppendDatabaseEventsFromQuery(events, db,
+                    "SELECT trigger_name AS \"Name\", 'Trigger' AS \"Type\", event_manipulation AS \"Status\", action_statement AS \"DDL\" " +
+                    "FROM information_schema.triggers WHERE trigger_schema = 'public' ORDER BY trigger_name;");
+                return events;
+            }
+
+            if (db is my_mssql)
+            {
+                AppendDatabaseEventsFromQuery(events, db,
+                    "SELECT t.name AS [Name], 'Trigger' AS [Type], CASE WHEN t.is_disabled = 1 THEN 'DISABLED' ELSE 'ENABLED' END AS [Status], " +
+                    "COALESCE(OBJECT_DEFINITION(t.object_id), '') AS [DDL] FROM [" + EscapeSqlServerName(dbName) + "].sys.triggers t ORDER BY t.name;");
+                return events;
+            }
+
+            if (db is my_oracle)
+            {
+                string owner = EscapeSqlLiteral(dbName.ToUpperInvariant());
+                AppendDatabaseEventsFromQuery(events, db,
+                    "SELECT TRIGGER_NAME AS Name, 'Trigger' AS Type, STATUS AS Status, TRIGGER_BODY AS DDL " +
+                    "FROM ALL_TRIGGERS WHERE OWNER='" + owner + "' ORDER BY TRIGGER_NAME");
+            }
+
+            return events;
+        }
+
+        private static DataTable CreateDatabaseEventTable()
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("Name");
+            dt.Columns.Add("Type");
+            dt.Columns.Add("Status");
+            dt.Columns.Add("DDL");
+            return dt;
+        }
+
+        private static void AppendDatabaseEventsFromQuery(DataTable target, IDatabase db, string sql)
+        {
+            try
+            {
+                AppendDatabaseEvents(target, db.SelectSQL(sql));
+            }
+            catch
+            {
+                // Metadata visibility differs by provider and permissions. Keep the group usable when one source is unavailable.
+            }
+        }
+
+        private static void AppendDatabaseEvents(DataTable target, DataTable source)
+        {
+            if (source == null) return;
+            foreach (DataRow sourceRow in source.Rows)
+            {
+                DataRow row = target.NewRow();
+                row["Name"] = GetColumnValue(sourceRow, "Name");
+                row["Type"] = GetColumnValue(sourceRow, "Type");
+                row["Status"] = GetColumnValue(sourceRow, "Status");
+                row["DDL"] = GetColumnValue(sourceRow, "DDL");
+                if (row["Name"].ToString().Length > 0) target.Rows.Add(row);
+            }
+        }
+
+        private static string GetColumnValue(DataRow row, string name)
+        {
+            if (row.Table.Columns.Contains(name) && row[name] != DBNull.Value) return row[name].ToString();
+            foreach (DataColumn column in row.Table.Columns)
+            {
+                if (string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase) && row[column] != DBNull.Value)
+                {
+                    return row[column].ToString();
+                }
+            }
+            return string.Empty;
+        }
+
+        private static string EscapeSqlLiteral(string value)
+        {
+            return (value ?? string.Empty).Replace("'", "''");
+        }
+
+        private static string EscapeSqlServerName(string name)
+        {
+            return (name ?? string.Empty).Replace("]", "]]");
         }
 
         private static string GetSQLiteDatabasePath(Dictionary<string, object> connInfo, IDatabase db)
@@ -2808,6 +2936,34 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 rtbDDL.Text = "Error loading view details: " + ex.Message;
+            }
+        }
+
+        private void ShowEventDetails(IDatabase db, string dbName, string eventName)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            try
+            {
+                DataRow match = GetDatabaseEvents(db, dbName).Rows
+                    .Cast<DataRow>()
+                    .FirstOrDefault(row => string.Equals(row["Name"].ToString(), eventName, StringComparison.OrdinalIgnoreCase));
+
+                if (match == null)
+                {
+                    rtbDDL.Text = "Event not found: " + eventName;
+                    return;
+                }
+
+                dgvDetails.Rows.Add("類型", match["Type"]);
+                dgvDetails.Rows.Add("名稱", match["Name"]);
+                dgvDetails.Rows.Add("狀態", match["Status"]);
+                rtbDDL.Text = match["DDL"].ToString();
+            }
+            catch (Exception ex)
+            {
+                rtbDDL.Text = "Error loading event details: " + ex.Message;
             }
         }
 
@@ -3014,6 +3170,14 @@ namespace mySQLPunk
             newNode.SelectedImageIndex = 15;
             databaseNode.Nodes.Add(newNode);
 
+            foreach (DataRow eventRow in GetDatabaseEvents(db, databaseName).Rows)
+            {
+                TreeNode eventNode = new TreeNode(eventRow["Name"].ToString());
+                eventNode.ImageIndex = 15;
+                eventNode.SelectedImageIndex = 15;
+                newNode.Nodes.Add(eventNode);
+            }
+
             newNode = new TreeNode("Queries");
             newNode.ImageIndex = 16;
             newNode.SelectedImageIndex = 16;
@@ -3099,6 +3263,7 @@ namespace mySQLPunk
             {
                 // 代表是資料表或檢視層級 -> 直接開啟
                 if (m[2] == "Views") OpenSelectedViewInQuery();
+                else if (m[2] == "Events") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else OpenSelectedTableInQuery();
                 dialogMyBoxOff();
                 return;
