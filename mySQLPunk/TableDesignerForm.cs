@@ -1333,7 +1333,7 @@ namespace mySQLPunk
 
         private bool SupportsSpatialIndex()
         {
-            return _db is my_postgresql;
+            return _db is my_postgresql || _db is my_oracle;
         }
 
         private bool SupportsFullTextIndex()
@@ -1469,6 +1469,10 @@ namespace mySQLPunk
                 return "CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
                        " ON " + GetQualifiedDesignerTableName(_tableName) +
                        " USING GIST (" + FormatGenericIndexColumns(columns) + ");";
+            }
+            if (type == "SPATIAL" && _db is my_oracle)
+            {
+                return BuildOracleSpatialIndexStatement(indexName, _tableName, columns);
             }
             string unique = type == "UNIQUE" ? "UNIQUE " : "";
             return "CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
@@ -1666,6 +1670,12 @@ namespace mySQLPunk
                     continue;
                 }
 
+                if (type == "SPATIAL" && _db is my_oracle)
+                {
+                    statements.Add(BuildOracleSpatialIndexStatement(indexName, tableName, columns));
+                    continue;
+                }
+
                 string unique = type == "UNIQUE" ? "UNIQUE " : "";
                 statements.Add("CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
                                " ON " + GetQualifiedDesignerTableName(tableName) +
@@ -1719,6 +1729,7 @@ namespace mySQLPunk
 
             if (_db is my_oracle)
             {
+                if (type.Contains("sdo_geometry") || type == "geometry") return "SDO_GEOMETRY";
                 if (type.Contains("bigint") || type.Contains("smallint") || type.Contains("int")) return "NUMBER(10)";
                 if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("number")) return "NUMBER(" + (len.Length > 0 ? len : "18") + "," + (scale.Length > 0 ? scale : "0") + ")";
                 if (type.Contains("double") || type.Contains("float") || type.Contains("real")) return "BINARY_DOUBLE";
@@ -1731,6 +1742,22 @@ namespace mySQLPunk
             }
 
             return columnType;
+        }
+
+        private string BuildOracleSpatialIndexStatement(string indexName, string tableName, string columns)
+        {
+            string spatialColumn = FormatOracleSpatialIndexColumn(columns);
+            return "CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
+                   " ON " + GetQualifiedDesignerTableName(tableName) +
+                   " (" + spatialColumn + ") INDEXTYPE IS MDSYS.SPATIAL_INDEX;";
+        }
+
+        private string FormatOracleSpatialIndexColumn(string columns)
+        {
+            string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            if (rawCols.Length == 0) return "";
+            string columnName = GetIndexColumnName(rawCols[0]);
+            return QuoteDesignerIdentifier(columnName);
         }
 
         private string FormatGenericIndexColumns(string columns)
@@ -2591,6 +2618,7 @@ namespace mySQLPunk
                     if (group.Key == "PRIMARY") newRow["索引類型"] = "PRIMARY";
                     else if (first["Non_unique"].ToString() == "0") newRow["索引類型"] = "UNIQUE";
                     else if (first["Index_type"].ToString() == "FULLTEXT") newRow["索引類型"] = "FULLTEXT";
+                    else if (first["Index_type"].ToString().Equals("SPATIAL", StringComparison.OrdinalIgnoreCase)) newRow["索引類型"] = "SPATIAL";
                     else newRow["索引類型"] = "NORMAL";
 
                     newRow["索引方法"] = first["Index_type"];
@@ -2627,6 +2655,11 @@ namespace mySQLPunk
             if (_db is my_postgresql)
             {
                 return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" };
+            }
+
+            if (_db is my_oracle)
+            {
+                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "SPATIAL" };
             }
 
             return new object[] { "NORMAL", "UNIQUE", "PRIMARY" };

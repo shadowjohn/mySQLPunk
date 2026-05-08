@@ -186,7 +186,7 @@ namespace mySQLPunk.lib
                     ic.COLUMN_NAME,
                     CASE WHEN i.UNIQUENESS = 'UNIQUE' THEN 0 ELSE 1 END AS NON_UNIQUE,
                     ic.COLUMN_POSITION AS SEQ_IN_INDEX,
-                    i.INDEX_TYPE,
+                    CASE WHEN i.INDEX_TYPE = 'DOMAIN' AND UPPER(i.ITYP_NAME) = 'SPATIAL_INDEX' THEN 'SPATIAL' ELSE i.INDEX_TYPE END AS INDEX_TYPE,
                     '' AS INDEX_COMMENT
                 FROM ALL_INDEXES i
                 INNER JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = i.OWNER AND ic.INDEX_NAME = i.INDEX_NAME
@@ -330,7 +330,7 @@ namespace mySQLPunk.lib
                     ic.COLUMN_NAME AS COLUMNNAME,
                     CASE WHEN i.UNIQUENESS = 'UNIQUE' THEN 0 ELSE 1 END AS NONUNIQUE,
                     ic.COLUMN_POSITION AS SEQININDEX,
-                    i.INDEX_TYPE AS INDEXTYPE
+                    CASE WHEN i.INDEX_TYPE = 'DOMAIN' AND UPPER(i.ITYP_NAME) = 'SPATIAL_INDEX' THEN 'SPATIAL' ELSE i.INDEX_TYPE END AS INDEXTYPE
                 FROM ALL_INDEXES i
                 INNER JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = i.OWNER AND ic.INDEX_NAME = i.INDEX_NAME
                 LEFT JOIN ALL_CONSTRAINTS c ON c.OWNER = i.OWNER AND c.INDEX_NAME = i.INDEX_NAME AND c.CONSTRAINT_TYPE = 'P'
@@ -357,14 +357,26 @@ namespace mySQLPunk.lib
                 string indexName = group.Key;
                 if (string.IsNullOrEmpty(indexName) || indexName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
                 DataRow first = group.First();
+                string indexType = first.Table.Columns.Contains("IndexType")
+                    ? first["IndexType"].ToString()
+                    : (first.Table.Columns.Contains("INDEXTYPE") ? first["INDEXTYPE"].ToString() : "");
                 bool unique = first.Table.Columns.Contains("NonUnique") && first["NonUnique"] != DBNull.Value &&
                     (first["NonUnique"].ToString() == "0" || first["NonUnique"].ToString().Equals("False", StringComparison.OrdinalIgnoreCase));
                 List<string> cols = new List<string>();
                 foreach (DataRow row in group.OrderBy(r => Convert.ToInt32(r["SeqInIndex"])))
                     cols.Add(QuoteIdentifier(row["ColumnName"].ToString()));
                 string targetIndexName = tableName + "_" + indexName;
-                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX " + QuoteIdentifier(targetIndexName) +
-                             " ON " + QualifiedName(databaseName, tableName) + " (" + string.Join(",", cols.ToArray()) + ")";
+                string sql;
+                if (indexType.Equals("SPATIAL", StringComparison.OrdinalIgnoreCase) && cols.Count > 0)
+                {
+                    sql = "CREATE INDEX " + QuoteIdentifier(targetIndexName) +
+                          " ON " + QualifiedName(databaseName, tableName) + " (" + cols[0] + ") INDEXTYPE IS MDSYS.SPATIAL_INDEX";
+                }
+                else
+                {
+                    sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX " + QuoteIdentifier(targetIndexName) +
+                          " ON " + QualifiedName(databaseName, tableName) + " (" + string.Join(",", cols.ToArray()) + ")";
+                }
                 ExecOrThrow(sql);
             }
         }
