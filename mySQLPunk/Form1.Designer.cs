@@ -404,7 +404,7 @@
             this.connection_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
             this.connection_btn.Name = "connection_btn";
             this.connection_btn.Size = new System.Drawing.Size(80, 70);
-            this.connection_btn.Text = "Connection";
+            this.connection_btn.Text = "連線";
             this.connection_btn.TextAlign = System.Drawing.ContentAlignment.BottomCenter;
             this.connection_btn.TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay;
             // 
@@ -723,4 +723,3 @@
         private System.Windows.Forms.ToolStripButton view_btn;
     }
 }
-

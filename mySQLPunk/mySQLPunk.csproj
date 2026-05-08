@@ -228,7 +228,12 @@
     <Content Include="image\backups.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="image\connection.png" />
+    <Content Include="image\connection.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="image\connection.svg">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <Content Include="image\database.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
