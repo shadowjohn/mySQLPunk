@@ -1256,18 +1256,16 @@ namespace mySQLPunk
 
         private void CreateNewTable()
         {
-            if (db_tree.SelectedNode == null) return;
-            var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-            if (pathParts.Length < 2) return;
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Designer.SelectDatabase"), Localization.T("Designer.NewTable"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
 
-            string dbName = pathParts[1];
-            TreeNode root = db_tree.SelectedNode;
-            while (root.Parent != null) root = root.Parent;
-            IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
-
-            TableDesignerForm tdf = new TableDesignerForm(db, dbName, "");
-            tdf.Text = "New Table";
+            TableDesignerForm tdf = new TableDesignerForm(target.Database, target.DatabaseName, "");
             DockDockableForm(tdf);
+            UpdateMainStatus(Localization.T("Designer.NewTableOpened"));
         }
 
         private void DeleteSelectedTable()
@@ -1800,7 +1798,7 @@ namespace mySQLPunk
 
         private void CreateNewView()
         {
-            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 MessageBox.Show("請先選取一個已展開的資料庫或 Views 節點。", "新增檢視", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1816,7 +1814,7 @@ namespace mySQLPunk
 
         private void CreateNewFunction()
         {
-            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 MessageBox.Show("請先選取一個已展開的資料庫或 Functions 節點。", "新增函式", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2209,7 +2207,7 @@ namespace mySQLPunk
 
         private void DumpSelectedDatabaseSqlWithDialog()
         {
-            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 MessageBox.Show(Localization.T("Backup.SelectDatabase"), Localization.T("Tool.DumpSql"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2241,7 +2239,7 @@ namespace mySQLPunk
 
         private bool DumpSelectedDatabaseSqlToFile(string targetPath)
         {
-            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 return false;
@@ -2260,7 +2258,7 @@ namespace mySQLPunk
 
         private void ImportSqlWithDialog()
         {
-            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 MessageBox.Show(Localization.T("ImportSql.SelectDatabase"), Localization.T("ImportSql.Title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2296,7 +2294,7 @@ namespace mySQLPunk
 
         private int ImportSqlScriptToSelectedDatabase(string script)
         {
-            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 return -1;
@@ -2442,7 +2440,7 @@ namespace mySQLPunk
 
         private void BackupSelectedDatabaseWithDialog()
         {
-            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 MessageBox.Show(Localization.T("Backup.SelectDatabase"), Localization.T("Backup.Title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2477,7 +2475,7 @@ namespace mySQLPunk
 
         private bool BackupSelectedDatabaseToFile(string targetPath)
         {
-            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 return false;
@@ -3522,6 +3520,15 @@ namespace mySQLPunk
                 DatabaseNode = dbNode,
                 ConnectionInfo = connInfo
             };
+        }
+
+        private TreeDatabaseTarget GetTargetFromCurrentSelection()
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target != null) return target;
+
+            TreeNode databaseNode = GetSelectedDatabaseNode();
+            return BuildTargetFromNode(databaseNode);
         }
 
         private void RefreshDatabaseObjectNodes(TreeNode databaseNode)

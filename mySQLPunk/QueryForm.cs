@@ -107,6 +107,16 @@ namespace mySQLPunk
         private ToolStripMenuItem menuWindowClose;
         private ToolStripMenuItem menuHelpAbout;
         private ContextMenuStrip resultsContextMenu;
+        private ToolStripMenuItem resultsCopyCellsItem;
+        private ToolStripMenuItem resultsCopyHeadersItem;
+        private ToolStripMenuItem resultsCopyRowsItem;
+        private ToolStripMenuItem resultsSelectAllItem;
+        private ToolStripMenuItem resultsExportItem;
+        private ToolStripSeparator resultsEditSeparator;
+        private ToolStripMenuItem resultsAddRowItem;
+        private ToolStripMenuItem resultsDeleteRowItem;
+        private ToolStripMenuItem resultsSaveRowsItem;
+        private bool _isClosing;
 
         private static readonly string[] Keywords =
         {
@@ -188,10 +198,12 @@ namespace mySQLPunk
                 try
                 {
                     _totalRows = await Task.Run(() => _db.CountRows(_databaseName, tableName));
+                    if (!CanUpdateUi()) return;
                     UpdatePaginationUI();
                 }
                 catch (Exception ex)
                 {
+                    if (!CanUpdateUi()) return;
                     UpdateStatus("Count rows failed: " + ex.Message);
                     UpdatePaginationUI();
                 }
@@ -938,6 +950,7 @@ namespace mySQLPunk
                 DataTable dt = await Task.Run(
                     () => _db.SelectTablePage(_databaseName, tableName, offset, _pageSize),
                     _cts.Token);
+                if (!CanUpdateUi()) return;
                 dt.AcceptChanges();
                 PrepareTableDataForEditing(dt);
 
@@ -952,19 +965,28 @@ namespace mySQLPunk
             }
             catch (OperationCanceledException)
             {
+                if (!CanUpdateUi()) return;
                 UpdateStatus("Cancelled.");
             }
             catch (Exception ex)
             {
+                if (!CanUpdateUi()) return;
                 UpdateStatus("Load failed: " + ex.Message);
                 MessageBox.Show("載入資料表失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
-                tsBtnExecute.Enabled = true;
-                tsBtnCancel.Enabled = false;
-                tsBtnRefresh.Enabled = true;
-                btnDataRefresh.Enabled = true;
+                if (CanUpdateUi())
+                {
+                    tsBtnExecute.Enabled = true;
+                    tsBtnCancel.Enabled = false;
+                    tsBtnRefresh.Enabled = true;
+                    btnDataRefresh.Enabled = true;
+                }
+
+                CancellationTokenSource cts = _cts;
+                _cts = null;
+                cts?.Dispose();
             }
         }
 
@@ -1048,6 +1070,7 @@ namespace mySQLPunk
                     DataTable dt = await Task.Run(
                         () => _db.SelectSQL(sql),
                         _cts.Token);
+                    if (!CanUpdateUi()) return;
                     if (_isTableDataMode)
                     {
                         dt.AcceptChanges();
@@ -1069,6 +1092,7 @@ namespace mySQLPunk
                     var result = await Task.Run(
                         () => _db.ExecSQL(sql),
                         _cts.Token);
+                    if (!CanUpdateUi()) return;
 
                     sw.Stop();
                     dgvResults.DataSource = null;
@@ -1092,11 +1116,13 @@ namespace mySQLPunk
             }
             catch (OperationCanceledException)
             {
+                if (!CanUpdateUi()) return;
                 sw.Stop();
                 UpdateStatus("Cancelled.");
             }
             catch (Exception ex)
             {
+                if (!CanUpdateUi()) return;
                 sw.Stop();
                 string status = "Error: " + ex.Message;
                 UpdateStatus(status);
@@ -1106,7 +1132,7 @@ namespace mySQLPunk
             }
             finally
             {
-                if (!IsDisposed && !Disposing)
+                if (CanUpdateUi())
                 {
                     tsBtnExecute.Enabled = true;
                     tsBtnCancel.Enabled = false;
@@ -1118,6 +1144,11 @@ namespace mySQLPunk
                 _cts = null;
                 cts?.Dispose();
             }
+        }
+
+        private bool CanUpdateUi()
+        {
+            return !_isClosing && !IsDisposed && !Disposing;
         }
 
         private void UpdateStatus(string msg)
@@ -1211,10 +1242,21 @@ namespace mySQLPunk
             {
                 resultsContextMenu = new ContextMenuStrip();
                 resultsContextMenu.Opening += ResultsContextMenu_Opening;
+                resultsCopyCellsItem = AddResultsMenuItem(resultsContextMenu, "copyCells", (s, e) => CopyResultsSelectionToClipboard(false));
+                resultsCopyHeadersItem = AddResultsMenuItem(resultsContextMenu, "copyHeaders", (s, e) => CopyResultsSelectionToClipboard(true));
+                resultsCopyRowsItem = AddResultsMenuItem(resultsContextMenu, "copyRows", (s, e) => CopySelectedResultRowsToClipboard());
+                resultsContextMenu.Items.Add(new ToolStripSeparator());
+                resultsSelectAllItem = AddResultsMenuItem(resultsContextMenu, "selectAll", (s, e) => dgvResults.SelectAll());
+                resultsExportItem = AddResultsMenuItem(resultsContextMenu, "export", (s, e) => ExportCsv());
+                resultsEditSeparator = new ToolStripSeparator();
+                resultsContextMenu.Items.Add(resultsEditSeparator);
+                resultsAddRowItem = AddResultsMenuItem(resultsContextMenu, "addRow", (s, e) => AddNewRow());
+                resultsDeleteRowItem = AddResultsMenuItem(resultsContextMenu, "deleteRow", (s, e) => DeleteSelectedRows());
+                resultsSaveRowsItem = AddResultsMenuItem(resultsContextMenu, "saveRows", (s, e) => SaveChanges());
                 dgvResults.ContextMenuStrip = resultsContextMenu;
             }
 
-            PopulateResultsContextMenu(resultsContextMenu);
+            UpdateResultsContextMenuItems();
             ThemeManager.ApplyToolStrip(resultsContextMenu);
         }
 
@@ -1222,36 +1264,46 @@ namespace mySQLPunk
         {
             ContextMenuStrip menu = new ContextMenuStrip();
             menu.Opening += ResultsContextMenu_Opening;
-            PopulateResultsContextMenu(menu);
-            return menu;
-        }
-
-        private void PopulateResultsContextMenu(ContextMenuStrip menu)
-        {
-            if (menu == null) return;
-            menu.Items.Clear();
-            AddResultsMenuItem(menu, "copyCells", Localization.T("Query.CopySelectedCells"), (s, e) => CopyResultsSelectionToClipboard(false));
-            AddResultsMenuItem(menu, "copyHeaders", Localization.T("Query.CopyWithHeaders"), (s, e) => CopyResultsSelectionToClipboard(true));
-            AddResultsMenuItem(menu, "copyRows", Localization.T("Query.CopySelectedRows"), (s, e) => CopySelectedResultRowsToClipboard());
+            AddResultsMenuItem(menu, "copyCells", (s, e) => CopyResultsSelectionToClipboard(false)).Text = Localization.T("Query.CopySelectedCells");
+            AddResultsMenuItem(menu, "copyHeaders", (s, e) => CopyResultsSelectionToClipboard(true)).Text = Localization.T("Query.CopyWithHeaders");
+            AddResultsMenuItem(menu, "copyRows", (s, e) => CopySelectedResultRowsToClipboard()).Text = Localization.T("Query.CopySelectedRows");
             menu.Items.Add(new ToolStripSeparator());
-            AddResultsMenuItem(menu, "selectAll", Localization.T("Query.SelectAll"), (s, e) => dgvResults.SelectAll());
-            AddResultsMenuItem(menu, "export", Localization.T("Query.Export"), (s, e) => ExportCsv());
-
+            AddResultsMenuItem(menu, "selectAll", (s, e) => dgvResults.SelectAll()).Text = Localization.T("Query.SelectAll");
+            AddResultsMenuItem(menu, "export", (s, e) => ExportCsv()).Text = Localization.T("Query.Export");
             if (_isTableDataMode)
             {
                 menu.Items.Add(new ToolStripSeparator());
-                AddResultsMenuItem(menu, "addRow", Localization.T("Query.Add"), (s, e) => AddNewRow());
-                AddResultsMenuItem(menu, "deleteRow", Localization.T("Query.Delete"), (s, e) => DeleteSelectedRows());
-                AddResultsMenuItem(menu, "saveRows", Localization.T("Query.Save"), (s, e) => SaveChanges());
+                AddResultsMenuItem(menu, "addRow", (s, e) => AddNewRow()).Text = Localization.T("Query.Add");
+                AddResultsMenuItem(menu, "deleteRow", (s, e) => DeleteSelectedRows()).Text = Localization.T("Query.Delete");
+                AddResultsMenuItem(menu, "saveRows", (s, e) => SaveChanges()).Text = Localization.T("Query.Save");
             }
+            return menu;
         }
 
-        private static void AddResultsMenuItem(ContextMenuStrip menu, string name, string text, EventHandler onClick)
+        private void UpdateResultsContextMenuItems()
         {
-            ToolStripMenuItem item = new ToolStripMenuItem(text);
+            if (resultsCopyCellsItem != null) resultsCopyCellsItem.Text = Localization.T("Query.CopySelectedCells");
+            if (resultsCopyHeadersItem != null) resultsCopyHeadersItem.Text = Localization.T("Query.CopyWithHeaders");
+            if (resultsCopyRowsItem != null) resultsCopyRowsItem.Text = Localization.T("Query.CopySelectedRows");
+            if (resultsSelectAllItem != null) resultsSelectAllItem.Text = Localization.T("Query.SelectAll");
+            if (resultsExportItem != null) resultsExportItem.Text = Localization.T("Query.Export");
+            if (resultsAddRowItem != null) resultsAddRowItem.Text = Localization.T("Query.Add");
+            if (resultsDeleteRowItem != null) resultsDeleteRowItem.Text = Localization.T("Query.Delete");
+            if (resultsSaveRowsItem != null) resultsSaveRowsItem.Text = Localization.T("Query.Save");
+
+            if (resultsEditSeparator != null) resultsEditSeparator.Visible = _isTableDataMode;
+            if (resultsAddRowItem != null) resultsAddRowItem.Visible = _isTableDataMode;
+            if (resultsDeleteRowItem != null) resultsDeleteRowItem.Visible = _isTableDataMode;
+            if (resultsSaveRowsItem != null) resultsSaveRowsItem.Visible = _isTableDataMode;
+        }
+
+        private static ToolStripMenuItem AddResultsMenuItem(ContextMenuStrip menu, string name, EventHandler onClick)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem();
             item.Name = name;
             item.Click += onClick;
             menu.Items.Add(item);
+            return item;
         }
 
         private void ResultsContextMenu_Opening(object sender, CancelEventArgs e)
@@ -1494,6 +1546,7 @@ namespace mySQLPunk
             try
             {
                 DataSaveResult result = await Task.Run(() => SaveTableChanges(dt));
+                if (!CanUpdateUi()) return;
                 dt.AcceptChanges();
                 UpdateStatus($"Saved. Inserted: {result.Inserted}, Updated: {result.Updated}, Deleted: {result.Deleted}");
                 CalculateTotalRowsAsync();
@@ -1501,15 +1554,19 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
+                if (!CanUpdateUi()) return;
                 UpdateStatus("Save failed: " + ex.Message);
                 MessageBox.Show("儲存失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
-                tsBtnSave.Enabled = true;
-                btnDataApply.Enabled = true;
-                tsBtnRefresh.Enabled = true;
-                btnDataRefresh.Enabled = true;
+                if (CanUpdateUi())
+                {
+                    tsBtnSave.Enabled = true;
+                    btnDataApply.Enabled = true;
+                    tsBtnRefresh.Enabled = true;
+                    btnDataRefresh.Enabled = true;
+                }
             }
         }
 
@@ -1927,6 +1984,13 @@ namespace mySQLPunk
                 _mainHost.NotifyDockableFormClosed(this);
             }
             base.OnFormClosed(e);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _isClosing = true;
+            _cts?.Cancel();
+            base.OnFormClosing(e);
         }
 
     }

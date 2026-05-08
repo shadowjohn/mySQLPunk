@@ -216,6 +216,8 @@ namespace mySQLPunk
             Add("Designer.ColumnProperties", "欄位屬性 (選取欄位以進行詳細設定)", "Column properties (select a column for details)");
             Add("Designer.TableName", "資料表名稱:", "Table Name:");
             Add("Designer.Engine", "引擎:", "Engine:");
+            Add("Designer.SelectDatabase", "請先選取一個已展開的資料庫或 Tables 節點。", "Select an expanded database or Tables node first.");
+            Add("Designer.NewTableOpened", "新增資料表設計器已開啟。", "New table designer opened.");
             Add("Designer.Name", "名稱", "Name");
             Add("Designer.Type", "類型", "Type");
             Add("Designer.Length", "長度", "Length");
