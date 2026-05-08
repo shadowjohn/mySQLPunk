@@ -850,7 +850,14 @@ namespace mySQLPunk
             _pageSize = parsed;
             _currentPage = 1;
             if (txtPageSize.Text != _pageSize.ToString()) txtPageSize.Text = _pageSize.ToString();
-            UpdatePaginationUI();
+            if (_isTableDataMode)
+            {
+                ExecutePagedQuery();
+            }
+            else
+            {
+                UpdatePaginationUI();
+            }
         }
 
         private void EnsureValidPageSize()
