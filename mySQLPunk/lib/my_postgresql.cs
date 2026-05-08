@@ -187,10 +187,87 @@ namespace mySQLPunk.lib
             return SelectSQL("SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = :tableName", p);
         }
 
-        public DataTable GetTableStatus(string databaseName) => new DataTable();
-        public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();
-        public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
-        public string GetTableCreateStatement(string databaseName, string tableName) => "";
+        public DataTable GetTableStatus(string databaseName)
+        {
+            return SelectSQL(@"
+                SELECT
+                    c.relname AS ""Name"",
+                    NULL AS ""Auto_increment"",
+                    NULL AS ""Update_time"",
+                    NULL AS ""Create_time"",
+                    NULL AS ""Check_time"",
+                    pg_total_relation_size(c.oid) AS ""Data_length"",
+                    pg_indexes_size(c.oid) AS ""Index_length"",
+                    0 AS ""Max_data_length"",
+                    0 AS ""Data_free"",
+                    'PostgreSQL' AS ""Engine"",
+                    COALESCE(s.n_live_tup, 0) AS ""Rows"",
+                    COALESCE(obj_description(c.oid), '') AS ""Comment"",
+                    '' AS ""Row_format"",
+                    '' AS ""Collation"",
+                    '' AS ""Create_options""
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+                WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+                ORDER BY c.relname;");
+        }
+
+        public DataTable GetIndexes(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "name", tableName } };
+            return SelectSQL(@"
+                SELECT
+                    i.relname AS ""Key_name"",
+                    a.attname AS ""Column_name"",
+                    CASE WHEN ix.indisunique THEN 0 ELSE 1 END AS ""Non_unique"",
+                    k.ord AS ""Seq_in_index"",
+                    am.amname AS ""Index_type"",
+                    COALESCE(obj_description(i.oid), '') AS ""Index_comment""
+                FROM pg_class t
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                JOIN pg_index ix ON t.oid = ix.indrelid
+                JOIN pg_class i ON i.oid = ix.indexrelid
+                JOIN pg_am am ON i.relam = am.oid
+                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                WHERE n.nspname = 'public' AND t.relname = :name
+                ORDER BY i.relname, k.ord;", p);
+        }
+
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName)
+        {
+            var output = new Dictionary<string, string>();
+            DataTable dt = SelectSQL(@"
+                SELECT
+                    pg_encoding_to_char(encoding) AS character_set,
+                    datcollate AS collation
+                FROM pg_database
+                WHERE datname = current_database();");
+            if (dt.Rows.Count > 0)
+            {
+                output["character_set"] = dt.Rows[0]["character_set"].ToString();
+                output["collation"] = dt.Rows[0]["collation"].ToString();
+            }
+            return output;
+        }
+
+        public string GetTableCreateStatement(string databaseName, string tableName)
+        {
+            DataTable columns = GetCopyColumns(databaseName, tableName);
+            if (columns.Rows.Count == 0) return "";
+
+            List<string> definitions = new List<string>();
+            foreach (DataRow row in columns.Rows)
+            {
+                string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
+                definitions.Add("  " + QuotePg(row["Name"].ToString()) + " " + MapCopyTypeToPostgreSql(row) + " " + nullable);
+            }
+
+            return "CREATE TABLE public." + QuotePg(tableName) + " (\r\n" +
+                   string.Join(",\r\n", definitions.ToArray()) +
+                   "\r\n);";
+        }
 
         public bool TableExists(string databaseName, string tableName)
         {

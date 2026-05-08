@@ -158,7 +158,7 @@ namespace mySQLPunk.lib
         public List<string> GetTables(string databaseName)
         {
             List<string> tables = new List<string>();
-            DataTable dt = SelectSQL("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE';");
+            DataTable dt = SelectSQL("SELECT TABLE_NAME FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_TYPE = 'BASE TABLE';");
             foreach (DataRow row in dt.Rows)
             {
                 tables.Add(row[0].ToString());
@@ -169,7 +169,7 @@ namespace mySQLPunk.lib
         public List<string> GetViews(string databaseName)
         {
             List<string> views = new List<string>();
-            DataTable dt = SelectSQL("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'VIEW';");
+            DataTable dt = SelectSQL("SELECT TABLE_NAME FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_TYPE = 'VIEW';");
             foreach (DataRow row in dt.Rows)
             {
                 views.Add(row[0].ToString());
@@ -180,13 +180,90 @@ namespace mySQLPunk.lib
         public DataTable GetColumns(string databaseName, string tableName)
         {
             var p = new Dictionary<string, object> { { "tableName", tableName } };
-            return SelectSQL($"SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @tableName", p);
+            return SelectSQL("SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @tableName ORDER BY ORDINAL_POSITION", p);
         }
 
-        public DataTable GetTableStatus(string databaseName) => new DataTable();
-        public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();
-        public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
-        public string GetTableCreateStatement(string databaseName, string tableName) => "";
+        public DataTable GetTableStatus(string databaseName)
+        {
+            return SelectSQL(@"
+                SELECT
+                    t.name AS [Name],
+                    NULL AS [Auto_increment],
+                    t.modify_date AS [Update_time],
+                    t.create_date AS [Create_time],
+                    NULL AS [Check_time],
+                    COALESCE(ds.Data_length, 0) AS [Data_length],
+                    COALESCE(ds.Index_length, 0) AS [Index_length],
+                    CAST(0 AS BIGINT) AS [Max_data_length],
+                    CAST(0 AS BIGINT) AS [Data_free],
+                    'SQL Server' AS [Engine],
+                    COALESCE(ds.[Rows], 0) AS [Rows],
+                    COALESCE(CAST(ep.value AS NVARCHAR(4000)), '') AS [Comment],
+                    '' AS [Row_format],
+                    DATABASEPROPERTYEX('" + EscapeSqlLiteral(databaseName) + @"', 'Collation') AS [Collation],
+                    '' AS [Create_options]
+                FROM [" + EscapeSqlServerName(databaseName) + @"].sys.tables t
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.schema_id = t.schema_id
+                LEFT JOIN (
+                    SELECT
+                        object_id,
+                        CAST(SUM(CASE WHEN index_id IN (0, 1) THEN row_count ELSE 0 END) AS BIGINT) AS [Rows],
+                        CAST(SUM(CASE WHEN index_id IN (0, 1) THEN used_page_count ELSE 0 END) * 8 * 1024 AS BIGINT) AS [Data_length],
+                        CAST(SUM(CASE WHEN index_id > 1 THEN used_page_count ELSE 0 END) * 8 * 1024 AS BIGINT) AS [Index_length]
+                    FROM [" + EscapeSqlServerName(databaseName) + @"].sys.dm_db_partition_stats
+                    GROUP BY object_id
+                ) ds ON ds.object_id = t.object_id
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.extended_properties ep ON ep.major_id = t.object_id AND ep.minor_id = 0 AND ep.name = 'MS_Description'
+                WHERE s.name = 'dbo'
+                ORDER BY t.name;");
+        }
+
+        public DataTable GetIndexes(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object> { { "name", tableName } };
+            return SelectSQL(@"
+                SELECT
+                    i.name AS [Key_name],
+                    c.name AS [Column_name],
+                    CASE WHEN i.is_unique = 1 OR i.is_primary_key = 1 THEN 0 ELSE 1 END AS [Non_unique],
+                    ic.key_ordinal AS [Seq_in_index],
+                    i.type_desc AS [Index_type],
+                    '' AS [Index_comment]
+                FROM [" + EscapeSqlServerName(databaseName) + @"].sys.indexes i
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.object_id = i.object_id
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.schema_id = o.schema_id
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
+                WHERE s.name = 'dbo' AND o.name = @name AND i.name IS NOT NULL
+                ORDER BY i.name, ic.key_ordinal;", p);
+        }
+
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName)
+        {
+            var output = new Dictionary<string, string>();
+            var p = new Dictionary<string, object> { { "name", databaseName } };
+            DataTable dt = SelectSQL("SELECT collation_name FROM sys.databases WHERE name = @name;", p);
+            output["character_set"] = "UTF-16";
+            output["collation"] = dt.Rows.Count > 0 ? dt.Rows[0]["collation_name"].ToString() : "";
+            return output;
+        }
+
+        public string GetTableCreateStatement(string databaseName, string tableName)
+        {
+            DataTable columns = GetCopyColumns(databaseName, tableName);
+            if (columns.Rows.Count == 0) return "";
+
+            List<string> definitions = new List<string>();
+            foreach (DataRow row in columns.Rows)
+            {
+                string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
+                definitions.Add("  [" + EscapeSqlServerName(row["Name"].ToString()) + "] " + MapCopyTypeToSqlServer(row) + " " + nullable);
+            }
+
+            return "CREATE TABLE [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (\r\n" +
+                   string.Join(",\r\n", definitions.ToArray()) +
+                   "\r\n);";
+        }
 
         public bool TableExists(string databaseName, string tableName)
         {

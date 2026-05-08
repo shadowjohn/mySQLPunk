@@ -262,14 +262,113 @@ namespace mySQLPunk.lib
             return SelectSQL($"PRAGMA table_info('{safeTable}');");
         }
 
-        public DataTable GetTableStatus(string databaseName) => new DataTable();
-        public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();
-        public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
+        public DataTable GetTableStatus(string databaseName)
+        {
+            DataTable output = CreateTableStatusSchema();
+            DataTable tables = SelectSQL("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;");
+            foreach (DataRow row in tables.Rows)
+            {
+                string tableName = row["name"].ToString();
+                DataRow nr = output.NewRow();
+                nr["Name"] = tableName;
+                nr["Auto_increment"] = DBNull.Value;
+                nr["Update_time"] = DBNull.Value;
+                nr["Create_time"] = DBNull.Value;
+                nr["Check_time"] = DBNull.Value;
+                nr["Data_length"] = 0L;
+                nr["Index_length"] = 0L;
+                nr["Max_data_length"] = 0L;
+                nr["Data_free"] = 0L;
+                nr["Engine"] = "SQLite";
+                nr["Rows"] = CountRows(databaseName, tableName);
+                nr["Comment"] = "";
+                nr["Row_format"] = "";
+                nr["Collation"] = "";
+                nr["Create_options"] = "";
+                output.Rows.Add(nr);
+            }
+            return output;
+        }
+
+        public DataTable GetIndexes(string databaseName, string tableName)
+        {
+            DataTable output = CreateIndexSchema();
+            DataTable indexes = SelectSQL("PRAGMA index_list(" + QuoteSqlite(tableName) + ");");
+            foreach (DataRow idx in indexes.Rows)
+            {
+                string indexName = idx["name"].ToString();
+                DataTable cols = SelectSQL("PRAGMA index_info(" + QuoteSqlite(indexName) + ");");
+                foreach (DataRow col in cols.Rows)
+                {
+                    DataRow nr = output.NewRow();
+                    nr["Key_name"] = indexName;
+                    nr["Column_name"] = col["name"];
+                    nr["Non_unique"] = idx["unique"].ToString() == "1" ? "0" : "1";
+                    nr["Seq_in_index"] = Convert.ToInt32(col["seqno"]) + 1;
+                    nr["Index_type"] = "BTREE";
+                    nr["Index_comment"] = "";
+                    output.Rows.Add(nr);
+                }
+            }
+            return output;
+        }
+
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName)
+        {
+            var output = new Dictionary<string, string>();
+            output["character_set"] = "UTF-8";
+            output["collation"] = "";
+
+            try
+            {
+                DataTable dt = SelectSQL("PRAGMA encoding;");
+                if (dt.Rows.Count > 0)
+                {
+                    output["character_set"] = dt.Rows[0][0].ToString();
+                }
+            }
+            catch { }
+
+            return output;
+        }
         public string GetTableCreateStatement(string databaseName, string tableName)
         {
             string safeTable = tableName.Replace("'", "''");
             DataTable dt = SelectSQL($"SELECT sql FROM sqlite_master WHERE type='table' AND name='{safeTable}';");
             return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
+        }
+
+        private static DataTable CreateTableStatusSchema()
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("Name");
+            dt.Columns.Add("Auto_increment");
+            dt.Columns.Add("Update_time");
+            dt.Columns.Add("Create_time");
+            dt.Columns.Add("Check_time");
+            dt.Columns.Add("Data_length", typeof(long));
+            dt.Columns.Add("Index_length", typeof(long));
+            dt.Columns.Add("Max_data_length", typeof(long));
+            dt.Columns.Add("Data_free", typeof(long));
+            dt.Columns.Add("Engine");
+            dt.Columns.Add("Rows", typeof(long));
+            dt.Columns.Add("Comment");
+            dt.Columns.Add("Row_format");
+            dt.Columns.Add("Collation");
+            dt.Columns.Add("Create_options");
+            return dt;
+        }
+
+        private static DataTable CreateIndexSchema()
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("Key_name");
+            dt.Columns.Add("Column_name");
+            dt.Columns.Add("Non_unique");
+            dt.Columns.Add("Seq_in_index", typeof(int));
+            dt.Columns.Add("Index_type");
+            dt.Columns.Add("Index_comment");
+            return dt;
         }
 
         public bool TableExists(string databaseName, string tableName)
