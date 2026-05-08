@@ -1997,6 +1997,16 @@ namespace mySQLPunk
             return displayIdx;
         }
 
+        private object[] GetSupportedIndexTypes()
+        {
+            if (_db is my_mysql)
+            {
+                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" };
+            }
+
+            return new object[] { "NORMAL", "UNIQUE", "PRIMARY" };
+        }
+
         private void BindIndexes(DataTable displayIdx)
         {
             dgvIndexes.DataSource = displayIdx;
@@ -2013,7 +2023,7 @@ namespace mySQLPunk
                     DataPropertyName = "索引類型",
                     FlatStyle = FlatStyle.Flat
                 };
-                cb.Items.AddRange(new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" });
+                cb.Items.AddRange(GetSupportedIndexTypes());
                 dgvIndexes.Columns.Insert(idx, cb);
             }
 
