@@ -660,6 +660,7 @@ namespace mySQLPunk
             DesignTable.Click += DesignTable_Click;
             NewTable.Click += (s, e) => CreateNewTable();
             DeleteTable.Click += (s, e) => DeleteSelectedTable();
+            ImportWizard.Click += (s, e) => ImportSqlWithDialog();
             ExportWizard.Click += (s, e) => DumpSelectedTableSql(false);
             OpenView.Click += (s, e) => OpenSelectedViewInQuery();
             DesignView.Click += (s, e) => ShowSelectedViewDefinition();
@@ -1603,6 +1604,188 @@ namespace mySQLPunk
                     MessageBox.Show("匯出 SQL 失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void ImportSqlWithDialog()
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("ImportSql.SelectDatabase"), Localization.T("ImportSql.Title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = Localization.T("ImportSql.Title");
+                dialog.Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*";
+                dialog.Multiselect = false;
+
+                if (dialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    string script = File.ReadAllText(dialog.FileName, Encoding.UTF8);
+                    int executed = ImportSqlScript(target, script);
+                    string message = string.Format(Localization.T("ImportSql.Success"), executed);
+                    MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UpdateMainStatus(message);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(Localization.T("ImportSql.Failed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateMainStatus("Import SQL failed: " + ex.Message);
+                }
+            }
+        }
+
+        private int ImportSqlScriptToSelectedDatabase(string script)
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                return -1;
+            }
+
+            return ImportSqlScript(target, script);
+        }
+
+        private int ImportSqlScript(TreeDatabaseTarget target, string script)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            int executed = ExecuteSqlScript(target.Database, target.DatabaseName, script);
+            RefreshDatabaseObjectNodes(target.DatabaseNode);
+            db_tree.SelectedNode = target.DatabaseNode;
+            UpdateMainStatus(string.Format(Localization.T("ImportSql.Success"), executed));
+            return executed;
+        }
+
+        private static int ExecuteSqlScript(IDatabase db, string databaseName, string script)
+        {
+            if (db == null) throw new ArgumentNullException(nameof(db));
+            if (script == null) throw new ArgumentNullException(nameof(script));
+
+            int executed = 0;
+            foreach (string statement in SplitSqlScript(script))
+            {
+                string sql = statement.Trim();
+                if (sql.Length == 0) continue;
+
+                Dictionary<string, string> result = db.ExecSQL(sql);
+                if (!result.ContainsKey("status") || result["status"] != "OK")
+                {
+                    string reason = result.ContainsKey("reason") ? result["reason"] : "unknown error";
+                    throw new Exception(reason + Environment.NewLine + sql);
+                }
+
+                executed++;
+            }
+
+            return executed;
+        }
+
+        private static List<string> SplitSqlScript(string script)
+        {
+            List<string> statements = new List<string>();
+            StringBuilder current = new StringBuilder();
+            bool inSingle = false;
+            bool inDouble = false;
+            bool inBacktick = false;
+            bool inLineComment = false;
+            bool inBlockComment = false;
+
+            for (int i = 0; i < script.Length; i++)
+            {
+                char c = script[i];
+                char next = i + 1 < script.Length ? script[i + 1] : '\0';
+
+                if (inLineComment)
+                {
+                    current.Append(c);
+                    if (c == '\n') inLineComment = false;
+                    continue;
+                }
+
+                if (inBlockComment)
+                {
+                    current.Append(c);
+                    if (c == '*' && next == '/')
+                    {
+                        current.Append(next);
+                        i++;
+                        inBlockComment = false;
+                    }
+                    continue;
+                }
+
+                if (!inSingle && !inDouble && !inBacktick)
+                {
+                    if (c == '-' && next == '-')
+                    {
+                        current.Append(c);
+                        current.Append(next);
+                        i++;
+                        inLineComment = true;
+                        continue;
+                    }
+                    if (c == '/' && next == '*')
+                    {
+                        current.Append(c);
+                        current.Append(next);
+                        i++;
+                        inBlockComment = true;
+                        continue;
+                    }
+                    if (c == ';')
+                    {
+                        statements.Add(current.ToString());
+                        current.Clear();
+                        continue;
+                    }
+                }
+
+                current.Append(c);
+
+                if (c == '\'' && !inDouble && !inBacktick)
+                {
+                    if (inSingle && next == '\'')
+                    {
+                        current.Append(next);
+                        i++;
+                    }
+                    else
+                    {
+                        inSingle = !inSingle;
+                    }
+                }
+                else if (c == '"' && !inSingle && !inBacktick)
+                {
+                    if (inDouble && next == '"')
+                    {
+                        current.Append(next);
+                        i++;
+                    }
+                    else
+                    {
+                        inDouble = !inDouble;
+                    }
+                }
+                else if (c == '`' && !inSingle && !inDouble)
+                {
+                    inBacktick = !inBacktick;
+                }
+            }
+
+            if (current.Length > 0)
+            {
+                statements.Add(current.ToString());
+            }
+
+            return statements;
         }
 
         private void BackupSelectedDatabaseWithDialog()

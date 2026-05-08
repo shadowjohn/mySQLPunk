@@ -145,6 +145,10 @@ namespace mySQLPunk
             Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
             Add("Backup.Success", "備份已建立。", "Backup created.");
             Add("Backup.Failed", "建立備份失敗：", "Backup failed: ");
+            Add("ImportSql.Title", "匯入 SQL 檔案", "Import SQL File");
+            Add("ImportSql.SelectDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
+            Add("ImportSql.Success", "SQL 匯入完成。執行語句數：{0}", "SQL import completed. Statements executed: {0}");
+            Add("ImportSql.Failed", "匯入 SQL 失敗：", "SQL import failed: ");
 
             Add("Query.Query", "查詢", "Query");
             Add("Query.Execute", "執行", "Execute");
