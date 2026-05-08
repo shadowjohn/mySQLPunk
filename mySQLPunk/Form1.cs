@@ -1670,7 +1670,7 @@ namespace mySQLPunk
             DesignTable_Click(this, EventArgs.Empty);
         }
 
-        private void DumpSelectedTableSql(bool structureOnly)
+        private void DumpSelectedTableSql(bool dataOnly)
         {
             if (db_tree.SelectedNode == null)
             {
@@ -1707,7 +1707,7 @@ namespace mySQLPunk
             {
                 dialog.Filter = "SQL files (*.sql)|*.sql";
                 dialog.DefaultExt = "sql";
-                dialog.FileName = dbName + "_" + tableName + (structureOnly ? "_schema" : "_data") + ".sql";
+                dialog.FileName = dbName + "_" + tableName + (dataOnly ? "_data" : "_structure_data") + ".sql";
 
                 if (dialog.ShowDialog() != DialogResult.OK)
                 {
@@ -1716,7 +1716,7 @@ namespace mySQLPunk
 
                 try
                 {
-                    string sql = BuildTableDump(db, dbName, tableName, structureOnly);
+                    string sql = BuildTableDump(db, dbName, tableName, dataOnly);
                     File.WriteAllText(dialog.FileName, sql, Encoding.UTF8);
                     MessageBox.Show("SQL 檔案已匯出。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
