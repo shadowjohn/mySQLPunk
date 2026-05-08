@@ -767,6 +767,7 @@ namespace mySQLPunk
                     () => _db.SelectTablePage(_databaseName, tableName, offset, _pageSize),
                     _cts.Token);
                 dt.AcceptChanges();
+                PrepareTableDataForEditing(dt);
 
                 sw.Stop();
                 dgvResults.DataSource = dt;
@@ -847,6 +848,7 @@ namespace mySQLPunk
                     if (_isTableDataMode)
                     {
                         dt.AcceptChanges();
+                        PrepareTableDataForEditing(dt);
                     }
 
                     sw.Stop();
@@ -1139,7 +1141,12 @@ namespace mySQLPunk
                 {
                     if (!row.Table.Columns.Contains("pk") || row["pk"].ToString() == "0") continue;
                     TableColumnInfo col = columns.FirstOrDefault(c => c.Name == row["name"].ToString());
-                    if (col != null) col.IsPrimaryKey = true;
+                    if (col != null)
+                    {
+                        col.IsPrimaryKey = true;
+                        string type = row.Table.Columns.Contains("type") ? row["type"].ToString() : "";
+                        col.IsAutoIncrement = type.IndexOf("INT", StringComparison.OrdinalIgnoreCase) >= 0;
+                    }
                 }
             }
 
@@ -1356,7 +1363,21 @@ namespace mySQLPunk
         {
             if (dgvResults.DataSource is DataTable dt)
             {
+                PrepareTableDataForEditing(dt);
                 dt.Rows.Add(dt.NewRow());
+            }
+        }
+
+        private void PrepareTableDataForEditing(DataTable dt)
+        {
+            if (!_isTableDataMode || dt == null) return;
+
+            string tableName = GetTableNameFromSql();
+            if (string.IsNullOrWhiteSpace(tableName) || tableName == "Table") return;
+
+            foreach (DataColumn dataColumn in dt.Columns)
+            {
+                dataColumn.AllowDBNull = true;
             }
         }
 
