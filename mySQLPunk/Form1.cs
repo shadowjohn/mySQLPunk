@@ -804,12 +804,12 @@ namespace mySQLPunk
             NewTable.Click += (s, e) => CreateNewTable();
             DeleteTable.Click += (s, e) => DeleteSelectedTable();
             ImportWizard.Click += (s, e) => ImportSqlWithDialog();
-            ExportWizard.Click += (s, e) => DumpSelectedTableSql(false);
+            ExportWizard.Click += (s, e) => DumpCurrentSelectionSqlWithDialog(false);
             OpenView.Click += (s, e) => OpenSelectedViewInQuery();
             DesignView.Click += (s, e) => ShowSelectedViewDefinition();
             NewView.Click += (s, e) => CreateNewView();
             DeleteView.Click += (s, e) => DeleteSelectedView();
-            View_ExportWizard.Click += (s, e) => DumpSelectedViewSql();
+            View_ExportWizard.Click += (s, e) => DumpCurrentSelectionSqlWithDialog(false);
             DesignFunction.Click += (s, e) => ShowSelectedFunctionDefinition();
             NewFunction.Click += (s, e) => CreateNewFunction();
             DeleteFunction.Click += (s, e) => DeleteSelectedFunction();
@@ -2203,6 +2203,99 @@ namespace mySQLPunk
                     MessageBox.Show("匯出 SQL 失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void DumpCurrentSelectionSqlWithDialog(bool dataOnlyForTable)
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Backup.SelectDatabase"), Localization.T("Tool.ExportWizard"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*";
+                dialog.DefaultExt = "sql";
+                dialog.FileName = BuildCurrentSelectionDumpFileName(dataOnlyForTable);
+
+                if (dialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    DumpCurrentSelectionSqlToFile(dialog.FileName, dataOnlyForTable);
+                    MessageBox.Show("SQL 檔案已匯出。", Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("匯出 SQL 失敗：" + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private string BuildCurrentSelectionDumpFileName(bool dataOnlyForTable)
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection != null)
+            {
+                if (selection.GroupName == "Tables")
+                {
+                    return selection.DatabaseName + "_" + selection.ObjectName + (dataOnlyForTable ? "_data" : "_structure_data") + ".sql";
+                }
+                if (selection.GroupName == "Views")
+                {
+                    return selection.DatabaseName + "_" + selection.ObjectName + "_view.sql";
+                }
+            }
+
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            string databaseName = target == null || string.IsNullOrWhiteSpace(target.DatabaseName)
+                ? "database"
+                : target.DatabaseName;
+            return databaseName + "_dump_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".sql";
+        }
+
+        private bool DumpCurrentSelectionSqlToFile(string targetPath, bool dataOnlyForTable)
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            string sql = null;
+            string statusTarget = null;
+
+            if (selection != null && selection.GroupName == "Tables")
+            {
+                sql = BuildTableDump(selection.Database, selection.DatabaseName, selection.ObjectName, dataOnlyForTable);
+                statusTarget = "table " + selection.ObjectName;
+            }
+            else if (selection != null && selection.GroupName == "Views")
+            {
+                sql = BuildViewDump(selection.Database, selection.DatabaseName, selection.ObjectName);
+                statusTarget = "view " + selection.ObjectName;
+            }
+            else
+            {
+                TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+                if (target == null)
+                {
+                    return false;
+                }
+
+                sql = BuildDatabaseDump(target.Database, target.DatabaseName);
+                statusTarget = "database " + target.DatabaseName;
+            }
+
+            string dir = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            File.WriteAllText(targetPath, sql, Encoding.UTF8);
+            UpdateMainStatus("SQL dump created for " + statusTarget + ": " + targetPath);
+            return true;
         }
 
         private void DumpSelectedDatabaseSqlWithDialog()
