@@ -5330,12 +5330,19 @@ namespace mySQLPunk
                 return;
             }
 
+            EnsureDatabaseGroupNodes(databaseNode);
+
             foreach (TreeNode child in databaseNode.Nodes)
             {
                 if (string.Equals(child.Text, groupName, StringComparison.OrdinalIgnoreCase))
                 {
+                    bool alreadySelected = ReferenceEquals(db_tree.SelectedNode, child);
                     db_tree.SelectedNode = child;
                     child.EnsureVisible();
+                    if (alreadySelected)
+                    {
+                        db_tree_AfterSelect(db_tree, new TreeViewEventArgs(child));
+                    }
                     return;
                 }
             }
@@ -5347,7 +5354,12 @@ namespace mySQLPunk
         {
             TreeNode node = db_tree.SelectedNode;
             if (node == null) return null;
-            if (node.Parent == null) return null;
+            if (node.Parent == null)
+            {
+                TreeNode loadedDatabase = node.Nodes.Cast<TreeNode>().FirstOrDefault(n => n.IsExpanded || n.Nodes.Count > 0);
+                if (loadedDatabase != null) return loadedDatabase;
+                return node.Nodes.Count == 1 ? node.Nodes[0] : null;
+            }
 
             while (node.Parent != null && node.Parent.Parent != null)
             {
@@ -5355,6 +5367,23 @@ namespace mySQLPunk
             }
 
             return node.Parent == null ? null : node;
+        }
+
+        private void EnsureDatabaseGroupNodes(TreeNode databaseNode)
+        {
+            if (databaseNode == null || databaseNode.Nodes.Count > 0) return;
+
+            TreeNode root = databaseNode;
+            while (root.Parent != null) root = root.Parent;
+            int index = root.Index;
+            if (index < 0 || index >= myN.connections.Count) return;
+
+            Dictionary<string, object> conn = myN.connections[index];
+            if (!conn.ContainsKey("isConnect") || conn["isConnect"].ToString() != "T") return;
+            if (!(conn.ContainsKey("pdo") && conn["pdo"] is IDatabase db)) return;
+
+            PopulateDatabaseChildren(databaseNode, db, databaseNode.Text);
+            databaseNode.Expand();
         }
 
         private void tool_Connection_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
