@@ -104,6 +104,7 @@ namespace mySQLPunk
             Add("Common.TestConnection", "測試連線", "Test Connection");
             Add("Common.OK", "確定", "OK");
             Add("Common.Cancel", "取消", "Cancel");
+            Add("Common.Next", "下一步", "Next");
             Add("Common.Browse", "瀏覽...", "Browse...");
             Add("Common.CreateNew", "建立新檔...", "Create New...");
             Add("Common.General", "一般", "General");
@@ -122,6 +123,12 @@ namespace mySQLPunk
             Add("Common.NetServiceName", "Net Service Name", "Net Service Name");
             Add("Common.SQLiteConnection", "SQLite 連線", "SQLite Connection");
             Add("Common.SqlServerConnection", "SQL Server 連線", "SQL Server Connection");
+
+            Add("ConnectionWizard.Title", "選取連線類型", "Select Connection Type");
+            Add("ConnectionWizard.SelectType", "選取連線類型:", "Select connection type:");
+            Add("ConnectionWizard.Recent", "最近使用過的", "Recent");
+            Add("ConnectionWizard.All", "全部", "All");
+            Add("ConnectionWizard.Search", "搜尋", "Search");
 
             Add("Query.Query", "查詢", "Query");
             Add("Query.Execute", "執行", "Execute");

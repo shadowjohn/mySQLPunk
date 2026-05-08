@@ -549,6 +549,8 @@ namespace mySQLPunk
             sQLiteToolStripMenuItem.Click += sQLiteToolStripMenuItem_Click;
             sQLServerToolStripMenuItem.Click -= sQLServerToolStripMenuItem_Click;
             sQLServerToolStripMenuItem.Click += sQLServerToolStripMenuItem_Click;
+            newConnectionToolStripMenuItem.Click -= NewConnectionToolStripMenuItem_Click;
+            newConnectionToolStripMenuItem.Click += NewConnectionToolStripMenuItem_Click;
 
             // 連結工具列事件
             NewTable.Click += (s, e) => CreateNewTable();
@@ -868,6 +870,10 @@ namespace mySQLPunk
             model_btn.Click += model_btn_Click;
             bi_btn.Click -= bi_btn_Click;
             bi_btn.Click += bi_btn_Click;
+            connection_btn.Click -= connection_btn_Click;
+            connection_btn.Click += connection_btn_Click;
+            connection_btn.ShowDropDownArrow = false;
+            connection_btn.DropDownItems.Clear();
 
             LoadIcon(connection_btn, Path.Combine(imgPath, "connection.png"), global::mySQLPunk.Properties.Resources.database);
             LoadIcon(query_btn, Path.Combine(imgPath, "new_query.png"), global::mySQLPunk.Properties.Resources.database);
@@ -2533,44 +2539,109 @@ namespace mySQLPunk
 
         }
 
-        private void mysqlStripMenuItem_Click(object sender, EventArgs e)
+        private void NewConnectionToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            //Console.WriteLine(sender.ToString());
-            //MySQL
-            //Form1.ActiveForm.Enabled = false;
-            mysql_add_edit form = new mysql_add_edit();
-            form.F1 = this;
-            form.ShowDialog();
+            ShowConnectionTypeSelection();
         }
 
-        private void postgreSQLToolStripMenuItem_Click(object sender, EventArgs e)
+        private void connection_btn_Click(object sender, EventArgs e)
+        {
+            ShowConnectionTypeSelection();
+        }
+
+        private void ShowConnectionTypeSelection()
+        {
+            using (ConnectionTypeSelectionForm form = new ConnectionTypeSelectionForm())
+            {
+                if (form.ShowDialog(this) == DialogResult.OK)
+                {
+                    OpenNewConnectionForm(form.SelectedConnectionType);
+                }
+            }
+        }
+
+        private void OpenNewConnectionForm(string connectionType)
+        {
+            switch (connectionType)
+            {
+                case ConnectionTypeSelectionForm.MySql:
+                    OpenMySqlConnectionForm();
+                    break;
+                case ConnectionTypeSelectionForm.PostgreSql:
+                    OpenPostgreSqlConnectionForm();
+                    break;
+                case ConnectionTypeSelectionForm.SqlServer:
+                    OpenSqlServerConnectionForm();
+                    break;
+                case ConnectionTypeSelectionForm.Oracle:
+                    OpenOracleConnectionForm();
+                    break;
+                case ConnectionTypeSelectionForm.Sqlite:
+                    OpenSqliteConnectionForm();
+                    break;
+            }
+        }
+
+        private void OpenMySqlConnectionForm()
+        {
+            mysql_add_edit form = new mysql_add_edit();
+            form.F1 = this;
+            form.ShowDialog(this);
+        }
+
+        private void OpenPostgreSqlConnectionForm()
         {
             postgresql_add_edit form = new postgresql_add_edit();
             form.F1 = this;
-            form.ShowDialog();
+            form.ShowDialog(this);
         }
 
-        private void oracleToolStripMenuItem_Click(object sender, EventArgs e)
+        private void OpenOracleConnectionForm()
         {
             oracle_add_edit form = new oracle_add_edit();
             form.F1 = this;
             form.oracle_connection_type.Text = "Basic";
             form.oracle_connection_type_selected_trigger_change();
-            form.ShowDialog();
+            form.ShowDialog(this);
+        }
+
+        private void OpenSqliteConnectionForm()
+        {
+            sqlite_add_edit form = new sqlite_add_edit();
+            form.F1 = this;
+            form.ShowDialog(this);
+        }
+
+        private void OpenSqlServerConnectionForm()
+        {
+            sqlserver_add_edit form = new sqlserver_add_edit();
+            form.F1 = this;
+            form.ShowDialog(this);
+        }
+
+        private void mysqlStripMenuItem_Click(object sender, EventArgs e)
+        {
+            OpenMySqlConnectionForm();
+        }
+
+        private void postgreSQLToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            OpenPostgreSqlConnectionForm();
+        }
+
+        private void oracleToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            OpenOracleConnectionForm();
         }
 
         private void sQLiteToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            sqlite_add_edit form = new sqlite_add_edit();
-            form.F1 = this;
-            form.ShowDialog();
+            OpenSqliteConnectionForm();
         }
 
         private void sQLServerToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            sqlserver_add_edit form = new sqlserver_add_edit();
-            form.F1 = this;
-            form.ShowDialog();
+            OpenSqlServerConnectionForm();
         }
 
         public void add_connection(Dictionary<string, object> conn)
