@@ -32,6 +32,9 @@ namespace mySQLPunk
             Add("Menu.ThemeLight", "亮色", "Light");
             Add("Menu.ThemeDark", "暗色", "Dark");
             Add("Menu.Options", "選項...", "Options...");
+            Add("Menu.AddFavorite", "加入目前選取項目", "Add Current Selection");
+            Add("Menu.NoFavorites", "尚無我的最愛", "No Favorites");
+            Add("Menu.ClearFavorites", "清除我的最愛", "Clear Favorites");
             Add("Menu.NewConnection", "新增連線", "New Connection");
             Add("Menu.OpenConnection", "開啟連線", "Open Connection");
             Add("Menu.CloseConnection", "關閉連線", "Close Connection");

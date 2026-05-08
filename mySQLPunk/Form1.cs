@@ -61,6 +61,7 @@ namespace mySQLPunk
         private Panel _dockHintOverlay;
         private DatabaseCopyItem _treeClipboardItem;
         private bool _allowTreeLabelEdit = false;
+        private readonly List<string> _favoriteNodePaths = new List<string>();
 
         private class TreeDatabaseTarget
         {
@@ -884,6 +885,7 @@ namespace mySQLPunk
             AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.AutoRun"), "Events");
             AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Model"), "Models");
             AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.BI"), "BI");
+            ConfigureFavoritesMenu(favoriteMenu);
             windowCloseMenu.Click += (s, e) => CloseSelectedTab();
             ttToolStripMenuItem.DropDownItems.Clear();
             ttToolStripMenuItem.DropDownItems.Add(windowCloseMenu);
@@ -908,6 +910,163 @@ namespace mySQLPunk
             ToolStripMenuItem item = new ToolStripMenuItem(text);
             item.Click += (s, e) => SelectDatabaseGroupNode(groupName);
             viewMenu.DropDownItems.Add(item);
+        }
+
+        private void ConfigureFavoritesMenu(ToolStripMenuItem favoriteMenu)
+        {
+            favoriteMenu.DropDownItems.Clear();
+
+            ToolStripMenuItem addCurrentItem = new ToolStripMenuItem(Localization.T("Menu.AddFavorite"));
+            addCurrentItem.Click += (s, e) => AddSelectedNodeToFavorites();
+            favoriteMenu.DropDownItems.Add(addCurrentItem);
+            favoriteMenu.DropDownItems.Add(new ToolStripSeparator());
+
+            if (_favoriteNodePaths.Count == 0)
+            {
+                ToolStripMenuItem emptyItem = new ToolStripMenuItem(Localization.T("Menu.NoFavorites"));
+                emptyItem.Enabled = false;
+                favoriteMenu.DropDownItems.Add(emptyItem);
+            }
+            else
+            {
+                foreach (string path in _favoriteNodePaths)
+                {
+                    string capturedPath = path;
+                    ToolStripMenuItem item = new ToolStripMenuItem(GetFavoriteDisplayText(path));
+                    item.ToolTipText = path;
+                    item.Click += (s, e) => OpenFavoriteNodePath(capturedPath);
+                    favoriteMenu.DropDownItems.Add(item);
+                }
+            }
+
+            favoriteMenu.DropDownItems.Add(new ToolStripSeparator());
+            ToolStripMenuItem clearItem = new ToolStripMenuItem(Localization.T("Menu.ClearFavorites"));
+            clearItem.Enabled = _favoriteNodePaths.Count > 0;
+            clearItem.Click += (s, e) => ClearFavorites();
+            favoriteMenu.DropDownItems.Add(clearItem);
+        }
+
+        private void AddSelectedNodeToFavorites()
+        {
+            if (db_tree.SelectedNode == null)
+            {
+                UpdateMainStatus(Localization.T("Status.SelectConnection"));
+                return;
+            }
+
+            string path = db_tree.SelectedNode.FullPath;
+            if (!_favoriteNodePaths.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase)))
+            {
+                _favoriteNodePaths.Add(path);
+                SaveFavoriteNodePaths();
+                ConfigureMainMenu();
+            }
+
+            UpdateMainStatus("Favorite added: " + path);
+        }
+
+        private void ClearFavorites()
+        {
+            _favoriteNodePaths.Clear();
+            SaveFavoriteNodePaths();
+            ConfigureMainMenu();
+            UpdateMainStatus("Favorites cleared.");
+        }
+
+        private void OpenFavoriteNodePath(string path)
+        {
+            TreeNode node = FindFavoriteNode(path);
+            if (node == null)
+            {
+                UpdateMainStatus("Favorite not found: " + path);
+                return;
+            }
+
+            db_tree.SelectedNode = node;
+            node.EnsureVisible();
+            db_tree_AfterSelect(db_tree, new TreeViewEventArgs(node));
+            UpdateMainStatus("Favorite opened: " + path);
+        }
+
+        private TreeNode FindFavoriteNode(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+
+            string[] parts = path.Split('\\');
+            if (parts.Length == 0) return null;
+
+            TreeNode current = db_tree.Nodes.Cast<TreeNode>()
+                .FirstOrDefault(n => string.Equals(n.Text, parts[0], StringComparison.OrdinalIgnoreCase));
+            if (current == null) return null;
+            if (parts.Length == 1) return current;
+
+            if (current.Parent == null && current.Nodes.Count == 0)
+            {
+                db_tree.SelectedNode = current;
+                db_tree_DoubleClick(db_tree, EventArgs.Empty);
+            }
+
+            for (int i = 1; i < parts.Length; i++)
+            {
+                if (i == 2)
+                {
+                    EnsureDatabaseGroupNodes(current);
+                }
+
+                current = current.Nodes.Cast<TreeNode>()
+                    .FirstOrDefault(n => string.Equals(n.Text, parts[i], StringComparison.OrdinalIgnoreCase));
+                if (current == null) return null;
+            }
+
+            return current;
+        }
+
+        private void LoadFavoriteNodePaths()
+        {
+            _favoriteNodePaths.Clear();
+
+            try
+            {
+                string path = GetFavoritesFilePath();
+                if (!File.Exists(path)) return;
+
+                foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                {
+                    string value = line.Trim();
+                    if (value.Length == 0) continue;
+                    if (_favoriteNodePaths.Any(p => string.Equals(p, value, StringComparison.OrdinalIgnoreCase))) continue;
+                    _favoriteNodePaths.Add(value);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void SaveFavoriteNodePaths()
+        {
+            try
+            {
+                string path = GetFavoritesFilePath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllLines(path, _favoriteNodePaths.ToArray(), Encoding.UTF8);
+            }
+            catch
+            {
+            }
+        }
+
+        private static string GetFavoritesFilePath()
+        {
+            return Path.Combine(Application.UserAppDataPath, "favorites.txt");
+        }
+
+        private static string GetFavoriteDisplayText(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return path;
+            string[] parts = path.Split('\\');
+            if (parts.Length <= 1) return parts[0];
+            return parts[parts.Length - 1] + " (" + parts[0] + ")";
         }
 
         private void OpenOptionsDialog()
@@ -2513,6 +2672,7 @@ namespace mySQLPunk
         private void Form1_Load(object sender, EventArgs e)
         {
             ApplyModernTheme(this);
+            LoadFavoriteNodePaths();
             UI_init();
             myN.getSettingINI();
             drawLists();
