@@ -387,11 +387,13 @@ namespace mySQLPunk.lib
         {
             string safeDB = databaseName.Replace("`", "``");
             string safeView = viewName.Replace("`", "``");
-            string sql = System.Text.RegularExpressions.Regex.Replace(
-                sourceViewSql,
-                @"CREATE\s+.*?\s+VIEW\s+(`[^`]+`\.)?`?[^`\s]+`?",
-                "CREATE VIEW `" + safeDB + "`.`" + safeView + "`",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            string selectSql = ViewSqlDialectConverter.ExtractSelectSql(sourceViewSql);
+            if (string.IsNullOrWhiteSpace(selectSql))
+            {
+                throw new Exception("無法解析 MySQL View DDL");
+            }
+
+            string sql = "CREATE VIEW `" + safeDB + "`.`" + safeView + "` AS " + selectSql.Trim().TrimEnd(';') + ";";
             ExecOrThrow(sql);
         }
 

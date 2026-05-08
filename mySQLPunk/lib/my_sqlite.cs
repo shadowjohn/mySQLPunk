@@ -532,11 +532,13 @@ namespace mySQLPunk.lib
 
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql)
         {
-            string sql = System.Text.RegularExpressions.Regex.Replace(
-                sourceViewSql,
-                @"CREATE\s+VIEW\s+(""[^""]+""|`[^`]+`|\[[^\]]+\]|\S+)",
-                "CREATE VIEW " + QuoteSqlite(viewName),
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            string selectSql = ViewSqlDialectConverter.ExtractSelectSql(sourceViewSql);
+            if (string.IsNullOrWhiteSpace(selectSql))
+            {
+                throw new Exception("無法解析 SQLite View DDL");
+            }
+
+            string sql = "CREATE VIEW " + QuoteSqlite(viewName) + " AS " + selectSql.Trim().TrimEnd(';') + ";";
             ExecOrThrow(sql);
         }
 

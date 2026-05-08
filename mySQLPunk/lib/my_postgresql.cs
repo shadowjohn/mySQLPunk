@@ -421,7 +421,13 @@ namespace mySQLPunk.lib
 
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql)
         {
-            ExecOrThrow("CREATE VIEW public." + QuotePg(viewName) + " AS " + sourceViewSql.Trim().TrimEnd(';') + ";");
+            string selectSql = ViewSqlDialectConverter.ExtractSelectSql(sourceViewSql);
+            if (string.IsNullOrWhiteSpace(selectSql))
+            {
+                throw new Exception("無法解析 PostgreSQL View DDL");
+            }
+
+            ExecOrThrow("CREATE VIEW public." + QuotePg(viewName) + " AS " + selectSql.Trim().TrimEnd(';') + ";");
         }
 
         private void ExecOrThrow(string sql, Dictionary<string, object> parameters = null)

@@ -419,11 +419,13 @@ namespace mySQLPunk.lib
 
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql)
         {
-            string sql = System.Text.RegularExpressions.Regex.Replace(
-                sourceViewSql,
-                @"CREATE\s+VIEW\s+(\[[^\]]+\]\.)?(\[[^\]]+\]\.)?\[[^\]]+\]",
-                "CREATE VIEW [dbo].[" + EscapeSqlServerName(viewName) + "]",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            string selectSql = ViewSqlDialectConverter.ExtractSelectSql(sourceViewSql);
+            if (string.IsNullOrWhiteSpace(selectSql))
+            {
+                throw new Exception("無法解析 SQL Server View DDL");
+            }
+
+            string sql = "CREATE VIEW [dbo].[" + EscapeSqlServerName(viewName) + "] AS " + selectSql.Trim().TrimEnd(';') + ";";
             string originalDb = MCT.Database;
             try
             {
