@@ -89,6 +89,13 @@ namespace mySQLPunk
             public QueryForm Query;
         }
 
+        private static readonly string[] DatabaseReportNames =
+        {
+            "Database Summary",
+            "Table Row Counts",
+            "Object Inventory"
+        };
+
         public Form1()
         {
             Localization.Load();
@@ -2427,6 +2434,12 @@ namespace mySQLPunk
                     ShowFunctionDetails(db, dbName, functionName);
                     showTools("點到Function本身");
                 }
+                if (pathParts.Length >= 4 && pathParts[2] == "Reports")
+                {
+                    string reportName = pathParts[3];
+                    lblSidebarTitle.Text = $"Report: {reportName}";
+                    ShowDatabaseReport(db, dbName, reportName, connInfo);
+                }
             }
         }
 
@@ -3078,6 +3091,19 @@ namespace mySQLPunk
                     displayDt.Rows.Add(row);
                 }
             }
+            else if (string.Equals(groupName, "Reports", StringComparison.OrdinalIgnoreCase))
+            {
+                displayDt.Columns.Add("描述");
+                foreach (string reportName in DatabaseReportNames)
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = reportName;
+                    row["類型"] = "Report";
+                    row["狀態"] = "Ready";
+                    row["描述"] = GetDatabaseReportDescription(reportName);
+                    displayDt.Rows.Add(row);
+                }
+            }
             else
             {
                 DataRow row = displayDt.NewRow();
@@ -3139,6 +3165,159 @@ namespace mySQLPunk
             if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return;
 
             ShowDatabaseGroupList(db, pathParts[1], "Queries", connInfo);
+        }
+
+        private void ShowDatabaseReport(IDatabase db, string dbName, string reportName, Dictionary<string, object> connInfo = null)
+        {
+            table_top.DataSource = BuildDatabaseReport(db, dbName, reportName, connInfo);
+            ShowReportDetails(db, dbName, reportName);
+        }
+
+        private DataTable BuildDatabaseReport(IDatabase db, string dbName, string reportName, Dictionary<string, object> connInfo = null)
+        {
+            if (string.Equals(reportName, "Table Row Counts", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildTableRowCountReport(db, dbName);
+            }
+
+            if (string.Equals(reportName, "Object Inventory", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildObjectInventoryReport(db, dbName, connInfo);
+            }
+
+            return BuildDatabaseSummaryReport(db, dbName, connInfo);
+        }
+
+        private DataTable BuildDatabaseSummaryReport(IDatabase db, string dbName, Dictionary<string, object> connInfo = null)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("項目");
+            dt.Columns.Add("數值");
+
+            List<string> tables = GetTablesSafe(db, dbName);
+            List<string> views = GetViewsSafe(db, dbName);
+            DataTable functions = GetDatabaseFunctions(db, dbName);
+            DataTable events = GetDatabaseEvents(db, dbName);
+
+            AddReportMetric(dt, "資料庫", dbName);
+            AddReportMetric(dt, "Provider", db.ProviderName);
+            AddReportMetric(dt, "資料表數", tables.Count.ToString());
+            AddReportMetric(dt, "檢視數", views.Count.ToString());
+            AddReportMetric(dt, "函式/程序數", functions.Rows.Count.ToString());
+            AddReportMetric(dt, "事件/Trigger 數", events.Rows.Count.ToString());
+            AddReportMetric(dt, "開啟中查詢分頁", GetOpenQueryTabs(dbName).Count.ToString());
+            AddReportMetric(dt, "備份來源", GetBackupSourceDescription(db, connInfo));
+            return dt;
+        }
+
+        private DataTable BuildTableRowCountReport(IDatabase db, string dbName)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("資料表");
+            dt.Columns.Add("列數");
+            dt.Columns.Add("狀態");
+
+            foreach (string tableName in GetTablesSafe(db, dbName))
+            {
+                DataRow row = dt.NewRow();
+                row["資料表"] = tableName;
+                try
+                {
+                    row["列數"] = db.CountRows(dbName, tableName).ToString();
+                    row["狀態"] = "Ready";
+                }
+                catch (Exception ex)
+                {
+                    row["列數"] = "";
+                    row["狀態"] = ex.Message;
+                }
+                dt.Rows.Add(row);
+            }
+
+            return dt;
+        }
+
+        private DataTable BuildObjectInventoryReport(IDatabase db, string dbName, Dictionary<string, object> connInfo = null)
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("名稱");
+            dt.Columns.Add("類型");
+            dt.Columns.Add("狀態");
+
+            foreach (string tableName in GetTablesSafe(db, dbName))
+            {
+                AddInventoryRow(dt, tableName, "Table", "Ready");
+            }
+
+            foreach (string viewName in GetViewsSafe(db, dbName))
+            {
+                AddInventoryRow(dt, viewName, "View", "Ready");
+            }
+
+            foreach (DataRow row in GetDatabaseFunctions(db, dbName).Rows)
+            {
+                AddInventoryRow(dt, row["Name"].ToString(), row["Type"].ToString(), row["Status"].ToString());
+            }
+
+            foreach (DataRow row in GetDatabaseEvents(db, dbName).Rows)
+            {
+                AddInventoryRow(dt, row["Name"].ToString(), row["Type"].ToString(), row["Status"].ToString());
+            }
+
+            AddInventoryRow(dt, dbName, db is my_sqlite ? "SQLite Backup Source" : "SQL Backup Target", GetBackupSourceDescription(db, connInfo));
+            return dt;
+        }
+
+        private static void AddReportMetric(DataTable dt, string name, string value)
+        {
+            DataRow row = dt.NewRow();
+            row["項目"] = name;
+            row["數值"] = value ?? string.Empty;
+            dt.Rows.Add(row);
+        }
+
+        private static void AddInventoryRow(DataTable dt, string name, string type, string status)
+        {
+            DataRow row = dt.NewRow();
+            row["名稱"] = name ?? string.Empty;
+            row["類型"] = type ?? string.Empty;
+            row["狀態"] = status ?? string.Empty;
+            dt.Rows.Add(row);
+        }
+
+        private static string GetDatabaseReportDescription(string reportName)
+        {
+            if (string.Equals(reportName, "Table Row Counts", StringComparison.OrdinalIgnoreCase))
+            {
+                return "列出所有資料表目前列數";
+            }
+
+            if (string.Equals(reportName, "Object Inventory", StringComparison.OrdinalIgnoreCase))
+            {
+                return "彙整資料表、檢視、函式、事件與備份目標";
+            }
+
+            return "彙整資料庫物件數量與目前開啟狀態";
+        }
+
+        private static List<string> GetTablesSafe(IDatabase db, string dbName)
+        {
+            try { return db.GetTables(dbName) ?? new List<string>(); }
+            catch { return new List<string>(); }
+        }
+
+        private static List<string> GetViewsSafe(IDatabase db, string dbName)
+        {
+            try { return db.GetViews(dbName) ?? new List<string>(); }
+            catch { return new List<string>(); }
+        }
+
+        private static string GetBackupSourceDescription(IDatabase db, Dictionary<string, object> connInfo)
+        {
+            if (!(db is my_sqlite)) return "Logical SQL dump";
+            string sqlitePath = GetSQLiteDatabasePath(connInfo, db);
+            if (string.IsNullOrWhiteSpace(sqlitePath)) return "(unknown SQLite file)";
+            return File.Exists(sqlitePath) ? sqlitePath : "Missing source: " + sqlitePath;
         }
 
         private DataTable GetDatabaseEvents(IDatabase db, string dbName)
@@ -3488,6 +3667,19 @@ namespace mySQLPunk
             }
         }
 
+        private void ShowReportDetails(IDatabase db, string dbName, string reportName)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            dgvDetails.Rows.Add("類型", "Report");
+            dgvDetails.Rows.Add("名稱", reportName);
+            dgvDetails.Rows.Add("資料庫", dbName);
+            dgvDetails.Rows.Add("Provider", db.ProviderName);
+            rtbDDL.Text = "-- Report: " + reportName + Environment.NewLine +
+                          "-- " + GetDatabaseReportDescription(reportName);
+        }
+
         private string FormatBytes(long bytes)
         {
             string[] suffix = { "B", "KB", "MB", "GB", "TB" };
@@ -3731,6 +3923,14 @@ namespace mySQLPunk
             newNode.SelectedImageIndex = 17;
             databaseNode.Nodes.Add(newNode);
 
+            foreach (string reportName in DatabaseReportNames)
+            {
+                TreeNode reportNode = new TreeNode(reportName);
+                reportNode.ImageIndex = 17;
+                reportNode.SelectedImageIndex = 17;
+                newNode.Nodes.Add(reportNode);
+            }
+
             newNode = new TreeNode("Backups");
             newNode.ImageIndex = 18;
             newNode.SelectedImageIndex = 18;
@@ -3808,6 +4008,7 @@ namespace mySQLPunk
                 if (m[2] == "Views") OpenSelectedViewInQuery();
                 else if (m[2] == "Events") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Functions") ExecuteSelectedFunction();
+                else if (m[2] == "Reports") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else OpenSelectedTableInQuery();
                 dialogMyBoxOff();
                 return;
