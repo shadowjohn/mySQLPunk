@@ -522,6 +522,9 @@ namespace mySQLPunk
                 if (item is ToolStripButton btn) btn.TextImageRelation = TextImageRelation.ImageAboveText;
                 if (item is ToolStripDropDownButton dd) dd.TextImageRelation = TextImageRelation.ImageAboveText;
             }
+            Resize -= Form1_Resize;
+            Resize += Form1_Resize;
+            ArrangeMainLayout();
 
             table_top.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             table_top.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
@@ -1538,6 +1541,45 @@ namespace mySQLPunk
             UI_init();
             myN.getSettingINI();
             drawLists();
+            ArrangeMainLayout();
+        }
+
+        private void Form1_Resize(object sender, EventArgs e)
+        {
+            ArrangeMainLayout();
+        }
+
+        private void ArrangeMainLayout()
+        {
+            if (menuStrip1 == null || splitContainer1 == null || statusStrip1 == null) return;
+
+            int menuHeight = menuStrip1.Visible ? menuStrip1.Height : 0;
+            int statusHeight = statusStrip1.Visible ? statusStrip1.Height : 0;
+
+            menuStrip1.Dock = DockStyle.None;
+            menuStrip1.Location = new Point(0, 0);
+            menuStrip1.Width = ClientSize.Width;
+
+            statusStrip1.Dock = DockStyle.None;
+            statusStrip1.Location = new Point(0, Math.Max(menuHeight, ClientSize.Height - statusHeight));
+            statusStrip1.Width = ClientSize.Width;
+            statusStrip1.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+
+            splitContainer1.Dock = DockStyle.None;
+            splitContainer1.Location = new Point(0, menuHeight);
+            splitContainer1.Size = new Size(
+                ClientSize.Width,
+                Math.Max(0, ClientSize.Height - menuHeight - statusHeight));
+            splitContainer1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+
+            int toolbarHeight = Math.Min(86, Math.Max(0, splitContainer1.Height - splitContainer1.SplitterWidth));
+            if (toolbarHeight > 0 && splitContainer1.SplitterDistance != toolbarHeight)
+            {
+                splitContainer1.SplitterDistance = toolbarHeight;
+            }
+
+            menuStrip1.BringToFront();
+            statusStrip1.BringToFront();
         }
 
         [DllImport("uxtheme.dll", SetLastError = true, ExactSpelling = true, CharSet = CharSet.Unicode)]
