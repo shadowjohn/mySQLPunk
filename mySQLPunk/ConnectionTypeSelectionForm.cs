@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -31,19 +32,20 @@ namespace mySQLPunk
         {
             Text = Localization.T("ConnectionWizard.Title");
             StartPosition = FormStartPosition.CenterParent;
-            Size = new Size(640, 390);
-            MinimumSize = new Size(560, 330);
+            Size = new Size(660, 430);
+            MinimumSize = new Size(600, 380);
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = false;
             MinimizeBox = false;
 
+            string imagePath = Path.Combine(Application.StartupPath, "image");
             options = new List<ConnectionTypeOption>
             {
-                new ConnectionTypeOption(MySql, "MySQL", Color.FromArgb(52, 205, 81)),
-                new ConnectionTypeOption(PostgreSql, "PostgreSQL", Color.FromArgb(80, 145, 240)),
-                new ConnectionTypeOption(SqlServer, "SQL Server", Color.FromArgb(255, 178, 27)),
-                new ConnectionTypeOption(Oracle, "Oracle", Color.FromArgb(245, 0, 61)),
-                new ConnectionTypeOption(Sqlite, "SQLite", Color.FromArgb(87, 207, 199))
+                new ConnectionTypeOption(MySql, "MySQL", Color.FromArgb(52, 168, 83), Path.Combine(imagePath, "mysql_open.png")),
+                new ConnectionTypeOption(PostgreSql, "PostgreSQL", Color.FromArgb(66, 133, 244), Path.Combine(imagePath, "postgresql_open.png")),
+                new ConnectionTypeOption(SqlServer, "SQL Server", Color.FromArgb(245, 166, 35), Path.Combine(imagePath, "sqlserver_open.png")),
+                new ConnectionTypeOption(Oracle, "Oracle", Color.FromArgb(230, 0, 18), Path.Combine(imagePath, "oracle_open.png")),
+                new ConnectionTypeOption(Sqlite, "SQLite", Color.FromArgb(64, 196, 180), Path.Combine(imagePath, "sqlite_open.png"))
             };
 
             Label titleLabel = new Label
@@ -94,7 +96,7 @@ namespace mySQLPunk
             recentPanel = new FlowLayoutPanel
             {
                 Location = new Point(14, 78),
-                Size = new Size(590, 92),
+                Size = new Size(610, 108),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 WrapContents = true
             };
@@ -103,13 +105,13 @@ namespace mySQLPunk
             {
                 Text = Localization.T("ConnectionWizard.All"),
                 AutoSize = true,
-                Location = new Point(14, 188)
+                Location = new Point(14, 204)
             };
 
             allPanel = new FlowLayoutPanel
             {
-                Location = new Point(14, 214),
-                Size = new Size(590, 74),
+                Location = new Point(14, 230),
+                Size = new Size(610, 110),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 AutoScroll = true,
                 WrapContents = true
@@ -240,12 +242,14 @@ namespace mySQLPunk
             public string Kind { get; private set; }
             public string Name { get; private set; }
             public Color Color { get; private set; }
+            public string IconPath { get; private set; }
 
-            public ConnectionTypeOption(string kind, string name, Color color)
+            public ConnectionTypeOption(string kind, string name, Color color, string iconPath)
             {
                 Kind = kind;
                 Name = name;
                 Color = color;
+                IconPath = iconPath;
             }
         }
 
@@ -255,41 +259,55 @@ namespace mySQLPunk
             public bool Selected { get; set; }
 
             private readonly bool listMode;
+            private readonly Image iconImage;
 
             public ConnectionTypeCard(ConnectionTypeOption option, bool listMode)
             {
                 Option = option;
                 this.listMode = listMode;
-                Size = listMode ? new Size(540, 48) : new Size(118, 88);
-                Margin = new Padding(4, 3, 18, 3);
+                iconImage = LoadIcon(option.IconPath);
+                Size = listMode ? new Size(540, 54) : new Size(126, 96);
+                Margin = new Padding(4, 3, 16, 5);
                 Cursor = Cursors.Hand;
                 DoubleBuffered = true;
                 TabStop = true;
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing && iconImage != null)
+                {
+                    iconImage.Dispose();
+                }
+                base.Dispose(disposing);
             }
 
             protected override void OnPaint(PaintEventArgs e)
             {
                 base.OnPaint(e);
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
                 Rectangle bounds = new Rectangle(0, 0, Width - 1, Height - 1);
-                Color backColor = Selected ? ThemeManager.SelectionColor : ThemeManager.WindowBackColor;
-                Color borderColor = Selected ? ThemeManager.AccentColor : ThemeManager.WindowBackColor;
+                Color backColor = Selected ? ThemeManager.SelectionColor : ThemeManager.ElevatedColor;
+                Color borderColor = Selected ? ThemeManager.AccentColor : ThemeManager.BorderColor;
+                using (GraphicsPath cardPath = RoundedRectangle(bounds, 8))
                 using (SolidBrush brush = new SolidBrush(backColor))
                 using (Pen pen = new Pen(borderColor, Selected ? 2 : 1))
                 {
-                    e.Graphics.FillRectangle(brush, bounds);
-                    e.Graphics.DrawRectangle(pen, bounds);
+                    e.Graphics.FillPath(brush, cardPath);
+                    e.Graphics.DrawPath(pen, cardPath);
                 }
 
-                Rectangle iconBounds = listMode
-                    ? new Rectangle(12, 8, 32, 32)
-                    : new Rectangle((Width - 50) / 2, 10, 50, 50);
-                DrawDatabaseIcon(e.Graphics, iconBounds, Option);
+                Rectangle tileBounds = listMode
+                    ? new Rectangle(12, 9, 36, 36)
+                    : new Rectangle((Width - 54) / 2, 10, 54, 54);
+                DrawIconTile(e.Graphics, tileBounds);
 
                 Rectangle textBounds = listMode
-                    ? new Rectangle(56, 0, Width - 64, Height)
-                    : new Rectangle(4, 62, Width - 8, 22);
+                    ? new Rectangle(60, 0, Width - 72, Height)
+                    : new Rectangle(6, 68, Width - 12, 22);
                 TextRenderer.DrawText(
                     e.Graphics,
                     Option.Name,
@@ -299,54 +317,71 @@ namespace mySQLPunk
                     listMode ? TextFormatFlags.VerticalCenter | TextFormatFlags.Left : TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis);
             }
 
-            private static void DrawDatabaseIcon(Graphics graphics, Rectangle bounds, ConnectionTypeOption option)
+            private void DrawIconTile(Graphics graphics, Rectangle bounds)
             {
-                using (GraphicsPath path = RoundedRectangle(bounds, 5))
-                using (SolidBrush brush = new SolidBrush(option.Color))
+                Rectangle shadow = new Rectangle(bounds.X, bounds.Y + 2, bounds.Width, bounds.Height);
+                using (GraphicsPath shadowPath = RoundedRectangle(shadow, 8))
+                using (SolidBrush shadowBrush = new SolidBrush(Color.FromArgb(28, Color.Black)))
+                {
+                    graphics.FillPath(shadowBrush, shadowPath);
+                }
+
+                using (GraphicsPath path = RoundedRectangle(bounds, 8))
+                using (SolidBrush brush = new SolidBrush(Option.Color))
                 {
                     graphics.FillPath(brush, path);
                 }
 
-                using (Pen whitePen = new Pen(Color.White, Math.Max(2, bounds.Width / 13)))
-                using (SolidBrush whiteBrush = new SolidBrush(Color.White))
+                if (iconImage != null)
                 {
-                    whitePen.StartCap = LineCap.Round;
-                    whitePen.EndCap = LineCap.Round;
+                    Rectangle imageBounds = InflateToFit(bounds, iconImage.Size, listMode ? 26 : 42);
+                    graphics.DrawImage(iconImage, imageBounds);
+                }
+                else
+                {
+                    DrawFallbackIcon(graphics, bounds);
+                }
+            }
 
-                    if (option.Kind == MySql)
+            private static Image LoadIcon(string path)
+            {
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+
+                try
+                {
+                    using (Image source = Image.FromFile(path))
                     {
-                        Point[] curve =
-                        {
-                            new Point(bounds.Left + bounds.Width / 4, bounds.Top + bounds.Height / 4),
-                            new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 3),
-                            new Point(bounds.Left + bounds.Width * 3 / 4, bounds.Top + bounds.Height * 2 / 3),
-                            new Point(bounds.Left + bounds.Width * 2 / 3, bounds.Top + bounds.Height * 3 / 4)
-                        };
-                        graphics.DrawCurve(whitePen, curve);
-                        graphics.FillEllipse(whiteBrush, bounds.Left + bounds.Width / 5, bounds.Top + bounds.Height / 6, bounds.Width / 3, bounds.Height / 2);
+                        return new Bitmap(source);
                     }
-                    else if (option.Kind == PostgreSql)
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            private static Rectangle InflateToFit(Rectangle bounds, Size sourceSize, int maxSize)
+            {
+                float scale = Math.Min((float)maxSize / sourceSize.Width, (float)maxSize / sourceSize.Height);
+                int width = Math.Max(1, (int)Math.Round(sourceSize.Width * scale));
+                int height = Math.Max(1, (int)Math.Round(sourceSize.Height * scale));
+                return new Rectangle(bounds.Left + (bounds.Width - width) / 2, bounds.Top + (bounds.Height - height) / 2, width, height);
+            }
+
+            private void DrawFallbackIcon(Graphics graphics, Rectangle bounds)
+            {
+                using (Pen pen = new Pen(Color.White, Math.Max(2, bounds.Width / 12)))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    Rectangle cylinder = new Rectangle(bounds.Left + bounds.Width / 4, bounds.Top + bounds.Height / 5, bounds.Width / 2, bounds.Height * 3 / 5);
+                    graphics.DrawEllipse(pen, cylinder.Left, cylinder.Top, cylinder.Width, cylinder.Height / 3);
+                    graphics.DrawLine(pen, cylinder.Left, cylinder.Top + cylinder.Height / 6, cylinder.Left, cylinder.Bottom - cylinder.Height / 6);
+                    graphics.DrawLine(pen, cylinder.Right, cylinder.Top + cylinder.Height / 6, cylinder.Right, cylinder.Bottom - cylinder.Height / 6);
+                    graphics.DrawArc(pen, cylinder.Left, cylinder.Bottom - cylinder.Height / 3, cylinder.Width, cylinder.Height / 3, 0, 180);
+                    if (Option.Kind == Oracle)
                     {
-                        graphics.DrawEllipse(whitePen, bounds.Left + bounds.Width / 4, bounds.Top + bounds.Height / 5, bounds.Width / 2, bounds.Height / 2);
-                        graphics.DrawLine(whitePen, bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2, bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height * 4 / 5);
-                        graphics.DrawArc(whitePen, bounds.Left + bounds.Width / 5, bounds.Top + bounds.Height / 2, bounds.Width * 3 / 5, bounds.Height / 3, 15, 150);
-                    }
-                    else if (option.Kind == SqlServer)
-                    {
-                        Rectangle cylinder = new Rectangle(bounds.Left + bounds.Width / 4, bounds.Top + bounds.Height / 5, bounds.Width / 2, bounds.Height * 3 / 5);
-                        graphics.DrawEllipse(whitePen, cylinder.Left, cylinder.Top, cylinder.Width, cylinder.Height / 3);
-                        graphics.DrawLine(whitePen, cylinder.Left, cylinder.Top + cylinder.Height / 6, cylinder.Left, cylinder.Bottom - cylinder.Height / 6);
-                        graphics.DrawLine(whitePen, cylinder.Right, cylinder.Top + cylinder.Height / 6, cylinder.Right, cylinder.Bottom - cylinder.Height / 6);
-                        graphics.DrawArc(whitePen, cylinder.Left, cylinder.Bottom - cylinder.Height / 3, cylinder.Width, cylinder.Height / 3, 0, 180);
-                    }
-                    else if (option.Kind == Oracle)
-                    {
-                        graphics.DrawEllipse(whitePen, bounds.Left + bounds.Width / 5, bounds.Top + bounds.Height / 3, bounds.Width * 3 / 5, bounds.Height / 3);
-                    }
-                    else
-                    {
-                        graphics.DrawArc(whitePen, bounds.Left + bounds.Width / 4, bounds.Top + bounds.Height / 5, bounds.Width / 2, bounds.Height * 3 / 5, 90, 210);
-                        graphics.DrawLine(whitePen, bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 3, bounds.Left + bounds.Width / 4, bounds.Bottom - bounds.Height / 5);
+                        graphics.DrawEllipse(pen, bounds.Left + bounds.Width / 5, bounds.Top + bounds.Height / 3, bounds.Width * 3 / 5, bounds.Height / 3);
                     }
                 }
             }
