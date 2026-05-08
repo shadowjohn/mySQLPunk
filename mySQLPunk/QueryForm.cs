@@ -84,6 +84,27 @@ namespace mySQLPunk
         private ToolStripButton btnDataPrev;
         private ToolStripButton btnDataNext;
         private ToolStripButton btnDataLast;
+        private ToolStripMenuItem menuFile;
+        private ToolStripMenuItem menuEdit;
+        private ToolStripMenuItem menuView;
+        private ToolStripMenuItem menuWindow;
+        private ToolStripMenuItem menuHelp;
+        private ToolStripMenuItem menuFileExecute;
+        private ToolStripMenuItem menuFileOpenSql;
+        private ToolStripMenuItem menuFileSaveSql;
+        private ToolStripMenuItem menuFileExport;
+        private ToolStripMenuItem menuFileClose;
+        private ToolStripMenuItem menuEditCut;
+        private ToolStripMenuItem menuEditCopy;
+        private ToolStripMenuItem menuEditPaste;
+        private ToolStripMenuItem menuEditSelectAll;
+        private ToolStripMenuItem menuEditBeautify;
+        private ToolStripMenuItem menuViewSqlEditor;
+        private ToolStripMenuItem menuViewResults;
+        private ToolStripMenuItem menuWindowFloat;
+        private ToolStripMenuItem menuWindowDock;
+        private ToolStripMenuItem menuWindowClose;
+        private ToolStripMenuItem menuHelpAbout;
 
         private static readonly string[] Keywords =
         {
@@ -227,11 +248,7 @@ namespace mySQLPunk
 
             // ── 頂部選單 (平時隱藏) ──
             mainMenuStrip = new MenuStrip { Visible = false };
-            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.File")));
-            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.Edit")));
-            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.View")));
-            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.Window")));
-            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.Help")));
+            BuildMainMenu();
 
             // ── 頂部專業工具列 (ToolStrip) ──
             mainToolStrip = new ToolStrip { 
@@ -403,6 +420,63 @@ namespace mySQLPunk
             ApplyTheme();
         }
 
+        private void BuildMainMenu()
+        {
+            menuFile = new ToolStripMenuItem();
+            menuEdit = new ToolStripMenuItem();
+            menuView = new ToolStripMenuItem();
+            menuWindow = new ToolStripMenuItem();
+            menuHelp = new ToolStripMenuItem();
+
+            menuFileExecute = new ToolStripMenuItem(null, null, (s, e) => ExecutePagedQuery()) { ShortcutKeys = Keys.F5 };
+            menuFileOpenSql = new ToolStripMenuItem(null, null, (s, e) => OpenSqlWithDialog()) { ShortcutKeys = Keys.Control | Keys.O };
+            menuFileSaveSql = new ToolStripMenuItem(null, null, (s, e) => SaveSqlWithDialog()) { ShortcutKeys = Keys.Control | Keys.S };
+            menuFileExport = new ToolStripMenuItem(null, null, (s, e) => ExportCsv());
+            menuFileClose = new ToolStripMenuItem(null, null, (s, e) => Close());
+
+            menuEditCut = new ToolStripMenuItem(null, null, (s, e) => txtSql.Cut()) { ShortcutKeys = Keys.Control | Keys.X };
+            menuEditCopy = new ToolStripMenuItem(null, null, (s, e) => CopyEditorSelection()) { ShortcutKeys = Keys.Control | Keys.C };
+            menuEditPaste = new ToolStripMenuItem(null, null, (s, e) => txtSql.Paste()) { ShortcutKeys = Keys.Control | Keys.V };
+            menuEditSelectAll = new ToolStripMenuItem(null, null, (s, e) => txtSql.SelectAll()) { ShortcutKeys = Keys.Control | Keys.A };
+            menuEditBeautify = new ToolStripMenuItem(null, null, (s, e) => BeautifySql());
+
+            menuViewSqlEditor = new ToolStripMenuItem(null, null, (s, e) => FocusSqlEditor());
+            menuViewResults = new ToolStripMenuItem(null, null, (s, e) => FocusResultsGrid());
+
+            menuWindowFloat = new ToolStripMenuItem(null, null, (s, e) => FloatToWindow());
+            menuWindowDock = new ToolStripMenuItem(null, null, (s, e) => DockToMainWindow());
+            menuWindowClose = new ToolStripMenuItem(null, null, (s, e) => Close());
+
+            menuHelpAbout = new ToolStripMenuItem(null, null, (s, e) => ShowQueryAbout());
+
+            menuFile.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                menuFileExecute,
+                new ToolStripSeparator(),
+                menuFileOpenSql,
+                menuFileSaveSql,
+                new ToolStripSeparator(),
+                menuFileExport,
+                new ToolStripSeparator(),
+                menuFileClose
+            });
+            menuEdit.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                menuEditCut,
+                menuEditCopy,
+                menuEditPaste,
+                new ToolStripSeparator(),
+                menuEditSelectAll,
+                new ToolStripSeparator(),
+                menuEditBeautify
+            });
+            menuView.DropDownItems.AddRange(new ToolStripItem[] { menuViewSqlEditor, menuViewResults });
+            menuWindow.DropDownItems.AddRange(new ToolStripItem[] { menuWindowFloat, menuWindowDock, new ToolStripSeparator(), menuWindowClose });
+            menuHelp.DropDownItems.Add(menuHelpAbout);
+            mainMenuStrip.Items.AddRange(new ToolStripItem[] { menuFile, menuEdit, menuView, menuWindow, menuHelp });
+            ApplyMenuLanguage();
+        }
+
         public void SetMainHost(Form1 mainHost)
         {
             _mainHost = mainHost;
@@ -479,6 +553,77 @@ namespace mySQLPunk
         {
             if (_mainHost == null) return;
             _mainHost.DockDockableForm(this);
+        }
+
+        private void CopyEditorSelection()
+        {
+            if (txtSql.SelectionLength > 0)
+            {
+                txtSql.Copy();
+            }
+        }
+
+        private void FocusSqlEditor()
+        {
+            if (split != null && _isTableDataMode)
+            {
+                split.Panel1Collapsed = false;
+            }
+            txtSql.Select();
+            txtSql.Focus();
+        }
+
+        private void FocusResultsGrid()
+        {
+            if (tabResults.TabPages.Count > 0)
+            {
+                tabResults.SelectedTab = tabResults.TabPages[0];
+            }
+            tabResults.Focus();
+            dgvResults.Select();
+            dgvResults.Focus();
+        }
+
+        private void SaveSqlWithDialog()
+        {
+            using (SaveFileDialog dialog = new SaveFileDialog
+            {
+                Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*",
+                DefaultExt = "sql",
+                FileName = string.IsNullOrWhiteSpace(_databaseName) ? "query.sql" : _databaseName + ".sql"
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                File.WriteAllText(dialog.FileName, txtSql.Text, Encoding.UTF8);
+                UpdateStatus("SQL saved: " + dialog.FileName);
+            }
+        }
+
+        private void OpenSqlWithDialog()
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog
+            {
+                Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*",
+                CheckFileExists = true
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                txtSql.Text = File.ReadAllText(dialog.FileName, Encoding.UTF8);
+                txtSql.SelectionStart = txtSql.TextLength;
+                txtSql.SelectionLength = 0;
+                UpdateStatus("SQL opened: " + dialog.FileName);
+            }
+        }
+
+        private void ShowQueryAbout()
+        {
+            MessageBox.Show(
+                "mySQLPunk Query\r\n\r\n" +
+                "Database: " + (_databaseName ?? string.Empty) + "\r\n" +
+                "Provider: " + (_db == null ? string.Empty : _db.ProviderName),
+                Localization.T("Query.About"),
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
         // 攔截 OS 層級視窗移動，提供 dock 提示框並在放開時自動塞回 tab
@@ -981,14 +1126,7 @@ namespace mySQLPunk
 
         public void ApplyLanguage()
         {
-            if (mainMenuStrip != null && mainMenuStrip.Items.Count >= 5)
-            {
-                mainMenuStrip.Items[0].Text = Localization.T("Menu.File");
-                mainMenuStrip.Items[1].Text = Localization.T("Menu.Edit");
-                mainMenuStrip.Items[2].Text = Localization.T("Menu.View");
-                mainMenuStrip.Items[3].Text = Localization.T("Menu.Window");
-                mainMenuStrip.Items[4].Text = Localization.T("Menu.Help");
-            }
+            ApplyMenuLanguage();
 
             if (tsBtnExecute != null) tsBtnExecute.Text = Localization.T("Query.Execute");
             if (tsBtnCancel != null) tsBtnCancel.Text = Localization.T("Query.Stop");
@@ -1005,6 +1143,31 @@ namespace mySQLPunk
             UpdatePaginationUI();
             Localization.ApplyTo(this);
             ApplyTheme();
+        }
+
+        private void ApplyMenuLanguage()
+        {
+            if (menuFile != null) menuFile.Text = Localization.T("Menu.File");
+            if (menuEdit != null) menuEdit.Text = Localization.T("Menu.Edit");
+            if (menuView != null) menuView.Text = Localization.T("Menu.View");
+            if (menuWindow != null) menuWindow.Text = Localization.T("Menu.Window");
+            if (menuHelp != null) menuHelp.Text = Localization.T("Menu.Help");
+            if (menuFileExecute != null) menuFileExecute.Text = Localization.T("Query.Execute");
+            if (menuFileOpenSql != null) menuFileOpenSql.Text = Localization.T("Query.OpenSql");
+            if (menuFileSaveSql != null) menuFileSaveSql.Text = Localization.T("Query.SaveSql");
+            if (menuFileExport != null) menuFileExport.Text = Localization.T("Query.Export");
+            if (menuFileClose != null) menuFileClose.Text = Localization.T("Menu.Close");
+            if (menuEditCut != null) menuEditCut.Text = Localization.T("Query.Cut");
+            if (menuEditCopy != null) menuEditCopy.Text = Localization.T("Query.Copy");
+            if (menuEditPaste != null) menuEditPaste.Text = Localization.T("Query.Paste");
+            if (menuEditSelectAll != null) menuEditSelectAll.Text = Localization.T("Query.SelectAll");
+            if (menuEditBeautify != null) menuEditBeautify.Text = Localization.T("Query.Beautify");
+            if (menuViewSqlEditor != null) menuViewSqlEditor.Text = Localization.T("Query.SqlEditor");
+            if (menuViewResults != null) menuViewResults.Text = Localization.T("Query.Results");
+            if (menuWindowFloat != null) menuWindowFloat.Text = Localization.T("Query.Float");
+            if (menuWindowDock != null) menuWindowDock.Text = Localization.T("Query.Dock");
+            if (menuWindowClose != null) menuWindowClose.Text = Localization.T("Menu.Close");
+            if (menuHelpAbout != null) menuHelpAbout.Text = Localization.T("Query.About");
         }
 
         public void ApplyTheme()

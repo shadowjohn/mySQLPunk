@@ -174,6 +174,14 @@ namespace mySQLPunk
             Add("Query.Stop", "停止", "Stop");
             Add("Query.Beautify", "美化", "Beautify");
             Add("Query.Save", "儲存", "Save");
+            Add("Query.OpenSql", "開啟 SQL...", "Open SQL...");
+            Add("Query.SaveSql", "儲存 SQL...", "Save SQL...");
+            Add("Query.Cut", "剪下", "Cut");
+            Add("Query.Copy", "複製", "Copy");
+            Add("Query.Paste", "貼上", "Paste");
+            Add("Query.SelectAll", "全選", "Select All");
+            Add("Query.SqlEditor", "SQL 編輯器", "SQL Editor");
+            Add("Query.About", "關於查詢視窗", "About Query Window");
             Add("Query.Add", "新增", "Add");
             Add("Query.Delete", "刪除", "Delete");
             Add("Query.Refresh", "重新整理", "Refresh");
