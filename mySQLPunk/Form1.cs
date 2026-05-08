@@ -110,6 +110,13 @@ namespace mySQLPunk
             "Row Count Ranking"
         };
 
+        private static readonly string[] DatabaseOtherToolNames =
+        {
+            "Connection Diagnostics",
+            "Provider Capabilities",
+            "Maintenance Checklist"
+        };
+
         public Form1()
         {
             Localization.Load();
@@ -348,6 +355,7 @@ namespace mySQLPunk
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\user.png"));  //19
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\model.png"));  //20
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\bi.png"));  //21
+            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\other.png"));  //22
 
             // Assign the ImageList to the TreeView.
 
@@ -2470,6 +2478,12 @@ namespace mySQLPunk
                     lblSidebarTitle.Text = $"BI: {biName}";
                     ShowDatabaseBIReport(db, dbName, biName, connInfo);
                 }
+                if (pathParts.Length >= 4 && pathParts[2] == "Other")
+                {
+                    string toolName = pathParts[3];
+                    lblSidebarTitle.Text = $"Other: {toolName}";
+                    ShowDatabaseOtherTool(db, dbName, toolName, connInfo);
+                }
                 if (pathParts.Length >= 4 && pathParts[2] == "Reports")
                 {
                     string reportName = pathParts[3];
@@ -2658,12 +2672,16 @@ namespace mySQLPunk
                 {
                     return "BI";
                 }
+                if (typeValue != null && string.Equals(typeValue.ToString(), "Other", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Other";
+                }
             }
 
             if (db_tree.SelectedNode != null)
             {
                 var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Users" || pathParts[2] == "Models" || pathParts[2] == "BI" || pathParts[2] == "Queries" || pathParts[2] == "Reports"))
+                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Users" || pathParts[2] == "Models" || pathParts[2] == "BI" || pathParts[2] == "Other" || pathParts[2] == "Queries" || pathParts[2] == "Reports"))
                 {
                     return pathParts[2];
                 }
@@ -3162,6 +3180,19 @@ namespace mySQLPunk
                     row["類型"] = "BI";
                     row["狀態"] = "Ready";
                     row["描述"] = GetDatabaseBIDescription(biName);
+                    displayDt.Rows.Add(row);
+                }
+            }
+            else if (string.Equals(groupName, "Other", StringComparison.OrdinalIgnoreCase))
+            {
+                displayDt.Columns.Add("描述");
+                foreach (string toolName in DatabaseOtherToolNames)
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = toolName;
+                    row["類型"] = "Other";
+                    row["狀態"] = "Ready";
+                    row["描述"] = GetDatabaseOtherToolDescription(toolName);
                     displayDt.Rows.Add(row);
                 }
             }
@@ -3818,6 +3849,125 @@ namespace mySQLPunk
             return "統計資料庫物件類別分布";
         }
 
+        private void ShowDatabaseOtherTool(IDatabase db, string dbName, string toolName, Dictionary<string, object> connInfo = null)
+        {
+            table_top.DataSource = BuildDatabaseOtherTool(db, dbName, toolName, connInfo);
+            ShowOtherToolDetails(db, dbName, toolName);
+        }
+
+        private DataTable BuildDatabaseOtherTool(IDatabase db, string dbName, string toolName, Dictionary<string, object> connInfo = null)
+        {
+            if (string.Equals(toolName, "Provider Capabilities", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildProviderCapabilitiesTool(db, dbName);
+            }
+
+            if (string.Equals(toolName, "Maintenance Checklist", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildMaintenanceChecklistTool(db, dbName, connInfo);
+            }
+
+            return BuildConnectionDiagnosticsTool(db, dbName, connInfo);
+        }
+
+        private DataTable BuildConnectionDiagnosticsTool(IDatabase db, string dbName, Dictionary<string, object> connInfo = null)
+        {
+            DataTable dt = CreateOtherToolTable();
+            AddOtherToolRow(dt, "Provider", "Ready", db.ProviderName);
+            AddOtherToolRow(dt, "Connection State", db.State == ConnectionState.Open ? "Ready" : "Warning", db.State.ToString());
+            AddOtherToolRow(dt, "Database", string.IsNullOrWhiteSpace(dbName) ? "Warning" : "Ready", dbName);
+            AddOtherToolRow(dt, "Tables", "Ready", GetTablesSafe(db, dbName).Count.ToString());
+            AddOtherToolRow(dt, "Views", "Ready", GetViewsSafe(db, dbName).Count.ToString());
+            AddOtherToolRow(dt, "Functions", "Ready", GetDatabaseFunctions(db, dbName).Rows.Count.ToString());
+            AddOtherToolRow(dt, "Events", "Ready", GetDatabaseEvents(db, dbName).Rows.Count.ToString());
+            AddOtherToolRow(dt, "Backup Source", "Ready", GetBackupSourceDescription(db, connInfo));
+            return dt;
+        }
+
+        private DataTable BuildProviderCapabilitiesTool(IDatabase db, string dbName)
+        {
+            DataTable dt = CreateOtherToolTable();
+            AddOtherToolRow(dt, "Tables", "Supported", GetTablesSafe(db, dbName).Count + " loaded");
+            AddOtherToolRow(dt, "Views", "Supported", GetViewsSafe(db, dbName).Count + " loaded");
+            AddOtherToolRow(dt, "Editable Table Data", "Supported", "QueryForm table mode");
+            AddOtherToolRow(dt, "SQL Import", "Supported", "ExecSQL pipeline");
+            AddOtherToolRow(dt, "SQL Export", "Supported", "Dump SQL tool");
+            AddOtherToolRow(dt, "Backup", "Supported", db is my_sqlite ? "SQLite file copy" : "Logical SQL dump");
+            AddOtherToolRow(dt, "Stored Functions", db is my_sqlite ? "Unavailable" : "Supported", db is my_sqlite ? "SQLite does not store database routines" : "Routine metadata available when permissions allow");
+            AddOtherToolRow(dt, "Triggers/Events", "Supported", "Metadata available when permissions allow");
+            return dt;
+        }
+
+        private DataTable BuildMaintenanceChecklistTool(IDatabase db, string dbName, Dictionary<string, object> connInfo = null)
+        {
+            DataTable dt = CreateOtherToolTable();
+            List<string> tables = GetTablesSafe(db, dbName);
+            List<string> views = GetViewsSafe(db, dbName);
+            AddOtherToolRow(dt, "Connection Open", db.State == ConnectionState.Open ? "OK" : "Warning", db.State.ToString());
+            AddOtherToolRow(dt, "Tables Loaded", tables.Count > 0 ? "OK" : "Warning", tables.Count + " table(s)");
+            AddOtherToolRow(dt, "Views Loaded", views.Count > 0 ? "OK" : "Info", views.Count + " view(s)");
+            AddOtherToolRow(dt, "Backup Target", string.IsNullOrWhiteSpace(GetBackupSourceDescription(db, connInfo)) ? "Warning" : "OK", GetBackupSourceDescription(db, connInfo));
+            AddOtherToolRow(dt, "Open Query Tabs", GetOpenQueryTabs(dbName).Count > 0 ? "Info" : "OK", GetOpenQueryTabs(dbName).Count + " tab(s)");
+            AddOtherToolRow(dt, "Largest Table", "Info", GetLargestTableDescription(db, dbName, tables));
+            return dt;
+        }
+
+        private static DataTable CreateOtherToolTable()
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("項目");
+            dt.Columns.Add("狀態");
+            dt.Columns.Add("說明");
+            return dt;
+        }
+
+        private static void AddOtherToolRow(DataTable dt, string item, string status, string detail)
+        {
+            DataRow row = dt.NewRow();
+            row["項目"] = item;
+            row["狀態"] = status;
+            row["說明"] = detail ?? string.Empty;
+            dt.Rows.Add(row);
+        }
+
+        private string GetLargestTableDescription(IDatabase db, string dbName, List<string> tables)
+        {
+            if (tables == null || tables.Count == 0) return "(no tables)";
+
+            string largestName = "";
+            long largestRows = -1;
+            foreach (string tableName in tables)
+            {
+                try
+                {
+                    long rows = db.CountRows(dbName, tableName);
+                    if (rows > largestRows)
+                    {
+                        largestName = tableName;
+                        largestRows = rows;
+                    }
+                }
+                catch { }
+            }
+
+            return largestRows < 0 ? "(unavailable)" : largestName + " (" + largestRows + " rows)";
+        }
+
+        private static string GetDatabaseOtherToolDescription(string toolName)
+        {
+            if (string.Equals(toolName, "Provider Capabilities", StringComparison.OrdinalIgnoreCase))
+            {
+                return "列出目前資料庫 Provider 可用功能";
+            }
+
+            if (string.Equals(toolName, "Maintenance Checklist", StringComparison.OrdinalIgnoreCase))
+            {
+                return "彙整連線、備份、查詢分頁與資料表狀態";
+            }
+
+            return "檢查連線狀態、物件數量與備份來源";
+        }
+
         private DataTable GetDatabaseEvents(IDatabase db, string dbName)
         {
             DataTable events = CreateDatabaseEventTable();
@@ -4319,6 +4469,19 @@ namespace mySQLPunk
                           "-- " + GetDatabaseBIDescription(biName);
         }
 
+        private void ShowOtherToolDetails(IDatabase db, string dbName, string toolName)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            dgvDetails.Rows.Add("類型", "Other");
+            dgvDetails.Rows.Add("名稱", toolName);
+            dgvDetails.Rows.Add("資料庫", dbName);
+            dgvDetails.Rows.Add("Provider", db.ProviderName);
+            rtbDDL.Text = "-- Other: " + toolName + Environment.NewLine +
+                          "-- " + GetDatabaseOtherToolDescription(toolName);
+        }
+
         private void ShowReportDetails(IDatabase db, string dbName, string reportName)
         {
             dgvDetails.Rows.Clear();
@@ -4594,6 +4757,19 @@ namespace mySQLPunk
                 newNode.Nodes.Add(biNode);
             }
 
+            newNode = new TreeNode("Other");
+            newNode.ImageIndex = 22;
+            newNode.SelectedImageIndex = 22;
+            databaseNode.Nodes.Add(newNode);
+
+            foreach (string toolName in DatabaseOtherToolNames)
+            {
+                TreeNode toolNode = new TreeNode(toolName);
+                toolNode.ImageIndex = 22;
+                toolNode.SelectedImageIndex = 22;
+                newNode.Nodes.Add(toolNode);
+            }
+
             newNode = new TreeNode("Events");
             newNode.ImageIndex = 15;
             newNode.SelectedImageIndex = 15;
@@ -4705,6 +4881,7 @@ namespace mySQLPunk
                 else if (m[2] == "Users") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Models") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "BI") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                else if (m[2] == "Other") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else if (m[2] == "Reports") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
                 else OpenSelectedTableInQuery();
                 dialogMyBoxOff();
@@ -5024,7 +5201,7 @@ namespace mySQLPunk
         private void other_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("other");
-            UpdateMainStatus(Localization.T("Status.OtherSelected"));
+            SelectDatabaseGroupNode("Other");
         }
 
         private void query_section_btn_Click(object sender, EventArgs e)
