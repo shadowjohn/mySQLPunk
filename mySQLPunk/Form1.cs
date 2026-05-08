@@ -99,6 +99,13 @@ namespace mySQLPunk
             node.SelectedImageIndex = iconIndex;
         }
 
+        private static string BuildSqlServerDataSource(string host, string port)
+        {
+            if (string.IsNullOrWhiteSpace(port)) return host;
+            if ((host ?? string.Empty).Contains(",") || (host ?? string.Empty).Contains("\\")) return host;
+            return host + "," + port;
+        }
+
         private class DatabaseObjectSelection
         {
             public IDatabase Database;
@@ -5162,13 +5169,14 @@ namespace mySQLPunk
                             var builder = new System.Data.SqlClient.SqlConnectionStringBuilder();
                             string host = myN.connections[index].ContainsKey("host") ? myN.connections[index]["host"].ToString() : "";
                             string port = myN.connections[index].ContainsKey("port") ? myN.connections[index]["port"].ToString() : "";
-                            builder.DataSource = string.IsNullOrWhiteSpace(port) ? host : host + "," + port;
+                            builder.DataSource = BuildSqlServerDataSource(host, port);
                             builder.InitialCatalog = myN.connections[index].ContainsKey("initial_database") && !string.IsNullOrWhiteSpace(myN.connections[index]["initial_database"].ToString())
                                 ? myN.connections[index]["initial_database"].ToString()
                                 : "master";
                             bool trusted = myN.connections[index].ContainsKey("trusted_connection") && myN.connections[index]["trusted_connection"].ToString() == "T";
                             builder.IntegratedSecurity = trusted;
                             builder.TrustServerCertificate = true;
+                            builder.ConnectTimeout = 8;
                             if (!trusted)
                             {
                                 builder.UserID = myN.connections[index].ContainsKey("username") ? myN.connections[index]["username"].ToString() : "";
@@ -5204,10 +5212,13 @@ namespace mySQLPunk
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine(ex.Message);
+                                    string message = "SQL Server 連線失敗：" + ex.Message;
+                                    Console.WriteLine(message);
                                     myN.connections[index]["isConnect"] = "F";
                                     ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
                                     ((TreeView)sender).SelectedNode.Collapse();
+                                    UpdateMainStatus(message);
+                                    MessageBox.Show(message, "SQL Server", MessageBoxButtons.OK, MessageBoxIcon.Error);
                                 }
 
                             }

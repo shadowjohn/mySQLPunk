@@ -128,13 +128,6 @@ namespace mySQLPunk.template
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(txtPort.Text))
-            {
-                MessageBox.Show("請輸入連接埠！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                txtPort.Focus();
-                return false;
-            }
-
             if (!chkWindowsAuth.Checked && string.IsNullOrWhiteSpace(txtUser.Text))
             {
                 MessageBox.Show("請輸入使用者名稱，或改用 Windows 驗證。", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -168,10 +161,11 @@ namespace mySQLPunk.template
         private string BuildConnectionString()
         {
             SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder();
-            builder.DataSource = txtHost.Text.Trim() + "," + txtPort.Text.Trim();
+            builder.DataSource = BuildDataSource(txtHost.Text.Trim(), txtPort.Text.Trim());
             builder.InitialCatalog = GetInitialDatabase();
             builder.IntegratedSecurity = chkWindowsAuth.Checked;
             builder.TrustServerCertificate = true;
+            builder.ConnectTimeout = 8;
 
             if (!chkWindowsAuth.Checked)
             {
@@ -180,6 +174,13 @@ namespace mySQLPunk.template
             }
 
             return builder.ConnectionString;
+        }
+
+        private static string BuildDataSource(string host, string port)
+        {
+            if (string.IsNullOrWhiteSpace(port)) return host;
+            if (host.Contains(",") || host.Contains("\\")) return host;
+            return host + "," + port;
         }
 
         private void btnTest_Click(object sender, EventArgs e)
