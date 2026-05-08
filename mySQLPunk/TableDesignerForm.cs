@@ -1241,7 +1241,7 @@ namespace mySQLPunk
             List<string> statements = new List<string>();
             DataTable currentIdxDt = dgvIndexes.DataSource as DataTable;
             if (currentIdxDt == null || _originalIdxDt == null) return statements;
-            bool sqlServerPrimaryKeyDropAdded = false;
+            bool primaryKeyDropAdded = false;
 
             foreach (DataRow original in _originalIdxDt.Rows)
             {
@@ -1251,10 +1251,10 @@ namespace mySQLPunk
                 {
                     if (!HasMatchingIndex(currentIdxDt, original))
                     {
-                        if (_db is my_mssql)
+                        if (SupportsDynamicPrimaryKeyChange())
                         {
-                            statements.Add(BuildSqlServerDropPrimaryKeyStatement());
-                            sqlServerPrimaryKeyDropAdded = true;
+                            statements.Add(BuildDropPrimaryKeyStatement());
+                            primaryKeyDropAdded = true;
                         }
                         else
                         {
@@ -1281,7 +1281,7 @@ namespace mySQLPunk
                 {
                     if (!HasOriginalMatchingIndex(current))
                     {
-                        if (_db is my_mssql)
+                        if (SupportsDynamicPrimaryKeyChange())
                         {
                             string columns = GetRowString(current, "欄位").Trim();
                             if (string.IsNullOrWhiteSpace(columns))
@@ -1290,12 +1290,12 @@ namespace mySQLPunk
                             }
                             else
                             {
-                                if (!sqlServerPrimaryKeyDropAdded && HasOriginalPrimaryIndex())
+                                if (!primaryKeyDropAdded && HasOriginalPrimaryIndex())
                                 {
-                                    statements.Add(BuildSqlServerDropPrimaryKeyStatement());
-                                    sqlServerPrimaryKeyDropAdded = true;
+                                    statements.Add(BuildDropPrimaryKeyStatement());
+                                    primaryKeyDropAdded = true;
                                 }
-                                statements.Add(BuildSqlServerAddPrimaryKeyStatement(current));
+                                statements.Add(BuildAddPrimaryKeyStatement(current));
                             }
                         }
                         else
@@ -1321,6 +1321,27 @@ namespace mySQLPunk
             return statements;
         }
 
+        private bool SupportsDynamicPrimaryKeyChange()
+        {
+            return _db is my_mssql || _db is my_postgresql || _db is my_oracle;
+        }
+
+        private string BuildDropPrimaryKeyStatement()
+        {
+            if (_db is my_mssql) return BuildSqlServerDropPrimaryKeyStatement();
+            if (_db is my_postgresql) return BuildPostgreSqlDropPrimaryKeyStatement();
+            if (_db is my_oracle) return BuildOracleDropPrimaryKeyStatement();
+            return "";
+        }
+
+        private string BuildAddPrimaryKeyStatement(DataRow row)
+        {
+            if (_db is my_mssql) return BuildSqlServerAddPrimaryKeyStatement(row);
+            if (_db is my_postgresql) return BuildPostgreSqlAddPrimaryKeyStatement(row);
+            if (_db is my_oracle) return BuildOracleAddPrimaryKeyStatement(row);
+            return "";
+        }
+
         private string BuildSqlServerDropPrimaryKeyStatement()
         {
             string database = QuoteDesignerIdentifier(_databaseName);
@@ -1344,6 +1365,68 @@ namespace mySQLPunk
             return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
                    " ADD CONSTRAINT " + QuoteDesignerIdentifier(indexName) +
                    " PRIMARY KEY (" + FormatGenericIndexColumns(GetRowString(row, "欄位").Trim()) + ");";
+        }
+
+        private string BuildPostgreSqlDropPrimaryKeyStatement()
+        {
+            string tableLiteral = EscapeSqlStringValue(_tableName);
+            string qualifiedTable = GetQualifiedDesignerTableName(_tableName).Replace("'", "''");
+
+            return "DO $mysqlpunk$\r\n" +
+                   "DECLARE primary_key_name text;\r\n" +
+                   "BEGIN\r\n" +
+                   "  SELECT tc.constraint_name INTO primary_key_name\r\n" +
+                   "  FROM information_schema.table_constraints tc\r\n" +
+                   "  WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public' AND tc.table_name = '" + tableLiteral + "';\r\n" +
+                   "  IF primary_key_name IS NOT NULL THEN\r\n" +
+                   "    EXECUTE 'ALTER TABLE " + qualifiedTable + " DROP CONSTRAINT ' || quote_ident(primary_key_name);\r\n" +
+                   "  END IF;\r\n" +
+                   "END\r\n" +
+                   "$mysqlpunk$;";
+        }
+
+        private string BuildPostgreSqlAddPrimaryKeyStatement(DataRow row)
+        {
+            string indexName = GetPrimaryKeyConstraintName(row, "pk_");
+            return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                   " ADD CONSTRAINT " + QuoteDesignerIdentifier(indexName) +
+                   " PRIMARY KEY (" + FormatGenericIndexColumns(GetRowString(row, "欄位").Trim()) + ");";
+        }
+
+        private string BuildOracleDropPrimaryKeyStatement()
+        {
+            string ownerLiteral = EscapeSqlStringValue(_databaseName);
+            string tableLiteral = EscapeSqlStringValue(_tableName);
+            string qualifiedTable = GetQualifiedDesignerTableName(_tableName).Replace("'", "''");
+
+            return "DECLARE\r\n" +
+                   "  primary_key_name VARCHAR2(128);\r\n" +
+                   "BEGIN\r\n" +
+                   "  SELECT constraint_name INTO primary_key_name\r\n" +
+                   "  FROM ALL_CONSTRAINTS\r\n" +
+                   "  WHERE CONSTRAINT_TYPE = 'P' AND UPPER(OWNER) = UPPER('" + ownerLiteral + "') AND UPPER(TABLE_NAME) = UPPER('" + tableLiteral + "') AND ROWNUM = 1;\r\n" +
+                   "  EXECUTE IMMEDIATE 'ALTER TABLE " + qualifiedTable + " DROP CONSTRAINT \"' || REPLACE(primary_key_name, '\"', '\"\"') || '\"';\r\n" +
+                   "EXCEPTION\r\n" +
+                   "  WHEN NO_DATA_FOUND THEN NULL;\r\n" +
+                   "END;";
+        }
+
+        private string BuildOracleAddPrimaryKeyStatement(DataRow row)
+        {
+            string indexName = GetPrimaryKeyConstraintName(row, "PK_");
+            return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                   " ADD CONSTRAINT " + QuoteDesignerIdentifier(indexName) +
+                   " PRIMARY KEY (" + FormatGenericIndexColumns(GetRowString(row, "欄位").Trim()) + ");";
+        }
+
+        private string GetPrimaryKeyConstraintName(DataRow row, string prefix)
+        {
+            string indexName = GetRowString(row, "名稱").Trim();
+            if (string.IsNullOrWhiteSpace(indexName) || IsPrimaryIndexName(indexName))
+            {
+                indexName = prefix + _tableName;
+            }
+            return indexName;
         }
 
         private string BuildDropIndexStatement(string indexName)
@@ -1908,6 +1991,11 @@ namespace mySQLPunk
             return "'" + (value ?? "").Replace("'", "''") + "'";
         }
 
+        private static string EscapeSqlStringValue(string value)
+        {
+            return (value ?? "").Replace("'", "''");
+        }
+
         private static string EscapeSqlServerLiteral(string value)
         {
             return (value ?? "").Replace("'", "''");
@@ -1956,7 +2044,7 @@ namespace mySQLPunk
 
             try
             {
-                List<string> statements = _db is my_mssql ? SplitSqlServerStatements(sql) : SplitSqlStatements(sql);
+                List<string> statements = SplitDesignerSqlStatements(sql, _db);
                 foreach (string statement in statements)
                 {
                     if (string.IsNullOrWhiteSpace(statement)) continue;
@@ -2173,6 +2261,14 @@ namespace mySQLPunk
             return statements;
         }
 
+        private static List<string> SplitDesignerSqlStatements(string sql, IDatabase db)
+        {
+            if (db is my_mssql) return SplitSqlServerStatements(sql);
+            if (db is my_postgresql) return SplitPostgreSqlStatements(sql);
+            if (db is my_oracle) return SplitOracleStatements(sql);
+            return SplitSqlStatements(sql);
+        }
+
         private static List<string> SplitSqlServerStatements(string sql)
         {
             List<string> statements = new List<string>();
@@ -2228,6 +2324,85 @@ namespace mySQLPunk
                 if (!string.IsNullOrWhiteSpace(statement)) statements.Add(statement);
             }
             pending.Clear();
+        }
+
+        private static List<string> SplitPostgreSqlStatements(string sql)
+        {
+            List<string> statements = new List<string>();
+            StringBuilder pending = new StringBuilder();
+            string normalizedSql = (sql ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+            string[] lines = normalizedSql.Split('\n');
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                string trimmed = line.TrimStart();
+                if (trimmed.StartsWith("DO $mysqlpunk$", StringComparison.OrdinalIgnoreCase))
+                {
+                    FlushSplitStatements(pending, statements);
+
+                    StringBuilder block = new StringBuilder();
+                    block.AppendLine(line);
+                    while (i + 1 < lines.Length)
+                    {
+                        i++;
+                        block.AppendLine(lines[i]);
+                        if (lines[i].Trim().Equals("$mysqlpunk$;", StringComparison.OrdinalIgnoreCase))
+                        {
+                            break;
+                        }
+                    }
+
+                    string blockSql = block.ToString().Trim();
+                    if (!string.IsNullOrWhiteSpace(blockSql)) statements.Add(blockSql);
+                    continue;
+                }
+
+                pending.AppendLine(line);
+            }
+
+            FlushSplitStatements(pending, statements);
+            return statements;
+        }
+
+        private static List<string> SplitOracleStatements(string sql)
+        {
+            List<string> statements = new List<string>();
+            StringBuilder pending = new StringBuilder();
+            string normalizedSql = (sql ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+            string[] lines = normalizedSql.Split('\n');
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                string trimmed = line.TrimStart();
+                if (trimmed.Equals("DECLARE", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Equals("BEGIN", StringComparison.OrdinalIgnoreCase))
+                {
+                    FlushSplitStatements(pending, statements);
+
+                    StringBuilder block = new StringBuilder();
+                    block.AppendLine(line);
+                    while (i + 1 < lines.Length)
+                    {
+                        i++;
+                        block.AppendLine(lines[i]);
+                        if (lines[i].Trim().Equals("END;", StringComparison.OrdinalIgnoreCase))
+                        {
+                            break;
+                        }
+                    }
+
+                    string blockSql = block.ToString().Trim();
+                    if (!string.IsNullOrWhiteSpace(blockSql)) statements.Add(blockSql);
+                    continue;
+                }
+
+                pending.AppendLine(line);
+            }
+
+            FlushSplitStatements(pending, statements);
+            return statements;
         }
 
         private void AddColumn(bool insert)
