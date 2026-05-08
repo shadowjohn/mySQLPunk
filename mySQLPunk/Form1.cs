@@ -73,19 +73,12 @@ namespace mySQLPunk
         public Form1()
         {
             Localization.Load();
+            ThemeManager.Load();
             InitializeComponent();
         }
         
         public static void ApplyModernTheme(Control parent)
         {
-            Color baseWhite = Color.White;
-            Color textGray = Color.FromArgb(51, 51, 51);
-            Color borderGray = Color.FromArgb(224, 224, 224);
-            Color professionalBlue = Color.FromArgb(0, 120, 212);
-
-            parent.BackColor = baseWhite;
-            parent.ForeColor = textGray;
-
             if (parent is Form f)
             {
                 f.Opacity = 1.0f;
@@ -94,52 +87,7 @@ namespace mySQLPunk
                     if (e.KeyCode == Keys.Escape) f.Close();
                 };
             }
-
-            foreach (Control c in parent.Controls)
-            {
-                if (c is MenuStrip || c is ToolStrip || c is StatusStrip)
-                {
-                    c.BackColor = Color.FromArgb(245, 245, 245);
-                    c.ForeColor = textGray;
-                    if (c is ToolStrip ts)
-                    {
-                        ts.Renderer = new ToolStripProfessionalRenderer(new ProfessionalColorTable());
-                        ts.ImageScalingSize = new Size(24, 24);
-                        ts.GripStyle = ToolStripGripStyle.Hidden;
-                    }
-                }
-                else if (c is TreeView tv)
-                {
-                    tv.BackColor = baseWhite;
-                    tv.ForeColor = textGray;
-                    tv.LineColor = borderGray;
-                    tv.BorderStyle = BorderStyle.None;
-                    tv.FullRowSelect = true;
-                    tv.ItemHeight = 24;
-                }
-                else if (c is DataGridView dgv)
-                {
-                    dgv.BackgroundColor = Color.FromArgb(240, 240, 240);
-                    dgv.GridColor = borderGray;
-                    dgv.BorderStyle = BorderStyle.None;
-                    dgv.DefaultCellStyle.BackColor = baseWhite;
-                    dgv.DefaultCellStyle.ForeColor = textGray;
-                    dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(245, 245, 245);
-                    dgv.ColumnHeadersDefaultCellStyle.ForeColor = textGray;
-                    dgv.EnableHeadersVisualStyles = true;
-                }
-                else if (c is SplitContainer sc)
-                {
-                    sc.BorderStyle = BorderStyle.None;
-                    sc.SplitterWidth = 1;
-                    ApplyModernTheme(sc.Panel1);
-                    ApplyModernTheme(sc.Panel2);
-                }
-                else
-                {
-                    ApplyModernTheme(c);
-                }
-            }
+            ThemeManager.ApplyTo(parent);
         }
 
         public class CyberpunkColorTable : ProfessionalColorTable
@@ -371,48 +319,48 @@ namespace mySQLPunk
             for (int i = 0, max_i = btns.Count; i < max_i; i++)
             {
                 ((ToolStripButton)btns[i]).Checked = false;
-                ((ToolStripButton)btns[i]).BackColor = Form1.DefaultBackColor;
+                ((ToolStripButton)btns[i]).BackColor = ThemeManager.SurfaceColor;
             }
             switch (kind.ToLower())
             {
                 case "user":
-                    user_btn.BackColor = Color.LightBlue;
+                    user_btn.BackColor = ThemeManager.SelectionColor;
                     user_btn.Checked = true;
                     break;
                 case "table":
-                    table_btn.BackColor = Color.LightBlue;
+                    table_btn.BackColor = ThemeManager.SelectionColor;
                     table_btn.Checked = true;
                     break;
                 case "view":
-                    view_btn.BackColor = Color.LightBlue;
+                    view_btn.BackColor = ThemeManager.SelectionColor;
                     view_btn.Checked = true;
                     break;
                 case "function":
-                    function_btn.BackColor = Color.LightBlue;
+                    function_btn.BackColor = ThemeManager.SelectionColor;
                     function_btn.Checked = true;
                     break;
                 case "other":
-                    other_btn.BackColor = Color.LightBlue;
+                    other_btn.BackColor = ThemeManager.SelectionColor;
                     other_btn.Checked = true;
                     break;
                 case "query":
-                    query_section_btn.BackColor = Color.LightBlue;
+                    query_section_btn.BackColor = ThemeManager.SelectionColor;
                     query_section_btn.Checked = true;
                     break;
                 case "backup":
-                    backup_btn.BackColor = Color.LightBlue;
+                    backup_btn.BackColor = ThemeManager.SelectionColor;
                     backup_btn.Checked = true;
                     break;
                 case "auto":
-                    auto_run_btn.BackColor = Color.LightBlue;
+                    auto_run_btn.BackColor = ThemeManager.SelectionColor;
                     auto_run_btn.Checked = true;
                     break;
                 case "model":
-                    model_btn.BackColor = Color.LightBlue;
+                    model_btn.BackColor = ThemeManager.SelectionColor;
                     model_btn.Checked = true;
                     break;
                 case "bi":
-                    bi_btn.BackColor = Color.LightBlue;
+                    bi_btn.BackColor = ThemeManager.SelectionColor;
                     bi_btn.Checked = true;
                     break;
             }
@@ -628,12 +576,20 @@ namespace mySQLPunk
             ToolStripMenuItem languageMenu = new ToolStripMenuItem(Localization.T("Menu.Language"));
             ToolStripMenuItem zhMenu = new ToolStripMenuItem(Localization.T("Menu.LanguageZh"));
             ToolStripMenuItem enMenu = new ToolStripMenuItem(Localization.T("Menu.LanguageEn"));
+            ToolStripMenuItem themeMenu = new ToolStripMenuItem(Localization.T("Menu.Theme"));
+            ToolStripMenuItem lightMenu = new ToolStripMenuItem(Localization.T("Menu.ThemeLight"));
+            ToolStripMenuItem darkMenu = new ToolStripMenuItem(Localization.T("Menu.ThemeDark"));
             zhMenu.Checked = !Localization.IsEnglish;
             enMenu.Checked = Localization.IsEnglish;
             zhMenu.Click += (s, e) => ChangeLanguage(Localization.TraditionalChinese);
             enMenu.Click += (s, e) => ChangeLanguage(Localization.English);
             languageMenu.DropDownItems.AddRange(new ToolStripItem[] { zhMenu, enMenu });
-            toolsMenu.DropDownItems.Add(languageMenu);
+            lightMenu.Checked = !ThemeManager.IsDark;
+            darkMenu.Checked = ThemeManager.IsDark;
+            lightMenu.Click += (s, e) => ChangeTheme(ThemeManager.Light);
+            darkMenu.Click += (s, e) => ChangeTheme(ThemeManager.Dark);
+            themeMenu.DropDownItems.AddRange(new ToolStripItem[] { lightMenu, darkMenu });
+            toolsMenu.DropDownItems.AddRange(new ToolStripItem[] { languageMenu, themeMenu });
 
             menuStrip1.Items.Clear();
             menuStrip1.Items.AddRange(new ToolStripItem[]
@@ -664,6 +620,22 @@ namespace mySQLPunk
             UpdateMainStatus(Localization.T("Status.LanguageChanged"));
         }
 
+        private void ChangeTheme(string theme)
+        {
+            ThemeManager.SetTheme(theme, true);
+            ApplyLanguage();
+            foreach (Form form in Application.OpenForms)
+            {
+                if (form == this) continue;
+                QueryForm queryForm = form as QueryForm;
+                if (queryForm != null) queryForm.ApplyTheme();
+                TableDesignerForm designerForm = form as TableDesignerForm;
+                if (designerForm != null) designerForm.ApplyTheme();
+                ThemeManager.ApplyTo(form);
+            }
+            UpdateMainStatus(Localization.T("Status.ThemeChanged"));
+        }
+
         private void ApplyLanguage()
         {
             Text = Localization.T("App.Title");
@@ -691,6 +663,34 @@ namespace mySQLPunk
             NewFunction.Text = Localization.T("Tool.NewFunction");
             DeleteFunction.Text = Localization.T("Tool.DeleteFunction");
             ExecuteFunction.Text = Localization.T("Tool.ExecuteFunction");
+            ApplyTheme();
+        }
+
+        private void ApplyTheme()
+        {
+            ThemeManager.ApplyTo(this);
+            if (_dockHintOverlay != null)
+            {
+                _dockHintOverlay.BackColor = ThemeManager.SelectionColor;
+                _dockHintOverlay.Invalidate();
+            }
+            if (table_top != null)
+            {
+                table_top.BackgroundColor = ThemeManager.WindowBackColor;
+                table_top.GridColor = ThemeManager.GridColor;
+            }
+            if (pnlSidebar != null) pnlSidebar.BackColor = ThemeManager.WindowBackColor;
+            if (rtbDDL != null)
+            {
+                rtbDDL.BackColor = ThemeManager.TextBoxBackColor;
+                rtbDDL.ForeColor = ThemeManager.TextColor;
+            }
+            if (lblSidebarTitle != null) lblSidebarTitle.ForeColor = ThemeManager.TextColor;
+            if (lblMainStatus != null) lblMainStatus.ForeColor = ThemeManager.TextColor;
+            ThemeManager.ApplyToolStrip(menuStrip1);
+            ThemeManager.ApplyToolStrip(tool_Connection);
+            ThemeManager.ApplyToolStrip(statusStrip1);
+            if (tsSidebar != null) ThemeManager.ApplyToolStrip(tsSidebar);
         }
 
         private void CreateNewTable()
@@ -745,14 +745,14 @@ namespace mySQLPunk
                     {
                         queryTabs.SelectedIndex = i;
                         var cms = new ContextMenuStrip();
-                        var itemFloat = new ToolStripMenuItem("Float / Undock");
+                        var itemFloat = new ToolStripMenuItem(Localization.T("Query.Float") + " / Undock");
                         itemFloat.Click += (s, ev) => {
                             if (queryTabs.SelectedTab?.Tag is IDockableForm dockable)
                                 FloatDockableForm(dockable);
                         };
                         cms.Items.Add(itemFloat);
                         
-                        var itemClose = new ToolStripMenuItem("Close");
+                        var itemClose = new ToolStripMenuItem(Localization.T("Menu.Close"));
                         itemClose.Click += (s, ev) => {
                             TabPage tp = queryTabs.SelectedTab;
                             if (tp != null)
@@ -763,6 +763,7 @@ namespace mySQLPunk
                         };
                         cms.Items.Add(itemClose);
 
+                        ThemeManager.ApplyToolStrip(cms);
                         cms.Show(queryTabs, e.Location);
                         break;
                     }
@@ -1499,10 +1500,11 @@ namespace mySQLPunk
                 itemDesign.Click += (s, ev) => DesignSelectedTable();
                 cms.Items.Add(itemDesign);
 
-                var itemDrop = new ToolStripMenuItem("刪除資料表");
+                var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                 itemDrop.Click += (s, ev) => DeleteSelectedTable();
                 cms.Items.Add(itemDrop);
                 
+                ThemeManager.ApplyToolStrip(cms);
                 cms.Show(table_top, table_top.PointToClient(Cursor.Position));
             }
         }
@@ -1966,6 +1968,7 @@ namespace mySQLPunk
                     return;
                 }
 
+                ThemeManager.ApplyToolStrip(menu);
                 menu.Show(db_tree, e.Location);
             }
         }
@@ -2120,15 +2123,15 @@ namespace mySQLPunk
             dialog.ControlBox = false;
             dialog.FormBorderStyle = FormBorderStyle.FixedSingle;
             dialog.StartPosition = FormStartPosition.CenterScreen;
-            dialog.BackColor = Color.White;
-            dialog.ForeColor = Color.FromArgb(51, 51, 51);
+            dialog.BackColor = ThemeManager.ElevatedColor;
+            dialog.ForeColor = ThemeManager.TextColor;
 
             dialogLabel.Location = new Point(0, 0);
             dialogLabel.AutoSize = false;
             dialogLabel.Size = new Size(250, 80);
             dialogLabel.TextAlign = ContentAlignment.MiddleCenter;
             dialogLabel.Text = message;
-            dialogLabel.ForeColor = Color.FromArgb(51, 51, 51);
+            dialogLabel.ForeColor = ThemeManager.TextColor;
             dialogLabel.Font = new Font("Microsoft JhengHei", 18, FontStyle.Bold);
             dialog.Controls.Add(dialogLabel);
             dialog.TopMost = true;
@@ -2598,17 +2601,20 @@ namespace mySQLPunk
             bool isSelected = (queryTabs.SelectedIndex == e.Index);
             
             // 背景
-            Color bgColor = isSelected ? Color.White : Color.FromArgb(240, 240, 240);
-            e.Graphics.FillRectangle(new SolidBrush(bgColor), tabRect);
+            Color bgColor = isSelected ? ThemeManager.ElevatedColor : ThemeManager.SurfaceColor;
+            using (var brush = new SolidBrush(bgColor))
+            {
+                e.Graphics.FillRectangle(brush, tabRect);
+            }
 
             // 文字 (置中偏左)
             Rectangle textRect = new Rectangle(tabRect.X + 4, tabRect.Y, tabRect.Width - 25, tabRect.Height);
-            TextRenderer.DrawText(e.Graphics, title, queryTabs.Font, textRect, Color.Black, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(e.Graphics, title, queryTabs.Font, textRect, ThemeManager.TextColor, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
 
             // 繪製關閉按鈕 (X)
             var xRect = GetCloseButtonRect(tabRect);
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using (Pen p = new Pen(Color.Gray, 1.5f))
+            using (Pen p = new Pen(ThemeManager.MutedTextColor, 1.5f))
             {
                 // 畫兩條線組成 X
                 e.Graphics.DrawLine(p, xRect.X + 3, xRect.Y + 3, xRect.Right - 3, xRect.Bottom - 3);
@@ -2707,7 +2713,7 @@ namespace mySQLPunk
             {
                 e.Effect = DragDropEffects.Move;
                 queryTabs.Visible = true;
-                queryTabs.BackColor = Color.FromArgb(200, 230, 255);
+                queryTabs.BackColor = ThemeManager.SelectionColor;
                 ShowDockHint();
                 if (queryTabs.TabPages.Count == 0)
                 {
@@ -2736,7 +2742,7 @@ namespace mySQLPunk
 
         private void QueryTabs_DragLeave(object sender, EventArgs e)
         {
-            queryTabs.BackColor = Color.White;
+            queryTabs.BackColor = ThemeManager.WindowBackColor;
             HideDockHint();
             if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
             statusStrip1.Visible = false; // 離開時隱藏
@@ -2745,7 +2751,7 @@ namespace mySQLPunk
 
         private void QueryTabs_DragDrop(object sender, DragEventArgs e)
         {
-            queryTabs.BackColor = Color.White;
+            queryTabs.BackColor = ThemeManager.WindowBackColor;
             HideDockHint();
             statusStrip1.Visible = false; // 放下時隱藏
             lblMainStatus.Text = Localization.T("Status.Ready");

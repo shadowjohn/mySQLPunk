@@ -49,6 +49,7 @@ namespace mySQLPunk
             _tableName = tableName;
             InitializeComponent();
             ApplyLanguage();
+            ApplyTheme();
             UpdateTitle();
             LoadColumns();
             LoadIndexes();
@@ -468,6 +469,28 @@ namespace mySQLPunk
             if (btnDock != null) btnDock.Text = Localization.T("Query.Dock");
             ApplyColumnHeaders();
             UpdateTitle();
+            ApplyTheme();
+        }
+
+        public void ApplyTheme()
+        {
+            ThemeManager.ApplyTo(this);
+            if (dgvColumns != null)
+            {
+                dgvColumns.BackgroundColor = ThemeManager.WindowBackColor;
+                dgvColumns.GridColor = ThemeManager.GridColor;
+            }
+            if (dgvIndexes != null)
+            {
+                dgvIndexes.BackgroundColor = ThemeManager.WindowBackColor;
+                dgvIndexes.GridColor = ThemeManager.GridColor;
+            }
+            if (pnlColumnProperties != null) pnlColumnProperties.BackColor = ThemeManager.WindowBackColor;
+            if (rtbSqlPreview != null)
+            {
+                rtbSqlPreview.BackColor = ThemeManager.TextBoxBackColor;
+                rtbSqlPreview.ForeColor = ThemeManager.TextColor;
+            }
         }
 
         private void ApplyColumnHeaders()

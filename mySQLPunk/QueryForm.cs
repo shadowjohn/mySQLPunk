@@ -391,6 +391,7 @@ namespace mySQLPunk
             
             // 將 dataToolStrip 放到 split.Panel2 的底部 (跟著表格走)
             split.Panel2.Controls.Add(dataToolStrip);
+            ApplyTheme();
         }
 
         public void SetMainHost(Form1 mainHost)
@@ -935,6 +936,33 @@ namespace mySQLPunk
             if (lblStatus != null && (lblStatus.Text == "Ready" || lblStatus.Text == "就緒")) lblStatus.Text = Localization.T("Status.Ready");
             UpdatePaginationUI();
             Localization.ApplyTo(this);
+            ApplyTheme();
+        }
+
+        public void ApplyTheme()
+        {
+            ThemeManager.ApplyTo(this);
+            if (mainToolStrip != null) ThemeManager.ApplyToolStrip(mainToolStrip);
+            if (dataToolStrip != null) ThemeManager.ApplyToolStrip(dataToolStrip);
+            if (mainMenuStrip != null) ThemeManager.ApplyToolStrip(mainMenuStrip);
+            if (statusStrip != null) ThemeManager.ApplyToolStrip(statusStrip);
+            if (txtSql != null)
+            {
+                txtSql.BackColor = ThemeManager.TextBoxBackColor;
+                txtSql.ForeColor = ThemeManager.TextColor;
+            }
+            if (lstCompletion != null)
+            {
+                lstCompletion.BackColor = ThemeManager.ElevatedColor;
+                lstCompletion.ForeColor = ThemeManager.TextColor;
+            }
+            if (dgvResults != null)
+            {
+                dgvResults.BackgroundColor = ThemeManager.WindowBackColor;
+                dgvResults.GridColor = ThemeManager.GridColor;
+            }
+            if (lblSqlPreview != null) lblSqlPreview.ForeColor = ThemeManager.MutedTextColor;
+            if (lblStatus != null) lblStatus.ForeColor = ThemeManager.TextColor;
         }
 
         private static string GetFirstWord(string sql)

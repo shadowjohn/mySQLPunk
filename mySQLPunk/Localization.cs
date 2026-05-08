@@ -28,6 +28,9 @@ namespace mySQLPunk
             Add("Menu.Language", "語言", "Language");
             Add("Menu.LanguageZh", "繁體中文", "Traditional Chinese");
             Add("Menu.LanguageEn", "English", "English");
+            Add("Menu.Theme", "主題", "Theme");
+            Add("Menu.ThemeLight", "亮色", "Light");
+            Add("Menu.ThemeDark", "暗色", "Dark");
             Add("Menu.NewConnection", "新增連線", "New Connection");
             Add("Menu.OpenConnection", "開啟連線", "Open Connection");
             Add("Menu.CloseConnection", "關閉連線", "Close Connection");
@@ -81,6 +84,7 @@ namespace mySQLPunk
             Add("Status.BISelected", "BI 功能入口已選取。", "BI section selected.");
             Add("Status.SelectExpandedDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
             Add("Status.ConnectionClosed", "連線已斷開。", "Connection closed.");
+            Add("Status.ThemeChanged", "主題已切換。", "Theme changed.");
 
             Add("Common.ConnectionName", "連線名稱", "Connection Name");
             Add("Common.ConnectionNameColon", "連線名稱:", "Connection Name:");

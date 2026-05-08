@@ -146,6 +146,7 @@
     </Compile>
     <Compile Include="IDockableForm.cs" />
     <Compile Include="Localization.cs" />
+    <Compile Include="ThemeManager.cs" />
     <Compile Include="lib\crypto.cs" />
     <Compile Include="lib\DatabaseCopyService.cs" />
     <Compile Include="lib\IDatabase.cs" />
