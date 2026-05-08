@@ -1814,7 +1814,7 @@ namespace mySQLPunk
                 }
                 else
                 {
-                    MessageBox.Show("儲存失敗：" + res["reason"]);
+                    MessageBox.Show(FormatDesignerSaveError(_db?.ProviderName, _databaseName, GetTableNameForSave(), res), "儲存失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -1824,6 +1824,7 @@ namespace mySQLPunk
             Dictionary<string, string> lastResult = new Dictionary<string, string> { { "status", "OK" } };
             bool transactionStarted = false;
             bool sqliteForeignKeysDisabled = false;
+            string currentStatement = "";
 
             try
             {
@@ -1832,10 +1833,15 @@ namespace mySQLPunk
                     if (string.IsNullOrWhiteSpace(statement)) continue;
 
                     string normalizedStatement = statement.Trim();
+                    currentStatement = normalizedStatement;
                     lastResult = _db.ExecSQL(normalizedStatement);
 
                     if (!lastResult.ContainsKey("status") || lastResult["status"] != "OK")
                     {
+                        if (!lastResult.ContainsKey("statement"))
+                        {
+                            lastResult["statement"] = normalizedStatement;
+                        }
                         RollbackDesignerTransactionIfNeeded(transactionStarted, sqliteForeignKeysDisabled);
                         return lastResult;
                     }
@@ -1866,9 +1872,114 @@ namespace mySQLPunk
                 return new Dictionary<string, string>
                 {
                     { "status", "ERROR" },
-                    { "reason", ex.Message }
+                    { "reason", ex.Message },
+                    { "statement", currentStatement }
                 };
             }
+        }
+
+        private static string FormatDesignerSaveError(string providerName, string databaseName, string tableName, Dictionary<string, string> result)
+        {
+            string reason = GetResultValue(result, "reason");
+            if (string.IsNullOrWhiteSpace(reason)) reason = "unknown error";
+
+            List<string> lines = new List<string>();
+            lines.Add("儲存失敗：" + reason);
+
+            if (string.Equals(providerName, "oracle", StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add("");
+                lines.Add("Oracle Table Designer 診斷：");
+                foreach (string hint in GetOracleDesignerErrorHints(reason, databaseName, tableName))
+                {
+                    lines.Add("- " + hint);
+                }
+            }
+
+            string statement = GetResultValue(result, "statement");
+            if (!string.IsNullOrWhiteSpace(statement))
+            {
+                lines.Add("");
+                lines.Add("失敗 SQL：");
+                lines.Add(CompactSqlForMessage(statement, 700));
+            }
+
+            return string.Join(Environment.NewLine, lines.ToArray());
+        }
+
+        private static IEnumerable<string> GetOracleDesignerErrorHints(string reason, string databaseName, string tableName)
+        {
+            string owner = string.IsNullOrWhiteSpace(databaseName) ? "目前 schema" : databaseName;
+            string objectName = string.IsNullOrWhiteSpace(tableName) ? "目前資料表" : tableName;
+
+            if (ContainsOracleError(reason, "ORA-01031"))
+            {
+                yield return "目前帳號沒有足夠權限執行這個 DDL。請確認已直接授權 ALTER、CREATE TABLE、CREATE VIEW、CREATE INDEX、DROP 或 COMMENT 等需要的權限；Oracle 的 role 權限在部分 DDL 情境可能不會生效。";
+                yield return "若要修改其他 schema 的物件，請確認 " + owner + "." + objectName + " 的 ALTER/INDEX 權限已授給目前登入帳號。";
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-00942") || ContainsOracleError(reason, "ORA-04043"))
+            {
+                yield return "Oracle 找不到目標物件，或目前帳號沒有存取權限。請確認 " + owner + "." + objectName + " 仍存在，並具備 SELECT/ALTER 權限。";
+                yield return "若物件剛被其他人刪除或重新命名，請重新整理左側資料庫樹後再開啟 Table Designer。";
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-00955") || ContainsOracleError(reason, "ORA-01430"))
+            {
+                yield return "目標名稱已存在，通常代表欄位、索引或暫存物件和現有名稱衝突。請重新整理欄位/索引清單，確認沒有重複名稱後再儲存。";
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-01442") || ContainsOracleError(reason, "ORA-01451"))
+            {
+                yield return "欄位 NULL/NOT NULL 狀態和目前資料庫狀態不一致，可能是其他人已先修改欄位。請重新載入 Table Designer 後再套用變更。";
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-02296") || ContainsOracleError(reason, "ORA-01400"))
+            {
+                yield return "欄位要改成 NOT NULL，但既有資料可能包含 NULL。請先清理資料或設定預設值，再重新儲存。";
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-02429"))
+            {
+                yield return "正在刪除或修改被主鍵/唯一約束使用的索引。請先處理對應 constraint，再調整索引。";
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-01735") || ContainsOracleError(reason, "ORA-00922"))
+            {
+                yield return "產生的 ALTER TABLE 語法不符合目前 Oracle 版本或物件型態。請檢查 SQL 預覽，或改用分段 SQL 手動調整。";
+                yield break;
+            }
+
+            yield return "請檢查目前帳號對 " + owner + "." + objectName + " 的 DDL 權限、物件是否仍存在，以及 SQL 預覽中的語法是否符合 Oracle 限制。";
+        }
+
+        private static bool ContainsOracleError(string reason, string code)
+        {
+            return !string.IsNullOrWhiteSpace(reason) &&
+                   reason.IndexOf(code, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string GetResultValue(Dictionary<string, string> result, string key)
+        {
+            if (result == null || !result.ContainsKey(key) || result[key] == null) return "";
+            return result[key];
+        }
+
+        private static string CompactSqlForMessage(string sql, int maxLength)
+        {
+            string value = (sql ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+            while (value.Contains("  ")) value = value.Replace("  ", " ");
+            if (maxLength > 0 && value.Length > maxLength)
+            {
+                return value.Substring(0, maxLength - 3) + "...";
+            }
+            return value;
         }
 
         private void RollbackDesignerTransactionIfNeeded(bool transactionStarted, bool sqliteForeignKeysDisabled)
