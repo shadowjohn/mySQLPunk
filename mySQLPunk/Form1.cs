@@ -106,6 +106,30 @@ namespace mySQLPunk
             return host + "," + port;
         }
 
+        private static string BuildSqlServerConnectionString(Dictionary<string, object> conn)
+        {
+            var builder = new System.Data.SqlClient.SqlConnectionStringBuilder();
+            string host = GetConnectionValue(conn, "host");
+            string port = GetConnectionValue(conn, "port");
+            builder.DataSource = BuildSqlServerDataSource(host, port);
+            builder.InitialCatalog = string.IsNullOrWhiteSpace(GetConnectionValue(conn, "initial_database"))
+                ? "master"
+                : GetConnectionValue(conn, "initial_database");
+            bool trusted = GetConnectionValue(conn, "trusted_connection") == "T";
+            builder.IntegratedSecurity = trusted;
+            builder.TrustServerCertificate = true;
+            builder.MultipleActiveResultSets = true;
+            builder.ConnectTimeout = 8;
+
+            if (!trusted)
+            {
+                builder.UserID = GetConnectionValue(conn, "username");
+                builder.Password = GetConnectionValue(conn, "pwd");
+            }
+
+            return builder.ConnectionString;
+        }
+
         private static string BuildConnectionFailureMessage(string providerName, Exception ex)
         {
             string provider = string.IsNullOrWhiteSpace(providerName) ? "Database" : providerName;
@@ -5181,23 +5205,7 @@ namespace mySQLPunk
                     case "mssql":
                     case "sqlserver":
                         {
-                            var builder = new System.Data.SqlClient.SqlConnectionStringBuilder();
-                            string host = myN.connections[index].ContainsKey("host") ? myN.connections[index]["host"].ToString() : "";
-                            string port = myN.connections[index].ContainsKey("port") ? myN.connections[index]["port"].ToString() : "";
-                            builder.DataSource = BuildSqlServerDataSource(host, port);
-                            builder.InitialCatalog = myN.connections[index].ContainsKey("initial_database") && !string.IsNullOrWhiteSpace(myN.connections[index]["initial_database"].ToString())
-                                ? myN.connections[index]["initial_database"].ToString()
-                                : "master";
-                            bool trusted = myN.connections[index].ContainsKey("trusted_connection") && myN.connections[index]["trusted_connection"].ToString() == "T";
-                            builder.IntegratedSecurity = trusted;
-                            builder.TrustServerCertificate = true;
-                            builder.ConnectTimeout = 8;
-                            if (!trusted)
-                            {
-                                builder.UserID = myN.connections[index].ContainsKey("username") ? myN.connections[index]["username"].ToString() : "";
-                                builder.Password = myN.connections[index].ContainsKey("pwd") ? myN.connections[index]["pwd"].ToString() : "";
-                            }
-                            myN.connections[index]["connString"] = builder.ConnectionString;
+                            myN.connections[index]["connString"] = BuildSqlServerConnectionString(myN.connections[index]);
                             //Console.WriteLine(myN.connections[index]["connString"]);
                             myN.connections[index]["pdo"] = new my_mssql();
                             //((MySqlConnection)myN.connections[index]["pdo"]).ConnectionString = myN.connections[index]["connString"].ToString();

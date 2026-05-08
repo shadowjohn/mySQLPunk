@@ -165,6 +165,7 @@ namespace mySQLPunk.template
             builder.InitialCatalog = GetInitialDatabase();
             builder.IntegratedSecurity = chkWindowsAuth.Checked;
             builder.TrustServerCertificate = true;
+            builder.MultipleActiveResultSets = true;
             builder.ConnectTimeout = 8;
 
             if (!chkWindowsAuth.Checked)
