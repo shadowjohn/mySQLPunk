@@ -1648,7 +1648,7 @@ namespace mySQLPunk
         {
             List<TableColumnInfo> columns = new List<TableColumnInfo>();
 
-            if (_db is my_mysql)
+            if (IsMySqlProvider())
             {
                 DataTable columnTable = _db.GetColumns(_databaseName, tableName);
                 foreach (DataRow row in columnTable.Rows)
@@ -1668,16 +1668,20 @@ namespace mySQLPunk
             DataTable copyColumns = _db.GetCopyColumns(_databaseName, tableName);
             foreach (DataRow row in copyColumns.Rows)
             {
-                columns.Add(new TableColumnInfo { Name = row["Name"].ToString() });
+                string name = GetMetadataValue(row, "Name", "NAME", "name", "COLUMN_NAME", "column_name");
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    columns.Add(new TableColumnInfo { Name = name });
+                }
             }
 
-            if (_db is my_sqlite)
+            if (IsSqliteProvider())
             {
                 DataTable sqliteColumns = _db.GetColumns(_databaseName, tableName);
                 foreach (DataRow row in sqliteColumns.Rows)
                 {
                     if (!row.Table.Columns.Contains("pk") || row["pk"].ToString() == "0") continue;
-                    TableColumnInfo col = columns.FirstOrDefault(c => c.Name == row["name"].ToString());
+                    TableColumnInfo col = FindTableColumnInfo(columns, row["name"].ToString());
                     if (col != null)
                     {
                         col.IsPrimaryKey = true;
@@ -1692,16 +1696,33 @@ namespace mySQLPunk
                 DataTable indexes = _db.GetIndexes(_databaseName, tableName);
                 foreach (DataRow row in indexes.Rows)
                 {
-                    string keyName = row.Table.Columns.Contains("Key_name") ? row["Key_name"].ToString() : "";
+                    string keyName = GetMetadataValue(row, "Key_name", "KEY_NAME", "key_name", "KeyName", "index_name", "INDEX_NAME");
                     if (!keyName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
-                    string columnName = row.Table.Columns.Contains("Column_name") ? row["Column_name"].ToString() : "";
-                    TableColumnInfo col = columns.FirstOrDefault(c => c.Name == columnName);
+                    string columnName = GetMetadataValue(row, "Column_name", "COLUMN_NAME", "column_name", "ColumnName");
+                    TableColumnInfo col = FindTableColumnInfo(columns, columnName);
                     if (col != null) col.IsPrimaryKey = true;
                 }
             }
             catch { }
 
             return columns;
+        }
+
+        private static TableColumnInfo FindTableColumnInfo(List<TableColumnInfo> columns, string columnName)
+        {
+            return columns.FirstOrDefault(c => c.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string GetMetadataValue(DataRow row, params string[] names)
+        {
+            foreach (string name in names)
+            {
+                if (row.Table.Columns.Contains(name) && row[name] != DBNull.Value)
+                {
+                    return row[name].ToString();
+                }
+            }
+            return "";
         }
 
         private void ExecuteInsert(string tableName, List<TableColumnInfo> columns, DataRow row)
@@ -1842,19 +1863,19 @@ namespace mySQLPunk
 
         private string GetQualifiedTableName(string tableName)
         {
-            if (_db is my_mysql)
+            if (IsMySqlProvider())
             {
                 return QuoteIdentifier(_databaseName) + "." + QuoteIdentifier(tableName);
             }
-            if (_db is my_mssql)
+            if (IsSqlServerProvider())
             {
                 return QuoteIdentifier(_databaseName) + ".[dbo]." + QuoteIdentifier(tableName);
             }
-            if (_db is my_postgresql)
+            if (IsPostgreSqlProvider())
             {
                 return "public." + QuoteIdentifier(tableName);
             }
-            if (_db is my_oracle)
+            if (IsOracleProvider())
             {
                 return QuoteIdentifier(_databaseName) + "." + QuoteIdentifier(tableName);
             }
@@ -1863,15 +1884,15 @@ namespace mySQLPunk
 
         private string QuoteIdentifier(string name)
         {
-            if (_db is my_mysql)
+            if (IsMySqlProvider())
             {
                 return "`" + name.Replace("`", "``") + "`";
             }
-            if (_db is my_mssql)
+            if (IsSqlServerProvider())
             {
                 return "[" + name.Replace("]", "]]") + "]";
             }
-            if (_db is my_postgresql || _db is my_sqlite || _db is my_oracle)
+            if (IsPostgreSqlProvider() || IsSqliteProvider() || IsOracleProvider())
             {
                 return "\"" + name.Replace("\"", "\"\"") + "\"";
             }
@@ -1880,10 +1901,40 @@ namespace mySQLPunk
 
         private string ParameterToken(string parameterName)
         {
-            if (_db is my_postgresql || _db is my_oracle) return ":" + parameterName;
-            if (_db is my_mssql) return "@" + parameterName;
-            if (_db is my_sqlite) return "@" + parameterName;
+            if (IsPostgreSqlProvider() || IsOracleProvider()) return ":" + parameterName;
+            if (IsSqlServerProvider()) return "@" + parameterName;
+            if (IsSqliteProvider()) return "@" + parameterName;
             return "?" + parameterName;
+        }
+
+        private bool IsProvider(string providerName)
+        {
+            return _db != null && string.Equals(_db.ProviderName, providerName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsMySqlProvider()
+        {
+            return _db is my_mysql || IsProvider("mysql");
+        }
+
+        private bool IsPostgreSqlProvider()
+        {
+            return _db is my_postgresql || IsProvider("postgresql");
+        }
+
+        private bool IsSqlServerProvider()
+        {
+            return _db is my_mssql || IsProvider("mssql") || IsProvider("sqlserver");
+        }
+
+        private bool IsSqliteProvider()
+        {
+            return _db is my_sqlite || IsProvider("sqlite");
+        }
+
+        private bool IsOracleProvider()
+        {
+            return _db is my_oracle || IsProvider("oracle");
         }
 
         private static bool IsDbNull(object value)

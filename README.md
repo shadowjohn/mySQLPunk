@@ -44,7 +44,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | SQL Server 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
 | Oracle | 部分可用 | 已補基本連線、查詢、schema/table/view metadata、table data 分頁與同 provider View 複製 |
 | SQL 查詢視窗 | 可用 | 支援執行、語法高亮、自動補完、CSV 匯出；資料表右鍵 `SELECT *` 與 `SELECT 全部欄位` 皆會進入可分頁與編輯的資料表資料模式 |
-| 表格資料列編輯儲存 | 可用 | table data 模式已支援 MySQL、PostgreSQL、SQLite、SQL Server |
+| 表格資料列編輯儲存 | 可用 | table data 模式已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle；更新與刪除會優先使用 Primary Key 條件 |
 | Table Designer | 部分可用 | 既有 table ALTER 已支援 MySQL、PostgreSQL、SQL Server、Oracle；PostgreSQL、SQL Server 與 Oracle 已支援既有 Primary Key 更新；PostgreSQL 已支援 FULLTEXT/GIN 與 SPATIAL/GiST 索引建立；SQL Server 已支援既有欄位 DEFAULT constraint 與欄位註解更新；Oracle 儲存失敗會提供權限與物件狀態診斷；SQLite 已支援以安全重建流程處理欄位新增、刪除、重新命名、排序、型別、NULL、DEFAULT 與 Primary Key 變更 |
 | New Table | 可用 | 已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle `CREATE TABLE` preview/save |
 | Table/View 複製 | 可用 | Table 可批次複製；同 provider View 複製為 View；異種 provider View 會先嘗試轉換 SQL，無法安全轉換時改為 table snapshot |
