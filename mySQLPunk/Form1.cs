@@ -1634,11 +1634,18 @@ namespace mySQLPunk
 
                 string dbName = pathParts[1];
                 
-                // 如果是 Database 節點或 Tables 節點，側邊欄標題顯示 DB 名稱
-                if (pathParts.Length <= 3)
+                // 如果是 Database 節點或物件分類節點，依分類顯示清單
+                if (pathParts.Length == 2)
                 {
                     lblSidebarTitle.Text = $"Database: {dbName}";
                     ShowDatabaseObjectList(db, dbName);
+                    ShowDatabaseInfo(db, dbName);
+                }
+                else if (pathParts.Length == 3)
+                {
+                    string groupName = pathParts[2];
+                    lblSidebarTitle.Text = $"{groupName}: {dbName}";
+                    ShowDatabaseGroupList(db, dbName, groupName);
                     ShowDatabaseInfo(db, dbName);
                 }
                 
@@ -1650,6 +1657,13 @@ namespace mySQLPunk
                     // 只有當 table_top 還沒載入過或是不同 DB 時才重載列表
                     ShowDatabaseObjectList(db, dbName); 
                     ShowTableDetails(db, dbName, tableName);
+                }
+                if (pathParts.Length >= 4 && pathParts[2] == "Views")
+                {
+                    string viewName = pathParts[3];
+                    lblSidebarTitle.Text = $"View: {viewName}";
+                    ShowDatabaseGroupList(db, dbName, "Views");
+                    ShowViewDetails(db, dbName, viewName);
                 }
             }
         }
@@ -2071,6 +2085,42 @@ namespace mySQLPunk
             catch { }
         }
 
+        private void ShowDatabaseGroupList(IDatabase db, string dbName, string groupName)
+        {
+            if (string.Equals(groupName, "Tables", StringComparison.OrdinalIgnoreCase))
+            {
+                ShowDatabaseObjectList(db, dbName);
+                return;
+            }
+
+            DataTable displayDt = new DataTable();
+            displayDt.Columns.Add("名稱");
+            displayDt.Columns.Add("類型");
+            displayDt.Columns.Add("狀態");
+
+            if (string.Equals(groupName, "Views", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (string viewName in db.GetViews(dbName))
+                {
+                    DataRow row = displayDt.NewRow();
+                    row["名稱"] = viewName;
+                    row["類型"] = "View";
+                    row["狀態"] = "Ready";
+                    displayDt.Rows.Add(row);
+                }
+            }
+            else
+            {
+                DataRow row = displayDt.NewRow();
+                row["名稱"] = groupName;
+                row["類型"] = groupName;
+                row["狀態"] = "Empty";
+                displayDt.Rows.Add(row);
+            }
+
+            table_top.DataSource = displayDt;
+        }
+
         private void ShowDatabaseInfo(IDatabase db, string dbName)
         {
             dgvDetails.Rows.Clear();
@@ -2120,6 +2170,23 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 rtbDDL.Text = "Error loading details: " + ex.Message;
+            }
+        }
+
+        private void ShowViewDetails(IDatabase db, string dbName, string viewName)
+        {
+            dgvDetails.Rows.Clear();
+            btnInfo.PerformClick();
+
+            try
+            {
+                dgvDetails.Rows.Add("類型", "View");
+                dgvDetails.Rows.Add("名稱", viewName);
+                rtbDDL.Text = db.GetViewCreateStatement(dbName, viewName);
+            }
+            catch (Exception ex)
+            {
+                rtbDDL.Text = "Error loading view details: " + ex.Message;
             }
         }
 
