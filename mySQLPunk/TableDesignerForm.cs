@@ -1305,7 +1305,7 @@ namespace mySQLPunk
                     }
                     continue;
                 }
-                if (type == "FULLTEXT")
+                if (type == "FULLTEXT" && !SupportsFullTextIndex())
                 {
                     unsupported.Add("非 MySQL 尚未支援 FULLTEXT 索引：" + indexName);
                     continue;
@@ -1332,6 +1332,11 @@ namespace mySQLPunk
         }
 
         private bool SupportsSpatialIndex()
+        {
+            return _db is my_postgresql;
+        }
+
+        private bool SupportsFullTextIndex()
         {
             return _db is my_postgresql;
         }
@@ -1453,6 +1458,12 @@ namespace mySQLPunk
             string indexName = GetRowString(row, "名稱").Trim();
             string type = GetRowString(row, "索引類型").Trim().ToUpperInvariant();
             string columns = GetRowString(row, "欄位").Trim();
+            if (type == "FULLTEXT" && _db is my_postgresql)
+            {
+                return "CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
+                       " ON " + GetQualifiedDesignerTableName(_tableName) +
+                       " USING GIN (" + FormatPostgreSqlFullTextIndexExpression(columns) + ");";
+            }
             if (type == "SPATIAL" && _db is my_postgresql)
             {
                 return "CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
@@ -1632,12 +1643,20 @@ namespace mySQLPunk
                 string columns = GetRowString(row, "欄位").Trim();
                 if (string.IsNullOrWhiteSpace(columns)) continue;
                 if (type == "PRIMARY") continue;
-                if (type == "FULLTEXT") continue;
+                if (type == "FULLTEXT" && !SupportsFullTextIndex()) continue;
                 if (type == "SPATIAL" && !SupportsSpatialIndex()) continue;
                 if (string.IsNullOrWhiteSpace(indexName)) indexName = tableName + "_idx";
 
                 string columnList = FormatGenericIndexColumns(columns);
                 if (string.IsNullOrWhiteSpace(columnList)) continue;
+
+                if (type == "FULLTEXT" && _db is my_postgresql)
+                {
+                    statements.Add("CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
+                                   " ON " + GetQualifiedDesignerTableName(tableName) +
+                                   " USING GIN (" + FormatPostgreSqlFullTextIndexExpression(columns) + ");");
+                    continue;
+                }
 
                 if (type == "SPATIAL" && _db is my_postgresql)
                 {
@@ -1717,6 +1736,25 @@ namespace mySQLPunk
         private string FormatGenericIndexColumns(string columns)
         {
             return FormatIndexColumns(columns, QuoteDesignerIdentifier);
+        }
+
+        private string FormatPostgreSqlFullTextIndexExpression(string columns)
+        {
+            string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            List<string> vectors = new List<string>();
+            foreach (string rawCol in rawCols)
+            {
+                string columnName = GetIndexColumnName(rawCol);
+                if (string.IsNullOrWhiteSpace(columnName)) continue;
+                vectors.Add("coalesce(" + QuoteDesignerIdentifier(columnName) + "::text, '')");
+            }
+
+            if (vectors.Count == 0)
+            {
+                return "to_tsvector('simple', '')";
+            }
+
+            return "to_tsvector('simple', " + string.Join(" || ' ' || ", vectors.ToArray()) + ")";
         }
 
         private string GetQualifiedDesignerTableName(string tableName)
@@ -2588,7 +2626,7 @@ namespace mySQLPunk
 
             if (_db is my_postgresql)
             {
-                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "SPATIAL" };
+                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" };
             }
 
             return new object[] { "NORMAL", "UNIQUE", "PRIMARY" };
