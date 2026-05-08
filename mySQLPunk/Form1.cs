@@ -2590,6 +2590,8 @@ namespace mySQLPunk
                     var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
                     itemDrop.Click += (s, ev) => DeleteSelectedView();
                     cms.Items.Add(itemDrop);
+
+                    AddCopyRenameObjectMenuItems(cms);
                 }
                 else if (groupName == "Tables")
                 {
@@ -2606,6 +2608,8 @@ namespace mySQLPunk
                     var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                     itemDrop.Click += (s, ev) => DeleteSelectedTable();
                     cms.Items.Add(itemDrop);
+
+                    AddCopyRenameObjectMenuItems(cms);
                 }
                 else if (groupName == "Backups")
                 {
@@ -4641,76 +4645,114 @@ namespace mySQLPunk
             {
                 db_tree.SelectedNode = e.Node;
 
-                ContextMenuStrip menu = new ContextMenuStrip();
-
-                if (e.Node.Parent == null)
-                {
-                    ToolStripMenuItem editItem = new ToolStripMenuItem(Localization.T("Tool.EditConnection"));
-                    editItem.Click += (s, ev) => db_tree_edit_connection(e.Node.Index);
-                    menu.Items.Add(editItem);
-
-                    ToolStripMenuItem deleteItem = new ToolStripMenuItem(Localization.T("Tool.DeleteConnection"));
-                    deleteItem.Click += (s, ev) => db_tree_delete_connection(e.Node.Index);
-                    menu.Items.Add(deleteItem);
-                }
-                else
-                {
-                    var pathParts = my.explode("\\", e.Node.FullPath);
-                    if (pathParts.Length >= 4 && pathParts[2] == "Tables")
-                    {
-                        ToolStripMenuItem openTableItem = new ToolStripMenuItem(Localization.T("Tool.OpenTable"));
-                        openTableItem.Click += (s, ev) => OpenSelectedTableInQuery();
-                        menu.Items.Add(openTableItem);
-
-                        ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
-                        designTableItem.Click += (s, ev) => DesignSelectedTable();
-                        menu.Items.Add(designTableItem);
-
-                        menu.Items.Add(CreateTableDumpMenuItem());
-                    }
-                    else if (pathParts.Length >= 4 && pathParts[2] == "Views")
-                    {
-                        ToolStripMenuItem openViewItem = new ToolStripMenuItem(Localization.T("Tool.OpenView"));
-                        openViewItem.Click += (s, ev) => OpenSelectedViewInQuery();
-                        menu.Items.Add(openViewItem);
-
-                        ToolStripMenuItem designViewItem = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
-                        designViewItem.Click += (s, ev) => ShowSelectedViewDefinition();
-                        menu.Items.Add(designViewItem);
-
-                        ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
-                        dumpSqlItem.Click += (s, ev) => DumpSelectedViewSql();
-                        menu.Items.Add(dumpSqlItem);
-
-                        ToolStripMenuItem deleteViewItem = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
-                        deleteViewItem.Click += (s, ev) => DeleteSelectedView();
-                        menu.Items.Add(deleteViewItem);
-                    }
-                    else if (pathParts.Length >= 4 && pathParts[2] == "Functions")
-                    {
-                        ToolStripMenuItem executeFunctionItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteFunction"));
-                        executeFunctionItem.Click += (s, ev) => ExecuteSelectedFunction();
-                        menu.Items.Add(executeFunctionItem);
-
-                        ToolStripMenuItem designFunctionItem = new ToolStripMenuItem(Localization.T("Tool.DesignFunction"));
-                        designFunctionItem.Click += (s, ev) => ShowSelectedFunctionDefinition();
-                        menu.Items.Add(designFunctionItem);
-
-                        ToolStripMenuItem deleteFunctionItem = new ToolStripMenuItem(Localization.T("Tool.DeleteFunction"));
-                        deleteFunctionItem.Click += (s, ev) => DeleteSelectedFunction();
-                        menu.Items.Add(deleteFunctionItem);
-                    }
-                }
-
-                if (menu.Items.Count == 0)
-                {
-                    menu.Dispose();
-                    return;
-                }
-
-                ThemeManager.ApplyToolStrip(menu);
+                ContextMenuStrip menu = BuildTreeContextMenu(e.Node);
+                if (menu == null) return;
                 menu.Show(db_tree, e.Location);
             }
+        }
+
+        private ContextMenuStrip BuildTreeContextMenu(TreeNode node)
+        {
+            if (node == null) return null;
+
+            ContextMenuStrip menu = new ContextMenuStrip();
+
+            if (node.Parent == null)
+            {
+                ToolStripMenuItem editItem = new ToolStripMenuItem(Localization.T("Tool.EditConnection"));
+                editItem.Click += (s, ev) => db_tree_edit_connection(node.Index);
+                menu.Items.Add(editItem);
+
+                ToolStripMenuItem deleteItem = new ToolStripMenuItem(Localization.T("Tool.DeleteConnection"));
+                deleteItem.Click += (s, ev) => db_tree_delete_connection(node.Index);
+                menu.Items.Add(deleteItem);
+            }
+            else
+            {
+                var pathParts = my.explode("\\", node.FullPath);
+                if (pathParts.Length == 2 || (pathParts.Length == 3 && (pathParts[2] == "Tables" || pathParts[2] == "Views")))
+                {
+                    AddPasteObjectMenuItem(menu);
+                }
+                if (pathParts.Length >= 4 && pathParts[2] == "Tables")
+                {
+                    ToolStripMenuItem openTableItem = new ToolStripMenuItem(Localization.T("Tool.OpenTable"));
+                    openTableItem.Click += (s, ev) => OpenSelectedTableInQuery();
+                    menu.Items.Add(openTableItem);
+
+                    ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
+                    designTableItem.Click += (s, ev) => DesignSelectedTable();
+                    menu.Items.Add(designTableItem);
+
+                    menu.Items.Add(CreateTableDumpMenuItem());
+
+                    AddCopyRenameObjectMenuItems(menu);
+                }
+                else if (pathParts.Length >= 4 && pathParts[2] == "Views")
+                {
+                    ToolStripMenuItem openViewItem = new ToolStripMenuItem(Localization.T("Tool.OpenView"));
+                    openViewItem.Click += (s, ev) => OpenSelectedViewInQuery();
+                    menu.Items.Add(openViewItem);
+
+                    ToolStripMenuItem designViewItem = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
+                    designViewItem.Click += (s, ev) => ShowSelectedViewDefinition();
+                    menu.Items.Add(designViewItem);
+
+                    ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                    dumpSqlItem.Click += (s, ev) => DumpSelectedViewSql();
+                    menu.Items.Add(dumpSqlItem);
+
+                    ToolStripMenuItem deleteViewItem = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
+                    deleteViewItem.Click += (s, ev) => DeleteSelectedView();
+                    menu.Items.Add(deleteViewItem);
+
+                    AddCopyRenameObjectMenuItems(menu);
+                }
+                else if (pathParts.Length >= 4 && pathParts[2] == "Functions")
+                {
+                    ToolStripMenuItem executeFunctionItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteFunction"));
+                    executeFunctionItem.Click += (s, ev) => ExecuteSelectedFunction();
+                    menu.Items.Add(executeFunctionItem);
+
+                    ToolStripMenuItem designFunctionItem = new ToolStripMenuItem(Localization.T("Tool.DesignFunction"));
+                    designFunctionItem.Click += (s, ev) => ShowSelectedFunctionDefinition();
+                    menu.Items.Add(designFunctionItem);
+
+                    ToolStripMenuItem deleteFunctionItem = new ToolStripMenuItem(Localization.T("Tool.DeleteFunction"));
+                    deleteFunctionItem.Click += (s, ev) => DeleteSelectedFunction();
+                    menu.Items.Add(deleteFunctionItem);
+                }
+            }
+
+            if (menu.Items.Count == 0)
+            {
+                menu.Dispose();
+                return null;
+            }
+
+            ThemeManager.ApplyToolStrip(menu);
+            return menu;
+        }
+
+        private void AddCopyRenameObjectMenuItems(ContextMenuStrip menu)
+        {
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem copyItem = new ToolStripMenuItem(Localization.T("Tool.CopyObject"));
+            copyItem.Click += (s, ev) => CopySelectedDatabaseObjectToInternalClipboard();
+            menu.Items.Add(copyItem);
+
+            ToolStripMenuItem renameItem = new ToolStripMenuItem(Localization.T("Tool.RenameObject"));
+            renameItem.Click += (s, ev) => BeginRenameSelectedDatabaseObject();
+            menu.Items.Add(renameItem);
+        }
+
+        private void AddPasteObjectMenuItem(ContextMenuStrip menu)
+        {
+            ToolStripMenuItem pasteItem = new ToolStripMenuItem(Localization.T("Tool.PasteObject"));
+            pasteItem.Enabled = _treeClipboardItem != null;
+            pasteItem.Click += (s, ev) => PasteInternalClipboardToSelectedDatabase();
+            menu.Items.Add(pasteItem);
         }
 
         private void db_tree_edit_connection(int index)
