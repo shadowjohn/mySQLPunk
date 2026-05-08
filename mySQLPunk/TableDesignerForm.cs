@@ -718,6 +718,11 @@ namespace mySQLPunk
 
         private string BuildGenericAlterTableSql(DataTable currentDt)
         {
+            if (_db is my_sqlite && NeedsSqliteTableRebuild(currentDt))
+            {
+                return BuildSqliteRebuildTableSql(currentDt);
+            }
+
             List<string> statements = new List<string>();
             List<string> unsupported = new List<string>();
 
@@ -778,6 +783,145 @@ namespace mySQLPunk
                 return "-- No changes detected.";
             }
 
+            return string.Join("\r\n", statements.ToArray());
+        }
+
+        private bool NeedsSqliteTableRebuild(DataTable currentDt)
+        {
+            if (!(_db is my_sqlite) || currentDt == null || _originalDt == null) return false;
+
+            foreach (DataRow original in _originalDt.Rows)
+            {
+                string oldName = GetRowString(original, "Name").Trim();
+                if (string.IsNullOrWhiteSpace(oldName)) continue;
+                if (FindCurrentColumnByOldName(currentDt, oldName) == null) return true;
+            }
+
+            int visibleIndex = 0;
+            foreach (DataRow current in currentDt.Rows)
+            {
+                if (current.RowState == DataRowState.Deleted) continue;
+                if (string.IsNullOrWhiteSpace(GetRowString(current, "Name"))) continue;
+
+                string oldName = GetRowString(current, "_OldName").Trim();
+                DataRow original = FindOriginalColumn(oldName);
+                if (original == null)
+                {
+                    visibleIndex++;
+                    continue;
+                }
+
+                if (!oldName.Equals(GetRowString(current, "Name").Trim(), StringComparison.Ordinal)) return true;
+                if (HasTextChanged(original, current, "Type")) return true;
+                if (HasTextChanged(original, current, "Length")) return true;
+                if (HasTextChanged(original, current, "Decimals")) return true;
+                if (HasBoolChanged(original, current, "NotNull")) return true;
+                if (HasTextChanged(original, current, "Default")) return true;
+                if (_originalDt.Rows.IndexOf(original) != visibleIndex) return true;
+
+                visibleIndex++;
+            }
+
+            return false;
+        }
+
+        private DataRow FindCurrentColumnByOldName(DataTable currentDt, string oldName)
+        {
+            foreach (DataRow row in currentDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                if (GetRowString(row, "_OldName").Trim() == oldName) return row;
+            }
+            return null;
+        }
+
+        private string BuildSqliteRebuildTableSql(DataTable currentDt)
+        {
+            List<string> unsupported = new List<string>();
+            foreach (DataRow current in currentDt.Rows)
+            {
+                if (current.RowState == DataRowState.Deleted) continue;
+                string oldName = GetRowString(current, "_OldName").Trim();
+                DataRow original = FindOriginalColumn(oldName);
+                if (original != null && HasTextChanged(original, current, "Comment"))
+                {
+                    unsupported.Add("SQLite 不支援欄位註解：" + GetRowString(current, "Name").Trim());
+                }
+            }
+
+            if (unsupported.Count > 0)
+            {
+                return "-- 目前不支援以下既有資料表變更：\r\n-- " + string.Join("\r\n-- ", unsupported.ToArray());
+            }
+
+            List<DataRow> currentColumns = new List<DataRow>();
+            foreach (DataRow row in currentDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                if (!string.IsNullOrWhiteSpace(GetRowString(row, "Name"))) currentColumns.Add(row);
+            }
+
+            if (currentColumns.Count == 0)
+            {
+                return "-- 請至少保留一個欄位。";
+            }
+
+            string tempTableName = "__mysqlpunk_rebuild_" + _tableName;
+            List<string> definitions = new List<string>();
+            List<string> primaryColumns = new List<string>();
+            foreach (DataRow row in currentColumns)
+            {
+                definitions.Add("  " + BuildGenericColumnDefinition(row));
+                if (GetBool(row, "PK"))
+                {
+                    primaryColumns.Add(QuoteDesignerIdentifier(GetRowString(row, "Name").Trim()));
+                }
+            }
+            if (primaryColumns.Count > 0)
+            {
+                definitions.Add("  PRIMARY KEY (" + string.Join(", ", primaryColumns.ToArray()) + ")");
+            }
+
+            List<string> insertColumns = new List<string>();
+            List<string> selectExpressions = new List<string>();
+            foreach (DataRow row in currentColumns)
+            {
+                string columnName = GetRowString(row, "Name").Trim();
+                insertColumns.Add(QuoteDesignerIdentifier(columnName));
+
+                DataRow original = FindOriginalColumn(GetRowString(row, "_OldName").Trim());
+                if (original != null)
+                {
+                    selectExpressions.Add(QuoteDesignerIdentifier(GetRowString(original, "Name").Trim()));
+                    continue;
+                }
+
+                string defaultValue = GetRowString(row, "Default").Trim();
+                selectExpressions.Add(string.IsNullOrWhiteSpace(defaultValue) ? "NULL" : FormatGenericDefault(defaultValue));
+            }
+
+            List<string> statements = new List<string>();
+            statements.Add("PRAGMA foreign_keys=OFF;");
+            statements.Add("BEGIN TRANSACTION;");
+            statements.Add("DROP TABLE IF EXISTS " + QuoteDesignerIdentifier(tempTableName) + ";");
+            statements.Add("CREATE TABLE " + QuoteDesignerIdentifier(tempTableName) + " (\r\n" +
+                           string.Join(",\r\n", definitions.ToArray()) + "\r\n" +
+                           ");");
+            statements.Add("INSERT INTO " + QuoteDesignerIdentifier(tempTableName) +
+                           " (" + string.Join(", ", insertColumns.ToArray()) + ") SELECT " +
+                           string.Join(", ", selectExpressions.ToArray()) +
+                           " FROM " + GetQualifiedDesignerTableName(_tableName) + ";");
+            statements.Add("DROP TABLE " + GetQualifiedDesignerTableName(_tableName) + ";");
+            statements.Add("ALTER TABLE " + QuoteDesignerIdentifier(tempTableName) +
+                           " RENAME TO " + QuoteDesignerIdentifier(_tableName) + ";");
+
+            foreach (string indexStatement in BuildGenericCreateIndexStatements(_tableName))
+            {
+                statements.Add(indexStatement);
+            }
+
+            statements.Add("COMMIT;");
+            statements.Add("PRAGMA foreign_keys=ON;");
             return string.Join("\r\n", statements.ToArray());
         }
 
@@ -1262,6 +1406,11 @@ namespace mySQLPunk
         {
             string upper = value.ToUpperInvariant();
             if (upper == "NULL" || upper == "CURRENT_TIMESTAMP" || upper == "CURRENT_TIMESTAMP()")
+            {
+                return value;
+            }
+            if ((value.StartsWith("'") && value.EndsWith("'")) ||
+                (value.StartsWith("\"") && value.EndsWith("\"")))
             {
                 return value;
             }
