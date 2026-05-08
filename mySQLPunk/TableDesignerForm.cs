@@ -866,7 +866,7 @@ namespace mySQLPunk
                 return "-- 請至少保留一個欄位。";
             }
 
-            string tempTableName = "__mysqlpunk_rebuild_" + _tableName;
+            string tempTableName = BuildUniqueSqliteRebuildTableName();
             List<string> definitions = new List<string>();
             List<string> primaryColumns = new List<string>();
             foreach (DataRow row in currentColumns)
@@ -903,7 +903,6 @@ namespace mySQLPunk
             List<string> statements = new List<string>();
             statements.Add("PRAGMA foreign_keys=OFF;");
             statements.Add("BEGIN TRANSACTION;");
-            statements.Add("DROP TABLE IF EXISTS " + QuoteDesignerIdentifier(tempTableName) + ";");
             statements.Add("CREATE TABLE " + QuoteDesignerIdentifier(tempTableName) + " (\r\n" +
                            string.Join(",\r\n", definitions.ToArray()) + "\r\n" +
                            ");");
@@ -923,6 +922,42 @@ namespace mySQLPunk
             statements.Add("COMMIT;");
             statements.Add("PRAGMA foreign_keys=ON;");
             return string.Join("\r\n", statements.ToArray());
+        }
+
+        private string BuildUniqueSqliteRebuildTableName()
+        {
+            string baseName = "__mysqlpunk_rebuild_" + _tableName;
+            HashSet<string> existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                foreach (string tableName in _db.GetTables(_databaseName))
+                {
+                    if (!string.IsNullOrWhiteSpace(tableName))
+                    {
+                        existingNames.Add(tableName);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            if (!existingNames.Contains(baseName))
+            {
+                return baseName;
+            }
+
+            for (int i = 1; i < 1000; i++)
+            {
+                string candidate = baseName + "_" + i.ToString();
+                if (!existingNames.Contains(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return baseName + "_" + Guid.NewGuid().ToString("N");
         }
 
         private List<string> BuildSqliteRebuildIndexStatements(DataTable currentDt, string tableName)
@@ -1787,16 +1822,66 @@ namespace mySQLPunk
         private Dictionary<string, string> ExecuteDesignerSql(string sql)
         {
             Dictionary<string, string> lastResult = new Dictionary<string, string> { { "status", "OK" } };
-            foreach (string statement in SplitSqlStatements(sql))
+            bool transactionStarted = false;
+            bool sqliteForeignKeysDisabled = false;
+
+            try
             {
-                if (string.IsNullOrWhiteSpace(statement)) continue;
-                lastResult = _db.ExecSQL(statement);
-                if (!lastResult.ContainsKey("status") || lastResult["status"] != "OK")
+                foreach (string statement in SplitSqlStatements(sql))
                 {
-                    return lastResult;
+                    if (string.IsNullOrWhiteSpace(statement)) continue;
+
+                    string normalizedStatement = statement.Trim();
+                    lastResult = _db.ExecSQL(normalizedStatement);
+
+                    if (!lastResult.ContainsKey("status") || lastResult["status"] != "OK")
+                    {
+                        RollbackDesignerTransactionIfNeeded(transactionStarted, sqliteForeignKeysDisabled);
+                        return lastResult;
+                    }
+
+                    if (string.Equals(normalizedStatement, "BEGIN TRANSACTION", StringComparison.OrdinalIgnoreCase))
+                    {
+                        transactionStarted = true;
+                    }
+                    else if (string.Equals(normalizedStatement, "COMMIT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        transactionStarted = false;
+                    }
+                    else if (_db is my_sqlite && string.Equals(normalizedStatement, "PRAGMA foreign_keys=OFF", StringComparison.OrdinalIgnoreCase))
+                    {
+                        sqliteForeignKeysDisabled = true;
+                    }
+                    else if (_db is my_sqlite && string.Equals(normalizedStatement, "PRAGMA foreign_keys=ON", StringComparison.OrdinalIgnoreCase))
+                    {
+                        sqliteForeignKeysDisabled = false;
+                    }
                 }
+
+                return lastResult;
             }
-            return lastResult;
+            catch (Exception ex)
+            {
+                RollbackDesignerTransactionIfNeeded(transactionStarted, sqliteForeignKeysDisabled);
+                return new Dictionary<string, string>
+                {
+                    { "status", "ERROR" },
+                    { "reason", ex.Message }
+                };
+            }
+        }
+
+        private void RollbackDesignerTransactionIfNeeded(bool transactionStarted, bool sqliteForeignKeysDisabled)
+        {
+            if (transactionStarted)
+            {
+                try { _db.ExecSQL("ROLLBACK"); } catch { }
+            }
+
+            if (sqliteForeignKeysDisabled && _db is my_sqlite)
+            {
+                try { _db.ExecSQL("PRAGMA foreign_keys=ON"); } catch { }
+            }
         }
 
         private static List<string> SplitSqlStatements(string sql)

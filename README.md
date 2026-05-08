@@ -45,7 +45,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | Oracle | 部分可用 | 已補基本連線、查詢、schema/table/view metadata、table data 分頁與同 provider View 複製 |
 | SQL 查詢視窗 | 可用 | 支援執行、語法高亮、自動補完、CSV 匯出 |
 | 表格資料列編輯儲存 | 可用 | table data 模式已支援 MySQL、PostgreSQL、SQLite、SQL Server |
-| Table Designer | 部分可用 | 既有 table ALTER 已支援 MySQL、PostgreSQL、SQL Server、Oracle；SQLite 支援 add/drop/rename column，型別修改需後續補重建表流程 |
+| Table Designer | 部分可用 | 既有 table ALTER 已支援 MySQL、PostgreSQL、SQL Server、Oracle；SQLite 已支援以安全重建流程處理欄位新增、刪除、重新命名、排序、型別、NULL 與 DEFAULT 變更 |
 | New Table | 可用 | 已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle `CREATE TABLE` preview/save |
 | Table/View 複製 | 可用 | Table 可批次複製；同 provider View 複製為 View，異種 provider View 複製為 table snapshot |
 | SQL Dump | 可用 | Table dump 已支援 MySQL、PostgreSQL、SQLite、SQL Server |
@@ -68,9 +68,8 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 1. 建立可重複的 Windows 建置與驗證流程。
 2. 針對 Oracle、PostgreSQL、SQLite、SQL Server 補實機連線回歸測試。
-3. 補齊 SQLite 既有資料表型別/NULL/default 修改的安全重建流程。
-4. 評估是否為異種資料庫 View 複製建立 SQL 方言轉換器。
-5. 補強 Oracle Table Designer 與權限不足時的錯誤訊息。
+3. 評估是否為異種資料庫 View 複製建立 SQL 方言轉換器。
+4. 補強 Oracle Table Designer 與權限不足時的錯誤訊息。
 
 ## 驗證原則
 
