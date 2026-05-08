@@ -184,7 +184,18 @@ namespace mySQLPunk.lib
         public DataTable GetColumns(string databaseName, string tableName)
         {
             var p = new Dictionary<string, object> { { "tableName", tableName } };
-            return SelectSQL("SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = :tableName", p);
+            return SelectSQL(@"
+                SELECT
+                    column_name,
+                    data_type,
+                    is_nullable,
+                    column_default,
+                    character_maximum_length,
+                    numeric_precision,
+                    numeric_scale
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = :tableName
+                ORDER BY ordinal_position", p);
         }
 
         public DataTable GetTableStatus(string databaseName)

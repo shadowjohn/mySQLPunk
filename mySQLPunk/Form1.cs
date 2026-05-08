@@ -367,7 +367,12 @@ namespace mySQLPunk
         }
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            MessageBox.Show("羽山帥");
+            string message =
+                "mySQLPunk\r\n\r\n" +
+                "版本：" + Application.ProductVersion + "\r\n" +
+                "平台：.NET Framework WinForms\r\n" +
+                "支援連線：MySQL、PostgreSQL、SQLite、SQL Server、Oracle";
+            MessageBox.Show(message, Localization.T("Menu.Help"), MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void toolStripMenuItem2_Click(object sender, EventArgs e)

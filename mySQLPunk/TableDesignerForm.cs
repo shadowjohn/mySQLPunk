@@ -398,13 +398,17 @@ namespace mySQLPunk
                     else if (_db is my_postgresql)
                     {
                         newRow["Name"] = row["column_name"];
+                        newRow["_OldName"] = row["column_name"];
                         newRow["Type"] = row["data_type"];
+                        newRow["Length"] = GetLengthFromMetadata(row, "character_maximum_length", "numeric_precision");
+                        newRow["Decimals"] = row.Table.Columns.Contains("numeric_scale") && row["numeric_scale"] != DBNull.Value ? row["numeric_scale"].ToString() : "";
                         newRow["NotNull"] = (row["is_nullable"].ToString() == "NO");
                         newRow["Default"] = row["column_default"];
                     }
                     else if (_db is my_sqlite)
                     {
                         newRow["Name"] = row["name"];
+                        newRow["_OldName"] = row["name"];
                         newRow["Type"] = row["type"];
                         newRow["NotNull"] = (row["notnull"].ToString() == "1");
                         newRow["PK"] = (row["pk"].ToString() == "1");
@@ -413,8 +417,21 @@ namespace mySQLPunk
                     else if (_db is my_mssql)
                     {
                         newRow["Name"] = row["COLUMN_NAME"];
+                        newRow["_OldName"] = row["COLUMN_NAME"];
                         newRow["Type"] = row["DATA_TYPE"];
+                        newRow["Length"] = GetLengthFromMetadata(row, "CHARACTER_MAXIMUM_LENGTH", "NUMERIC_PRECISION");
+                        newRow["Decimals"] = row.Table.Columns.Contains("NUMERIC_SCALE") && row["NUMERIC_SCALE"] != DBNull.Value ? row["NUMERIC_SCALE"].ToString() : "";
                         newRow["NotNull"] = (row["IS_NULLABLE"].ToString() == "NO");
+                        newRow["Default"] = row["COLUMN_DEFAULT"];
+                    }
+                    else if (_db is my_oracle)
+                    {
+                        newRow["Name"] = row["COLUMN_NAME"];
+                        newRow["_OldName"] = row["COLUMN_NAME"];
+                        newRow["Type"] = row["DATA_TYPE"];
+                        newRow["Length"] = row.Table.Columns.Contains("DATA_LENGTH") && row["DATA_LENGTH"] != DBNull.Value ? row["DATA_LENGTH"].ToString() : "";
+                        newRow["Decimals"] = row.Table.Columns.Contains("DATA_SCALE") && row["DATA_SCALE"] != DBNull.Value ? row["DATA_SCALE"].ToString() : "";
+                        newRow["NotNull"] = (row["IS_NULLABLE"].ToString() == "N");
                         newRow["Default"] = row["COLUMN_DEFAULT"];
                     }
                     else
@@ -447,6 +464,22 @@ namespace mySQLPunk
             displayDt.Columns.Add("Comment");
             displayDt.Columns.Add("_OldName");
             return displayDt;
+        }
+
+        private static string GetLengthFromMetadata(DataRow row, string textLengthColumn, string numericPrecisionColumn)
+        {
+            if (row.Table.Columns.Contains(textLengthColumn) && row[textLengthColumn] != DBNull.Value)
+            {
+                string value = row[textLengthColumn].ToString();
+                return value == "-1" ? "MAX" : value;
+            }
+
+            if (row.Table.Columns.Contains(numericPrecisionColumn) && row[numericPrecisionColumn] != DBNull.Value)
+            {
+                return row[numericPrecisionColumn].ToString();
+            }
+
+            return "";
         }
 
         private void BindColumns(DataTable displayDt)
@@ -519,7 +552,7 @@ namespace mySQLPunk
 
             if (!(_db is my_mysql))
             {
-                rtbSqlPreview.Text = "-- 既有資料表 ALTER 目前只支援 MySQL；非 MySQL 請使用 New Table 建立新表。";
+                rtbSqlPreview.Text = BuildGenericAlterTableSql(currentDt);
                 return;
             }
 
@@ -690,6 +723,352 @@ namespace mySQLPunk
             return BuildGenericCreateTableSql(currentDt);
         }
 
+        private string BuildGenericAlterTableSql(DataTable currentDt)
+        {
+            List<string> statements = new List<string>();
+            List<string> unsupported = new List<string>();
+
+            foreach (DataRow original in _originalDt.Rows)
+            {
+                string oldName = GetRowString(original, "Name").Trim();
+                if (string.IsNullOrWhiteSpace(oldName)) continue;
+
+                bool stillExists = false;
+                foreach (DataRow current in currentDt.Rows)
+                {
+                    if (current.RowState == DataRowState.Deleted) continue;
+                    if (GetRowString(current, "_OldName").Trim() == oldName)
+                    {
+                        stillExists = true;
+                        break;
+                    }
+                }
+
+                if (!stillExists)
+                {
+                    statements.Add(BuildDropColumnStatement(oldName));
+                }
+            }
+
+            foreach (DataRow current in currentDt.Rows)
+            {
+                if (current.RowState == DataRowState.Deleted) continue;
+
+                string columnName = GetRowString(current, "Name").Trim();
+                if (string.IsNullOrWhiteSpace(columnName)) continue;
+
+                string oldName = GetRowString(current, "_OldName").Trim();
+                DataRow original = FindOriginalColumn(oldName);
+                if (original == null)
+                {
+                    statements.Add(BuildAddColumnStatement(current));
+                    continue;
+                }
+
+                if (!oldName.Equals(columnName, StringComparison.Ordinal))
+                {
+                    statements.Add(BuildRenameColumnStatement(oldName, columnName));
+                }
+
+                statements.AddRange(BuildAlterColumnStatements(original, current, columnName, unsupported));
+            }
+
+            statements.AddRange(BuildGenericAlterIndexStatements(unsupported));
+
+            if (unsupported.Count > 0)
+            {
+                return "-- 目前不支援以下既有資料表變更：\r\n-- " + string.Join("\r\n-- ", unsupported.ToArray());
+            }
+
+            if (statements.Count == 0)
+            {
+                return "-- No changes detected.";
+            }
+
+            return string.Join("\r\n", statements.ToArray());
+        }
+
+        private DataRow FindOriginalColumn(string oldName)
+        {
+            if (string.IsNullOrWhiteSpace(oldName) || _originalDt == null) return null;
+            foreach (DataRow row in _originalDt.Rows)
+            {
+                if (GetRowString(row, "Name").Trim() == oldName) return row;
+            }
+            return null;
+        }
+
+        private string BuildAddColumnStatement(DataRow row)
+        {
+            if (_db is my_oracle)
+            {
+                return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                       " ADD (" + BuildGenericColumnDefinition(row) + ");";
+            }
+
+            if (_db is my_mssql)
+            {
+                return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                       " ADD " + BuildGenericColumnDefinition(row) + ";";
+            }
+
+            return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                   " ADD COLUMN " + BuildGenericColumnDefinition(row) + ";";
+        }
+
+        private string BuildDropColumnStatement(string oldName)
+        {
+            return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                   " DROP COLUMN " + QuoteDesignerIdentifier(oldName) + ";";
+        }
+
+        private string BuildRenameColumnStatement(string oldName, string newName)
+        {
+            if (_db is my_mssql)
+            {
+                return "EXEC " + QuoteDesignerIdentifier(_databaseName) + ".sys.sp_rename N'dbo." +
+                       EscapeSqlServerLiteral(_tableName) + "." + EscapeSqlServerLiteral(oldName) +
+                       "', N'" + EscapeSqlServerLiteral(newName) + "', N'COLUMN';";
+            }
+
+            return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                   " RENAME COLUMN " + QuoteDesignerIdentifier(oldName) +
+                   " TO " + QuoteDesignerIdentifier(newName) + ";";
+        }
+
+        private List<string> BuildAlterColumnStatements(DataRow original, DataRow current, string columnName, List<string> unsupported)
+        {
+            List<string> statements = new List<string>();
+            bool typeChanged = HasTextChanged(original, current, "Type") ||
+                               HasTextChanged(original, current, "Length") ||
+                               HasTextChanged(original, current, "Decimals");
+            bool nullChanged = HasBoolChanged(original, current, "NotNull");
+            bool defaultChanged = HasTextChanged(original, current, "Default");
+            bool commentChanged = HasTextChanged(original, current, "Comment");
+
+            if (_db is my_sqlite)
+            {
+                if (typeChanged || nullChanged || defaultChanged)
+                    unsupported.Add("SQLite 修改既有欄位型別、NULL 或 DEFAULT 需要重建資料表：" + columnName);
+                if (commentChanged)
+                    unsupported.Add("SQLite 不支援欄位註解：" + columnName);
+                return statements;
+            }
+
+            if (_db is my_postgresql)
+            {
+                if (typeChanged)
+                {
+                    statements.Add("ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                                   " ALTER COLUMN " + QuoteDesignerIdentifier(columnName) +
+                                   " TYPE " + MapDesignerType(GetRowString(current, "Type"), GetRowString(current, "Length"), GetRowString(current, "Decimals")) + ";");
+                }
+                if (nullChanged)
+                {
+                    statements.Add("ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                                   " ALTER COLUMN " + QuoteDesignerIdentifier(columnName) +
+                                   (GetBool(current, "NotNull") ? " SET NOT NULL;" : " DROP NOT NULL;"));
+                }
+                if (defaultChanged)
+                {
+                    string defaultValue = GetRowString(current, "Default").Trim();
+                    statements.Add("ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                                   " ALTER COLUMN " + QuoteDesignerIdentifier(columnName) +
+                                   (string.IsNullOrWhiteSpace(defaultValue) ? " DROP DEFAULT;" : " SET DEFAULT " + FormatGenericDefault(defaultValue) + ";"));
+                }
+                if (commentChanged)
+                {
+                    statements.Add("COMMENT ON COLUMN " + GetQualifiedDesignerTableName(_tableName) + "." + QuoteDesignerIdentifier(columnName) +
+                                   " IS " + EscapeSqlStringLiteral(GetRowString(current, "Comment")) + ";");
+                }
+                return statements;
+            }
+
+            if (_db is my_mssql)
+            {
+                if (typeChanged || nullChanged)
+                {
+                    statements.Add("ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                                   " ALTER COLUMN " + QuoteDesignerIdentifier(columnName) + " " +
+                                   MapDesignerType(GetRowString(current, "Type"), GetRowString(current, "Length"), GetRowString(current, "Decimals")) +
+                                   (GetBool(current, "NotNull") ? " NOT NULL;" : " NULL;"));
+                }
+                if (defaultChanged)
+                    unsupported.Add("SQL Server 修改既有 DEFAULT 需要先定位並刪除 default constraint：" + columnName);
+                if (commentChanged)
+                    unsupported.Add("SQL Server 欄位註解需透過 extended property 另行處理：" + columnName);
+                return statements;
+            }
+
+            if (_db is my_oracle)
+            {
+                if (typeChanged || nullChanged || defaultChanged)
+                {
+                    string defaultValue = GetRowString(current, "Default").Trim();
+                    List<string> parts = new List<string>
+                    {
+                        QuoteDesignerIdentifier(columnName),
+                        MapDesignerType(GetRowString(current, "Type"), GetRowString(current, "Length"), GetRowString(current, "Decimals"))
+                    };
+                    if (!string.IsNullOrWhiteSpace(defaultValue))
+                    {
+                        parts.Add("DEFAULT " + FormatGenericDefault(defaultValue));
+                    }
+                    parts.Add(GetBool(current, "NotNull") ? "NOT NULL" : "NULL");
+                    statements.Add("ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
+                                   " MODIFY (" + string.Join(" ", parts.ToArray()) + ");");
+                }
+                if (commentChanged)
+                {
+                    statements.Add("COMMENT ON COLUMN " + GetQualifiedDesignerTableName(_tableName) + "." + QuoteDesignerIdentifier(columnName) +
+                                   " IS " + EscapeSqlStringLiteral(GetRowString(current, "Comment")) + ";");
+                }
+            }
+
+            return statements;
+        }
+
+        private List<string> BuildGenericAlterIndexStatements(List<string> unsupported)
+        {
+            List<string> statements = new List<string>();
+            DataTable currentIdxDt = dgvIndexes.DataSource as DataTable;
+            if (currentIdxDt == null || _originalIdxDt == null) return statements;
+
+            foreach (DataRow original in _originalIdxDt.Rows)
+            {
+                string oldName = GetRowString(original, "名稱").Trim();
+                if (string.IsNullOrWhiteSpace(oldName)) continue;
+                if (IsPrimaryIndexName(oldName))
+                {
+                    if (!HasMatchingIndex(currentIdxDt, original))
+                        unsupported.Add("PRIMARY KEY 修改需要資料庫特定 constraint 名稱：" + _tableName);
+                    continue;
+                }
+
+                DataRow current = FindCurrentIndex(currentIdxDt, oldName);
+                if (current == null || IsIndexChanged(original, current))
+                {
+                    statements.Add(BuildDropIndexStatement(oldName));
+                }
+            }
+
+            foreach (DataRow current in currentIdxDt.Rows)
+            {
+                if (current.RowState == DataRowState.Deleted) continue;
+                string indexName = GetRowString(current, "名稱").Trim();
+                string type = GetRowString(current, "索引類型").Trim().ToUpperInvariant();
+                if (string.IsNullOrWhiteSpace(indexName)) continue;
+                if (type == "PRIMARY")
+                {
+                    if (!HasOriginalMatchingIndex(current))
+                        unsupported.Add("PRIMARY KEY 修改需要資料庫特定 constraint 名稱：" + _tableName);
+                    continue;
+                }
+                if (type == "FULLTEXT" || type == "SPATIAL")
+                {
+                    unsupported.Add("非 MySQL 尚未支援 " + type + " 索引：" + indexName);
+                    continue;
+                }
+
+                DataRow original = FindOriginalIndex(indexName);
+                if (original == null || IsIndexChanged(original, current))
+                {
+                    statements.Add(BuildCreateGenericIndexStatement(current));
+                }
+            }
+
+            return statements;
+        }
+
+        private string BuildDropIndexStatement(string indexName)
+        {
+            if (_db is my_mssql)
+            {
+                return "DROP INDEX " + QuoteDesignerIdentifier(indexName) + " ON " + GetQualifiedDesignerTableName(_tableName) + ";";
+            }
+            return "DROP INDEX " + QuoteDesignerIdentifier(indexName) + ";";
+        }
+
+        private string BuildCreateGenericIndexStatement(DataRow row)
+        {
+            string indexName = GetRowString(row, "名稱").Trim();
+            string type = GetRowString(row, "索引類型").Trim().ToUpperInvariant();
+            string columns = GetRowString(row, "欄位").Trim();
+            string unique = type == "UNIQUE" ? "UNIQUE " : "";
+            return "CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
+                   " ON " + GetQualifiedDesignerTableName(_tableName) +
+                   " (" + FormatGenericIndexColumns(columns) + ");";
+        }
+
+        private DataRow FindOriginalIndex(string indexName)
+        {
+            foreach (DataRow row in _originalIdxDt.Rows)
+            {
+                if (GetRowString(row, "名稱").Trim() == indexName) return row;
+            }
+            return null;
+        }
+
+        private DataRow FindCurrentIndex(DataTable currentIdxDt, string oldName)
+        {
+            foreach (DataRow row in currentIdxDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                string currentOldName = GetRowString(row, "_OldName").Trim();
+                string currentName = GetRowString(row, "名稱").Trim();
+                if (currentOldName == oldName || currentName == oldName) return row;
+            }
+            return null;
+        }
+
+        private bool HasMatchingIndex(DataTable currentIdxDt, DataRow original)
+        {
+            foreach (DataRow current in currentIdxDt.Rows)
+            {
+                if (current.RowState == DataRowState.Deleted) continue;
+                if (!IsIndexChanged(original, current)) return true;
+            }
+            return false;
+        }
+
+        private bool HasOriginalMatchingIndex(DataRow current)
+        {
+            foreach (DataRow original in _originalIdxDt.Rows)
+            {
+                if (!IsIndexChanged(original, current)) return true;
+            }
+            return false;
+        }
+
+        private static bool IsPrimaryIndexName(string indexName)
+        {
+            return indexName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsIndexChanged(DataRow original, DataRow current)
+        {
+            return GetRowString(original, "名稱") != GetRowString(current, "名稱") ||
+                   GetRowString(original, "欄位") != GetRowString(current, "欄位") ||
+                   GetRowString(original, "索引類型") != GetRowString(current, "索引類型") ||
+                   GetRowString(original, "索引方法") != GetRowString(current, "索引方法") ||
+                   GetRowString(original, "註解") != GetRowString(current, "註解");
+        }
+
+        private static bool HasTextChanged(DataRow original, DataRow current, string columnName)
+        {
+            return GetRowString(original, columnName).Trim() != GetRowString(current, columnName).Trim();
+        }
+
+        private static bool HasBoolChanged(DataRow original, DataRow current, string columnName)
+        {
+            return GetBool(original, columnName) != GetBool(current, columnName);
+        }
+
+        private static bool GetBool(DataRow row, string columnName)
+        {
+            return row.Table.Columns.Contains(columnName) && row[columnName] != DBNull.Value && (bool)row[columnName];
+        }
+
         private string BuildGenericCreateTableSql(DataTable currentDt)
         {
             string tableName = GetTableNameForSave();
@@ -838,11 +1217,13 @@ namespace mySQLPunk
             if (_db is my_oracle)
             {
                 if (type.Contains("bigint") || type.Contains("smallint") || type.Contains("int")) return "NUMBER(10)";
-                if (type.Contains("decimal") || type.Contains("numeric")) return "NUMBER(" + (len.Length > 0 ? len : "18") + "," + (scale.Length > 0 ? scale : "0") + ")";
+                if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("number")) return "NUMBER(" + (len.Length > 0 ? len : "18") + "," + (scale.Length > 0 ? scale : "0") + ")";
                 if (type.Contains("double") || type.Contains("float") || type.Contains("real")) return "BINARY_DOUBLE";
                 if (type.Contains("bool") || type == "bit") return "NUMBER(1)";
                 if (type.Contains("date") || type.Contains("time")) return "TIMESTAMP";
                 if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea")) return "BLOB";
+                if (type.Contains("char") || type.Contains("varchar")) return len.Length > 0 ? "VARCHAR2(" + len + ")" : "VARCHAR2(255)";
+                if (type.Contains("clob")) return "CLOB";
                 return len.Length > 0 ? "VARCHAR2(" + len + ")" : "CLOB";
             }
 
@@ -1112,6 +1493,16 @@ namespace mySQLPunk
             return "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
         }
 
+        private static string EscapeSqlStringLiteral(string value)
+        {
+            return "'" + (value ?? "").Replace("'", "''") + "'";
+        }
+
+        private static string EscapeSqlServerLiteral(string value)
+        {
+            return (value ?? "").Replace("'", "''");
+        }
+
         private void BtnSave_Click(object sender, EventArgs e)
         {
             GeneratePreviewSql();
@@ -1125,7 +1516,7 @@ namespace mySQLPunk
 
             if (MessageBox.Show($"即將執行以下 SQL：\n\n{sql}\n\n確定嗎？", "Confirm Save", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             {
-                var res = _db.ExecSQL(sql);
+                var res = ExecuteDesignerSql(sql);
                 if (res["status"] == "OK")
                 {
                     MessageBox.Show("儲存成功！");
@@ -1144,6 +1535,70 @@ namespace mySQLPunk
                     MessageBox.Show("儲存失敗：" + res["reason"]);
                 }
             }
+        }
+
+        private Dictionary<string, string> ExecuteDesignerSql(string sql)
+        {
+            Dictionary<string, string> lastResult = new Dictionary<string, string> { { "status", "OK" } };
+            foreach (string statement in SplitSqlStatements(sql))
+            {
+                if (string.IsNullOrWhiteSpace(statement)) continue;
+                lastResult = _db.ExecSQL(statement);
+                if (!lastResult.ContainsKey("status") || lastResult["status"] != "OK")
+                {
+                    return lastResult;
+                }
+            }
+            return lastResult;
+        }
+
+        private static List<string> SplitSqlStatements(string sql)
+        {
+            List<string> statements = new List<string>();
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            int start = 0;
+
+            for (int i = 0; i < sql.Length; i++)
+            {
+                char ch = sql[i];
+                char next = i + 1 < sql.Length ? sql[i + 1] : '\0';
+
+                if (inSingleQuote && ch == '\\')
+                {
+                    i++;
+                    continue;
+                }
+
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    if (inSingleQuote && next == '\'')
+                    {
+                        i++;
+                        continue;
+                    }
+                    inSingleQuote = !inSingleQuote;
+                }
+                else if (ch == '"' && !inSingleQuote)
+                {
+                    if (inDoubleQuote && next == '"')
+                    {
+                        i++;
+                        continue;
+                    }
+                    inDoubleQuote = !inDoubleQuote;
+                }
+                else if (ch == ';' && !inSingleQuote && !inDoubleQuote)
+                {
+                    string statement = sql.Substring(start, i - start).Trim();
+                    if (statement.Length > 0) statements.Add(statement);
+                    start = i + 1;
+                }
+            }
+
+            string last = sql.Substring(start).Trim();
+            if (last.Length > 0) statements.Add(last);
+            return statements;
         }
 
         private void AddColumn(bool insert)
