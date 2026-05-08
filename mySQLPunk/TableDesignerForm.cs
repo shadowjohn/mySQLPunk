@@ -835,6 +835,17 @@ namespace mySQLPunk
                 return len.Length > 0 ? "VARCHAR(" + len + ")" : "TEXT";
             }
 
+            if (_db is my_oracle)
+            {
+                if (type.Contains("bigint") || type.Contains("smallint") || type.Contains("int")) return "NUMBER(10)";
+                if (type.Contains("decimal") || type.Contains("numeric")) return "NUMBER(" + (len.Length > 0 ? len : "18") + "," + (scale.Length > 0 ? scale : "0") + ")";
+                if (type.Contains("double") || type.Contains("float") || type.Contains("real")) return "BINARY_DOUBLE";
+                if (type.Contains("bool") || type == "bit") return "NUMBER(1)";
+                if (type.Contains("date") || type.Contains("time")) return "TIMESTAMP";
+                if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea")) return "BLOB";
+                return len.Length > 0 ? "VARCHAR2(" + len + ")" : "CLOB";
+            }
+
             return columnType;
         }
 
@@ -864,6 +875,10 @@ namespace mySQLPunk
             {
                 return "public." + QuoteDesignerIdentifier(tableName);
             }
+            if (_db is my_oracle)
+            {
+                return QuoteDesignerIdentifier(_databaseName) + "." + QuoteDesignerIdentifier(tableName);
+            }
             return QuoteDesignerIdentifier(tableName);
         }
 
@@ -873,7 +888,7 @@ namespace mySQLPunk
             {
                 return "[" + name.Replace("]", "]]") + "]";
             }
-            if (_db is my_postgresql || _db is my_sqlite)
+            if (_db is my_postgresql || _db is my_sqlite || _db is my_oracle)
             {
                 return "\"" + name.Replace("\"", "\"\"") + "\"";
             }

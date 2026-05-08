@@ -1491,7 +1491,7 @@ namespace mySQLPunk
             {
                 return "[" + name.Replace("]", "]]") + "]";
             }
-            if (db is my_postgresql || db is my_sqlite)
+            if (db is my_postgresql || db is my_sqlite || db is my_oracle)
             {
                 return "\"" + name.Replace("\"", "\"\"") + "\"";
             }
@@ -2560,6 +2560,39 @@ namespace mySQLPunk
                             }
                         }
                         break;
+                    case "oracle":
+                        {
+                            myN.connections[index]["connString"] = BuildOracleConnectionString(myN.connections[index]);
+                            myN.connections[index]["pdo"] = new my_oracle();
+                            ((my_oracle)myN.connections[index]["pdo"]).setConn(myN.connections[index]["connString"].ToString());
+                            if (((my_oracle)myN.connections[index]["pdo"]).MCT.State != ConnectionState.Open)
+                            {
+                                try
+                                {
+                                    ((my_oracle)myN.connections[index]["pdo"]).open();
+                                    myN.connections[index]["isConnect"] = "T";
+                                    db_tree.Nodes[index].SelectedImageIndex = 5;
+                                    db_tree.Nodes[index].ImageIndex = 5;
+                                    List<string> schemas = ((my_oracle)myN.connections[index]["pdo"]).GetDatabases();
+                                    for (int i = 0, max_i = schemas.Count; i < max_i; i++)
+                                    {
+                                        TreeNode newNode = new TreeNode(schemas[i], i, i);
+                                        newNode.ImageIndex = 10;
+                                        newNode.SelectedImageIndex = 10;
+                                        db_tree.Nodes[index].Nodes.Add(newNode);
+                                    }
+                                    ((TreeView)sender).SelectedNode.ExpandAll();
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine(ex.Message);
+                                    myN.connections[index]["isConnect"] = "F";
+                                    ((TreeView)sender).SelectedNode.Collapse();
+                                }
+
+                            }
+                        }
+                        break;
                     case "mssql":
                     case "sqlserver":
                         {
@@ -2818,6 +2851,40 @@ namespace mySQLPunk
             sqlserver_add_edit form = new sqlserver_add_edit();
             form.F1 = this;
             form.ShowDialog(this);
+        }
+
+        private static string BuildOracleConnectionString(Dictionary<string, object> conn)
+        {
+            if (conn.ContainsKey("connString") && !string.IsNullOrWhiteSpace(conn["connString"]?.ToString()))
+            {
+                return conn["connString"].ToString();
+            }
+
+            Oracle.ManagedDataAccess.Client.OracleConnectionStringBuilder builder =
+                new Oracle.ManagedDataAccess.Client.OracleConnectionStringBuilder();
+            builder.UserID = GetConnectionValue(conn, "username");
+            builder.Password = GetConnectionValue(conn, "pwd");
+            builder.DataSource = string.Equals(GetConnectionValue(conn, "connection_type"), "TNS", StringComparison.OrdinalIgnoreCase)
+                ? GetConnectionValue(conn, "tns_name")
+                : BuildOracleBasicDataSource(conn);
+            return builder.ConnectionString;
+        }
+
+        private static string BuildOracleBasicDataSource(Dictionary<string, object> conn)
+        {
+            string host = string.IsNullOrWhiteSpace(GetConnectionValue(conn, "host")) ? "localhost" : GetConnectionValue(conn, "host");
+            string port = string.IsNullOrWhiteSpace(GetConnectionValue(conn, "port")) ? "1521" : GetConnectionValue(conn, "port");
+            string value = GetConnectionValue(conn, "service_name");
+            if (string.IsNullOrWhiteSpace(value)) value = GetConnectionValue(conn, "sid");
+            string key = GetConnectionValue(conn, "oracle_identifier_type") == "sid" ? "SID" : "SERVICE_NAME";
+            return "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=" + host + ")(PORT=" + port + "))" +
+                   "(CONNECT_DATA=(" + key + "=" + value + ")))";
+        }
+
+        private static string GetConnectionValue(Dictionary<string, object> conn, string key)
+        {
+            if (conn != null && conn.ContainsKey(key) && conn[key] != null) return conn[key].ToString();
+            return string.Empty;
         }
 
         private void mysqlStripMenuItem_Click(object sender, EventArgs e)

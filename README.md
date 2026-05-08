@@ -2,7 +2,7 @@
 
 mySQLPunk 是一個以 WinForms 開發的桌面資料庫管理工具，主要目標是提供連線管理、資料庫物件瀏覽、SQL 查詢、資料表設計與資料庫物件複製功能。
 
-目前專案以 MySQL 支援最完整，PostgreSQL、SQLite 與 SQL Server 已具備部分查詢與物件操作能力。Oracle 目前只有連線 UI 雛形，尚未有可用的 provider 實作。
+目前專案以 MySQL 支援最完整，PostgreSQL、SQLite 與 SQL Server 已具備部分查詢與物件操作能力。Oracle 已具備基本連線、查詢與 metadata 瀏覽能力，進階設計與複製行為仍需實機回歸。
 
 ## 開發環境
 
@@ -42,7 +42,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | PostgreSQL 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
 | SQLite 連線與查詢 | 可用 | 已加入 SpatiaLite runtime，並補 metadata 與 table data 分頁 |
 | SQL Server 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
-| Oracle | 未完成 | 目前只有 UI 雛形，provider 尚未實作 |
+| Oracle | 部分可用 | 已補基本連線、查詢、schema/table/view metadata 與 table data 分頁 |
 | SQL 查詢視窗 | 可用 | 支援執行、語法高亮、自動補完、CSV 匯出 |
 | 表格資料列編輯儲存 | 可用 | table data 模式已支援 MySQL、PostgreSQL、SQLite、SQL Server |
 | MySQL Table Designer | 可用 | 支援既有 table 的 ALTER preview/save |
@@ -61,15 +61,16 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 - `mySQLPunk/lib/my_postgresql.cs`: PostgreSQL provider
 - `mySQLPunk/lib/my_sqlite.cs`: SQLite provider
 - `mySQLPunk/lib/my_mssql.cs`: SQL Server provider
+- `mySQLPunk/lib/my_oracle.cs`: Oracle provider
 - `mySQLPunk/lib/DatabaseCopyService.cs`: Table/View 複製服務
 
 ## 待辦優先順序
 
 1. 建立可重複的 Windows 建置與驗證流程。
-2. 決定 Oracle 是要補實作，或暫時從 UI 隱藏。
+2. 針對 Oracle、PostgreSQL、SQLite、SQL Server 補實機連線回歸測試。
 3. 擴充非 MySQL 既有資料表 ALTER 設計能力。
 4. 評估是否為異種資料庫 View 複製建立 SQL 方言轉換器。
-5. 針對 PostgreSQL、SQLite、SQL Server 補實機連線回歸測試。
+5. 補強 Oracle Table Designer、View 複製與權限不足時的錯誤訊息。
 
 ## 驗證原則
 

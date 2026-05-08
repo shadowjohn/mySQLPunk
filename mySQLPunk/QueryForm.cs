@@ -1310,6 +1310,10 @@ namespace mySQLPunk
             {
                 return "public." + QuoteIdentifier(tableName);
             }
+            if (_db is my_oracle)
+            {
+                return QuoteIdentifier(_databaseName) + "." + QuoteIdentifier(tableName);
+            }
             return QuoteIdentifier(tableName);
         }
 
@@ -1323,7 +1327,7 @@ namespace mySQLPunk
             {
                 return "[" + name.Replace("]", "]]") + "]";
             }
-            if (_db is my_postgresql || _db is my_sqlite)
+            if (_db is my_postgresql || _db is my_sqlite || _db is my_oracle)
             {
                 return "\"" + name.Replace("\"", "\"\"") + "\"";
             }
@@ -1332,7 +1336,7 @@ namespace mySQLPunk
 
         private string ParameterToken(string parameterName)
         {
-            if (_db is my_postgresql) return ":" + parameterName;
+            if (_db is my_postgresql || _db is my_oracle) return ":" + parameterName;
             if (_db is my_mssql) return "@" + parameterName;
             return "?" + parameterName;
         }
