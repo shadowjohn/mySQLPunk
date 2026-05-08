@@ -849,6 +849,10 @@ namespace mySQLPunk
             ToolStripMenuItem viewMenu = new ToolStripMenuItem(Localization.T("Menu.View"));
             ToolStripMenuItem favoriteMenu = new ToolStripMenuItem(Localization.T("Menu.Favorites"));
             ToolStripMenuItem toolsMenu = new ToolStripMenuItem(Localization.T("Menu.Tools"));
+            ToolStripMenuItem editCopyMenu = new ToolStripMenuItem(Localization.T("Tool.CopyObject"));
+            ToolStripMenuItem editPasteMenu = new ToolStripMenuItem(Localization.T("Tool.PasteObject"));
+            ToolStripMenuItem editRenameMenu = new ToolStripMenuItem(Localization.T("Tool.RenameObject"));
+            ToolStripMenuItem windowCloseMenu = new ToolStripMenuItem(Localization.T("Menu.Close"));
             ToolStripMenuItem languageMenu = new ToolStripMenuItem(Localization.T("Menu.Language"));
             ToolStripMenuItem zhMenu = new ToolStripMenuItem(Localization.T("Menu.LanguageZh"));
             ToolStripMenuItem enMenu = new ToolStripMenuItem(Localization.T("Menu.LanguageEn"));
@@ -866,6 +870,23 @@ namespace mySQLPunk
             lightMenu.Click += (s, e) => ApplyPreferences(Localization.CurrentLanguage, ThemeManager.Light, "Status.ThemeChanged");
             darkMenu.Click += (s, e) => ApplyPreferences(Localization.CurrentLanguage, ThemeManager.Dark, "Status.ThemeChanged");
             themeMenu.DropDownItems.AddRange(new ToolStripItem[] { lightMenu, darkMenu });
+            editCopyMenu.Click += (s, e) => CopySelectedDatabaseObjectToInternalClipboard();
+            editPasteMenu.Click += (s, e) => PasteInternalClipboardToSelectedDatabase();
+            editRenameMenu.Click += (s, e) => BeginRenameSelectedDatabaseObject();
+            editMenu.DropDownItems.AddRange(new ToolStripItem[] { editCopyMenu, editPasteMenu, editRenameMenu });
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Table"), "Tables");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.View"), "Views");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Function"), "Functions");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.User"), "Users");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Other"), "Other");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Query"), "Queries");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Backup"), "Backups");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.AutoRun"), "Events");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Model"), "Models");
+            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.BI"), "BI");
+            windowCloseMenu.Click += (s, e) => CloseSelectedTab();
+            ttToolStripMenuItem.DropDownItems.Clear();
+            ttToolStripMenuItem.DropDownItems.Add(windowCloseMenu);
             optionsMenu.Click += (s, e) => OpenOptionsDialog();
             toolsMenu.DropDownItems.AddRange(new ToolStripItem[] { optionsMenu, new ToolStripSeparator(), languageMenu, themeMenu });
 
@@ -880,6 +901,13 @@ namespace mySQLPunk
                 ttToolStripMenuItem,
                 helpToolStripMenuItem
             });
+        }
+
+        private void AddViewGroupMenuItem(ToolStripMenuItem viewMenu, string text, string groupName)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(text);
+            item.Click += (s, e) => SelectDatabaseGroupNode(groupName);
+            viewMenu.DropDownItems.Add(item);
         }
 
         private void OpenOptionsDialog()
