@@ -687,14 +687,7 @@ namespace mySQLPunk
                         string type = curr["索引類型"].ToString();
                         string method = curr["索引方法"].ToString();
                         string cols = curr["欄位"].ToString();
-                        // 處理欄位格式 (相容舊版 .NET)
-                        string[] rawCols = cols.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                        List<string> formattedCols = new List<string>();
-                        foreach (string c in rawCols)
-                        {
-                            formattedCols.Add("`" + c.Trim() + "`");
-                        }
-                        string colList = string.Join(", ", formattedCols.ToArray());
+                        string colList = FormatMySqlIndexColumns(cols);
                         string comment = curr["註解"].ToString();
                         string commentStr = string.IsNullOrEmpty(comment) ? "" : $"COMMENT '{comment}'";
 
@@ -1232,18 +1225,7 @@ namespace mySQLPunk
 
         private string FormatGenericIndexColumns(string columns)
         {
-            string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-            List<string> formattedCols = new List<string>();
-            foreach (string rawCol in rawCols)
-            {
-                string col = rawCol.Trim();
-                if (!string.IsNullOrWhiteSpace(col))
-                {
-                    formattedCols.Add(QuoteDesignerIdentifier(col));
-                }
-            }
-
-            return string.Join(", ", formattedCols.ToArray());
+            return FormatIndexColumns(columns, QuoteDesignerIdentifier);
         }
 
         private string GetQualifiedDesignerTableName(string tableName)
@@ -1469,6 +1451,11 @@ namespace mySQLPunk
 
         private static string FormatMySqlIndexColumns(string columns)
         {
+            return FormatIndexColumns(columns, QuoteMySqlIdentifier);
+        }
+
+        private static string FormatIndexColumns(string columns, Func<string, string> quoteIdentifier)
+        {
             string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
             List<string> formattedCols = new List<string>();
             foreach (string rawCol in rawCols)
@@ -1476,11 +1463,38 @@ namespace mySQLPunk
                 string col = rawCol.Trim();
                 if (!string.IsNullOrWhiteSpace(col))
                 {
-                    formattedCols.Add(QuoteMySqlIdentifier(col));
+                    formattedCols.Add(FormatIndexColumn(col, quoteIdentifier));
                 }
             }
 
             return string.Join(", ", formattedCols);
+        }
+
+        private static string FormatIndexColumn(string columnExpression, Func<string, string> quoteIdentifier)
+        {
+            string direction = "";
+            string columnName = columnExpression.Trim();
+
+            if (EndsWithIndexDirection(columnName, "ASC"))
+            {
+                direction = " ASC";
+                columnName = columnName.Substring(0, columnName.Length - 3).TrimEnd();
+            }
+            else if (EndsWithIndexDirection(columnName, "DESC"))
+            {
+                direction = " DESC";
+                columnName = columnName.Substring(0, columnName.Length - 4).TrimEnd();
+            }
+
+            return quoteIdentifier(columnName) + direction;
+        }
+
+        private static bool EndsWithIndexDirection(string value, string direction)
+        {
+            if (!value.EndsWith(direction, StringComparison.OrdinalIgnoreCase)) return false;
+
+            int separatorIndex = value.Length - direction.Length - 1;
+            return separatorIndex >= 0 && char.IsWhiteSpace(value[separatorIndex]);
         }
 
         private static string QuoteMySqlIdentifier(string name)

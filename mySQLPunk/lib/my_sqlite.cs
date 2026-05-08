@@ -297,12 +297,21 @@ namespace mySQLPunk.lib
             foreach (DataRow idx in indexes.Rows)
             {
                 string indexName = idx["name"].ToString();
-                DataTable cols = SelectSQL("PRAGMA index_info(" + QuoteSqlite(indexName) + ");");
+                DataTable cols = SelectSQL("PRAGMA index_xinfo(" + QuoteSqlite(indexName) + ");");
                 foreach (DataRow col in cols.Rows)
                 {
+                    if (cols.Columns.Contains("key") && col["key"].ToString() != "1") continue;
+                    if (col["name"] == DBNull.Value || string.IsNullOrWhiteSpace(col["name"].ToString())) continue;
+
+                    string columnName = col["name"].ToString();
+                    if (cols.Columns.Contains("desc") && col["desc"].ToString() == "1")
+                    {
+                        columnName += " DESC";
+                    }
+
                     DataRow nr = output.NewRow();
                     nr["Key_name"] = indexName;
-                    nr["Column_name"] = col["name"];
+                    nr["Column_name"] = columnName;
                     nr["Non_unique"] = idx["unique"].ToString() == "1" ? "0" : "1";
                     nr["Seq_in_index"] = Convert.ToInt32(col["seqno"]) + 1;
                     nr["Index_type"] = "BTREE";
