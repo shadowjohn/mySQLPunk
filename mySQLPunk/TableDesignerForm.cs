@@ -1151,7 +1151,9 @@ namespace mySQLPunk
                     }
                 }
                 if (commentChanged)
-                    unsupported.Add("SQL Server 欄位註解需透過 extended property 另行處理：" + columnName);
+                {
+                    statements.Add(BuildSqlServerColumnCommentStatement(columnName, GetRowString(current, "Comment")));
+                }
                 return statements;
             }
 
@@ -1201,6 +1203,35 @@ namespace mySQLPunk
             return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
                    " ADD DEFAULT " + FormatGenericDefault(defaultValue) +
                    " FOR " + QuoteDesignerIdentifier(columnName) + ";";
+        }
+
+        private string BuildSqlServerColumnCommentStatement(string columnName, string comment)
+        {
+            string database = QuoteDesignerIdentifier(_databaseName);
+            string tableLiteral = EscapeSqlServerLiteral(_tableName);
+            string columnLiteral = EscapeSqlServerLiteral(columnName);
+            string valueLiteral = EscapeSqlServerLiteral(comment ?? "");
+
+            string existsSql =
+                "EXISTS (SELECT 1 FROM " + database + ".sys.extended_properties ep " +
+                "INNER JOIN " + database + ".sys.columns c ON c.object_id = ep.major_id AND c.column_id = ep.minor_id " +
+                "INNER JOIN " + database + ".sys.tables t ON t.object_id = c.object_id " +
+                "INNER JOIN " + database + ".sys.schemas s ON s.schema_id = t.schema_id " +
+                "WHERE ep.name = N'MS_Description' AND s.name = N'dbo' AND t.name = N'" + tableLiteral + "' AND c.name = N'" + columnLiteral + "')";
+
+            string commonArgs =
+                "@name=N'MS_Description', @level0type=N'SCHEMA', @level0name=N'dbo', " +
+                "@level1type=N'TABLE', @level1name=N'" + tableLiteral + "', " +
+                "@level2type=N'COLUMN', @level2name=N'" + columnLiteral + "'";
+
+            if (string.IsNullOrWhiteSpace(comment))
+            {
+                return "IF " + existsSql + " EXEC " + database + ".sys.sp_dropextendedproperty " + commonArgs + ";";
+            }
+
+            return "IF " + existsSql +
+                   " EXEC " + database + ".sys.sp_updateextendedproperty @value=N'" + valueLiteral + "', " + commonArgs +
+                   " ELSE EXEC " + database + ".sys.sp_addextendedproperty @value=N'" + valueLiteral + "', " + commonArgs + ";";
         }
 
         private List<string> BuildGenericAlterIndexStatements(List<string> unsupported)
