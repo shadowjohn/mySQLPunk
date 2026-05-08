@@ -218,7 +218,7 @@ namespace mySQLPunk.lib
             var p = new Dictionary<string, object> { { "name", tableName } };
             return SelectSQL(@"
                 SELECT
-                    i.relname AS ""Key_name"",
+                    CASE WHEN ix.indisprimary THEN 'PRIMARY' ELSE i.relname END AS ""Key_name"",
                     a.attname AS ""Column_name"",
                     CASE WHEN ix.indisunique THEN 0 ELSE 1 END AS ""Non_unique"",
                     k.ord AS ""Seq_in_index"",

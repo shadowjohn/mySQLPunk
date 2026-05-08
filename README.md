@@ -39,16 +39,16 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | --- | --- | --- |
 | 連線設定儲存 | 可用 | 設定儲存在執行目錄的 `setting.ini` |
 | MySQL 連線與查詢 | 可用 | 目前最完整的 provider |
-| PostgreSQL 連線與查詢 | 部分可用 | 已補基本 table/index/database metadata |
-| SQLite 連線與查詢 | 部分可用 | 已加入 SpatiaLite runtime，並補基本 metadata |
-| SQL Server 連線與查詢 | 部分可用 | 已補基本 table/index/database metadata |
+| PostgreSQL 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
+| SQLite 連線與查詢 | 可用 | 已加入 SpatiaLite runtime，並補 metadata 與 table data 分頁 |
+| SQL Server 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
 | Oracle | 未完成 | 目前只有 UI 雛形，provider 尚未實作 |
 | SQL 查詢視窗 | 可用 | 支援執行、語法高亮、自動補完、CSV 匯出 |
-| 表格資料列編輯儲存 | 部分可用 | 目前支援 MySQL table data 模式 |
-| MySQL Table Designer | 部分可用 | 支援既有 table 的 ALTER preview/save |
-| New Table | 部分可用 | 已支援 MySQL `CREATE TABLE` preview/save |
-| Table/View 複製 | 部分可用 | Table 可批次複製；View 僅支援同 provider |
-| SQL Dump | 部分可用 | 目前只支援 MySQL table dump |
+| 表格資料列編輯儲存 | 可用 | table data 模式已支援 MySQL、PostgreSQL、SQLite、SQL Server |
+| MySQL Table Designer | 可用 | 支援既有 table 的 ALTER preview/save |
+| New Table | 可用 | 已支援 MySQL、PostgreSQL、SQLite、SQL Server `CREATE TABLE` preview/save |
+| Table/View 複製 | 可用 | Table 可批次複製；同 provider View 複製為 View，異種 provider View 複製為 table snapshot |
+| SQL Dump | 可用 | Table dump 已支援 MySQL、PostgreSQL、SQLite、SQL Server |
 
 ## 重要程式位置
 
@@ -67,8 +67,8 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 1. 建立可重複的 Windows 建置與驗證流程。
 2. 決定 Oracle 是要補實作，或暫時從 UI 隱藏。
-3. 擴充非 MySQL 的 SQL dump 與 View/Table 設計能力。
-4. 擴充非 MySQL 的資料列編輯儲存。
+3. 擴充非 MySQL 既有資料表 ALTER 設計能力。
+4. 評估是否為異種資料庫 View 複製建立 SQL 方言轉換器。
 5. 針對 PostgreSQL、SQLite、SQL Server 補實機連線回歸測試。
 
 ## 驗證原則

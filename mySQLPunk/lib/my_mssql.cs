@@ -223,7 +223,7 @@ namespace mySQLPunk.lib
             var p = new Dictionary<string, object> { { "name", tableName } };
             return SelectSQL(@"
                 SELECT
-                    i.name AS [Key_name],
+                    CASE WHEN i.is_primary_key = 1 THEN 'PRIMARY' ELSE i.name END AS [Key_name],
                     c.name AS [Column_name],
                     CASE WHEN i.is_unique = 1 OR i.is_primary_key = 1 THEN 0 ELSE 1 END AS [Non_unique],
                     ic.key_ordinal AS [Seq_in_index],

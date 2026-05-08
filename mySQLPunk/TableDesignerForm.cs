@@ -464,18 +464,18 @@ namespace mySQLPunk
 
         private void GeneratePreviewSql()
         {
-            if (!(_db is my_mysql))
-            {
-                rtbSqlPreview.Text = "-- SQL Preview is currently only supported for MySQL.";
-                return;
-            }
-
             DataTable currentDt = (DataTable)dgvColumns.DataSource;
             if (currentDt == null) return;
 
             if (IsNewTable)
             {
-                rtbSqlPreview.Text = BuildMySqlCreateTableSql(currentDt);
+                rtbSqlPreview.Text = BuildCreateTableSql(currentDt);
+                return;
+            }
+
+            if (!(_db is my_mysql))
+            {
+                rtbSqlPreview.Text = "-- 既有資料表 ALTER 目前只支援 MySQL；非 MySQL 請使用 New Table 建立新表。";
                 return;
             }
 
@@ -638,6 +638,219 @@ namespace mySQLPunk
             {
                 rtbSqlPreview.Text = "-- No changes detected.";
             }
+        }
+
+        private string BuildCreateTableSql(DataTable currentDt)
+        {
+            if (_db is my_mysql) return BuildMySqlCreateTableSql(currentDt);
+            return BuildGenericCreateTableSql(currentDt);
+        }
+
+        private string BuildGenericCreateTableSql(DataTable currentDt)
+        {
+            string tableName = GetTableNameForSave();
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                return "-- 請先在「選項」分頁輸入資料表名稱。";
+            }
+
+            List<string> definitions = new List<string>();
+            List<string> primaryColumns = new List<string>();
+
+            foreach (DataRow row in currentDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                string columnName = GetRowString(row, "Name").Trim();
+                if (string.IsNullOrWhiteSpace(columnName)) continue;
+
+                definitions.Add("  " + BuildGenericColumnDefinition(row));
+
+                if (row["PK"] != DBNull.Value && (bool)row["PK"])
+                {
+                    primaryColumns.Add(QuoteDesignerIdentifier(columnName));
+                }
+            }
+
+            if (definitions.Count == 0)
+            {
+                return "-- 請至少新增一個欄位。";
+            }
+
+            if (primaryColumns.Count > 0)
+            {
+                definitions.Add("  PRIMARY KEY (" + string.Join(", ", primaryColumns.ToArray()) + ")");
+            }
+
+            string sql = "CREATE TABLE " + GetQualifiedDesignerTableName(tableName) + " (\n" +
+                         string.Join(",\n", definitions.ToArray()) + "\n" +
+                         ");";
+
+            List<string> indexes = BuildGenericCreateIndexStatements(tableName);
+            if (indexes.Count > 0)
+            {
+                sql += "\n" + string.Join("\n", indexes.ToArray());
+            }
+
+            return sql;
+        }
+
+        private string BuildGenericColumnDefinition(DataRow row)
+        {
+            string columnName = GetRowString(row, "Name").Trim();
+            string columnType = GetRowString(row, "Type").Trim();
+            string length = GetRowString(row, "Length").Trim();
+            string decimals = GetRowString(row, "Decimals").Trim();
+            bool notNull = row["NotNull"] != DBNull.Value && (bool)row["NotNull"];
+            string defaultValue = GetRowString(row, "Default").Trim();
+
+            List<string> parts = new List<string>
+            {
+                QuoteDesignerIdentifier(columnName),
+                MapDesignerType(columnType, length, decimals),
+                notNull ? "NOT NULL" : "NULL"
+            };
+
+            if (!string.IsNullOrWhiteSpace(defaultValue))
+            {
+                parts.Add("DEFAULT " + FormatGenericDefault(defaultValue));
+            }
+
+            return string.Join(" ", parts.ToArray());
+        }
+
+        private List<string> BuildGenericCreateIndexStatements(string tableName)
+        {
+            List<string> statements = new List<string>();
+            DataTable currentIdxDt = dgvIndexes.DataSource as DataTable;
+            if (currentIdxDt == null) return statements;
+
+            foreach (DataRow row in currentIdxDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                string indexName = GetRowString(row, "名稱").Trim();
+                string type = GetRowString(row, "索引類型").Trim().ToUpperInvariant();
+                string columns = GetRowString(row, "欄位").Trim();
+                if (string.IsNullOrWhiteSpace(columns)) continue;
+                if (type == "PRIMARY") continue;
+                if (type == "FULLTEXT" || type == "SPATIAL") continue;
+                if (string.IsNullOrWhiteSpace(indexName)) indexName = tableName + "_idx";
+
+                string columnList = FormatGenericIndexColumns(columns);
+                if (string.IsNullOrWhiteSpace(columnList)) continue;
+
+                string unique = type == "UNIQUE" ? "UNIQUE " : "";
+                statements.Add("CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
+                               " ON " + GetQualifiedDesignerTableName(tableName) +
+                               " (" + columnList + ");");
+            }
+
+            return statements;
+        }
+
+        private string MapDesignerType(string columnType, string length, string decimals)
+        {
+            string type = string.IsNullOrWhiteSpace(columnType) ? "varchar" : columnType.ToLowerInvariant();
+            string len = string.IsNullOrWhiteSpace(length) ? "" : length;
+            string scale = string.IsNullOrWhiteSpace(decimals) ? "" : decimals;
+
+            if (_db is my_sqlite)
+            {
+                if (type.Contains("int")) return "INTEGER";
+                if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("double") || type.Contains("float") || type.Contains("real")) return "REAL";
+                if (type.Contains("blob") || type.Contains("binary")) return "BLOB";
+                return "TEXT";
+            }
+
+            if (_db is my_mssql)
+            {
+                if (type.Contains("bigint")) return "BIGINT";
+                if (type.Contains("smallint")) return "SMALLINT";
+                if (type.Contains("tinyint")) return "TINYINT";
+                if (type.Contains("int")) return "INT";
+                if (type.Contains("decimal") || type.Contains("numeric")) return "DECIMAL(" + (len.Length > 0 ? len : "18") + "," + (scale.Length > 0 ? scale : "0") + ")";
+                if (type.Contains("double") || type.Contains("float")) return "FLOAT";
+                if (type.Contains("real")) return "REAL";
+                if (type.Contains("bool") || type == "bit") return "BIT";
+                if (type.Contains("date") || type.Contains("time")) return "DATETIME2";
+                if (type.Contains("blob") || type.Contains("binary") || type.Contains("image")) return "VARBINARY(MAX)";
+                return len.Length > 0 ? "NVARCHAR(" + len + ")" : "NVARCHAR(MAX)";
+            }
+
+            if (_db is my_postgresql)
+            {
+                if (type.Contains("bigint")) return "BIGINT";
+                if (type.Contains("smallint")) return "SMALLINT";
+                if (type.Contains("int")) return "INTEGER";
+                if (type.Contains("decimal") || type.Contains("numeric")) return "NUMERIC(" + (len.Length > 0 ? len : "18") + "," + (scale.Length > 0 ? scale : "0") + ")";
+                if (type.Contains("double") || type.Contains("float") || type.Contains("real")) return "DOUBLE PRECISION";
+                if (type.Contains("bool") || type == "bit") return "BOOLEAN";
+                if (type.Contains("date") || type.Contains("time")) return "TIMESTAMP";
+                if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea")) return "BYTEA";
+                return len.Length > 0 ? "VARCHAR(" + len + ")" : "TEXT";
+            }
+
+            return columnType;
+        }
+
+        private string FormatGenericIndexColumns(string columns)
+        {
+            string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            List<string> formattedCols = new List<string>();
+            foreach (string rawCol in rawCols)
+            {
+                string col = rawCol.Trim();
+                if (!string.IsNullOrWhiteSpace(col))
+                {
+                    formattedCols.Add(QuoteDesignerIdentifier(col));
+                }
+            }
+
+            return string.Join(", ", formattedCols.ToArray());
+        }
+
+        private string GetQualifiedDesignerTableName(string tableName)
+        {
+            if (_db is my_mssql)
+            {
+                return QuoteDesignerIdentifier(_databaseName) + ".[dbo]." + QuoteDesignerIdentifier(tableName);
+            }
+            if (_db is my_postgresql)
+            {
+                return "public." + QuoteDesignerIdentifier(tableName);
+            }
+            return QuoteDesignerIdentifier(tableName);
+        }
+
+        private string QuoteDesignerIdentifier(string name)
+        {
+            if (_db is my_mssql)
+            {
+                return "[" + name.Replace("]", "]]") + "]";
+            }
+            if (_db is my_postgresql || _db is my_sqlite)
+            {
+                return "\"" + name.Replace("\"", "\"\"") + "\"";
+            }
+            return QuoteMySqlIdentifier(name);
+        }
+
+        private static string FormatGenericDefault(string value)
+        {
+            string upper = value.ToUpperInvariant();
+            if (upper == "NULL" || upper == "CURRENT_TIMESTAMP" || upper == "CURRENT_TIMESTAMP()")
+            {
+                return value;
+            }
+
+            decimal numericValue;
+            if (decimal.TryParse(value, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out numericValue))
+            {
+                return value;
+            }
+
+            return "'" + value.Replace("'", "''") + "'";
         }
 
         private string BuildMySqlCreateTableSql(DataTable currentDt)

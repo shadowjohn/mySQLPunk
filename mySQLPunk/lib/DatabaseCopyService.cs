@@ -43,13 +43,21 @@ namespace mySQLPunk.lib
             if (source.Database == null || target.Database == null) throw new ArgumentException("來源或目標資料庫尚未連線");
 
             string kind = NormalizeKind(source.ObjectKind);
-            string targetName = GenerateTargetName(target.Database, target.DatabaseName, source.ObjectName, kind);
+            bool copyViewAsTable = kind == "view" &&
+                !string.Equals(source.ProviderName, target.ProviderName, StringComparison.OrdinalIgnoreCase);
+            string targetKind = copyViewAsTable ? "table" : kind;
+            string targetName = GenerateTargetName(target.Database, target.DatabaseName, source.ObjectName, targetKind);
 
             if (kind == "table")
                 return CopyTable(source, target, targetName, progress);
 
             if (kind == "view")
+            {
+                if (copyViewAsTable)
+                    return CopyTable(source, target, targetName, progress);
+
                 return CopyView(source, target, targetName, progress);
+            }
 
             throw new NotSupportedException("只支援複製 Table / View");
         }
@@ -113,9 +121,6 @@ namespace mySQLPunk.lib
 
         private DatabaseCopyResult CopyView(DatabaseCopyItem source, DatabaseCopyItem target, string targetName, Action<DatabaseCopyProgress> progress)
         {
-            if (!string.Equals(source.ProviderName, target.ProviderName, StringComparison.OrdinalIgnoreCase))
-                throw new NotSupportedException("異種資料庫 View 複製暫不支援");
-
             progress?.Invoke(new DatabaseCopyProgress
             {
                 SourceName = source.ObjectName,

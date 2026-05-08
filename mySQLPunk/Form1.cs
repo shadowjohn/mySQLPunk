@@ -865,7 +865,7 @@ namespace mySQLPunk
             string host = connInfo.ContainsKey("host") && connInfo["host"] != null
                 ? connInfo["host"].ToString()
                 : string.Empty;
-            string initialSql = "SELECT * FROM `" + dbName + "`.`" + tableName.Replace("`", "``") + "` LIMIT 1000;";
+            string initialSql = "SELECT * FROM " + QuoteDumpIdentifier((IDatabase)connInfo["pdo"], tableName) + ";";
 
             OpenQuery((IDatabase)connInfo["pdo"], dbName, host, initialSql, true);
         }
@@ -1079,12 +1079,6 @@ namespace mySQLPunk
             }
 
             IDatabase db = (IDatabase)connInfo["pdo"];
-            if (!(db is my_mysql))
-            {
-                MessageBox.Show("目前僅支援 MySQL 資料表傾印。", "功能限制", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
             string dbName = pathParts[1];
             string tableName = pathParts[3];
 
@@ -1101,7 +1095,7 @@ namespace mySQLPunk
 
                 try
                 {
-                    string sql = BuildMySqlTableDump((my_mysql)db, dbName, tableName, structureOnly);
+                    string sql = BuildTableDump(db, dbName, tableName, structureOnly);
                     File.WriteAllText(dialog.FileName, sql, Encoding.UTF8);
                     MessageBox.Show("SQL 檔案已匯出。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -1112,54 +1106,87 @@ namespace mySQLPunk
             }
         }
 
-        private static string BuildMySqlTableDump(my_mysql db, string databaseName, string tableName, bool dataOnly)
+        private static string BuildTableDump(IDatabase db, string databaseName, string tableName, bool dataOnly)
         {
-            string safeDatabaseName = databaseName.Replace("`", "``");
-            string safeTableName = tableName.Replace("`", "``");
             StringBuilder builder = new StringBuilder();
+            string quotedTable = QuoteDumpIdentifier(db, tableName);
 
             builder.AppendLine("-- mySQLPunk SQL Dump");
-            builder.AppendLine("-- Database: `" + safeDatabaseName + "`");
-            builder.AppendLine("-- Table: `" + safeTableName + "`");
-            builder.AppendLine("SET NAMES utf8mb4;");
-            builder.AppendLine("USE `" + safeDatabaseName + "`;");
+            builder.AppendLine("-- Provider: " + db.ProviderName);
+            builder.AppendLine("-- Database: " + databaseName);
+            builder.AppendLine("-- Table: " + tableName);
+            if (db is my_mysql)
+            {
+                builder.AppendLine("SET NAMES utf8mb4;");
+                builder.AppendLine("USE " + QuoteDumpIdentifier(db, databaseName) + ";");
+            }
             builder.AppendLine();
 
             if (!dataOnly)
             {
-                DataTable createTableDt = db.SelectSQL("SHOW CREATE TABLE `" + safeDatabaseName + "`.`" + safeTableName + "`;");
-                if (createTableDt.Rows.Count > 0)
+                string ddl = db.GetTableCreateStatement(databaseName, tableName);
+                if (!string.IsNullOrWhiteSpace(ddl))
                 {
-                    builder.AppendLine("DROP TABLE IF EXISTS `" + safeTableName + "`;");
-                    builder.AppendLine(createTableDt.Rows[0][1].ToString() + ";");
+                    builder.AppendLine(ddl.TrimEnd().TrimEnd(';') + ";");
                     builder.AppendLine();
                 }
             }
 
-            DataTable dataTable = db.SelectSQL("SELECT * FROM `" + safeDatabaseName + "`.`" + safeTableName + "`;");
-            foreach (DataRow row in dataTable.Rows)
+            long total = db.CountRows(databaseName, tableName);
+            long copied = 0;
+            const int batchSize = 1000;
+            while (copied < total)
             {
-                builder.Append("INSERT INTO `");
-                builder.Append(safeTableName);
-                builder.Append("` VALUES (");
+                DataTable dataTable = db.SelectTablePage(databaseName, tableName, copied, batchSize);
+                if (dataTable == null || dataTable.Rows.Count == 0) break;
 
-                for (int i = 0; i < dataTable.Columns.Count; i++)
+                foreach (DataRow row in dataTable.Rows)
                 {
-                    if (i > 0)
+                    builder.Append("INSERT INTO ");
+                    builder.Append(quotedTable);
+                    builder.Append(" (");
+
+                    for (int i = 0; i < dataTable.Columns.Count; i++)
                     {
-                        builder.Append(", ");
+                        if (i > 0) builder.Append(", ");
+                        builder.Append(QuoteDumpIdentifier(db, dataTable.Columns[i].ColumnName));
                     }
 
-                    builder.Append(ToMySqlLiteral(row[i]));
+                    builder.Append(") VALUES (");
+
+                    for (int i = 0; i < dataTable.Columns.Count; i++)
+                    {
+                        if (i > 0) builder.Append(", ");
+                        builder.Append(ToSqlLiteral(row[i]));
+                    }
+
+                    builder.AppendLine(");");
                 }
 
-                builder.AppendLine(");");
+                copied += dataTable.Rows.Count;
             }
 
             return builder.ToString();
         }
 
-        private static string ToMySqlLiteral(object value)
+        private static string QuoteDumpIdentifier(IDatabase db, string name)
+        {
+            if (db is my_mysql)
+            {
+                return "`" + name.Replace("`", "``") + "`";
+            }
+            if (db is my_mssql)
+            {
+                return "[" + name.Replace("]", "]]") + "]";
+            }
+            if (db is my_postgresql || db is my_sqlite)
+            {
+                return "\"" + name.Replace("\"", "\"\"") + "\"";
+            }
+            return name;
+        }
+
+        private static string ToSqlLiteral(object value)
         {
             if (value == null || value == DBNull.Value)
             {
@@ -1185,7 +1212,7 @@ namespace mySQLPunk
 
             if (value is string || value is char || value is DateTime || value is Guid)
             {
-                return "'" + value.ToString().Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+                return "'" + value.ToString().Replace("'", "''") + "'";
             }
 
             if (value is IFormattable formattable)
@@ -1193,7 +1220,7 @@ namespace mySQLPunk
                 return formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
             }
 
-            return "'" + value.ToString().Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+            return "'" + value.ToString().Replace("'", "''") + "'";
         }
 
         private void Form1_Load(object sender, EventArgs e)

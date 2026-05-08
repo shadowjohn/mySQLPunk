@@ -157,27 +157,18 @@ namespace mySQLPunk
         private async void CalculateTotalRowsAsync()
         {
             if (string.IsNullOrEmpty(_baseSql)) return;
-            
-            // 嘗試解析資料表路徑 (處理 FROM `db`.`table` 或 FROM table 格式)
-            string pattern = @"FROM\s+([`\w\.\x22]+)";
-            Match match = Regex.Match(_baseSql, pattern, RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                string tablePath = match.Groups[1].Value.Trim();
-                
-                // 如果 tablePath 已經包含點 (例如 `db`.`table`)，直接使用
-                // 否則如果 _databaseName 存在，則補上資料庫字首
-                string fullTableName = tablePath;
-                if (!tablePath.Contains(".") && !string.IsNullOrEmpty(_databaseName))
-                {
-                    fullTableName = $"`{_databaseName}`.{tablePath}";
-                }
 
-                string countSql = $"SELECT COUNT(*) FROM {fullTableName}";
-                var dt = await Task.Run(() => _db.SelectSQL(countSql));
-                if (dt != null && dt.Rows.Count > 0)
+            string tableName = GetTableNameFromSql();
+            if (!string.IsNullOrWhiteSpace(tableName) && tableName != "Table")
+            {
+                try
                 {
-                    _totalRows = Convert.ToInt64(dt.Rows[0][0]);
+                    _totalRows = await Task.Run(() => _db.CountRows(_databaseName, tableName));
+                    UpdatePaginationUI();
+                }
+                catch (Exception ex)
+                {
+                    UpdateStatus("Count rows failed: " + ex.Message);
                     UpdatePaginationUI();
                 }
             }
@@ -217,11 +208,11 @@ namespace mySQLPunk
         private string GetTableNameFromSql()
         {
             if (string.IsNullOrEmpty(_baseSql)) return "Table";
-            string pattern = @"FROM\s+([`\w\.\x22]+)";
+            string pattern = @"FROM\s+([`\[\]\w\.\x22]+)";
             Match match = Regex.Match(_baseSql, pattern, RegexOptions.IgnoreCase);
             if (match.Success)
             {
-                string path = match.Groups[1].Value.Replace("`", "").Replace("\"", "");
+                string path = match.Groups[1].Value.Replace("`", "").Replace("\"", "").Replace("[", "").Replace("]", "");
                 return path.Contains(".") ? path.Split('.').Last() : path;
             }
             return "Table";
@@ -747,9 +738,59 @@ namespace mySQLPunk
             }
 
             int offset = (_currentPage - 1) * _pageSize;
-            txtSql.Text = $"{_baseSql} LIMIT {_pageSize} OFFSET {offset};";
-            ExecuteQueryAsync();
-            UpdatePaginationUI();
+            ExecuteTablePageAsync(offset);
+        }
+
+        private async void ExecuteTablePageAsync(int offset)
+        {
+            string tableName = GetTableNameFromSql();
+            if (string.IsNullOrWhiteSpace(tableName) || tableName == "Table")
+            {
+                ExecuteQueryAsync();
+                return;
+            }
+
+            _cts = new CancellationTokenSource();
+            tsBtnExecute.Enabled = false;
+            tsBtnCancel.Enabled = true;
+            tsBtnExport.Enabled = false;
+            tsBtnRefresh.Enabled = false;
+            btnDataRefresh.Enabled = false;
+            UpdateStatus("Loading table page...");
+
+            Stopwatch sw = Stopwatch.StartNew();
+            try
+            {
+                DataTable dt = await Task.Run(
+                    () => _db.SelectTablePage(_databaseName, tableName, offset, _pageSize),
+                    _cts.Token);
+                dt.AcceptChanges();
+
+                sw.Stop();
+                dgvResults.DataSource = dt;
+                AutoResizeColumns(dgvResults);
+                tsBtnExport.Enabled = dt.Rows.Count > 0;
+                UpdateStatus(string.Format(
+                    "OK  |  {0} rows  |  {1} ms",
+                    dt.Rows.Count, sw.ElapsedMilliseconds));
+                UpdatePaginationUI();
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatus("Cancelled.");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus("Load failed: " + ex.Message);
+                MessageBox.Show("載入資料表失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                tsBtnExecute.Enabled = true;
+                tsBtnCancel.Enabled = false;
+                tsBtnRefresh.Enabled = true;
+                btnDataRefresh.Enabled = true;
+            }
         }
 
          private void UpdatePaginationUI()
@@ -912,12 +953,6 @@ namespace mySQLPunk
                 return;
             }
 
-            if (!(_db is my_mysql))
-            {
-                MessageBox.Show("目前資料列儲存只支援 MySQL。", "功能限制", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
             DataTable dt = dgvResults.DataSource as DataTable;
             if (dt == null)
             {
@@ -950,7 +985,7 @@ namespace mySQLPunk
 
             try
             {
-                DataSaveResult result = await Task.Run(() => SaveMySqlTableChanges(dt));
+                DataSaveResult result = await Task.Run(() => SaveTableChanges(dt));
                 dt.AcceptChanges();
                 UpdateStatus($"Saved. Inserted: {result.Inserted}, Updated: {result.Updated}, Deleted: {result.Deleted}");
                 CalculateTotalRowsAsync();
@@ -970,7 +1005,7 @@ namespace mySQLPunk
             }
         }
 
-        private DataSaveResult SaveMySqlTableChanges(DataTable dt)
+        private DataSaveResult SaveTableChanges(DataTable dt)
         {
             string tableName = GetTableNameFromSql();
             if (string.IsNullOrWhiteSpace(_databaseName) || string.IsNullOrWhiteSpace(tableName))
@@ -978,7 +1013,7 @@ namespace mySQLPunk
                 throw new Exception("無法判斷要儲存的資料表。");
             }
 
-            List<TableColumnInfo> columns = GetMySqlTableColumns(tableName);
+            List<TableColumnInfo> columns = GetTableColumns(tableName);
             List<string> primaryKeys = columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
             DataSaveResult result = new DataSaveResult();
 
@@ -996,17 +1031,17 @@ namespace mySQLPunk
                         continue;
                     }
 
-                    ExecuteMySqlInsert(tableName, columns, row);
+                    ExecuteInsert(tableName, columns, row);
                     result.Inserted++;
                 }
                 else if (row.RowState == DataRowState.Modified)
                 {
-                    ExecuteMySqlUpdate(tableName, columns, primaryKeys, row);
+                    ExecuteUpdate(tableName, columns, primaryKeys, row);
                     result.Updated++;
                 }
                 else if (row.RowState == DataRowState.Deleted)
                 {
-                    ExecuteMySqlDelete(tableName, columns, primaryKeys, row);
+                    ExecuteDelete(tableName, columns, primaryKeys, row);
                     result.Deleted++;
                 }
             }
@@ -1014,27 +1049,62 @@ namespace mySQLPunk
             return result;
         }
 
-        private List<TableColumnInfo> GetMySqlTableColumns(string tableName)
+        private List<TableColumnInfo> GetTableColumns(string tableName)
         {
-            DataTable columnTable = _db.GetColumns(_databaseName, tableName);
             List<TableColumnInfo> columns = new List<TableColumnInfo>();
 
-            foreach (DataRow row in columnTable.Rows)
+            if (_db is my_mysql)
             {
-                string name = row["Field"].ToString();
-                columns.Add(new TableColumnInfo
+                DataTable columnTable = _db.GetColumns(_databaseName, tableName);
+                foreach (DataRow row in columnTable.Rows)
                 {
-                    Name = name,
-                    IsPrimaryKey = row.Table.Columns.Contains("Key") && row["Key"].ToString() == "PRI",
-                    IsAutoIncrement = row.Table.Columns.Contains("Extra") &&
-                        row["Extra"].ToString().IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0
-                });
+                    string name = row["Field"].ToString();
+                    columns.Add(new TableColumnInfo
+                    {
+                        Name = name,
+                        IsPrimaryKey = row.Table.Columns.Contains("Key") && row["Key"].ToString() == "PRI",
+                        IsAutoIncrement = row.Table.Columns.Contains("Extra") &&
+                            row["Extra"].ToString().IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0
+                    });
+                }
+                return columns;
             }
+
+            DataTable copyColumns = _db.GetCopyColumns(_databaseName, tableName);
+            foreach (DataRow row in copyColumns.Rows)
+            {
+                columns.Add(new TableColumnInfo { Name = row["Name"].ToString() });
+            }
+
+            if (_db is my_sqlite)
+            {
+                DataTable sqliteColumns = _db.GetColumns(_databaseName, tableName);
+                foreach (DataRow row in sqliteColumns.Rows)
+                {
+                    if (!row.Table.Columns.Contains("pk") || row["pk"].ToString() == "0") continue;
+                    TableColumnInfo col = columns.FirstOrDefault(c => c.Name == row["name"].ToString());
+                    if (col != null) col.IsPrimaryKey = true;
+                }
+            }
+
+            try
+            {
+                DataTable indexes = _db.GetIndexes(_databaseName, tableName);
+                foreach (DataRow row in indexes.Rows)
+                {
+                    string keyName = row.Table.Columns.Contains("Key_name") ? row["Key_name"].ToString() : "";
+                    if (!keyName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
+                    string columnName = row.Table.Columns.Contains("Column_name") ? row["Column_name"].ToString() : "";
+                    TableColumnInfo col = columns.FirstOrDefault(c => c.Name == columnName);
+                    if (col != null) col.IsPrimaryKey = true;
+                }
+            }
+            catch { }
 
             return columns;
         }
 
-        private void ExecuteMySqlInsert(string tableName, List<TableColumnInfo> columns, DataRow row)
+        private void ExecuteInsert(string tableName, List<TableColumnInfo> columns, DataRow row)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
             List<string> fieldSql = new List<string>();
@@ -1049,8 +1119,8 @@ namespace mySQLPunk
                 if (column.IsAutoIncrement && IsDbNull(value)) continue;
 
                 string parameterName = "p" + index;
-                fieldSql.Add(QuoteMySqlIdentifier(column.Name));
-                valueSql.Add("?" + parameterName);
+                fieldSql.Add(QuoteIdentifier(column.Name));
+                valueSql.Add(ParameterToken(parameterName));
                 parameters[parameterName] = NormalizeDbValue(value);
                 index++;
             }
@@ -1060,12 +1130,12 @@ namespace mySQLPunk
                 throw new Exception("新增資料列沒有可寫入的欄位。");
             }
 
-            string sql = "INSERT INTO " + GetMySqlQualifiedTableName(tableName) +
+            string sql = "INSERT INTO " + GetQualifiedTableName(tableName) +
                          " (" + string.Join(", ", fieldSql) + ") VALUES (" + string.Join(", ", valueSql) + ");";
-            ExecMySqlOrThrow(sql, parameters);
+            ExecOrThrow(sql, parameters);
         }
 
-        private void ExecuteMySqlUpdate(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
+        private void ExecuteUpdate(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
             List<string> setSql = new List<string>();
@@ -1078,31 +1148,31 @@ namespace mySQLPunk
                 if (!HasColumnChanged(row, column.Name)) continue;
 
                 string parameterName = "p" + index;
-                setSql.Add(QuoteMySqlIdentifier(column.Name) + " = ?" + parameterName);
+                setSql.Add(QuoteIdentifier(column.Name) + " = " + ParameterToken(parameterName));
                 parameters[parameterName] = NormalizeDbValue(row[column.Name, DataRowVersion.Current]);
                 index++;
             }
 
             if (setSql.Count == 0) return;
 
-            string whereSql = BuildMySqlWhereClause(row, columns, primaryKeys, parameters, ref index);
-            string sql = "UPDATE " + GetMySqlQualifiedTableName(tableName) +
+            string whereSql = BuildWhereClause(row, columns, primaryKeys, parameters, ref index);
+            string sql = "UPDATE " + GetQualifiedTableName(tableName) +
                          " SET " + string.Join(", ", setSql) +
-                         " WHERE " + whereSql + " LIMIT 1;";
-            ExecMySqlOrThrow(sql, parameters);
+                         " WHERE " + whereSql + ";";
+            ExecOrThrow(sql, parameters);
         }
 
-        private void ExecuteMySqlDelete(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
+        private void ExecuteDelete(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
             int index = 0;
-            string whereSql = BuildMySqlWhereClause(row, columns, primaryKeys, parameters, ref index);
-            string sql = "DELETE FROM " + GetMySqlQualifiedTableName(tableName) +
-                         " WHERE " + whereSql + " LIMIT 1;";
-            ExecMySqlOrThrow(sql, parameters);
+            string whereSql = BuildWhereClause(row, columns, primaryKeys, parameters, ref index);
+            string sql = "DELETE FROM " + GetQualifiedTableName(tableName) +
+                         " WHERE " + whereSql + ";";
+            ExecOrThrow(sql, parameters);
         }
 
-        private string BuildMySqlWhereClause(
+        private string BuildWhereClause(
             DataRow row,
             List<TableColumnInfo> columns,
             List<string> primaryKeys,
@@ -1119,12 +1189,12 @@ namespace mySQLPunk
                 object value = row[columnName, DataRowVersion.Original];
                 if (IsDbNull(value))
                 {
-                    clauses.Add(QuoteMySqlIdentifier(columnName) + " IS NULL");
+                    clauses.Add(QuoteIdentifier(columnName) + " IS NULL");
                 }
                 else
                 {
                     string parameterName = "p" + index;
-                    clauses.Add(QuoteMySqlIdentifier(columnName) + " = ?" + parameterName);
+                    clauses.Add(QuoteIdentifier(columnName) + " = " + ParameterToken(parameterName));
                     parameters[parameterName] = NormalizeDbValue(value);
                     index++;
                 }
@@ -1138,7 +1208,7 @@ namespace mySQLPunk
             return string.Join(" AND ", clauses);
         }
 
-        private void ExecMySqlOrThrow(string sql, Dictionary<string, object> parameters)
+        private void ExecOrThrow(string sql, Dictionary<string, object> parameters)
         {
             Dictionary<string, string> result = _db.ExecSQL(sql, parameters);
             if (!result.ContainsKey("status") || result["status"] != "OK")
@@ -1170,14 +1240,45 @@ namespace mySQLPunk
             return !object.Equals(original, current);
         }
 
-        private string GetMySqlQualifiedTableName(string tableName)
+        private string GetQualifiedTableName(string tableName)
         {
-            return QuoteMySqlIdentifier(_databaseName) + "." + QuoteMySqlIdentifier(tableName);
+            if (_db is my_mysql)
+            {
+                return QuoteIdentifier(_databaseName) + "." + QuoteIdentifier(tableName);
+            }
+            if (_db is my_mssql)
+            {
+                return QuoteIdentifier(_databaseName) + ".[dbo]." + QuoteIdentifier(tableName);
+            }
+            if (_db is my_postgresql)
+            {
+                return "public." + QuoteIdentifier(tableName);
+            }
+            return QuoteIdentifier(tableName);
         }
 
-        private static string QuoteMySqlIdentifier(string name)
+        private string QuoteIdentifier(string name)
         {
-            return "`" + name.Replace("`", "``") + "`";
+            if (_db is my_mysql)
+            {
+                return "`" + name.Replace("`", "``") + "`";
+            }
+            if (_db is my_mssql)
+            {
+                return "[" + name.Replace("]", "]]") + "]";
+            }
+            if (_db is my_postgresql || _db is my_sqlite)
+            {
+                return "\"" + name.Replace("\"", "\"\"") + "\"";
+            }
+            return name;
+        }
+
+        private string ParameterToken(string parameterName)
+        {
+            if (_db is my_postgresql) return ":" + parameterName;
+            if (_db is my_mssql) return "@" + parameterName;
+            return "?" + parameterName;
         }
 
         private static bool IsDbNull(object value)
