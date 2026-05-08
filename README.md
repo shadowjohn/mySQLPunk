@@ -42,7 +42,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | PostgreSQL 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
 | SQLite 連線與查詢 | 可用 | 已加入 SpatiaLite runtime，並補 metadata 與 table data 分頁 |
 | SQL Server 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
-| Oracle | 部分可用 | 已補基本連線、查詢、schema/table/view metadata 與 table data 分頁 |
+| Oracle | 部分可用 | 已補基本連線、查詢、schema/table/view metadata、table data 分頁與同 provider View 複製 |
 | SQL 查詢視窗 | 可用 | 支援執行、語法高亮、自動補完、CSV 匯出 |
 | 表格資料列編輯儲存 | 可用 | table data 模式已支援 MySQL、PostgreSQL、SQLite、SQL Server |
 | Table Designer | 部分可用 | 既有 table ALTER 已支援 MySQL、PostgreSQL、SQL Server、Oracle；SQLite 支援 add/drop/rename column，型別修改需後續補重建表流程 |
@@ -70,7 +70,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 2. 針對 Oracle、PostgreSQL、SQLite、SQL Server 補實機連線回歸測試。
 3. 補齊 SQLite 既有資料表型別/NULL/default 修改的安全重建流程。
 4. 評估是否為異種資料庫 View 複製建立 SQL 方言轉換器。
-5. 補強 Oracle Table Designer、View 複製與權限不足時的錯誤訊息。
+5. 補強 Oracle Table Designer 與權限不足時的錯誤訊息。
 
 ## 驗證原則
 

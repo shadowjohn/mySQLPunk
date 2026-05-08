@@ -411,7 +411,13 @@ namespace mySQLPunk.lib
 
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql)
         {
-            throw new NotSupportedException("Oracle View 複製目前只支援異種資料庫轉 table snapshot。");
+            string selectSql = ExtractViewSelectSql(sourceViewSql);
+            if (string.IsNullOrWhiteSpace(selectSql))
+            {
+                throw new Exception("無法解析 Oracle View DDL");
+            }
+
+            ExecOrThrow("CREATE OR REPLACE VIEW " + QualifiedName(databaseName, viewName) + " AS " + selectSql);
         }
 
         private void ExecOrThrow(string sql, Dictionary<string, object> parameters = null)
@@ -434,6 +440,24 @@ namespace mySQLPunk.lib
         private static string NormalizeName(string name) => (name ?? "").Trim().ToUpperInvariant();
         private static string QuoteIdentifier(string name) => "\"" + (name ?? "").Replace("\"", "\"\"").ToUpperInvariant() + "\"";
         private static string QualifiedName(string owner, string name) => QuoteIdentifier(owner) + "." + QuoteIdentifier(name);
+
+        private static string ExtractViewSelectSql(string sourceViewSql)
+        {
+            if (string.IsNullOrWhiteSpace(sourceViewSql)) return "";
+
+            string sql = sourceViewSql.Trim().TrimEnd(';').Trim();
+            if (sql.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) ||
+                sql.StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
+            {
+                return sql;
+            }
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                sql,
+                @"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:FORCE\s+|NOFORCE\s+)?VIEW\s+(?:(?:""[^""]+""|\w+)\.)?(?:""[^""]+""|\w+)(?:\s*\([^\)]*\))?\s+AS\s+(?<body>.*)$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            return match.Success ? match.Groups["body"].Value.Trim().TrimEnd(';').Trim() : "";
+        }
 
         private static bool IsCopyNullable(DataRow row)
         {
