@@ -71,6 +71,7 @@ namespace mySQLPunk
             Add("Tool.EditConnection", "編輯連線", "Edit Connection");
             Add("Tool.DeleteConnection", "刪除連線", "Delete Connection");
             Add("Tool.DumpSql", "傾印 SQL 檔案", "Dump SQL File");
+            Add("Tool.CreateBackup", "建立備份", "Create Backup");
             Add("Tool.StructureAndData", "結構與資料", "Structure and Data");
             Add("Tool.DataOnly", "僅資料", "Data Only");
 
@@ -140,6 +141,10 @@ namespace mySQLPunk
             Add("Connection.ImportTitle", "匯入連線設定", "Import Connections");
             Add("Connection.JsonFilter", "JSON 檔案 (*.json)|*.json|所有檔案 (*.*)|*.*", "JSON files (*.json)|*.json|All files (*.*)|*.*");
             Add("Connection.ImportReplaceConfirm", "匯入會取代目前所有連線設定，是否繼續？", "Importing will replace all current connection settings. Continue?");
+            Add("Backup.Title", "建立備份", "Create Backup");
+            Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
+            Add("Backup.Success", "備份已建立。", "Backup created.");
+            Add("Backup.Failed", "建立備份失敗：", "Backup failed: ");
 
             Add("Query.Query", "查詢", "Query");
             Add("Query.Execute", "執行", "Execute");

@@ -68,6 +68,7 @@ namespace mySQLPunk
             public string DatabaseName;
             public string ProviderName;
             public TreeNode DatabaseNode;
+            public Dictionary<string, object> ConnectionInfo;
         }
 
         private class DatabaseObjectSelection
@@ -1604,6 +1605,106 @@ namespace mySQLPunk
             }
         }
 
+        private void BackupSelectedDatabaseWithDialog()
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Backup.SelectDatabase"), Localization.T("Backup.Title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                bool sqlite = target.Database is my_sqlite;
+                dialog.Filter = sqlite ? "SQLite database (*.sqlite)|*.sqlite|All files (*.*)|*.*" : "SQL files (*.sql)|*.sql|All files (*.*)|*.*";
+                dialog.DefaultExt = sqlite ? "sqlite" : "sql";
+                dialog.FileName = target.DatabaseName + "_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + (sqlite ? ".sqlite" : ".sql");
+
+                if (dialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    CreateDatabaseBackup(target, dialog.FileName);
+                    MessageBox.Show(Localization.T("Backup.Success"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UpdateMainStatus("Backup created: " + dialog.FileName);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(Localization.T("Backup.Failed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateMainStatus("Backup failed: " + ex.Message);
+                }
+            }
+        }
+
+        private bool BackupSelectedDatabaseToFile(string targetPath)
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                return false;
+            }
+
+            CreateDatabaseBackup(target, targetPath);
+            UpdateMainStatus("Backup created: " + targetPath);
+            return true;
+        }
+
+        private void CreateDatabaseBackup(TreeDatabaseTarget target, string targetPath)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("Target path is required.", nameof(targetPath));
+
+            string dir = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            if (File.Exists(targetPath))
+            {
+                File.Delete(targetPath);
+            }
+
+            my_sqlite sqlite = target.Database as my_sqlite;
+            if (sqlite != null)
+            {
+                using (System.Data.SQLite.SQLiteConnection destination = new System.Data.SQLite.SQLiteConnection("Data Source=" + targetPath + ";Version=3;"))
+                {
+                    destination.Open();
+                    sqlite.MCT.BackupDatabase(destination, "main", "main", -1, null, 0);
+                }
+                return;
+            }
+
+            File.WriteAllText(targetPath, BuildDatabaseDump(target.Database, target.DatabaseName), Encoding.UTF8);
+        }
+
+        private static string BuildDatabaseDump(IDatabase db, string databaseName)
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("-- mySQLPunk Database Backup");
+            builder.AppendLine("-- Provider: " + db.ProviderName);
+            builder.AppendLine("-- Database: " + databaseName);
+            builder.AppendLine("-- Created: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            builder.AppendLine();
+
+            foreach (string tableName in db.GetTables(databaseName))
+            {
+                builder.AppendLine(BuildTableDump(db, databaseName, tableName, false));
+            }
+
+            foreach (string viewName in db.GetViews(databaseName))
+            {
+                builder.AppendLine(BuildViewDump(db, databaseName, viewName));
+            }
+
+            return builder.ToString();
+        }
+
         private static string BuildTableDump(IDatabase db, string databaseName, string tableName, bool dataOnly)
         {
             StringBuilder builder = new StringBuilder();
@@ -1875,7 +1976,7 @@ namespace mySQLPunk
                 {
                     string groupName = pathParts[2];
                     lblSidebarTitle.Text = $"{groupName}: {dbName}";
-                    ShowDatabaseGroupList(db, dbName, groupName);
+                    ShowDatabaseGroupList(db, dbName, groupName, connInfo);
                     ShowDatabaseInfo(db, dbName);
                     if (groupName == "Tables") showTools("點到Tables");
                     else if (groupName == "Views") showTools("點到Views本身");
@@ -1896,7 +1997,7 @@ namespace mySQLPunk
                 {
                     string viewName = pathParts[3];
                     lblSidebarTitle.Text = $"View: {viewName}";
-                    ShowDatabaseGroupList(db, dbName, "Views");
+                    ShowDatabaseGroupList(db, dbName, "Views", connInfo);
                     ShowViewDetails(db, dbName, viewName);
                     showTools("點到View本身");
                 }
@@ -1952,6 +2053,18 @@ namespace mySQLPunk
                     itemDrop.Click += (s, ev) => DeleteSelectedTable();
                     cms.Items.Add(itemDrop);
                 }
+                else if (groupName == "Backups")
+                {
+                    var itemBackup = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
+                    itemBackup.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
+                    cms.Items.Add(itemBackup);
+                }
+
+                if (cms.Items.Count == 0)
+                {
+                    cms.Dispose();
+                    return;
+                }
                 
                 ThemeManager.ApplyToolStrip(cms);
                 cms.Show(table_top, table_top.PointToClient(Cursor.Position));
@@ -1972,7 +2085,7 @@ namespace mySQLPunk
             if (db_tree.SelectedNode != null)
             {
                 var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
-                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables"))
+                if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups"))
                 {
                     return pathParts[2];
                 }
@@ -2231,7 +2344,8 @@ namespace mySQLPunk
                 Database = db,
                 DatabaseName = pathParts[1],
                 ProviderName = db.ProviderName,
-                DatabaseNode = dbNode
+                DatabaseNode = dbNode,
+                ConnectionInfo = connInfo
             };
         }
 
@@ -2373,7 +2487,7 @@ namespace mySQLPunk
             catch { }
         }
 
-        private void ShowDatabaseGroupList(IDatabase db, string dbName, string groupName)
+        private void ShowDatabaseGroupList(IDatabase db, string dbName, string groupName, Dictionary<string, object> connInfo = null)
         {
             if (string.Equals(groupName, "Tables", StringComparison.OrdinalIgnoreCase))
             {
@@ -2397,6 +2511,17 @@ namespace mySQLPunk
                     displayDt.Rows.Add(row);
                 }
             }
+            else if (string.Equals(groupName, "Backups", StringComparison.OrdinalIgnoreCase))
+            {
+                displayDt.Columns.Add("路徑");
+                DataRow row = displayDt.NewRow();
+                row["名稱"] = dbName;
+                row["類型"] = db is my_sqlite ? "SQLite File" : "SQL Dump";
+                string sqlitePath = GetSQLiteDatabasePath(connInfo, db);
+                row["狀態"] = db is my_sqlite && !File.Exists(sqlitePath) ? "Missing source" : "Ready";
+                row["路徑"] = string.IsNullOrWhiteSpace(sqlitePath) ? "(logical backup)" : sqlitePath;
+                displayDt.Rows.Add(row);
+            }
             else
             {
                 DataRow row = displayDt.NewRow();
@@ -2407,6 +2532,31 @@ namespace mySQLPunk
             }
 
             table_top.DataSource = displayDt;
+        }
+
+        private static string GetSQLiteDatabasePath(Dictionary<string, object> connInfo, IDatabase db)
+        {
+            if (!(db is my_sqlite)) return string.Empty;
+
+            if (connInfo != null && connInfo.ContainsKey("path") && connInfo["path"] != null)
+            {
+                string path = connInfo["path"].ToString();
+                if (!string.IsNullOrWhiteSpace(path)) return path;
+            }
+
+            my_sqlite sqlite = db as my_sqlite;
+            if (sqlite != null && sqlite.MCT != null)
+            {
+                try
+                {
+                    System.Data.SQLite.SQLiteConnectionStringBuilder builder =
+                        new System.Data.SQLite.SQLiteConnectionStringBuilder(sqlite.MCT.ConnectionString);
+                    return builder.DataSource;
+                }
+                catch { }
+            }
+
+            return string.Empty;
         }
 
         private void ShowDatabaseInfo(IDatabase db, string dbName)
@@ -2752,6 +2902,12 @@ namespace mySQLPunk
             if (m.Length == 3)
             {
                 // 代表是 Tables/Views 群組層級
+                if (m[2] == "Backups")
+                {
+                    BackupSelectedDatabaseWithDialog();
+                    dialogMyBoxOff();
+                    return;
+                }
                 db_tree_third_click(index, tree.SelectedNode.Parent.Index, tree.SelectedNode.Parent.Text, tree.SelectedNode.Text);
                 dialogMyBoxOff();
                 return;
