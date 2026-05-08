@@ -32,6 +32,12 @@ namespace mySQLPunk
             Add("Menu.ThemeLight", "亮色", "Light");
             Add("Menu.ThemeDark", "暗色", "Dark");
             Add("Menu.Options", "選項...", "Options...");
+            Add("Menu.ToolDataDictionary", "資料字典...", "Data Dictionary...");
+            Add("Menu.ToolQueryHistory", "歷史記錄...", "History...");
+            Add("Menu.ToolBackups", "備份...", "Backups...");
+            Add("Menu.ToolConnectionDiagnostics", "連線診斷...", "Connection Diagnostics...");
+            Add("Menu.ToolProviderCapabilities", "功能支援...", "Provider Capabilities...");
+            Add("Menu.ToolMaintenanceChecklist", "維護檢查...", "Maintenance Checklist...");
             Add("Menu.AddFavorite", "加入目前選取項目", "Add Current Selection");
             Add("Menu.NoFavorites", "尚無我的最愛", "No Favorites");
             Add("Menu.ClearFavorites", "清除我的最愛", "Clear Favorites");

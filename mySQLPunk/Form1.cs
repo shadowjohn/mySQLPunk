@@ -861,6 +861,12 @@ namespace mySQLPunk
             ToolStripMenuItem lightMenu = new ToolStripMenuItem(Localization.T("Menu.ThemeLight"));
             ToolStripMenuItem darkMenu = new ToolStripMenuItem(Localization.T("Menu.ThemeDark"));
             ToolStripMenuItem optionsMenu = new ToolStripMenuItem(Localization.T("Menu.Options"));
+            ToolStripMenuItem dataDictionaryMenu = new ToolStripMenuItem(Localization.T("Menu.ToolDataDictionary"));
+            ToolStripMenuItem queryHistoryMenu = new ToolStripMenuItem(Localization.T("Menu.ToolQueryHistory"));
+            ToolStripMenuItem backupsMenu = new ToolStripMenuItem(Localization.T("Menu.ToolBackups"));
+            ToolStripMenuItem diagnosticsMenu = new ToolStripMenuItem(Localization.T("Menu.ToolConnectionDiagnostics"));
+            ToolStripMenuItem capabilitiesMenu = new ToolStripMenuItem(Localization.T("Menu.ToolProviderCapabilities"));
+            ToolStripMenuItem maintenanceMenu = new ToolStripMenuItem(Localization.T("Menu.ToolMaintenanceChecklist"));
             zhMenu.Checked = !Localization.IsEnglish;
             enMenu.Checked = Localization.IsEnglish;
             zhMenu.Click += (s, e) => ApplyPreferences(Localization.TraditionalChinese, ThemeManager.CurrentTheme, "Status.LanguageChanged");
@@ -889,8 +895,28 @@ namespace mySQLPunk
             windowCloseMenu.Click += (s, e) => CloseSelectedTab();
             ttToolStripMenuItem.DropDownItems.Clear();
             ttToolStripMenuItem.DropDownItems.Add(windowCloseMenu);
+            dataDictionaryMenu.Click += (s, e) => SelectDatabaseGroupNode("Models");
+            queryHistoryMenu.Click += (s, e) => SelectDatabaseGroupNode("Queries");
+            backupsMenu.Click += (s, e) => SelectDatabaseGroupNode("Backups");
+            diagnosticsMenu.Click += (s, e) => ShowSelectedOtherTool("Connection Diagnostics");
+            capabilitiesMenu.Click += (s, e) => ShowSelectedOtherTool("Provider Capabilities");
+            maintenanceMenu.Click += (s, e) => ShowSelectedOtherTool("Maintenance Checklist");
             optionsMenu.Click += (s, e) => OpenOptionsDialog();
-            toolsMenu.DropDownItems.AddRange(new ToolStripItem[] { optionsMenu, new ToolStripSeparator(), languageMenu, themeMenu });
+            toolsMenu.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                dataDictionaryMenu,
+                queryHistoryMenu,
+                backupsMenu,
+                new ToolStripSeparator(),
+                diagnosticsMenu,
+                capabilitiesMenu,
+                maintenanceMenu,
+                new ToolStripSeparator(),
+                optionsMenu,
+                new ToolStripSeparator(),
+                languageMenu,
+                themeMenu
+            });
 
             menuStrip1.Items.Clear();
             menuStrip1.Items.AddRange(new ToolStripItem[]
@@ -903,6 +929,36 @@ namespace mySQLPunk
                 ttToolStripMenuItem,
                 helpToolStripMenuItem
             });
+        }
+
+        private void ShowSelectedOtherTool(string toolName)
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
+            if (target == null)
+            {
+                TreeNode databaseNode = GetSelectedDatabaseNode();
+                target = BuildTargetFromNode(databaseNode);
+            }
+
+            if (target == null)
+            {
+                UpdateMainStatus(Localization.T("Status.SelectExpandedDatabase"));
+                return;
+            }
+
+            EnsureDatabaseGroupNodes(target.DatabaseNode);
+            foreach (TreeNode child in target.DatabaseNode.Nodes)
+            {
+                if (string.Equals(child.Text, "Other", StringComparison.OrdinalIgnoreCase))
+                {
+                    db_tree.SelectedNode = child;
+                    child.EnsureVisible();
+                    break;
+                }
+            }
+
+            thirty_two_change("other");
+            ShowDatabaseOtherTool(target.Database, target.DatabaseName, toolName, target.ConnectionInfo);
         }
 
         private void AddViewGroupMenuItem(ToolStripMenuItem viewMenu, string text, string groupName)
