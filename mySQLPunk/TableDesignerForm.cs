@@ -48,6 +48,7 @@ namespace mySQLPunk
             _databaseName = databaseName;
             _tableName = tableName;
             InitializeComponent();
+            ApplyLanguage();
             UpdateTitle();
             LoadColumns();
             LoadIndexes();
@@ -69,10 +70,10 @@ namespace mySQLPunk
             }
             if (string.IsNullOrWhiteSpace(tableTitle))
             {
-                tableTitle = "New Table";
+                tableTitle = Localization.T("Designer.NewTable");
             }
 
-            this.Text = $"{prefix}Design Table - {tableTitle}";
+            this.Text = $"{prefix}{Localization.T("Designer.DesignTable")} - {tableTitle}";
             if (_mainHost != null) _mainHost.UpdateTabTitle(this);
         }
 
@@ -98,19 +99,19 @@ namespace mySQLPunk
             };
             
             string iconPath = my.pwd() + "\\image\\";
-            ToolStripButton btnSave = new ToolStripButton("儲存", GetIcon(iconPath + "save.png"), BtnSave_Click);
+            ToolStripButton btnSave = new ToolStripButton(Localization.T("Designer.Save"), GetIcon(iconPath + "save.png"), BtnSave_Click);
             
             ToolStripSeparator sep1 = new ToolStripSeparator();
-            ToolStripButton btnAddCol = new ToolStripButton("加入欄位", GetIcon(iconPath + "add.png"), (s, e) => AddColumn(false));
-            ToolStripButton btnInsertCol = new ToolStripButton("插入欄位", GetIcon(iconPath + "insert.png"), (s, e) => AddColumn(true));
-            ToolStripButton btnDelCol = new ToolStripButton("刪除欄位", GetIcon(iconPath + "delete.png"), (s, e) => DeleteColumn());
+            ToolStripButton btnAddCol = new ToolStripButton(Localization.T("Designer.AddColumn"), GetIcon(iconPath + "add.png"), (s, e) => AddColumn(false));
+            ToolStripButton btnInsertCol = new ToolStripButton(Localization.T("Designer.InsertColumn"), GetIcon(iconPath + "insert.png"), (s, e) => AddColumn(true));
+            ToolStripButton btnDelCol = new ToolStripButton(Localization.T("Designer.DeleteColumn"), GetIcon(iconPath + "delete.png"), (s, e) => DeleteColumn());
             
             ToolStripSeparator sep2 = new ToolStripSeparator();
-            ToolStripButton btnMoveUp = new ToolStripButton("上移", GetIcon(iconPath + "up.png"), (s, e) => MoveColumn(-1));
-            ToolStripButton btnMoveDown = new ToolStripButton("下移", GetIcon(iconPath + "down.png"), (s, e) => MoveColumn(1));
+            ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), GetIcon(iconPath + "up.png"), (s, e) => MoveColumn(-1));
+            ToolStripButton btnMoveDown = new ToolStripButton(Localization.T("Designer.MoveDown"), GetIcon(iconPath + "down.png"), (s, e) => MoveColumn(1));
 
-            btnFloat = new ToolStripButton("浮動", null, (s, e) => _mainHost?.FloatDockableForm(this)) { Alignment = ToolStripItemAlignment.Right };
-            btnDock = new ToolStripButton("嵌入", null, (s, e) => _mainHost?.DockDockableForm(this)) { Visible = false, Alignment = ToolStripItemAlignment.Right };
+            btnFloat = new ToolStripButton(Localization.T("Query.Float"), null, (s, e) => _mainHost?.FloatDockableForm(this)) { Alignment = ToolStripItemAlignment.Right };
+            btnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => _mainHost?.DockDockableForm(this)) { Visible = false, Alignment = ToolStripItemAlignment.Right };
             
             tsTop.Items.AddRange(new ToolStripItem[] { 
                 btnSave, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnMoveUp, btnMoveDown, btnFloat, btnDock 
@@ -121,15 +122,15 @@ namespace mySQLPunk
                 bool isCol = tcMain.SelectedTab == tpColumns;
                 bool isIdx = tcMain.SelectedTab == tpIndexes;
                 
-                btnAddCol.Text = isCol ? "加入欄位" : (isIdx ? "加入索引" : "加入");
+                btnAddCol.Text = isCol ? Localization.T("Designer.AddColumn") : (isIdx ? Localization.T("Designer.AddIndex") : Localization.T("Query.Add"));
                 btnInsertCol.Visible = isCol; // 索引通常沒有「插入」概念
-                btnDelCol.Text = isCol ? "刪除欄位" : (isIdx ? "刪除索引" : "刪除");
+                btnDelCol.Text = isCol ? Localization.T("Designer.DeleteColumn") : (isIdx ? Localization.T("Designer.DeleteIndex") : Localization.T("Query.Delete"));
                 
                 if (tcMain.SelectedTab == tpSqlPreview) GeneratePreviewSql();
             };
             
             // 1. 欄位分頁
-            tpColumns = new TabPage("欄位");
+            tpColumns = new TabPage(Localization.T("Designer.Columns"));
             SplitContainer splitColumns = new SplitContainer() { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 350 };
             dgvColumns = new DataGridView() 
             { 
@@ -140,14 +141,14 @@ namespace mySQLPunk
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
             };
             pnlColumnProperties = new Panel() { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(10) };
-            pnlColumnProperties.Controls.Add(new Label() { Text = "欄位屬性 (選取欄位以進行詳細設定)", ForeColor = Color.Gray, Location = new Point(10, 10), AutoSize = true });
+            pnlColumnProperties.Controls.Add(new Label() { Text = Localization.T("Designer.ColumnProperties"), ForeColor = Color.Gray, Location = new Point(10, 10), AutoSize = true });
             
             splitColumns.Panel1.Controls.Add(dgvColumns);
             splitColumns.Panel2.Controls.Add(pnlColumnProperties);
             tpColumns.Controls.Add(splitColumns);
 
             // 2. 索引分頁
-            tpIndexes = new TabPage("索引");
+            tpIndexes = new TabPage(Localization.T("Designer.Indexes"));
             dgvIndexes = new DataGridView() 
             { 
                 Dock = DockStyle.Fill, 
@@ -159,12 +160,12 @@ namespace mySQLPunk
             tpIndexes.Controls.Add(dgvIndexes);
 
             // 3. 選項分頁
-            tpOptions = new TabPage("選項");
+            tpOptions = new TabPage(Localization.T("Designer.Options"));
             TableLayoutPanel tlpOptions = new TableLayoutPanel() { Dock = DockStyle.Top, Height = 200, RowCount = 4, ColumnCount = 2, Padding = new Padding(20) };
             tlpOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
             tlpOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-            tlpOptions.Controls.Add(new Label() { Text = "資料表名稱:", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+            tlpOptions.Controls.Add(new Label() { Text = Localization.T("Designer.TableName"), Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
             txtTableName = new TextBox() { Width = 260, Text = _tableName, ReadOnly = !IsNewTable };
             txtTableName.TextChanged += (s, e) =>
             {
@@ -173,7 +174,7 @@ namespace mySQLPunk
             };
             tlpOptions.Controls.Add(txtTableName, 1, 0);
 
-            tlpOptions.Controls.Add(new Label() { Text = "引擎:", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+            tlpOptions.Controls.Add(new Label() { Text = Localization.T("Designer.Engine"), Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
             cbEngine = new ComboBox() { Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
             cbEngine.Items.AddRange(new object[] { "InnoDB", "MyISAM", "MEMORY" });
             cbEngine.SelectedItem = "InnoDB";
@@ -182,13 +183,13 @@ namespace mySQLPunk
             tpOptions.Controls.Add(tlpOptions);
 
             // 4. 註解分頁
-            tpComment = new TabPage("註解");
+            tpComment = new TabPage(Localization.T("Designer.Comment"));
             txtTableComment = new TextBox() { Dock = DockStyle.Fill, Multiline = true };
             txtTableComment.TextChanged += (s, e) => MarkAsModified();
             tpComment.Controls.Add(txtTableComment);
 
             // 5. SQL 預覽分頁
-            tpSqlPreview = new TabPage("SQL 預覽");
+            tpSqlPreview = new TabPage(Localization.T("Designer.SqlPreview"));
             rtbSqlPreview = new RichTextBox() { Dock = DockStyle.Fill, ReadOnly = true, Font = new Font("Consolas", 11), BackColor = Color.White };
             tpSqlPreview.Controls.Add(rtbSqlPreview);
 
@@ -451,15 +452,35 @@ namespace mySQLPunk
         {
             dgvColumns.DataSource = displayDt;
 
-            dgvColumns.Columns["Name"].HeaderText = "名稱";
-            dgvColumns.Columns["Type"].HeaderText = "類型";
-            dgvColumns.Columns["Length"].HeaderText = "長度";
-            dgvColumns.Columns["Decimals"].HeaderText = "小數位數";
-            dgvColumns.Columns["NotNull"].HeaderText = "不是 Null";
-            dgvColumns.Columns["PK"].HeaderText = "主鍵";
-            dgvColumns.Columns["Default"].HeaderText = "預設";
-            dgvColumns.Columns["Comment"].HeaderText = "註解";
+            ApplyColumnHeaders();
             dgvColumns.Columns["_OldName"].Visible = false;
+        }
+
+        public void ApplyLanguage()
+        {
+            Localization.ApplyTo(this);
+            if (tpColumns != null) tpColumns.Text = Localization.T("Designer.Columns");
+            if (tpIndexes != null) tpIndexes.Text = Localization.T("Designer.Indexes");
+            if (tpOptions != null) tpOptions.Text = Localization.T("Designer.Options");
+            if (tpComment != null) tpComment.Text = Localization.T("Designer.Comment");
+            if (tpSqlPreview != null) tpSqlPreview.Text = Localization.T("Designer.SqlPreview");
+            if (btnFloat != null) btnFloat.Text = Localization.T("Query.Float");
+            if (btnDock != null) btnDock.Text = Localization.T("Query.Dock");
+            ApplyColumnHeaders();
+            UpdateTitle();
+        }
+
+        private void ApplyColumnHeaders()
+        {
+            if (dgvColumns == null || dgvColumns.Columns.Count == 0) return;
+            if (dgvColumns.Columns.Contains("Name")) dgvColumns.Columns["Name"].HeaderText = Localization.T("Designer.Name");
+            if (dgvColumns.Columns.Contains("Type")) dgvColumns.Columns["Type"].HeaderText = Localization.T("Designer.Type");
+            if (dgvColumns.Columns.Contains("Length")) dgvColumns.Columns["Length"].HeaderText = Localization.T("Designer.Length");
+            if (dgvColumns.Columns.Contains("Decimals")) dgvColumns.Columns["Decimals"].HeaderText = Localization.T("Designer.Decimals");
+            if (dgvColumns.Columns.Contains("NotNull")) dgvColumns.Columns["NotNull"].HeaderText = Localization.T("Designer.NotNull");
+            if (dgvColumns.Columns.Contains("PK")) dgvColumns.Columns["PK"].HeaderText = Localization.T("Designer.PrimaryKey");
+            if (dgvColumns.Columns.Contains("Default")) dgvColumns.Columns["Default"].HeaderText = Localization.T("Designer.Default");
+            if (dgvColumns.Columns.Contains("Comment")) dgvColumns.Columns["Comment"].HeaderText = Localization.T("Designer.Comment");
         }
 
         private void GeneratePreviewSql()
@@ -1248,7 +1269,7 @@ namespace mySQLPunk
                 var cb = new DataGridViewComboBoxColumn()
                 {
                     Name = "索引類型",
-                    HeaderText = "索引類型",
+                    HeaderText = Localization.T("Designer.IndexType"),
                     DataPropertyName = "索引類型",
                     FlatStyle = FlatStyle.Flat
                 };
@@ -1263,7 +1284,7 @@ namespace mySQLPunk
                 var cb = new DataGridViewComboBoxColumn()
                 {
                     Name = "索引方法",
-                    HeaderText = "索引方法",
+                    HeaderText = Localization.T("Designer.IndexMethod"),
                     DataPropertyName = "索引方法",
                     FlatStyle = FlatStyle.Flat
                 };

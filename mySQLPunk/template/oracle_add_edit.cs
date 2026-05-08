@@ -15,6 +15,8 @@ namespace mySQLPunk.template
         public oracle_add_edit()
         {
             InitializeComponent();
+            Form1.ApplyModernTheme(this);
+            Localization.ApplyTo(this);
 
         }
         public Form1 F1 { get; set; }

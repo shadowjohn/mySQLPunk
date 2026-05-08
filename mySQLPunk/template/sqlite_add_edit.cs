@@ -27,36 +27,37 @@ namespace mySQLPunk.template
         {
             InitializeUi();
             Form1.ApplyModernTheme(this);
+            Localization.ApplyTo(this);
         }
 
         private void InitializeUi()
         {
-            Text = "SQLite Connection";
+            Text = Localization.T("Common.SQLiteConnection");
             StartPosition = FormStartPosition.CenterParent;
             Size = new Size(620, 250);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
 
-            Label lblName = new Label { Text = "連線名稱", Location = new Point(20, 24), AutoSize = true };
+            Label lblName = new Label { Text = Localization.T("Common.ConnectionName"), Location = new Point(20, 24), AutoSize = true };
             txtName = new TextBox { Location = new Point(120, 20), Width = 450 };
 
-            Label lblPath = new Label { Text = "SQLite 檔案", Location = new Point(20, 64), AutoSize = true };
+            Label lblPath = new Label { Text = Localization.T("Common.SQLiteFile"), Location = new Point(20, 64), AutoSize = true };
             txtPath = new TextBox { Location = new Point(120, 60), Width = 330 };
-            btnBrowse = new Button { Text = "Browse...", Location = new Point(460, 58), Size = new Size(80, 28) };
-            btnCreateNew = new Button { Text = "Create New...", Location = new Point(120, 96), Size = new Size(120, 30) };
+            btnBrowse = new Button { Text = Localization.T("Common.Browse"), Location = new Point(460, 58), Size = new Size(80, 28) };
+            btnCreateNew = new Button { Text = Localization.T("Common.CreateNew"), Location = new Point(120, 96), Size = new Size(120, 30) };
 
             chkInitGeospatial = new CheckBox
             {
-                Text = "初始化 geospatial / SpatiaLite metadata",
+                Text = Localization.T("Common.InitGeospatial"),
                 Location = new Point(120, 136),
                 Width = 360,
                 Checked = true
             };
 
-            btnTest = new Button { Text = "Test Connection", Location = new Point(20, 170), Size = new Size(150, 34) };
-            btnOk = new Button { Text = "OK", Location = new Point(410, 170), Size = new Size(80, 34) };
-            btnCancel = new Button { Text = "Cancel", Location = new Point(500, 170), Size = new Size(80, 34) };
+            btnTest = new Button { Text = Localization.T("Common.TestConnection"), Location = new Point(20, 170), Size = new Size(150, 34) };
+            btnOk = new Button { Text = Localization.T("Common.OK"), Location = new Point(410, 170), Size = new Size(80, 34) };
+            btnCancel = new Button { Text = Localization.T("Common.Cancel"), Location = new Point(500, 170), Size = new Size(80, 34) };
 
             Controls.Add(lblName);
             Controls.Add(txtName);

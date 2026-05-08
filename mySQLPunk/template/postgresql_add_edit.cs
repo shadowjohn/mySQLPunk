@@ -17,6 +17,7 @@ namespace mySQLPunk.template
         {
             InitializeComponent();
             Form1.ApplyModernTheme(this);
+            Localization.ApplyTo(this);
         }
         public Form1 F1 { get; set; }
         public int editIndex { get; set; } = -1;

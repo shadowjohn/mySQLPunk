@@ -126,7 +126,7 @@ namespace mySQLPunk
 
             if (!string.IsNullOrWhiteSpace(this.currentDatabase) || !string.IsNullOrWhiteSpace(this.connectionHost))
             {
-                string title = "Query";
+                string title = Localization.T("Query.Query");
                 if (!string.IsNullOrWhiteSpace(this.connectionHost))
                 {
                     title += " - " + this.connectionHost;
@@ -152,6 +152,7 @@ namespace mySQLPunk
                 SetTableDataMode(true);
                 ExecutePagedQuery(); // 立即載入第一頁資料
             }
+            ApplyLanguage();
         }
 
         private async void CalculateTotalRowsAsync()
@@ -190,7 +191,7 @@ namespace mySQLPunk
             if (active)
             {
                 if (split != null) split.Panel1Collapsed = true;
-                this.Text = $"{_databaseName}.{GetTableNameFromSql()} - Table Data";
+                this.Text = $"{_databaseName}.{GetTableNameFromSql()} - {Localization.T("Query.TableData")}";
                 
                 dgvResults.ReadOnly = false;
                 dgvResults.AllowUserToAddRows = true;
@@ -226,11 +227,11 @@ namespace mySQLPunk
 
             // ── 頂部選單 (平時隱藏) ──
             mainMenuStrip = new MenuStrip { Visible = false };
-            mainMenuStrip.Items.Add(new ToolStripMenuItem("File"));
-            mainMenuStrip.Items.Add(new ToolStripMenuItem("Edit"));
-            mainMenuStrip.Items.Add(new ToolStripMenuItem("View"));
-            mainMenuStrip.Items.Add(new ToolStripMenuItem("Window"));
-            mainMenuStrip.Items.Add(new ToolStripMenuItem("Help"));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.File")));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.Edit")));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.View")));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.Window")));
+            mainMenuStrip.Items.Add(new ToolStripMenuItem(Localization.T("Menu.Help")));
 
             // ── 頂部專業工具列 (ToolStrip) ──
             mainToolStrip = new ToolStrip { 
@@ -240,18 +241,18 @@ namespace mySQLPunk
                 BackColor = Color.White
             };
             
-            tsBtnExecute = new ToolStripButton("Execute", null, (s, e) => ExecutePagedQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
-            tsBtnCancel = new ToolStripButton("Stop", null, (s, e) => CancelQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Enabled = false };
-            tsBtnBeautify = new ToolStripButton("Beautify", null, (s, e) => BeautifySql()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsBtnExecute = new ToolStripButton(Localization.T("Query.Execute"), null, (s, e) => ExecutePagedQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsBtnCancel = new ToolStripButton(Localization.T("Query.Stop"), null, (s, e) => CancelQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Enabled = false };
+            tsBtnBeautify = new ToolStripButton(Localization.T("Query.Beautify"), null, (s, e) => BeautifySql()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             
-            tsBtnSave = new ToolStripButton("Save", null, (s, e) => SaveChanges()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
-            tsBtnAdd = new ToolStripButton("Add", null, (s, e) => AddNewRow()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
-            tsBtnDelete = new ToolStripButton("Delete", null, (s, e) => DeleteSelectedRows()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
-            tsBtnRefresh = new ToolStripButton("Refresh", null, (s, e) => ExecutePagedQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
+            tsBtnSave = new ToolStripButton(Localization.T("Query.Save"), null, (s, e) => SaveChanges()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
+            tsBtnAdd = new ToolStripButton(Localization.T("Query.Add"), null, (s, e) => AddNewRow()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
+            tsBtnDelete = new ToolStripButton(Localization.T("Query.Delete"), null, (s, e) => DeleteSelectedRows()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
+            tsBtnRefresh = new ToolStripButton(Localization.T("Query.Refresh"), null, (s, e) => ExecutePagedQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
             
-            tsBtnExport = new ToolStripButton("Export", null, (s, e) => ExportCsv()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
-            tsBtnFloat = new ToolStripButton("Float", null, (s, e) => FloatToWindow()) { DisplayStyle = ToolStripItemDisplayStyle.Image };
-            tsBtnDock = new ToolStripButton("Dock", null, (s, e) => DockToMainWindow()) { DisplayStyle = ToolStripItemDisplayStyle.Image, Visible = false };
+            tsBtnExport = new ToolStripButton(Localization.T("Query.Export"), null, (s, e) => ExportCsv()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsBtnFloat = new ToolStripButton(Localization.T("Query.Float"), null, (s, e) => FloatToWindow()) { DisplayStyle = ToolStripItemDisplayStyle.Image };
+            tsBtnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => DockToMainWindow()) { DisplayStyle = ToolStripItemDisplayStyle.Image, Visible = false };
 
             mainToolStrip.Items.AddRange(new ToolStripItem[] { 
                 tsBtnExecute, tsBtnCancel, tsBtnBeautify, 
@@ -302,14 +303,14 @@ namespace mySQLPunk
             btnDataNext = new ToolStripButton(">", null, (s, e) => { if (_currentPage < GetTotalPages()) { _currentPage++; ExecutePagedQuery(); } });
             btnDataLast = new ToolStripButton(">|", null, (s, e) => { _currentPage = GetTotalPages(); ExecutePagedQuery(); });
 
-            ToolStripLabel lblLimit = new ToolStripLabel(" Limit: ") { Margin = new Padding(10, 0, 0, 0) };
+            ToolStripLabel lblLimit = new ToolStripLabel(Localization.T("Query.Limit")) { Margin = new Padding(10, 0, 0, 0) };
             txtPageSize = new ToolStripTextBox { Text = _pageSize.ToString(), Width = 50, TextBoxTextAlign = HorizontalAlignment.Center };
             txtPageSize.TextChanged += (s, e) => { if (int.TryParse(txtPageSize.Text, out int val)) _pageSize = val; };
-            ToolStripLabel lblRecords = new ToolStripLabel(" records ") { Margin = new Padding(0, 0, 20, 0) };
+            ToolStripLabel lblRecords = new ToolStripLabel(Localization.T("Query.Records")) { Margin = new Padding(0, 0, 20, 0) };
 
             btnDataFirst = new ToolStripButton("|<", null, (s, e) => { _currentPage = 1; ExecutePagedQuery(); }) { Alignment = ToolStripItemAlignment.Right };
             btnDataPrev = new ToolStripButton("<", null, (s, e) => { if (_currentPage > 1) { _currentPage--; ExecutePagedQuery(); } }) { Alignment = ToolStripItemAlignment.Right };
-            lblDataPagination = new ToolStripLabel(" Page 1 of 1 ") { Alignment = ToolStripItemAlignment.Right, Margin = new Padding(10, 0, 10, 0) };
+            lblDataPagination = new ToolStripLabel(Localization.Format("Query.PageFormat", 1, 1, 0)) { Alignment = ToolStripItemAlignment.Right, Margin = new Padding(10, 0, 10, 0) };
             btnDataNext = new ToolStripButton(">", null, (s, e) => { if (_currentPage < GetTotalPages()) { _currentPage++; ExecutePagedQuery(); } }) { Alignment = ToolStripItemAlignment.Right };
             btnDataLast = new ToolStripButton(">|", null, (s, e) => { _currentPage = GetTotalPages(); ExecutePagedQuery(); }) { Alignment = ToolStripItemAlignment.Right };
 
@@ -361,7 +362,7 @@ namespace mySQLPunk
             // ── 結果區 (TabControl) ──
             tabResults = new TabControl { Dock = DockStyle.Fill };
 
-            TabPage tabData = new TabPage("Results");
+            TabPage tabData = new TabPage(Localization.T("Query.Results"));
             dgvResults = new DataGridView
             {
                 Dock = DockStyle.Fill,
@@ -379,7 +380,7 @@ namespace mySQLPunk
 
             // ── 狀態列 ──
             statusStrip = new StatusStrip { BackColor = Color.White };
-            lblStatus = new ToolStripStatusLabel("Ready");
+            lblStatus = new ToolStripStatusLabel(Localization.T("Status.Ready"));
             lblSqlPreview = new ToolStripStatusLabel { Spring = true, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.Gray };
             statusStrip.Items.AddRange(new ToolStripItem[] { lblStatus, lblSqlPreview });
 
@@ -796,7 +797,7 @@ namespace mySQLPunk
          private void UpdatePaginationUI()
         {
             int totalPages = GetTotalPages();
-            lblDataPagination.Text = $" Page {_currentPage} of {totalPages} (Total: {_totalRows}) ";
+            lblDataPagination.Text = Localization.Format("Query.PageFormat", _currentPage, totalPages, _totalRows);
             btnDataFirst.Enabled = _currentPage > 1;
             btnDataPrev.Enabled = _currentPage > 1;
             btnDataNext.Enabled = _currentPage < totalPages;
@@ -907,6 +908,33 @@ namespace mySQLPunk
             {
                 _mainHost.UpdateMainStatus(msg);
             }
+        }
+
+        public void ApplyLanguage()
+        {
+            if (mainMenuStrip != null && mainMenuStrip.Items.Count >= 5)
+            {
+                mainMenuStrip.Items[0].Text = Localization.T("Menu.File");
+                mainMenuStrip.Items[1].Text = Localization.T("Menu.Edit");
+                mainMenuStrip.Items[2].Text = Localization.T("Menu.View");
+                mainMenuStrip.Items[3].Text = Localization.T("Menu.Window");
+                mainMenuStrip.Items[4].Text = Localization.T("Menu.Help");
+            }
+
+            if (tsBtnExecute != null) tsBtnExecute.Text = Localization.T("Query.Execute");
+            if (tsBtnCancel != null) tsBtnCancel.Text = Localization.T("Query.Stop");
+            if (tsBtnBeautify != null) tsBtnBeautify.Text = Localization.T("Query.Beautify");
+            if (tsBtnSave != null) tsBtnSave.Text = Localization.T("Query.Save");
+            if (tsBtnAdd != null) tsBtnAdd.Text = Localization.T("Query.Add");
+            if (tsBtnDelete != null) tsBtnDelete.Text = Localization.T("Query.Delete");
+            if (tsBtnRefresh != null) tsBtnRefresh.Text = Localization.T("Query.Refresh");
+            if (tsBtnExport != null) tsBtnExport.Text = Localization.T("Query.Export");
+            if (tsBtnFloat != null) tsBtnFloat.Text = Localization.T("Query.Float");
+            if (tsBtnDock != null) tsBtnDock.Text = Localization.T("Query.Dock");
+            if (tabResults != null && tabResults.TabPages.Count > 0) tabResults.TabPages[0].Text = Localization.T("Query.Results");
+            if (lblStatus != null && (lblStatus.Text == "Ready" || lblStatus.Text == "就緒")) lblStatus.Text = Localization.T("Status.Ready");
+            UpdatePaginationUI();
+            Localization.ApplyTo(this);
         }
 
         private static string GetFirstWord(string sql)

@@ -72,6 +72,7 @@ namespace mySQLPunk
 
         public Form1()
         {
+            Localization.Load();
             InitializeComponent();
         }
         
@@ -464,7 +465,7 @@ namespace mySQLPunk
             statusStrip1.Visible = true; 
             statusStrip1.SizingGrip = true; // 恢復 Resize 手柄
             statusStrip1.SendToBack(); 
-            lblMainStatus = new ToolStripStatusLabel("Ready") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+            lblMainStatus = new ToolStripStatusLabel(Localization.T("Status.Ready")) { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
             statusStrip1.Items.Clear();
             statusStrip1.Items.Add(lblMainStatus);
 
@@ -500,7 +501,7 @@ namespace mySQLPunk
             table_top.BorderStyle = BorderStyle.None;
 
             // 初始化主狀態標籤
-            lblMainStatus = new ToolStripStatusLabel("Ready") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+            lblMainStatus = new ToolStripStatusLabel(Localization.T("Status.Ready")) { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
             statusStrip1.Items.Add(lblMainStatus);
 
             queryTabs = new TabControl();
@@ -540,7 +541,7 @@ namespace mySQLPunk
             {
                 using (var pen = new Pen(Color.FromArgb(0, 120, 212), 4))
                     e.Graphics.DrawRectangle(pen, 2, 2, _dockHintOverlay.Width - 5, _dockHintOverlay.Height - 5);
-                const string msg = "釋放滑鼠以嵌入視窗";
+                string msg = Localization.T("Status.ReleaseToDock");
                 using (var font = new Font("Microsoft JhengHei", 14, FontStyle.Bold))
                 using (var brush = new SolidBrush(Color.FromArgb(0, 120, 212)))
                 {
@@ -581,6 +582,7 @@ namespace mySQLPunk
 
             string imgPath = Path.Combine(Application.StartupPath, "image");
             ConfigureMainToolbar(imgPath);
+            ApplyLanguage();
 
             // 連結 Design Table 事件
             DesignTable.Click += DesignTable_Click;
@@ -607,14 +609,31 @@ namespace mySQLPunk
 
         private void ConfigureMainMenu()
         {
-            檔案ToolStripMenuItem.Text = "檔案";
-            ttToolStripMenuItem.Text = "視窗";
-            helpToolStripMenuItem.Text = "說明";
+            檔案ToolStripMenuItem.Text = Localization.T("Menu.File");
+            newConnectionToolStripMenuItem.Text = Localization.T("Menu.NewConnection");
+            openConnectionToolStripMenuItem.Text = Localization.T("Menu.OpenConnection");
+            closeConnectionToolStripMenuItem.Text = Localization.T("Menu.CloseConnection");
+            exportToolStripMenuItem.Text = Localization.T("Menu.ExportConnections");
+            importConnectionsToolStripMenuItem.Text = Localization.T("Menu.ImportConnections");
+            closeToolStripMenuItem.Text = Localization.T("Menu.Close");
+            exitToolStripMenuItem.Text = Localization.T("Menu.Exit");
+            ttToolStripMenuItem.Text = Localization.T("Menu.Window");
+            helpToolStripMenuItem.Text = Localization.T("Menu.Help");
+            aboutToolStripMenuItem.Text = Localization.T("Menu.About");
 
-            ToolStripMenuItem editMenu = new ToolStripMenuItem("編輯");
-            ToolStripMenuItem viewMenu = new ToolStripMenuItem("檢視");
-            ToolStripMenuItem favoriteMenu = new ToolStripMenuItem("我的最愛");
-            ToolStripMenuItem toolsMenu = new ToolStripMenuItem("工具");
+            ToolStripMenuItem editMenu = new ToolStripMenuItem(Localization.T("Menu.Edit"));
+            ToolStripMenuItem viewMenu = new ToolStripMenuItem(Localization.T("Menu.View"));
+            ToolStripMenuItem favoriteMenu = new ToolStripMenuItem(Localization.T("Menu.Favorites"));
+            ToolStripMenuItem toolsMenu = new ToolStripMenuItem(Localization.T("Menu.Tools"));
+            ToolStripMenuItem languageMenu = new ToolStripMenuItem(Localization.T("Menu.Language"));
+            ToolStripMenuItem zhMenu = new ToolStripMenuItem(Localization.T("Menu.LanguageZh"));
+            ToolStripMenuItem enMenu = new ToolStripMenuItem(Localization.T("Menu.LanguageEn"));
+            zhMenu.Checked = !Localization.IsEnglish;
+            enMenu.Checked = Localization.IsEnglish;
+            zhMenu.Click += (s, e) => ChangeLanguage(Localization.TraditionalChinese);
+            enMenu.Click += (s, e) => ChangeLanguage(Localization.English);
+            languageMenu.DropDownItems.AddRange(new ToolStripItem[] { zhMenu, enMenu });
+            toolsMenu.DropDownItems.Add(languageMenu);
 
             menuStrip1.Items.Clear();
             menuStrip1.Items.AddRange(new ToolStripItem[]
@@ -627,6 +646,51 @@ namespace mySQLPunk
                 ttToolStripMenuItem,
                 helpToolStripMenuItem
             });
+        }
+
+        private void ChangeLanguage(string language)
+        {
+            Localization.SetLanguage(language, true);
+            ApplyLanguage();
+            foreach (Form form in Application.OpenForms)
+            {
+                if (form == this) continue;
+                QueryForm queryForm = form as QueryForm;
+                if (queryForm != null) queryForm.ApplyLanguage();
+                TableDesignerForm designerForm = form as TableDesignerForm;
+                if (designerForm != null) designerForm.ApplyLanguage();
+                Localization.ApplyTo(form);
+            }
+            UpdateMainStatus(Localization.T("Status.LanguageChanged"));
+        }
+
+        private void ApplyLanguage()
+        {
+            Text = Localization.T("App.Title");
+            ConfigureMainMenu();
+            ConfigureMainToolbar(Path.Combine(Application.StartupPath, "image"));
+            label1.Text = Localization.T("Sidebar.Connections");
+            if (lblSidebarTitle != null) lblSidebarTitle.Text = Localization.T("Sidebar.ObjectDetails");
+            if (lblMainStatus != null && (lblMainStatus.Text == "Ready" || lblMainStatus.Text == "就緒" || string.IsNullOrWhiteSpace(lblMainStatus.Text)))
+            {
+                lblMainStatus.Text = Localization.T("Status.Ready");
+            }
+
+            OpenTable.Text = Localization.T("Tool.OpenTable");
+            DesignTable.Text = Localization.T("Tool.DesignTable");
+            NewTable.Text = Localization.T("Tool.NewTable");
+            DeleteTable.Text = Localization.T("Tool.DeleteTable");
+            ImportWizard.Text = Localization.T("Tool.ImportWizard");
+            ExportWizard.Text = Localization.T("Tool.ExportWizard");
+            OpenView.Text = Localization.T("Tool.OpenView");
+            DesignView.Text = Localization.T("Tool.DesignView");
+            NewView.Text = Localization.T("Tool.NewView");
+            DeleteView.Text = Localization.T("Tool.DeleteView");
+            View_ExportWizard.Text = Localization.T("Tool.ExportWizard");
+            DesignFunction.Text = Localization.T("Tool.DesignFunction");
+            NewFunction.Text = Localization.T("Tool.NewFunction");
+            DeleteFunction.Text = Localization.T("Tool.DeleteFunction");
+            ExecuteFunction.Text = Localization.T("Tool.ExecuteFunction");
         }
 
         private void CreateNewTable()
@@ -712,7 +776,7 @@ namespace mySQLPunk
             
             // 標題區
             Panel pnlTitle = new Panel() { Dock = DockStyle.Top, Height = 40, Padding = new Padding(10, 5, 10, 0) };
-            lblSidebarTitle = new Label() { Text = "Object Details", Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold), AutoSize = true, Location = new Point(10, 10) };
+            lblSidebarTitle = new Label() { Text = Localization.T("Sidebar.ObjectDetails"), Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold), AutoSize = true, Location = new Point(10, 10) };
             pnlTitle.Controls.Add(lblSidebarTitle);
 
             // 切換按鈕 (Info / DDL)
@@ -773,18 +837,18 @@ namespace mySQLPunk
 
         private void ConfigureMainToolbar(string imgPath)
         {
-            ConfigureToolbarItem(connection_btn, "連線");
-            ConfigureToolbarItem(query_btn, "新增查詢");
-            ConfigureToolbarItem(table_btn, "資料表");
-            ConfigureToolbarItem(view_btn, "檢視");
-            ConfigureToolbarItem(function_btn, "函式");
-            ConfigureToolbarItem(user_btn, "使用者");
-            ConfigureToolbarItem(other_btn, "其它");
-            ConfigureToolbarItem(query_section_btn, "查詢");
-            ConfigureToolbarItem(backup_btn, "備份");
-            ConfigureToolbarItem(auto_run_btn, "自動執行");
-            ConfigureToolbarItem(model_btn, "模型");
-            ConfigureToolbarItem(bi_btn, "BI");
+            ConfigureToolbarItem(connection_btn, Localization.T("Toolbar.Connection"));
+            ConfigureToolbarItem(query_btn, Localization.T("Toolbar.NewQuery"));
+            ConfigureToolbarItem(table_btn, Localization.T("Toolbar.Table"));
+            ConfigureToolbarItem(view_btn, Localization.T("Toolbar.View"));
+            ConfigureToolbarItem(function_btn, Localization.T("Toolbar.Function"));
+            ConfigureToolbarItem(user_btn, Localization.T("Toolbar.User"));
+            ConfigureToolbarItem(other_btn, Localization.T("Toolbar.Other"));
+            ConfigureToolbarItem(query_section_btn, Localization.T("Toolbar.Query"));
+            ConfigureToolbarItem(backup_btn, Localization.T("Toolbar.Backup"));
+            ConfigureToolbarItem(auto_run_btn, Localization.T("Toolbar.AutoRun"));
+            ConfigureToolbarItem(model_btn, Localization.T("Toolbar.Model"));
+            ConfigureToolbarItem(bi_btn, Localization.T("Toolbar.BI"));
 
             query_btn.Click -= Query_btn_Click;
             query_btn.Click += Query_btn_Click;
@@ -1427,11 +1491,11 @@ namespace mySQLPunk
                 SyncTreeWithTable(tableName);
 
                 var cms = new ContextMenuStrip();
-                var itemOpen = new ToolStripMenuItem("開啟資料表");
+                var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenTable"));
                 itemOpen.Click += (s, ev) => OpenSelectedTableInQuery();
                 cms.Items.Add(itemOpen);
                 
-                var itemDesign = new ToolStripMenuItem("設計資料表");
+                var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                 itemDesign.Click += (s, ev) => DesignSelectedTable();
                 cms.Items.Add(itemDesign);
 
@@ -1746,14 +1810,14 @@ namespace mySQLPunk
                 table_top.DataSource = null;
                 table_top.Visible = true;
                 queryTabs.Visible = false;
-                lblSidebarTitle.Text = "Object Details";
+                lblSidebarTitle.Text = Localization.T("Sidebar.ObjectDetails");
                 dgvDetails.DataSource = null;
                 rtbDDL.Clear();
 
                 Control[] navControls = this.Controls.Find("lblNav", true);
-                if (navControls.Length > 0) ((Label)navControls[0]).Text = " Ready";
+                if (navControls.Length > 0) ((Label)navControls[0]).Text = " " + Localization.T("Status.Ready");
                 
-                MessageBox.Show("連線已斷開。");
+                MessageBox.Show(Localization.T("Status.ConnectionClosed"));
             }
         }
 
@@ -1862,11 +1926,11 @@ namespace mySQLPunk
 
                 if (e.Node.Parent == null)
                 {
-                    ToolStripMenuItem editItem = new ToolStripMenuItem("編輯連線");
+                    ToolStripMenuItem editItem = new ToolStripMenuItem(Localization.T("Tool.EditConnection"));
                     editItem.Click += (s, ev) => db_tree_edit_connection(e.Node.Index);
                     menu.Items.Add(editItem);
 
-                    ToolStripMenuItem deleteItem = new ToolStripMenuItem("刪除連線");
+                    ToolStripMenuItem deleteItem = new ToolStripMenuItem(Localization.T("Tool.DeleteConnection"));
                     deleteItem.Click += (s, ev) => db_tree_delete_connection(e.Node.Index);
                     menu.Items.Add(deleteItem);
                 }
@@ -1875,20 +1939,20 @@ namespace mySQLPunk
                     var pathParts = my.explode("\\", e.Node.FullPath);
                     if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                     {
-                        ToolStripMenuItem openTableItem = new ToolStripMenuItem("開啟資料表");
+                        ToolStripMenuItem openTableItem = new ToolStripMenuItem(Localization.T("Tool.OpenTable"));
                         openTableItem.Click += (s, ev) => OpenSelectedTableInQuery();
                         menu.Items.Add(openTableItem);
 
-                        ToolStripMenuItem designTableItem = new ToolStripMenuItem("設計資料表");
+                        ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                         designTableItem.Click += (s, ev) => DesignSelectedTable();
                         menu.Items.Add(designTableItem);
 
-                        ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem("傾印 SQL 檔案");
-                        ToolStripMenuItem dumpStructureAndDataItem = new ToolStripMenuItem("結構與資料");
+                        ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                        ToolStripMenuItem dumpStructureAndDataItem = new ToolStripMenuItem(Localization.T("Tool.StructureAndData"));
                         dumpStructureAndDataItem.Click += (s, ev) => DumpSelectedTableSql(false);
                         dumpSqlItem.DropDownItems.Add(dumpStructureAndDataItem);
 
-                        ToolStripMenuItem dumpDataOnlyItem = new ToolStripMenuItem("僅資料");
+                        ToolStripMenuItem dumpDataOnlyItem = new ToolStripMenuItem(Localization.T("Tool.DataOnly"));
                         dumpDataOnlyItem.Click += (s, ev) => DumpSelectedTableSql(true);
                         dumpSqlItem.DropDownItems.Add(dumpDataOnlyItem);
 
@@ -2378,7 +2442,7 @@ namespace mySQLPunk
         private void user_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("user");
-            UpdateMainStatus("使用者功能入口已選取。");
+            UpdateMainStatus(Localization.T("Status.UserSelected"));
         }
 
         private void function_btn_Click(object sender, EventArgs e)
@@ -2391,7 +2455,7 @@ namespace mySQLPunk
         private void other_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("other");
-            UpdateMainStatus("其它功能入口已選取。");
+            UpdateMainStatus(Localization.T("Status.OtherSelected"));
         }
 
         private void query_section_btn_Click(object sender, EventArgs e)
@@ -2415,13 +2479,13 @@ namespace mySQLPunk
         private void model_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("model");
-            UpdateMainStatus("模型功能入口已選取。");
+            UpdateMainStatus(Localization.T("Status.ModelSelected"));
         }
 
         private void bi_btn_Click(object sender, EventArgs e)
         {
             thirty_two_change("bi");
-            UpdateMainStatus("BI 功能入口已選取。");
+            UpdateMainStatus(Localization.T("Status.BISelected"));
         }
 
         private void SelectDatabaseGroupNode(string groupName)
@@ -2429,7 +2493,7 @@ namespace mySQLPunk
             TreeNode databaseNode = GetSelectedDatabaseNode();
             if (databaseNode == null)
             {
-                UpdateMainStatus("請先選取一個已展開的資料庫。");
+                UpdateMainStatus(Localization.T("Status.SelectExpandedDatabase"));
                 return;
             }
 
@@ -2648,7 +2712,7 @@ namespace mySQLPunk
                 if (queryTabs.TabPages.Count == 0)
                 {
                     statusStrip1.Visible = true; // 拖入時顯示提示
-                    lblMainStatus.Text = "Release mouse to dock the window...";
+                    lblMainStatus.Text = Localization.T("Status.ReleaseToDock") + "...";
                 }
             }
             else
@@ -2676,7 +2740,7 @@ namespace mySQLPunk
             HideDockHint();
             if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
             statusStrip1.Visible = false; // 離開時隱藏
-            lblMainStatus.Text = "Ready";
+            lblMainStatus.Text = Localization.T("Status.Ready");
         }
 
         private void QueryTabs_DragDrop(object sender, DragEventArgs e)
@@ -2684,7 +2748,7 @@ namespace mySQLPunk
             queryTabs.BackColor = Color.White;
             HideDockHint();
             statusStrip1.Visible = false; // 放下時隱藏
-            lblMainStatus.Text = "Ready";
+            lblMainStatus.Text = Localization.T("Status.Ready");
             var dockable = GetDockableFromDrag(e.Data);
             if (dockable != null && IsPointInTabDropArea(new Point(e.X, e.Y)))
                 DockDockableForm(dockable);

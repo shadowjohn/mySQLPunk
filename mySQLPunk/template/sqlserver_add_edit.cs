@@ -27,11 +27,12 @@ namespace mySQLPunk.template
         {
             InitializeUi();
             Form1.ApplyModernTheme(this);
+            Localization.ApplyTo(this);
         }
 
         private void InitializeUi()
         {
-            Text = "SQL Server Connection";
+            Text = Localization.T("Common.SqlServerConnection");
             StartPosition = FormStartPosition.CenterParent;
             Size = new Size(560, 360);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -42,43 +43,43 @@ namespace mySQLPunk.template
             int inputX = 145;
             int y = 24;
 
-            Controls.Add(new Label { Text = "連線名稱", Location = new Point(labelX, y + 4), AutoSize = true });
+            Controls.Add(new Label { Text = Localization.T("Common.ConnectionName"), Location = new Point(labelX, y + 4), AutoSize = true });
             txtName = new TextBox { Location = new Point(inputX, y), Width = 360 };
             Controls.Add(txtName);
 
             y += 40;
-            Controls.Add(new Label { Text = "主機 / IP", Location = new Point(labelX, y + 4), AutoSize = true });
+            Controls.Add(new Label { Text = Localization.T("Common.Host"), Location = new Point(labelX, y + 4), AutoSize = true });
             txtHost = new TextBox { Location = new Point(inputX, y), Width = 360, Text = "localhost" };
             Controls.Add(txtHost);
 
             y += 40;
-            Controls.Add(new Label { Text = "連接埠", Location = new Point(labelX, y + 4), AutoSize = true });
+            Controls.Add(new Label { Text = Localization.T("Common.Port"), Location = new Point(labelX, y + 4), AutoSize = true });
             txtPort = new TextBox { Location = new Point(inputX, y), Width = 120, Text = "1433" };
             Controls.Add(txtPort);
 
             y += 40;
-            Controls.Add(new Label { Text = "初始資料庫", Location = new Point(labelX, y + 4), AutoSize = true });
+            Controls.Add(new Label { Text = Localization.T("Common.InitialDatabase"), Location = new Point(labelX, y + 4), AutoSize = true });
             txtDatabase = new TextBox { Location = new Point(inputX, y), Width = 160, Text = "master" };
             Controls.Add(txtDatabase);
 
             y += 40;
-            chkWindowsAuth = new CheckBox { Text = "使用 Windows 驗證", Location = new Point(inputX, y), Width = 220 };
+            chkWindowsAuth = new CheckBox { Text = Localization.T("Common.WindowsAuth"), Location = new Point(inputX, y), Width = 260 };
             chkWindowsAuth.CheckedChanged += (s, e) => ToggleAuthFields();
             Controls.Add(chkWindowsAuth);
 
             y += 40;
-            Controls.Add(new Label { Text = "使用者名稱", Location = new Point(labelX, y + 4), AutoSize = true });
+            Controls.Add(new Label { Text = Localization.T("Common.Username"), Location = new Point(labelX, y + 4), AutoSize = true });
             txtUser = new TextBox { Location = new Point(inputX, y), Width = 240 };
             Controls.Add(txtUser);
 
             y += 40;
-            Controls.Add(new Label { Text = "密碼", Location = new Point(labelX, y + 4), AutoSize = true });
+            Controls.Add(new Label { Text = Localization.T("Common.Password"), Location = new Point(labelX, y + 4), AutoSize = true });
             txtPassword = new TextBox { Location = new Point(inputX, y), Width = 240, UseSystemPasswordChar = true };
             Controls.Add(txtPassword);
 
-            btnTest = new Button { Text = "Test Connection", Location = new Point(24, 284), Size = new Size(145, 34) };
-            btnOk = new Button { Text = "OK", Location = new Point(356, 284), Size = new Size(75, 34) };
-            btnCancel = new Button { Text = "Cancel", Location = new Point(440, 284), Size = new Size(75, 34) };
+            btnTest = new Button { Text = Localization.T("Common.TestConnection"), Location = new Point(24, 284), Size = new Size(145, 34) };
+            btnOk = new Button { Text = Localization.T("Common.OK"), Location = new Point(356, 284), Size = new Size(75, 34) };
+            btnCancel = new Button { Text = Localization.T("Common.Cancel"), Location = new Point(440, 284), Size = new Size(75, 34) };
             Controls.Add(btnTest);
             Controls.Add(btnOk);
             Controls.Add(btnCancel);
