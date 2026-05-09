@@ -4825,9 +4825,13 @@ namespace mySQLPunk
 
             if (db is my_postgresql)
             {
-                AppendDatabaseEventsFromQuery(events, db,
-                    "SELECT trigger_name AS \"Name\", 'Trigger' AS \"Type\", event_manipulation AS \"Status\", action_statement AS \"DDL\" " +
-                    "FROM information_schema.triggers WHERE trigger_schema = 'public' ORDER BY trigger_name;");
+                AppendDatabaseEventsFromQuery(events, db, BuildPostgreSqlTriggerMetadataSql());
+                if (events.Rows.Count == 0)
+                {
+                    AppendDatabaseEventsFromQuery(events, db,
+                        "SELECT trigger_name AS \"Name\", 'Trigger' AS \"Type\", event_manipulation AS \"Status\", action_statement AS \"DDL\" " +
+                        "FROM information_schema.triggers WHERE trigger_schema = 'public' ORDER BY trigger_name;");
+                }
                 return events;
             }
 
@@ -4841,13 +4845,36 @@ namespace mySQLPunk
 
             if (db is my_oracle)
             {
-                string owner = EscapeSqlLiteral(dbName.ToUpperInvariant());
-                AppendDatabaseEventsFromQuery(events, db,
-                    "SELECT TRIGGER_NAME AS Name, 'Trigger' AS Type, STATUS AS Status, TRIGGER_BODY AS DDL " +
-                    "FROM ALL_TRIGGERS WHERE OWNER='" + owner + "' ORDER BY TRIGGER_NAME");
+                AppendDatabaseEventsFromQuery(events, db, BuildOracleTriggerMetadataSql(dbName));
+                if (events.Rows.Count == 0)
+                {
+                    string owner = EscapeSqlLiteral((dbName ?? string.Empty).ToUpperInvariant());
+                    AppendDatabaseEventsFromQuery(events, db,
+                        "SELECT TRIGGER_NAME AS Name, 'Trigger' AS Type, STATUS AS Status, TRIGGER_BODY AS DDL " +
+                        "FROM ALL_TRIGGERS WHERE OWNER='" + owner + "' ORDER BY TRIGGER_NAME");
+                }
             }
 
             return events;
+        }
+
+        private static string BuildPostgreSqlTriggerMetadataSql()
+        {
+            return "SELECT t.tgname AS \"Name\", 'Trigger' AS \"Type\", " +
+                   "CASE WHEN t.tgenabled = 'D' THEN 'DISABLED' ELSE 'ENABLED' END AS \"Status\", " +
+                   "pg_catalog.pg_get_triggerdef(t.oid, true) AS \"DDL\" " +
+                   "FROM pg_catalog.pg_trigger t " +
+                   "INNER JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid " +
+                   "INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace " +
+                   "WHERE NOT t.tgisinternal AND n.nspname = 'public' ORDER BY t.tgname;";
+        }
+
+        private static string BuildOracleTriggerMetadataSql(string ownerName)
+        {
+            string owner = EscapeSqlLiteral((ownerName ?? string.Empty).ToUpperInvariant());
+            return "SELECT TRIGGER_NAME AS Name, 'Trigger' AS Type, STATUS AS Status, " +
+                   "DBMS_METADATA.GET_DDL('TRIGGER', TRIGGER_NAME, OWNER) AS DDL " +
+                   "FROM ALL_TRIGGERS WHERE OWNER='" + owner + "' ORDER BY TRIGGER_NAME";
         }
 
         private DataTable GetDatabaseFunctions(IDatabase db, string dbName)
