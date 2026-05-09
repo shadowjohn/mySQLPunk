@@ -243,17 +243,65 @@ namespace mySQLPunk.lib
         {
             DataTable columns = GetCopyColumns(databaseName, tableName);
             if (columns.Rows.Count == 0) return "";
+            DataTable indexes = TryGetOracleIndexes(databaseName, tableName, true);
+            DataTable copyIndexes = TryGetOracleIndexes(databaseName, tableName, false);
 
+            return BuildOracleTableCreateStatement(databaseName, tableName, columns, indexes, copyIndexes);
+        }
+
+        private DataTable TryGetOracleIndexes(string databaseName, string tableName, bool includePrimary)
+        {
+            try
+            {
+                return includePrimary ? GetIndexes(databaseName, tableName) : GetCopyIndexes(databaseName, tableName);
+            }
+            catch
+            {
+                return new DataTable();
+            }
+        }
+
+        private static string BuildOracleTableCreateStatement(string databaseName, string tableName, DataTable columns, DataTable indexes, DataTable copyIndexes)
+        {
             List<string> defs = new List<string>();
             foreach (DataRow row in columns.Rows)
             {
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
-                defs.Add("  " + QuoteIdentifier(row["Name"].ToString()) + " " + MapCopyTypeToOracle(row) + " " + nullable);
+                string defaultValue = GetDataRowValue(row, "DefaultValue", "DEFAULTVALUE", "ColumnDefault", "COLUMN_DEFAULT");
+                string definition = "  " + QuoteIdentifier(GetDataRowValue(row, "Name", "NAME")) + " " + MapCopyTypeToOracle(row);
+                if (!string.IsNullOrWhiteSpace(defaultValue))
+                {
+                    definition += " DEFAULT " + defaultValue.Trim();
+                }
+                definition += " " + nullable;
+                defs.Add(definition);
             }
 
-            return "CREATE TABLE " + QualifiedName(databaseName, tableName) + " (\r\n" +
-                   string.Join(",\r\n", defs.ToArray()) +
-                   "\r\n)";
+            List<string> primaryColumns = GetPrimaryKeyColumns(indexes);
+            if (primaryColumns.Count > 0)
+            {
+                defs.Add("  CONSTRAINT " + QuoteIdentifier("PK_" + tableName) +
+                         " PRIMARY KEY (" + string.Join(", ", primaryColumns.ToArray()) + ")");
+            }
+
+            List<string> statements = new List<string>
+            {
+                "CREATE TABLE " + QualifiedName(databaseName, tableName) + " (\r\n" +
+                string.Join(",\r\n", defs.ToArray()) +
+                "\r\n)"
+            };
+
+            foreach (DataRow row in columns.Rows)
+            {
+                string comment = GetDataRowValue(row, "Comment", "COMMENT");
+                if (string.IsNullOrWhiteSpace(comment)) continue;
+                statements.Add("COMMENT ON COLUMN " + QualifiedName(databaseName, tableName) + "." +
+                               QuoteIdentifier(GetDataRowValue(row, "Name", "NAME")) +
+                               " IS '" + comment.Replace("'", "''") + "'");
+            }
+
+            statements.AddRange(BuildOracleIndexCreateStatements(databaseName, tableName, copyIndexes));
+            return string.Join(";\r\n", statements.ToArray());
         }
 
         public bool TableExists(string databaseName, string tableName)
@@ -309,6 +357,7 @@ namespace mySQLPunk.lib
                     c.DATA_LENGTH AS MAXLENGTH,
                     c.DATA_PRECISION AS NUMERICPRECISION,
                     c.DATA_SCALE AS NUMERICSCALE,
+                    c.DATA_DEFAULT AS DEFAULTVALUE,
                     cc.COMMENTS AS COMMENT,
                     c.COLUMN_ID AS ORDINALPOSITION
                 FROM ALL_TAB_COLUMNS c
@@ -478,6 +527,92 @@ namespace mySQLPunk.lib
                    row["IsNullable"].ToString().Equals("YES", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static List<string> GetPrimaryKeyColumns(DataTable indexes)
+        {
+            List<string> columns = new List<string>();
+            if (indexes == null) return columns;
+
+            foreach (DataRow row in indexes.Rows)
+            {
+                string keyName = GetDataRowValue(row, "KeyName", "KEY_NAME", "IndexName", "INDEXNAME");
+                if (!keyName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
+
+                string columnName = GetDataRowValue(row, "ColumnName", "COLUMN_NAME", "COLUMNNAME");
+                if (!string.IsNullOrWhiteSpace(columnName))
+                {
+                    columns.Add(QuoteIdentifier(columnName));
+                }
+            }
+
+            return columns;
+        }
+
+        private static List<string> BuildOracleIndexCreateStatements(string databaseName, string tableName, DataTable indexes)
+        {
+            List<string> statements = new List<string>();
+            if (indexes == null || indexes.Rows.Count == 0) return statements;
+
+            foreach (var group in indexes.AsEnumerable().GroupBy(r => GetDataRowValue(r, "IndexName", "INDEXNAME")))
+            {
+                string indexName = group.Key;
+                if (string.IsNullOrWhiteSpace(indexName) || indexName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
+                DataRow first = group.First();
+                string indexType = GetDataRowValue(first, "IndexType", "INDEXTYPE");
+                bool unique = IsUniqueIndexRow(first);
+
+                List<string> columns = new List<string>();
+                foreach (DataRow row in group.OrderBy(r => GetDataRowInt(r, "SeqInIndex", "SEQININDEX")))
+                {
+                    string columnName = GetDataRowValue(row, "ColumnName", "COLUMNNAME");
+                    if (!string.IsNullOrWhiteSpace(columnName))
+                    {
+                        columns.Add(QuoteIdentifier(columnName));
+                    }
+                }
+
+                if (columns.Count == 0) continue;
+
+                if (indexType.Equals("SPATIAL", StringComparison.OrdinalIgnoreCase))
+                {
+                    statements.Add("CREATE INDEX " + QuoteIdentifier(indexName) +
+                                   " ON " + QualifiedName(databaseName, tableName) +
+                                   " (" + columns[0] + ") INDEXTYPE IS MDSYS.SPATIAL_INDEX");
+                    continue;
+                }
+
+                statements.Add("CREATE " + (unique ? "UNIQUE " : "") + "INDEX " + QuoteIdentifier(indexName) +
+                               " ON " + QualifiedName(databaseName, tableName) +
+                               " (" + string.Join(", ", columns.ToArray()) + ")");
+            }
+
+            return statements;
+        }
+
+        private static bool IsUniqueIndexRow(DataRow row)
+        {
+            string nonUnique = GetDataRowValue(row, "NonUnique", "NONUNIQUE", "NON_UNIQUE");
+            return nonUnique == "0" || nonUnique.Equals("False", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetDataRowValue(DataRow row, params string[] names)
+        {
+            foreach (string name in names)
+            {
+                if (row.Table.Columns.Contains(name) && row[name] != DBNull.Value)
+                {
+                    return row[name].ToString();
+                }
+            }
+            return "";
+        }
+
+        private static int GetDataRowInt(DataRow row, params string[] names)
+        {
+            string value = GetDataRowValue(row, names);
+            int parsed;
+            return int.TryParse(value, out parsed) ? parsed : 0;
+        }
+
         private static string MapCopyTypeToOracle(DataRow row)
         {
             string type = row["DataType"].ToString().ToLowerInvariant();
@@ -494,6 +629,13 @@ namespace mySQLPunk.lib
             if (type.Contains("bool") || type == "bit") return "NUMBER(1)";
             if (type.Contains("date") || type.Contains("time")) return "TIMESTAMP";
             if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea") || type.Contains("image")) return "BLOB";
+            if (type.Contains("clob") || type.Contains("text")) return "CLOB";
+            if (type.Contains("char") || type.Contains("varchar"))
+            {
+                int maxLength = GetDataRowInt(row, "MaxLength", "MAXLENGTH", "DataLength", "DATALENGTH");
+                if (maxLength <= 0) maxLength = 255;
+                return "VARCHAR2(" + Math.Min(maxLength, 4000) + ")";
+            }
             return "CLOB";
         }
 
