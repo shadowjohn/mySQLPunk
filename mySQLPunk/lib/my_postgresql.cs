@@ -325,9 +325,13 @@ namespace mySQLPunk.lib
                     c.character_maximum_length AS ""MaxLength"",
                     c.numeric_precision AS ""NumericPrecision"",
                     c.numeric_scale AS ""NumericScale"",
-                    col_description((quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass::oid, c.ordinal_position) AS ""Comment"",
+                    c.column_default AS ""DefaultValue"",
+                    col_description(cls.oid, a.attnum) AS ""Comment"",
                     c.ordinal_position AS ""OrdinalPosition""
                 FROM information_schema.columns c
+                LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
+                LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
+                LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped
                 WHERE c.table_schema = 'public' AND c.table_name = :name
                 ORDER BY c.ordinal_position;", p);
         }
@@ -354,20 +358,51 @@ namespace mySQLPunk.lib
 
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
         {
+            foreach (string sql in BuildPostgreSqlCopyCreateTableStatements(tableName, sourceColumns, sourceProvider))
+            {
+                ExecOrThrow(sql);
+            }
+        }
+
+        private static List<string> BuildPostgreSqlCopyCreateTableStatements(string tableName, DataTable sourceColumns, string sourceProvider)
+        {
+            List<string> statements = new List<string>();
             List<string> defs = new List<string>();
             foreach (DataRow row in sourceColumns.Rows)
             {
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
-                defs.Add(QuotePg(row["Name"].ToString()) + " " + MapCopyTypeToPostgreSql(row) + " " + nullable);
+                string definition = QuotePg(row["Name"].ToString()) + " " + MapCopyTypeToPostgreSql(row);
+                string defaultValue = GetPostgreSqlCopyDefaultValue(row, sourceProvider);
+                if (!string.IsNullOrWhiteSpace(defaultValue))
+                {
+                    definition += " DEFAULT " + defaultValue;
+                }
+                definition += " " + nullable;
+                defs.Add(definition);
             }
-            ExecOrThrow("CREATE TABLE public." + QuotePg(tableName) + " (" + string.Join(", ", defs.ToArray()) + ");");
+
+            statements.Add("CREATE TABLE public." + QuotePg(tableName) + " (" + string.Join(", ", defs.ToArray()) + ");");
 
             foreach (DataRow row in sourceColumns.Rows)
             {
-                if (!row.Table.Columns.Contains("Comment") || row["Comment"] == DBNull.Value || row["Comment"].ToString().Length == 0) continue;
-                string sql = "COMMENT ON COLUMN public." + QuotePg(tableName) + "." + QuotePg(row["Name"].ToString()) + " IS '" + row["Comment"].ToString().Replace("'", "''") + "';";
-                ExecOrThrow(sql);
+                string comment = GetDataRowValue(row, "Comment", "COMMENT");
+                if (string.IsNullOrWhiteSpace(comment)) continue;
+                statements.Add("COMMENT ON COLUMN public." + QuotePg(tableName) + "." + QuotePg(row["Name"].ToString()) +
+                               " IS '" + comment.Replace("'", "''") + "';");
             }
+
+            return statements;
+        }
+
+        private static string GetPostgreSqlCopyDefaultValue(DataRow row, string sourceProvider)
+        {
+            if (!string.Equals(sourceProvider, "postgresql", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(sourceProvider, "postgres", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            return GetDataRowValue(row, "DefaultValue", "DEFAULTVALUE", "ColumnDefault", "COLUMN_DEFAULT").Trim();
         }
 
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider)
@@ -446,6 +481,18 @@ namespace mySQLPunk.lib
         private static bool IsCopyNullable(DataRow row)
         {
             return !row.Table.Columns.Contains("IsNullable") || row["IsNullable"] == DBNull.Value || row["IsNullable"].ToString().ToUpper() != "NO";
+        }
+
+        private static string GetDataRowValue(DataRow row, params string[] names)
+        {
+            foreach (string name in names)
+            {
+                if (row.Table.Columns.Contains(name) && row[name] != DBNull.Value)
+                {
+                    return row[name].ToString();
+                }
+            }
+            return "";
         }
 
         private static string MapCopyTypeToPostgreSql(DataRow row)
