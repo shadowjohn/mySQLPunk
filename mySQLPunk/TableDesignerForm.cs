@@ -1338,7 +1338,7 @@ namespace mySQLPunk
 
         private bool SupportsFullTextIndex()
         {
-            return _db is my_postgresql || _db is my_oracle;
+            return _db is my_postgresql || _db is my_oracle || _db is my_mssql;
         }
 
         private string BuildDropPrimaryKeyStatement()
@@ -1467,6 +1467,10 @@ namespace mySQLPunk
             if (type == "FULLTEXT" && _db is my_oracle)
             {
                 return BuildOracleFullTextIndexStatement(indexName, _tableName, columns);
+            }
+            if (type == "FULLTEXT" && _db is my_mssql)
+            {
+                return BuildSqlServerFullTextIndexStatement(_tableName, columns);
             }
             if (type == "SPATIAL" && _db is my_postgresql)
             {
@@ -1676,6 +1680,12 @@ namespace mySQLPunk
                     continue;
                 }
 
+                if (type == "FULLTEXT" && _db is my_mssql)
+                {
+                    statements.Add(BuildSqlServerFullTextIndexStatement(tableName, columns));
+                    continue;
+                }
+
                 if (type == "SPATIAL" && _db is my_postgresql)
                 {
                     statements.Add("CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
@@ -1783,6 +1793,40 @@ namespace mySQLPunk
                    " (" + spatialColumn + ") USING " + method + ";";
         }
 
+        private string BuildSqlServerFullTextIndexStatement(string tableName, string columns)
+        {
+            string fullTextColumns = FormatSqlServerFullTextColumns(columns);
+            string catalogName = "mysqlpunk_ft";
+            string tableIdentifier = QuoteDesignerIdentifier(tableName).Replace("'", "''");
+            string catalogIdentifier = QuoteDesignerIdentifier(catalogName).Replace("'", "''");
+            string escapedFullTextColumns = fullTextColumns.Replace("'", "''");
+            string tableLiteral = EscapeSqlServerLiteral(tableName);
+            string databaseIdentifier = QuoteDesignerIdentifier(_databaseName);
+
+            return "DECLARE @fullTextKeyIndex nvarchar(128);\r\n" +
+                   "DECLARE @catalogName sysname = N'" + EscapeSqlServerLiteral(catalogName) + "';\r\n" +
+                   "DECLARE @createCatalogSql nvarchar(max);\r\n" +
+                   "DECLARE @createIndexSql nvarchar(max);\r\n" +
+                   "SELECT TOP (1) @fullTextKeyIndex = i.name\r\n" +
+                   "FROM " + QuoteDesignerIdentifier(_databaseName) + ".sys.indexes i\r\n" +
+                   "INNER JOIN " + QuoteDesignerIdentifier(_databaseName) + ".sys.objects o ON o.object_id = i.object_id\r\n" +
+                   "INNER JOIN " + QuoteDesignerIdentifier(_databaseName) + ".sys.schemas s ON s.schema_id = o.schema_id\r\n" +
+                   "WHERE s.name = N'dbo' AND o.name = N'" + tableLiteral + "' AND (i.is_primary_key = 1 OR i.is_unique = 1) AND i.is_disabled = 0 AND i.has_filter = 0\r\n" +
+                   "ORDER BY CASE WHEN i.is_primary_key = 1 THEN 0 ELSE 1 END, i.index_id;\r\n" +
+                   "IF @fullTextKeyIndex IS NULL\r\n" +
+                   "BEGIN\r\n" +
+                   "    THROW 50000, 'SQL Server FULLTEXT index requires a primary key or unique index on the table.', 1;\r\n" +
+                   "END\r\n" +
+                   "IF NOT EXISTS (SELECT 1 FROM " + QuoteDesignerIdentifier(_databaseName) + ".sys.fulltext_catalogs WHERE name = @catalogName)\r\n" +
+                   "BEGIN\r\n" +
+                   "    SET @createCatalogSql = N'CREATE FULLTEXT CATALOG " + catalogIdentifier + " AS DEFAULT;';\r\n" +
+                   "    EXEC " + databaseIdentifier + ".sys.sp_executesql @createCatalogSql;\r\n" +
+                   "END\r\n" +
+                   "SET @createIndexSql = N'CREATE FULLTEXT INDEX ON [dbo]." + tableIdentifier +
+                   " (" + escapedFullTextColumns + ") KEY INDEX ' + QUOTENAME(@fullTextKeyIndex) + N' ON " + catalogIdentifier + " WITH CHANGE_TRACKING AUTO;';\r\n" +
+                   "EXEC " + databaseIdentifier + ".sys.sp_executesql @createIndexSql;";
+        }
+
         private string BuildOracleFullTextIndexStatement(string indexName, string tableName, string columns)
         {
             string textColumn = FormatOracleSingleIndexColumn(columns);
@@ -1810,6 +1854,20 @@ namespace mySQLPunk
             if (rawCols.Length == 0) return "";
             string columnName = GetIndexColumnName(rawCols[0]);
             return QuoteDesignerIdentifier(columnName);
+        }
+
+        private string FormatSqlServerFullTextColumns(string columns)
+        {
+            string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            List<string> formattedCols = new List<string>();
+            foreach (string rawCol in rawCols)
+            {
+                string columnName = GetIndexColumnName(rawCol);
+                if (string.IsNullOrWhiteSpace(columnName)) continue;
+                formattedCols.Add(QuoteDesignerIdentifier(columnName) + " LANGUAGE 0x0");
+            }
+
+            return string.Join(", ", formattedCols.ToArray());
         }
 
         private string GetSqlServerSpatialIndexMethod(string quotedColumnName)
@@ -2453,8 +2511,7 @@ namespace mySQLPunk
                         i++;
                         batch.AppendLine(lines[i]);
                         string batchLine = lines[i].TrimStart();
-                        if (batchLine.StartsWith("IF @constraintName", StringComparison.OrdinalIgnoreCase) ||
-                            batchLine.StartsWith("IF @primaryKeyName", StringComparison.OrdinalIgnoreCase))
+                        if (IsSqlServerDesignerBatchEnd(batchLine))
                         {
                             break;
                         }
@@ -2475,7 +2532,16 @@ namespace mySQLPunk
         private static bool StartsSqlServerDesignerBatch(string statement)
         {
             return statement.StartsWith("DECLARE @constraintName", StringComparison.OrdinalIgnoreCase) ||
-                   statement.StartsWith("DECLARE @primaryKeyName", StringComparison.OrdinalIgnoreCase);
+                   statement.StartsWith("DECLARE @primaryKeyName", StringComparison.OrdinalIgnoreCase) ||
+                   statement.StartsWith("DECLARE @fullTextKeyIndex", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSqlServerDesignerBatchEnd(string statement)
+        {
+            return statement.StartsWith("IF @constraintName", StringComparison.OrdinalIgnoreCase) ||
+                   statement.StartsWith("IF @primaryKeyName", StringComparison.OrdinalIgnoreCase) ||
+                   (statement.StartsWith("EXEC ", StringComparison.OrdinalIgnoreCase) &&
+                    statement.IndexOf("@createIndexSql", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static void FlushSplitStatements(StringBuilder pending, List<string> statements)
@@ -2736,7 +2802,7 @@ namespace mySQLPunk
 
             if (_db is my_mssql)
             {
-                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "SPATIAL" };
+                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" };
             }
 
             return new object[] { "NORMAL", "UNIQUE", "PRIMARY" };
