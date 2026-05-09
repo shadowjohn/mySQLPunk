@@ -4889,13 +4889,28 @@ namespace mySQLPunk
 
             if (db is my_oracle)
             {
-                string owner = EscapeSqlLiteral(dbName.ToUpperInvariant());
-                AppendDatabaseFunctionsFromQuery(functions, db,
-                    "SELECT OBJECT_NAME AS Name, OBJECT_TYPE AS Type, '' AS ReturnType, STATUS AS Status, '' AS DDL " +
-                    "FROM ALL_OBJECTS WHERE OWNER='" + owner + "' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME");
+                AppendDatabaseFunctionsFromQuery(functions, db, BuildOracleRoutineMetadataSql(dbName));
+                if (functions.Rows.Count == 0)
+                {
+                    string owner = EscapeSqlLiteral((dbName ?? string.Empty).ToUpperInvariant());
+                    AppendDatabaseFunctionsFromQuery(functions, db,
+                        "SELECT OBJECT_NAME AS Name, OBJECT_TYPE AS Type, '' AS ReturnType, STATUS AS Status, '' AS DDL " +
+                        "FROM ALL_OBJECTS WHERE OWNER='" + owner + "' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME");
+                }
             }
 
             return functions;
+        }
+
+        private static string BuildOracleRoutineMetadataSql(string ownerName)
+        {
+            string owner = EscapeSqlLiteral((ownerName ?? string.Empty).ToUpperInvariant());
+            return "SELECT o.OBJECT_NAME AS Name, " +
+                   "CASE WHEN o.OBJECT_TYPE = 'PROCEDURE' THEN 'Procedure' ELSE 'Function' END AS Type, " +
+                   "'' AS ReturnType, o.STATUS AS Status, " +
+                   "(SELECT RTRIM(XMLAGG(XMLELEMENT(e, s.TEXT) ORDER BY s.LINE).EXTRACT('//text()').GETCLOBVAL()) " +
+                   "FROM ALL_SOURCE s WHERE s.OWNER = o.OWNER AND s.NAME = o.OBJECT_NAME AND s.TYPE = o.OBJECT_TYPE) AS DDL " +
+                   "FROM ALL_OBJECTS o WHERE o.OWNER='" + owner + "' AND o.OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY o.OBJECT_TYPE, o.OBJECT_NAME";
         }
 
         private DataTable GetDatabaseUsers(IDatabase db, string dbName, Dictionary<string, object> connInfo = null)
