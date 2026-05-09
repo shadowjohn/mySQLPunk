@@ -4930,6 +4930,7 @@ namespace mySQLPunk
                 AppendDatabaseFunctionsFromQuery(functions, db,
                     "SELECT ROUTINE_NAME AS Name, ROUTINE_TYPE AS Type, COALESCE(DATA_TYPE, '') AS ReturnType, IS_DETERMINISTIC AS Status, COALESCE(ROUTINE_DEFINITION, '') AS DDL " +
                     "FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA='" + safeDb + "' ORDER BY ROUTINE_TYPE, ROUTINE_NAME;");
+                PopulateMySqlRoutineCreateStatements(functions, db, dbName);
                 return functions;
             }
 
@@ -4965,6 +4966,40 @@ namespace mySQLPunk
             }
 
             return functions;
+        }
+
+        private static void PopulateMySqlRoutineCreateStatements(DataTable functions, IDatabase db, string dbName)
+        {
+            if (functions == null || db == null) return;
+
+            foreach (DataRow row in functions.Rows)
+            {
+                string routineName = row["Name"].ToString();
+                string routineType = row["Type"].ToString();
+                if (string.IsNullOrWhiteSpace(routineName)) continue;
+
+                try
+                {
+                    DataTable createTable = db.SelectSQL(BuildMySqlShowCreateRoutineSql(dbName, routineName, routineType));
+                    if (createTable == null || createTable.Rows.Count == 0) continue;
+
+                    string createSql = FirstColumnValue(createTable.Rows[0], "Create Function", "Create Procedure");
+                    if (!string.IsNullOrWhiteSpace(createSql))
+                    {
+                        row["DDL"] = createSql;
+                    }
+                }
+                catch
+                {
+                    // Keep ROUTINE_DEFINITION as a fallback when SHOW CREATE is hidden by permissions.
+                }
+            }
+        }
+
+        private static string BuildMySqlShowCreateRoutineSql(string databaseName, string routineName, string routineType)
+        {
+            string kind = IsProcedureRoutine(routineType) ? "PROCEDURE" : "FUNCTION";
+            return "SHOW CREATE " + kind + " " + QuoteMySqlIdentifier(databaseName) + "." + QuoteMySqlIdentifier(routineName) + ";";
         }
 
         private static string BuildOracleRoutineMetadataSql(string ownerName)
@@ -5164,6 +5199,11 @@ namespace mySQLPunk
         private static string EscapeSqlLiteral(string value)
         {
             return (value ?? string.Empty).Replace("'", "''");
+        }
+
+        private static string QuoteMySqlIdentifier(string name)
+        {
+            return "`" + (name ?? string.Empty).Replace("`", "``") + "`";
         }
 
         private static string EscapeSqlServerName(string name)
