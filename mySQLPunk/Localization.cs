@@ -168,6 +168,9 @@ namespace mySQLPunk
             Add("Connection.SpatiaLiteLoadFailed", "SQLite 可連線，但 SpatiaLite 載入失敗：\r\n{0}", "SQLite connected, but SpatiaLite failed to load:\r\n{0}");
             Add("Connection.InitSpatialMetadataTitle", "初始化 geospatial", "Initialize geospatial");
             Add("Connection.InitSpatialMetadataPrompt", "此 SQLite 檔尚未偵測到 SpatiaLite metadata，是否要初始化？", "This SQLite file does not have SpatiaLite metadata yet. Initialize it?");
+            Add("Connection.UnsupportedEdit", "此連線類型尚未支援編輯：{0}", "Editing this connection type is not supported yet: {0}");
+            Add("Connection.ConfirmDelete", "確定要刪除連線「{0}」嗎？", "Delete connection \"{0}\"?");
+            Add("Connection.DeleteTitle", "刪除連線", "Delete Connection");
 
             Add("ConnectionWizard.Title", "選取連線類型", "Select Connection Type");
             Add("ConnectionWizard.SelectType", "選取連線類型:", "Select connection type:");

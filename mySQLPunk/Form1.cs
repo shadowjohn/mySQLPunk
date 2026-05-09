@@ -5703,9 +5703,19 @@ namespace mySQLPunk
                     }
                     break;
                 default:
-                    MessageBox.Show("此連線類型尚未支援編輯：" + kind);
+                    MessageBox.Show(BuildUnsupportedConnectionEditMessage(kind), Localization.T("Tool.EditConnection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     break;
             }
+        }
+
+        private static string BuildUnsupportedConnectionEditMessage(string kind)
+        {
+            return Localization.Format("Connection.UnsupportedEdit", kind);
+        }
+
+        private static string BuildDeleteConnectionMessage(string name)
+        {
+            return Localization.Format("Connection.ConfirmDelete", name);
         }
 
         private void db_tree_delete_connection(int index)
@@ -5713,8 +5723,8 @@ namespace mySQLPunk
             var conn = myN.connections[index];
             string name = conn["conn_name"].ToString();
             var result = MessageBox.Show(
-                $"確定要刪除連線「{name}」嗎？",
-                "刪除連線",
+                BuildDeleteConnectionMessage(name),
+                Localization.T("Connection.DeleteTitle"),
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning);
 
