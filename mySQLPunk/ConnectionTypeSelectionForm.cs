@@ -319,6 +319,13 @@ namespace mySQLPunk
 
             private void DrawIconTile(Graphics graphics, Rectangle bounds)
             {
+                if (iconImage != null)
+                {
+                    Rectangle imageBounds = InflateToFit(bounds, iconImage.Size, listMode ? 30 : 48);
+                    graphics.DrawImage(iconImage, imageBounds);
+                    return;
+                }
+
                 Rectangle shadow = new Rectangle(bounds.X, bounds.Y + 2, bounds.Width, bounds.Height);
                 using (GraphicsPath shadowPath = RoundedRectangle(shadow, 8))
                 using (SolidBrush shadowBrush = new SolidBrush(Color.FromArgb(28, Color.Black)))
@@ -332,15 +339,7 @@ namespace mySQLPunk
                     graphics.FillPath(brush, path);
                 }
 
-                if (iconImage != null)
-                {
-                    Rectangle imageBounds = InflateToFit(bounds, iconImage.Size, listMode ? 26 : 42);
-                    graphics.DrawImage(iconImage, imageBounds);
-                }
-                else
-                {
-                    DrawFallbackIcon(graphics, bounds);
-                }
+                DrawFallbackIcon(graphics, bounds);
             }
 
             private static Image LoadIcon(string path)
