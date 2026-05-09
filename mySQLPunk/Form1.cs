@@ -760,10 +760,6 @@ namespace mySQLPunk
             table_top.GridColor = Color.FromArgb(240, 240, 240);
             table_top.BorderStyle = BorderStyle.None;
 
-            // 初始化主狀態標籤
-            lblMainStatus = new ToolStripStatusLabel(Localization.T("Status.Ready")) { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-            statusStrip1.Items.Add(lblMainStatus);
-
             queryTabs = new TabControl();
             queryTabs.Dock = DockStyle.Fill;
             queryTabs.Visible = false;
