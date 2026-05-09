@@ -1338,7 +1338,7 @@ namespace mySQLPunk
 
         private bool SupportsFullTextIndex()
         {
-            return _db is my_postgresql;
+            return _db is my_postgresql || _db is my_oracle;
         }
 
         private string BuildDropPrimaryKeyStatement()
@@ -1463,6 +1463,10 @@ namespace mySQLPunk
                 return "CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
                        " ON " + GetQualifiedDesignerTableName(_tableName) +
                        " USING GIN (" + FormatPostgreSqlFullTextIndexExpression(columns) + ");";
+            }
+            if (type == "FULLTEXT" && _db is my_oracle)
+            {
+                return BuildOracleFullTextIndexStatement(indexName, _tableName, columns);
             }
             if (type == "SPATIAL" && _db is my_postgresql)
             {
@@ -1662,6 +1666,12 @@ namespace mySQLPunk
                     continue;
                 }
 
+                if (type == "FULLTEXT" && _db is my_oracle)
+                {
+                    statements.Add(BuildOracleFullTextIndexStatement(indexName, tableName, columns));
+                    continue;
+                }
+
                 if (type == "SPATIAL" && _db is my_postgresql)
                 {
                     statements.Add("CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
@@ -1752,7 +1762,20 @@ namespace mySQLPunk
                    " (" + spatialColumn + ") INDEXTYPE IS MDSYS.SPATIAL_INDEX;";
         }
 
+        private string BuildOracleFullTextIndexStatement(string indexName, string tableName, string columns)
+        {
+            string textColumn = FormatOracleSingleIndexColumn(columns);
+            return "CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
+                   " ON " + GetQualifiedDesignerTableName(tableName) +
+                   " (" + textColumn + ") INDEXTYPE IS CTXSYS.CONTEXT;";
+        }
+
         private string FormatOracleSpatialIndexColumn(string columns)
+        {
+            return FormatOracleSingleIndexColumn(columns);
+        }
+
+        private string FormatOracleSingleIndexColumn(string columns)
         {
             string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
             if (rawCols.Length == 0) return "";
@@ -2659,7 +2682,7 @@ namespace mySQLPunk
 
             if (_db is my_oracle)
             {
-                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "SPATIAL" };
+                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" };
             }
 
             return new object[] { "NORMAL", "UNIQUE", "PRIMARY" };

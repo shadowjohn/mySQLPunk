@@ -186,7 +186,11 @@ namespace mySQLPunk.lib
                     ic.COLUMN_NAME,
                     CASE WHEN i.UNIQUENESS = 'UNIQUE' THEN 0 ELSE 1 END AS NON_UNIQUE,
                     ic.COLUMN_POSITION AS SEQ_IN_INDEX,
-                    CASE WHEN i.INDEX_TYPE = 'DOMAIN' AND UPPER(i.ITYP_NAME) = 'SPATIAL_INDEX' THEN 'SPATIAL' ELSE i.INDEX_TYPE END AS INDEX_TYPE,
+                    CASE
+                        WHEN i.INDEX_TYPE = 'DOMAIN' AND UPPER(i.ITYP_NAME) = 'SPATIAL_INDEX' THEN 'SPATIAL'
+                        WHEN i.INDEX_TYPE = 'DOMAIN' AND UPPER(i.ITYP_OWNER) = 'CTXSYS' AND UPPER(i.ITYP_NAME) = 'CONTEXT' THEN 'FULLTEXT'
+                        ELSE i.INDEX_TYPE
+                    END AS INDEX_TYPE,
                     '' AS INDEX_COMMENT
                 FROM ALL_INDEXES i
                 INNER JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = i.OWNER AND ic.INDEX_NAME = i.INDEX_NAME
@@ -379,7 +383,11 @@ namespace mySQLPunk.lib
                     ic.COLUMN_NAME AS COLUMNNAME,
                     CASE WHEN i.UNIQUENESS = 'UNIQUE' THEN 0 ELSE 1 END AS NONUNIQUE,
                     ic.COLUMN_POSITION AS SEQININDEX,
-                    CASE WHEN i.INDEX_TYPE = 'DOMAIN' AND UPPER(i.ITYP_NAME) = 'SPATIAL_INDEX' THEN 'SPATIAL' ELSE i.INDEX_TYPE END AS INDEXTYPE
+                    CASE
+                        WHEN i.INDEX_TYPE = 'DOMAIN' AND UPPER(i.ITYP_NAME) = 'SPATIAL_INDEX' THEN 'SPATIAL'
+                        WHEN i.INDEX_TYPE = 'DOMAIN' AND UPPER(i.ITYP_OWNER) = 'CTXSYS' AND UPPER(i.ITYP_NAME) = 'CONTEXT' THEN 'FULLTEXT'
+                        ELSE i.INDEX_TYPE
+                    END AS INDEXTYPE
                 FROM ALL_INDEXES i
                 INNER JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = i.OWNER AND ic.INDEX_NAME = i.INDEX_NAME
                 LEFT JOIN ALL_CONSTRAINTS c ON c.OWNER = i.OWNER AND c.INDEX_NAME = i.INDEX_NAME AND c.CONSTRAINT_TYPE = 'P'
@@ -420,6 +428,11 @@ namespace mySQLPunk.lib
                 {
                     sql = "CREATE INDEX " + QuoteIdentifier(targetIndexName) +
                           " ON " + QualifiedName(databaseName, tableName) + " (" + cols[0] + ") INDEXTYPE IS MDSYS.SPATIAL_INDEX";
+                }
+                else if (indexType.Equals("FULLTEXT", StringComparison.OrdinalIgnoreCase) && cols.Count > 0)
+                {
+                    sql = "CREATE INDEX " + QuoteIdentifier(targetIndexName) +
+                          " ON " + QualifiedName(databaseName, tableName) + " (" + cols[0] + ") INDEXTYPE IS CTXSYS.CONTEXT";
                 }
                 else
                 {
@@ -577,6 +590,14 @@ namespace mySQLPunk.lib
                     statements.Add("CREATE INDEX " + QuoteIdentifier(indexName) +
                                    " ON " + QualifiedName(databaseName, tableName) +
                                    " (" + columns[0] + ") INDEXTYPE IS MDSYS.SPATIAL_INDEX");
+                    continue;
+                }
+
+                if (indexType.Equals("FULLTEXT", StringComparison.OrdinalIgnoreCase))
+                {
+                    statements.Add("CREATE INDEX " + QuoteIdentifier(indexName) +
+                                   " ON " + QualifiedName(databaseName, tableName) +
+                                   " (" + columns[0] + ") INDEXTYPE IS CTXSYS.CONTEXT");
                     continue;
                 }
 
