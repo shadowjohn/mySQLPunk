@@ -1334,14 +1334,14 @@ namespace mySQLPunk
             var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
             if (pathParts.Length < 4 || pathParts[2] != "Tables")
             {
-                MessageBox.Show("請先在左側選取一個具體的資料表 (Table)！");
+                MessageBox.Show(Localization.T("Object.SelectTable"), Localization.T("Tool.DeleteTable"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return false;
             }
 
             string dbName = pathParts[1];
             string tableName = pathParts[3];
 
-            if (confirm && MessageBox.Show($"確定要刪除資料表 「{tableName}」嗎？此操作不可還原！", "警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            if (confirm && MessageBox.Show(Localization.Format("Object.ConfirmDeleteTable", tableName), Localization.T("Common.Warning"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             {
                 return false;
             }
@@ -1358,12 +1358,12 @@ namespace mySQLPunk
                 parent.Nodes.Remove(selectedNode);
                 db_tree.SelectedNode = parent;
                 ShowDatabaseGroupList(db, dbName, "Tables");
-                UpdateMainStatus("Table deleted: " + tableName);
-                if (confirm) MessageBox.Show("資料表已刪除。");
+                UpdateMainStatus(Localization.Format("Object.TableDeletedStatus", tableName));
+                if (confirm) MessageBox.Show(Localization.T("Object.TableDeleted"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return true;
             }
 
-            MessageBox.Show("刪除失敗：" + (res.ContainsKey("reason") ? res["reason"] : "unknown error"));
+            MessageBox.Show(Localization.Format("Object.DeleteFailed", res.ContainsKey("reason") ? res["reason"] : Localization.T("Object.UnknownError")), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
         }
 
@@ -1656,7 +1656,7 @@ namespace mySQLPunk
             }
             else
             {
-                MessageBox.Show("請先在左側選取一個具體的資料表 (Table)！");
+                MessageBox.Show(Localization.T("Object.SelectTable"), Localization.T("Tool.DesignTable"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
@@ -1664,7 +1664,7 @@ namespace mySQLPunk
         {
             if (db_tree.SelectedNode == null)
             {
-                MessageBox.Show("請先選擇一個資料庫或連線！");
+                MessageBox.Show(Localization.T("Object.SelectDatabaseOrConnection"), Localization.T("Toolbar.NewQuery"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1703,7 +1703,7 @@ namespace mySQLPunk
                 }
                 else
                 {
-                    MessageBox.Show("請先雙擊連線以開啟資料庫！");
+                    MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), Localization.T("Toolbar.NewQuery"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
         }
@@ -1730,7 +1730,7 @@ namespace mySQLPunk
 
             if (pathParts.Length < 4 || pathParts[2] != "Tables")
             {
-                MessageBox.Show("請先在左側選取一個具體的資料表 (Table)！");
+                MessageBox.Show(Localization.T("Object.SelectTable"), Localization.T("Tool.OpenTable"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1743,7 +1743,7 @@ namespace mySQLPunk
             var connInfo = myN.connections[root.Index];
             if (connInfo["isConnect"].ToString() != "T")
             {
-                MessageBox.Show("請先雙擊連線以開啟資料庫！");
+                MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), Localization.T("Tool.OpenTable"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1756,7 +1756,7 @@ namespace mySQLPunk
             string initialSql = BuildTableSelectSql(db, dbName, tableName, explicitColumns);
 
             OpenQuery(db, dbName, host, initialSql, true);
-            UpdateMainStatus((explicitColumns ? "SELECT columns opened: " : "SELECT * opened: ") + tableName);
+            UpdateMainStatus(Localization.Format(explicitColumns ? "Object.SelectColumnsOpenedStatus" : "Object.SelectStarOpenedStatus", tableName));
         }
 
         private void OpenSelectedViewInQuery()
@@ -1764,7 +1764,7 @@ namespace mySQLPunk
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
             if (selection == null || selection.GroupName != "Views")
             {
-                MessageBox.Show("請先在左側選取一個具體的檢視 (View)！");
+                MessageBox.Show(Localization.T("Object.SelectView"), Localization.T("Tool.OpenView"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1841,7 +1841,7 @@ namespace mySQLPunk
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
             if (selection == null || selection.GroupName != "Views")
             {
-                MessageBox.Show("請先在左側選取一個具體的檢視 (View)！");
+                MessageBox.Show(Localization.T("Object.SelectView"), Localization.T("Tool.DesignView"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1856,7 +1856,7 @@ namespace mySQLPunk
             TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
-                MessageBox.Show("請先選取一個已展開的資料庫或 Views 節點。", "新增檢視", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Object.SelectViewTarget"), Localization.T("Tool.NewView"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1864,7 +1864,7 @@ namespace mySQLPunk
                                 "SELECT *" + Environment.NewLine +
                                 "FROM " + QuoteDumpIdentifier(target.Database, "table_name") + ";";
             OpenQuery(target.Database, target.DatabaseName, string.Empty, initialSql, true);
-            UpdateMainStatus("New view SQL template opened.");
+            UpdateMainStatus(Localization.T("Object.NewViewTemplateOpened"));
         }
 
         private void CreateNewFunction()
@@ -1872,12 +1872,12 @@ namespace mySQLPunk
             TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
-                MessageBox.Show("請先選取一個已展開的資料庫或 Functions 節點。", "新增函式", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Object.SelectFunctionTarget"), Localization.T("Tool.NewFunction"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), BuildFunctionTemplate(target.Database, target.DatabaseName), true);
-            UpdateMainStatus("New function SQL template opened.");
+            UpdateMainStatus(Localization.T("Object.NewFunctionTemplateOpened"));
         }
 
         private void ShowSelectedFunctionDefinition()
@@ -1885,7 +1885,7 @@ namespace mySQLPunk
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
             if (selection == null || selection.GroupName != "Functions")
             {
-                MessageBox.Show("請先在左側選取一個具體的函式或程序 (Function/Procedure)！");
+                MessageBox.Show(Localization.T("Object.SelectFunction"), Localization.T("Tool.DesignFunction"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1900,13 +1900,13 @@ namespace mySQLPunk
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
             if (selection == null || selection.GroupName != "Functions")
             {
-                MessageBox.Show("請先在左側選取一個具體的函式或程序 (Function/Procedure)！");
+                MessageBox.Show(Localization.T("Object.SelectFunction"), Localization.T("Tool.ExecuteFunction"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             string initialSql = BuildFunctionExecuteSql(selection.Database, selection.DatabaseName, selection.ObjectName, GetSelectedFunctionType(selection));
             OpenQuery(selection.Database, selection.DatabaseName, selection.Host, initialSql, true);
-            UpdateMainStatus("Function execution SQL opened: " + selection.ObjectName);
+            UpdateMainStatus(Localization.Format("Object.FunctionExecutionOpened", selection.ObjectName));
         }
 
         private void DeleteSelectedFunction()
@@ -1919,17 +1919,17 @@ namespace mySQLPunk
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
             if (selection == null || selection.GroupName != "Functions")
             {
-                MessageBox.Show("請先在左側選取一個具體的函式或程序 (Function/Procedure)！");
+                MessageBox.Show(Localization.T("Object.SelectFunction"), Localization.T("Tool.DeleteFunction"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return false;
             }
 
             if (selection.Database is my_sqlite)
             {
-                MessageBox.Show("SQLite 不支援資料庫內建 stored function。", "刪除函式", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Object.SqliteNoStoredFunction"), Localization.T("Tool.DeleteFunction"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return false;
             }
 
-            if (confirm && MessageBox.Show($"確定要刪除函式或程序「{selection.ObjectName}」嗎？此操作不可還原！", "警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            if (confirm && MessageBox.Show(Localization.Format("Object.ConfirmDeleteFunction", selection.ObjectName), Localization.T("Common.Warning"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             {
                 return false;
             }
@@ -1943,12 +1943,12 @@ namespace mySQLPunk
                 parent.Nodes.Remove(db_tree.SelectedNode);
                 db_tree.SelectedNode = parent;
                 ShowDatabaseGroupList(selection.Database, selection.DatabaseName, "Functions");
-                UpdateMainStatus("Function deleted: " + selection.ObjectName);
-                if (confirm) MessageBox.Show("函式或程序已刪除。");
+                UpdateMainStatus(Localization.Format("Object.FunctionDeletedStatus", selection.ObjectName));
+                if (confirm) MessageBox.Show(Localization.T("Object.FunctionDeleted"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return true;
             }
 
-            MessageBox.Show("刪除失敗：" + (res.ContainsKey("reason") ? res["reason"] : "unknown error"));
+            MessageBox.Show(Localization.Format("Object.DeleteFailed", res.ContainsKey("reason") ? res["reason"] : Localization.T("Object.UnknownError")), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
         }
 
@@ -1962,11 +1962,11 @@ namespace mySQLPunk
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
             if (selection == null || selection.GroupName != "Views")
             {
-                MessageBox.Show("請先在左側選取一個具體的檢視 (View)！");
+                MessageBox.Show(Localization.T("Object.SelectView"), Localization.T("Tool.DeleteView"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return false;
             }
 
-            if (confirm && MessageBox.Show($"確定要刪除檢視 「{selection.ObjectName}」嗎？此操作不可還原！", "警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            if (confirm && MessageBox.Show(Localization.Format("Object.ConfirmDeleteView", selection.ObjectName), Localization.T("Common.Warning"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             {
                 return false;
             }
@@ -1978,13 +1978,13 @@ namespace mySQLPunk
                 parent.Nodes.Remove(db_tree.SelectedNode);
                 db_tree.SelectedNode = parent;
                 ShowDatabaseGroupList(selection.Database, selection.DatabaseName, "Views");
-                UpdateMainStatus("View deleted: " + selection.ObjectName);
-                if (confirm) MessageBox.Show("檢視已刪除。");
+                UpdateMainStatus(Localization.Format("Object.ViewDeletedStatus", selection.ObjectName));
+                if (confirm) MessageBox.Show(Localization.T("Object.ViewDeleted"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return true;
             }
             else
             {
-                MessageBox.Show("刪除失敗：" + (res.ContainsKey("reason") ? res["reason"] : "unknown error"));
+                MessageBox.Show(Localization.Format("Object.DeleteFailed", res.ContainsKey("reason") ? res["reason"] : Localization.T("Object.UnknownError")), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
         }
@@ -2182,7 +2182,7 @@ namespace mySQLPunk
 
             if (pathParts.Length < 4 || pathParts[2] != "Tables")
             {
-                MessageBox.Show("請先在左側選取一個具體的資料表 (Table)！");
+                MessageBox.Show(Localization.T("Object.SelectTable"), Localization.T("Tool.DumpSql"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -2195,7 +2195,7 @@ namespace mySQLPunk
             var connInfo = myN.connections[root.Index];
             if (connInfo["isConnect"].ToString() != "T")
             {
-                MessageBox.Show("請先雙擊連線以開啟資料庫！");
+                MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), Localization.T("Tool.DumpSql"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -2205,7 +2205,7 @@ namespace mySQLPunk
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
-                dialog.Filter = "SQL files (*.sql)|*.sql";
+                dialog.Filter = Localization.T("Common.SqlFilesFilter");
                 dialog.DefaultExt = "sql";
                 dialog.FileName = dbName + "_" + tableName + (dataOnly ? "_data" : "_structure_data") + ".sql";
 
@@ -2218,11 +2218,11 @@ namespace mySQLPunk
                 {
                     string sql = BuildTableDump(db, dbName, tableName, dataOnly);
                     File.WriteAllText(dialog.FileName, sql, Encoding.UTF8);
-                    MessageBox.Show("SQL 檔案已匯出。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("匯出 SQL 失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(Localization.Format("Object.SqlExportFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -2232,13 +2232,13 @@ namespace mySQLPunk
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
             if (selection == null || selection.GroupName != "Views")
             {
-                MessageBox.Show("請先在左側選取一個具體的檢視 (View)！");
+                MessageBox.Show(Localization.T("Object.SelectView"), Localization.T("Tool.DumpSql"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
-                dialog.Filter = "SQL files (*.sql)|*.sql";
+                dialog.Filter = Localization.T("Common.SqlFilesFilter");
                 dialog.DefaultExt = "sql";
                 dialog.FileName = selection.DatabaseName + "_" + selection.ObjectName + "_view.sql";
 
@@ -2251,11 +2251,11 @@ namespace mySQLPunk
                 {
                     string sql = BuildViewDump(selection.Database, selection.DatabaseName, selection.ObjectName);
                     File.WriteAllText(dialog.FileName, sql, Encoding.UTF8);
-                    MessageBox.Show("SQL 檔案已匯出。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("匯出 SQL 失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(Localization.Format("Object.SqlExportFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -2271,7 +2271,7 @@ namespace mySQLPunk
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
-                dialog.Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*";
+                dialog.Filter = Localization.T("Common.SqlFilesFilter");
                 dialog.DefaultExt = "sql";
                 dialog.FileName = BuildCurrentSelectionDumpFileName(dataOnlyForTable);
 
@@ -2283,11 +2283,11 @@ namespace mySQLPunk
                 try
                 {
                     DumpCurrentSelectionSqlToFile(dialog.FileName, dataOnlyForTable);
-                    MessageBox.Show("SQL 檔案已匯出。", Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("匯出 SQL 失敗：" + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(Localization.Format("Object.SqlExportFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -2323,12 +2323,12 @@ namespace mySQLPunk
             if (selection != null && selection.GroupName == "Tables")
             {
                 sql = BuildTableDump(selection.Database, selection.DatabaseName, selection.ObjectName, dataOnlyForTable);
-                statusTarget = "table " + selection.ObjectName;
+                statusTarget = Localization.Format("Object.TableTarget", selection.ObjectName);
             }
             else if (selection != null && selection.GroupName == "Views")
             {
                 sql = BuildViewDump(selection.Database, selection.DatabaseName, selection.ObjectName);
-                statusTarget = "view " + selection.ObjectName;
+                statusTarget = Localization.Format("Object.ViewTarget", selection.ObjectName);
             }
             else
             {
@@ -2339,7 +2339,7 @@ namespace mySQLPunk
                 }
 
                 sql = BuildDatabaseDump(target.Database, target.DatabaseName);
-                statusTarget = "database " + target.DatabaseName;
+                statusTarget = Localization.Format("Object.DatabaseTarget", target.DatabaseName);
             }
 
             string dir = Path.GetDirectoryName(targetPath);
@@ -2349,7 +2349,7 @@ namespace mySQLPunk
             }
 
             File.WriteAllText(targetPath, sql, Encoding.UTF8);
-            UpdateMainStatus("SQL dump created for " + statusTarget + ": " + targetPath);
+            UpdateMainStatus(Localization.Format("Object.SqlDumpCreatedFor", statusTarget, targetPath));
             return true;
         }
 
@@ -2364,7 +2364,7 @@ namespace mySQLPunk
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
-                dialog.Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*";
+                dialog.Filter = Localization.T("Common.SqlFilesFilter");
                 dialog.DefaultExt = "sql";
                 dialog.FileName = target.DatabaseName + "_dump_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".sql";
 
@@ -2376,11 +2376,11 @@ namespace mySQLPunk
                 try
                 {
                     DumpSelectedDatabaseSqlToFile(dialog.FileName);
-                    MessageBox.Show("SQL 檔案已匯出。", Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("匯出 SQL 失敗：" + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(Localization.Format("Object.SqlExportFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -2400,7 +2400,7 @@ namespace mySQLPunk
             }
 
             File.WriteAllText(targetPath, BuildDatabaseDump(target.Database, target.DatabaseName), Encoding.UTF8);
-            UpdateMainStatus("SQL dump created: " + targetPath);
+            UpdateMainStatus(Localization.Format("Object.SqlDumpCreated", targetPath));
             return true;
         }
 
@@ -2416,7 +2416,7 @@ namespace mySQLPunk
             using (OpenFileDialog dialog = new OpenFileDialog())
             {
                 dialog.Title = Localization.T("ImportSql.Title");
-                dialog.Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*";
+                dialog.Filter = Localization.T("Common.SqlFilesFilter");
                 dialog.Multiselect = false;
 
                 if (dialog.ShowDialog() != DialogResult.OK)
@@ -2435,7 +2435,7 @@ namespace mySQLPunk
                 catch (Exception ex)
                 {
                     MessageBox.Show(Localization.T("ImportSql.Failed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    UpdateMainStatus("Import SQL failed: " + ex.Message);
+                    UpdateMainStatus(Localization.T("ImportSql.Failed") + ex.Message);
                 }
             }
         }
@@ -3517,7 +3517,7 @@ namespace mySQLPunk
         {
             if (!IsRenameableObjectNode(db_tree.SelectedNode))
             {
-                MessageBox.Show("請先選取單一 Table 或 View。", "重新命名", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Object.SelectTableOrView"), Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -3559,7 +3559,7 @@ namespace mySQLPunk
             DatabaseCopyItem item = BuildCopyItemFromNode(node);
             if (item == null)
             {
-                MessageBox.Show("無法取得目前選取物件的連線資訊。", "重新命名", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.T("Object.SelectionConnectionUnavailable"), Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -3568,7 +3568,7 @@ namespace mySQLPunk
                 bool isView = item.ObjectKind == "view";
                 if (isView ? item.Database.ViewExists(item.DatabaseName, newName) : item.Database.TableExists(item.DatabaseName, newName))
                 {
-                    MessageBox.Show("目標名稱已存在：" + newName, "重新命名", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(Localization.Format("Object.TargetNameExists", newName), Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
@@ -3580,13 +3580,13 @@ namespace mySQLPunk
 
                 node.Text = newName;
                 db_tree.SelectedNode = node;
-                UpdateMainStatus("Renamed " + item.ObjectKind + ": " + oldName + " -> " + newName);
+                UpdateMainStatus(Localization.Format("Object.RenamedStatus", item.ObjectKind, oldName, newName));
                 db_tree_AfterSelect(db_tree, new TreeViewEventArgs(node));
             }
             catch (Exception ex)
             {
-                UpdateMainStatus("Rename failed: " + ex.Message);
-                MessageBox.Show("重新命名失敗：" + ex.Message, "重新命名", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateMainStatus(Localization.Format("Object.RenameFailed", ex.Message));
+                MessageBox.Show(Localization.Format("Object.RenameFailed", ex.Message), Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -3599,26 +3599,26 @@ namespace mySQLPunk
             DatabaseCopyItem item = BuildCopyItemFromNode(db_tree.SelectedNode);
             if (item == null)
             {
-                MessageBox.Show("請先選取單一 Table 或 View。", "複製物件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Object.SelectTableOrView"), Localization.T("Tool.CopyObject"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             _treeClipboardItem = item;
-            UpdateMainStatus("Copied " + item.ObjectKind + ": " + item.DatabaseName + "." + item.ObjectName);
+            UpdateMainStatus(Localization.Format("Object.CopiedStatus", item.ObjectKind, item.DatabaseName, item.ObjectName));
         }
 
         private async void PasteInternalClipboardToSelectedDatabase()
         {
             if (_treeClipboardItem == null)
             {
-                MessageBox.Show("尚未複製任何 Table 或 View。", "貼上物件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Object.NoCopiedObject"), Localization.T("Tool.PasteObject"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
             if (target == null)
             {
-                MessageBox.Show("請先選取目標 database 或其 Tables/Views 節點。", "貼上物件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Object.SelectCopyTarget"), Localization.T("Tool.PasteObject"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -3641,12 +3641,14 @@ namespace mySQLPunk
 
                 RefreshDatabaseObjectNodes(target.DatabaseNode);
                 SelectObjectNode(target.DatabaseNode, result.ObjectKind, result.TargetName);
-                UpdateMainStatus("Copy completed: " + result.TargetName + (result.ObjectKind == "table" ? " (" + result.CopiedRows + " rows)" : ""));
+                UpdateMainStatus(result.ObjectKind == "table"
+                    ? Localization.Format("Object.CopyCompletedRowsStatus", result.TargetName, result.CopiedRows)
+                    : Localization.Format("Object.CopyCompletedStatus", result.TargetName));
             }
             catch (Exception ex)
             {
-                UpdateMainStatus("Copy failed: " + ex.Message);
-                MessageBox.Show("複製失敗：" + ex.Message, "貼上物件", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateMainStatus(Localization.Format("Object.CopyFailed", ex.Message));
+                MessageBox.Show(Localization.Format("Object.CopyFailed", ex.Message), Localization.T("Tool.PasteObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
