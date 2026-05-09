@@ -264,16 +264,124 @@ namespace mySQLPunk.lib
             DataTable columns = GetCopyColumns(databaseName, tableName);
             if (columns.Rows.Count == 0) return "";
 
+            DataTable indexes = GetIndexes(databaseName, tableName);
+            DataTable copyIndexes = GetCopyIndexes(databaseName, tableName);
+            return BuildSqlServerTableCreateStatement(databaseName, tableName, columns, indexes, copyIndexes);
+        }
+
+        private static string BuildSqlServerTableCreateStatement(string databaseName, string tableName, DataTable columns, DataTable indexes, DataTable copyIndexes)
+        {
             List<string> definitions = new List<string>();
             foreach (DataRow row in columns.Rows)
             {
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
-                definitions.Add("  [" + EscapeSqlServerName(row["Name"].ToString()) + "] " + MapCopyTypeToSqlServer(row) + " " + nullable);
+                string defaultValue = GetOptionalString(row, "DefaultValue").Trim();
+                string defaultSql = string.IsNullOrWhiteSpace(defaultValue) ? "" : " DEFAULT " + defaultValue;
+                definitions.Add("  [" + EscapeSqlServerName(row["Name"].ToString()) + "] " + MapCopyTypeToSqlServer(row) + defaultSql + " " + nullable);
             }
 
-            return "CREATE TABLE [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (\r\n" +
-                   string.Join(",\r\n", definitions.ToArray()) +
-                   "\r\n);";
+            List<string> primaryColumns = GetSqlServerPrimaryKeyColumns(indexes);
+            if (primaryColumns.Count > 0)
+            {
+                definitions.Add("  CONSTRAINT [PK_" + EscapeSqlServerName(tableName) + "] PRIMARY KEY (" + string.Join(", ", primaryColumns.ToArray()) + ")");
+            }
+
+            List<string> statements = new List<string>();
+            statements.Add("CREATE TABLE [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (\r\n" +
+                           string.Join(",\r\n", definitions.ToArray()) +
+                           "\r\n);");
+
+            foreach (DataRow row in columns.Rows)
+            {
+                string comment = GetOptionalString(row, "Comment");
+                if (string.IsNullOrWhiteSpace(comment)) continue;
+
+                statements.Add("EXEC [" + EscapeSqlServerName(databaseName) + "].sys.sp_addextendedproperty " +
+                               "@name=N'MS_Description', @value=N'" + EscapeSqlLiteral(comment) + "', " +
+                               "@level0type=N'SCHEMA', @level0name=N'dbo', " +
+                               "@level1type=N'TABLE', @level1name=N'" + EscapeSqlLiteral(tableName) + "', " +
+                               "@level2type=N'COLUMN', @level2name=N'" + EscapeSqlLiteral(row["Name"].ToString()) + "';");
+            }
+
+            statements.AddRange(BuildSqlServerIndexCreateStatements(databaseName, tableName, copyIndexes));
+            return string.Join("\r\n", statements.ToArray());
+        }
+
+        private static List<string> GetSqlServerPrimaryKeyColumns(DataTable indexes)
+        {
+            List<DataRow> primaryRows = new List<DataRow>();
+            if (indexes == null) return new List<string>();
+
+            foreach (DataRow row in indexes.Rows)
+            {
+                if (GetOptionalString(row, "Key_name").Equals("PRIMARY", StringComparison.OrdinalIgnoreCase))
+                {
+                    primaryRows.Add(row);
+                }
+            }
+
+            primaryRows.Sort((a, b) => GetOptionalInt(a, "Seq_in_index", 0).CompareTo(GetOptionalInt(b, "Seq_in_index", 0)));
+
+            List<string> columns = new List<string>();
+            foreach (DataRow row in primaryRows)
+            {
+                string columnName = GetOptionalString(row, "Column_name");
+                if (!string.IsNullOrWhiteSpace(columnName))
+                {
+                    columns.Add("[" + EscapeSqlServerName(columnName) + "]");
+                }
+            }
+            return columns;
+        }
+
+        private static List<string> BuildSqlServerIndexCreateStatements(string databaseName, string tableName, DataTable indexes)
+        {
+            List<string> statements = new List<string>();
+            if (indexes == null || indexes.Rows.Count == 0) return statements;
+
+            foreach (var group in indexes.AsEnumerable().GroupBy(r => r["IndexName"].ToString()))
+            {
+                string indexName = group.Key;
+                if (string.IsNullOrWhiteSpace(indexName) || indexName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)) continue;
+
+                DataRow first = group.First();
+                bool unique = first.Table.Columns.Contains("NonUnique") && first["NonUnique"] != DBNull.Value &&
+                    (first["NonUnique"].ToString() == "0" || first["NonUnique"].ToString().Equals("False", StringComparison.OrdinalIgnoreCase));
+                string indexType = GetSqlServerIndexType(GetOptionalString(first, "IndexType"));
+
+                List<DataRow> orderedRows = group.ToList();
+                orderedRows.Sort((a, b) => GetOptionalInt(a, "SeqInIndex", 0).CompareTo(GetOptionalInt(b, "SeqInIndex", 0)));
+
+                List<string> cols = new List<string>();
+                foreach (DataRow row in orderedRows)
+                {
+                    string columnName = GetOptionalString(row, "ColumnName");
+                    if (!string.IsNullOrWhiteSpace(columnName))
+                    {
+                        cols.Add("[" + EscapeSqlServerName(columnName) + "]");
+                    }
+                }
+                if (cols.Count == 0) continue;
+
+                statements.Add("CREATE " + (unique ? "UNIQUE " : "") + indexType + "INDEX [" + EscapeSqlServerName(indexName) + "] ON [" +
+                               EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" +
+                               string.Join(", ", cols.ToArray()) + ");");
+            }
+
+            return statements;
+        }
+
+        private static string GetSqlServerIndexType(string indexType)
+        {
+            if (indexType != null && indexType.IndexOf("NONCLUSTERED", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "NONCLUSTERED ";
+            }
+            if (indexType != null && indexType.IndexOf("CLUSTERED", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "CLUSTERED ";
+            }
+            return "NONCLUSTERED ";
         }
 
         public bool TableExists(string databaseName, string tableName)
@@ -317,6 +425,7 @@ namespace mySQLPunk.lib
                     c.CHARACTER_MAXIMUM_LENGTH AS MaxLength,
                     c.NUMERIC_PRECISION AS NumericPrecision,
                     c.NUMERIC_SCALE AS NumericScale,
+                    c.COLUMN_DEFAULT AS DefaultValue,
                     CAST(ep.value AS NVARCHAR(4000)) AS Comment,
                     c.ORDINAL_POSITION AS OrdinalPosition
                 FROM [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.COLUMNS c
@@ -463,6 +572,19 @@ namespace mySQLPunk.lib
         private static string EscapeSqlServerName(string name) => name.Replace("]", "]]");
         private static string EscapeSqlLiteral(string value) => value.Replace("'", "''");
 
+        private static string GetOptionalString(DataRow row, string columnName)
+        {
+            if (row == null || row.Table == null || !row.Table.Columns.Contains(columnName) || row[columnName] == DBNull.Value) return "";
+            return row[columnName].ToString();
+        }
+
+        private static int GetOptionalInt(DataRow row, string columnName, int fallback)
+        {
+            string value = GetOptionalString(row, columnName);
+            int parsed;
+            return int.TryParse(value, out parsed) ? parsed : fallback;
+        }
+
         private static bool IsCopyNullable(DataRow row)
         {
             return !row.Table.Columns.Contains("IsNullable") || row["IsNullable"] == DBNull.Value || row["IsNullable"].ToString().ToUpper() != "NO";
@@ -471,17 +593,31 @@ namespace mySQLPunk.lib
         private static string MapCopyTypeToSqlServer(DataRow row)
         {
             string type = row["DataType"].ToString().ToLower();
+            int length = GetOptionalInt(row, "MaxLength", 0);
+            int precision = GetOptionalInt(row, "NumericPrecision", 0);
+            int scale = GetOptionalInt(row, "NumericScale", 0);
             if (type.Contains("bigint")) return "BIGINT";
             if (type.Contains("smallint")) return "SMALLINT";
             if (type.Contains("tinyint")) return "TINYINT";
             if (type.Contains("int") || type.Contains("serial")) return "INT";
-            if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("money")) return "DECIMAL(38,10)";
+            if (type.Contains("decimal") || type.Contains("numeric")) return "DECIMAL(" + (precision > 0 ? precision : 38) + "," + (scale >= 0 ? scale : 10) + ")";
+            if (type.Contains("money")) return "MONEY";
             if (type.Contains("double") || type.Contains("float")) return "FLOAT";
             if (type.Contains("real")) return "REAL";
             if (type.Contains("bool") || type == "bit") return "BIT";
+            if (type == "date") return "DATE";
+            if (type == "time") return "TIME";
             if (type.Contains("date") || type.Contains("time")) return "DATETIME2";
-            if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea") || type.Contains("image")) return "VARBINARY(MAX)";
+            if (type.Contains("varbinary") || type.Contains("binary") || type.Contains("bytea")) return type.Contains("var") ? "VARBINARY(" + FormatSqlServerLength(length) + ")" : "BINARY(" + (length > 0 ? length.ToString() : "1") + ")";
+            if (type.Contains("blob") || type.Contains("image")) return "VARBINARY(MAX)";
+            if (type.Contains("nchar")) return type.Contains("var") ? "NVARCHAR(" + FormatSqlServerLength(length) + ")" : "NCHAR(" + (length > 0 ? length.ToString() : "1") + ")";
+            if (type.Contains("char") || type.Contains("text")) return type.Contains("var") || type.Contains("text") ? "NVARCHAR(" + FormatSqlServerLength(length) + ")" : "NCHAR(" + (length > 0 ? length.ToString() : "1") + ")";
             return "NVARCHAR(MAX)";
+        }
+
+        private static string FormatSqlServerLength(int length)
+        {
+            return length > 0 ? length.ToString() : "MAX";
         }
 
         public void Dispose()

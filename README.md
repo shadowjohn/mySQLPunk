@@ -48,7 +48,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | Table Designer | 部分可用 | 既有 table ALTER 已支援 MySQL、PostgreSQL、SQL Server、Oracle；PostgreSQL、SQL Server 與 Oracle 已支援既有 Primary Key 更新；PostgreSQL 已支援 FULLTEXT/GIN 與 SPATIAL/GiST 索引建立；Oracle 已支援 FULLTEXT/CTXSYS.CONTEXT、SDO_GEOMETRY 與 SPATIAL/MDSYS.SPATIAL_INDEX 索引建立；SQL Server 已支援既有欄位 DEFAULT constraint 與欄位註解更新；Oracle 儲存失敗會提供權限與物件狀態診斷；SQLite 已支援以安全重建流程處理欄位新增、刪除、重新命名、排序、型別、NULL、DEFAULT 與 Primary Key 變更 |
 | New Table | 可用 | 已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle `CREATE TABLE` preview/save |
 | Table/View 複製 | 可用 | Table 可批次複製；同 provider View 複製為 View；異種 provider View 會先嘗試轉換 SQL，無法安全轉換時改為 table snapshot |
-| SQL Dump | 可用 | Table dump 已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle；Oracle dump 會輸出 schema-qualified INSERT、HEXTORAW、TO_TIMESTAMP literal，並保留 Primary Key、欄位註解與一般/唯一/全文/空間索引 DDL |
+| SQL Dump | 可用 | Table dump 已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle；SQL Server dump 會保留 Primary Key、DEFAULT、欄位註解與一般/唯一索引 DDL；Oracle dump 會輸出 schema-qualified INSERT、HEXTORAW、TO_TIMESTAMP literal，並保留 Primary Key、欄位註解與一般/唯一/全文/空間索引 DDL |
 
 ## 重要程式位置
 
