@@ -1333,7 +1333,7 @@ namespace mySQLPunk
 
         private bool SupportsSpatialIndex()
         {
-            return _db is my_postgresql || _db is my_oracle;
+            return _db is my_postgresql || _db is my_oracle || _db is my_mssql;
         }
 
         private bool SupportsFullTextIndex()
@@ -1477,6 +1477,10 @@ namespace mySQLPunk
             if (type == "SPATIAL" && _db is my_oracle)
             {
                 return BuildOracleSpatialIndexStatement(indexName, _tableName, columns);
+            }
+            if (type == "SPATIAL" && _db is my_mssql)
+            {
+                return BuildSqlServerSpatialIndexStatement(indexName, _tableName, columns);
             }
             string unique = type == "UNIQUE" ? "UNIQUE " : "";
             return "CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
@@ -1686,6 +1690,12 @@ namespace mySQLPunk
                     continue;
                 }
 
+                if (type == "SPATIAL" && _db is my_mssql)
+                {
+                    statements.Add(BuildSqlServerSpatialIndexStatement(indexName, tableName, columns));
+                    continue;
+                }
+
                 string unique = type == "UNIQUE" ? "UNIQUE " : "";
                 statements.Add("CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
                                " ON " + GetQualifiedDesignerTableName(tableName) +
@@ -1711,6 +1721,8 @@ namespace mySQLPunk
 
             if (_db is my_mssql)
             {
+                if (type.Contains("geography")) return "GEOGRAPHY";
+                if (type.Contains("geometry")) return "GEOMETRY";
                 if (type.Contains("bigint")) return "BIGINT";
                 if (type.Contains("smallint")) return "SMALLINT";
                 if (type.Contains("tinyint")) return "TINYINT";
@@ -1762,6 +1774,15 @@ namespace mySQLPunk
                    " (" + spatialColumn + ") INDEXTYPE IS MDSYS.SPATIAL_INDEX;";
         }
 
+        private string BuildSqlServerSpatialIndexStatement(string indexName, string tableName, string columns)
+        {
+            string spatialColumn = FormatSqlServerSingleIndexColumn(columns);
+            string method = GetSqlServerSpatialIndexMethod(spatialColumn);
+            return "CREATE SPATIAL INDEX " + QuoteDesignerIdentifier(indexName) +
+                   " ON " + GetQualifiedDesignerTableName(tableName) +
+                   " (" + spatialColumn + ") USING " + method + ";";
+        }
+
         private string BuildOracleFullTextIndexStatement(string indexName, string tableName, string columns)
         {
             string textColumn = FormatOracleSingleIndexColumn(columns);
@@ -1781,6 +1802,34 @@ namespace mySQLPunk
             if (rawCols.Length == 0) return "";
             string columnName = GetIndexColumnName(rawCols[0]);
             return QuoteDesignerIdentifier(columnName);
+        }
+
+        private string FormatSqlServerSingleIndexColumn(string columns)
+        {
+            string[] rawCols = columns.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            if (rawCols.Length == 0) return "";
+            string columnName = GetIndexColumnName(rawCols[0]);
+            return QuoteDesignerIdentifier(columnName);
+        }
+
+        private string GetSqlServerSpatialIndexMethod(string quotedColumnName)
+        {
+            if (_originalDt != null)
+            {
+                string columnName = quotedColumnName.Trim('[', ']');
+                foreach (DataRow row in _originalDt.Rows)
+                {
+                    if (GetRowString(row, "Name").Trim().Equals(columnName, StringComparison.OrdinalIgnoreCase) ||
+                        GetRowString(row, "_OldName").Trim().Equals(columnName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string type = GetRowString(row, "Type").Trim().ToLowerInvariant();
+                        if (type.Contains("geography")) return "GEOGRAPHY_AUTO_GRID";
+                        break;
+                    }
+                }
+            }
+
+            return "GEOMETRY_AUTO_GRID";
         }
 
         private string FormatGenericIndexColumns(string columns)
@@ -2683,6 +2732,11 @@ namespace mySQLPunk
             if (_db is my_oracle)
             {
                 return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" };
+            }
+
+            if (_db is my_mssql)
+            {
+                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "SPATIAL" };
             }
 
             return new object[] { "NORMAL", "UNIQUE", "PRIMARY" };
