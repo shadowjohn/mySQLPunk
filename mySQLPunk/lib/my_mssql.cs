@@ -434,7 +434,8 @@ namespace mySQLPunk.lib
                     CAST(ep.value AS NVARCHAR(4000)) AS Comment,
                     c.ORDINAL_POSITION AS OrdinalPosition
                 FROM [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.COLUMNS c
-                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.name = c.TABLE_NAME
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.name = c.TABLE_SCHEMA
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.name = c.TABLE_NAME AND o.schema_id = s.schema_id
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns sc ON sc.object_id = o.object_id AND sc.name = c.COLUMN_NAME
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.extended_properties ep ON ep.major_id = sc.object_id AND ep.minor_id = sc.column_id AND ep.name = 'MS_Description'
                 WHERE c.TABLE_SCHEMA = 'dbo' AND c.TABLE_NAME = @name
@@ -461,21 +462,53 @@ namespace mySQLPunk.lib
 
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
         {
+            foreach (string sql in BuildSqlServerCopyCreateTableStatements(databaseName, tableName, sourceColumns, sourceProvider))
+            {
+                ExecOrThrow(sql);
+            }
+        }
+
+        private static List<string> BuildSqlServerCopyCreateTableStatements(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
+        {
+            List<string> statements = new List<string>();
             List<string> defs = new List<string>();
             foreach (DataRow row in sourceColumns.Rows)
             {
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
-                defs.Add("[" + EscapeSqlServerName(row["Name"].ToString()) + "] " + MapCopyTypeToSqlServer(row) + " " + nullable);
+                string definition = "[" + EscapeSqlServerName(row["Name"].ToString()) + "] " + MapCopyTypeToSqlServer(row);
+                string defaultValue = GetSqlServerCopyDefaultValue(row, sourceProvider);
+                if (!string.IsNullOrWhiteSpace(defaultValue))
+                {
+                    definition += " DEFAULT " + defaultValue;
+                }
+                definition += " " + nullable;
+                defs.Add(definition);
             }
-            ExecOrThrow("CREATE TABLE [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" + string.Join(", ", defs.ToArray()) + ");");
+            statements.Add("CREATE TABLE [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" + string.Join(", ", defs.ToArray()) + ");");
 
             foreach (DataRow row in sourceColumns.Rows)
             {
-                if (!row.Table.Columns.Contains("Comment") || row["Comment"] == DBNull.Value || row["Comment"].ToString().Length == 0) continue;
-                var p = new Dictionary<string, object> { { "value", row["Comment"].ToString() } };
-                string sql = "EXEC [" + EscapeSqlServerName(databaseName) + "].sys.sp_addextendedproperty @name=N'MS_Description', @value=@value, @level0type=N'SCHEMA', @level0name=N'dbo', @level1type=N'TABLE', @level1name=N'" + EscapeSqlLiteral(tableName) + "', @level2type=N'COLUMN', @level2name=N'" + EscapeSqlLiteral(row["Name"].ToString()) + "';";
-                ExecOrThrow(sql, p);
+                string comment = GetOptionalString(row, "Comment");
+                if (string.IsNullOrWhiteSpace(comment)) continue;
+                statements.Add("EXEC [" + EscapeSqlServerName(databaseName) + "].sys.sp_addextendedproperty " +
+                               "@name=N'MS_Description', @value=N'" + EscapeSqlLiteral(comment) + "', " +
+                               "@level0type=N'SCHEMA', @level0name=N'dbo', " +
+                               "@level1type=N'TABLE', @level1name=N'" + EscapeSqlLiteral(tableName) + "', " +
+                               "@level2type=N'COLUMN', @level2name=N'" + EscapeSqlLiteral(row["Name"].ToString()) + "';");
             }
+
+            return statements;
+        }
+
+        private static string GetSqlServerCopyDefaultValue(DataRow row, string sourceProvider)
+        {
+            if (!string.Equals(sourceProvider, "mssql", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(sourceProvider, "sqlserver", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            return GetOptionalString(row, "DefaultValue").Trim();
         }
 
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider)

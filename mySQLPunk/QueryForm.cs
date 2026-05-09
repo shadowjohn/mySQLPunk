@@ -1525,10 +1525,18 @@ namespace mySQLPunk
 
         private static void AutoResizeColumns(DataGridView dgv)
         {
-            if (dgv.Columns.Count == 0) return;
+            if (dgv == null || dgv.IsDisposed || dgv.Disposing || !dgv.IsHandleCreated || dgv.Columns.Count == 0) return;
             // ── 資料編輯功能 (Stubs) ──
             // 限制最大欄寬避免超寬欄位讓畫面難以閱讀
-            dgv.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.DisplayedCells);
+            try
+            {
+                dgv.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.DisplayedCells);
+            }
+            catch (InvalidOperationException)
+            {
+                if (dgv.IsDisposed || dgv.Disposing) return;
+                throw;
+            }
             foreach (DataGridViewColumn col in dgv.Columns)
             {
                 if (col.Width > 300) col.Width = 300;
