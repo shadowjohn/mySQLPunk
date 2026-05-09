@@ -315,6 +315,7 @@ namespace mySQLPunk
             Add("Designer.Default", "預設", "Default");
             Add("Designer.IndexType", "索引類型", "Index Type");
             Add("Designer.IndexMethod", "索引方法", "Index Method");
+            Add("Designer.SelectIndexColumns", "選擇索引欄位", "Select Index Columns");
             Add("Designer.ConfirmCloseChanges", "你要儲存對 {0} 的變更嗎？", "Save changes to {0}?");
             Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
             Add("Designer.NoChangesDetected", "沒有偵測到變更。", "No changes detected.");
@@ -333,6 +334,19 @@ namespace mySQLPunk
             Add("Designer.SaveFailedTitle", "儲存失敗", "Save Failed");
             Add("Designer.SaveFailedReason", "儲存失敗：{0}", "Save failed: {0}");
             Add("Designer.FailedSql", "失敗 SQL：", "Failed SQL:");
+            Add("Designer.OracleDiagnosticTitle", "Oracle Table Designer 診斷：", "Oracle Table Designer Diagnostics:");
+            Add("Designer.CurrentSchema", "目前 schema", "current schema");
+            Add("Designer.CurrentTable", "目前資料表", "current table");
+            Add("Designer.OracleHintInsufficientPrivileges", "目前帳號沒有足夠權限執行這個 DDL。請確認已直接授權 ALTER、CREATE TABLE、CREATE VIEW、CREATE INDEX、DROP 或 COMMENT 等需要的權限；Oracle 的 role 權限在部分 DDL 情境可能不會生效。", "The current account does not have enough privileges to execute this DDL. Confirm that ALTER, CREATE TABLE, CREATE VIEW, CREATE INDEX, DROP, COMMENT, or other required privileges are granted directly; Oracle role privileges may not apply in some DDL contexts.");
+            Add("Designer.OracleHintCrossSchemaPrivileges", "若要修改其他 schema 的物件，請確認 {0}.{1} 的 ALTER/INDEX 權限已授給目前登入帳號。", "To modify an object in another schema, confirm that ALTER/INDEX privileges on {0}.{1} are granted to the current login.");
+            Add("Designer.OracleHintObjectMissing", "Oracle 找不到目標物件，或目前帳號沒有存取權限。請確認 {0}.{1} 仍存在，並具備 SELECT/ALTER 權限。", "Oracle cannot find the target object, or the current account cannot access it. Confirm that {0}.{1} still exists and that SELECT/ALTER privileges are available.");
+            Add("Designer.OracleHintRefreshAfterObjectChange", "若物件剛被其他人刪除或重新命名，請重新整理左側資料庫樹後再開啟 Table Designer。", "If the object was just deleted or renamed by someone else, refresh the database tree and reopen Table Designer.");
+            Add("Designer.OracleHintNameConflict", "目標名稱已存在，通常代表欄位、索引或暫存物件和現有名稱衝突。請重新整理欄位/索引清單，確認沒有重複名稱後再儲存。", "The target name already exists, usually because a column, index, or temporary object conflicts with an existing name. Refresh the column/index list, confirm there are no duplicate names, then save again.");
+            Add("Designer.OracleHintNullStateChanged", "欄位 NULL/NOT NULL 狀態和目前資料庫狀態不一致，可能是其他人已先修改欄位。請重新載入 Table Designer 後再套用變更。", "The column NULL/NOT NULL state no longer matches the database, possibly because someone else changed the column first. Reload Table Designer before applying the change.");
+            Add("Designer.OracleHintNotNullConflict", "欄位要改成 NOT NULL，但既有資料可能包含 NULL。請先清理資料或設定預設值，再重新儲存。", "The column is being changed to NOT NULL, but existing data may contain NULL values. Clean the data or set a default value before saving again.");
+            Add("Designer.OracleHintConstraintIndexConflict", "正在刪除或修改被主鍵/唯一約束使用的索引。請先處理對應 constraint，再調整索引。", "An index used by a primary key or unique constraint is being deleted or modified. Handle the related constraint first, then adjust the index.");
+            Add("Designer.OracleHintAlterSyntax", "產生的 ALTER TABLE 語法不符合目前 Oracle 版本或物件型態。請檢查 SQL 預覽，或改用分段 SQL 手動調整。", "The generated ALTER TABLE syntax does not match the current Oracle version or object type. Check the SQL preview or adjust it manually with staged SQL.");
+            Add("Designer.OracleHintGeneric", "請檢查目前帳號對 {0}.{1} 的 DDL 權限、物件是否仍存在，以及 SQL 預覽中的語法是否符合 Oracle 限制。", "Check the current account's DDL privileges on {0}.{1}, whether the object still exists, and whether the SQL preview syntax matches Oracle limitations.");
 
             Add("Options.Title", "選項", "Options");
             Add("Options.General", "一般", "General");
