@@ -206,24 +206,25 @@ namespace mySQLPunk.lib
             var p = new Dictionary<string, object> { { "owner", NormalizeOwner(databaseName) } };
             return SelectSQL(@"
                 SELECT
-                    TABLE_NAME AS NAME,
+                    t.TABLE_NAME AS NAME,
                     NULL AS AUTO_INCREMENT,
-                    LAST_ANALYZED AS UPDATE_TIME,
+                    t.LAST_ANALYZED AS UPDATE_TIME,
                     NULL AS CREATE_TIME,
                     NULL AS CHECK_TIME,
-                    BLOCKS * 8192 AS DATA_LENGTH,
+                    t.BLOCKS * 8192 AS DATA_LENGTH,
                     0 AS INDEX_LENGTH,
                     0 AS MAX_DATA_LENGTH,
                     0 AS DATA_FREE,
                     'Oracle' AS ENGINE,
-                    NUM_ROWS AS ROWS,
-                    '' AS COMMENTS,
+                    t.NUM_ROWS AS ROWS,
+                    COALESCE(tc.COMMENTS, '') AS COMMENTS,
                     '' AS ROW_FORMAT,
                     '' AS COLLATION,
                     '' AS CREATE_OPTIONS
-                FROM ALL_TABLES
-                WHERE OWNER = :owner
-                ORDER BY TABLE_NAME", p);
+                FROM ALL_TABLES t
+                LEFT JOIN ALL_TAB_COMMENTS tc ON tc.OWNER = t.OWNER AND tc.TABLE_NAME = t.TABLE_NAME
+                WHERE t.OWNER = :owner
+                ORDER BY t.TABLE_NAME", p);
         }
 
         public Dictionary<string, string> GetDatabaseInfo(string databaseName)
@@ -251,8 +252,9 @@ namespace mySQLPunk.lib
             if (columns.Rows.Count == 0) return "";
             DataTable indexes = TryGetOracleIndexes(databaseName, tableName, true);
             DataTable copyIndexes = TryGetOracleIndexes(databaseName, tableName, false);
+            string tableComment = GetTableComment(databaseName, tableName);
 
-            return BuildOracleTableCreateStatement(databaseName, tableName, columns, indexes, copyIndexes);
+            return BuildOracleTableCreateStatementWithComment(databaseName, tableName, columns, indexes, copyIndexes, tableComment);
         }
 
         private DataTable TryGetOracleIndexes(string databaseName, string tableName, bool includePrimary)
@@ -268,6 +270,11 @@ namespace mySQLPunk.lib
         }
 
         private static string BuildOracleTableCreateStatement(string databaseName, string tableName, DataTable columns, DataTable indexes, DataTable copyIndexes)
+        {
+            return BuildOracleTableCreateStatementWithComment(databaseName, tableName, columns, indexes, copyIndexes, "");
+        }
+
+        private static string BuildOracleTableCreateStatementWithComment(string databaseName, string tableName, DataTable columns, DataTable indexes, DataTable copyIndexes, string tableComment)
         {
             List<string> defs = new List<string>();
             foreach (DataRow row in columns.Rows)
@@ -296,6 +303,12 @@ namespace mySQLPunk.lib
                 string.Join(",\r\n", defs.ToArray()) +
                 "\r\n)"
             };
+
+            if (!string.IsNullOrWhiteSpace(tableComment))
+            {
+                statements.Add("COMMENT ON TABLE " + QualifiedName(databaseName, tableName) +
+                               " IS '" + tableComment.Replace("'", "''") + "'");
+            }
 
             foreach (DataRow row in columns.Rows)
             {
@@ -395,6 +408,32 @@ namespace mySQLPunk.lib
                 LEFT JOIN ALL_CONSTRAINTS c ON c.OWNER = i.OWNER AND c.INDEX_NAME = i.INDEX_NAME AND c.CONSTRAINT_TYPE = 'P'
                 WHERE i.TABLE_OWNER = :owner AND i.TABLE_NAME = :tableName AND c.CONSTRAINT_NAME IS NULL
                 ORDER BY i.INDEX_NAME, ic.COLUMN_POSITION", p);
+        }
+
+        private string GetTableComment(string databaseName, string tableName)
+        {
+            var p = new Dictionary<string, object>
+            {
+                { "owner", NormalizeOwner(databaseName) },
+                { "tableName", NormalizeName(tableName) }
+            };
+
+            try
+            {
+                DataTable dt = SelectSQL(@"
+                    SELECT COMMENTS
+                    FROM ALL_TAB_COMMENTS
+                    WHERE OWNER = :owner AND TABLE_NAME = :tableName", p);
+                if (dt.Rows.Count > 0 && dt.Rows[0]["COMMENTS"] != DBNull.Value)
+                {
+                    return dt.Rows[0]["COMMENTS"].ToString();
+                }
+            }
+            catch
+            {
+            }
+
+            return "";
         }
 
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
