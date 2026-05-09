@@ -34,10 +34,10 @@
             this.newConnectionToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.openConnectionToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.closeConnectionToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.toolStripMenuItem2 = new System.Windows.Forms.ToolStripMenuItem();
+            this.toolStripMenuItem2 = new System.Windows.Forms.ToolStripSeparator();
             this.exportToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.importConnectionsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.toolStripMenuItem3 = new System.Windows.Forms.ToolStripMenuItem();
+            this.toolStripMenuItem3 = new System.Windows.Forms.ToolStripSeparator();
             this.closeToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.exitToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.ttToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -153,11 +153,8 @@
             // 
             // toolStripMenuItem2
             // 
-            this.toolStripMenuItem2.Enabled = false;
             this.toolStripMenuItem2.Name = "toolStripMenuItem2";
-            this.toolStripMenuItem2.Size = new System.Drawing.Size(189, 22);
-            this.toolStripMenuItem2.Text = "-----------------------";
-            this.toolStripMenuItem2.Click += new System.EventHandler(this.toolStripMenuItem2_Click);
+            this.toolStripMenuItem2.Size = new System.Drawing.Size(186, 6);
             // 
             // exportToolStripMenuItem
             // 
@@ -173,10 +170,8 @@
             // 
             // toolStripMenuItem3
             // 
-            this.toolStripMenuItem3.Enabled = false;
             this.toolStripMenuItem3.Name = "toolStripMenuItem3";
-            this.toolStripMenuItem3.Size = new System.Drawing.Size(189, 22);
-            this.toolStripMenuItem3.Text = "-----------------------";
+            this.toolStripMenuItem3.Size = new System.Drawing.Size(186, 6);
             // 
             // closeToolStripMenuItem
             // 
@@ -680,10 +675,10 @@
         private System.Windows.Forms.ToolStripMenuItem newConnectionToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem openConnectionToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem closeConnectionToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem2;
+        private System.Windows.Forms.ToolStripSeparator toolStripMenuItem2;
         private System.Windows.Forms.ToolStripMenuItem exportToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem importConnectionsToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem3;
+        private System.Windows.Forms.ToolStripSeparator toolStripMenuItem3;
         private System.Windows.Forms.ToolStripMenuItem closeToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem exitToolStripMenuItem;
         private System.Windows.Forms.SplitContainer splitContainer1;

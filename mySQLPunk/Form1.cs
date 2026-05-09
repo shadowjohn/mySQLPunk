@@ -557,11 +557,6 @@ namespace mySQLPunk
             MessageBox.Show(message, Localization.T("Menu.Help"), MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        private void toolStripMenuItem2_Click(object sender, EventArgs e)
-        {
-
-        }
-
         private void OpenConnectionToolStripMenuItem_Click(object sender, EventArgs e)
         {
             TreeNode root = GetSelectedConnectionRoot();
@@ -702,16 +697,6 @@ namespace mySQLPunk
         private void exitToolStripMenuItem_Click(object sender, EventArgs e)
         {
             Application.Exit();
-        }
-
-        private void posgreSQLToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-
-        }
-
-        private void mySQLToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-
         }
 
         private void splitContainer2_Panel1_Paint(object sender, PaintEventArgs e)
@@ -6195,11 +6180,6 @@ namespace mySQLPunk
 
             }
             dialogMyBoxOff();
-        }
-
-        private void label1_Click(object sender, EventArgs e)
-        {
-
         }
 
         private void splitContainer5_Panel1_Resize(object sender, EventArgs e)
