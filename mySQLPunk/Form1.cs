@@ -4814,12 +4814,21 @@ namespace mySQLPunk
             if (db is my_mysql)
             {
                 string safeDb = EscapeSqlLiteral(dbName);
-                AppendDatabaseEventsFromQuery(events, db,
-                    "SELECT EVENT_NAME AS Name, 'Event' AS Type, STATUS AS Status, EVENT_DEFINITION AS DDL " +
-                    "FROM information_schema.EVENTS WHERE EVENT_SCHEMA='" + safeDb + "' ORDER BY EVENT_NAME;");
-                AppendDatabaseEventsFromQuery(events, db,
-                    "SELECT TRIGGER_NAME AS Name, 'Trigger' AS Type, EVENT_MANIPULATION AS Status, ACTION_STATEMENT AS DDL " +
-                    "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='" + safeDb + "' ORDER BY TRIGGER_NAME;");
+                AppendDatabaseEventsFromQuery(events, db, BuildMySqlEventMetadataSql(safeDb));
+                if (CountDatabaseEvents(events, "Event") == 0)
+                {
+                    AppendDatabaseEventsFromQuery(events, db,
+                        "SELECT EVENT_NAME AS Name, 'Event' AS Type, STATUS AS Status, EVENT_DEFINITION AS DDL " +
+                        "FROM information_schema.EVENTS WHERE EVENT_SCHEMA='" + safeDb + "' ORDER BY EVENT_NAME;");
+                }
+
+                AppendDatabaseEventsFromQuery(events, db, BuildMySqlTriggerMetadataSql(safeDb));
+                if (CountDatabaseEvents(events, "Trigger") == 0)
+                {
+                    AppendDatabaseEventsFromQuery(events, db,
+                        "SELECT TRIGGER_NAME AS Name, 'Trigger' AS Type, EVENT_MANIPULATION AS Status, ACTION_STATEMENT AS DDL " +
+                        "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='" + safeDb + "' ORDER BY TRIGGER_NAME;");
+                }
                 return events;
             }
 
@@ -4856,6 +4865,35 @@ namespace mySQLPunk
             }
 
             return events;
+        }
+
+        private static string BuildMySqlEventMetadataSql(string safeDb)
+        {
+            return "SELECT EVENT_NAME AS Name, 'Event' AS Type, STATUS AS Status, " +
+                   "CONCAT('CREATE DEFINER=', DEFINER, ' EVENT `', REPLACE(EVENT_SCHEMA, '`', '``'), '`.`', REPLACE(EVENT_NAME, '`', '``'), '` ON SCHEDULE ', " +
+                   "CASE WHEN EVENT_TYPE = 'ONE TIME' THEN CONCAT('AT ', IFNULL(DATE_FORMAT(EXECUTE_AT, '%Y-%m-%d %H:%i:%s'), 'CURRENT_TIMESTAMP')) " +
+                   "ELSE CONCAT('EVERY ', IFNULL(INTERVAL_VALUE, '1'), ' ', IFNULL(INTERVAL_FIELD, 'DAY'), " +
+                   "IF(STARTS IS NULL, '', CONCAT(' STARTS ''', DATE_FORMAT(STARTS, '%Y-%m-%d %H:%i:%s'), '''')), " +
+                   "IF(ENDS IS NULL, '', CONCAT(' ENDS ''', DATE_FORMAT(ENDS, '%Y-%m-%d %H:%i:%s'), ''''))) END, " +
+                   "CASE WHEN ON_COMPLETION = 'PRESERVE' THEN ' ON COMPLETION PRESERVE' ELSE ' ON COMPLETION NOT PRESERVE' END, ' ', " +
+                   "CASE STATUS WHEN 'ENABLED' THEN 'ENABLE' WHEN 'DISABLED' THEN 'DISABLE' WHEN 'SLAVESIDE_DISABLED' THEN 'DISABLE ON SLAVE' ELSE STATUS END, " +
+                   "IF(EVENT_COMMENT IS NULL OR EVENT_COMMENT = '', '', CONCAT(' COMMENT ', QUOTE(EVENT_COMMENT))), ' DO ', EVENT_DEFINITION) AS DDL " +
+                   "FROM information_schema.EVENTS WHERE EVENT_SCHEMA='" + safeDb + "' ORDER BY EVENT_NAME;";
+        }
+
+        private static string BuildMySqlTriggerMetadataSql(string safeDb)
+        {
+            return "SELECT TRIGGER_NAME AS Name, 'Trigger' AS Type, EVENT_MANIPULATION AS Status, " +
+                   "CONCAT('CREATE DEFINER=', DEFINER, ' TRIGGER `', REPLACE(TRIGGER_SCHEMA, '`', '``'), '`.`', REPLACE(TRIGGER_NAME, '`', '``'), '` ', " +
+                   "ACTION_TIMING, ' ', EVENT_MANIPULATION, ' ON `', REPLACE(EVENT_OBJECT_SCHEMA, '`', '``'), '`.`', REPLACE(EVENT_OBJECT_TABLE, '`', '``'), " +
+                   "'` FOR EACH ', ACTION_ORIENTATION, ' ', ACTION_STATEMENT) AS DDL " +
+                   "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='" + safeDb + "' ORDER BY TRIGGER_NAME;";
+        }
+
+        private static int CountDatabaseEvents(DataTable events, string type)
+        {
+            if (events == null || !events.Columns.Contains("Type")) return 0;
+            return events.Rows.Cast<DataRow>().Count(row => string.Equals(row["Type"].ToString(), type, StringComparison.OrdinalIgnoreCase));
         }
 
         private static string BuildPostgreSqlTriggerMetadataSql()
