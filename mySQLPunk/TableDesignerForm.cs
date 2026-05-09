@@ -509,6 +509,13 @@ namespace mySQLPunk
             return "";
         }
 
+        private static int GetMetadataInt(DataRow row, params string[] columnNames)
+        {
+            string value = GetMetadataString(row, columnNames).Trim();
+            int parsed;
+            return int.TryParse(value, out parsed) ? parsed : 0;
+        }
+
         private void BindColumns(DataTable displayDt)
         {
             dgvColumns.DataSource = displayDt;
@@ -2758,11 +2765,12 @@ namespace mySQLPunk
 
                 DataTable rawIdx = _db.GetIndexes(_databaseName, _tableName);
 
-                // MySQL 索引是按 Key_name 分多列，我們需要分組
+                // Provider 索引 metadata 會按索引分多列，欄位名稱在不同 driver 大小寫不同。
                 var indexGroups = new Dictionary<string, List<DataRow>>();
                 foreach (DataRow row in rawIdx.Rows)
                 {
-                    string keyName = row["Key_name"].ToString();
+                    string keyName = GetMetadataString(row, "Key_name", "KEY_NAME", "KeyName", "IndexName", "INDEXNAME", "index_name", "name");
+                    if (string.IsNullOrWhiteSpace(keyName)) continue;
                     if (!indexGroups.ContainsKey(keyName)) indexGroups[keyName] = new List<DataRow>();
                     indexGroups[keyName].Add(row);
                 }
@@ -2775,18 +2783,22 @@ namespace mySQLPunk
                     newRow["_OldName"] = group.Key;
                     
                     // 組合多欄位索引
+                    group.Value.Sort((left, right) => GetMetadataInt(left, "Seq_in_index", "SEQ_IN_INDEX", "SeqInIndex", "SEQININDEX", "seqno")
+                        .CompareTo(GetMetadataInt(right, "Seq_in_index", "SEQ_IN_INDEX", "SeqInIndex", "SEQININDEX", "seqno")));
                     List<string> cols = new List<string>();
-                    foreach (var r in group.Value) cols.Add(r["Column_name"].ToString());
+                    foreach (var r in group.Value)
+                    {
+                        string columnName = GetMetadataString(r, "Column_name", "COLUMN_NAME", "ColumnName", "COLUMNNAME", "column_name", "name");
+                        if (!string.IsNullOrWhiteSpace(columnName)) cols.Add(columnName);
+                    }
                     newRow["欄位"] = string.Join(", ", cols);
 
-                    if (group.Key == "PRIMARY") newRow["索引類型"] = "PRIMARY";
-                    else if (first["Non_unique"].ToString() == "0") newRow["索引類型"] = "UNIQUE";
-                    else if (first["Index_type"].ToString() == "FULLTEXT") newRow["索引類型"] = "FULLTEXT";
-                    else if (first["Index_type"].ToString().Equals("SPATIAL", StringComparison.OrdinalIgnoreCase)) newRow["索引類型"] = "SPATIAL";
-                    else newRow["索引類型"] = "NORMAL";
+                    string nonUnique = GetMetadataString(first, "Non_unique", "NON_UNIQUE", "NonUnique", "NONUNIQUE");
+                    string indexType = GetMetadataString(first, "Index_type", "INDEX_TYPE", "IndexType", "INDEXTYPE", "type_desc");
+                    newRow["索引類型"] = GetDesignerIndexType(group.Key, nonUnique, indexType);
 
-                    newRow["索引方法"] = first["Index_type"];
-                    newRow["註解"] = first["Index_comment"];
+                    newRow["索引方法"] = indexType;
+                    newRow["註解"] = GetMetadataString(first, "Index_comment", "INDEX_COMMENT", "IndexComment", "INDEXCOMMENT", "comment");
                     
                     displayIdx.Rows.Add(newRow);
                 }
@@ -2795,6 +2807,16 @@ namespace mySQLPunk
                 BindIndexes(displayIdx);
             }
             catch { /* 暫時不處理錯誤 */ }
+        }
+
+        private static string GetDesignerIndexType(string keyName, string nonUnique, string indexType)
+        {
+            string normalizedType = (indexType ?? "").Trim().ToUpperInvariant();
+            if (string.Equals(keyName, "PRIMARY", StringComparison.OrdinalIgnoreCase)) return "PRIMARY";
+            if (normalizedType == "FULLTEXT" || normalizedType.Contains("FULLTEXT")) return "FULLTEXT";
+            if (normalizedType == "SPATIAL" || normalizedType.Contains("SPATIAL")) return "SPATIAL";
+            if (nonUnique == "0" || string.Equals(nonUnique, "False", StringComparison.OrdinalIgnoreCase)) return "UNIQUE";
+            return "NORMAL";
         }
 
         private DataTable CreateIndexesDisplayTable()
