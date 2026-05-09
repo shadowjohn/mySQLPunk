@@ -312,6 +312,21 @@ namespace mySQLPunk
             Add("Designer.Default", "預設", "Default");
             Add("Designer.IndexType", "索引類型", "Index Type");
             Add("Designer.IndexMethod", "索引方法", "Index Method");
+            Add("Designer.ConfirmCloseChanges", "你要儲存對 {0} 的變更嗎？", "Save changes to {0}?");
+            Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
+            Add("Designer.NoChangesDetected", "沒有偵測到變更。", "No changes detected.");
+            Add("Designer.SqliteColumnCommentUnsupported", "SQLite 不支援欄位註解：{0}", "SQLite does not support column comments: {0}");
+            Add("Designer.PrimaryKeyNeedsConstraintName", "PRIMARY KEY 修改需要資料庫特定 constraint 名稱：{0}", "PRIMARY KEY changes require a database-specific constraint name: {0}");
+            Add("Designer.PrimaryKeyMissingColumns", "PRIMARY KEY 缺少欄位：{0}", "PRIMARY KEY is missing columns: {0}");
+            Add("Designer.FullTextUnsupported", "此資料庫尚未支援 FULLTEXT 索引：{0}", "This database does not currently support FULLTEXT indexes: {0}");
+            Add("Designer.SpatialUnsupported", "此資料庫尚未支援 SPATIAL 索引：{0}", "This database does not currently support SPATIAL indexes: {0}");
+            Add("Designer.CannotSaveTitle", "無法儲存", "Cannot Save");
+            Add("Designer.ConfirmSaveTitle", "確認儲存", "Confirm Save");
+            Add("Designer.ConfirmExecuteSql", "即將執行以下 SQL：\n\n{0}\n\n確定嗎？", "The following SQL will be executed:\n\n{0}\n\nContinue?");
+            Add("Designer.SaveSucceeded", "儲存成功。", "Save succeeded.");
+            Add("Designer.SaveFailedTitle", "儲存失敗", "Save Failed");
+            Add("Designer.SaveFailedReason", "儲存失敗：{0}", "Save failed: {0}");
+            Add("Designer.FailedSql", "失敗 SQL：", "Failed SQL:");
 
             Add("Options.Title", "選項", "Options");
             Add("Options.General", "一般", "General");

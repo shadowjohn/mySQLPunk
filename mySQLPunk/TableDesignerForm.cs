@@ -229,7 +229,11 @@ namespace mySQLPunk
         {
             if (!_isModified) return true;
 
-            var result = MessageBox.Show($"你要儲存對 {_tableName} 的變更嗎？", "確認", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            var result = MessageBox.Show(
+                Localization.Format("Designer.ConfirmCloseChanges", _tableName),
+                Localization.T("Common.Confirm"),
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
             if (result == DialogResult.Yes)
             {
                 BtnSave_Click(null, null);
@@ -809,12 +813,12 @@ namespace mySQLPunk
 
             if (unsupported.Count > 0)
             {
-                return "-- 目前不支援以下既有資料表變更：\r\n-- " + string.Join("\r\n-- ", unsupported.ToArray());
+                return FormatUnsupportedChanges(unsupported);
             }
 
             if (statements.Count == 0)
             {
-                return "-- No changes detected.";
+                return "-- " + Localization.T("Designer.NoChangesDetected");
             }
 
             return string.Join("\r\n", statements.ToArray());
@@ -860,6 +864,11 @@ namespace mySQLPunk
             return false;
         }
 
+        private static string FormatUnsupportedChanges(List<string> unsupported)
+        {
+            return "-- " + Localization.T("Designer.UnsupportedExistingChanges") + "\r\n-- " + string.Join("\r\n-- ", unsupported.ToArray());
+        }
+
         private DataRow FindCurrentColumnByOldName(DataTable currentDt, string oldName)
         {
             foreach (DataRow row in currentDt.Rows)
@@ -880,13 +889,13 @@ namespace mySQLPunk
                 DataRow original = FindOriginalColumn(oldName);
                 if (original != null && HasTextChanged(original, current, "Comment"))
                 {
-                    unsupported.Add("SQLite 不支援欄位註解：" + GetRowString(current, "Name").Trim());
+                    unsupported.Add(Localization.Format("Designer.SqliteColumnCommentUnsupported", GetRowString(current, "Name").Trim()));
                 }
             }
 
             if (unsupported.Count > 0)
             {
-                return "-- 目前不支援以下既有資料表變更：\r\n-- " + string.Join("\r\n-- ", unsupported.ToArray());
+                return FormatUnsupportedChanges(unsupported);
             }
 
             List<DataRow> currentColumns = new List<DataRow>();
@@ -1291,7 +1300,7 @@ namespace mySQLPunk
                         }
                         else
                         {
-                            unsupported.Add("PRIMARY KEY 修改需要資料庫特定 constraint 名稱：" + _tableName);
+                            unsupported.Add(Localization.Format("Designer.PrimaryKeyNeedsConstraintName", _tableName));
                         }
                     }
                     continue;
@@ -1319,7 +1328,7 @@ namespace mySQLPunk
                             string columns = GetRowString(current, "欄位").Trim();
                             if (string.IsNullOrWhiteSpace(columns))
                             {
-                                unsupported.Add("PRIMARY KEY 缺少欄位：" + _tableName);
+                                unsupported.Add(Localization.Format("Designer.PrimaryKeyMissingColumns", _tableName));
                             }
                             else
                             {
@@ -1333,19 +1342,19 @@ namespace mySQLPunk
                         }
                         else
                         {
-                            unsupported.Add("PRIMARY KEY 修改需要資料庫特定 constraint 名稱：" + _tableName);
+                            unsupported.Add(Localization.Format("Designer.PrimaryKeyNeedsConstraintName", _tableName));
                         }
                     }
                     continue;
                 }
                 if (type == "FULLTEXT" && !SupportsFullTextIndex())
                 {
-                    unsupported.Add("非 MySQL 尚未支援 FULLTEXT 索引：" + indexName);
+                    unsupported.Add(Localization.Format("Designer.FullTextUnsupported", indexName));
                     continue;
                 }
                 if (type == "SPATIAL" && !SupportsSpatialIndex())
                 {
-                    unsupported.Add("此資料庫尚未支援 SPATIAL 索引：" + indexName);
+                    unsupported.Add(Localization.Format("Designer.SpatialUnsupported", indexName));
                     continue;
                 }
 
@@ -2261,16 +2270,16 @@ namespace mySQLPunk
             
             if (sql.StartsWith("--"))
             {
-                MessageBox.Show(sql.TrimStart('-', ' '), "無法儲存", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(sql.TrimStart('-', ' '), Localization.T("Designer.CannotSaveTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            if (MessageBox.Show($"即將執行以下 SQL：\n\n{sql}\n\n確定嗎？", "Confirm Save", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            if (MessageBox.Show(Localization.Format("Designer.ConfirmExecuteSql", sql), Localization.T("Designer.ConfirmSaveTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             {
                 var res = ExecuteDesignerSql(sql);
                 if (res["status"] == "OK")
                 {
-                    MessageBox.Show("儲存成功！");
+                    MessageBox.Show(Localization.T("Designer.SaveSucceeded"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     if (IsNewTable)
                     {
                         _tableName = GetTableNameForSave();
@@ -2283,7 +2292,7 @@ namespace mySQLPunk
                 }
                 else
                 {
-                    MessageBox.Show(FormatDesignerSaveError(_db?.ProviderName, _databaseName, GetTableNameForSave(), res), "儲存失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(FormatDesignerSaveError(_db?.ProviderName, _databaseName, GetTableNameForSave(), res), Localization.T("Designer.SaveFailedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -2354,7 +2363,7 @@ namespace mySQLPunk
             if (string.IsNullOrWhiteSpace(reason)) reason = "unknown error";
 
             List<string> lines = new List<string>();
-            lines.Add("儲存失敗：" + reason);
+            lines.Add(Localization.Format("Designer.SaveFailedReason", reason));
 
             if (string.Equals(providerName, "oracle", StringComparison.OrdinalIgnoreCase))
             {
@@ -2370,7 +2379,7 @@ namespace mySQLPunk
             if (!string.IsNullOrWhiteSpace(statement))
             {
                 lines.Add("");
-                lines.Add("失敗 SQL：");
+                lines.Add(Localization.T("Designer.FailedSql"));
                 lines.Add(CompactSqlForMessage(statement, 700));
             }
 
