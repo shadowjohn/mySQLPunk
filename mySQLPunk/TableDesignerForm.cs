@@ -907,7 +907,7 @@ namespace mySQLPunk
 
             if (currentColumns.Count == 0)
             {
-                return "-- 請至少保留一個欄位。";
+                return "-- " + Localization.T("Designer.KeepAtLeastOneColumn");
             }
 
             string tempTableName = BuildUniqueSqliteRebuildTableName();
@@ -1618,7 +1618,7 @@ namespace mySQLPunk
             string tableName = GetTableNameForSave();
             if (string.IsNullOrWhiteSpace(tableName))
             {
-                return "-- 請先在「選項」分頁輸入資料表名稱。";
+                return "-- " + Localization.T("Designer.EnterTableNameInOptions");
             }
 
             List<string> definitions = new List<string>();
@@ -1641,7 +1641,7 @@ namespace mySQLPunk
 
             if (definitions.Count == 0)
             {
-                return "-- 請至少新增一個欄位。";
+                return "-- " + Localization.T("Designer.AddAtLeastOneColumn");
             }
 
             if (primaryColumns.Count > 0)
@@ -2013,7 +2013,7 @@ namespace mySQLPunk
             string tableName = GetTableNameForSave();
             if (string.IsNullOrWhiteSpace(tableName))
             {
-                return "-- 請先在「選項」分頁輸入資料表名稱。";
+                return "-- " + Localization.T("Designer.EnterTableNameInOptions");
             }
 
             List<string> definitions = new List<string>();
@@ -2036,7 +2036,7 @@ namespace mySQLPunk
 
             if (definitions.Count == 0)
             {
-                return "-- 請至少新增一個欄位。";
+                return "-- " + Localization.T("Designer.AddAtLeastOneColumn");
             }
 
             foreach (string indexDefinition in BuildMySqlCreateIndexDefinitions(primaryColumns))

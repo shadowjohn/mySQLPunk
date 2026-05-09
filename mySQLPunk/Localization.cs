@@ -318,6 +318,9 @@ namespace mySQLPunk
             Add("Designer.ConfirmCloseChanges", "你要儲存對 {0} 的變更嗎？", "Save changes to {0}?");
             Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
             Add("Designer.NoChangesDetected", "沒有偵測到變更。", "No changes detected.");
+            Add("Designer.EnterTableNameInOptions", "請先在「選項」分頁輸入資料表名稱。", "Enter a table name on the Options tab first.");
+            Add("Designer.AddAtLeastOneColumn", "請至少新增一個欄位。", "Add at least one column.");
+            Add("Designer.KeepAtLeastOneColumn", "請至少保留一個欄位。", "Keep at least one column.");
             Add("Designer.SqliteColumnCommentUnsupported", "SQLite 不支援欄位註解：{0}", "SQLite does not support column comments: {0}");
             Add("Designer.PrimaryKeyNeedsConstraintName", "PRIMARY KEY 修改需要資料庫特定 constraint 名稱：{0}", "PRIMARY KEY changes require a database-specific constraint name: {0}");
             Add("Designer.PrimaryKeyMissingColumns", "PRIMARY KEY 缺少欄位：{0}", "PRIMARY KEY is missing columns: {0}");
