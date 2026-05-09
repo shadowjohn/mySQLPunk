@@ -438,13 +438,47 @@ namespace mySQLPunk.lib
 
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
         {
+            foreach (string sql in BuildOracleCopyCreateTableStatements(databaseName, tableName, sourceColumns, sourceProvider))
+            {
+                ExecOrThrow(sql);
+            }
+        }
+
+        private static List<string> BuildOracleCopyCreateTableStatements(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
+        {
+            List<string> statements = new List<string>();
             List<string> defs = new List<string>();
             foreach (DataRow row in sourceColumns.Rows)
             {
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
-                defs.Add(QuoteIdentifier(row["Name"].ToString()) + " " + MapCopyTypeToOracle(row) + " " + nullable);
+                string definition = QuoteIdentifier(row["Name"].ToString()) + " " + MapCopyTypeToOracle(row);
+                string defaultValue = GetOracleCopyDefaultValue(row, sourceProvider);
+                if (!string.IsNullOrWhiteSpace(defaultValue))
+                {
+                    definition += " DEFAULT " + defaultValue;
+                }
+                definition += " " + nullable;
+                defs.Add(definition);
             }
-            ExecOrThrow("CREATE TABLE " + QualifiedName(databaseName, tableName) + " (" + string.Join(", ", defs.ToArray()) + ")");
+
+            statements.Add("CREATE TABLE " + QualifiedName(databaseName, tableName) + " (" + string.Join(", ", defs.ToArray()) + ")");
+
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                string comment = GetDataRowValue(row, "Comment", "COMMENT");
+                if (string.IsNullOrWhiteSpace(comment)) continue;
+                statements.Add("COMMENT ON COLUMN " + QualifiedName(databaseName, tableName) + "." +
+                               QuoteIdentifier(row["Name"].ToString()) +
+                               " IS '" + comment.Replace("'", "''") + "'");
+            }
+
+            return statements;
+        }
+
+        private static string GetOracleCopyDefaultValue(DataRow row, string sourceProvider)
+        {
+            if (!string.Equals(sourceProvider, "oracle", StringComparison.OrdinalIgnoreCase)) return "";
+            return GetDataRowValue(row, "DefaultValue", "DEFAULTVALUE", "ColumnDefault", "COLUMN_DEFAULT").Trim();
         }
 
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider)
