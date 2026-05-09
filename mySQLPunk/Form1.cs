@@ -3837,13 +3837,13 @@ namespace mySQLPunk
                 foreach (DataRow row in dt.Rows)
                 {
                     DataRow newRow = displayDt.NewRow();
-                    newRow["名稱"] = row["Name"];
-                    newRow["自動遞增值"] = row["Auto_increment"];
-                    newRow["修改日期"] = row["Update_time"];
-                    newRow["資料長度"] = FormatBytes(Convert.ToInt64(row["Data_length"]));
-                    newRow["引擎"] = row["Engine"];
-                    newRow["列"] = row["Rows"];
-                    newRow["註解"] = row["Comment"];
+                    newRow["名稱"] = FirstColumnValue(row, "Name", "NAME", "TABLE_NAME");
+                    newRow["自動遞增值"] = FirstColumnValue(row, "Auto_increment", "AUTO_INCREMENT");
+                    newRow["修改日期"] = FirstColumnValue(row, "Update_time", "UPDATE_TIME");
+                    newRow["資料長度"] = FormatBytesValue(FirstColumnValue(row, "Data_length", "DATA_LENGTH"));
+                    newRow["引擎"] = FirstColumnValue(row, "Engine", "ENGINE");
+                    newRow["列"] = FirstColumnValue(row, "Rows", "ROWS", "NUM_ROWS");
+                    newRow["註解"] = FirstColumnValue(row, "Comment", "COMMENTS");
                     displayDt.Rows.Add(newRow);
                 }
 
@@ -5139,24 +5139,23 @@ namespace mySQLPunk
             {
                 // 取得詳情
                 DataTable dt = db.GetTableStatus(dbName);
-                DataRow[] rows = dt.Select($"Name = '{tableName}'");
-                if (rows.Length > 0)
+                DataRow r = FindTableStatusRow(dt, tableName);
+                if (r != null)
                 {
-                    DataRow r = rows[0];
-                    dgvDetails.Rows.Add("列", r["Rows"]);
-                    dgvDetails.Rows.Add("引擎", r["Engine"]);
-                    dgvDetails.Rows.Add("自動遞增", r["Auto_increment"]);
-                    dgvDetails.Rows.Add("列格式", r["Row_format"]);
-                    dgvDetails.Rows.Add("修改日期", r["Update_time"]);
-                    dgvDetails.Rows.Add("建立日期", r["Create_time"]);
-                    dgvDetails.Rows.Add("檢查時間", r["Check_time"]);
-                    dgvDetails.Rows.Add("索引長度", FormatBytes(Convert.ToInt64(r["Index_length"])));
-                    dgvDetails.Rows.Add("資料長度", FormatBytes(Convert.ToInt64(r["Data_length"])));
-                    dgvDetails.Rows.Add("最大資料長度", FormatBytes(Convert.ToInt64(r["Max_data_length"])));
-                    dgvDetails.Rows.Add("資料可用空間", FormatBytes(Convert.ToInt64(r["Data_free"])));
-                    dgvDetails.Rows.Add("定序", r["Collation"]);
-                    dgvDetails.Rows.Add("建立選項", r["Create_options"]);
-                    dgvDetails.Rows.Add("註解", r["Comment"]);
+                    dgvDetails.Rows.Add("列", FirstColumnValue(r, "Rows", "ROWS", "NUM_ROWS"));
+                    dgvDetails.Rows.Add("引擎", FirstColumnValue(r, "Engine", "ENGINE"));
+                    dgvDetails.Rows.Add("自動遞增", FirstColumnValue(r, "Auto_increment", "AUTO_INCREMENT"));
+                    dgvDetails.Rows.Add("列格式", FirstColumnValue(r, "Row_format", "ROW_FORMAT"));
+                    dgvDetails.Rows.Add("修改日期", FirstColumnValue(r, "Update_time", "UPDATE_TIME"));
+                    dgvDetails.Rows.Add("建立日期", FirstColumnValue(r, "Create_time", "CREATE_TIME"));
+                    dgvDetails.Rows.Add("檢查時間", FirstColumnValue(r, "Check_time", "CHECK_TIME"));
+                    dgvDetails.Rows.Add("索引長度", FormatBytesValue(FirstColumnValue(r, "Index_length", "INDEX_LENGTH")));
+                    dgvDetails.Rows.Add("資料長度", FormatBytesValue(FirstColumnValue(r, "Data_length", "DATA_LENGTH")));
+                    dgvDetails.Rows.Add("最大資料長度", FormatBytesValue(FirstColumnValue(r, "Max_data_length", "MAX_DATA_LENGTH")));
+                    dgvDetails.Rows.Add("資料可用空間", FormatBytesValue(FirstColumnValue(r, "Data_free", "DATA_FREE")));
+                    dgvDetails.Rows.Add("定序", FirstColumnValue(r, "Collation", "COLLATION"));
+                    dgvDetails.Rows.Add("建立選項", FirstColumnValue(r, "Create_options", "CREATE_OPTIONS"));
+                    dgvDetails.Rows.Add("註解", FirstColumnValue(r, "Comment", "COMMENTS"));
                 }
 
                 // 取得 DDL
@@ -5166,6 +5165,18 @@ namespace mySQLPunk
             {
                 rtbDDL.Text = "Error loading details: " + ex.Message;
             }
+        }
+
+        private static DataRow FindTableStatusRow(DataTable tableStatus, string tableName)
+        {
+            if (tableStatus == null) return null;
+            foreach (DataRow row in tableStatus.Rows)
+            {
+                string name = FirstColumnValue(row, "Name", "NAME", "TABLE_NAME");
+                if (string.Equals(name, tableName, StringComparison.OrdinalIgnoreCase)) return row;
+            }
+
+            return null;
         }
 
         private void ShowViewDetails(IDatabase db, string dbName, string viewName)
