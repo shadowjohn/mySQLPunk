@@ -20,6 +20,12 @@ namespace mySQLPunk
 
     public partial class Form1 : Form
     {
+        private const int MainToolbarHeight = 96;
+        private const int MainToolbarItemWidth = 76;
+        private const int MainToolbarItemHeight = 84;
+        private const int MainToolbarIconSize = 40;
+        private const int MainToolbarIconContentSize = 38;
+
         public Form dialog = new Form();
         public Label dialogLabel = new Label();
         public int dialogFlag = 0;
@@ -741,11 +747,11 @@ namespace mySQLPunk
             menuStrip1.BringToFront();
             
             // 確保容器高度足夠容納工具列
-            splitContainer1.SplitterDistance = 86;
+            splitContainer1.SplitterDistance = MainToolbarHeight;
             tool_Connection.Dock = DockStyle.Fill;
             tool_Connection.AutoSize = false;
-            tool_Connection.Height = 86;
-            tool_Connection.ImageScalingSize = new Size(32, 32);
+            tool_Connection.Height = MainToolbarHeight;
+            tool_Connection.ImageScalingSize = new Size(MainToolbarIconSize, MainToolbarIconSize);
             tool_Connection.GripStyle = ToolStripGripStyle.Hidden;
             tool_Connection.Padding = new Padding(10, 8, 10, 4);
 
@@ -753,8 +759,8 @@ namespace mySQLPunk
             foreach (ToolStripItem item in tool_Connection.Items)
             {
                 item.AutoSize = false;
-                item.Size = new Size(72, 74);
-                item.Padding = new Padding(0, 4, 0, 2);
+                item.Size = new Size(MainToolbarItemWidth, MainToolbarItemHeight);
+                item.Padding = new Padding(0, 3, 0, 2);
                 if (item is ToolStripButton btn) btn.TextImageRelation = TextImageRelation.ImageAboveText;
                 if (item is ToolStripDropDownButton dd) dd.TextImageRelation = TextImageRelation.ImageAboveText;
             }
@@ -1533,8 +1539,8 @@ namespace mySQLPunk
                 bi_btn
             });
 
-            tool_Connection.ImageScalingSize = new Size(32, 32);
-            tool_Connection.Height = 86;
+            tool_Connection.ImageScalingSize = new Size(MainToolbarIconSize, MainToolbarIconSize);
+            tool_Connection.Height = MainToolbarHeight;
             tool_Connection.Padding = new Padding(10, 8, 10, 4);
 
             foreach (ToolStripItem item in tool_Connection.Items)
@@ -1542,9 +1548,9 @@ namespace mySQLPunk
                 item.TextImageRelation = TextImageRelation.ImageAboveText;
                 item.TextAlign = ContentAlignment.BottomCenter;
                 item.AutoSize = false;
-                item.Size = new Size(72, 74);
+                item.Size = new Size(MainToolbarItemWidth, MainToolbarItemHeight);
                 item.Margin = new Padding(2, 2, 2, 0);
-                item.Padding = new Padding(0, 4, 0, 2);
+                item.Padding = new Padding(0, 3, 0, 2);
             }
         }
 
@@ -1610,19 +1616,28 @@ namespace mySQLPunk
 
         private static Image CreateToolbarIcon(Image source)
         {
-            Bitmap bitmap = new Bitmap(32, 32);
+            Bitmap bitmap = new Bitmap(MainToolbarIconSize, MainToolbarIconSize);
+            try
+            {
+                bitmap.SetResolution(source.HorizontalResolution, source.VerticalResolution);
+            }
+            catch
+            {
+            }
+
             using (Graphics graphics = Graphics.FromImage(bitmap))
             {
                 graphics.Clear(Color.Transparent);
+                graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
                 graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                 graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
 
-                float scale = Math.Min(30f / source.Width, 30f / source.Height);
+                float scale = Math.Min((float)MainToolbarIconContentSize / source.Width, (float)MainToolbarIconContentSize / source.Height);
                 int width = Math.Max(1, (int)Math.Round(source.Width * scale));
                 int height = Math.Max(1, (int)Math.Round(source.Height * scale));
-                int x = (32 - width) / 2;
-                int y = (32 - height) / 2;
+                int x = (MainToolbarIconSize - width) / 2;
+                int y = (MainToolbarIconSize - height) / 2;
                 graphics.DrawImage(source, new Rectangle(x, y, width, height));
             }
 
@@ -3030,7 +3045,7 @@ namespace mySQLPunk
                 Math.Max(0, ClientSize.Height - menuHeight - statusHeight));
             splitContainer1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
 
-            int toolbarHeight = Math.Min(86, Math.Max(0, splitContainer1.Height - splitContainer1.SplitterWidth));
+            int toolbarHeight = Math.Min(MainToolbarHeight, Math.Max(0, splitContainer1.Height - splitContainer1.SplitterWidth));
             if (toolbarHeight > 0 && splitContainer1.SplitterDistance != toolbarHeight)
             {
                 splitContainer1.SplitterDistance = toolbarHeight;
