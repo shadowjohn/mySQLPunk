@@ -59,28 +59,28 @@ namespace mySQLPunk.template
         {
             if (string.IsNullOrWhiteSpace(postgresql_connection_name.Text))
             {
-                MessageBox.Show("請輸入連線名稱！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterConnectionName"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 postgresql_connection_name.Focus();
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(postgresql_host.Text))
             {
-                MessageBox.Show("請輸入主機名稱或 IP！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterHost"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 postgresql_host.Focus();
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(postgresql_port.Text))
             {
-                MessageBox.Show("請輸入連接埠！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterPort"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 postgresql_port.Focus();
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(postgresql_username.Text))
             {
-                MessageBox.Show("請輸入使用者名稱！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterUsername"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 postgresql_username.Focus();
                 return false;
             }
@@ -129,12 +129,12 @@ namespace mySQLPunk.template
                 my_postgresql db = new my_postgresql();
                 db.SetConn(connStr);
                 db.Open();
-                MessageBox.Show("連線成功！", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.Format("Connection.TestSucceeded", "PostgreSQL"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 db.Close();
             }
             catch (Exception ex)
             {
-                MessageBox.Show("連線失敗：" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.Format("Connection.TestFailed", "PostgreSQL", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
         
@@ -142,7 +142,7 @@ namespace mySQLPunk.template
         {
             if (F1 == null)
             {
-                MessageBox.Show("主視窗未初始化！", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.T("Connection.MainWindowNotInitialized"), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 

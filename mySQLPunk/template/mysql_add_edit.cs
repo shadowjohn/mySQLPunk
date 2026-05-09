@@ -61,8 +61,46 @@ namespace mySQLPunk.template
             return conn;
         }
 
+        private bool ValidateInput()
+        {
+            if (string.IsNullOrWhiteSpace(mysql_connection_name.Text))
+            {
+                MessageBox.Show(Localization.T("Connection.EnterConnectionName"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                mysql_connection_name.Focus();
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(mysql_host.Text))
+            {
+                MessageBox.Show(Localization.T("Connection.EnterHost"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                mysql_host.Focus();
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(mysql_port.Text))
+            {
+                MessageBox.Show(Localization.T("Connection.EnterPort"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                mysql_port.Focus();
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(mysql_username.Text))
+            {
+                MessageBox.Show(Localization.T("Connection.EnterUsername"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                mysql_username.Focus();
+                return false;
+            }
+
+            return true;
+        }
+
         private void button1_Click(object sender, EventArgs e)
         {
+            if (!ValidateInput())
+            {
+                return;
+            }
+
             // Test Connection
             try
             {
@@ -70,12 +108,12 @@ namespace mySQLPunk.template
                 my_mysql db = new my_mysql();
                 db.SetConn(connStr);
                 db.MCT.Open();
-                MessageBox.Show("連線成功！", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.Format("Connection.TestSucceeded", "MySQL"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 db.MCT.Close();
             }
             catch (Exception ex)
             {
-                MessageBox.Show("連線失敗：" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.Format("Connection.TestFailed", "MySQL", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
         
@@ -83,7 +121,12 @@ namespace mySQLPunk.template
         {
             if (F1 == null)
             {
-                MessageBox.Show("主視窗未初始化！", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.T("Connection.MainWindowNotInitialized"), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (!ValidateInput())
+            {
                 return;
             }
 

@@ -78,11 +78,11 @@ namespace mySQLPunk.template
                     db.Close();
                 }
 
-                MessageBox.Show("Oracle 連線成功。", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.Format("Connection.TestSucceeded", "Oracle"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Oracle 連線失敗：" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.Format("Connection.TestFailed", "Oracle", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
         
@@ -90,7 +90,7 @@ namespace mySQLPunk.template
         {
             if (F1 == null)
             {
-                MessageBox.Show("主視窗未初始化！", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.T("Connection.MainWindowNotInitialized"), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -130,7 +130,7 @@ namespace mySQLPunk.template
         {
             if (string.IsNullOrWhiteSpace(oracle_connection_name.Text))
             {
-                MessageBox.Show("請輸入連線名稱！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterConnectionName"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 oracle_connection_name.Focus();
                 return false;
             }
@@ -139,13 +139,13 @@ namespace mySQLPunk.template
             {
                 if (string.IsNullOrWhiteSpace(comboBox1.Text))
                 {
-                    MessageBox.Show("請輸入 Net Service Name。", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(Localization.T("Connection.EnterNetServiceName"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     comboBox1.Focus();
                     return false;
                 }
                 if (string.IsNullOrWhiteSpace(textBox7.Text))
                 {
-                    MessageBox.Show("請輸入使用者名稱！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(Localization.T("Connection.EnterUsername"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     textBox7.Focus();
                     return false;
                 }
@@ -154,25 +154,25 @@ namespace mySQLPunk.template
 
             if (string.IsNullOrWhiteSpace(textBox1.Text))
             {
-                MessageBox.Show("請輸入主機名稱或 IP！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterHost"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 textBox1.Focus();
                 return false;
             }
             if (string.IsNullOrWhiteSpace(textBox2.Text))
             {
-                MessageBox.Show("請輸入連接埠！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterPort"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 textBox2.Focus();
                 return false;
             }
             if (string.IsNullOrWhiteSpace(textBox3.Text))
             {
-                MessageBox.Show("請輸入 Service Name 或 SID。", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterServiceNameOrSid"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 textBox3.Focus();
                 return false;
             }
             if (string.IsNullOrWhiteSpace(textBox4.Text))
             {
-                MessageBox.Show("請輸入使用者名稱！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterUsername"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 textBox4.Focus();
                 return false;
             }

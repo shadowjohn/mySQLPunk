@@ -92,7 +92,7 @@ namespace mySQLPunk.template
         {
             using (OpenFileDialog dlg = new OpenFileDialog())
             {
-                dlg.Filter = "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*";
+                dlg.Filter = Localization.T("Connection.SqliteFileFilter");
                 dlg.CheckFileExists = true;
                 if (File.Exists(txtPath.Text)) dlg.FileName = txtPath.Text;
                 if (dlg.ShowDialog() == DialogResult.OK)
@@ -109,7 +109,7 @@ namespace mySQLPunk.template
         {
             using (SaveFileDialog dlg = new SaveFileDialog())
             {
-                dlg.Filter = "SQLite database (*.sqlite)|*.sqlite|SQLite DB (*.db)|*.db|All files (*.*)|*.*";
+                dlg.Filter = Localization.T("Connection.SqliteNewFileFilter");
                 dlg.DefaultExt = "sqlite";
                 dlg.OverwritePrompt = false;
                 if (dlg.ShowDialog() == DialogResult.OK)
@@ -129,11 +129,11 @@ namespace mySQLPunk.template
             try
             {
                 TestAndMaybeInitialize(true);
-                MessageBox.Show("SQLite 連線成功。", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.Format("Connection.TestSucceeded", "SQLite"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("SQLite 連線失敗：" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.Format("Connection.TestFailed", "SQLite", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -141,7 +141,7 @@ namespace mySQLPunk.template
         {
             if (F1 == null)
             {
-                MessageBox.Show("主視窗未初始化！", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.T("Connection.MainWindowNotInitialized"), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
             if (!ValidateInput()) return;
@@ -152,7 +152,7 @@ namespace mySQLPunk.template
             }
             catch (Exception ex)
             {
-                MessageBox.Show("SQLite 初始化失敗：" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.Format("Connection.InitializationFailed", "SQLite", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -187,7 +187,7 @@ namespace mySQLPunk.template
                 if (!db.SpatiaLiteEnabled)
                 {
                     MessageBox.Show(
-                        "SQLite 可連線，但 SpatiaLite 載入失敗：\r\n" + db.SpatiaLiteLoadError,
+                        Localization.Format("Connection.SpatiaLiteLoadFailed", db.SpatiaLiteLoadError),
                         "SpatiaLite",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
@@ -202,8 +202,8 @@ namespace mySQLPunk.template
                     if (fileExisted && shouldInit && !_selectedNewFile)
                     {
                         DialogResult answer = MessageBox.Show(
-                            "此 SQLite 檔尚未偵測到 SpatiaLite metadata，是否要初始化？",
-                            "初始化 geospatial",
+                            Localization.T("Connection.InitSpatialMetadataPrompt"),
+                            Localization.T("Connection.InitSpatialMetadataTitle"),
                             MessageBoxButtons.YesNo,
                             MessageBoxIcon.Question);
                         shouldInit = answer == DialogResult.Yes;
@@ -240,13 +240,13 @@ namespace mySQLPunk.template
         {
             if (string.IsNullOrWhiteSpace(txtName.Text))
             {
-                MessageBox.Show("請輸入連線名稱。", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterConnectionName"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtName.Focus();
                 return false;
             }
             if (string.IsNullOrWhiteSpace(txtPath.Text))
             {
-                MessageBox.Show("請選擇或建立 SQLite 檔案。", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.SelectOrCreateSqliteFile"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtPath.Focus();
                 return false;
             }

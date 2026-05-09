@@ -116,21 +116,21 @@ namespace mySQLPunk.template
         {
             if (string.IsNullOrWhiteSpace(txtName.Text))
             {
-                MessageBox.Show("請輸入連線名稱！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterConnectionName"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtName.Focus();
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(txtHost.Text))
             {
-                MessageBox.Show("請輸入主機名稱或 IP！", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterHost"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtHost.Focus();
                 return false;
             }
 
             if (!chkWindowsAuth.Checked && string.IsNullOrWhiteSpace(txtUser.Text))
             {
-                MessageBox.Show("請輸入使用者名稱，或改用 Windows 驗證。", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(Localization.T("Connection.EnterUsernameOrWindowsAuth"), Localization.T("Common.Warning"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtUser.Focus();
                 return false;
             }
@@ -197,11 +197,11 @@ namespace mySQLPunk.template
                     db.Close();
                 }
 
-                MessageBox.Show("SQL Server 連線成功。", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.Format("Connection.TestSucceeded", "SQL Server"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("SQL Server 連線失敗：" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.Format("Connection.TestFailed", "SQL Server", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -209,7 +209,7 @@ namespace mySQLPunk.template
         {
             if (F1 == null)
             {
-                MessageBox.Show("主視窗未初始化！", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.T("Connection.MainWindowNotInitialized"), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 

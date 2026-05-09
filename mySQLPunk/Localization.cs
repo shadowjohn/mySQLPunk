@@ -151,6 +151,23 @@ namespace mySQLPunk
             Add("Common.NetServiceName", "Net Service Name", "Net Service Name");
             Add("Common.SQLiteConnection", "SQLite 連線", "SQLite Connection");
             Add("Common.SqlServerConnection", "SQL Server 連線", "SQL Server Connection");
+            Add("Connection.EnterConnectionName", "請輸入連線名稱。", "Enter a connection name.");
+            Add("Connection.EnterHost", "請輸入主機名稱或 IP。", "Enter a host name or IP address.");
+            Add("Connection.EnterPort", "請輸入連接埠。", "Enter a port.");
+            Add("Connection.EnterUsername", "請輸入使用者名稱。", "Enter a user name.");
+            Add("Connection.EnterUsernameOrWindowsAuth", "請輸入使用者名稱，或改用 Windows 驗證。", "Enter a user name, or use Windows Authentication.");
+            Add("Connection.EnterNetServiceName", "請輸入 Net Service Name。", "Enter a Net Service Name.");
+            Add("Connection.EnterServiceNameOrSid", "請輸入 Service Name 或 SID。", "Enter a Service Name or SID.");
+            Add("Connection.MainWindowNotInitialized", "主視窗未初始化。", "The main window is not initialized.");
+            Add("Connection.TestSucceeded", "{0} 連線成功。", "{0} connection succeeded.");
+            Add("Connection.TestFailed", "{0} 連線失敗：{1}", "{0} connection failed: {1}");
+            Add("Connection.InitializationFailed", "{0} 初始化失敗：{1}", "{0} initialization failed: {1}");
+            Add("Connection.SelectOrCreateSqliteFile", "請選擇或建立 SQLite 檔案。", "Select or create a SQLite file.");
+            Add("Connection.SqliteFileFilter", "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*", "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*");
+            Add("Connection.SqliteNewFileFilter", "SQLite database (*.sqlite)|*.sqlite|SQLite DB (*.db)|*.db|All files (*.*)|*.*", "SQLite database (*.sqlite)|*.sqlite|SQLite DB (*.db)|*.db|All files (*.*)|*.*");
+            Add("Connection.SpatiaLiteLoadFailed", "SQLite 可連線，但 SpatiaLite 載入失敗：\r\n{0}", "SQLite connected, but SpatiaLite failed to load:\r\n{0}");
+            Add("Connection.InitSpatialMetadataTitle", "初始化 geospatial", "Initialize geospatial");
+            Add("Connection.InitSpatialMetadataPrompt", "此 SQLite 檔尚未偵測到 SpatiaLite metadata，是否要初始化？", "This SQLite file does not have SpatiaLite metadata yet. Initialize it?");
 
             Add("ConnectionWizard.Title", "選取連線類型", "Select Connection Type");
             Add("ConnectionWizard.SelectType", "選取連線類型:", "Select connection type:");
