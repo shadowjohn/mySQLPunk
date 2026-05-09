@@ -160,17 +160,19 @@ namespace mySQLPunk.lib
             };
             return SelectSQL(@"
                 SELECT
-                    COLUMN_NAME,
-                    DATA_TYPE,
-                    NULLABLE AS IS_NULLABLE,
-                    DATA_DEFAULT AS COLUMN_DEFAULT,
-                    DATA_LENGTH,
-                    DATA_PRECISION,
-                    DATA_SCALE,
-                    COLUMN_ID
-                FROM ALL_TAB_COLUMNS
-                WHERE OWNER = :owner AND TABLE_NAME = :tableName
-                ORDER BY COLUMN_ID", p);
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.NULLABLE AS IS_NULLABLE,
+                    c.DATA_DEFAULT AS COLUMN_DEFAULT,
+                    c.DATA_LENGTH,
+                    c.DATA_PRECISION,
+                    c.DATA_SCALE,
+                    c.COLUMN_ID,
+                    COALESCE(cc.COMMENTS, '') AS ""Comment""
+                FROM ALL_TAB_COLUMNS c
+                LEFT JOIN ALL_COL_COMMENTS cc ON cc.OWNER = c.OWNER AND cc.TABLE_NAME = c.TABLE_NAME AND cc.COLUMN_NAME = c.COLUMN_NAME
+                WHERE c.OWNER = :owner AND c.TABLE_NAME = :tableName
+                ORDER BY c.COLUMN_ID", p);
         }
 
         public DataTable GetIndexes(string databaseName, string tableName)

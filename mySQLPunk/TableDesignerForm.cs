@@ -366,80 +366,7 @@ namespace mySQLPunk
                 foreach (DataRow row in rawDt.Rows)
                 {
                     DataRow newRow = displayDt.NewRow();
-                    
-                    if (_db is my_mysql)
-                    {
-                        newRow["Name"] = row["Field"];
-                        newRow["_OldName"] = row["Field"];
-                        string typeStr = row["Type"].ToString();
-                        if (typeStr.Contains("("))
-                        {
-                            string rawType = typeStr.Split('(')[0];
-                            string fullLen = typeStr.Split('(')[1].Replace(")", "");
-                            newRow["Type"] = rawType;
-                            if (fullLen.Contains(","))
-                            {
-                                newRow["Length"] = fullLen.Split(',')[0];
-                                newRow["Decimals"] = fullLen.Split(',')[1];
-                            }
-                            else
-                            {
-                                newRow["Length"] = fullLen;
-                            }
-                        }
-                        else
-                        {
-                            newRow["Type"] = typeStr;
-                        }
-                        newRow["NotNull"] = (row["Null"].ToString() == "NO");
-                        newRow["PK"] = (row["Key"].ToString() == "PRI");
-                        newRow["Default"] = row["Default"];
-                        newRow["Comment"] = row["Comment"];
-                    }
-                    else if (_db is my_postgresql)
-                    {
-                        newRow["Name"] = row["column_name"];
-                        newRow["_OldName"] = row["column_name"];
-                        newRow["Type"] = row["data_type"];
-                        newRow["Length"] = GetLengthFromMetadata(row, "character_maximum_length", "numeric_precision");
-                        newRow["Decimals"] = row.Table.Columns.Contains("numeric_scale") && row["numeric_scale"] != DBNull.Value ? row["numeric_scale"].ToString() : "";
-                        newRow["NotNull"] = (row["is_nullable"].ToString() == "NO");
-                        newRow["Default"] = row["column_default"];
-                    }
-                    else if (_db is my_sqlite)
-                    {
-                        newRow["Name"] = row["name"];
-                        newRow["_OldName"] = row["name"];
-                        newRow["Type"] = row["type"];
-                        newRow["NotNull"] = (row["notnull"].ToString() == "1");
-                        newRow["PK"] = (row["pk"].ToString() == "1");
-                        newRow["Default"] = row["dflt_value"];
-                    }
-                    else if (_db is my_mssql)
-                    {
-                        newRow["Name"] = row["COLUMN_NAME"];
-                        newRow["_OldName"] = row["COLUMN_NAME"];
-                        newRow["Type"] = row["DATA_TYPE"];
-                        newRow["Length"] = GetLengthFromMetadata(row, "CHARACTER_MAXIMUM_LENGTH", "NUMERIC_PRECISION");
-                        newRow["Decimals"] = row.Table.Columns.Contains("NUMERIC_SCALE") && row["NUMERIC_SCALE"] != DBNull.Value ? row["NUMERIC_SCALE"].ToString() : "";
-                        newRow["NotNull"] = (row["IS_NULLABLE"].ToString() == "NO");
-                        newRow["Default"] = row["COLUMN_DEFAULT"];
-                    }
-                    else if (_db is my_oracle)
-                    {
-                        newRow["Name"] = row["COLUMN_NAME"];
-                        newRow["_OldName"] = row["COLUMN_NAME"];
-                        newRow["Type"] = row["DATA_TYPE"];
-                        newRow["Length"] = row.Table.Columns.Contains("DATA_LENGTH") && row["DATA_LENGTH"] != DBNull.Value ? row["DATA_LENGTH"].ToString() : "";
-                        newRow["Decimals"] = row.Table.Columns.Contains("DATA_SCALE") && row["DATA_SCALE"] != DBNull.Value ? row["DATA_SCALE"].ToString() : "";
-                        newRow["NotNull"] = (row["IS_NULLABLE"].ToString() == "N");
-                        newRow["Default"] = row["COLUMN_DEFAULT"];
-                    }
-                    else
-                    {
-                        newRow["Name"] = row[0];
-                    }
-
+                    PopulateDesignerColumnRow(newRow, row);
                     displayDt.Rows.Add(newRow);
                 }
 
@@ -467,6 +394,92 @@ namespace mySQLPunk
             return displayDt;
         }
 
+        private void PopulateDesignerColumnRow(DataRow newRow, DataRow row)
+        {
+            if (_db is my_mysql)
+            {
+                newRow["Name"] = row["Field"];
+                newRow["_OldName"] = row["Field"];
+                string typeStr = row["Type"].ToString();
+                if (typeStr.Contains("("))
+                {
+                    string rawType = typeStr.Split('(')[0];
+                    string fullLen = typeStr.Split('(')[1].Replace(")", "");
+                    newRow["Type"] = rawType;
+                    if (fullLen.Contains(","))
+                    {
+                        newRow["Length"] = fullLen.Split(',')[0];
+                        newRow["Decimals"] = fullLen.Split(',')[1];
+                    }
+                    else
+                    {
+                        newRow["Length"] = fullLen;
+                    }
+                }
+                else
+                {
+                    newRow["Type"] = typeStr;
+                }
+                newRow["NotNull"] = (row["Null"].ToString() == "NO");
+                newRow["PK"] = (row["Key"].ToString() == "PRI");
+                newRow["Default"] = row["Default"];
+                newRow["Comment"] = row["Comment"];
+                return;
+            }
+
+            if (_db is my_postgresql)
+            {
+                newRow["Name"] = row["column_name"];
+                newRow["_OldName"] = row["column_name"];
+                newRow["Type"] = row["data_type"];
+                newRow["Length"] = GetLengthFromMetadata(row, "character_maximum_length", "numeric_precision");
+                newRow["Decimals"] = GetMetadataString(row, "numeric_scale");
+                newRow["NotNull"] = (row["is_nullable"].ToString() == "NO");
+                newRow["Default"] = row["column_default"];
+                newRow["Comment"] = GetMetadataString(row, "Comment", "comment");
+                return;
+            }
+
+            if (_db is my_sqlite)
+            {
+                newRow["Name"] = row["name"];
+                newRow["_OldName"] = row["name"];
+                newRow["Type"] = row["type"];
+                newRow["NotNull"] = (row["notnull"].ToString() == "1");
+                newRow["PK"] = (row["pk"].ToString() == "1");
+                newRow["Default"] = row["dflt_value"];
+                return;
+            }
+
+            if (_db is my_mssql)
+            {
+                newRow["Name"] = row["COLUMN_NAME"];
+                newRow["_OldName"] = row["COLUMN_NAME"];
+                newRow["Type"] = row["DATA_TYPE"];
+                newRow["Length"] = GetLengthFromMetadata(row, "CHARACTER_MAXIMUM_LENGTH", "NUMERIC_PRECISION");
+                newRow["Decimals"] = GetMetadataString(row, "NUMERIC_SCALE");
+                newRow["NotNull"] = (row["IS_NULLABLE"].ToString() == "NO");
+                newRow["Default"] = row["COLUMN_DEFAULT"];
+                newRow["Comment"] = GetMetadataString(row, "Comment", "COMMENT");
+                return;
+            }
+
+            if (_db is my_oracle)
+            {
+                newRow["Name"] = row["COLUMN_NAME"];
+                newRow["_OldName"] = row["COLUMN_NAME"];
+                newRow["Type"] = row["DATA_TYPE"];
+                newRow["Length"] = GetMetadataString(row, "DATA_LENGTH");
+                newRow["Decimals"] = GetMetadataString(row, "DATA_SCALE");
+                newRow["NotNull"] = (row["IS_NULLABLE"].ToString() == "N");
+                newRow["Default"] = row["COLUMN_DEFAULT"];
+                newRow["Comment"] = GetMetadataString(row, "Comment", "COMMENT");
+                return;
+            }
+
+            newRow["Name"] = row[0];
+        }
+
         private static string GetLengthFromMetadata(DataRow row, string textLengthColumn, string numericPrecisionColumn)
         {
             if (row.Table.Columns.Contains(textLengthColumn) && row[textLengthColumn] != DBNull.Value)
@@ -478,6 +491,19 @@ namespace mySQLPunk
             if (row.Table.Columns.Contains(numericPrecisionColumn) && row[numericPrecisionColumn] != DBNull.Value)
             {
                 return row[numericPrecisionColumn].ToString();
+            }
+
+            return "";
+        }
+
+        private static string GetMetadataString(DataRow row, params string[] columnNames)
+        {
+            foreach (string columnName in columnNames)
+            {
+                if (row.Table.Columns.Contains(columnName) && row[columnName] != DBNull.Value)
+                {
+                    return row[columnName].ToString();
+                }
             }
 
             return "";

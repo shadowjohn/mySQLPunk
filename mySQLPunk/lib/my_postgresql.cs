@@ -186,16 +186,20 @@ namespace mySQLPunk.lib
             var p = new Dictionary<string, object> { { "tableName", tableName } };
             return SelectSQL(@"
                 SELECT
-                    column_name,
-                    data_type,
-                    is_nullable,
-                    column_default,
-                    character_maximum_length,
-                    numeric_precision,
-                    numeric_scale
-                FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = :tableName
-                ORDER BY ordinal_position", p);
+                    c.column_name,
+                    c.data_type,
+                    c.is_nullable,
+                    c.column_default,
+                    c.character_maximum_length,
+                    c.numeric_precision,
+                    c.numeric_scale,
+                    COALESCE(col_description(cls.oid, a.attnum), '') AS ""Comment""
+                FROM information_schema.columns c
+                LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
+                LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
+                LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped
+                WHERE c.table_schema = 'public' AND c.table_name = :tableName
+                ORDER BY c.ordinal_position", p);
         }
 
         public DataTable GetTableStatus(string databaseName)

@@ -182,16 +182,21 @@ namespace mySQLPunk.lib
             var p = new Dictionary<string, object> { { "tableName", tableName } };
             return SelectSQL(@"
                 SELECT
-                    COLUMN_NAME,
-                    DATA_TYPE,
-                    IS_NULLABLE,
-                    COLUMN_DEFAULT,
-                    CHARACTER_MAXIMUM_LENGTH,
-                    NUMERIC_PRECISION,
-                    NUMERIC_SCALE
-                FROM [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @tableName
-                ORDER BY ORDINAL_POSITION", p);
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.IS_NULLABLE,
+                    c.COLUMN_DEFAULT,
+                    c.CHARACTER_MAXIMUM_LENGTH,
+                    c.NUMERIC_PRECISION,
+                    c.NUMERIC_SCALE,
+                    COALESCE(CAST(ep.value AS NVARCHAR(4000)), '') AS [Comment]
+                FROM [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.COLUMNS c
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.name = c.TABLE_SCHEMA
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.name = c.TABLE_NAME AND o.schema_id = s.schema_id
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns sc ON sc.object_id = o.object_id AND sc.name = c.COLUMN_NAME
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.extended_properties ep ON ep.major_id = sc.object_id AND ep.minor_id = sc.column_id AND ep.name = 'MS_Description'
+                WHERE c.TABLE_SCHEMA = 'dbo' AND c.TABLE_NAME = @tableName
+                ORDER BY c.ORDINAL_POSITION", p);
         }
 
         public DataTable GetTableStatus(string databaseName)
