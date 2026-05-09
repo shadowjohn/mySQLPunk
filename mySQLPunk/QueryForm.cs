@@ -205,7 +205,7 @@ namespace mySQLPunk
                 catch (Exception ex)
                 {
                     if (!CanUpdateUi()) return;
-                    UpdateStatus("Count rows failed: " + ex.Message);
+                    UpdateStatus(Localization.Format("Query.CountRowsFailed", ex.Message));
                     UpdatePaginationUI();
                 }
             }
@@ -634,14 +634,14 @@ namespace mySQLPunk
         {
             using (SaveFileDialog dialog = new SaveFileDialog
             {
-                Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*",
+                Filter = Localization.T("Common.SqlFilesFilter"),
                 DefaultExt = "sql",
                 FileName = string.IsNullOrWhiteSpace(_databaseName) ? "query.sql" : _databaseName + ".sql"
             })
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
                 File.WriteAllText(dialog.FileName, txtSql.Text, Encoding.UTF8);
-                UpdateStatus("SQL saved: " + dialog.FileName);
+                UpdateStatus(Localization.Format("Query.SqlSaved", dialog.FileName));
             }
         }
 
@@ -649,7 +649,7 @@ namespace mySQLPunk
         {
             using (OpenFileDialog dialog = new OpenFileDialog
             {
-                Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*",
+                Filter = Localization.T("Common.SqlFilesFilter"),
                 CheckFileExists = true
             })
             {
@@ -657,7 +657,7 @@ namespace mySQLPunk
                 txtSql.Text = File.ReadAllText(dialog.FileName, Encoding.UTF8);
                 txtSql.SelectionStart = txtSql.TextLength;
                 txtSql.SelectionLength = 0;
-                UpdateStatus("SQL opened: " + dialog.FileName);
+                UpdateStatus(Localization.Format("Query.SqlOpened", dialog.FileName));
             }
         }
 
@@ -971,7 +971,7 @@ namespace mySQLPunk
             tsBtnExport.Enabled = false;
             tsBtnRefresh.Enabled = false;
             btnDataRefresh.Enabled = false;
-            UpdateStatus("Loading table page...");
+            UpdateStatus(Localization.T("Query.LoadingTablePage"));
 
             Stopwatch sw = Stopwatch.StartNew();
             try
@@ -995,13 +995,13 @@ namespace mySQLPunk
             catch (OperationCanceledException)
             {
                 if (!CanUpdateUi()) return;
-                UpdateStatus("Cancelled.");
+                UpdateStatus(Localization.T("Query.Cancelled"));
             }
             catch (Exception ex)
             {
                 if (!CanUpdateUi()) return;
-                UpdateStatus("Load failed: " + ex.Message);
-                MessageBox.Show("載入資料表失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateStatus(Localization.Format("Query.LoadFailed", ex.Message));
+                MessageBox.Show(Localization.Format("Query.LoadTableFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -1044,7 +1044,7 @@ namespace mySQLPunk
             {
                 EnsureValidPageSize();
                 if (txtPageSize != null) txtPageSize.Text = _pageSize.ToString();
-                UpdateStatus("Page size must be greater than 0.");
+                UpdateStatus(Localization.T("Query.PageSizeInvalid"));
                 return;
             }
 
@@ -1084,7 +1084,7 @@ namespace mySQLPunk
             tsBtnExport.Enabled = false;
             tsBtnRefresh.Enabled = false;
             btnDataRefresh.Enabled = false;
-            UpdateStatus("Executing...");
+            UpdateStatus(Localization.T("Query.Executing"));
 
             Stopwatch sw = Stopwatch.StartNew();
 
@@ -1135,10 +1135,10 @@ namespace mySQLPunk
                     }
                     else
                     {
-                        string status = "Error: " + result["reason"];
+                        string status = Localization.Format("Query.ErrorStatus", result["reason"]);
                         lblStatus.Text = status;
                         _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
-                        MessageBox.Show(result["reason"], "Execute Error",
+                        MessageBox.Show(result["reason"], Localization.T("Query.ExecuteError"),
                             MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
@@ -1147,16 +1147,16 @@ namespace mySQLPunk
             {
                 if (!CanUpdateUi()) return;
                 sw.Stop();
-                UpdateStatus("Cancelled.");
+                UpdateStatus(Localization.T("Query.Cancelled"));
             }
             catch (Exception ex)
             {
                 if (!CanUpdateUi()) return;
                 sw.Stop();
-                string status = "Error: " + ex.Message;
+                string status = Localization.Format("Query.ErrorStatus", ex.Message);
                 UpdateStatus(status);
                 _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
-                MessageBox.Show(ex.Message, "Query Error",
+                MessageBox.Show(ex.Message, Localization.T("Query.QueryError"),
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -1547,14 +1547,14 @@ namespace mySQLPunk
         {
             if (!_isTableDataMode)
             {
-                MessageBox.Show("只有開啟資料表資料時才能儲存變更。", "資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Query.SaveTableDataOnly"), Localization.T("Common.Info"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             DataTable dt = dgvResults.DataSource as DataTable;
             if (dt == null)
             {
-                MessageBox.Show("目前沒有可儲存的資料。", "資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Query.NoDataToSave"), Localization.T("Common.Info"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1564,13 +1564,13 @@ namespace mySQLPunk
             DataTable changes = dt.GetChanges();
             if (changes == null || changes.Rows.Count == 0)
             {
-                MessageBox.Show("沒有偵測到資料變更。", "資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Query.NoChangesDetected"), Localization.T("Common.Info"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             DialogResult answer = MessageBox.Show(
-                "即將儲存目前資料表的新增、修改與刪除資料列，確定要繼續？",
-                "確認儲存",
+                Localization.T("Query.ConfirmSaveChanges"),
+                Localization.T("Query.ConfirmSaveTitle"),
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
             if (answer != DialogResult.Yes) return;
@@ -1579,22 +1579,22 @@ namespace mySQLPunk
             btnDataApply.Enabled = false;
             tsBtnRefresh.Enabled = false;
             btnDataRefresh.Enabled = false;
-            UpdateStatus("Saving changes...");
+            UpdateStatus(Localization.T("Query.SavingChanges"));
 
             try
             {
                 DataSaveResult result = await Task.Run(() => SaveTableChanges(dt));
                 if (!CanUpdateUi()) return;
                 dt.AcceptChanges();
-                UpdateStatus($"Saved. Inserted: {result.Inserted}, Updated: {result.Updated}, Deleted: {result.Deleted}");
+                UpdateStatus(Localization.Format("Query.SavedChangesStatus", result.Inserted, result.Updated, result.Deleted));
                 CalculateTotalRowsAsync();
-                MessageBox.Show("資料已儲存。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Query.DataSaved"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 if (!CanUpdateUi()) return;
-                UpdateStatus("Save failed: " + ex.Message);
-                MessageBox.Show("儲存失敗：" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateStatus(Localization.Format("Query.SaveFailed", ex.Message));
+                MessageBox.Show(Localization.Format("Query.SaveFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -1613,7 +1613,7 @@ namespace mySQLPunk
             string tableName = GetTableNameFromSql();
             if (string.IsNullOrWhiteSpace(_databaseName) || string.IsNullOrWhiteSpace(tableName))
             {
-                throw new Exception("無法判斷要儲存的資料表。");
+                throw new Exception(Localization.T("Query.CannotDetermineSaveTable"));
             }
 
             List<TableColumnInfo> columns = GetTableColumns(tableName);
@@ -1756,7 +1756,7 @@ namespace mySQLPunk
 
             if (fieldSql.Count == 0)
             {
-                throw new Exception("新增資料列沒有可寫入的欄位。");
+                throw new Exception(Localization.T("Query.NoWritableInsertColumns"));
             }
 
             string sql = "INSERT INTO " + GetQualifiedTableName(tableName) +
@@ -1831,7 +1831,7 @@ namespace mySQLPunk
 
             if (clauses.Count == 0)
             {
-                throw new Exception("無法建立安全的 WHERE 條件。");
+                throw new Exception(Localization.T("Query.UnsafeWhereClause"));
             }
 
             return string.Join(" AND ", clauses);
@@ -1842,7 +1842,7 @@ namespace mySQLPunk
             Dictionary<string, string> result = _db.ExecSQL(sql, parameters);
             if (!result.ContainsKey("status") || result["status"] != "OK")
             {
-                string reason = result.ContainsKey("reason") ? result["reason"] : "未知錯誤";
+                string reason = result.ContainsKey("reason") ? result["reason"] : Localization.T("Query.UnknownError");
                 throw new Exception(reason);
             }
         }
