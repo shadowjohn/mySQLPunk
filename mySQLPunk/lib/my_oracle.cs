@@ -481,6 +481,7 @@ namespace mySQLPunk.lib
         private static string MapCopyTypeToOracle(DataRow row)
         {
             string type = row["DataType"].ToString().ToLowerInvariant();
+            if (type.Contains("sdo_geometry") || type == "geometry") return "SDO_GEOMETRY";
             if (type.Contains("bigint") || type.Contains("int") || type.Contains("serial") || type.Contains("number"))
             {
                 if (row.Table.Columns.Contains("NumericPrecision") && row["NumericPrecision"] != DBNull.Value &&

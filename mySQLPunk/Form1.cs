@@ -2689,7 +2689,7 @@ namespace mySQLPunk
         private static string BuildTableDump(IDatabase db, string databaseName, string tableName, bool dataOnly)
         {
             StringBuilder builder = new StringBuilder();
-            string quotedTable = QuoteDumpIdentifier(db, tableName);
+            string insertTarget = BuildDumpInsertTargetName(db, databaseName, tableName);
 
             builder.AppendLine("-- mySQLPunk SQL Dump");
             builder.AppendLine("-- Provider: " + db.ProviderName);
@@ -2723,7 +2723,7 @@ namespace mySQLPunk
                 foreach (DataRow row in dataTable.Rows)
                 {
                     builder.Append("INSERT INTO ");
-                    builder.Append(quotedTable);
+                    builder.Append(insertTarget);
                     builder.Append(" (");
 
                     for (int i = 0; i < dataTable.Columns.Count; i++)
@@ -2737,7 +2737,7 @@ namespace mySQLPunk
                     for (int i = 0; i < dataTable.Columns.Count; i++)
                     {
                         if (i > 0) builder.Append(", ");
-                        builder.Append(ToSqlLiteral(row[i]));
+                        builder.Append(ToSqlLiteral(db, row[i]));
                     }
 
                     builder.AppendLine(");");
@@ -2747,6 +2747,16 @@ namespace mySQLPunk
             }
 
             return builder.ToString();
+        }
+
+        private static string BuildDumpInsertTargetName(IDatabase db, string databaseName, string tableName)
+        {
+            if (IsDumpProvider(db, "oracle"))
+            {
+                return BuildQualifiedObjectName(db, databaseName, tableName);
+            }
+
+            return QuoteDumpIdentifier(db, tableName);
         }
 
         private static string BuildViewDump(IDatabase db, string databaseName, string viewName)
@@ -2774,15 +2784,15 @@ namespace mySQLPunk
 
         private static string QuoteDumpIdentifier(IDatabase db, string name)
         {
-            if (db is my_mysql)
+            if (IsDumpProvider(db, "mysql"))
             {
                 return "`" + name.Replace("`", "``") + "`";
             }
-            if (db is my_mssql)
+            if (IsDumpProvider(db, "mssql") || IsDumpProvider(db, "sqlserver"))
             {
                 return "[" + name.Replace("]", "]]") + "]";
             }
-            if (db is my_postgresql || db is my_sqlite || db is my_oracle)
+            if (IsDumpProvider(db, "postgresql") || IsDumpProvider(db, "sqlite") || IsDumpProvider(db, "oracle"))
             {
                 return "\"" + name.Replace("\"", "\"\"") + "\"";
             }
@@ -2791,27 +2801,32 @@ namespace mySQLPunk
 
         private static string BuildQualifiedObjectName(IDatabase db, string databaseName, string objectName)
         {
-            if (db is my_mysql)
+            if (IsDumpProvider(db, "mysql"))
             {
                 return QuoteDumpIdentifier(db, databaseName) + "." + QuoteDumpIdentifier(db, objectName);
             }
-            if (db is my_mssql)
+            if (IsDumpProvider(db, "mssql") || IsDumpProvider(db, "sqlserver"))
             {
                 return QuoteDumpIdentifier(db, databaseName) + ".[dbo]." + QuoteDumpIdentifier(db, objectName);
             }
-            if (db is my_postgresql)
+            if (IsDumpProvider(db, "postgresql"))
             {
                 return "\"public\"." + QuoteDumpIdentifier(db, objectName);
             }
-            if (db is my_sqlite)
+            if (IsDumpProvider(db, "sqlite"))
             {
                 return QuoteDumpIdentifier(db, objectName);
             }
-            if (db is my_oracle)
+            if (IsDumpProvider(db, "oracle"))
             {
                 return QuoteDumpIdentifier(db, databaseName) + "." + QuoteDumpIdentifier(db, objectName);
             }
             return QuoteDumpIdentifier(db, objectName);
+        }
+
+        private static bool IsDumpProvider(IDatabase db, string providerName)
+        {
+            return db != null && string.Equals(db.ProviderName, providerName, StringComparison.OrdinalIgnoreCase);
         }
 
         private static string BuildFunctionTemplate(IDatabase db, string databaseName)
@@ -2920,7 +2935,7 @@ namespace mySQLPunk
             return target.ConnectionInfo["host"].ToString();
         }
 
-        private static string ToSqlLiteral(object value)
+        private static string ToSqlLiteral(IDatabase db, object value)
         {
             if (value == null || value == DBNull.Value)
             {
@@ -2929,19 +2944,30 @@ namespace mySQLPunk
 
             if (value is byte[] bytes)
             {
-                StringBuilder hex = new StringBuilder(bytes.Length * 2 + 2);
-                hex.Append("0x");
+                StringBuilder hex = new StringBuilder(bytes.Length * 2);
                 for (int i = 0; i < bytes.Length; i++)
                 {
                     hex.Append(bytes[i].ToString("X2"));
                 }
 
-                return hex.ToString();
+                if (IsDumpProvider(db, "oracle"))
+                {
+                    return "HEXTORAW('" + hex + "')";
+                }
+
+                return "0x" + hex;
             }
 
             if (value is bool)
             {
                 return ((bool)value) ? "1" : "0";
+            }
+
+            if (IsDumpProvider(db, "oracle") && value is DateTime oracleDateTime)
+            {
+                return "TO_TIMESTAMP('" +
+                       oracleDateTime.ToString("yyyy-MM-dd HH:mm:ss.fffffff", System.Globalization.CultureInfo.InvariantCulture) +
+                       "', 'YYYY-MM-DD HH24:MI:SS.FF7')";
             }
 
             if (value is string || value is char || value is DateTime || value is Guid)
@@ -2955,6 +2981,11 @@ namespace mySQLPunk
             }
 
             return "'" + value.ToString().Replace("'", "''") + "'";
+        }
+
+        private static string ToSqlLiteral(object value)
+        {
+            return ToSqlLiteral(null, value);
         }
 
         private void Form1_Load(object sender, EventArgs e)
