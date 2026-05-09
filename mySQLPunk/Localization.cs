@@ -177,6 +177,7 @@ namespace mySQLPunk
             Add("ConnectionWizard.Recent", "最近使用過的", "Recent");
             Add("ConnectionWizard.All", "全部", "All");
             Add("ConnectionWizard.Search", "搜尋", "Search");
+            Add("ConnectionWizard.NoRecent", "尚無最近使用過的連線類型", "No recent connection types yet");
             Add("Connection.ExportTitle", "匯出連線設定", "Export Connections");
             Add("Connection.ImportTitle", "匯入連線設定", "Import Connections");
             Add("Connection.JsonFilter", "JSON 檔案 (*.json)|*.json|所有檔案 (*.*)|*.*", "JSON files (*.json)|*.json|All files (*.*)|*.*");

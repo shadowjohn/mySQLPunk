@@ -22,18 +22,28 @@ namespace mySQLPunk
         private readonly Button nextButton;
         private readonly FlowLayoutPanel recentPanel;
         private readonly FlowLayoutPanel allPanel;
+        private readonly List<string> recentConnectionTypes = new List<string>();
         private readonly List<ConnectionTypeOption> options;
         private readonly List<ConnectionTypeCard> cards = new List<ConnectionTypeCard>();
+        private readonly Panel selectionPage;
+        private readonly Panel connectionFormPage;
         private bool listMode;
+        private Form embeddedConnectionForm;
 
         public string SelectedConnectionType { get; private set; }
+        public Func<string, Form> CreateConnectionForm { get; set; }
 
         public ConnectionTypeSelectionForm()
+            : this(null)
+        {
+        }
+
+        public ConnectionTypeSelectionForm(IEnumerable<string> recentTypes)
         {
             Text = Localization.T("ConnectionWizard.Title");
             StartPosition = FormStartPosition.CenterParent;
-            Size = new Size(660, 430);
-            MinimumSize = new Size(600, 380);
+            Size = new Size(860, 620);
+            MinimumSize = new Size(760, 520);
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -48,6 +58,18 @@ namespace mySQLPunk
                 new ConnectionTypeOption(Sqlite, "SQLite", Color.FromArgb(0, 109, 165), Path.Combine(imagePath, "brand_sqlite.png"))
             };
 
+            recentConnectionTypes.AddRange(BuildRecentConnectionTypes(recentTypes));
+
+            selectionPage = new Panel
+            {
+                Dock = DockStyle.Fill
+            };
+            connectionFormPage = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Visible = false
+            };
+
             Label titleLabel = new Label
             {
                 Text = Localization.T("ConnectionWizard.SelectType"),
@@ -58,22 +80,25 @@ namespace mySQLPunk
             gridButton = new Button
             {
                 Text = "▦",
-                Location = new Point(390, 8),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Location = new Point(590, 8),
                 Size = new Size(28, 28),
                 FlatStyle = FlatStyle.Flat
             };
             listButton = new Button
             {
                 Text = "☰",
-                Location = new Point(420, 8),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Location = new Point(620, 8),
                 Size = new Size(28, 28),
                 FlatStyle = FlatStyle.Flat
             };
 
             searchBox = new TextBox
             {
-                Location = new Point(456, 10),
-                Width = 150
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Location = new Point(656, 10),
+                Width = 170
             };
             searchBox.TextChanged += (s, e) => RenderCards();
             searchBox.GotFocus += (s, e) =>
@@ -96,7 +121,7 @@ namespace mySQLPunk
             recentPanel = new FlowLayoutPanel
             {
                 Location = new Point(14, 78),
-                Size = new Size(610, 108),
+                Size = new Size(810, 132),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 WrapContents = true
             };
@@ -111,7 +136,7 @@ namespace mySQLPunk
             allPanel = new FlowLayoutPanel
             {
                 Location = new Point(14, 230),
-                Size = new Size(610, 110),
+                Size = new Size(810, 285),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 AutoScroll = true,
                 WrapContents = true
@@ -145,17 +170,19 @@ namespace mySQLPunk
 
             gridButton.Click += (s, e) => SetListMode(false);
             listButton.Click += (s, e) => SetListMode(true);
-            nextButton.Click += (s, e) => DialogResult = DialogResult.OK;
+            nextButton.Click += (s, e) => ShowSelectedConnectionForm();
 
-            Controls.Add(titleLabel);
-            Controls.Add(gridButton);
-            Controls.Add(listButton);
-            Controls.Add(searchBox);
-            Controls.Add(recentLabel);
-            Controls.Add(recentPanel);
-            Controls.Add(allLabel);
-            Controls.Add(allPanel);
-            Controls.Add(footer);
+            selectionPage.Controls.Add(titleLabel);
+            selectionPage.Controls.Add(gridButton);
+            selectionPage.Controls.Add(listButton);
+            selectionPage.Controls.Add(searchBox);
+            selectionPage.Controls.Add(recentLabel);
+            selectionPage.Controls.Add(recentPanel);
+            selectionPage.Controls.Add(allLabel);
+            selectionPage.Controls.Add(allPanel);
+            selectionPage.Controls.Add(footer);
+            Controls.Add(connectionFormPage);
+            Controls.Add(selectionPage);
 
             AcceptButton = nextButton;
             CancelButton = cancelButton;
@@ -165,6 +192,18 @@ namespace mySQLPunk
             ApplySearchPlaceholder();
             SetListMode(false);
             RenderCards();
+        }
+
+        public static void RememberRecentConnectionType(string kind)
+        {
+            kind = NormalizeKind(kind);
+            if (string.IsNullOrEmpty(kind)) return;
+
+            List<string> values = LoadRecordedRecentConnectionTypes();
+            values.RemoveAll(value => string.Equals(value, kind, StringComparison.OrdinalIgnoreCase));
+            values.Insert(0, kind);
+            if (values.Count > 5) values.RemoveRange(5, values.Count - 5);
+            SaveRecordedRecentConnectionTypes(values);
         }
 
         private void ApplySearchPlaceholder()
@@ -197,10 +236,28 @@ namespace mySQLPunk
                 keyword.Length == 0 ||
                 option.Name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
 
-            ConnectionTypeOption mysql = options.First(option => option.Kind == MySql);
-            if (keyword.Length == 0 || mysql.Name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+            List<ConnectionTypeOption> recentOptions = recentConnectionTypes
+                .Select(kind => options.FirstOrDefault(option => string.Equals(option.Kind, kind, StringComparison.OrdinalIgnoreCase)))
+                .Where(option => option != null)
+                .Where(option => keyword.Length == 0 || option.Name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+
+            if (recentOptions.Count == 0)
             {
-                recentPanel.Controls.Add(CreateCard(mysql));
+                recentPanel.Controls.Add(new Label
+                {
+                    Text = Localization.T("ConnectionWizard.NoRecent"),
+                    AutoSize = true,
+                    ForeColor = ThemeManager.MutedTextColor,
+                    Margin = new Padding(4, 18, 4, 4)
+                });
+            }
+            else
+            {
+                foreach (ConnectionTypeOption option in recentOptions)
+                {
+                    recentPanel.Controls.Add(CreateCard(option));
+                }
             }
 
             foreach (ConnectionTypeOption option in filtered)
@@ -219,8 +276,7 @@ namespace mySQLPunk
             card.DoubleClick += (s, e) =>
             {
                 SelectOption(option.Kind);
-                DialogResult = DialogResult.OK;
-                Close();
+                ShowSelectedConnectionForm();
             };
             cards.Add(card);
             return card;
@@ -235,6 +291,138 @@ namespace mySQLPunk
                 card.Selected = card.Option.Kind == kind;
                 card.Invalidate();
             }
+        }
+
+        private void ShowSelectedConnectionForm()
+        {
+            if (string.IsNullOrWhiteSpace(SelectedConnectionType)) return;
+
+            if (CreateConnectionForm == null)
+            {
+                DialogResult = DialogResult.OK;
+                return;
+            }
+
+            Form form = CreateConnectionForm(SelectedConnectionType);
+            if (form == null) return;
+
+            embeddedConnectionForm = form;
+            Text = form.Text;
+            MinimumSize = new Size(Math.Max(MinimumSize.Width, form.Width + 40), Math.Max(MinimumSize.Height, form.Height + 70));
+            Size = new Size(Math.Max(Width, form.Width + 40), Math.Max(Height, form.Height + 70));
+
+            selectionPage.Visible = false;
+            connectionFormPage.Controls.Clear();
+            connectionFormPage.Visible = true;
+            connectionFormPage.BringToFront();
+
+            form.TopLevel = false;
+            form.FormBorderStyle = FormBorderStyle.None;
+            form.Dock = DockStyle.Fill;
+            form.StartPosition = FormStartPosition.Manual;
+            form.FormClosed += EmbeddedConnectionForm_FormClosed;
+            connectionFormPage.Controls.Add(form);
+            form.Show();
+            ActiveControl = form;
+        }
+
+        private void EmbeddedConnectionForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            embeddedConnectionForm = null;
+            Close();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            if (embeddedConnectionForm != null && !embeddedConnectionForm.IsDisposed)
+            {
+                embeddedConnectionForm.FormClosed -= EmbeddedConnectionForm_FormClosed;
+                embeddedConnectionForm.Close();
+            }
+            base.OnFormClosed(e);
+        }
+
+        private List<string> BuildRecentConnectionTypes(IEnumerable<string> recentTypes)
+        {
+            List<string> values = new List<string>();
+            AddRecentTypes(values, LoadRecordedRecentConnectionTypes());
+            AddRecentTypes(values, recentTypes);
+            return values;
+        }
+
+        private static void AddRecentTypes(List<string> target, IEnumerable<string> source)
+        {
+            if (source == null) return;
+
+            foreach (string raw in source)
+            {
+                if (target.Count >= 5) return;
+                string kind = NormalizeKind(raw);
+                if (string.IsNullOrEmpty(kind)) continue;
+                if (target.Any(value => string.Equals(value, kind, StringComparison.OrdinalIgnoreCase))) continue;
+                target.Add(kind);
+            }
+        }
+
+        private static string NormalizeKind(string kind)
+        {
+            if (string.IsNullOrWhiteSpace(kind)) return string.Empty;
+
+            switch (kind.Trim().ToLowerInvariant())
+            {
+                case "mysql":
+                    return MySql;
+                case "postgresql":
+                case "postgres":
+                    return PostgreSql;
+                case "sqlserver":
+                case "mssql":
+                case "sql server":
+                    return SqlServer;
+                case "oracle":
+                    return Oracle;
+                case "sqlite":
+                    return Sqlite;
+                default:
+                    return string.Empty;
+            }
+        }
+
+        private static List<string> LoadRecordedRecentConnectionTypes()
+        {
+            try
+            {
+                string path = GetRecentConnectionTypesPath();
+                if (!File.Exists(path)) return new List<string>();
+                return File.ReadAllLines(path)
+                    .Select(NormalizeKind)
+                    .Where(value => !string.IsNullOrEmpty(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(5)
+                    .ToList();
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
+        private static void SaveRecordedRecentConnectionTypes(List<string> values)
+        {
+            try
+            {
+                string path = GetRecentConnectionTypesPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllLines(path, values.Select(NormalizeKind).Where(value => !string.IsNullOrEmpty(value)).Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToArray());
+            }
+            catch
+            {
+            }
+        }
+
+        private static string GetRecentConnectionTypesPath()
+        {
+            return Path.Combine(Application.UserAppDataPath, "recent-connection-types.txt");
         }
 
         private class ConnectionTypeOption

@@ -1488,7 +1488,7 @@ namespace mySQLPunk
             bi_btn.Click += bi_btn_Click;
             connection_btn.Click -= connection_btn_Click;
             connection_btn.Click += connection_btn_Click;
-            ConfigureConnectionToolbarDropdown();
+            ConfigureConnectionToolbarButton();
 
             LoadIcon(connection_btn, Path.Combine(imgPath, "connection.png"), global::mySQLPunk.Properties.Resources.database);
             LoadIcon(query_btn, Path.Combine(imgPath, "new_query.png"), global::mySQLPunk.Properties.Resources.database);
@@ -1535,36 +1535,9 @@ namespace mySQLPunk
             }
         }
 
-        private void ConfigureConnectionToolbarDropdown()
+        private void ConfigureConnectionToolbarButton()
         {
-            connection_btn.ShowDropDownArrow = true;
-            mysqlStripMenuItem.Text = "MySQL";
-            postgreSQLToolStripMenuItem.Text = "PostgreSQL";
-            oracleToolStripMenuItem.Text = "Oracle";
-            sQLiteToolStripMenuItem.Text = "SQLite";
-            sQLServerToolStripMenuItem.Text = "SQL Server";
-
-            mysqlStripMenuItem.Click -= mysqlStripMenuItem_Click;
-            postgreSQLToolStripMenuItem.Click -= postgreSQLToolStripMenuItem_Click;
-            oracleToolStripMenuItem.Click -= oracleToolStripMenuItem_Click;
-            sQLiteToolStripMenuItem.Click -= sQLiteToolStripMenuItem_Click;
-            sQLServerToolStripMenuItem.Click -= sQLServerToolStripMenuItem_Click;
-
-            mysqlStripMenuItem.Click += mysqlStripMenuItem_Click;
-            postgreSQLToolStripMenuItem.Click += postgreSQLToolStripMenuItem_Click;
-            oracleToolStripMenuItem.Click += oracleToolStripMenuItem_Click;
-            sQLiteToolStripMenuItem.Click += sQLiteToolStripMenuItem_Click;
-            sQLServerToolStripMenuItem.Click += sQLServerToolStripMenuItem_Click;
-
-            connection_btn.DropDownItems.Clear();
-            connection_btn.DropDownItems.AddRange(new ToolStripItem[]
-            {
-                mysqlStripMenuItem,
-                postgreSQLToolStripMenuItem,
-                oracleToolStripMenuItem,
-                sQLiteToolStripMenuItem,
-                sQLServerToolStripMenuItem
-            });
+            connection_btn.ToolTipText = Localization.T("Menu.NewConnection");
         }
 
         private static void ConfigureToolbarItem(ToolStripItem item, string text)
@@ -6329,12 +6302,10 @@ namespace mySQLPunk
 
         private void ShowConnectionTypeSelection()
         {
-            using (ConnectionTypeSelectionForm form = new ConnectionTypeSelectionForm())
+            using (ConnectionTypeSelectionForm form = new ConnectionTypeSelectionForm(GetRecentConnectionTypesForWizard()))
             {
-                if (form.ShowDialog(this) == DialogResult.OK)
-                {
-                    OpenNewConnectionForm(form.SelectedConnectionType);
-                }
+                form.CreateConnectionForm = CreateNewConnectionForm;
+                form.ShowDialog(this);
             }
         }
 
@@ -6455,6 +6426,7 @@ namespace mySQLPunk
         public void add_connection(Dictionary<string, object> conn)
         {
             myN.connections.Add(conn);
+            RememberRecentConnectionType(conn);
             myN.setSettingINI();
             drawLists();
         }
@@ -6467,8 +6439,25 @@ namespace mySQLPunk
         public void update_connection(int index, Dictionary<string, object> conn)
         {
             myN.connections[index] = conn;
+            RememberRecentConnectionType(conn);
             myN.setSettingINI();
             drawLists();
+        }
+
+        private IEnumerable<string> GetRecentConnectionTypesForWizard()
+        {
+            return myN.connections
+                .Where(conn => conn != null && conn.ContainsKey("db_kind") && conn["db_kind"] != null)
+                .Select(conn => conn["db_kind"].ToString())
+                .Reverse()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(5);
+        }
+
+        private static void RememberRecentConnectionType(Dictionary<string, object> conn)
+        {
+            if (conn == null || !conn.ContainsKey("db_kind") || conn["db_kind"] == null) return;
+            ConnectionTypeSelectionForm.RememberRecentConnectionType(conn["db_kind"].ToString());
         }
         // ── 頁籤進階功能實作 ──
 

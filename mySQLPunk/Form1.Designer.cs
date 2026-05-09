@@ -55,7 +55,7 @@
             this.splitContainer5 = new System.Windows.Forms.SplitContainer();
             this.table_top = new System.Windows.Forms.DataGridView();
             this.statusStrip1 = new System.Windows.Forms.StatusStrip();
-            this.connection_btn = new System.Windows.Forms.ToolStripDropDownButton();
+            this.connection_btn = new System.Windows.Forms.ToolStripButton();
             this.mysqlStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.postgreSQLToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.oracleToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -388,12 +388,6 @@
             // 
             this.connection_btn.AutoSize = false;
             this.connection_btn.AutoToolTip = false;
-            this.connection_btn.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.mysqlStripMenuItem,
-            this.postgreSQLToolStripMenuItem,
-            this.oracleToolStripMenuItem,
-            this.sQLiteToolStripMenuItem,
-            this.sQLServerToolStripMenuItem});
             this.connection_btn.Image = global::mySQLPunk.Properties.Resources.database;
             this.connection_btn.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
             this.connection_btn.ImageTransparentColor = System.Drawing.Color.Magenta;
@@ -683,7 +677,7 @@
         private System.Windows.Forms.ToolStripMenuItem exitToolStripMenuItem;
         private System.Windows.Forms.SplitContainer splitContainer1;
         private System.Windows.Forms.ToolStrip tool_Connection;
-        private System.Windows.Forms.ToolStripDropDownButton connection_btn;
+        private System.Windows.Forms.ToolStripButton connection_btn;
         private System.Windows.Forms.ToolStripMenuItem postgreSQLToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem oracleToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem sQLiteToolStripMenuItem;
