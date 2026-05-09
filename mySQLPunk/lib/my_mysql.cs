@@ -279,6 +279,7 @@ namespace mySQLPunk.lib
                     CHARACTER_MAXIMUM_LENGTH AS MaxLength,
                     NUMERIC_PRECISION AS NumericPrecision,
                     NUMERIC_SCALE AS NumericScale,
+                    COLUMN_DEFAULT AS DefaultValue,
                     COLUMN_COMMENT AS Comment,
                     ORDINAL_POSITION AS OrdinalPosition
                 FROM information_schema.columns
@@ -303,6 +304,14 @@ namespace mySQLPunk.lib
 
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
         {
+            foreach (string sql in BuildMySqlCopyCreateTableStatements(databaseName, tableName, sourceColumns, sourceProvider))
+            {
+                ExecOrThrow(sql);
+            }
+        }
+
+        private static List<string> BuildMySqlCopyCreateTableStatements(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
+        {
             string safeDB = databaseName.Replace("`", "``");
             string safeTable = tableName.Replace("`", "``");
             List<string> defs = new List<string>();
@@ -310,12 +319,13 @@ namespace mySQLPunk.lib
             {
                 string name = row["Name"].ToString().Replace("`", "``");
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
+                string defaultValue = GetMySqlCopyDefaultValue(row, sourceProvider);
                 string comment = "";
                 if (row.Table.Columns.Contains("Comment") && row["Comment"] != DBNull.Value && row["Comment"].ToString().Length > 0)
                     comment = " COMMENT '" + row["Comment"].ToString().Replace("'", "''") + "'";
-                defs.Add("`" + name + "` " + MapCopyTypeToMySql(row) + " " + nullable + comment);
+                defs.Add("`" + name + "` " + MapCopyTypeToMySql(row) + (string.IsNullOrWhiteSpace(defaultValue) ? "" : " DEFAULT " + defaultValue) + " " + nullable + comment);
             }
-            ExecOrThrow("CREATE TABLE `" + safeDB + "`.`" + safeTable + "` (" + string.Join(", ", defs.ToArray()) + ");");
+            return new List<string> { "CREATE TABLE `" + safeDB + "`.`" + safeTable + "` (" + string.Join(", ", defs.ToArray()) + ");" };
         }
 
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider)
@@ -414,13 +424,98 @@ namespace mySQLPunk.lib
             string type = row["DataType"].ToString().ToLower();
             if (type.Contains("bigint")) return "BIGINT";
             if (type.Contains("int") || type.Contains("serial")) return "INT";
-            if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("money")) return "DECIMAL(38,10)";
+            if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("money"))
+            {
+                int precision = GetOptionalInt(row, "NumericPrecision");
+                int scale = GetOptionalInt(row, "NumericScale");
+                if (precision > 0)
+                {
+                    if (scale < 0) scale = 0;
+                    return "DECIMAL(" + precision + "," + scale + ")";
+                }
+                return "DECIMAL(38,10)";
+            }
             if (type.Contains("double") || type.Contains("float") || type.Contains("real")) return "DOUBLE";
             if (type.Contains("bool") || type == "bit") return "TINYINT(1)";
             if (type.Contains("date") || type.Contains("time")) return "DATETIME";
             if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea") || type.Contains("image")) return "LONGBLOB";
             if (type.Contains("text") || type.Contains("json") || type.Contains("xml")) return "LONGTEXT";
+            if (type.Contains("char") || type.Contains("string"))
+            {
+                int length = GetOptionalInt(row, "MaxLength");
+                if (length > 0 && length <= 65535) return "VARCHAR(" + length + ")";
+            }
             return "VARCHAR(255)";
+        }
+
+        private static string GetMySqlCopyDefaultValue(DataRow row, string sourceProvider)
+        {
+            if (!string.Equals(sourceProvider, "mysql", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            string defaultValue = GetOptionalString(row, "DefaultValue").Trim();
+            if (string.IsNullOrWhiteSpace(defaultValue) || string.Equals(defaultValue, "NULL", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            if (IsMySqlDefaultExpression(defaultValue) || IsMySqlNumericType(row) || IsQuotedSqlLiteral(defaultValue))
+            {
+                return defaultValue;
+            }
+
+            return "'" + defaultValue.Replace("'", "''") + "'";
+        }
+
+        private static bool IsMySqlDefaultExpression(string defaultValue)
+        {
+            string normalized = defaultValue.Trim().ToUpperInvariant();
+            return normalized.StartsWith("(") ||
+                   normalized.StartsWith("CURRENT_TIMESTAMP") ||
+                   normalized.StartsWith("CURRENT_DATE") ||
+                   normalized.StartsWith("CURRENT_TIME") ||
+                   normalized.StartsWith("LOCALTIME") ||
+                   normalized.StartsWith("LOCALTIMESTAMP") ||
+                   normalized.StartsWith("UUID()") ||
+                   normalized.StartsWith("NOW()");
+        }
+
+        private static bool IsMySqlNumericType(DataRow row)
+        {
+            string type = GetOptionalString(row, "DataType").ToLowerInvariant();
+            return type.Contains("int") ||
+                   type.Contains("decimal") ||
+                   type.Contains("numeric") ||
+                   type.Contains("money") ||
+                   type.Contains("double") ||
+                   type.Contains("float") ||
+                   type.Contains("real") ||
+                   type.Contains("bool") ||
+                   type == "bit";
+        }
+
+        private static bool IsQuotedSqlLiteral(string value)
+        {
+            string trimmed = value.Trim();
+            return (trimmed.StartsWith("'") && trimmed.EndsWith("'")) ||
+                   (trimmed.StartsWith("\"") && trimmed.EndsWith("\"")) ||
+                   trimmed.StartsWith("b'", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.StartsWith("x'", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetOptionalString(DataRow row, string columnName)
+        {
+            if (row == null || row.Table == null || !row.Table.Columns.Contains(columnName) || row[columnName] == DBNull.Value) return "";
+            return row[columnName].ToString();
+        }
+
+        private static int GetOptionalInt(DataRow row, string columnName)
+        {
+            string value = GetOptionalString(row, columnName).Trim();
+            int parsed;
+            return int.TryParse(value, out parsed) ? parsed : -1;
         }
 
         public void Dispose()
