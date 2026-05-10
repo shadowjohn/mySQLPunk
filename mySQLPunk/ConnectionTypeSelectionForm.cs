@@ -130,13 +130,13 @@ namespace mySQLPunk
             {
                 Text = Localization.T("ConnectionWizard.All"),
                 AutoSize = true,
-                Location = new Point(14, 204)
+                Location = new Point(14, 222)
             };
 
             allPanel = new FlowLayoutPanel
             {
-                Location = new Point(14, 230),
-                Size = new Size(810, 285),
+                Location = new Point(14, 248),
+                Size = new Size(810, 267),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 AutoScroll = true,
                 WrapContents = true
