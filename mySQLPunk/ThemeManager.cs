@@ -30,7 +30,9 @@ namespace mySQLPunk
         public static Color BorderColor => IsDark ? Color.FromArgb(70, 78, 86) : Color.FromArgb(224, 224, 224);
         public static Color GridColor => IsDark ? Color.FromArgb(58, 65, 72) : Color.FromArgb(240, 240, 240);
         public static Color SelectionColor => IsDark ? Color.FromArgb(35, 95, 135) : Color.FromArgb(220, 235, 255);
+        public static Color SelectionTextColor => IsDark ? Color.White : Color.FromArgb(26, 55, 82);
         public static Color AccentColor => IsDark ? Color.FromArgb(80, 170, 220) : Color.FromArgb(0, 120, 212);
+        public static Color HoverColor => IsDark ? Color.FromArgb(48, 73, 88) : Color.FromArgb(232, 242, 255);
         public static Color ButtonBackColor => IsDark ? Color.FromArgb(54, 61, 68) : Color.FromArgb(245, 245, 245);
         public static Color TextBoxBackColor => IsDark ? Color.FromArgb(25, 29, 33) : Color.White;
 
@@ -79,6 +81,7 @@ namespace mySQLPunk
                 form.Opacity = 1.0f;
                 form.BackColor = WindowBackColor;
                 form.ForeColor = TextColor;
+                form.Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Regular);
             }
 
             ApplyControl(root);
@@ -121,6 +124,7 @@ namespace mySQLPunk
                 treeView.BorderStyle = BorderStyle.None;
                 treeView.FullRowSelect = true;
                 treeView.ItemHeight = 24;
+                treeView.HideSelection = false;
                 return;
             }
 
@@ -137,6 +141,7 @@ namespace mySQLPunk
                 textBox.BackColor = TextBoxBackColor;
                 textBox.ForeColor = TextColor;
                 textBox.BorderStyle = BorderStyle.FixedSingle;
+                textBox.Margin = new Padding(3, 4, 3, 4);
                 return;
             }
 
@@ -145,6 +150,8 @@ namespace mySQLPunk
             {
                 comboBox.BackColor = TextBoxBackColor;
                 comboBox.ForeColor = TextColor;
+                comboBox.FlatStyle = FlatStyle.Flat;
+                comboBox.Margin = new Padding(3, 4, 3, 4);
                 return;
             }
 
@@ -156,6 +163,11 @@ namespace mySQLPunk
                 button.ForeColor = TextColor;
                 button.FlatStyle = FlatStyle.Flat;
                 button.FlatAppearance.BorderColor = BorderColor;
+                button.FlatAppearance.MouseOverBackColor = HoverColor;
+                button.FlatAppearance.MouseDownBackColor = SelectionColor;
+                button.Padding = new Padding(8, 2, 8, 2);
+                button.MinimumSize = new Size(Math.Max(button.MinimumSize.Width, 0), Math.Max(button.MinimumSize.Height, 28));
+                button.Cursor = Cursors.Hand;
                 return;
             }
 
@@ -164,6 +176,7 @@ namespace mySQLPunk
             {
                 tabControl.BackColor = WindowBackColor;
                 tabControl.ForeColor = TextColor;
+                tabControl.Padding = new Point(Math.Max(tabControl.Padding.X, 12), Math.Max(tabControl.Padding.Y, 5));
                 return;
             }
 
@@ -184,6 +197,63 @@ namespace mySQLPunk
                 return;
             }
 
+            SplitContainer splitContainer = control as SplitContainer;
+            if (splitContainer != null)
+            {
+                splitContainer.BackColor = BorderColor;
+                splitContainer.Panel1.BackColor = WindowBackColor;
+                splitContainer.Panel2.BackColor = WindowBackColor;
+                return;
+            }
+
+            CheckedListBox checkedListBox = control as CheckedListBox;
+            if (checkedListBox != null)
+            {
+                checkedListBox.BackColor = ElevatedColor;
+                checkedListBox.ForeColor = TextColor;
+                checkedListBox.BorderStyle = BorderStyle.None;
+                checkedListBox.IntegralHeight = false;
+                checkedListBox.ItemHeight = Math.Max(checkedListBox.ItemHeight, 24);
+                return;
+            }
+
+            ListBox listBox = control as ListBox;
+            if (listBox != null)
+            {
+                listBox.BackColor = ElevatedColor;
+                listBox.ForeColor = TextColor;
+                listBox.BorderStyle = BorderStyle.None;
+                listBox.IntegralHeight = false;
+                listBox.ItemHeight = Math.Max(listBox.ItemHeight, 24);
+                return;
+            }
+
+            GroupBox groupBox = control as GroupBox;
+            if (groupBox != null)
+            {
+                groupBox.BackColor = WindowBackColor;
+                groupBox.ForeColor = TextColor;
+                return;
+            }
+
+            CheckBox checkBox = control as CheckBox;
+            if (checkBox != null)
+            {
+                checkBox.BackColor = Color.Transparent;
+                checkBox.ForeColor = TextColor;
+                checkBox.FlatStyle = FlatStyle.Standard;
+                return;
+            }
+
+            RadioButton radioButton = control as RadioButton;
+            if (radioButton != null)
+            {
+                radioButton.BackColor = Color.Transparent;
+                radioButton.ForeColor = TextColor;
+                radioButton.FlatStyle = FlatStyle.Standard;
+                return;
+            }
+
             Label label = control as Label;
             if (label != null)
             {
@@ -200,6 +270,7 @@ namespace mySQLPunk
             strip.ForeColor = TextColor;
             strip.Renderer = new ThemedToolStripRenderer();
             strip.GripStyle = ToolStripGripStyle.Hidden;
+            strip.Padding = new Padding(4, 2, 4, 2);
 
             foreach (ToolStripItem item in strip.Items)
             {
@@ -211,6 +282,8 @@ namespace mySQLPunk
         {
             item.BackColor = SurfaceColor;
             item.ForeColor = TextColor;
+            item.Margin = new Padding(1, 1, 1, 1);
+            item.Padding = new Padding(4, 2, 4, 2);
 
             ToolStripTextBox textBox = item as ToolStripTextBox;
             if (textBox != null)
@@ -238,26 +311,36 @@ namespace mySQLPunk
             dgv.GridColor = GridColor;
             dgv.BorderStyle = BorderStyle.None;
             dgv.EnableHeadersVisualStyles = false;
+            dgv.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+            dgv.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+            dgv.RowHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+            dgv.RowTemplate.Height = Math.Max(dgv.RowTemplate.Height, 28);
+            dgv.ColumnHeadersHeight = Math.Max(dgv.ColumnHeadersHeight, 30);
+            dgv.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
 
             dgv.DefaultCellStyle.BackColor = ElevatedColor;
             dgv.DefaultCellStyle.ForeColor = TextColor;
             dgv.DefaultCellStyle.SelectionBackColor = SelectionColor;
-            dgv.DefaultCellStyle.SelectionForeColor = Color.White;
+            dgv.DefaultCellStyle.SelectionForeColor = SelectionTextColor;
+            dgv.DefaultCellStyle.Padding = new Padding(6, 2, 6, 2);
 
             dgv.AlternatingRowsDefaultCellStyle.BackColor = IsDark ? Color.FromArgb(34, 39, 44) : Color.FromArgb(250, 250, 250);
             dgv.AlternatingRowsDefaultCellStyle.ForeColor = TextColor;
             dgv.AlternatingRowsDefaultCellStyle.SelectionBackColor = SelectionColor;
-            dgv.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+            dgv.AlternatingRowsDefaultCellStyle.SelectionForeColor = SelectionTextColor;
+            dgv.AlternatingRowsDefaultCellStyle.Padding = new Padding(6, 2, 6, 2);
 
             dgv.ColumnHeadersDefaultCellStyle.BackColor = SurfaceColor;
             dgv.ColumnHeadersDefaultCellStyle.ForeColor = TextColor;
             dgv.ColumnHeadersDefaultCellStyle.SelectionBackColor = SurfaceColor;
             dgv.ColumnHeadersDefaultCellStyle.SelectionForeColor = TextColor;
+            dgv.ColumnHeadersDefaultCellStyle.Padding = new Padding(6, 4, 6, 4);
+            dgv.ColumnHeadersDefaultCellStyle.Font = new Font(dgv.Font, FontStyle.Bold);
 
             dgv.RowHeadersDefaultCellStyle.BackColor = SurfaceColor;
             dgv.RowHeadersDefaultCellStyle.ForeColor = TextColor;
             dgv.RowHeadersDefaultCellStyle.SelectionBackColor = SelectionColor;
-            dgv.RowHeadersDefaultCellStyle.SelectionForeColor = Color.White;
+            dgv.RowHeadersDefaultCellStyle.SelectionForeColor = SelectionTextColor;
         }
 
         private static string GetThemeFilePath()
@@ -273,9 +356,9 @@ namespace mySQLPunk
             public override Color ToolStripBorder => BorderColor;
             public override Color MenuBorder => BorderColor;
             public override Color MenuItemBorder => AccentColor;
-            public override Color MenuItemSelected => SelectionColor;
-            public override Color MenuItemSelectedGradientBegin => SelectionColor;
-            public override Color MenuItemSelectedGradientEnd => SelectionColor;
+            public override Color MenuItemSelected => HoverColor;
+            public override Color MenuItemSelectedGradientBegin => HoverColor;
+            public override Color MenuItemSelectedGradientEnd => HoverColor;
             public override Color MenuItemPressedGradientBegin => SelectionColor;
             public override Color MenuItemPressedGradientMiddle => SelectionColor;
             public override Color MenuItemPressedGradientEnd => SelectionColor;
@@ -284,8 +367,8 @@ namespace mySQLPunk
             public override Color ImageMarginGradientEnd => SurfaceColor;
             public override Color SeparatorDark => BorderColor;
             public override Color SeparatorLight => BorderColor;
-            public override Color ButtonSelectedGradientBegin => SelectionColor;
-            public override Color ButtonSelectedGradientEnd => SelectionColor;
+            public override Color ButtonSelectedGradientBegin => HoverColor;
+            public override Color ButtonSelectedGradientEnd => HoverColor;
             public override Color ButtonPressedGradientBegin => SelectionColor;
             public override Color ButtonPressedGradientEnd => SelectionColor;
             public override Color ButtonCheckedGradientBegin => SelectionColor;
