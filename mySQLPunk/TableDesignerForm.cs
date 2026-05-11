@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
-using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -34,8 +33,7 @@ namespace mySQLPunk
         private ToolStripButton btnFloat;
         private ToolStripButton btnDock;
         private ToolStripButton btnFillAutoComments;
-        private AnimatedRunnerProgressBar autoCommentRunnerProgress;
-        private ToolStripControlHost autoCommentRunnerHost;
+        private RunnerProgressOverlay autoCommentProgressOverlay;
         private bool _isFillingAutoComments;
 
         private TabControl tcMain;
@@ -126,23 +124,6 @@ namespace mySQLPunk
             
             ToolStripSeparator sep2 = new ToolStripSeparator();
             btnFillAutoComments = new ToolStripButton(Localization.T("Designer.FillAutoComments"), GetIcon(iconPath + "table.png"), BtnFillAutoComments_Click);
-            autoCommentRunnerProgress = new AnimatedRunnerProgressBar()
-            {
-                Width = 360,
-                Height = 34,
-                Visible = false,
-                BackColor = Color.Transparent,
-                ForeColor = Color.FromArgb(45, 45, 45)
-            };
-            autoCommentRunnerProgress.LoadRunnerImage(Path.Combine(Application.StartupPath, "image", "progress_runner.gif"));
-            autoCommentRunnerHost = new ToolStripControlHost(autoCommentRunnerProgress)
-            {
-                AutoSize = false,
-                Width = 360,
-                Height = 34,
-                Visible = false,
-                Margin = new Padding(2, 0, 6, 0)
-            };
             ToolStripSeparator sepAutoComment = new ToolStripSeparator();
             ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), GetIcon(iconPath + "up.png"));
             ToolStripButton btnMoveDown = new ToolStripButton(Localization.T("Designer.MoveDown"), GetIcon(iconPath + "down.png"));
@@ -151,7 +132,7 @@ namespace mySQLPunk
             btnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => _mainHost?.DockDockableForm(this)) { Visible = false, Alignment = ToolStripItemAlignment.Right };
             
             tsTop.Items.AddRange(new ToolStripItem[] { 
-                btnSave, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnFillAutoComments, autoCommentRunnerHost, sepAutoComment, btnMoveUp, btnMoveDown, btnFloat, btnDock
+                btnSave, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnFillAutoComments, sepAutoComment, btnMoveUp, btnMoveDown, btnFloat, btnDock
             });
 
             tcMain = new TabControl() { Dock = DockStyle.Fill, Padding = new Point(12, 5) };
@@ -736,60 +717,65 @@ namespace mySQLPunk
             Cursor.Current = Cursors.WaitCursor;
             _isFillingAutoComments = true;
             if (btnFillAutoComments != null) btnFillAutoComments.Enabled = false;
-            ShowAutoCommentProgress(Localization.T("Designer.AutoCommentsLoading"), 0, 1);
-            try
+            using (autoCommentProgressOverlay = RunnerProgressOverlay.Show(GetAutoCommentProgressOwner(), Localization.T("Designer.FillAutoComments"), Localization.T("Designer.AutoCommentsLoading")))
             {
-                Dictionary<string, string> comments = await GetAutoColumnCommentTask();
-                if (comments == null || comments.Count == 0)
+                ShowAutoCommentProgress(Localization.T("Designer.AutoCommentsLoading"), 0, 1);
+                try
                 {
+                    Dictionary<string, string> comments = await GetAutoColumnCommentTask();
+                    if (comments == null || comments.Count == 0)
+                    {
+                        if (showMessage)
+                        {
+                            MessageBox.Show(Localization.T("Designer.AutoCommentsUnavailable"), Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                        return 0;
+                    }
+
+                    int applied = 0;
+                    int processed = 0;
+                    int total = CountFillableColumnRows(currentDt);
+                    foreach (DataRow row in currentDt.Rows)
+                    {
+                        if (row.RowState == DataRowState.Deleted) continue;
+                        string columnName = GetRowString(row, "Name").Trim();
+                        if (string.IsNullOrWhiteSpace(columnName)) continue;
+                        processed++;
+                        ShowAutoCommentProgress(Localization.Format("Designer.AutoCommentsProgress", processed, total, columnName), processed, total);
+                        await Task.Delay(20);
+                        if (FillMissingAutoColumnComment(row, comments)) applied++;
+                    }
+
+                    if (applied > 0)
+                    {
+                        MarkAsModified();
+                        if (tcMain != null)
+                        {
+                            tcMain.SelectedTab = tpSqlPreview;
+                            GeneratePreviewSql();
+                        }
+                    }
+
+                    ShowAutoCommentProgress(Localization.Format("Designer.AutoCommentsDone", applied, total), total, total);
+
                     if (showMessage)
                     {
-                        MessageBox.Show(Localization.T("Designer.AutoCommentsUnavailable"), Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        string message = applied > 0
+                            ? Localization.Format("Designer.AutoCommentsApplied", applied)
+                            : Localization.T("Designer.AutoCommentsNoMatches");
+                        MessageBox.Show(message, Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
-                    return 0;
-                }
 
-                int applied = 0;
-                int processed = 0;
-                int total = CountFillableColumnRows(currentDt);
-                foreach (DataRow row in currentDt.Rows)
+                    return applied;
+                }
+                finally
                 {
-                    if (row.RowState == DataRowState.Deleted) continue;
-                    string columnName = GetRowString(row, "Name").Trim();
-                    if (string.IsNullOrWhiteSpace(columnName)) continue;
-                    processed++;
-                    ShowAutoCommentProgress(Localization.Format("Designer.AutoCommentsProgress", processed, total, columnName), processed, total);
-                    await Task.Delay(20);
-                    if (FillMissingAutoColumnComment(row, comments)) applied++;
+                    await Task.Delay(250);
+                    autoCommentProgressOverlay = null;
+                    if (btnFillAutoComments != null) btnFillAutoComments.Enabled = true;
+                    _isFillingAutoComments = false;
+                    Cursor.Current = previousCursor;
                 }
-
-                if (applied > 0)
-                {
-                    MarkAsModified();
-                    if (tcMain != null)
-                    {
-                        tcMain.SelectedTab = tpSqlPreview;
-                        GeneratePreviewSql();
-                    }
-                }
-
-                ShowAutoCommentProgress(Localization.Format("Designer.AutoCommentsDone", applied, total), total, total);
-
-                if (showMessage)
-                {
-                    string message = applied > 0
-                        ? Localization.Format("Designer.AutoCommentsApplied", applied)
-                        : Localization.T("Designer.AutoCommentsNoMatches");
-                    MessageBox.Show(message, Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-
-                return applied;
-            }
-            finally
-            {
-                if (btnFillAutoComments != null) btnFillAutoComments.Enabled = true;
-                _isFillingAutoComments = false;
-                Cursor.Current = previousCursor;
             }
         }
 
@@ -807,13 +793,13 @@ namespace mySQLPunk
 
         private void ShowAutoCommentProgress(string message, int current, int total)
         {
-            if (autoCommentRunnerProgress != null)
-            {
-                if (autoCommentRunnerHost != null) autoCommentRunnerHost.Visible = true;
-                autoCommentRunnerProgress.Visible = true;
-                autoCommentRunnerProgress.SetProgress(current, total, message);
-            }
-            Application.DoEvents();
+            if (autoCommentProgressOverlay != null) autoCommentProgressOverlay.SetProgress(current, total, message);
+        }
+
+        private Form GetAutoCommentProgressOwner()
+        {
+            if (_isDocked && _mainHost != null && !_mainHost.IsDisposed) return _mainHost;
+            return this;
         }
 
         private bool FillMissingAutoColumnComment(DataRow row, Dictionary<string, string> comments)

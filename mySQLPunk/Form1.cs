@@ -6050,15 +6050,11 @@ namespace mySQLPunk
                 return;
             }
 
-            AnimatedRunnerProgressBar runnerProgress;
-            using (Form progressForm = CreateDatabaseAutoCommentProgressForm(out runnerProgress))
+            using (RunnerProgressOverlay progressOverlay = RunnerProgressOverlay.Show(this, Localization.T("Tool.FillAutoComments"), Localization.T("Designer.AutoCommentsLoading")))
             {
-                progressForm.Show(this);
-                progressForm.Refresh();
-
                 try
                 {
-                    runnerProgress.SetProgress(0, 1, Localization.T("Designer.AutoCommentsLoading"));
+                    progressOverlay.SetProgress(0, 1, Localization.T("Designer.AutoCommentsLoading"));
                     Dictionary<string, string> comments = await TableDesignerForm.GetAutoColumnCommentTask();
                     if (comments == null || comments.Count == 0)
                     {
@@ -6066,11 +6062,11 @@ namespace mySQLPunk
                         return;
                     }
 
-                    runnerProgress.SetProgress(0, 1, Localization.T("Database.AutoCommentsScanning"));
+                    progressOverlay.SetProgress(0, 1, Localization.T("Database.AutoCommentsScanning"));
                     List<AutoCommentColumnUpdate> updates = await Task.Run(() => BuildDatabaseAutoCommentUpdates(target.Database, target.DatabaseName, comments));
                     if (updates.Count == 0)
                     {
-                        runnerProgress.SetProgress(1, 1, Localization.T("Designer.AutoCommentsNoMatches"));
+                        progressOverlay.SetProgress(1, 1, Localization.T("Designer.AutoCommentsNoMatches"));
                         MessageBox.Show(Localization.T("Designer.AutoCommentsNoMatches"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }
@@ -6079,20 +6075,19 @@ namespace mySQLPunk
                     for (int i = 0; i < updates.Count; i++)
                     {
                         AutoCommentColumnUpdate update = updates[i];
-                        runnerProgress.SetProgress(i + 1, updates.Count, Localization.Format("Database.AutoCommentsProgress", i + 1, updates.Count, update.TableName, update.ColumnName));
-                        progressForm.Refresh();
+                        progressOverlay.SetProgress(i + 1, updates.Count, Localization.Format("Database.AutoCommentsProgress", i + 1, updates.Count, update.TableName, update.ColumnName));
                         await Task.Run(() => ExecuteAutoCommentUpdate(target.Database, update));
                         applied++;
                         await Task.Delay(20);
                     }
 
-                    runnerProgress.SetProgress(updates.Count, updates.Count, Localization.Format("Database.AutoCommentsDone", applied));
+                    progressOverlay.SetProgress(updates.Count, updates.Count, Localization.Format("Database.AutoCommentsDone", applied));
                     UpdateMainStatus(Localization.Format("Database.AutoCommentsDone", applied));
                     MessageBox.Show(Localization.Format("Database.AutoCommentsApplied", applied), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
-                    runnerProgress.SetProgress(1, 1, Localization.Format("Database.AutoCommentsFailed", ex.Message));
+                    progressOverlay.SetProgress(1, 1, Localization.Format("Database.AutoCommentsFailed", ex.Message));
                     MessageBox.Show(Localization.Format("Database.AutoCommentsFailed", ex.Message), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 finally
@@ -6100,31 +6095,6 @@ namespace mySQLPunk
                     await Task.Delay(250);
                 }
             }
-        }
-
-        private Form CreateDatabaseAutoCommentProgressForm(out AnimatedRunnerProgressBar runnerProgress)
-        {
-            Form form = new Form
-            {
-                Text = Localization.T("Tool.FillAutoComments"),
-                Size = new Size(560, 170),
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                StartPosition = FormStartPosition.CenterParent,
-                MaximizeBox = false,
-                MinimizeBox = false
-            };
-
-            runnerProgress = new AnimatedRunnerProgressBar
-            {
-                Location = new Point(18, 22),
-                Size = new Size(508, 86),
-                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
-            };
-            runnerProgress.LoadRunnerImage(Path.Combine(Application.StartupPath, "image", "progress_runner.gif"));
-            runnerProgress.SetProgress(0, 1, Localization.T("Designer.AutoCommentsLoading"));
-
-            form.Controls.Add(runnerProgress);
-            return form;
         }
 
         private static List<AutoCommentColumnUpdate> BuildDatabaseAutoCommentUpdates(IDatabase db, string databaseName, Dictionary<string, string> comments)

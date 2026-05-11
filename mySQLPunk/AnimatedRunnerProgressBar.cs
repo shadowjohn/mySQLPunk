@@ -10,6 +10,7 @@ namespace mySQLPunk
     {
         private readonly Timer animationTimer;
         private Image runnerImage;
+        private MemoryStream runnerImageStream;
         private bool imageAnimated;
         private int animationTick;
         private int maximum = 100;
@@ -81,14 +82,9 @@ namespace mySQLPunk
 
             try
             {
-                using (FileStream stream = File.OpenRead(path))
-                using (MemoryStream memory = new MemoryStream())
-                {
-                    stream.CopyTo(memory);
-                    memory.Position = 0;
-                    Image image = Image.FromStream(memory);
-                    SetRunnerImage(new Bitmap(image));
-                }
+                MemoryStream memory = new MemoryStream(File.ReadAllBytes(path));
+                Image image = Image.FromStream(memory);
+                SetRunnerImage(image, memory);
             }
             catch
             {
@@ -106,6 +102,11 @@ namespace mySQLPunk
                     if (imageAnimated) ImageAnimator.StopAnimate(runnerImage, OnRunnerFrameChanged);
                     runnerImage.Dispose();
                     runnerImage = null;
+                }
+                if (runnerImageStream != null)
+                {
+                    runnerImageStream.Dispose();
+                    runnerImageStream = null;
                 }
             }
             base.Dispose(disposing);
@@ -158,15 +159,17 @@ namespace mySQLPunk
             TextRenderer.DrawText(g, message, Font, textRect, ForeColor, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter);
         }
 
-        private void SetRunnerImage(Image image)
+        private void SetRunnerImage(Image image, MemoryStream imageStream)
         {
             if (runnerImage != null)
             {
                 if (imageAnimated) ImageAnimator.StopAnimate(runnerImage, OnRunnerFrameChanged);
                 runnerImage.Dispose();
             }
+            if (runnerImageStream != null) runnerImageStream.Dispose();
 
             runnerImage = image;
+            runnerImageStream = imageStream;
             imageAnimated = ImageAnimator.CanAnimate(runnerImage);
             if (imageAnimated) ImageAnimator.Animate(runnerImage, OnRunnerFrameChanged);
             Invalidate();
