@@ -52,6 +52,13 @@ namespace mySQLPunk
             public int Deleted { get; set; }
         }
 
+        private class TablePageLoadResult
+        {
+            public DataTable Rows { get; set; }
+            public long TotalRows { get; set; }
+            public int CurrentPage { get; set; }
+        }
+
         // 工具列與狀態列
         private ToolStrip mainToolStrip;
         private ToolStrip dataToolStrip;
@@ -189,28 +196,6 @@ namespace mySQLPunk
             ApplyLanguage();
         }
 
-        private async void CalculateTotalRowsAsync()
-        {
-            if (string.IsNullOrEmpty(_baseSql)) return;
-
-            string tableName = GetTableNameFromSql();
-            if (!string.IsNullOrWhiteSpace(tableName) && tableName != "Table")
-            {
-                try
-                {
-                    _totalRows = await Task.Run(() => _db.CountRows(_databaseName, tableName));
-                    if (!CanUpdateUi()) return;
-                    UpdatePaginationUI();
-                }
-                catch (Exception ex)
-                {
-                    if (!CanUpdateUi()) return;
-                    UpdateStatus(Localization.Format("Query.CountRowsFailed", ex.Message));
-                    UpdatePaginationUI();
-                }
-            }
-        }
-
         private void SetTableDataMode(bool active)
         {
             _isTableDataMode = active;
@@ -234,8 +219,6 @@ namespace mySQLPunk
                 dgvResults.AllowUserToAddRows = true;
                 dgvResults.AllowUserToDeleteRows = true;
 
-                // 立即計算總筆數以初始化分頁 UI
-                CalculateTotalRowsAsync();
             }
             else
             {
@@ -971,15 +954,19 @@ namespace mySQLPunk
             tsBtnExport.Enabled = false;
             tsBtnRefresh.Enabled = false;
             btnDataRefresh.Enabled = false;
+            SetPaginationControlsEnabled(false);
             UpdateStatus(Localization.T("Query.LoadingTablePage"));
 
             Stopwatch sw = Stopwatch.StartNew();
             try
             {
-                DataTable dt = await Task.Run(
-                    () => _db.SelectTablePage(_databaseName, tableName, offset, _pageSize),
+                TablePageLoadResult result = await Task.Run(
+                    () => LoadTablePage(tableName, offset, _pageSize, _cts.Token),
                     _cts.Token);
                 if (!CanUpdateUi()) return;
+                DataTable dt = result.Rows;
+                _totalRows = result.TotalRows;
+                _currentPage = result.CurrentPage;
                 dt.AcceptChanges();
                 PrepareTableDataForEditing(dt);
 
@@ -1011,6 +998,8 @@ namespace mySQLPunk
                     tsBtnCancel.Enabled = false;
                     tsBtnRefresh.Enabled = true;
                     btnDataRefresh.Enabled = true;
+                    if (txtPageSize != null) txtPageSize.Enabled = true;
+                    UpdatePaginationUI();
                 }
 
                 CancellationTokenSource cts = _cts;
@@ -1019,7 +1008,28 @@ namespace mySQLPunk
             }
         }
 
-         private void UpdatePaginationUI()
+        private TablePageLoadResult LoadTablePage(string tableName, int requestedOffset, int pageSize, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            long totalRows = _db.CountRows(_databaseName, tableName);
+            token.ThrowIfCancellationRequested();
+
+            int totalPages = totalRows <= 0 ? 1 : (int)Math.Ceiling((double)totalRows / pageSize);
+            int page = requestedOffset / pageSize + 1;
+            if (page < 1) page = 1;
+            if (page > totalPages) page = totalPages;
+
+            int offset = (page - 1) * pageSize;
+            DataTable rows = _db.SelectTablePage(_databaseName, tableName, offset, pageSize);
+            return new TablePageLoadResult
+            {
+                Rows = rows,
+                TotalRows = totalRows,
+                CurrentPage = page
+            };
+        }
+
+        private void UpdatePaginationUI()
         {
             EnsureValidPageSize();
             int totalPages = GetTotalPages();
@@ -1028,6 +1038,15 @@ namespace mySQLPunk
             btnDataPrev.Enabled = _currentPage > 1;
             btnDataNext.Enabled = _currentPage < totalPages;
             btnDataLast.Enabled = _currentPage < totalPages;
+        }
+
+        private void SetPaginationControlsEnabled(bool enabled)
+        {
+            if (btnDataFirst != null) btnDataFirst.Enabled = enabled;
+            if (btnDataPrev != null) btnDataPrev.Enabled = enabled;
+            if (btnDataNext != null) btnDataNext.Enabled = enabled;
+            if (btnDataLast != null) btnDataLast.Enabled = enabled;
+            if (txtPageSize != null) txtPageSize.Enabled = enabled;
         }
 
         private int GetTotalPages()
@@ -1579,15 +1598,17 @@ namespace mySQLPunk
             btnDataApply.Enabled = false;
             tsBtnRefresh.Enabled = false;
             btnDataRefresh.Enabled = false;
+            SetPaginationControlsEnabled(false);
             UpdateStatus(Localization.T("Query.SavingChanges"));
 
+            bool reloadAfterSave = false;
             try
             {
                 DataSaveResult result = await Task.Run(() => SaveTableChanges(dt));
                 if (!CanUpdateUi()) return;
                 dt.AcceptChanges();
                 UpdateStatus(Localization.Format("Query.SavedChangesStatus", result.Inserted, result.Updated, result.Deleted));
-                CalculateTotalRowsAsync();
+                reloadAfterSave = true;
                 MessageBox.Show(Localization.T("Query.DataSaved"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -1604,7 +1625,14 @@ namespace mySQLPunk
                     btnDataApply.Enabled = true;
                     tsBtnRefresh.Enabled = true;
                     btnDataRefresh.Enabled = true;
+                    if (txtPageSize != null) txtPageSize.Enabled = true;
+                    UpdatePaginationUI();
                 }
+            }
+
+            if (reloadAfterSave && CanUpdateUi())
+            {
+                ExecutePagedQuery();
             }
         }
 
