@@ -36,7 +36,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DEFAULT constraint 與進階索引仍有限制。 |
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
 | SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、CSV 匯出、語法格式化、查詢歷史。 |
-| 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；若沒有 Primary Key 會退回使用整列 WHERE，比較容易受資料變動影響。 |
+| 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；若沒有 Primary Key，更新/刪除前會顯示風險警告。 |
 | Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；部分既有資料表修改與進階索引尚未完整支援。 |
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 不支援欄位註解。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
@@ -108,13 +108,13 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 ### 資料瀏覽與儲存限制
 
 - **沒有 Primary Key 的資料表儲存風險較高**
-  - 現況：儲存更新/刪除時，若沒有 Primary Key，會用可用欄位建立 WHERE 條件。
+  - 現況：儲存更新/刪除時，若沒有 Primary Key，會先顯示風險警告；繼續儲存時仍會用可用欄位建立 WHERE 條件。
   - 風險：資料列被其他人改過，或欄位包含 BLOB/浮點/大文字時，WHERE 可能不穩定。
-  - 後續方向：沒有 Primary Key 時顯示更明確警告，或限制只能唯讀。
+  - 後續方向：視使用者回饋決定是否提供「沒有 Primary Key 時唯讀」的選項。
 
-- **BLOB/geometry 欄位目前只做摘要顯示**
-  - 現況：`byte[]` 欄位在結果表格中顯示為 `[BLOB n bytes] 0x...`，並設為唯讀。
-  - 後續方向：新增 BLOB 檢視器、匯出檔案、匯入檔案與十六進位檢視。
+- **BLOB/geometry 欄位操作仍有部分限制**
+  - 現況：`byte[]` 欄位在結果表格中顯示為 `[BLOB n bytes] 0x...`，並設為唯讀；右鍵可檢視十六進位、複製 Hex、匯出檔案，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
+  - 後續方向：補 BLOB 匯入檔案與更完整的大型檔案串流檢視。
 
 ### Table/View 複製限制
 

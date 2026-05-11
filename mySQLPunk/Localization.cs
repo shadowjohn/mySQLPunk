@@ -177,6 +177,7 @@ namespace mySQLPunk
             Add("Common.TestConnection", "測試連線", "Test Connection");
             Add("Common.OK", "確定", "OK");
             Add("Common.Cancel", "取消", "Cancel");
+            Add("Common.Close", "關閉", "Close");
             Add("Common.Next", "下一步", "Next");
             Add("Common.Browse", "瀏覽...", "Browse...");
             Add("Common.CreateNew", "建立新檔...", "Create New...");
@@ -333,6 +334,13 @@ namespace mySQLPunk
             Add("Query.CopyWktAsGeometrySql", "複製 WKT 為 Geometry SQL", "Copy WKT as Geometry SQL");
             Add("Query.GeometryToWktFailed", "無法將選取的 Geometry 轉成 WKT。", "Cannot convert the selected geometry to WKT.");
             Add("Query.WktRequired", "請選取 WKT 文字。", "Select WKT text first.");
+            Add("Query.ViewBlobHex", "檢視 BLOB 十六進位", "View BLOB Hex");
+            Add("Query.CopyBlobHex", "複製 BLOB Hex", "Copy BLOB Hex");
+            Add("Query.SaveBlobFile", "匯出 BLOB 檔案", "Export BLOB File");
+            Add("Query.BlobRequired", "請選取 BLOB / binary 欄位。", "Select a BLOB / binary cell first.");
+            Add("Query.BlobFileFilter", "Binary files (*.bin)|*.bin|All files (*.*)|*.*", "Binary files (*.bin)|*.bin|All files (*.*)|*.*");
+            Add("Query.BlobSaved", "BLOB 已匯出：{0}", "BLOB exported: {0}");
+            Add("Query.BlobPreviewTruncated", "僅顯示前 {0} bytes，完整大小：{1} bytes。", "Showing first {0} bytes only. Full size: {1} bytes.");
             Add("Query.Paste", "貼上", "Paste");
             Add("Query.SelectAll", "全選", "Select All");
             Add("Query.SqlEditor", "SQL 編輯器", "SQL Editor");
@@ -367,6 +375,8 @@ namespace mySQLPunk
             Add("Query.NoChangesDetected", "沒有偵測到資料變更。", "No data changes were detected.");
             Add("Query.ConfirmSaveChanges", "即將儲存目前資料表的新增、修改與刪除資料列，確定要繼續？", "Save inserted, updated, and deleted rows for the current table?");
             Add("Query.ConfirmSaveTitle", "確認儲存", "Confirm Save");
+            Add("Query.NoPrimaryKeySaveWarningTitle", "資料表沒有 Primary Key", "Table Has No Primary Key");
+            Add("Query.NoPrimaryKeySaveWarning", "目前資料表沒有 Primary Key，修改或刪除資料時會使用整列欄位組成 WHERE 條件。若資料列已被其他人修改，或包含 BLOB、浮點、大文字欄位，可能會更新失敗或影響非預期資料。仍要繼續儲存嗎？", "This table has no primary key. Updates and deletes will use the full row as the WHERE condition. If the row changed elsewhere, or contains BLOB, floating-point, or large text columns, saving may fail or affect unexpected data. Continue saving?");
             Add("Query.SavingChanges", "正在儲存變更...", "Saving changes...");
             Add("Query.SavedChangesStatus", "已儲存。新增：{0}，修改：{1}，刪除：{2}", "Saved. Inserted: {0}, Updated: {1}, Deleted: {2}");
             Add("Query.DataSaved", "資料已儲存。", "Data saved.");

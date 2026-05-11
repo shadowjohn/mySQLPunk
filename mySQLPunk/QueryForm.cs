@@ -119,6 +119,10 @@ namespace mySQLPunk
         private ToolStripMenuItem resultsCopyRowsItem;
         private ToolStripMenuItem resultsSelectAllItem;
         private ToolStripMenuItem resultsExportItem;
+        private ToolStripSeparator resultsBinarySeparator;
+        private ToolStripMenuItem resultsViewBlobHexItem;
+        private ToolStripMenuItem resultsCopyBlobHexItem;
+        private ToolStripMenuItem resultsSaveBlobFileItem;
         private ToolStripSeparator resultsGeometrySeparator;
         private ToolStripMenuItem resultsCopyGeometryWktItem;
         private ToolStripMenuItem resultsCopyWktGeometrySqlItem;
@@ -1325,6 +1329,11 @@ namespace mySQLPunk
                 resultsContextMenu.Items.Add(new ToolStripSeparator());
                 resultsSelectAllItem = AddResultsMenuItem(resultsContextMenu, "selectAll", (s, e) => dgvResults.SelectAll());
                 resultsExportItem = AddResultsMenuItem(resultsContextMenu, "export", (s, e) => ExportCsv());
+                resultsBinarySeparator = new ToolStripSeparator();
+                resultsContextMenu.Items.Add(resultsBinarySeparator);
+                resultsViewBlobHexItem = AddResultsMenuItem(resultsContextMenu, "viewBlobHex", (s, e) => ViewSelectedBlobHex());
+                resultsCopyBlobHexItem = AddResultsMenuItem(resultsContextMenu, "copyBlobHex", (s, e) => CopySelectedBlobHex());
+                resultsSaveBlobFileItem = AddResultsMenuItem(resultsContextMenu, "saveBlobFile", (s, e) => SaveSelectedBlobToFile());
                 resultsGeometrySeparator = new ToolStripSeparator();
                 resultsContextMenu.Items.Add(resultsGeometrySeparator);
                 resultsCopyGeometryWktItem = AddResultsMenuItem(resultsContextMenu, "copyGeometryWkt", (s, e) => CopySelectedGeometryAsWkt());
@@ -1352,6 +1361,10 @@ namespace mySQLPunk
             AddResultsMenuItem(menu, "selectAll", (s, e) => dgvResults.SelectAll()).Text = Localization.T("Query.SelectAll");
             AddResultsMenuItem(menu, "export", (s, e) => ExportCsv()).Text = Localization.T("Query.Export");
             menu.Items.Add(new ToolStripSeparator());
+            AddResultsMenuItem(menu, "viewBlobHex", (s, e) => ViewSelectedBlobHex()).Text = Localization.T("Query.ViewBlobHex");
+            AddResultsMenuItem(menu, "copyBlobHex", (s, e) => CopySelectedBlobHex()).Text = Localization.T("Query.CopyBlobHex");
+            AddResultsMenuItem(menu, "saveBlobFile", (s, e) => SaveSelectedBlobToFile()).Text = Localization.T("Query.SaveBlobFile");
+            menu.Items.Add(new ToolStripSeparator());
             AddResultsMenuItem(menu, "copyGeometryWkt", (s, e) => CopySelectedGeometryAsWkt()).Text = Localization.T("Query.CopyGeometryAsWkt");
             AddResultsMenuItem(menu, "copyWktGeometrySql", (s, e) => CopySelectedWktAsGeometrySql()).Text = Localization.T("Query.CopyWktAsGeometrySql");
             if (_isTableDataMode)
@@ -1371,6 +1384,9 @@ namespace mySQLPunk
             if (resultsCopyRowsItem != null) resultsCopyRowsItem.Text = Localization.T("Query.CopySelectedRows");
             if (resultsSelectAllItem != null) resultsSelectAllItem.Text = Localization.T("Query.SelectAll");
             if (resultsExportItem != null) resultsExportItem.Text = Localization.T("Query.Export");
+            if (resultsViewBlobHexItem != null) resultsViewBlobHexItem.Text = Localization.T("Query.ViewBlobHex");
+            if (resultsCopyBlobHexItem != null) resultsCopyBlobHexItem.Text = Localization.T("Query.CopyBlobHex");
+            if (resultsSaveBlobFileItem != null) resultsSaveBlobFileItem.Text = Localization.T("Query.SaveBlobFile");
             if (resultsCopyGeometryWktItem != null) resultsCopyGeometryWktItem.Text = Localization.T("Query.CopyGeometryAsWkt");
             if (resultsCopyWktGeometrySqlItem != null) resultsCopyWktGeometrySqlItem.Text = Localization.T("Query.CopyWktAsGeometrySql");
             if (resultsAddRowItem != null) resultsAddRowItem.Text = Localization.T("Query.Add");
@@ -1400,6 +1416,7 @@ namespace mySQLPunk
             bool hasData = ResultsHaveDataRows();
             bool hasSelection = HasResultsSelection();
             object currentValue = GetCurrentResultCellValue();
+            bool canUseBlobTools = currentValue is byte[];
             bool canCopyGeometryWkt = currentValue is byte[] bytes && GeometryWktConverter.TryGeometryBytesToWkt(bytes, out _);
             bool canCopyWktGeometrySql = currentValue != null && LooksLikeWkt(currentValue.ToString());
             SetResultsMenuItemEnabled(menu, "copyCells", hasSelection);
@@ -1407,11 +1424,19 @@ namespace mySQLPunk
             SetResultsMenuItemEnabled(menu, "copyRows", GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "selectAll", hasData);
             SetResultsMenuItemEnabled(menu, "export", hasData);
+            SetResultsMenuItemEnabled(menu, "viewBlobHex", canUseBlobTools);
+            SetResultsMenuItemEnabled(menu, "copyBlobHex", canUseBlobTools);
+            SetResultsMenuItemEnabled(menu, "saveBlobFile", canUseBlobTools);
             SetResultsMenuItemEnabled(menu, "copyGeometryWkt", canCopyGeometryWkt);
             SetResultsMenuItemEnabled(menu, "copyWktGeometrySql", canCopyWktGeometrySql);
             SetResultsMenuItemEnabled(menu, "addRow", dgvResults != null && dgvResults.DataSource is DataTable);
             SetResultsMenuItemEnabled(menu, "deleteRow", GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "saveRows", dgvResults != null && dgvResults.DataSource is DataTable);
+
+            if (resultsBinarySeparator != null) resultsBinarySeparator.Visible = canUseBlobTools;
+            if (resultsViewBlobHexItem != null) resultsViewBlobHexItem.Visible = canUseBlobTools;
+            if (resultsCopyBlobHexItem != null) resultsCopyBlobHexItem.Visible = canUseBlobTools;
+            if (resultsSaveBlobFileItem != null) resultsSaveBlobFileItem.Visible = canUseBlobTools;
 
             bool showGeometryTools = canCopyGeometryWkt || canCopyWktGeometrySql;
             if (resultsGeometrySeparator != null) resultsGeometrySeparator.Visible = showGeometryTools;
@@ -1433,6 +1458,94 @@ namespace mySQLPunk
             if (dgvResults == null || dgvResults.CurrentCell == null) return null;
             if (dgvResults.CurrentCell.RowIndex < 0 || dgvResults.CurrentCell.ColumnIndex < 0) return null;
             return dgvResults.CurrentCell.Value;
+        }
+
+        private byte[] GetCurrentResultBlob()
+        {
+            return GetCurrentResultCellValue() as byte[];
+        }
+
+        private void ViewSelectedBlobHex()
+        {
+            byte[] bytes = GetCurrentResultBlob();
+            if (bytes == null)
+            {
+                MessageBox.Show(Localization.T("Query.BlobRequired"), Localization.T("Common.Info"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (Form dialog = new Form())
+            using (RichTextBox text = new RichTextBox())
+            using (Button copyButton = new Button())
+            using (Button closeButton = new Button())
+            {
+                dialog.Text = Localization.T("Query.ViewBlobHex");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.Size = new Size(820, 560);
+                dialog.MinimizeBox = false;
+                dialog.ShowInTaskbar = false;
+
+                text.Dock = DockStyle.Fill;
+                text.ReadOnly = true;
+                text.WordWrap = false;
+                text.Font = new Font("Consolas", 10);
+                text.Text = BuildHexDump(bytes, 4096);
+
+                FlowLayoutPanel footer = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 44,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(8)
+                };
+                copyButton.Text = Localization.T("Query.CopyBlobHex");
+                copyButton.AutoSize = true;
+                copyButton.Click += (s, e) => CopySelectedBlobHex();
+                closeButton.Text = Localization.T("Common.Close");
+                closeButton.AutoSize = true;
+                closeButton.Click += (s, e) => dialog.Close();
+                footer.Controls.Add(closeButton);
+                footer.Controls.Add(copyButton);
+
+                dialog.Controls.Add(text);
+                dialog.Controls.Add(footer);
+                ThemeManager.ApplyTo(dialog);
+                dialog.ShowDialog(this);
+            }
+        }
+
+        private void CopySelectedBlobHex()
+        {
+            byte[] bytes = GetCurrentResultBlob();
+            if (bytes == null)
+            {
+                MessageBox.Show(Localization.T("Query.BlobRequired"), Localization.T("Common.Info"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            Clipboard.SetText(BytesToHex(bytes));
+            UpdateStatus(Localization.T("Query.CopiedToClipboard"));
+        }
+
+        private void SaveSelectedBlobToFile()
+        {
+            byte[] bytes = GetCurrentResultBlob();
+            if (bytes == null)
+            {
+                MessageBox.Show(Localization.T("Query.BlobRequired"), Localization.T("Common.Info"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Title = Localization.T("Query.SaveBlobFile");
+                dialog.Filter = Localization.T("Query.BlobFileFilter");
+                dialog.FileName = BuildBlobFileName();
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                File.WriteAllBytes(dialog.FileName, bytes);
+                UpdateStatus(Localization.Format("Query.BlobSaved", dialog.FileName));
+            }
         }
 
         private void CopySelectedGeometryAsWkt()
@@ -1490,6 +1603,71 @@ namespace mySQLPunk
             }
 
             return false;
+        }
+
+        private string BuildBlobFileName()
+        {
+            string columnName = "blob";
+            if (dgvResults != null && dgvResults.CurrentCell != null && dgvResults.CurrentCell.ColumnIndex >= 0)
+            {
+                DataGridViewColumn column = dgvResults.Columns[dgvResults.CurrentCell.ColumnIndex];
+                if (column != null && !string.IsNullOrWhiteSpace(column.HeaderText))
+                {
+                    columnName = column.HeaderText;
+                }
+            }
+
+            foreach (char invalid in Path.GetInvalidFileNameChars())
+            {
+                columnName = columnName.Replace(invalid, '_');
+            }
+            return columnName + ".bin";
+        }
+
+        private static string BytesToHex(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return string.Empty;
+            StringBuilder sb = new StringBuilder(bytes.Length * 2);
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                sb.Append(bytes[i].ToString("X2"));
+            }
+            return sb.ToString();
+        }
+
+        private static string BuildHexDump(byte[] bytes, int maxBytes)
+        {
+            if (bytes == null) return string.Empty;
+
+            int length = Math.Min(bytes.Length, Math.Max(0, maxBytes));
+            StringBuilder sb = new StringBuilder();
+            for (int offset = 0; offset < length; offset += 16)
+            {
+                int lineLength = Math.Min(16, length - offset);
+                sb.Append(offset.ToString("X8"));
+                sb.Append("  ");
+                for (int i = 0; i < 16; i++)
+                {
+                    if (i < lineLength) sb.Append(bytes[offset + i].ToString("X2"));
+                    else sb.Append("  ");
+                    sb.Append(i == 7 ? "  " : " ");
+                }
+                sb.Append(" ");
+                for (int i = 0; i < lineLength; i++)
+                {
+                    byte value = bytes[offset + i];
+                    sb.Append(value >= 32 && value <= 126 ? (char)value : '.');
+                }
+                sb.AppendLine();
+            }
+
+            if (bytes.Length > length)
+            {
+                sb.AppendLine();
+                sb.AppendLine(Localization.Format("Query.BlobPreviewTruncated", length, bytes.Length));
+            }
+
+            return sb.ToString();
         }
 
         private void DgvResults_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
@@ -1776,6 +1954,16 @@ namespace mySQLPunk
                 return;
             }
 
+            if (HasModifiedOrDeletedRows(changes) && IsSavingWithoutPrimaryKey())
+            {
+                DialogResult riskyAnswer = MessageBox.Show(
+                    Localization.T("Query.NoPrimaryKeySaveWarning"),
+                    Localization.T("Query.NoPrimaryKeySaveWarningTitle"),
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+                if (riskyAnswer != DialogResult.Yes) return;
+            }
+
             DialogResult answer = MessageBox.Show(
                 Localization.T("Query.ConfirmSaveChanges"),
                 Localization.T("Query.ConfirmSaveTitle"),
@@ -1823,6 +2011,35 @@ namespace mySQLPunk
             {
                 ExecutePagedQuery();
             }
+        }
+
+        private bool IsSavingWithoutPrimaryKey()
+        {
+            try
+            {
+                string tableName = GetTableNameFromSql();
+                if (string.IsNullOrWhiteSpace(tableName) || tableName == "Table") return false;
+
+                List<TableColumnInfo> columns = GetTableColumns(tableName);
+                return columns.Count > 0 && !columns.Any(c => c.IsPrimaryKey);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool HasModifiedOrDeletedRows(DataTable changes)
+        {
+            if (changes == null) return false;
+            foreach (DataRow row in changes.Rows)
+            {
+                if (row.RowState == DataRowState.Modified || row.RowState == DataRowState.Deleted)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private DataSaveResult SaveTableChanges(DataTable dt)
