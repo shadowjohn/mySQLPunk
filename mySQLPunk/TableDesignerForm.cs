@@ -2,18 +2,27 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
+using System.Net;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using mySQLPunk.lib;
+using Newtonsoft.Json;
 using System.Diagnostics;
 using utility;
 namespace mySQLPunk
 {
     public class TableDesignerForm : Form, IDockableForm
     {
+        private const string AutoColumnCommentUrl = "https://3wa.tw/fast/all_my_columns.php?raw=1";
+        private static readonly object AutoColumnCommentSync = new object();
+        private static Task<Dictionary<string, string>> AutoColumnCommentTask;
+
         private IDatabase _db;
         private string _databaseName;
         private string _tableName;
+        private readonly SynchronizationContext _uiContext;
         
         private DataGridView dgvColumns;
         private DataGridView dgvIndexes;
@@ -45,6 +54,7 @@ namespace mySQLPunk
         private myinclude my = new myinclude();        
         public TableDesignerForm(IDatabase db, string databaseName, string tableName)
         {
+            _uiContext = SynchronizationContext.Current;
             _db = db;
             _databaseName = databaseName;
             _tableName = tableName;
@@ -55,11 +65,12 @@ namespace mySQLPunk
             LoadColumns();
             LoadIndexes();
 
-            dgvColumns.CellValueChanged += (s, e) => MarkAsModified();
+            dgvColumns.CellValueChanged += DgvColumns_CellValueChanged;
             dgvIndexes.CellValueChanged += (s, e) => MarkAsModified();
             // 監聽刪除行等操作
             dgvColumns.RowsRemoved += (s, e) => MarkAsModified();
             dgvIndexes.RowsRemoved += (s, e) => MarkAsModified();
+            BeginLoadAutoColumnComments();
         }
 
         private void UpdateTitle()
@@ -295,6 +306,16 @@ namespace mySQLPunk
             }
         }
 
+        private void DgvColumns_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && dgvColumns.Columns[e.ColumnIndex].Name == "Name")
+            {
+                ApplyAutoColumnCommentForGridRow(e.RowIndex);
+            }
+
+            MarkAsModified();
+        }
+
         public void SetMainHost(Form1 mainHost) => _mainHost = mainHost;
         public string GetDisplayTitle() => this.Text;
 
@@ -395,6 +416,7 @@ namespace mySQLPunk
             displayDt.Columns.Add("Default");
             displayDt.Columns.Add("Comment");
             displayDt.Columns.Add("_OldName");
+            displayDt.Columns.Add("_AutoComment");
             return displayDt;
         }
 
@@ -520,12 +542,165 @@ namespace mySQLPunk
             return int.TryParse(value, out parsed) ? parsed : 0;
         }
 
+        private void BeginLoadAutoColumnComments()
+        {
+            if (!IsNewTable) return;
+
+            Task<Dictionary<string, string>> task = GetAutoColumnCommentTask();
+            task.ContinueWith(t =>
+            {
+                if (t.IsCanceled || t.IsFaulted) return;
+
+                Action apply = () =>
+                {
+                    if (!IsDisposed) ApplyAutoColumnCommentsToEmptyRows();
+                };
+
+                if (_uiContext != null)
+                {
+                    _uiContext.Post(_ => apply(), null);
+                }
+                else if (IsHandleCreated)
+                {
+                    BeginInvoke(apply);
+                }
+            });
+        }
+
+        private static Task<Dictionary<string, string>> GetAutoColumnCommentTask()
+        {
+            lock (AutoColumnCommentSync)
+            {
+                if (AutoColumnCommentTask == null)
+                {
+                    AutoColumnCommentTask = Task.Factory.StartNew(
+                        LoadAutoColumnComments,
+                        CancellationToken.None,
+                        TaskCreationOptions.None,
+                        TaskScheduler.Default);
+                }
+
+                return AutoColumnCommentTask;
+            }
+        }
+
+        private static Dictionary<string, string> LoadAutoColumnComments()
+        {
+            Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                using (WebClient client = new WebClient())
+                {
+                    client.Encoding = Encoding.UTF8;
+                    string json = client.DownloadString(AutoColumnCommentUrl);
+                    Dictionary<string, string> parsed = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+                    if (parsed == null) return comments;
+
+                    foreach (var item in parsed)
+                    {
+                        if (string.IsNullOrWhiteSpace(item.Key) || string.IsNullOrWhiteSpace(item.Value)) continue;
+                        comments[item.Key.Trim()] = item.Value.Trim();
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return comments;
+        }
+
+        private void ApplyAutoColumnCommentForGridRow(int rowIndex)
+        {
+            if (!IsNewTable || dgvColumns == null || rowIndex < 0 || rowIndex >= dgvColumns.Rows.Count) return;
+            DataGridViewRow gridRow = dgvColumns.Rows[rowIndex];
+            if (gridRow == null || gridRow.IsNewRow) return;
+
+            DataRowView rowView = gridRow.DataBoundItem as DataRowView;
+            if (rowView == null) return;
+
+            ApplyAutoColumnComment(rowView.Row);
+        }
+
+        private void ApplyAutoColumnCommentsToEmptyRows()
+        {
+            if (!IsNewTable || dgvColumns == null) return;
+            DataTable currentDt = dgvColumns.DataSource as DataTable;
+            if (currentDt == null) return;
+
+            bool changed = false;
+            foreach (DataRow row in currentDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                changed |= ApplyAutoColumnComment(row);
+            }
+
+            if (changed)
+            {
+                MarkAsModified();
+                if (tcMain != null && tcMain.SelectedTab == tpSqlPreview) GeneratePreviewSql();
+            }
+        }
+
+        private bool ApplyAutoColumnComment(DataRow row)
+        {
+            if (!IsNewTable || row == null || !row.Table.Columns.Contains("Comment")) return false;
+            if (!row.Table.Columns.Contains("_AutoComment")) return false;
+
+            string columnName = GetRowString(row, "Name").Trim();
+            if (string.IsNullOrWhiteSpace(columnName)) return false;
+
+            string currentComment = GetRowString(row, "Comment").Trim();
+            string currentAutoComment = GetRowString(row, "_AutoComment").Trim();
+            if (!string.IsNullOrWhiteSpace(currentComment) &&
+                !string.Equals(currentComment, currentAutoComment, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            string comment;
+            if (TryGetLoadedAutoColumnComment(columnName, out comment))
+            {
+                if (currentComment == comment && currentAutoComment == comment) return false;
+                row["Comment"] = comment;
+                row["_AutoComment"] = comment;
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(currentAutoComment) && currentComment == currentAutoComment)
+            {
+                row["Comment"] = "";
+                row["_AutoComment"] = "";
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetLoadedAutoColumnComment(string columnName, out string comment)
+        {
+            comment = "";
+            Task<Dictionary<string, string>> task;
+            lock (AutoColumnCommentSync)
+            {
+                task = AutoColumnCommentTask;
+            }
+
+            if (task == null || !task.IsCompleted || task.IsFaulted || task.IsCanceled) return false;
+
+            Dictionary<string, string> comments = task.Result;
+            return comments != null && comments.TryGetValue(columnName, out comment);
+        }
+
         private void BindColumns(DataTable displayDt)
         {
             dgvColumns.DataSource = displayDt;
 
             ApplyColumnHeaders();
             dgvColumns.Columns["_OldName"].Visible = false;
+            dgvColumns.Columns["_AutoComment"].Visible = false;
         }
 
         public void ApplyLanguage()
@@ -1251,8 +1426,13 @@ namespace mySQLPunk
 
         private string BuildSqlServerColumnCommentStatement(string columnName, string comment)
         {
+            return BuildSqlServerColumnCommentStatement(_tableName, columnName, comment);
+        }
+
+        private string BuildSqlServerColumnCommentStatement(string tableName, string columnName, string comment)
+        {
             string database = QuoteDesignerIdentifier(_databaseName);
-            string tableLiteral = EscapeSqlServerLiteral(_tableName);
+            string tableLiteral = EscapeSqlServerLiteral(tableName);
             string columnLiteral = EscapeSqlServerLiteral(columnName);
             string valueLiteral = EscapeSqlServerLiteral(comment ?? "");
 
@@ -1659,7 +1839,42 @@ namespace mySQLPunk
                 sql += "\n" + string.Join("\n", indexes.ToArray());
             }
 
+            List<string> comments = BuildGenericCreateColumnCommentStatements(tableName, currentDt);
+            if (comments.Count > 0)
+            {
+                sql += "\n" + string.Join("\n", comments.ToArray());
+            }
+
             return sql;
+        }
+
+        private List<string> BuildGenericCreateColumnCommentStatements(string tableName, DataTable currentDt)
+        {
+            List<string> statements = new List<string>();
+            if (currentDt == null || _db is my_sqlite) return statements;
+
+            foreach (DataRow row in currentDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                string columnName = GetRowString(row, "Name").Trim();
+                string comment = GetRowString(row, "Comment").Trim();
+                if (string.IsNullOrWhiteSpace(columnName) || string.IsNullOrWhiteSpace(comment)) continue;
+
+                if (_db is my_mssql)
+                {
+                    statements.Add(BuildSqlServerColumnCommentStatement(tableName, columnName, comment));
+                    continue;
+                }
+
+                if (_db is my_postgresql || _db is my_oracle)
+                {
+                    statements.Add("COMMENT ON COLUMN " + GetQualifiedDesignerTableName(tableName) + "." + QuoteDesignerIdentifier(columnName) +
+                                   " IS " + EscapeSqlStringLiteral(comment) + ";");
+                }
+            }
+
+            return statements;
         }
 
         private string BuildGenericColumnDefinition(DataRow row)
@@ -2691,6 +2906,7 @@ namespace mySQLPunk
             newRow["Length"] = "255";
             newRow["NotNull"] = false;
             newRow["PK"] = false;
+            ApplyAutoColumnComment(newRow);
             
             if (insert && dgvColumns.CurrentRow != null)
                 dt.Rows.InsertAt(newRow, dgvColumns.CurrentRow.Index);
