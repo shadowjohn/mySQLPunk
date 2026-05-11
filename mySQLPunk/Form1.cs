@@ -1698,10 +1698,10 @@ namespace mySQLPunk
 
         private void DesignTable_Click(object sender, EventArgs e)
         {
-            OpenSelectedTableDesigner(false);
+            OpenSelectedTableDesigner(null);
         }
 
-        private void OpenSelectedTableDesigner(bool fillAutoComments)
+        private void OpenSelectedTableDesigner(AutoCommentMode? autoCommentMode)
         {
             if (db_tree.SelectedNode == null) return;
 
@@ -1724,9 +1724,9 @@ namespace mySQLPunk
 
                 TableDesignerForm tdf = new TableDesignerForm(db, dbName, tableName);
                 DockDockableForm(tdf);
-                if (fillAutoComments)
+                if (autoCommentMode.HasValue)
                 {
-                    tdf.FillMissingAutoColumnComments();
+                    tdf.FillAutoColumnComments(autoCommentMode.Value);
                 }
             }
             else
@@ -2246,7 +2246,24 @@ namespace mySQLPunk
 
         private void FillSelectedTableComments()
         {
-            OpenSelectedTableDesigner(true);
+            FillSelectedTableComments(AutoCommentMode.FillBlanks);
+        }
+
+        private void FillSelectedTableComments(AutoCommentMode mode)
+        {
+            OpenSelectedTableDesigner(mode);
+        }
+
+        private ToolStripMenuItem CreateAutoCommentModeMenuItem(Action<AutoCommentMode> onModeSelected)
+        {
+            ToolStripMenuItem menuItem = new ToolStripMenuItem(Localization.T("Tool.FillAutoComments"));
+            ToolStripMenuItem fillBlankItem = new ToolStripMenuItem(Localization.T("Tool.FillBlankAutoComments"));
+            fillBlankItem.Click += (s, ev) => onModeSelected(AutoCommentMode.FillBlanks);
+            ToolStripMenuItem overwriteItem = new ToolStripMenuItem(Localization.T("Tool.OverwriteAutoComments"));
+            overwriteItem.Click += (s, ev) => onModeSelected(AutoCommentMode.Overwrite);
+            menuItem.DropDownItems.Add(fillBlankItem);
+            menuItem.DropDownItems.Add(overwriteItem);
+            return menuItem;
         }
 
         private void DumpSelectedTableSql(bool dataOnly)
@@ -3304,9 +3321,7 @@ namespace mySQLPunk
                 itemDesign.Click += (s, ev) => DesignSelectedTable();
                 cms.Items.Add(itemDesign);
 
-                var itemFillComments = new ToolStripMenuItem(Localization.T("Tool.FillAutoComments"));
-                itemFillComments.Click += (s, ev) => FillSelectedTableComments();
-                cms.Items.Add(itemFillComments);
+                cms.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
 
                 var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                 itemDrop.Click += (s, ev) => DeleteSelectedTable();
@@ -5655,9 +5670,7 @@ namespace mySQLPunk
                     designTableItem.Click += (s, ev) => DesignSelectedTable();
                     menu.Items.Add(designTableItem);
 
-                    ToolStripMenuItem fillCommentsItem = new ToolStripMenuItem(Localization.T("Tool.FillAutoComments"));
-                    fillCommentsItem.Click += (s, ev) => FillSelectedTableComments();
-                    menu.Items.Add(fillCommentsItem);
+                    menu.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
 
                     ToolStripMenuItem deleteTableItem = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                     deleteTableItem.Click += (s, ev) => DeleteSelectedTable();
@@ -6009,9 +6022,7 @@ namespace mySQLPunk
             dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();
             menu.Items.Add(dictionaryItem);
 
-            ToolStripMenuItem fillCommentsItem = new ToolStripMenuItem(Localization.T("Tool.FillAutoComments"));
-            fillCommentsItem.Click += (s, ev) => FillSelectedDatabaseComments(node);
-            menu.Items.Add(fillCommentsItem);
+            menu.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedDatabaseComments(node, mode)));
 
             ToolStripMenuItem reverseModelItem = new ToolStripMenuItem(Localization.T("Tool.ReverseEngineerModel"));
             reverseModelItem.Click += (s, ev) => ReverseEngineerSelectedDatabaseModel();
@@ -6030,7 +6041,7 @@ namespace mySQLPunk
             menu.Items.Add(refreshItem);
         }
 
-        private async void FillSelectedDatabaseComments(TreeNode databaseNode)
+        private async void FillSelectedDatabaseComments(TreeNode databaseNode, AutoCommentMode mode)
         {
             TreeDatabaseTarget target = BuildTargetFromNode(databaseNode);
             if (target == null)
@@ -6045,7 +6056,8 @@ namespace mySQLPunk
                 return;
             }
 
-            if (MessageBox.Show(Localization.Format("Database.AutoCommentsConfirm", target.DatabaseName), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            string confirmKey = mode == AutoCommentMode.Overwrite ? "Database.AutoCommentsConfirmOverwrite" : "Database.AutoCommentsConfirm";
+            if (MessageBox.Show(Localization.Format(confirmKey, target.DatabaseName), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             {
                 return;
             }
@@ -6063,11 +6075,12 @@ namespace mySQLPunk
                     }
 
                     progressOverlay.SetProgress(0, 1, Localization.T("Database.AutoCommentsScanning"));
-                    List<AutoCommentColumnUpdate> updates = await Task.Run(() => BuildDatabaseAutoCommentUpdates(target.Database, target.DatabaseName, comments));
+                    List<AutoCommentColumnUpdate> updates = await Task.Run(() => BuildDatabaseAutoCommentUpdates(target.Database, target.DatabaseName, comments, mode));
                     if (updates.Count == 0)
                     {
-                        progressOverlay.SetProgress(1, 1, Localization.T("Designer.AutoCommentsNoMatches"));
-                        MessageBox.Show(Localization.T("Designer.AutoCommentsNoMatches"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        string noUpdatesMessage = GetDatabaseAutoCommentNoUpdatesMessage(mode);
+                        progressOverlay.SetProgress(1, 1, noUpdatesMessage);
+                        MessageBox.Show(noUpdatesMessage, Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }
 
@@ -6083,7 +6096,7 @@ namespace mySQLPunk
 
                     progressOverlay.SetProgress(updates.Count, updates.Count, Localization.Format("Database.AutoCommentsDone", applied));
                     UpdateMainStatus(Localization.Format("Database.AutoCommentsDone", applied));
-                    MessageBox.Show(Localization.Format("Database.AutoCommentsApplied", applied), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(GetDatabaseAutoCommentAppliedMessage(applied, mode), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
@@ -6097,7 +6110,21 @@ namespace mySQLPunk
             }
         }
 
-        private static List<AutoCommentColumnUpdate> BuildDatabaseAutoCommentUpdates(IDatabase db, string databaseName, Dictionary<string, string> comments)
+        private static string GetDatabaseAutoCommentNoUpdatesMessage(AutoCommentMode mode)
+        {
+            return mode == AutoCommentMode.Overwrite
+                ? Localization.T("Database.AutoCommentsNoUpdates")
+                : Localization.T("Designer.AutoCommentsNoMatches");
+        }
+
+        private static string GetDatabaseAutoCommentAppliedMessage(int applied, AutoCommentMode mode)
+        {
+            return mode == AutoCommentMode.Overwrite
+                ? Localization.Format("Database.AutoCommentsUpdated", applied)
+                : Localization.Format("Database.AutoCommentsApplied", applied);
+        }
+
+        private static List<AutoCommentColumnUpdate> BuildDatabaseAutoCommentUpdates(IDatabase db, string databaseName, Dictionary<string, string> comments, AutoCommentMode mode)
         {
             List<AutoCommentColumnUpdate> updates = new List<AutoCommentColumnUpdate>();
             HashSet<string> viewNames = GetDatabaseViewNameSet(db, databaseName);
@@ -6111,20 +6138,22 @@ namespace mySQLPunk
                     string columnName = FirstColumnValue(row, "Field", "Name", "NAME", "COLUMN_NAME", "column_name", "name");
                     if (string.IsNullOrWhiteSpace(columnName)) continue;
 
-                    string currentComment = FirstColumnValue(row, "Comment", "COMMENT", "COMMENTS", "comment");
-                    if (!string.IsNullOrWhiteSpace(currentComment)) continue;
-
                     string comment;
                     if (!comments.TryGetValue(columnName, out comment) || string.IsNullOrWhiteSpace(comment)) continue;
+                    comment = comment.Trim();
 
-                    string sql = BuildAutoCommentSql(db, databaseName, tableName, row, columnName, comment.Trim());
+                    string currentComment = FirstColumnValue(row, "Comment", "COMMENT", "COMMENTS", "comment");
+                    if (mode == AutoCommentMode.FillBlanks && !string.IsNullOrWhiteSpace(currentComment)) continue;
+                    if (string.Equals(currentComment, comment, StringComparison.Ordinal)) continue;
+
+                    string sql = BuildAutoCommentSql(db, databaseName, tableName, row, columnName, comment);
                     if (string.IsNullOrWhiteSpace(sql)) continue;
 
                     updates.Add(new AutoCommentColumnUpdate
                     {
                         TableName = tableName,
                         ColumnName = columnName,
-                        Comment = comment.Trim(),
+                        Comment = comment,
                         Sql = sql
                     });
                 }

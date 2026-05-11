@@ -96,6 +96,8 @@ namespace mySQLPunk
             Add("Tool.OpenTable", "開啟資料表", "Open Table");
             Add("Tool.DesignTable", "設計資料表", "Design Table");
             Add("Tool.FillAutoComments", "補註解", "Fill Comments");
+            Add("Tool.FillBlankAutoComments", "補空白註解", "Fill Blank Comments");
+            Add("Tool.OverwriteAutoComments", "覆蓋註解", "Overwrite Comments");
             Add("Tool.NewTable", "新增資料表", "New Table");
             Add("Tool.DeleteTable", "刪除資料表", "Delete Table");
             Add("Tool.ImportWizard", "匯入精靈", "Import Wizard");
@@ -253,10 +255,13 @@ namespace mySQLPunk
             Add("Database.Deleted", "資料庫已刪除：{0}", "Database deleted: {0}");
             Add("Database.DeleteFailed", "刪除資料庫失敗：{0}", "Delete database failed: {0}");
             Add("Database.AutoCommentsConfirm", "要掃描資料庫「{0}」的全部資料表，並補上空白欄位註解嗎？", "Scan every table in database \"{0}\" and fill blank column comments?");
+            Add("Database.AutoCommentsConfirmOverwrite", "要掃描資料庫「{0}」的全部資料表，並覆蓋已有對照的欄位註解嗎？", "Scan every table in database \"{0}\" and overwrite matched column comments?");
             Add("Database.AutoCommentsScanning", "正在掃描資料表欄位...", "Scanning table columns...");
             Add("Database.AutoCommentsProgress", "補註解 {0}/{1}：{2}.{3}", "Filling comments {0}/{1}: {2}.{3}");
             Add("Database.AutoCommentsDone", "補註解完成：{0} 個欄位", "Fill comments done: {0} columns");
             Add("Database.AutoCommentsApplied", "已補上 {0} 個欄位註解。", "Filled {0} column comments.");
+            Add("Database.AutoCommentsUpdated", "已更新 {0} 個欄位註解。", "Updated {0} column comments.");
+            Add("Database.AutoCommentsNoUpdates", "沒有可更新的欄位註解。", "There are no column comments to update.");
             Add("Database.AutoCommentsFailed", "補註解失敗：{0}", "Fill comments failed: {0}");
             Add("Database.ModelOpened", "資料庫模型已建立：{0}", "Database model opened: {0}");
             Add("Database.SearchTitle", "在資料庫中尋找", "Find in Database");
@@ -374,6 +379,8 @@ namespace mySQLPunk
             Add("Designer.InsertColumn", "插入欄位", "Insert Column");
             Add("Designer.DeleteColumn", "刪除欄位", "Delete Column");
             Add("Designer.FillAutoComments", "補註解", "Fill Comments");
+            Add("Designer.FillBlankAutoComments", "補空白註解", "Fill Blank Comments");
+            Add("Designer.OverwriteAutoComments", "覆蓋註解", "Overwrite Comments");
             Add("Designer.AddIndex", "加入索引", "Add Index");
             Add("Designer.DeleteIndex", "刪除索引", "Delete Index");
             Add("Designer.MoveUp", "上移", "Move Up");
@@ -404,7 +411,9 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsUnavailable", "無法載入自動註解字典，請稍後再試。", "Cannot load the auto comment dictionary. Try again later.");
             Add("Designer.AutoCommentsUnsupported", "SQLite 不支援欄位註解，無法直接補註解。", "SQLite does not support column comments, so comments cannot be filled directly.");
             Add("Designer.AutoCommentsApplied", "已補上 {0} 個欄位註解，請確認 SQL 預覽後儲存。", "Filled {0} column comments. Review the SQL preview, then save.");
+            Add("Designer.AutoCommentsUpdated", "已更新 {0} 個欄位註解，請確認 SQL 預覽後儲存。", "Updated {0} column comments. Review the SQL preview, then save.");
             Add("Designer.AutoCommentsNoMatches", "沒有可補的空白欄位註解。", "There are no blank column comments to fill.");
+            Add("Designer.AutoCommentsNoUpdates", "沒有可更新的欄位註解。", "There are no column comments to update.");
             Add("Designer.AutoCommentsLoading", "正在載入自動註解字典...", "Loading the auto comment dictionary...");
             Add("Designer.AutoCommentsProgress", "補註解 {0}/{1}：{2}", "Filling comments {0}/{1}: {2}");
             Add("Designer.AutoCommentsDone", "補註解完成：{0}/{1}", "Fill comments done: {0}/{1}");

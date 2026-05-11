@@ -32,7 +32,7 @@ namespace mySQLPunk
         private bool _isDocked;
         private ToolStripButton btnFloat;
         private ToolStripButton btnDock;
-        private ToolStripButton btnFillAutoComments;
+        private ToolStripSplitButton btnFillAutoComments;
         private RunnerProgressOverlay autoCommentProgressOverlay;
         private bool _isFillingAutoComments;
 
@@ -123,7 +123,14 @@ namespace mySQLPunk
             ToolStripButton btnDelCol = new ToolStripButton(Localization.T("Designer.DeleteColumn"), GetIcon(iconPath + "delete.png"));
             
             ToolStripSeparator sep2 = new ToolStripSeparator();
-            btnFillAutoComments = new ToolStripButton(Localization.T("Designer.FillAutoComments"), GetIcon(iconPath + "table.png"), BtnFillAutoComments_Click);
+            btnFillAutoComments = new ToolStripSplitButton(Localization.T("Designer.FillAutoComments"), GetIcon(iconPath + "table.png"));
+            ToolStripMenuItem fillBlankCommentsItem = new ToolStripMenuItem(Localization.T("Designer.FillBlankAutoComments"));
+            fillBlankCommentsItem.Click += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.FillBlanks, true);
+            ToolStripMenuItem overwriteCommentsItem = new ToolStripMenuItem(Localization.T("Designer.OverwriteAutoComments"));
+            overwriteCommentsItem.Click += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.Overwrite, true);
+            btnFillAutoComments.DropDownItems.Add(fillBlankCommentsItem);
+            btnFillAutoComments.DropDownItems.Add(overwriteCommentsItem);
+            btnFillAutoComments.ButtonClick += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.FillBlanks, true);
             ToolStripSeparator sepAutoComment = new ToolStripSeparator();
             ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), GetIcon(iconPath + "up.png"));
             ToolStripButton btnMoveDown = new ToolStripButton(Localization.T("Designer.MoveDown"), GetIcon(iconPath + "down.png"));
@@ -323,13 +330,18 @@ namespace mySQLPunk
 
         private async void BtnFillAutoComments_Click(object sender, EventArgs e)
         {
-            await FillMissingAutoColumnCommentsAsync(true);
+            await FillAutoColumnCommentsAsync(AutoCommentMode.FillBlanks, true);
         }
 
         public void FillMissingAutoColumnComments()
         {
+            FillAutoColumnComments(AutoCommentMode.FillBlanks);
+        }
+
+        public void FillAutoColumnComments(AutoCommentMode mode)
+        {
             if (IsDisposed) return;
-            Action apply = async () => await FillMissingAutoColumnCommentsAsync(true);
+            Action apply = async () => await FillAutoColumnCommentsAsync(mode, true);
             if (IsHandleCreated) BeginInvoke(apply);
             else apply();
         }
@@ -697,7 +709,7 @@ namespace mySQLPunk
             return false;
         }
 
-        private async Task<int> FillMissingAutoColumnCommentsAsync(bool showMessage)
+        private async Task<int> FillAutoColumnCommentsAsync(AutoCommentMode mode, bool showMessage)
         {
             if (_isFillingAutoComments) return 0;
 
@@ -743,7 +755,7 @@ namespace mySQLPunk
                         processed++;
                         ShowAutoCommentProgress(Localization.Format("Designer.AutoCommentsProgress", processed, total, columnName), processed, total);
                         await Task.Delay(20);
-                        if (FillMissingAutoColumnComment(row, comments)) applied++;
+                        if (ApplyAutoColumnComment(row, comments, mode)) applied++;
                     }
 
                     if (applied > 0)
@@ -760,9 +772,7 @@ namespace mySQLPunk
 
                     if (showMessage)
                     {
-                        string message = applied > 0
-                            ? Localization.Format("Designer.AutoCommentsApplied", applied)
-                            : Localization.T("Designer.AutoCommentsNoMatches");
+                        string message = GetDesignerAutoCommentResultMessage(applied, mode);
                         MessageBox.Show(message, Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
 
@@ -796,28 +806,46 @@ namespace mySQLPunk
             if (autoCommentProgressOverlay != null) autoCommentProgressOverlay.SetProgress(current, total, message);
         }
 
+        private static string GetDesignerAutoCommentResultMessage(int applied, AutoCommentMode mode)
+        {
+            if (applied > 0)
+            {
+                return mode == AutoCommentMode.Overwrite
+                    ? Localization.Format("Designer.AutoCommentsUpdated", applied)
+                    : Localization.Format("Designer.AutoCommentsApplied", applied);
+            }
+
+            return mode == AutoCommentMode.Overwrite
+                ? Localization.T("Designer.AutoCommentsNoUpdates")
+                : Localization.T("Designer.AutoCommentsNoMatches");
+        }
+
         private Form GetAutoCommentProgressOwner()
         {
             if (_isDocked && _mainHost != null && !_mainHost.IsDisposed) return _mainHost;
             return this;
         }
 
-        private bool FillMissingAutoColumnComment(DataRow row, Dictionary<string, string> comments)
+        private bool ApplyAutoColumnComment(DataRow row, Dictionary<string, string> comments, AutoCommentMode mode)
         {
             if (row == null || comments == null || !row.Table.Columns.Contains("Comment")) return false;
 
             string columnName = GetRowString(row, "Name").Trim();
             if (string.IsNullOrWhiteSpace(columnName)) return false;
-            if (!string.IsNullOrWhiteSpace(GetRowString(row, "Comment"))) return false;
 
             string comment;
             if (!comments.TryGetValue(columnName, out comment)) return false;
             if (string.IsNullOrWhiteSpace(comment)) return false;
 
-            row["Comment"] = comment.Trim();
+            string currentComment = GetRowString(row, "Comment");
+            string nextComment = comment.Trim();
+            if (mode == AutoCommentMode.FillBlanks && !string.IsNullOrWhiteSpace(currentComment)) return false;
+            if (string.Equals(currentComment, nextComment, StringComparison.Ordinal)) return false;
+
+            row["Comment"] = nextComment;
             if (row.Table.Columns.Contains("_AutoComment"))
             {
-                row["_AutoComment"] = comment.Trim();
+                row["_AutoComment"] = nextComment;
             }
             return true;
         }
@@ -857,6 +885,11 @@ namespace mySQLPunk
             if (btnFloat != null) btnFloat.Text = Localization.T("Query.Float");
             if (btnDock != null) btnDock.Text = Localization.T("Query.Dock");
             if (btnFillAutoComments != null) btnFillAutoComments.Text = Localization.T("Designer.FillAutoComments");
+            if (btnFillAutoComments != null && btnFillAutoComments.DropDownItems.Count >= 2)
+            {
+                btnFillAutoComments.DropDownItems[0].Text = Localization.T("Designer.FillBlankAutoComments");
+                btnFillAutoComments.DropDownItems[1].Text = Localization.T("Designer.OverwriteAutoComments");
+            }
             ApplyColumnHeaders();
             UpdateTitle();
             ApplyTheme();

@@ -154,6 +154,7 @@
     <Compile Include="AnimatedRunnerProgressBar.cs">
       <SubType>Component</SubType>
     </Compile>
+    <Compile Include="AutoCommentMode.cs" />
     <Compile Include="RunnerProgressOverlay.cs">
       <SubType>Form</SubType>
     </Compile>
