@@ -4427,7 +4427,8 @@ namespace mySQLPunk
                     newRow["修改日期"] = FirstColumnValue(row, "Update_time", "UPDATE_TIME");
                     newRow["資料長度"] = FormatBytesValue(FirstColumnValue(row, "Data_length", "DATA_LENGTH"));
                     newRow["引擎"] = FirstColumnValue(row, "Engine", "ENGINE");
-                    newRow["列"] = FirstColumnValue(row, "Rows", "ROWS", "NUM_ROWS");
+                    string rowCount = FirstColumnValue(row, "Rows", "ROWS", "NUM_ROWS");
+                    newRow["列"] = rowCount == "-1" ? "-" : rowCount;
                     newRow["註解"] = FirstColumnValue(row, "Comment", "COMMENTS");
                     displayDt.Rows.Add(newRow);
                 }

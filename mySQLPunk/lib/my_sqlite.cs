@@ -237,7 +237,11 @@ namespace mySQLPunk.lib
         public List<string> GetTables(string databaseName)
         {
             List<string> tables = new List<string>();
-            DataTable dt = SelectSQL("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';");
+            // 排除系統內部表及 virtual table（virtual table 模組未載入時會異常）
+            DataTable dt = SelectSQL(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                + "AND name NOT LIKE 'sqlite_%' "
+                + "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%');");
             foreach (DataRow row in dt.Rows)
             {
                 tables.Add(row[0].ToString());
@@ -265,7 +269,12 @@ namespace mySQLPunk.lib
         public DataTable GetTableStatus(string databaseName)
         {
             DataTable output = CreateTableStatusSchema();
-            DataTable tables = SelectSQL("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;");
+            // 排除 virtual table：其 sql 欄以 CREATE VIRTUAL TABLE 開頭，模組未載入時會拋出 "no such table"
+            DataTable tables = SelectSQL(
+                "SELECT name, sql FROM sqlite_master WHERE type='table' "
+                + "AND name NOT LIKE 'sqlite_%' "
+                + "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%') "
+                + "ORDER BY name;");
             foreach (DataRow row in tables.Rows)
             {
                 string tableName = row["name"].ToString();
@@ -280,7 +289,8 @@ namespace mySQLPunk.lib
                 nr["Max_data_length"] = 0L;
                 nr["Data_free"] = 0L;
                 nr["Engine"] = "SQLite";
-                nr["Rows"] = CountRows(databaseName, tableName);
+                try { nr["Rows"] = CountRows(databaseName, tableName); }
+                catch { nr["Rows"] = -1L; } // 無法計數（如被鎖定、尚未初始化等）時展示 -1
                 nr["Comment"] = "";
                 nr["Row_format"] = "";
                 nr["Collation"] = "";
@@ -409,8 +419,15 @@ namespace mySQLPunk.lib
 
         public long CountRows(string databaseName, string tableName)
         {
-            DataTable dt = SelectSQL("SELECT COUNT(*) FROM " + QuoteSqlite(tableName) + ";");
-            return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
+            try
+            {
+                DataTable dt = SelectSQL("SELECT COUNT(*) FROM " + QuoteSqlite(tableName) + ";");
+                return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
+            }
+            catch
+            {
+                return -1;
+            }
         }
 
         public DataTable GetCopyColumns(string databaseName, string tableName)
