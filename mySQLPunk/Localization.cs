@@ -329,6 +329,10 @@ namespace mySQLPunk
             Add("Query.CopyWithHeaders", "複製含欄位名稱", "Copy With Headers");
             Add("Query.CopySelectedRows", "複製選取資料列", "Copy Selected Rows");
             Add("Query.CopiedToClipboard", "已複製到剪貼簿。", "Copied to clipboard.");
+            Add("Query.CopyGeometryAsWkt", "複製 Geometry 為 WKT", "Copy Geometry as WKT");
+            Add("Query.CopyWktAsGeometrySql", "複製 WKT 為 Geometry SQL", "Copy WKT as Geometry SQL");
+            Add("Query.GeometryToWktFailed", "無法將選取的 Geometry 轉成 WKT。", "Cannot convert the selected geometry to WKT.");
+            Add("Query.WktRequired", "請選取 WKT 文字。", "Select WKT text first.");
             Add("Query.Paste", "貼上", "Paste");
             Add("Query.SelectAll", "全選", "Select All");
             Add("Query.SqlEditor", "SQL 編輯器", "SQL Editor");

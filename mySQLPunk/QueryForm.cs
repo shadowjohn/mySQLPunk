@@ -119,6 +119,9 @@ namespace mySQLPunk
         private ToolStripMenuItem resultsCopyRowsItem;
         private ToolStripMenuItem resultsSelectAllItem;
         private ToolStripMenuItem resultsExportItem;
+        private ToolStripSeparator resultsGeometrySeparator;
+        private ToolStripMenuItem resultsCopyGeometryWktItem;
+        private ToolStripMenuItem resultsCopyWktGeometrySqlItem;
         private ToolStripSeparator resultsEditSeparator;
         private ToolStripMenuItem resultsAddRowItem;
         private ToolStripMenuItem resultsDeleteRowItem;
@@ -1299,6 +1302,10 @@ namespace mySQLPunk
                 resultsContextMenu.Items.Add(new ToolStripSeparator());
                 resultsSelectAllItem = AddResultsMenuItem(resultsContextMenu, "selectAll", (s, e) => dgvResults.SelectAll());
                 resultsExportItem = AddResultsMenuItem(resultsContextMenu, "export", (s, e) => ExportCsv());
+                resultsGeometrySeparator = new ToolStripSeparator();
+                resultsContextMenu.Items.Add(resultsGeometrySeparator);
+                resultsCopyGeometryWktItem = AddResultsMenuItem(resultsContextMenu, "copyGeometryWkt", (s, e) => CopySelectedGeometryAsWkt());
+                resultsCopyWktGeometrySqlItem = AddResultsMenuItem(resultsContextMenu, "copyWktGeometrySql", (s, e) => CopySelectedWktAsGeometrySql());
                 resultsEditSeparator = new ToolStripSeparator();
                 resultsContextMenu.Items.Add(resultsEditSeparator);
                 resultsAddRowItem = AddResultsMenuItem(resultsContextMenu, "addRow", (s, e) => AddNewRow());
@@ -1321,6 +1328,9 @@ namespace mySQLPunk
             menu.Items.Add(new ToolStripSeparator());
             AddResultsMenuItem(menu, "selectAll", (s, e) => dgvResults.SelectAll()).Text = Localization.T("Query.SelectAll");
             AddResultsMenuItem(menu, "export", (s, e) => ExportCsv()).Text = Localization.T("Query.Export");
+            menu.Items.Add(new ToolStripSeparator());
+            AddResultsMenuItem(menu, "copyGeometryWkt", (s, e) => CopySelectedGeometryAsWkt()).Text = Localization.T("Query.CopyGeometryAsWkt");
+            AddResultsMenuItem(menu, "copyWktGeometrySql", (s, e) => CopySelectedWktAsGeometrySql()).Text = Localization.T("Query.CopyWktAsGeometrySql");
             if (_isTableDataMode)
             {
                 menu.Items.Add(new ToolStripSeparator());
@@ -1338,6 +1348,8 @@ namespace mySQLPunk
             if (resultsCopyRowsItem != null) resultsCopyRowsItem.Text = Localization.T("Query.CopySelectedRows");
             if (resultsSelectAllItem != null) resultsSelectAllItem.Text = Localization.T("Query.SelectAll");
             if (resultsExportItem != null) resultsExportItem.Text = Localization.T("Query.Export");
+            if (resultsCopyGeometryWktItem != null) resultsCopyGeometryWktItem.Text = Localization.T("Query.CopyGeometryAsWkt");
+            if (resultsCopyWktGeometrySqlItem != null) resultsCopyWktGeometrySqlItem.Text = Localization.T("Query.CopyWktAsGeometrySql");
             if (resultsAddRowItem != null) resultsAddRowItem.Text = Localization.T("Query.Add");
             if (resultsDeleteRowItem != null) resultsDeleteRowItem.Text = Localization.T("Query.Delete");
             if (resultsSaveRowsItem != null) resultsSaveRowsItem.Text = Localization.T("Query.Save");
@@ -1364,14 +1376,24 @@ namespace mySQLPunk
 
             bool hasData = ResultsHaveDataRows();
             bool hasSelection = HasResultsSelection();
+            object currentValue = GetCurrentResultCellValue();
+            bool canCopyGeometryWkt = currentValue is byte[] bytes && GeometryWktConverter.TryGeometryBytesToWkt(bytes, out _);
+            bool canCopyWktGeometrySql = currentValue != null && LooksLikeWkt(currentValue.ToString());
             SetResultsMenuItemEnabled(menu, "copyCells", hasSelection);
             SetResultsMenuItemEnabled(menu, "copyHeaders", hasSelection);
             SetResultsMenuItemEnabled(menu, "copyRows", GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "selectAll", hasData);
             SetResultsMenuItemEnabled(menu, "export", hasData);
+            SetResultsMenuItemEnabled(menu, "copyGeometryWkt", canCopyGeometryWkt);
+            SetResultsMenuItemEnabled(menu, "copyWktGeometrySql", canCopyWktGeometrySql);
             SetResultsMenuItemEnabled(menu, "addRow", dgvResults != null && dgvResults.DataSource is DataTable);
             SetResultsMenuItemEnabled(menu, "deleteRow", GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "saveRows", dgvResults != null && dgvResults.DataSource is DataTable);
+
+            bool showGeometryTools = canCopyGeometryWkt || canCopyWktGeometrySql;
+            if (resultsGeometrySeparator != null) resultsGeometrySeparator.Visible = showGeometryTools;
+            if (resultsCopyGeometryWktItem != null) resultsCopyGeometryWktItem.Visible = showGeometryTools;
+            if (resultsCopyWktGeometrySqlItem != null) resultsCopyWktGeometrySqlItem.Visible = showGeometryTools;
         }
 
         private static void SetResultsMenuItemEnabled(ContextMenuStrip menu, string name, bool enabled)
@@ -1381,6 +1403,70 @@ namespace mySQLPunk
             {
                 items[0].Enabled = enabled;
             }
+        }
+
+        private object GetCurrentResultCellValue()
+        {
+            if (dgvResults == null || dgvResults.CurrentCell == null) return null;
+            if (dgvResults.CurrentCell.RowIndex < 0 || dgvResults.CurrentCell.ColumnIndex < 0) return null;
+            return dgvResults.CurrentCell.Value;
+        }
+
+        private void CopySelectedGeometryAsWkt()
+        {
+            object value = GetCurrentResultCellValue();
+            if (!(value is byte[] bytes) || !GeometryWktConverter.TryGeometryBytesToWkt(bytes, out string wkt))
+            {
+                MessageBox.Show(Localization.T("Query.GeometryToWktFailed"), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            Clipboard.SetText(wkt);
+            UpdateStatus(Localization.T("Query.CopiedToClipboard"));
+        }
+
+        private void CopySelectedWktAsGeometrySql()
+        {
+            object value = GetCurrentResultCellValue();
+            string wkt = value == null ? "" : value.ToString().Trim();
+            if (!LooksLikeWkt(wkt))
+            {
+                MessageBox.Show(Localization.T("Query.WktRequired"), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            Clipboard.SetText(BuildGeometrySqlExpression(wkt));
+            UpdateStatus(Localization.T("Query.CopiedToClipboard"));
+        }
+
+        private string BuildGeometrySqlExpression(string wkt)
+        {
+            string literal = "'" + wkt.Replace("'", "''") + "'";
+            if (IsSqlServerProvider()) return "geometry::STGeomFromText(" + literal + ", 0)";
+            if (IsOracleProvider()) return "SDO_GEOMETRY(" + literal + ", 0)";
+            if (IsSqliteProvider()) return "ST_GeomFromText(" + literal + ", 0)";
+            return "ST_GeomFromText(" + literal + ")";
+        }
+
+        private static bool LooksLikeWkt(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            string text = value.TrimStart();
+            string[] prefixes =
+            {
+                "POINT", "LINESTRING", "POLYGON", "MULTIPOINT", "MULTILINESTRING",
+                "MULTIPOLYGON", "GEOMETRYCOLLECTION"
+            };
+
+            foreach (string prefix in prefixes)
+            {
+                if (!text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                if (text.Length == prefix.Length) return false;
+                char next = text[prefix.Length];
+                return char.IsWhiteSpace(next) || next == '(';
+            }
+
+            return false;
         }
 
         private void DgvResults_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
