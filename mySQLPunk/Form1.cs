@@ -533,7 +533,8 @@ namespace mySQLPunk
                     Tag = ConnectionGroupNodeTag,
                     Name = ConnectionGroupNodeTag + ":" + grp,
                     ImageIndex = 23,          // folder_closed
-                    SelectedImageIndex = 24   // folder_open
+                    SelectedImageIndex = 24,  // folder_open
+                    NodeFont = new Font(db_tree.Font, FontStyle.Bold)
                 };
                 db_tree.Nodes.Add(gNode);
                 groupNodeMap[grp] = gNode;
@@ -567,9 +568,37 @@ namespace mySQLPunk
             foreach (var gNode in groupNodeMap.Values) gNode.Expand();
 
             db_tree.ImageList = myImageList;
+            db_tree.Indent = 20;
+            db_tree.ItemHeight = 22;
+
+            // 群組節點展開/收合時切換資料夾圖示
+            db_tree.AfterExpand -= db_tree_AfterExpand;
+            db_tree.AfterCollapse -= db_tree_AfterCollapse;
+            db_tree.AfterExpand += db_tree_AfterExpand;
+            db_tree.AfterCollapse += db_tree_AfterCollapse;
+
             SetWindowTheme(db_tree.Handle, "explorer", null);
 
         }
+
+        private void db_tree_AfterExpand(object sender, TreeViewEventArgs e)
+        {
+            if (IsConnectionGroupNode(e.Node))
+            {
+                e.Node.ImageIndex = 24;          // folder_open
+                e.Node.SelectedImageIndex = 24;
+            }
+        }
+
+        private void db_tree_AfterCollapse(object sender, TreeViewEventArgs e)
+        {
+            if (IsConnectionGroupNode(e.Node))
+            {
+                e.Node.ImageIndex = 23;          // folder_closed
+                e.Node.SelectedImageIndex = 24;  // 選取時仍顯示開啟
+            }
+        }
+
         private void thirty_two_change(string kind)
         {
             List<object> btns = new List<object>();
