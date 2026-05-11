@@ -480,6 +480,7 @@ namespace mySQLPunk
                     newNode,
                     myN.connections[i]["db_kind"].ToString(),
                     myN.connections[i]["isConnect"].ToString() != "F");
+                TryPopulateOpenConnectionDatabases(newNode, i);
 
                 db_tree.Nodes.Add(newNode);
             }
@@ -5718,6 +5719,11 @@ namespace mySQLPunk
             db_tree.SelectedNode = node;
             if (IsConnectionOpen(node.Index))
             {
+                if (node.Nodes.Count == 0)
+                {
+                    RefreshConnectionDatabaseNodes(node);
+                }
+
                 node.Expand();
                 UpdateMainStatus(Localization.Format("Status.ConnectionAlreadyOpen", node.Text));
                 return;
@@ -5825,7 +5831,29 @@ namespace mySQLPunk
             if (root == null || root.Index < 0 || root.Index >= myN.connections.Count) return;
             if (!IsConnectionOpen(root.Index)) return;
 
-            IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
+            PopulateOpenConnectionDatabases(root, root.Index);
+            root.Expand();
+            UpdateMainStatus(Localization.Format("Connection.Refreshed", root.Text));
+        }
+
+        private void TryPopulateOpenConnectionDatabases(TreeNode root, int index)
+        {
+            try
+            {
+                PopulateOpenConnectionDatabases(root, index);
+            }
+            catch
+            {
+                root.Nodes.Clear();
+            }
+        }
+
+        private void PopulateOpenConnectionDatabases(TreeNode root, int index)
+        {
+            if (root == null || index < 0 || index >= myN.connections.Count) return;
+            if (!IsConnectionOpen(index)) return;
+
+            IDatabase db = (IDatabase)myN.connections[index]["pdo"];
             root.Nodes.Clear();
             foreach (string databaseName in db.GetDatabases())
             {
@@ -5834,9 +5862,6 @@ namespace mySQLPunk
                 newNode.SelectedImageIndex = 10;
                 root.Nodes.Add(newNode);
             }
-
-            root.Expand();
-            UpdateMainStatus(Localization.Format("Connection.Refreshed", root.Text));
         }
 
         private void SelectConnectionDatabaseNode(TreeNode root, string databaseName)
@@ -6430,6 +6455,11 @@ namespace mySQLPunk
             //連線測試
             if (db["isConnect"].ToString() == "T")
             {
+                if (tree.SelectedNode.Nodes.Count == 0)
+                {
+                    RefreshConnectionDatabaseNodes(tree.SelectedNode);
+                }
+
                 tree.SelectedNode.Expand();
                 UpdateMainStatus(Localization.Format("Status.ConnectionAlreadyOpen", tree.SelectedNode.Text));
                 //((TreeView)sender).SelectedNode.Toggle();
