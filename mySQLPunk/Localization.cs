@@ -59,6 +59,20 @@ namespace mySQLPunk
             Add("Menu.ColorPurple", "紫色", "Purple");
             Add("Menu.ManageGroups", "管理群組", "Manage Groups");
             Add("Menu.GroupUnavailable", "尚未建立群組功能", "Groups are not available yet");
+            Add("Menu.GroupName", "群組名稱", "Group Name");
+            Add("Menu.GroupNamePrompt", "請輸入群組名稱：", "Enter a group name:");
+            Add("Menu.MoveToGroup", "移至群組...", "Move to Group...");
+            Add("Menu.RemoveFromGroup", "移出群組", "Remove from Group");
+            Add("Menu.RenameGroup", "重新命名群組...", "Rename Group...");
+            Add("Menu.DeleteGroup", "刪除群組", "Delete Group");
+            Add("Menu.GroupCreated", "群組已建立：{0}", "Group created: {0}");
+            Add("Menu.GroupDeleted", "群組已刪除：{0}（連線已移回根目錄）", "Group deleted: {0} (connections moved to root)");
+            Add("Menu.GroupRenamed", "群組已重新命名：{0} → {1}", "Group renamed: {0} → {1}");
+            Add("Menu.ConnectionMovedToGroup", "連線已移至群組：{0}", "Connection moved to group: {0}");
+            Add("Menu.ConnectionRemovedFromGroup", "連線已移出群組", "Connection removed from group");
+            Add("Menu.GroupNameRequired", "請輸入群組名稱。", "Please enter a group name.");
+            Add("Menu.GroupNameExists", "群組名稱已存在：{0}", "Group name already exists: {0}");
+            Add("Menu.ConfirmDeleteGroup", "確定要刪除群組「{0}」嗎？其中的連線將移回根目錄。", "Delete group \"{0}\"? Connections in this group will be moved to root.");
             Add("Menu.Share", "分享...", "Share...");
             Add("Menu.NewConnection", "新增連線", "New Connection");
             Add("Menu.OpenConnection", "開啟連線", "Open Connection");
@@ -229,6 +243,7 @@ namespace mySQLPunk
             Add("Connection.CommandLineUnavailable", "命令列介面目前尚未支援此連線類型。", "Command line interface is not supported for this connection type yet.");
             Add("Connection.CommandLineOpened", "已開啟命令列介面。", "Command line interface opened.");
             Add("Connection.CommandLineOpenFailed", "開啟命令列介面失敗：{0}", "Open command line interface failed: {0}");
+            Add("Connection.CliNotFound", "找不到 {0} 命令列工具，請先安裝並確認已加入 PATH。\n說明：{1}", "Cannot find {0} CLI tool. Please install it and make sure it is added to PATH.\nHelp: {1}");
             Add("Connection.MarkedColor", "已標記連線色彩：{0}", "Connection color marked: {0}");
 
             Add("ConnectionWizard.Title", "選取連線類型", "Select Connection Type");

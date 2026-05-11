@@ -51,10 +51,13 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 ### 優先待辦
 
-- **群組功能尚未建立**
+- **群組功能 ✅ 已完成**
   - 觸發位置：左側樹狀清單與右鍵選單中的「新增群組 / 管理群組」。
-  - 現況：點擊會顯示「尚未建立群組功能」。
-  - 後續方向：定義群組資料結構、儲存位置、拖曳/搬移節點規則，以及語系文字。
+  - 完成內容：
+    - 連線支援 `conn_group` 欄位，儲存與讀取已整合至 `setting.ini`。
+    - 左側樹狀清單以群組節點分類顯示連線。
+    - 右鍵選單支援「移至群組」、「移出群組」、「重新命名群組」、「刪除群組」。
+    - 語系文字已補齊。
 
 - **多連線設定檔尚未支援**
   - 觸發位置：連線根節點右鍵選單的「切換連線設定檔」。
@@ -63,9 +66,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 ### Provider 與資料庫操作限制
 
-- **命令列介面依賴本機 CLI**
+- **命令列介面依賴本機 CLI ✅ 偵測已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
-  - 後續方向：補上 CLI 可用性偵測、可自訂 CLI 路徑，以及更完整的密碼安全傳遞策略。
+  - 完成內容：已加入 CLI 可用性偵測（先透過 `where.exe`，再掃描 `PATH`）。找不到時會顯示安裝說明連結，不會直接開啟空白終端機。
+  - 後續方向：可自訂 CLI 路徑，以及更完整的密碼安全傳遞策略。
 
 - **部分連線類型尚未支援編輯**
   - 現況：不支援的連線編輯會顯示「此連線類型尚未支援編輯」。
@@ -79,9 +83,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 現況：SQLite 本身沒有欄位註解語法，Table Designer 與補註解流程會擋下。
   - 後續方向：若需要 SQLite 註解，可另設 sidecar metadata table，但需先定義格式與匯出策略。
 
-- **SpatiaLite extension 可能載入失敗**
+- **SpatiaLite extension 可能載入失敗 ✅ 降級行為已改善**
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。
-  - 後續方向：補齊 UI 診斷與無 SpatiaLite 時的降級行為。
+  - 完成內容：載入失敗訊息已改用語系化字串（`Connection.SpatiaLiteLoadFailed`），並同步更新狀態列，降級行為更清楚。
+  - 後續方向：UI 診斷工具（顯示 extension 路徑、版本等）。
 
 ### Table Designer 限制
 

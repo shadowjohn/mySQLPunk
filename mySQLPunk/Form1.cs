@@ -71,6 +71,11 @@ namespace mySQLPunk
         private bool _allowTreeLabelEdit = false;
         private readonly List<string> _favoriteNodePaths = new List<string>();
 
+        // 群組功能：快速查詢連線節點（key = 連線索引）
+        private TreeNode[] _connectionTreeNodes = new TreeNode[0];
+
+        private const string ConnectionGroupNodeTag = "__CONN_GROUP__";
+
         private class TreeDatabaseTarget
         {
             public IDatabase Database;
@@ -153,10 +158,7 @@ namespace mySQLPunk
             if (index >= 0 && index < myN.connections.Count)
             {
                 myN.connections[index]["isConnect"] = "F";
-                if (db_tree != null && index < db_tree.Nodes.Count)
-                {
-                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), false);
-                }
+                ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), false);
             }
             if (tree != null && tree.SelectedNode != null)
             {
@@ -476,18 +478,57 @@ namespace mySQLPunk
 
             db_tree.ShowPlusMinus = true;
             db_tree.Nodes.Clear();
+
+            // 收集所有群組名稱（依字母排序）
+            var groupNames = myN.connections
+                .Select(c => GetConnectionValue(c, "conn_group"))
+                .Where(g => !string.IsNullOrWhiteSpace(g))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(g => g)
+                .ToList();
+
+            // 建立群組節點
+            var groupNodeMap = new Dictionary<string, TreeNode>(StringComparer.Ordinal);
+            foreach (string grp in groupNames)
+            {
+                TreeNode gNode = new TreeNode(grp)
+                {
+                    Tag = ConnectionGroupNodeTag,
+                    Name = ConnectionGroupNodeTag + ":" + grp,
+                    ImageIndex = 10,
+                    SelectedImageIndex = 10
+                };
+                db_tree.Nodes.Add(gNode);
+                groupNodeMap[grp] = gNode;
+            }
+
+            // 建立連線節點並記錄至 _connectionTreeNodes
+            _connectionTreeNodes = new TreeNode[myN.connections.Count];
             for (int i = 0, max_i = myN.connections.Count; i < max_i; i++)
             {
-                //From : https://stackoverflow.com/questions/3415354/how-to-avoid-winforms-treeview-icon-changes-when-item-selected
-                TreeNode newNode = new TreeNode(myN.connections[i]["conn_name"].ToString(), i, i);
+                TreeNode newNode = new TreeNode(myN.connections[i]["conn_name"].ToString());
+                newNode.Tag = i; // 以整數 Tag 儲存連線索引
                 ApplyConnectionNodeIcon(
                     newNode,
                     myN.connections[i]["db_kind"].ToString(),
                     myN.connections[i]["isConnect"].ToString() != "F");
                 TryPopulateOpenConnectionDatabases(newNode, i);
 
-                db_tree.Nodes.Add(newNode);
+                string connGroup = GetConnectionValue(myN.connections[i], "conn_group");
+                if (!string.IsNullOrWhiteSpace(connGroup) && groupNodeMap.ContainsKey(connGroup))
+                {
+                    groupNodeMap[connGroup].Nodes.Add(newNode);
+                }
+                else
+                {
+                    db_tree.Nodes.Add(newNode);
+                }
+                _connectionTreeNodes[i] = newNode;
             }
+
+            // 展開所有群組節點
+            foreach (var gNode in groupNodeMap.Values) gNode.Expand();
+
             db_tree.ImageList = myImageList;
             SetWindowTheme(db_tree.Handle, "explorer", null);
 
@@ -1219,6 +1260,176 @@ namespace mySQLPunk
             return parts[parts.Length - 1] + " (" + parts[0] + ")";
         }
 
+        // ── 連線群組 helpers ────────────────────────────────────────────
+
+        private static bool IsConnectionGroupNode(TreeNode node)
+        {
+            return node != null && (node.Tag as string) == ConnectionGroupNodeTag;
+        }
+
+        private int GetConnectionIndex(TreeNode node)
+        {
+            if (node == null) return -1;
+            if (node.Tag is int idx) return idx;
+            return -1;
+        }
+
+        private TreeNode FindConnectionNode(int index)
+        {
+            if (index >= 0 && index < _connectionTreeNodes.Length && _connectionTreeNodes[index] != null)
+                return _connectionTreeNodes[index];
+            return null;
+        }
+
+        private string GetConnectionGroupName(int index)
+        {
+            if (index < 0 || index >= myN.connections.Count) return string.Empty;
+            return GetConnectionValue(myN.connections[index], "conn_group");
+        }
+
+        private List<string> GetAllGroupNames()
+        {
+            return myN.connections
+                .Select(c => GetConnectionValue(c, "conn_group"))
+                .Where(g => !string.IsNullOrWhiteSpace(g))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(g => g)
+                .ToList();
+        }
+
+        private void ShowCreateGroupDialog()
+        {
+            string name = PromptForText(
+                Localization.T("Menu.NewGroup"),
+                Localization.T("Menu.GroupNamePrompt"),
+                "");
+            if (string.IsNullOrWhiteSpace(name)) return;
+
+            // 若已有連線屬於此群組，則只需要重繪
+            if (GetAllGroupNames().Contains(name))
+            {
+                UpdateMainStatus(Localization.Format("Menu.GroupNameExists", name));
+                MessageBox.Show(Localization.Format("Menu.GroupNameExists", name),
+                    Localization.T("Menu.NewGroup"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // 新群組目前沒有連線，只記錄名稱（下次加入連線時自動建立）
+            UpdateMainStatus(Localization.Format("Menu.GroupCreated", name));
+        }
+
+        private void MoveConnectionToGroup(int index, string groupName)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            myN.connections[index]["conn_group"] = groupName ?? "";
+            myN.setSettingINI();
+            drawLists();
+            UpdateMainStatus(string.IsNullOrWhiteSpace(groupName)
+                ? Localization.T("Menu.ConnectionRemovedFromGroup")
+                : Localization.Format("Menu.ConnectionMovedToGroup", groupName));
+        }
+
+        private void ShowMoveToGroupDialog(int index)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+
+            List<string> groups = GetAllGroupNames();
+
+            using (Form dlg = new Form())
+            {
+                dlg.Text = Localization.T("Menu.MoveToGroup");
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.Size = new Size(360, 230);
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+
+                Label lbl = new Label { Text = Localization.T("Menu.GroupName"), Location = new Point(16, 18), AutoSize = true };
+                ComboBox combo = new ComboBox
+                {
+                    Location = new Point(16, 40),
+                    Width = 310,
+                    DropDownStyle = ComboBoxStyle.DropDownList
+                };
+                foreach (string g in groups) combo.Items.Add(g);
+
+                Label lblNew = new Label { Text = Localization.T("Menu.GroupNamePrompt"), Location = new Point(16, 86), AutoSize = true };
+                TextBox txtNew = new TextBox { Location = new Point(16, 108), Width = 310 };
+
+                Button btnOk = new Button
+                {
+                    Text = Localization.T("Common.OK"),
+                    DialogResult = DialogResult.OK,
+                    Location = new Point(160, 150),
+                    Size = new Size(80, 30)
+                };
+                Button btnCancel = new Button
+                {
+                    Text = Localization.T("Common.Cancel"),
+                    DialogResult = DialogResult.Cancel,
+                    Location = new Point(248, 150),
+                    Size = new Size(80, 30)
+                };
+
+                dlg.Controls.AddRange(new Control[] { lbl, combo, lblNew, txtNew, btnOk, btnCancel });
+                dlg.AcceptButton = btnOk;
+                dlg.CancelButton = btnCancel;
+                ThemeManager.ApplyTo(dlg);
+
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                string target = txtNew.Text.Trim();
+                if (string.IsNullOrWhiteSpace(target) && combo.SelectedItem != null)
+                    target = combo.SelectedItem.ToString();
+                if (string.IsNullOrWhiteSpace(target)) return;
+
+                MoveConnectionToGroup(index, target);
+            }
+        }
+
+        private void DeleteConnectionGroup(string groupName)
+        {
+            if (string.IsNullOrWhiteSpace(groupName)) return;
+
+            DialogResult confirm = MessageBox.Show(
+                Localization.Format("Menu.ConfirmDeleteGroup", groupName),
+                Localization.T("Menu.DeleteGroup"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (confirm != DialogResult.Yes) return;
+
+            foreach (var conn in myN.connections)
+            {
+                if (GetConnectionValue(conn, "conn_group") == groupName)
+                    conn["conn_group"] = "";
+            }
+            myN.setSettingINI();
+            drawLists();
+            UpdateMainStatus(Localization.Format("Menu.GroupDeleted", groupName));
+        }
+
+        private void RenameConnectionGroup(string oldName)
+        {
+            if (string.IsNullOrWhiteSpace(oldName)) return;
+
+            string newName = PromptForText(
+                Localization.T("Menu.RenameGroup"),
+                Localization.T("Menu.GroupNamePrompt"),
+                oldName);
+            if (string.IsNullOrWhiteSpace(newName) || newName == oldName) return;
+
+            foreach (var conn in myN.connections)
+            {
+                if (GetConnectionValue(conn, "conn_group") == oldName)
+                    conn["conn_group"] = newName;
+            }
+            myN.setSettingINI();
+            drawLists();
+            UpdateMainStatus(Localization.Format("Menu.GroupRenamed", oldName, newName));
+        }
+
+        // ── end 連線群組 helpers ────────────────────────────────────────
+
         private string[] GetTreePathParts(TreeNode node)
         {
             if (node == null) return new string[0];
@@ -1227,6 +1438,12 @@ namespace mySQLPunk
             TreeNode current = node;
             while (current != null)
             {
+                // 跳過連線群組節點，不納入路徑
+                if (IsConnectionGroupNode(current))
+                {
+                    current = current.Parent;
+                    continue;
+                }
                 string groupKey = GetTreeGroupKey(current);
                 parts.Insert(0, string.IsNullOrWhiteSpace(groupKey) ? current.Text : groupKey);
                 current = current.Parent;
@@ -3941,11 +4158,14 @@ namespace mySQLPunk
                 conn["isConnect"] = "F";
                 conn["pdo"] = null;
                 
-                TreeNode root = db_tree.Nodes[index];
-                root.Nodes.Clear();
-                // 加回一個虛擬節點以便下次雙擊展開
-                root.Nodes.Add("loading..."); 
-                root.Collapse();
+                TreeNode root = FindConnectionNode(index);
+                if (root != null)
+                {
+                    root.Nodes.Clear();
+                    // 加回一個虛擬節點以便下次雙擊展開
+                    root.Nodes.Add("loading...");
+                    root.Collapse();
+                }
                 
                 // 重設右側與中間面板
                 table_top.DataSource = null;
@@ -3971,12 +4191,15 @@ namespace mySQLPunk
             TreeNode node = db_tree.SelectedNode;
             if (node == null) return null;
 
-            while (node.Parent != null)
-            {
+            // 向上走直到找到連線節點（跳過群組節點）
+            while (node != null && IsConnectionGroupNode(node))
                 node = node.Parent;
-            }
+            if (node == null) return null;
 
-            return node.Index >= 0 && node.Index < myN.connections.Count ? node : null;
+            while (node.Parent != null && !IsConnectionGroupNode(node.Parent))
+                node = node.Parent;
+
+            return GetConnectionIndex(node) >= 0 ? node : null;
         }
 
         private void CloseSelectedTab()
@@ -5684,7 +5907,7 @@ namespace mySQLPunk
             menu.Items.Add(newConnectionItem);
 
             ToolStripMenuItem newGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewGroup"));
-            newGroupItem.Click += (s, ev) => ShowGroupUnavailable();
+            newGroupItem.Click += (s, ev) => ShowCreateGroupDialog();
             menu.Items.Add(newGroupItem);
 
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
@@ -5715,7 +5938,23 @@ namespace mySQLPunk
 
             ContextMenuStrip menu = new ContextMenuStrip();
 
-            if (node.Parent == null)
+            // 連線群組節點：顯示重新命名 / 刪除群組
+            if (IsConnectionGroupNode(node))
+            {
+                string groupName = node.Text;
+                ToolStripMenuItem renameGroupItem = new ToolStripMenuItem(Localization.T("Menu.RenameGroup"));
+                renameGroupItem.Click += (s, ev) => RenameConnectionGroup(groupName);
+                menu.Items.Add(renameGroupItem);
+
+                ToolStripMenuItem deleteGroupItem = new ToolStripMenuItem(Localization.T("Menu.DeleteGroup"));
+                deleteGroupItem.Click += (s, ev) => DeleteConnectionGroup(groupName);
+                menu.Items.Add(deleteGroupItem);
+
+                ThemeManager.ApplyToolStrip(menu);
+                return menu;
+            }
+
+            if (node.Parent == null || IsConnectionGroupNode(node.Parent))
             {
                 AddConnectionRootMenuItems(menu, node);
             }
@@ -6874,9 +7113,10 @@ namespace mySQLPunk
 
         private void AddConnectionRootMenuItems(ContextMenuStrip menu, TreeNode node)
         {
-            if (node == null || node.Index < 0 || node.Index >= myN.connections.Count) return;
+            int connIdx = GetConnectionIndex(node);
+            if (connIdx < 0 || connIdx >= myN.connections.Count) return;
 
-            bool isConnected = IsConnectionOpen(node.Index);
+            bool isConnected = IsConnectionOpen(connIdx);
 
             ToolStripMenuItem openItem = new ToolStripMenuItem(Localization.T("Menu.OpenConnection"));
             openItem.Click += (s, ev) => OpenConnectionNode(node);
@@ -6892,7 +7132,7 @@ namespace mySQLPunk
             menu.Items.Add(new ToolStripSeparator());
 
             ToolStripMenuItem editItem = new ToolStripMenuItem(Localization.T("Tool.EditConnection"));
-            editItem.Click += (s, ev) => db_tree_edit_connection(node.Index);
+            editItem.Click += (s, ev) => db_tree_edit_connection(connIdx);
             menu.Items.Add(editItem);
 
             ToolStripMenuItem newItem = new ToolStripMenuItem(Localization.T("Menu.NewConnection"));
@@ -6900,11 +7140,11 @@ namespace mySQLPunk
             menu.Items.Add(newItem);
 
             ToolStripMenuItem deleteItem = new ToolStripMenuItem(Localization.T("Tool.DeleteConnection"));
-            deleteItem.Click += (s, ev) => db_tree_delete_connection(node.Index);
+            deleteItem.Click += (s, ev) => db_tree_delete_connection(connIdx);
             menu.Items.Add(deleteItem);
 
             ToolStripMenuItem duplicateItem = new ToolStripMenuItem(Localization.T("Tool.CopyConnection"));
-            duplicateItem.Click += (s, ev) => DuplicateConnection(node.Index);
+            duplicateItem.Click += (s, ev) => DuplicateConnection(connIdx);
             menu.Items.Add(duplicateItem);
 
             menu.Items.Add(new ToolStripSeparator());
@@ -6923,7 +7163,7 @@ namespace mySQLPunk
 
             ToolStripMenuItem commandLineItem = new ToolStripMenuItem(Localization.T("Tool.CommandLine"));
             commandLineItem.Enabled = isConnected;
-            commandLineItem.Click += (s, ev) => OpenDatabaseCommandLine(node.Index);
+            commandLineItem.Click += (s, ev) => OpenDatabaseCommandLine(connIdx);
             menu.Items.Add(commandLineItem);
 
             ToolStripMenuItem executeSqlFileItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteSqlFile"));
@@ -6948,14 +7188,21 @@ namespace mySQLPunk
 
             AddConnectionColorMenu(menu, node);
 
-            ToolStripMenuItem groupItem = new ToolStripMenuItem(Localization.T("Menu.ManageGroups"));
-            ToolStripMenuItem groupUnavailableItem = new ToolStripMenuItem(Localization.T("Menu.GroupUnavailable"));
-            groupUnavailableItem.Enabled = false;
-            groupItem.DropDownItems.Add(groupUnavailableItem);
-            menu.Items.Add(groupItem);
+            // 群組管理：移至群組 / 移出群組
+            ToolStripMenuItem moveToGroupItem = new ToolStripMenuItem(Localization.T("Menu.MoveToGroup"));
+            moveToGroupItem.Click += (s, ev) => ShowMoveToGroupDialog(connIdx);
+            menu.Items.Add(moveToGroupItem);
+
+            string currentGroup = GetConnectionGroupName(connIdx);
+            if (!string.IsNullOrWhiteSpace(currentGroup))
+            {
+                ToolStripMenuItem removeFromGroupItem = new ToolStripMenuItem(Localization.T("Menu.RemoveFromGroup"));
+                removeFromGroupItem.Click += (s, ev) => MoveConnectionToGroup(connIdx, "");
+                menu.Items.Add(removeFromGroupItem);
+            }
 
             ToolStripMenuItem shareItem = new ToolStripMenuItem(Localization.T("Menu.Share"));
-            shareItem.Click += (s, ev) => ShareConnection(node.Index);
+            shareItem.Click += (s, ev) => ShareConnection(connIdx);
             menu.Items.Add(shareItem);
 
             menu.Items.Add(new ToolStripSeparator());
@@ -6978,7 +7225,8 @@ namespace mySQLPunk
         {
             if (node == null) return;
             db_tree.SelectedNode = node;
-            if (IsConnectionOpen(node.Index))
+            int connIdx = GetConnectionIndex(node);
+            if (IsConnectionOpen(connIdx))
             {
                 if (node.Nodes.Count == 0)
                 {
@@ -7274,6 +7522,17 @@ namespace mySQLPunk
                 return;
             }
 
+            // CLI 可用性偵測
+            string cliExe = GetCliExecutableName(GetConnectionValue(conn, "db_kind").ToLowerInvariant());
+            if (!string.IsNullOrEmpty(cliExe) && !IsCliInPath(cliExe))
+            {
+                string installHint = GetCliInstallHint(GetConnectionValue(conn, "db_kind").ToLowerInvariant());
+                string notFoundMsg = Localization.Format("Connection.CliNotFound", cliExe, installHint);
+                UpdateMainStatus(notFoundMsg);
+                MessageBox.Show(notFoundMsg, Localization.T("Tool.CommandLine"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo("cmd.exe");
@@ -7288,6 +7547,80 @@ namespace mySQLPunk
                 UpdateMainStatus(message);
                 MessageBox.Show(message, Localization.T("Tool.CommandLine"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private static string GetCliExecutableName(string dbKind)
+        {
+            switch (dbKind)
+            {
+                case "mysql":      return "mysql.exe";
+                case "postgresql": return "psql.exe";
+                case "mssql":
+                case "sqlserver":  return "sqlcmd.exe";
+                case "oracle":     return "sqlplus.exe";
+                case "sqlite":
+                    // 優先使用內建 sqlite3.exe，不需要偵測 PATH
+                    string bundled = Path.Combine(
+                        AppDomain.CurrentDomain.BaseDirectory,
+                        "binary", "sqlite3_ext", "sqlite3.exe");
+                    return File.Exists(bundled) ? null : "sqlite3.exe";
+                default:           return null;
+            }
+        }
+
+        private static string GetCliInstallHint(string dbKind)
+        {
+            switch (dbKind)
+            {
+                case "mysql":      return "https://dev.mysql.com/downloads/";
+                case "postgresql": return "https://www.postgresql.org/download/";
+                case "mssql":
+                case "sqlserver":  return "https://learn.microsoft.com/zh-tw/sql/tools/sqlcmd/sqlcmd-utility";
+                case "oracle":     return "https://www.oracle.com/tools/downloads/sqlplus-downloads/";
+                case "sqlite":     return "https://www.sqlite.org/download.html";
+                default:           return "";
+            }
+        }
+
+        private static bool IsCliInPath(string executableName)
+        {
+            if (string.IsNullOrEmpty(executableName)) return true;
+
+            // 先用 where.exe 查詢（Windows）
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo("where")
+                {
+                    Arguments = executableName,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                using (Process p = Process.Start(psi))
+                {
+                    string output = p.StandardOutput.ReadToEnd();
+                    p.WaitForExit();
+                    if (p.ExitCode == 0 && !string.IsNullOrWhiteSpace(output))
+                        return true;
+                }
+            }
+            catch { /* where.exe 不存在時 fallback 到 PATH 掃描 */ }
+
+            // Fallback：手動掃描 PATH
+            string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (string dir in pathEnv.Split(';'))
+            {
+                string trimmed = dir.Trim();
+                if (string.IsNullOrEmpty(trimmed)) continue;
+                try
+                {
+                    if (File.Exists(Path.Combine(trimmed, executableName)))
+                        return true;
+                }
+                catch { }
+            }
+            return false;
         }
 
         private string BuildDatabaseCommandLine(Dictionary<string, object> conn)
@@ -7690,10 +8023,11 @@ namespace mySQLPunk
             dialogMyBoxOn("資料載入中...", false);
             var m = GetTreePathParts(tree.SelectedNode);
 
-            // 取得根連線索引 (永遠以最頂層節點為準)
+            // 取得根連線節點（跳過連線群組節點）
             TreeNode rootNode = tree.SelectedNode;
-            while (rootNode.Parent != null) rootNode = rootNode.Parent;
-            int index = rootNode.Index;
+            while (rootNode.Parent != null && !IsConnectionGroupNode(rootNode.Parent))
+                rootNode = rootNode.Parent;
+            int index = GetConnectionIndex(rootNode);
 
             if (m.Length == 2)
             {
@@ -7757,7 +8091,8 @@ namespace mySQLPunk
             }
             else
             {
-                db_tree.Nodes[index].Nodes.Clear();
+                TreeNode connRoot = FindConnectionNode(index);
+                if (connRoot != null) connRoot.Nodes.Clear();
 
                 //連線，展開
                 switch (db["db_kind"].ToString().ToLower())
@@ -7780,7 +8115,7 @@ namespace mySQLPunk
                                 {
                                     ((my_postgresql)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
+                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
                                     //取得 databases 列表
                                     string SQL = @"
                                         SELECT
@@ -7796,7 +8131,7 @@ namespace mySQLPunk
                                         TreeNode newNode = new TreeNode(dt.Rows[i]["Database"].ToString(), i, i);
                                         newNode.ImageIndex = 10;
                                         newNode.SelectedImageIndex = 10;
-                                        db_tree.Nodes[index].Nodes.Add(newNode);
+                                        FindConnectionNode(index)?.Nodes.Add(newNode);
                                     }
                                     ((TreeView)sender).SelectedNode.ExpandAll();
                                 }
@@ -7821,11 +8156,13 @@ namespace mySQLPunk
                                 {
                                     ((my_sqlite)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
+                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
                                     if (!((my_sqlite)myN.connections[index]["pdo"]).SpatiaLiteEnabled)
                                     {
+                                        string spatiaLiteErr = ((my_sqlite)myN.connections[index]["pdo"]).SpatiaLiteLoadError;
+                                        UpdateMainStatus(Localization.Format("Connection.SpatiaLiteLoadFailed", spatiaLiteErr));
                                         MessageBox.Show(
-                                            "SQLite 已連線，但 SpatiaLite 載入失敗：\r\n" + ((my_sqlite)myN.connections[index]["pdo"]).SpatiaLiteLoadError,
+                                            Localization.Format("Connection.SpatiaLiteLoadFailed", spatiaLiteErr),
                                             "SpatiaLite",
                                             MessageBoxButtons.OK,
                                             MessageBoxIcon.Warning);
@@ -7844,7 +8181,7 @@ namespace mySQLPunk
                                         TreeNode newNode = new TreeNode(dt.Rows[i]["Database"].ToString(), i, i);
                                         newNode.ImageIndex = 10;
                                         newNode.SelectedImageIndex = 10;
-                                        db_tree.Nodes[index].Nodes.Add(newNode);
+                                        FindConnectionNode(index)?.Nodes.Add(newNode);
                                     }
                                     ((TreeView)sender).SelectedNode.ExpandAll();
                                 }
@@ -7872,7 +8209,7 @@ namespace mySQLPunk
                                 {
                                     ((my_mysql)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
+                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
                                     //取得 databases 列表
                                     string SQL = @"
                                     show databases;
@@ -7885,7 +8222,7 @@ namespace mySQLPunk
                                         TreeNode newNode = new TreeNode(dt.Rows[i]["Database"].ToString(), i, i);
                                         newNode.ImageIndex = 10;
                                         newNode.SelectedImageIndex = 10;
-                                        db_tree.Nodes[index].Nodes.Add(newNode);
+                                        FindConnectionNode(index)?.Nodes.Add(newNode);
                                     }
                                     ((TreeView)sender).SelectedNode.ExpandAll();
                                 }
@@ -7908,14 +8245,14 @@ namespace mySQLPunk
                                 {
                                     ((my_oracle)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
+                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
                                     List<string> schemas = ((my_oracle)myN.connections[index]["pdo"]).GetDatabases();
                                     for (int i = 0, max_i = schemas.Count; i < max_i; i++)
                                     {
                                         TreeNode newNode = new TreeNode(schemas[i], i, i);
                                         newNode.ImageIndex = 10;
                                         newNode.SelectedImageIndex = 10;
-                                        db_tree.Nodes[index].Nodes.Add(newNode);
+                                        FindConnectionNode(index)?.Nodes.Add(newNode);
                                     }
                                     ((TreeView)sender).SelectedNode.ExpandAll();
                                 }
@@ -7941,7 +8278,7 @@ namespace mySQLPunk
                                 {
                                     ((my_mssql)myN.connections[index]["pdo"]).open();
                                     myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(db_tree.Nodes[index], myN.connections[index]["db_kind"].ToString(), true);
+                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
                                     //取得 databases 列表
                                     string SQL = @"
                                   select [name] as [Database] from sys.databases WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb')
@@ -7954,7 +8291,7 @@ namespace mySQLPunk
                                         TreeNode newNode = new TreeNode(dt.Rows[i]["Database"].ToString(), i, i);
                                         newNode.ImageIndex = 10;
                                         newNode.SelectedImageIndex = 10;
-                                        db_tree.Nodes[index].Nodes.Add(newNode);
+                                        FindConnectionNode(index)?.Nodes.Add(newNode);
                                     }
                                     ((TreeView)sender).SelectedNode.ExpandAll();
                                 }

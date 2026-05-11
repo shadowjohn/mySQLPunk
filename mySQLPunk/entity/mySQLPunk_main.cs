@@ -82,7 +82,8 @@ namespace mySQLPunk.entity
                     { "conn_name", GetVal(conn, "conn_name") },
                     { "path", GetVal(conn, "path") },
                     { "init_geospatial", GetVal(conn, "init_geospatial") },
-                    { "trusted_connection", GetVal(conn, "trusted_connection") }
+                    { "trusted_connection", GetVal(conn, "trusted_connection") },
+                    { "conn_group", GetVal(conn, "conn_group") }
                 };
                 saveList.Add(item);
             }
@@ -137,6 +138,10 @@ namespace mySQLPunk.entity
             if (!conn.ContainsKey("trusted_connection"))
             {
                 conn["trusted_connection"] = "F";
+            }
+            if (!conn.ContainsKey("conn_group"))
+            {
+                conn["conn_group"] = "";
             }
         }
 
