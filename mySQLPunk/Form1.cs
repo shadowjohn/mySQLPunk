@@ -1690,6 +1690,11 @@ namespace mySQLPunk
 
         private void DesignTable_Click(object sender, EventArgs e)
         {
+            OpenSelectedTableDesigner(false);
+        }
+
+        private void OpenSelectedTableDesigner(bool fillAutoComments)
+        {
             if (db_tree.SelectedNode == null) return;
 
             TreeNode node = db_tree.SelectedNode;
@@ -1711,6 +1716,10 @@ namespace mySQLPunk
 
                 TableDesignerForm tdf = new TableDesignerForm(db, dbName, tableName);
                 DockDockableForm(tdf);
+                if (fillAutoComments)
+                {
+                    tdf.FillMissingAutoColumnComments();
+                }
             }
             else
             {
@@ -2225,6 +2234,11 @@ namespace mySQLPunk
         private void DesignSelectedTable()
         {
             DesignTable_Click(this, EventArgs.Empty);
+        }
+
+        private void FillSelectedTableComments()
+        {
+            OpenSelectedTableDesigner(true);
         }
 
         private void DumpSelectedTableSql(bool dataOnly)
@@ -3281,6 +3295,10 @@ namespace mySQLPunk
                 var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                 itemDesign.Click += (s, ev) => DesignSelectedTable();
                 cms.Items.Add(itemDesign);
+
+                var itemFillComments = new ToolStripMenuItem(Localization.T("Tool.FillAutoComments"));
+                itemFillComments.Click += (s, ev) => FillSelectedTableComments();
+                cms.Items.Add(itemFillComments);
 
                 var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                 itemDrop.Click += (s, ev) => DeleteSelectedTable();
@@ -5628,6 +5646,10 @@ namespace mySQLPunk
                     ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                     designTableItem.Click += (s, ev) => DesignSelectedTable();
                     menu.Items.Add(designTableItem);
+
+                    ToolStripMenuItem fillCommentsItem = new ToolStripMenuItem(Localization.T("Tool.FillAutoComments"));
+                    fillCommentsItem.Click += (s, ev) => FillSelectedTableComments();
+                    menu.Items.Add(fillCommentsItem);
 
                     ToolStripMenuItem deleteTableItem = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                     deleteTableItem.Click += (s, ev) => DeleteSelectedTable();

@@ -32,6 +32,7 @@ namespace mySQLPunk
         private bool _isDocked;
         private ToolStripButton btnFloat;
         private ToolStripButton btnDock;
+        private ToolStripButton btnFillAutoComments;
 
         private TabControl tcMain;
         private TabPage tpColumns, tpIndexes, tpOptions, tpComment, tpSqlPreview;
@@ -120,6 +121,8 @@ namespace mySQLPunk
             ToolStripButton btnDelCol = new ToolStripButton(Localization.T("Designer.DeleteColumn"), GetIcon(iconPath + "delete.png"));
             
             ToolStripSeparator sep2 = new ToolStripSeparator();
+            btnFillAutoComments = new ToolStripButton(Localization.T("Designer.FillAutoComments"), GetIcon(iconPath + "table.png"), BtnFillAutoComments_Click);
+            ToolStripSeparator sepAutoComment = new ToolStripSeparator();
             ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), GetIcon(iconPath + "up.png"));
             ToolStripButton btnMoveDown = new ToolStripButton(Localization.T("Designer.MoveDown"), GetIcon(iconPath + "down.png"));
 
@@ -127,7 +130,7 @@ namespace mySQLPunk
             btnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => _mainHost?.DockDockableForm(this)) { Visible = false, Alignment = ToolStripItemAlignment.Right };
             
             tsTop.Items.AddRange(new ToolStripItem[] { 
-                btnSave, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnMoveUp, btnMoveDown, btnFloat, btnDock 
+                btnSave, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnFillAutoComments, sepAutoComment, btnMoveUp, btnMoveDown, btnFloat, btnDock
             });
 
             tcMain = new TabControl() { Dock = DockStyle.Fill, Padding = new Point(12, 5) };
@@ -314,6 +317,19 @@ namespace mySQLPunk
             }
 
             MarkAsModified();
+        }
+
+        private async void BtnFillAutoComments_Click(object sender, EventArgs e)
+        {
+            await FillMissingAutoColumnCommentsAsync(true);
+        }
+
+        public void FillMissingAutoColumnComments()
+        {
+            if (IsDisposed) return;
+            Action apply = async () => await FillMissingAutoColumnCommentsAsync(true);
+            if (IsHandleCreated) BeginInvoke(apply);
+            else apply();
         }
 
         public void SetMainHost(Form1 mainHost) => _mainHost = mainHost;
@@ -679,6 +695,87 @@ namespace mySQLPunk
             return false;
         }
 
+        private async Task<int> FillMissingAutoColumnCommentsAsync(bool showMessage)
+        {
+            if (!IsNewTable && _db is my_sqlite)
+            {
+                if (showMessage)
+                {
+                    MessageBox.Show(Localization.T("Designer.AutoCommentsUnsupported"), Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return 0;
+            }
+
+            DataTable currentDt = dgvColumns?.DataSource as DataTable;
+            if (currentDt == null) return 0;
+
+            Cursor previousCursor = Cursor.Current;
+            Cursor.Current = Cursors.WaitCursor;
+            try
+            {
+                Dictionary<string, string> comments = await GetAutoColumnCommentTask();
+                if (comments == null || comments.Count == 0)
+                {
+                    if (showMessage)
+                    {
+                        MessageBox.Show(Localization.T("Designer.AutoCommentsUnavailable"), Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    return 0;
+                }
+
+                int applied = 0;
+                foreach (DataRow row in currentDt.Rows)
+                {
+                    if (row.RowState == DataRowState.Deleted) continue;
+                    if (FillMissingAutoColumnComment(row, comments)) applied++;
+                }
+
+                if (applied > 0)
+                {
+                    MarkAsModified();
+                    if (tcMain != null)
+                    {
+                        tcMain.SelectedTab = tpSqlPreview;
+                        GeneratePreviewSql();
+                    }
+                }
+
+                if (showMessage)
+                {
+                    string message = applied > 0
+                        ? Localization.Format("Designer.AutoCommentsApplied", applied)
+                        : Localization.T("Designer.AutoCommentsNoMatches");
+                    MessageBox.Show(message, Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
+                return applied;
+            }
+            finally
+            {
+                Cursor.Current = previousCursor;
+            }
+        }
+
+        private bool FillMissingAutoColumnComment(DataRow row, Dictionary<string, string> comments)
+        {
+            if (row == null || comments == null || !row.Table.Columns.Contains("Comment")) return false;
+
+            string columnName = GetRowString(row, "Name").Trim();
+            if (string.IsNullOrWhiteSpace(columnName)) return false;
+            if (!string.IsNullOrWhiteSpace(GetRowString(row, "Comment"))) return false;
+
+            string comment;
+            if (!comments.TryGetValue(columnName, out comment)) return false;
+            if (string.IsNullOrWhiteSpace(comment)) return false;
+
+            row["Comment"] = comment.Trim();
+            if (row.Table.Columns.Contains("_AutoComment"))
+            {
+                row["_AutoComment"] = comment.Trim();
+            }
+            return true;
+        }
+
         private static bool TryGetLoadedAutoColumnComment(string columnName, out string comment)
         {
             comment = "";
@@ -713,6 +810,7 @@ namespace mySQLPunk
             if (tpSqlPreview != null) tpSqlPreview.Text = Localization.T("Designer.SqlPreview");
             if (btnFloat != null) btnFloat.Text = Localization.T("Query.Float");
             if (btnDock != null) btnDock.Text = Localization.T("Query.Dock");
+            if (btnFillAutoComments != null) btnFillAutoComments.Text = Localization.T("Designer.FillAutoComments");
             ApplyColumnHeaders();
             UpdateTitle();
             ApplyTheme();
@@ -799,7 +897,7 @@ namespace mySQLPunk
                 string nullStr = notNull ? "NOT NULL" : "NULL";
                 string defStr = string.IsNullOrEmpty(colDefault) ? "" : $"DEFAULT '{colDefault}'";
                 if (colDefault.ToUpper() == "NULL") defStr = "DEFAULT NULL";
-                string commentStr = string.IsNullOrEmpty(colComment) ? "" : $"COMMENT '{colComment}'";
+                string commentStr = string.IsNullOrEmpty(colComment) ? "" : "COMMENT " + EscapeMySqlStringLiteral(colComment);
                 
                 // 位置語法
                 string posStr = (prevCol == null) ? "FIRST" : $"AFTER `{prevCol}`";

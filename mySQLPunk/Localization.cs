@@ -95,6 +95,7 @@ namespace mySQLPunk
 
             Add("Tool.OpenTable", "開啟資料表", "Open Table");
             Add("Tool.DesignTable", "設計資料表", "Design Table");
+            Add("Tool.FillAutoComments", "補註解", "Fill Comments");
             Add("Tool.NewTable", "新增資料表", "New Table");
             Add("Tool.DeleteTable", "刪除資料表", "Delete Table");
             Add("Tool.ImportWizard", "匯入精靈", "Import Wizard");
@@ -366,6 +367,7 @@ namespace mySQLPunk
             Add("Designer.AddColumn", "加入欄位", "Add Column");
             Add("Designer.InsertColumn", "插入欄位", "Insert Column");
             Add("Designer.DeleteColumn", "刪除欄位", "Delete Column");
+            Add("Designer.FillAutoComments", "補註解", "Fill Comments");
             Add("Designer.AddIndex", "加入索引", "Add Index");
             Add("Designer.DeleteIndex", "刪除索引", "Delete Index");
             Add("Designer.MoveUp", "上移", "Move Up");
@@ -393,6 +395,10 @@ namespace mySQLPunk
             Add("Designer.ConfirmCloseChanges", "你要儲存對 {0} 的變更嗎？", "Save changes to {0}?");
             Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
             Add("Designer.NoChangesDetected", "沒有偵測到變更。", "No changes detected.");
+            Add("Designer.AutoCommentsUnavailable", "無法載入自動註解字典，請稍後再試。", "Cannot load the auto comment dictionary. Try again later.");
+            Add("Designer.AutoCommentsUnsupported", "SQLite 不支援欄位註解，無法直接補註解。", "SQLite does not support column comments, so comments cannot be filled directly.");
+            Add("Designer.AutoCommentsApplied", "已補上 {0} 個欄位註解，請確認 SQL 預覽後儲存。", "Filled {0} column comments. Review the SQL preview, then save.");
+            Add("Designer.AutoCommentsNoMatches", "沒有可補的空白欄位註解。", "There are no blank column comments to fill.");
             Add("Designer.EnterTableNameInOptions", "請先在「選項」分頁輸入資料表名稱。", "Enter a table name on the Options tab first.");
             Add("Designer.AddAtLeastOneColumn", "請至少新增一個欄位。", "Add at least one column.");
             Add("Designer.KeepAtLeastOneColumn", "請至少保留一個欄位。", "Keep at least one column.");
