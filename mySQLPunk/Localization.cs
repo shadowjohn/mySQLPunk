@@ -252,6 +252,12 @@ namespace mySQLPunk
             Add("Database.UnsupportedDelete", "此連線類型不支援由右鍵選單刪除資料庫：{0}", "Deleting a database from the context menu is not supported for: {0}");
             Add("Database.Deleted", "資料庫已刪除：{0}", "Database deleted: {0}");
             Add("Database.DeleteFailed", "刪除資料庫失敗：{0}", "Delete database failed: {0}");
+            Add("Database.AutoCommentsConfirm", "要掃描資料庫「{0}」的全部資料表，並補上空白欄位註解嗎？", "Scan every table in database \"{0}\" and fill blank column comments?");
+            Add("Database.AutoCommentsScanning", "正在掃描資料表欄位...", "Scanning table columns...");
+            Add("Database.AutoCommentsProgress", "補註解 {0}/{1}：{2}.{3}", "Filling comments {0}/{1}: {2}.{3}");
+            Add("Database.AutoCommentsDone", "補註解完成：{0} 個欄位", "Fill comments done: {0} columns");
+            Add("Database.AutoCommentsApplied", "已補上 {0} 個欄位註解。", "Filled {0} column comments.");
+            Add("Database.AutoCommentsFailed", "補註解失敗：{0}", "Fill comments failed: {0}");
             Add("Database.ModelOpened", "資料庫模型已建立：{0}", "Database model opened: {0}");
             Add("Database.SearchTitle", "在資料庫中尋找", "Find in Database");
             Add("Database.SearchPrompt", "搜尋文字:", "Search text:");

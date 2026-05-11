@@ -195,6 +195,14 @@ namespace mySQLPunk
             public bool IsQuery;
         }
 
+        private class AutoCommentColumnUpdate
+        {
+            public string TableName;
+            public string ColumnName;
+            public string Comment;
+            public string Sql;
+        }
+
         private readonly List<QueryHistoryEntry> _queryHistory = new List<QueryHistoryEntry>();
 
         private static readonly string[] DatabaseReportNames =
@@ -6001,6 +6009,10 @@ namespace mySQLPunk
             dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();
             menu.Items.Add(dictionaryItem);
 
+            ToolStripMenuItem fillCommentsItem = new ToolStripMenuItem(Localization.T("Tool.FillAutoComments"));
+            fillCommentsItem.Click += (s, ev) => FillSelectedDatabaseComments(node);
+            menu.Items.Add(fillCommentsItem);
+
             ToolStripMenuItem reverseModelItem = new ToolStripMenuItem(Localization.T("Tool.ReverseEngineerModel"));
             reverseModelItem.Click += (s, ev) => ReverseEngineerSelectedDatabaseModel();
             menu.Items.Add(reverseModelItem);
@@ -6016,6 +6028,334 @@ namespace mySQLPunk
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
             refreshItem.Click += (s, ev) => RefreshDatabaseObjectNodes(node);
             menu.Items.Add(refreshItem);
+        }
+
+        private async void FillSelectedDatabaseComments(TreeNode databaseNode)
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(databaseNode);
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Object.SelectDatabaseOrConnection"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (target.Database is my_sqlite)
+            {
+                MessageBox.Show(Localization.T("Designer.AutoCommentsUnsupported"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (MessageBox.Show(Localization.Format("Database.AutoCommentsConfirm", target.DatabaseName), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            ProgressBar progressBar;
+            Label progressLabel;
+            using (Form progressForm = CreateDatabaseAutoCommentProgressForm(out progressBar, out progressLabel))
+            {
+                progressForm.Show(this);
+                progressForm.Refresh();
+
+                try
+                {
+                    progressLabel.Text = Localization.T("Designer.AutoCommentsLoading");
+                    Dictionary<string, string> comments = await TableDesignerForm.GetAutoColumnCommentTask();
+                    if (comments == null || comments.Count == 0)
+                    {
+                        MessageBox.Show(Localization.T("Designer.AutoCommentsUnavailable"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    progressLabel.Text = Localization.T("Database.AutoCommentsScanning");
+                    List<AutoCommentColumnUpdate> updates = await Task.Run(() => BuildDatabaseAutoCommentUpdates(target.Database, target.DatabaseName, comments));
+                    if (updates.Count == 0)
+                    {
+                        progressBar.Value = progressBar.Maximum;
+                        progressLabel.Text = Localization.T("Designer.AutoCommentsNoMatches");
+                        MessageBox.Show(Localization.T("Designer.AutoCommentsNoMatches"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    progressBar.Minimum = 0;
+                    progressBar.Maximum = updates.Count;
+                    progressBar.Value = 0;
+
+                    int applied = 0;
+                    for (int i = 0; i < updates.Count; i++)
+                    {
+                        AutoCommentColumnUpdate update = updates[i];
+                        progressLabel.Text = Localization.Format("Database.AutoCommentsProgress", i + 1, updates.Count, update.TableName, update.ColumnName);
+                        progressForm.Refresh();
+                        await Task.Run(() => ExecuteAutoCommentUpdate(target.Database, update));
+                        applied++;
+                        progressBar.Value = Math.Min(i + 1, progressBar.Maximum);
+                        await Task.Delay(20);
+                    }
+
+                    progressLabel.Text = Localization.Format("Database.AutoCommentsDone", applied);
+                    UpdateMainStatus(Localization.Format("Database.AutoCommentsDone", applied));
+                    MessageBox.Show(Localization.Format("Database.AutoCommentsApplied", applied), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    progressLabel.Text = Localization.Format("Database.AutoCommentsFailed", ex.Message);
+                    MessageBox.Show(Localization.Format("Database.AutoCommentsFailed", ex.Message), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    await Task.Delay(250);
+                }
+            }
+        }
+
+        private Form CreateDatabaseAutoCommentProgressForm(out ProgressBar progressBar, out Label progressLabel)
+        {
+            Form form = new Form
+            {
+                Text = Localization.T("Tool.FillAutoComments"),
+                Size = new Size(520, 140),
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                MaximizeBox = false,
+                MinimizeBox = false
+            };
+
+            progressLabel = new Label
+            {
+                AutoSize = false,
+                Text = Localization.T("Designer.AutoCommentsLoading"),
+                Location = new Point(18, 18),
+                Size = new Size(470, 24)
+            };
+            progressBar = new ProgressBar
+            {
+                Location = new Point(18, 52),
+                Size = new Size(470, 24),
+                Minimum = 0,
+                Maximum = 1,
+                Value = 0
+            };
+
+            form.Controls.Add(progressLabel);
+            form.Controls.Add(progressBar);
+            return form;
+        }
+
+        private static List<AutoCommentColumnUpdate> BuildDatabaseAutoCommentUpdates(IDatabase db, string databaseName, Dictionary<string, string> comments)
+        {
+            List<AutoCommentColumnUpdate> updates = new List<AutoCommentColumnUpdate>();
+            foreach (string tableName in db.GetTables(databaseName))
+            {
+                DataTable columns = db.GetColumns(databaseName, tableName);
+                foreach (DataRow row in columns.Rows)
+                {
+                    string columnName = FirstColumnValue(row, "Field", "Name", "NAME", "COLUMN_NAME", "column_name", "name");
+                    if (string.IsNullOrWhiteSpace(columnName)) continue;
+
+                    string currentComment = FirstColumnValue(row, "Comment", "COMMENT", "COMMENTS", "comment");
+                    if (!string.IsNullOrWhiteSpace(currentComment)) continue;
+
+                    string comment;
+                    if (!comments.TryGetValue(columnName, out comment) || string.IsNullOrWhiteSpace(comment)) continue;
+
+                    string sql = BuildAutoCommentSql(db, databaseName, tableName, row, columnName, comment.Trim());
+                    if (string.IsNullOrWhiteSpace(sql)) continue;
+
+                    updates.Add(new AutoCommentColumnUpdate
+                    {
+                        TableName = tableName,
+                        ColumnName = columnName,
+                        Comment = comment.Trim(),
+                        Sql = sql
+                    });
+                }
+            }
+            return updates;
+        }
+
+        private static string BuildAutoCommentSql(IDatabase db, string databaseName, string tableName, DataRow row, string columnName, string comment)
+        {
+            if (IsDumpProvider(db, "mysql"))
+            {
+                return BuildMySqlAutoCommentSql(databaseName, tableName, row, columnName, comment);
+            }
+            if (IsDumpProvider(db, "postgresql") || IsDumpProvider(db, "oracle"))
+            {
+                return "COMMENT ON COLUMN " + BuildQualifiedObjectName(db, databaseName, tableName) + "." + QuoteDumpIdentifier(db, columnName) +
+                       " IS '" + EscapeSqlLiteral(comment) + "';";
+            }
+            if (IsDumpProvider(db, "mssql") || IsDumpProvider(db, "sqlserver"))
+            {
+                return BuildSqlServerAutoCommentSql(databaseName, tableName, columnName, comment);
+            }
+            return null;
+        }
+
+        private static string BuildMySqlAutoCommentSql(string databaseName, string tableName, DataRow row, string columnName, string comment)
+        {
+            string columnType = FirstColumnValue(row, "Type", "COLUMN_TYPE");
+            if (string.IsNullOrWhiteSpace(columnType)) return null;
+
+            string extra = FirstColumnValue(row, "Extra", "EXTRA");
+            if (IsMySqlGeneratedColumn(extra)) return null;
+
+            List<string> parts = new List<string>
+            {
+                QuoteMySqlIdentifier(columnName),
+                columnType
+            };
+
+            string nullValue = FirstColumnValue(row, "Null", "IS_NULLABLE", "is_nullable");
+            parts.Add(IsMySqlNullable(nullValue) ? "NULL" : "NOT NULL");
+
+            string defaultClause = BuildMySqlDefaultClause(row, columnType);
+            if (!string.IsNullOrWhiteSpace(defaultClause)) parts.Add(defaultClause);
+
+            string extraClause = BuildMySqlExtraClause(extra);
+            if (!string.IsNullOrWhiteSpace(extraClause)) parts.Add(extraClause);
+
+            parts.Add("COMMENT " + EscapeMySqlStringLiteral(comment));
+
+            return "ALTER TABLE " + QuoteMySqlIdentifier(databaseName) + "." + QuoteMySqlIdentifier(tableName) +
+                   " MODIFY COLUMN " + string.Join(" ", parts.ToArray()) + ";";
+        }
+
+        private static bool IsMySqlNullable(string value)
+        {
+            return string.Equals(value, "YES", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, "Y", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsMySqlGeneratedColumn(string extra)
+        {
+            string value = extra ?? string.Empty;
+            return value.IndexOf("VIRTUAL GENERATED", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   value.IndexOf("STORED GENERATED", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string BuildMySqlDefaultClause(DataRow row, string columnType)
+        {
+            object rawValue;
+            if (!TryGetRawColumnValue(row, out rawValue, "Default", "COLUMN_DEFAULT", "column_default")) return string.Empty;
+
+            string value = rawValue == null ? "" : rawValue.ToString();
+            if (string.Equals(value, "NULL", StringComparison.OrdinalIgnoreCase)) return "DEFAULT NULL";
+            return "DEFAULT " + FormatMySqlDefaultValue(columnType, value);
+        }
+
+        private static string FormatMySqlDefaultValue(string columnType, string value)
+        {
+            string trimmed = value ?? string.Empty;
+            string upper = trimmed.ToUpperInvariant();
+            if (upper == "CURRENT_TIMESTAMP" || upper == "CURRENT_TIMESTAMP()" || upper.StartsWith("CURRENT_TIMESTAMP("))
+            {
+                return trimmed;
+            }
+            if ((trimmed.StartsWith("'") && trimmed.EndsWith("'")) ||
+                (trimmed.StartsWith("(") && trimmed.EndsWith(")")) ||
+                trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("b'", StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed;
+            }
+
+            decimal numericValue;
+            string type = (columnType ?? string.Empty).ToLowerInvariant();
+            bool numericType = type.Contains("int") || type.Contains("decimal") || type.Contains("numeric") ||
+                               type.Contains("float") || type.Contains("double") || type.Contains("real");
+            if (numericType && decimal.TryParse(trimmed, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out numericValue))
+            {
+                return trimmed;
+            }
+
+            return EscapeMySqlStringLiteral(trimmed);
+        }
+
+        private static string BuildMySqlExtraClause(string extra)
+        {
+            if (string.IsNullOrWhiteSpace(extra)) return string.Empty;
+
+            List<string> clauses = new List<string>();
+            if (extra.IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                clauses.Add("AUTO_INCREMENT");
+            }
+
+            int onUpdateIndex = extra.IndexOf("on update", StringComparison.OrdinalIgnoreCase);
+            if (onUpdateIndex >= 0)
+            {
+                clauses.Add(extra.Substring(onUpdateIndex).Trim());
+            }
+
+            return string.Join(" ", clauses.ToArray());
+        }
+
+        private static string BuildSqlServerAutoCommentSql(string databaseName, string tableName, string columnName, string comment)
+        {
+            string database = "[" + EscapeSqlServerName(databaseName) + "]";
+            string tableLiteral = EscapeSqlLiteral(tableName);
+            string columnLiteral = EscapeSqlLiteral(columnName);
+            string valueLiteral = EscapeSqlLiteral(comment ?? "");
+
+            string existsSql =
+                "EXISTS (SELECT 1 FROM " + database + ".sys.extended_properties ep " +
+                "INNER JOIN " + database + ".sys.columns c ON c.object_id = ep.major_id AND c.column_id = ep.minor_id " +
+                "INNER JOIN " + database + ".sys.tables t ON t.object_id = c.object_id " +
+                "INNER JOIN " + database + ".sys.schemas s ON s.schema_id = t.schema_id " +
+                "WHERE ep.name = N'MS_Description' AND s.name = N'dbo' AND t.name = N'" + tableLiteral + "' AND c.name = N'" + columnLiteral + "')";
+
+            string commonArgs =
+                "@name=N'MS_Description', @level0type=N'SCHEMA', @level0name=N'dbo', " +
+                "@level1type=N'TABLE', @level1name=N'" + tableLiteral + "', " +
+                "@level2type=N'COLUMN', @level2name=N'" + columnLiteral + "'";
+
+            return "IF " + existsSql +
+                   " EXEC " + database + ".sys.sp_updateextendedproperty @value=N'" + valueLiteral + "', " + commonArgs +
+                   " ELSE EXEC " + database + ".sys.sp_addextendedproperty @value=N'" + valueLiteral + "', " + commonArgs + ";";
+        }
+
+        private static bool TryGetRawColumnValue(DataRow row, out object value, params string[] names)
+        {
+            foreach (string name in names)
+            {
+                if (TryGetRawColumnValue(row, name, out value)) return true;
+            }
+            value = null;
+            return false;
+        }
+
+        private static bool TryGetRawColumnValue(DataRow row, string name, out object value)
+        {
+            if (row.Table.Columns.Contains(name))
+            {
+                value = row[name];
+                return value != DBNull.Value;
+            }
+            foreach (DataColumn column in row.Table.Columns)
+            {
+                if (string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = row[column];
+                    return value != DBNull.Value;
+                }
+            }
+            value = null;
+            return false;
+        }
+
+        private static string EscapeMySqlStringLiteral(string value)
+        {
+            return "'" + (value ?? string.Empty).Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+        }
+
+        private static void ExecuteAutoCommentUpdate(IDatabase db, AutoCommentColumnUpdate update)
+        {
+            Dictionary<string, string> result = db.ExecSQL(update.Sql);
+            if (result != null && result.ContainsKey("status") && string.Equals(result["status"], "OK", StringComparison.OrdinalIgnoreCase)) return;
+
+            string reason = result != null && result.ContainsKey("reason") ? result["reason"] : "unknown error";
+            throw new Exception(update.TableName + "." + update.ColumnName + ": " + reason);
         }
 
         private void CloseDatabaseNode(TreeNode databaseNode)

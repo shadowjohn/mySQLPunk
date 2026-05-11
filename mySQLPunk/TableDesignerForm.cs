@@ -601,7 +601,7 @@ namespace mySQLPunk
             });
         }
 
-        private static Task<Dictionary<string, string>> GetAutoColumnCommentTask()
+        public static Task<Dictionary<string, string>> GetAutoColumnCommentTask()
         {
             lock (AutoColumnCommentSync)
             {
