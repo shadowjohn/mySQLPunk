@@ -1,15 +1,13 @@
 # mySQLPunk
 
-mySQLPunk 是一個以 WinForms 開發的桌面資料庫管理工具，主要目標是提供連線管理、資料庫物件瀏覽、SQL 查詢、資料表設計與資料庫物件複製功能。
+mySQLPunk 是一套 Windows WinForms 資料庫管理工具，目標是用同一個介面管理多種資料庫連線、瀏覽資料表與檢視、執行 SQL、編輯資料、設計資料表、搬移 Table/View，以及產生常用 DDL/DML。
 
-目前專案以 MySQL 支援最完整，PostgreSQL、SQLite 與 SQL Server 已具備部分查詢與物件操作能力。Oracle 已具備基本連線、查詢與 metadata 瀏覽能力，進階設計與複製行為仍需實機回歸。
+目前主要支援 MySQL、PostgreSQL、SQLite、SQL Server，Oracle 支援已逐步補齊但仍有部分限制。
 
 ## 開發環境
 
-必要環境：
-
 - Windows
-- Visual Studio 2017 以上，或 Visual Studio Build Tools
+- Visual Studio 2017 或更新版本，或 Visual Studio Build Tools
 - .NET Framework 4.7.2 Developer Pack
 - NuGet package restore
 
@@ -20,62 +18,136 @@ mySQLPunk 是一個以 WinForms 開發的桌面資料庫管理工具，主要目
 - Target Framework: `.NET Framework 4.7.2`
 - Output Type: `WinExe`
 
-這是 .NET Framework WinForms 專案，不適合直接用 Linux 上的 `dotnet build` 完整建置。Linux 環境通常會因缺少 .NET Framework 4.7.2 reference assemblies 而失敗。
-
-## 建置方式
-
-在 Windows 開發機上：
+建置：
 
 ```powershell
 nuget restore .\mySQLPunk.sln
 msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 ```
 
-或直接用 Visual Studio 開啟 `mySQLPunk.sln`，先還原 NuGet 套件，再建置 Debug / Any CPU。
+## 目前功能概況
 
-## 主要功能狀態
-
-| 功能 | 狀態 | 備註 |
+| 功能 | 狀態 | 說明 |
 | --- | --- | --- |
-| 連線設定儲存 | 可用 | 設定儲存在執行目錄的 `setting.ini` |
-| MySQL 連線與查詢 | 可用 | 目前最完整的 provider |
-| PostgreSQL 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
-| SQLite 連線與查詢 | 可用 | 已加入 SpatiaLite runtime，並補 metadata 與 table data 分頁 |
-| SQL Server 連線與查詢 | 可用 | 已補 table/index/database metadata 與 table data 分頁 |
-| Oracle | 部分可用 | 已補基本連線、查詢、schema/table/view metadata、table data 分頁、資料表註解 metadata 與同 provider View 複製 |
-| SQL 查詢視窗 | 可用 | 支援執行、語法高亮、自動補完、CSV 匯出；資料表右鍵 `SELECT *` 與 `SELECT 全部欄位` 皆會進入可分頁與編輯的資料表資料模式 |
-| 表格資料列編輯儲存 | 可用 | table data 模式已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle；更新與刪除會優先使用 Primary Key 條件 |
-| Table Designer | 部分可用 | 既有 table ALTER 已支援 MySQL、PostgreSQL、SQL Server、Oracle；PostgreSQL、SQL Server 與 Oracle 已支援既有 Primary Key 更新與欄位註解載入/更新；PostgreSQL 已支援 FULLTEXT/GIN 與 SPATIAL/GiST 索引建立；SQL Server 已支援 FULLTEXT/Full-Text Catalog、GEOMETRY/GEOGRAPHY 欄位型別與 SPATIAL/GEOMETRY_AUTO_GRID 索引建立；Oracle 已支援 FULLTEXT/CTXSYS.CONTEXT、SDO_GEOMETRY 與 SPATIAL/MDSYS.SPATIAL_INDEX 索引建立；SQL Server 已支援既有欄位 DEFAULT constraint 更新；Oracle 儲存失敗會提供權限與物件狀態診斷；SQLite 已支援以安全重建流程處理欄位新增、刪除、重新命名、排序、型別、NULL、DEFAULT 與 Primary Key 變更 |
-| New Table | 可用 | 已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle `CREATE TABLE` preview/save |
-| Table/View 複製 | 可用 | Table 可批次複製；MySQL/Oracle/PostgreSQL/SQL Server 目標建表會保留同 provider 來源 DEFAULT 與欄位註解；同 provider View 複製為 View；異種 provider View 會先嘗試轉換 SQL，無法安全轉換時改為 table snapshot |
-| SQL Dump | 可用 | Table dump 已支援 MySQL、PostgreSQL、SQLite、SQL Server、Oracle；SQL Server dump 會保留 Primary Key、DEFAULT、欄位註解與一般/唯一索引 DDL；Oracle dump 會輸出 schema-qualified INSERT、HEXTORAW、TO_TIMESTAMP literal，並保留 Primary Key、資料表註解、欄位註解與一般/唯一/全文/空間索引 DDL |
+| 連線管理 | 可用 | 連線資訊儲存在 `setting.ini`。 |
+| MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
+| PostgreSQL | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分進階索引仍有限制。 |
+| SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；SQLite 本身不支援欄位註解。 |
+| SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DEFAULT constraint 與進階索引仍有限制。 |
+| Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
+| SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、CSV 匯出、語法格式化、查詢歷史。 |
+| 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；若沒有 Primary Key 會退回使用整列 WHERE，比較容易受資料變動影響。 |
+| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；部分既有資料表修改與進階索引尚未完整支援。 |
+| 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 不支援欄位註解。 |
+| 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
+| Table/View 複製 | 可用 | 跨 provider 複製 Table/View；View SQL 無法安全轉換時會改用 table snapshot。 |
+| SQL Dump | 可用 | 支援多 provider Table dump；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
 
-## 重要程式位置
+## 未完成功能與已知限制
 
-- `mySQLPunk/Program.cs`: 應用程式入口
-- `mySQLPunk/Form1.cs`: 主視窗、連線樹、工具列、dock/float tab、資料庫物件操作
-- `mySQLPunk/QueryForm.cs`: SQL 編輯器與查詢結果視窗
-- `mySQLPunk/TableDesignerForm.cs`: 資料表設計器
-- `mySQLPunk/lib/IDatabase.cs`: database provider 介面
-- `mySQLPunk/lib/my_mysql.cs`: MySQL provider
-- `mySQLPunk/lib/my_postgresql.cs`: PostgreSQL provider
-- `mySQLPunk/lib/my_sqlite.cs`: SQLite provider
-- `mySQLPunk/lib/my_mssql.cs`: SQL Server provider
-- `mySQLPunk/lib/my_oracle.cs`: Oracle provider
-- `mySQLPunk/lib/DatabaseCopyService.cs`: Table/View 複製服務
+以下是從程式碼裡的「尚未支援」、「Unavailable」、「Unsupported」與實作 fallback 掃描出的清單。後續修改請優先參考這裡，把完成狀態同步更新。
 
-## 待辦優先順序
+### 優先待辦
 
-1. 建立可重複的 Windows 建置與驗證流程。
-2. 針對 Oracle、PostgreSQL、SQLite、SQL Server 補實機連線回歸測試。
+- **群組功能尚未建立**
+  - 觸發位置：左側樹狀清單與右鍵選單中的「新增群組 / 管理群組」。
+  - 現況：點擊會顯示「尚未建立群組功能」。
+  - 後續方向：定義群組資料結構、儲存位置、拖曳/搬移節點規則，以及語系文字。
 
-## 驗證原則
+- **資料產生功能尚未建立**
+  - 觸發位置：資料表分類右鍵選單的資料產生相關入口。
+  - 現況：點擊會顯示「資料產生功能尚未建立」。
+  - 後續方向：先定義可產生資料型別、筆數、欄位規則與安全確認流程。
 
-每次修改後都需要依修改範圍做驗證：
+- **多連線設定檔尚未支援**
+  - 觸發位置：連線根節點右鍵選單的「切換連線設定檔」。
+  - 現況：選單項目目前顯示為不可用。
+  - 後續方向：設計 profile schema、UI 切換流程，以及既有 `setting.ini` 相容策略。
 
-- 文件或設定修改：檢查 diff、格式與指令範例。
-- C# 程式碼修改：至少完成靜態檢查，並在可用 Windows 環境執行 build。
-- UI 行為修改：在 Windows 上啟動程式，手動驗證主要操作流程。
-- 資料庫 provider 修改：使用對應資料庫驗證連線、查詢、metadata 與錯誤處理。
+- **命令列介面只支援部分連線類型**
+  - 觸發位置：資料庫右鍵選單「命令列介面」。
+  - 現況：不支援的 provider 會顯示「命令列介面目前尚未支援此連線類型」。
+  - 後續方向：逐一補 provider 對應的 CLI 啟動指令、環境變數、密碼傳遞與錯誤提示。
 
-若目前環境無法完整執行測試，提交說明與 PR 說明必須明確列出未執行項目與原因。
+### Provider 與資料庫操作限制
+
+- **部分連線類型尚未支援編輯**
+  - 現況：不支援的連線編輯會顯示「此連線類型尚未支援編輯」。
+  - 後續方向：檢查每個 template form 是否具備讀寫所有連線欄位的能力。
+
+- **由主機節點新增/刪除資料庫只支援部分 provider**
+  - 現況：不支援時會顯示 provider 不支援新增或刪除資料庫。
+  - 後續方向：補齊各 provider 的 `CREATE DATABASE` / `DROP DATABASE` SQL 與權限提示。
+
+- **SQLite 欄位註解不支援**
+  - 現況：SQLite 本身沒有欄位註解語法，Table Designer 與補註解流程會擋下。
+  - 後續方向：若需要 SQLite 註解，可另設 sidecar metadata table，但需先定義格式與匯出策略。
+
+- **SpatiaLite extension 可能載入失敗**
+  - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。
+  - 後續方向：補齊 UI 診斷、下載/放置說明，以及無 SpatiaLite 時的降級行為。
+
+### Table Designer 限制
+
+- **既有資料表修改仍有不支援情境**
+  - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」。
+  - 後續方向：以 provider 為單位補齊欄位改名、型別變更、NULL/DEFAULT、Primary Key 與 constraint 變更。
+
+- **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法**
+  - 現況：不支援時會顯示「此資料庫尚未支援 FULLTEXT/SPATIAL 索引」。
+  - 後續方向：逐 provider 補 MySQL FULLTEXT/SPATIAL、PostgreSQL GIN/GiST、SQL Server Full-Text、Oracle CTXSYS/MDSYS 等語法。
+
+- **SQL Server DEFAULT constraint 變更仍有限制**
+  - 現況：部分 DEFAULT constraint 需要先查 constraint name 再 drop/create。
+  - 後續方向：建立完整 SQL Server column default 修改流程與測試。
+
+- **Oracle Table Designer 對權限與物件狀態較敏感**
+  - 現況：已有多種診斷提示，例如權限不足、物件不存在、跨 schema 權限、語法不符。
+  - 後續方向：把 Oracle DDL 拆成更小步驟，並在預覽中標示可能需要的權限。
+
+### 資料瀏覽與儲存限制
+
+- **沒有 Primary Key 的資料表儲存風險較高**
+  - 現況：儲存更新/刪除時，若沒有 Primary Key，會用可用欄位建立 WHERE 條件。
+  - 風險：資料列被其他人改過，或欄位包含 BLOB/浮點/大文字時，WHERE 可能不穩定。
+  - 後續方向：沒有 Primary Key 時顯示更明確警告，或限制只能唯讀。
+
+- **BLOB/geometry 欄位目前只做摘要顯示**
+  - 現況：`byte[]` 欄位在結果表格中顯示為 `[BLOB n bytes] 0x...`，並設為唯讀。
+  - 後續方向：新增 BLOB 檢視器、匯出檔案、匯入檔案與十六進位檢視。
+
+### Table/View 複製限制
+
+- **View SQL 無法安全轉換時會改用 table snapshot**
+  - 現況：跨 provider 複製 View 時，如果無法解析或轉換 SQL，會以查詢結果建立資料表快照。
+  - 已知情境：Oracle 階層查詢/ROWNUM、MySQL 專用 View 語法、無法解析的 SELECT SQL。
+  - 後續方向：新增轉換預覽與使用者選項，讓使用者決定要保留 View、改成 Table snapshot，或取消。
+
+## 專案檔案導覽
+
+- `mySQLPunk/Program.cs`: 程式進入點。
+- `mySQLPunk/Form1.cs`: 主視窗、左側連線樹、右鍵選單、metadata 瀏覽、資料庫級操作。
+- `mySQLPunk/QueryForm.cs`: SQL 編輯器、查詢結果、資料表資料瀏覽與儲存。
+- `mySQLPunk/TableDesignerForm.cs`: 資料表設計器、欄位/索引/SQL 預覽。
+- `mySQLPunk/RunnerProgressOverlay.cs`: 補註解遮罩進度視窗。
+- `mySQLPunk/AnimatedRunnerProgressBar.cs`: 跑者動畫進度條控制項。
+- `mySQLPunk/AutoCommentMode.cs`: 補註解模式定義。
+- `mySQLPunk/lib/IDatabase.cs`: database provider 介面。
+- `mySQLPunk/lib/my_mysql.cs`: MySQL provider。
+- `mySQLPunk/lib/my_postgresql.cs`: PostgreSQL provider。
+- `mySQLPunk/lib/my_sqlite.cs`: SQLite provider。
+- `mySQLPunk/lib/my_mssql.cs`: SQL Server provider。
+- `mySQLPunk/lib/my_oracle.cs`: Oracle provider。
+- `mySQLPunk/lib/DatabaseCopyService.cs`: Table/View 跨 provider 複製服務。
+- `mySQLPunk/image/progress_runner.gif`: 補註解進度視窗的 CC0 貓咪跑者動畫。
+- `mySQLPunk/image/progress_runner_LICENSE.txt`: 跑者動畫素材來源與授權資訊。
+
+## 協作規範
+
+- 多人共同維護時，開工前先執行 `git pull --ff-only origin master`。
+- 修改完成後先建置或執行對應 smoke test，再 commit。
+- Commit message 使用繁體中文，並遵守 Conventional Commits：
+  - 例：`feat(comment): 新增補註解模式選擇`
+  - body 建議包含「原因 / 調整 / 影響」。
+- Commit 後推送到遠端，避免本機進度落後。
+- 修完 README 中的待辦或限制時，請同步更新本檔案狀態。
