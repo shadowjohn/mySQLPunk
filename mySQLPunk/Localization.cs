@@ -81,6 +81,17 @@ namespace mySQLPunk
             Add("Toolbar.AutoRun", "自動執行", "Automation");
             Add("Toolbar.Model", "模型", "Models");
             Add("Toolbar.BI", "BI", "BI");
+            Add("Tree.Tables", "資料表", "Tables");
+            Add("Tree.Views", "檢視", "Views");
+            Add("Tree.Functions", "函式", "Functions");
+            Add("Tree.Users", "使用者", "Users");
+            Add("Tree.Models", "模型", "Models");
+            Add("Tree.BI", "BI", "BI");
+            Add("Tree.Other", "其它", "Other");
+            Add("Tree.Events", "事件", "Events");
+            Add("Tree.Queries", "查詢", "Queries");
+            Add("Tree.Reports", "報表", "Reports");
+            Add("Tree.Backups", "備份", "Backups");
 
             Add("Tool.OpenTable", "開啟資料表", "Open Table");
             Add("Tool.DesignTable", "設計資料表", "Design Table");

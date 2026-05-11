@@ -1005,7 +1005,7 @@ namespace mySQLPunk
             EnsureDatabaseGroupNodes(target.DatabaseNode);
             foreach (TreeNode child in target.DatabaseNode.Nodes)
             {
-                if (string.Equals(child.Text, "Other", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(GetTreeGroupKey(child), "Other", StringComparison.OrdinalIgnoreCase))
                 {
                     db_tree.SelectedNode = child;
                     child.EnsureVisible();
@@ -1035,7 +1035,7 @@ namespace mySQLPunk
             EnsureDatabaseGroupNodes(target.DatabaseNode);
             foreach (TreeNode child in target.DatabaseNode.Nodes)
             {
-                if (string.Equals(child.Text, "Queries", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(GetTreeGroupKey(child), "Queries", StringComparison.OrdinalIgnoreCase))
                 {
                     db_tree.SelectedNode = child;
                     child.EnsureVisible();
@@ -1212,6 +1212,91 @@ namespace mySQLPunk
             return parts[parts.Length - 1] + " (" + parts[0] + ")";
         }
 
+        private string[] GetTreePathParts(TreeNode node)
+        {
+            if (node == null) return new string[0];
+
+            List<string> parts = new List<string>();
+            TreeNode current = node;
+            while (current != null)
+            {
+                string groupKey = GetTreeGroupKey(current);
+                parts.Insert(0, string.IsNullOrWhiteSpace(groupKey) ? current.Text : groupKey);
+                current = current.Parent;
+            }
+
+            return parts.ToArray();
+        }
+
+        private string GetTreeGroupKey(TreeNode node)
+        {
+            if (node == null) return string.Empty;
+            if (IsTreeGroupKey(node.Name)) return node.Name;
+            string tag = node.Tag as string;
+            return IsTreeGroupKey(tag) ? tag : string.Empty;
+        }
+
+        private static bool IsTreeGroupKey(string key)
+        {
+            switch (key)
+            {
+                case "Tables":
+                case "Views":
+                case "Functions":
+                case "Users":
+                case "Models":
+                case "BI":
+                case "Other":
+                case "Events":
+                case "Queries":
+                case "Reports":
+                case "Backups":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static string GetTreeGroupText(string groupKey)
+        {
+            return IsTreeGroupKey(groupKey) ? Localization.T("Tree." + groupKey) : groupKey;
+        }
+
+        private static TreeNode CreateTreeGroupNode(string groupKey, int imageIndex)
+        {
+            return new TreeNode(GetTreeGroupText(groupKey))
+            {
+                Name = groupKey,
+                Tag = groupKey,
+                ImageIndex = imageIndex,
+                SelectedImageIndex = imageIndex
+            };
+        }
+
+        private void LocalizeTreeGroupNodes()
+        {
+            if (db_tree == null) return;
+            foreach (TreeNode root in db_tree.Nodes)
+            {
+                LocalizeTreeGroupNodes(root);
+            }
+        }
+
+        private void LocalizeTreeGroupNodes(TreeNode node)
+        {
+            if (node == null) return;
+            string groupKey = GetTreeGroupKey(node);
+            if (!string.IsNullOrWhiteSpace(groupKey))
+            {
+                node.Text = GetTreeGroupText(groupKey);
+            }
+
+            foreach (TreeNode child in node.Nodes)
+            {
+                LocalizeTreeGroupNodes(child);
+            }
+        }
+
         private void OpenOptionsDialog()
         {
             using (OptionsForm form = new OptionsForm())
@@ -1254,6 +1339,7 @@ namespace mySQLPunk
             {
                 lblMainStatus.Text = Localization.T("Status.Ready");
             }
+            LocalizeTreeGroupNodes();
 
             OpenTable.Text = Localization.T("Tool.OpenTable");
             DesignTable.Text = Localization.T("Tool.DesignTable");
@@ -1322,7 +1408,7 @@ namespace mySQLPunk
         private bool DropSelectedTable(bool confirm)
         {
             if (db_tree.SelectedNode == null) return false;
-            var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+            var pathParts = GetTreePathParts(db_tree.SelectedNode);
             if (pathParts.Length < 4 || pathParts[2] != "Tables")
             {
                 MessageBox.Show(Localization.T("Object.SelectTable"), Localization.T("Tool.DeleteTable"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1607,8 +1693,7 @@ namespace mySQLPunk
             if (db_tree.SelectedNode == null) return;
 
             TreeNode node = db_tree.SelectedNode;
-            string fullPath = node.FullPath;
-            var pathParts = my.explode("\\", fullPath);
+            var pathParts = GetTreePathParts(node);
 
             // 只有點到 Table 本身時才允許設計 (假設路徑是 Conn\DB\Tables\TableName)
             if (pathParts.Length >= 4 && pathParts[2] == "Tables")
@@ -1643,8 +1728,7 @@ namespace mySQLPunk
 
             // 解析目前選中的連線與資料庫
             TreeNode node = db_tree.SelectedNode;
-            string fullPath = node.FullPath;
-            var pathParts = my.explode("\\", fullPath);
+            var pathParts = GetTreePathParts(node);
 
             int connIndex = -1;
             string dbName = "";
@@ -1699,7 +1783,7 @@ namespace mySQLPunk
             }
 
             TreeNode node = db_tree.SelectedNode;
-            var pathParts = my.explode("\\", node.FullPath);
+            var pathParts = GetTreePathParts(node);
 
             if (pathParts.Length < 4 || pathParts[2] != "Tables")
             {
@@ -1789,7 +1873,7 @@ namespace mySQLPunk
             if (db_tree.SelectedNode == null) return null;
 
             TreeNode node = db_tree.SelectedNode;
-            var pathParts = my.explode("\\", node.FullPath);
+            var pathParts = GetTreePathParts(node);
             if (pathParts.Length < 4) return null;
             if (pathParts[2] != "Tables" && pathParts[2] != "Views" && pathParts[2] != "Functions") return null;
 
@@ -2151,7 +2235,7 @@ namespace mySQLPunk
             }
 
             TreeNode node = db_tree.SelectedNode;
-            var pathParts = my.explode("\\", node.FullPath);
+            var pathParts = GetTreePathParts(node);
 
             if (pathParts.Length < 4 || pathParts[2] != "Tables")
             {
@@ -3032,7 +3116,7 @@ namespace mySQLPunk
             if (e.Node == null) return;
 
             string fullPath = e.Node.FullPath;
-            var pathParts = my.explode("\\", fullPath);
+            var pathParts = GetTreePathParts(e.Node);
 
             // 更新導覽列
             Control[] navControls = this.Controls.Find("lblNav", true);
@@ -3067,7 +3151,7 @@ namespace mySQLPunk
                 else if (pathParts.Length == 3)
                 {
                     string groupName = pathParts[2];
-                    lblSidebarTitle.Text = $"{groupName}: {dbName}";
+                    lblSidebarTitle.Text = $"{GetTreeGroupText(groupName)}: {dbName}";
                     ShowDatabaseGroupList(db, dbName, groupName, connInfo);
                     ShowDatabaseInfo(db, dbName);
                     if (groupName == "Tables") showTools("點到Tables");
@@ -3409,7 +3493,7 @@ namespace mySQLPunk
 
             if (db_tree.SelectedNode != null)
             {
-                var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+                var pathParts = GetTreePathParts(db_tree.SelectedNode);
                 if (pathParts.Length >= 3 && (pathParts[2] == "Views" || pathParts[2] == "Tables" || pathParts[2] == "Backups" || pathParts[2] == "Functions" || pathParts[2] == "Users" || pathParts[2] == "Models" || pathParts[2] == "BI" || pathParts[2] == "Other" || pathParts[2] == "Queries" || pathParts[2] == "Reports"))
                 {
                     return pathParts[2];
@@ -3428,7 +3512,7 @@ namespace mySQLPunk
 
             foreach (TreeNode group in databaseNode.Nodes)
             {
-                if (!string.Equals(group.Text, groupName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(GetTreeGroupKey(group), groupName, StringComparison.OrdinalIgnoreCase)) continue;
 
                 foreach (TreeNode node in group.Nodes)
                 {
@@ -3471,7 +3555,7 @@ namespace mySQLPunk
             {
                 if (db_tree.SelectedNode == null) return;
 
-                var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+                var pathParts = GetTreePathParts(db_tree.SelectedNode);
                 
                 // 使用者要求：table 按 esc 沒事，如果在 database 可以關閉 database (連線)
                 if (pathParts.Length <= 2)
@@ -3523,7 +3607,7 @@ namespace mySQLPunk
         private bool IsRenameableObjectNode(TreeNode node)
         {
             if (node == null) return false;
-            var pathParts = my.explode("\\", node.FullPath);
+            var pathParts = GetTreePathParts(node);
             return pathParts.Length >= 4 && (pathParts[2] == "Tables" || pathParts[2] == "Views");
         }
 
@@ -3632,7 +3716,7 @@ namespace mySQLPunk
         private DatabaseCopyItem BuildCopyItemFromNode(TreeNode node)
         {
             if (node == null) return null;
-            var pathParts = my.explode("\\", node.FullPath);
+            var pathParts = GetTreePathParts(node);
             if (pathParts.Length < 4) return null;
             if (pathParts[2] != "Tables" && pathParts[2] != "Views") return null;
 
@@ -3654,7 +3738,7 @@ namespace mySQLPunk
         private TreeDatabaseTarget BuildTargetFromNode(TreeNode node)
         {
             if (node == null) return null;
-            var pathParts = my.explode("\\", node.FullPath);
+            var pathParts = GetTreePathParts(node);
             if (pathParts.Length < 2) return null;
 
             TreeNode root = node;
@@ -3702,7 +3786,7 @@ namespace mySQLPunk
             string groupName = objectKind == "view" ? "Views" : "Tables";
             foreach (TreeNode group in databaseNode.Nodes)
             {
-                if (group.Text != groupName) continue;
+                if (!string.Equals(GetTreeGroupKey(group), groupName, StringComparison.OrdinalIgnoreCase)) continue;
                 foreach (TreeNode item in group.Nodes)
                 {
                     if (item.Text == objectName)
@@ -4085,7 +4169,7 @@ namespace mySQLPunk
         private void RefreshQueriesGroupIfSelected()
         {
             if (db_tree.SelectedNode == null) return;
-            var pathParts = my.explode("\\", db_tree.SelectedNode.FullPath);
+            var pathParts = GetTreePathParts(db_tree.SelectedNode);
             if (pathParts.Length < 3 || pathParts[2] != "Queries") return;
 
             TreeNode root = db_tree.SelectedNode;
@@ -5508,7 +5592,7 @@ namespace mySQLPunk
             }
             else
             {
-                var pathParts = my.explode("\\", node.FullPath);
+                var pathParts = GetTreePathParts(node);
                 if (pathParts.Length == 3 && pathParts[2] == "Views")
                 {
                     AddViewGroupMenuItems(menu, node);
@@ -5842,7 +5926,7 @@ namespace mySQLPunk
             RefreshDatabaseObjectNodes(databaseNode);
             foreach (TreeNode child in databaseNode.Nodes)
             {
-                if (!string.Equals(child.Text, groupName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(GetTreeGroupKey(child), groupName, StringComparison.OrdinalIgnoreCase)) continue;
                 db_tree.SelectedNode = child;
                 child.EnsureVisible();
                 return;
@@ -6665,9 +6749,7 @@ namespace mySQLPunk
 
         private void PopulateDatabaseChildren(TreeNode databaseNode, IDatabase db, string databaseName)
         {
-            TreeNode tablesNode = new TreeNode("Tables");
-            tablesNode.ImageIndex = 12;
-            tablesNode.SelectedImageIndex = 12;
+            TreeNode tablesNode = CreateTreeGroupNode("Tables", 12);
             databaseNode.Nodes.Add(tablesNode);
 
             foreach (string tableName in db.GetTables(databaseName))
@@ -6678,9 +6760,7 @@ namespace mySQLPunk
                 tablesNode.Nodes.Add(tN);
             }
 
-            TreeNode viewsNode = new TreeNode("Views");
-            viewsNode.ImageIndex = 13;
-            viewsNode.SelectedImageIndex = 13;
+            TreeNode viewsNode = CreateTreeGroupNode("Views", 13);
             databaseNode.Nodes.Add(viewsNode);
 
             foreach (string viewName in db.GetViews(databaseName))
@@ -6691,9 +6771,7 @@ namespace mySQLPunk
                 viewsNode.Nodes.Add(vN);
             }
 
-            TreeNode newNode = new TreeNode("Functions");
-            newNode.ImageIndex = 14;
-            newNode.SelectedImageIndex = 14;
+            TreeNode newNode = CreateTreeGroupNode("Functions", 14);
             databaseNode.Nodes.Add(newNode);
 
             foreach (DataRow functionRow in GetDatabaseFunctions(db, databaseName).Rows)
@@ -6704,9 +6782,7 @@ namespace mySQLPunk
                 newNode.Nodes.Add(functionNode);
             }
 
-            newNode = new TreeNode("Users");
-            newNode.ImageIndex = 19;
-            newNode.SelectedImageIndex = 19;
+            newNode = CreateTreeGroupNode("Users", 19);
             databaseNode.Nodes.Add(newNode);
 
             TreeNode root = databaseNode;
@@ -6720,9 +6796,7 @@ namespace mySQLPunk
                 newNode.Nodes.Add(userNode);
             }
 
-            newNode = new TreeNode("Models");
-            newNode.ImageIndex = 20;
-            newNode.SelectedImageIndex = 20;
+            newNode = CreateTreeGroupNode("Models", 20);
             databaseNode.Nodes.Add(newNode);
 
             foreach (string modelName in DatabaseModelNames)
@@ -6733,9 +6807,7 @@ namespace mySQLPunk
                 newNode.Nodes.Add(modelNode);
             }
 
-            newNode = new TreeNode("BI");
-            newNode.ImageIndex = 21;
-            newNode.SelectedImageIndex = 21;
+            newNode = CreateTreeGroupNode("BI", 21);
             databaseNode.Nodes.Add(newNode);
 
             foreach (string biName in DatabaseBIReportNames)
@@ -6746,9 +6818,7 @@ namespace mySQLPunk
                 newNode.Nodes.Add(biNode);
             }
 
-            newNode = new TreeNode("Other");
-            newNode.ImageIndex = 22;
-            newNode.SelectedImageIndex = 22;
+            newNode = CreateTreeGroupNode("Other", 22);
             databaseNode.Nodes.Add(newNode);
 
             foreach (string toolName in DatabaseOtherToolNames)
@@ -6759,9 +6829,7 @@ namespace mySQLPunk
                 newNode.Nodes.Add(toolNode);
             }
 
-            newNode = new TreeNode("Events");
-            newNode.ImageIndex = 15;
-            newNode.SelectedImageIndex = 15;
+            newNode = CreateTreeGroupNode("Events", 15);
             databaseNode.Nodes.Add(newNode);
 
             foreach (DataRow eventRow in GetDatabaseEvents(db, databaseName).Rows)
@@ -6772,14 +6840,10 @@ namespace mySQLPunk
                 newNode.Nodes.Add(eventNode);
             }
 
-            newNode = new TreeNode("Queries");
-            newNode.ImageIndex = 16;
-            newNode.SelectedImageIndex = 16;
+            newNode = CreateTreeGroupNode("Queries", 16);
             databaseNode.Nodes.Add(newNode);
 
-            newNode = new TreeNode("Reports");
-            newNode.ImageIndex = 17;
-            newNode.SelectedImageIndex = 17;
+            newNode = CreateTreeGroupNode("Reports", 17);
             databaseNode.Nodes.Add(newNode);
 
             foreach (string reportName in DatabaseReportNames)
@@ -6790,9 +6854,7 @@ namespace mySQLPunk
                 newNode.Nodes.Add(reportNode);
             }
 
-            newNode = new TreeNode("Backups");
-            newNode.ImageIndex = 18;
-            newNode.SelectedImageIndex = 18;
+            newNode = CreateTreeGroupNode("Backups", 18);
             databaseNode.Nodes.Add(newNode);
         }
         private void db_tree_third_click(int father_index, int index, string databaseName, string name)
@@ -6833,8 +6895,7 @@ namespace mySQLPunk
             if (tree.SelectedNode == null) return;
 
             dialogMyBoxOn("資料載入中...", false);
-            string fullPath = tree.SelectedNode.FullPath;
-            var m = my.explode("\\", fullPath);
+            var m = GetTreePathParts(tree.SelectedNode);
 
             // 取得根連線索引 (永遠以最頂層節點為準)
             TreeNode rootNode = tree.SelectedNode;
@@ -7200,7 +7261,7 @@ namespace mySQLPunk
 
             foreach (TreeNode child in databaseNode.Nodes)
             {
-                if (string.Equals(child.Text, groupName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(GetTreeGroupKey(child), groupName, StringComparison.OrdinalIgnoreCase))
                 {
                     bool alreadySelected = ReferenceEquals(db_tree.SelectedNode, child);
                     db_tree.SelectedNode = child;
