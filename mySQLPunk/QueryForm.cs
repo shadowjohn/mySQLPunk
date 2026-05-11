@@ -427,6 +427,9 @@ namespace mySQLPunk
                 ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
             };
             dgvResults.CellMouseDown += DgvResults_CellMouseDown;
+            dgvResults.CellFormatting += DgvResults_CellFormatting;
+            dgvResults.DataBindingComplete += DgvResults_DataBindingComplete;
+            dgvResults.DataError += DgvResults_DataError;
             RefreshResultsContextMenu();
             tabData.Controls.Add(dgvResults);
             tabResults.TabPages.Add(tabData);
@@ -1388,6 +1391,83 @@ namespace mySQLPunk
             dgvResults.ClearSelection();
             dgvResults.CurrentCell = dgvResults.Rows[e.RowIndex].Cells[e.ColumnIndex];
             dgvResults.Rows[e.RowIndex].Cells[e.ColumnIndex].Selected = true;
+        }
+
+        private void DgvResults_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
+        {
+            ConfigureBinaryResultColumns();
+        }
+
+        private void DgvResults_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.Value is byte[] bytes)
+            {
+                e.Value = FormatBinaryCellValue(bytes);
+                e.FormattingApplied = true;
+            }
+        }
+
+        private void DgvResults_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            e.ThrowException = false;
+            e.Cancel = false;
+        }
+
+        private void ConfigureBinaryResultColumns()
+        {
+            if (dgvResults == null || dgvResults.Columns.Count == 0) return;
+
+            DataTable source = dgvResults.DataSource as DataTable;
+            if (source == null) return;
+
+            for (int i = 0; i < dgvResults.Columns.Count; i++)
+            {
+                DataGridViewColumn gridColumn = dgvResults.Columns[i];
+                if (!IsBinaryDataGridColumn(source, gridColumn)) continue;
+
+                if (!(gridColumn is DataGridViewTextBoxColumn))
+                {
+                    DataGridViewTextBoxColumn textColumn = new DataGridViewTextBoxColumn
+                    {
+                        Name = gridColumn.Name,
+                        HeaderText = gridColumn.HeaderText,
+                        DataPropertyName = gridColumn.DataPropertyName,
+                        ReadOnly = true,
+                        SortMode = DataGridViewColumnSortMode.Automatic,
+                        Width = gridColumn.Width,
+                        DisplayIndex = gridColumn.DisplayIndex
+                    };
+                    dgvResults.Columns.RemoveAt(i);
+                    dgvResults.Columns.Insert(i, textColumn);
+                    gridColumn = textColumn;
+                }
+
+                gridColumn.ReadOnly = true;
+                gridColumn.DefaultCellStyle.NullValue = "";
+            }
+        }
+
+        private static bool IsBinaryDataGridColumn(DataTable source, DataGridViewColumn gridColumn)
+        {
+            string columnName = gridColumn.DataPropertyName;
+            if (string.IsNullOrWhiteSpace(columnName)) columnName = gridColumn.Name;
+            if (string.IsNullOrWhiteSpace(columnName) || !source.Columns.Contains(columnName)) return false;
+            return source.Columns[columnName].DataType == typeof(byte[]);
+        }
+
+        private static string FormatBinaryCellValue(byte[] bytes)
+        {
+            if (bytes == null) return "";
+
+            int previewLength = Math.Min(bytes.Length, 12);
+            StringBuilder preview = new StringBuilder(previewLength * 2);
+            for (int i = 0; i < previewLength; i++)
+            {
+                preview.Append(bytes[i].ToString("X2"));
+            }
+            if (bytes.Length > previewLength) preview.Append("...");
+
+            return "[BLOB " + bytes.Length + " bytes] 0x" + preview;
         }
 
         private bool ResultsHaveDataRows()
