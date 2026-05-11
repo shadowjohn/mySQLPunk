@@ -1,0 +1,8 @@
+progress_runner.gif
+
+Source: Cat & Dog - Free Sprites
+URL: https://lpc.opengameart.org/content/cat-dog-free-sprites
+Author: pzUH
+License: CC0 1.0 Universal
+
+The progress runner GIF was generated from the cat Run PNG sequence in CatnDog.zip.

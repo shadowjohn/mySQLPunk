@@ -321,6 +321,9 @@
     <Content Include="image\progress_runner.gif">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="image\progress_runner_LICENSE.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <Content Include="image\queries.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
