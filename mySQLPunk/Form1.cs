@@ -5521,6 +5521,10 @@ namespace mySQLPunk
                 {
                     AddTableGroupMenuItems(menu, node);
                 }
+                if (pathParts.Length == 3 && pathParts[2] == "Queries")
+                {
+                    AddQueryGroupMenuItems(menu, node);
+                }
                 if (pathParts.Length == 3 && pathParts[2] == "Backups")
                 {
                     ToolStripMenuItem backupDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
@@ -5597,6 +5601,79 @@ namespace mySQLPunk
 
             ThemeManager.ApplyToolStrip(menu);
             return menu;
+        }
+
+        private void AddQueryGroupMenuItems(ContextMenuStrip menu, TreeNode node)
+        {
+            ToolStripMenuItem newQueryItem = new ToolStripMenuItem(Localization.T("Toolbar.NewQuery"));
+            newQueryItem.Click += (s, ev) => Query_btn_Click(s, ev);
+            menu.Items.Add(newQueryItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem newGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewGroup"));
+            newGroupItem.Click += (s, ev) => ShowGroupUnavailable();
+            menu.Items.Add(newGroupItem);
+
+            AddPasteObjectMenuItem(menu);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem openFolderItem = new ToolStripMenuItem(Localization.T("Tool.OpenContainingFolder"));
+            openFolderItem.Click += (s, ev) => OpenQueryFolder();
+            menu.Items.Add(openFolderItem);
+
+            ToolStripMenuItem openExternalQueryItem = new ToolStripMenuItem(Localization.T("Tool.OpenExternalQuery"));
+            openExternalQueryItem.Click += (s, ev) => OpenExternalQueryWithDialog();
+            menu.Items.Add(openExternalQueryItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
+            refreshItem.Click += (s, ev) => RefreshQueryGroupNode(node);
+            menu.Items.Add(refreshItem);
+        }
+
+        private void OpenQueryFolder()
+        {
+            string path = GetQueryFolderPath();
+            Directory.CreateDirectory(path);
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            UpdateMainStatus(Localization.Format("Query.FolderOpened", path));
+        }
+
+        private static string GetQueryFolderPath()
+        {
+            return Path.Combine(Application.UserAppDataPath, "queries");
+        }
+
+        private void OpenExternalQueryWithDialog()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Object.SelectDatabaseOrConnection"), Localization.T("Tool.OpenExternalQuery"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = Localization.T("Tool.OpenExternalQuery");
+                dialog.Filter = Localization.T("Common.SqlFilesFilter");
+                dialog.CheckFileExists = true;
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                string sql = File.ReadAllText(dialog.FileName, Encoding.UTF8);
+                OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), sql, true);
+                UpdateMainStatus(Localization.Format("Query.ExternalOpened", dialog.FileName));
+            }
+        }
+
+        private void RefreshQueryGroupNode(TreeNode queriesNode)
+        {
+            if (queriesNode == null) return;
+            db_tree.SelectedNode = queriesNode;
+            ShowQueryHistoryForSelectedDatabase();
         }
 
         private void AddViewGroupMenuItems(ContextMenuStrip menu, TreeNode node)

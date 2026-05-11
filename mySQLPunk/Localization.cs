@@ -106,6 +106,8 @@ namespace mySQLPunk
             Add("Tool.ReverseEngineerModel", "將資料庫逆向至模型...", "Reverse Engineer Database to Model...");
             Add("Tool.GenerateData", "資料產生...", "Data Generation...");
             Add("Tool.FindInDatabase", "在資料庫中尋找", "Find in Database");
+            Add("Tool.OpenContainingFolder", "開啟所屬資料夾...", "Open Containing Folder...");
+            Add("Tool.OpenExternalQuery", "開啟外部查詢...", "Open External Query...");
             Add("Tool.EditConnection", "編輯連線", "Edit Connection");
             Add("Tool.DeleteConnection", "刪除連線", "Delete Connection");
             Add("Tool.CopyConnection", "複製連線...", "Duplicate Connection...");
@@ -321,6 +323,8 @@ namespace mySQLPunk
             Add("Query.TableData", "資料表資料", "Table Data");
             Add("Query.SqlSaved", "SQL 已儲存：{0}", "SQL saved: {0}");
             Add("Query.SqlOpened", "SQL 已開啟：{0}", "SQL opened: {0}");
+            Add("Query.ExternalOpened", "外部查詢已開啟：{0}", "External query opened: {0}");
+            Add("Query.FolderOpened", "查詢資料夾已開啟：{0}", "Query folder opened: {0}");
             Add("Query.CountRowsFailed", "計算資料列數失敗：{0}", "Count rows failed: {0}");
             Add("Query.LoadingTablePage", "正在載入資料表頁面...", "Loading table page...");
             Add("Query.Cancelled", "已取消。", "Cancelled.");
