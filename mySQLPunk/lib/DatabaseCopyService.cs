@@ -29,6 +29,12 @@ namespace mySQLPunk.lib
         public long CopiedRows { get; set; }
     }
 
+    public enum ViewCopyFallback
+    {
+        AutoSnapshot,       // 嘗試轉換 SQL，失敗改用 table snapshot
+        ForceTableSnapshot, // 跨過轉換，直接建立 table snapshot
+    }
+
     public class DatabaseCopyService
     {
         private readonly int _batchSize;
@@ -38,7 +44,7 @@ namespace mySQLPunk.lib
             _batchSize = batchSize <= 0 ? 1000 : batchSize;
         }
 
-        public DatabaseCopyResult Copy(DatabaseCopyItem source, DatabaseCopyItem target, Action<DatabaseCopyProgress> progress)
+        public DatabaseCopyResult Copy(DatabaseCopyItem source, DatabaseCopyItem target, Action<DatabaseCopyProgress> progress, ViewCopyFallback viewFallback = ViewCopyFallback.AutoSnapshot)
         {
             if (source == null || target == null) throw new ArgumentNullException("source");
             if (source.Database == null || target.Database == null) throw new ArgumentException("來源或目標資料庫尚未連線");
@@ -56,6 +62,18 @@ namespace mySQLPunk.lib
             {
                 if (crossProviderView)
                 {
+                    if (viewFallback == ViewCopyFallback.ForceTableSnapshot)
+                    {
+                        progress?.Invoke(new DatabaseCopyProgress
+                        {
+                            SourceName = source.ObjectName,
+                            TargetName = targetName,
+                            Message = "使用者選擇直接建立 table snapshot"
+                        });
+                        targetName = GenerateTargetName(target.Database, target.DatabaseName, source.ObjectName, "table");
+                        return CopyTable(source, target, targetName, progress);
+                    }
+
                     DatabaseCopyResult convertedView;
                     if (TryCopyConvertedView(source, target, targetName, progress, out convertedView))
                     {

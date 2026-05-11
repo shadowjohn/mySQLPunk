@@ -4042,6 +4042,18 @@ namespace mySQLPunk
                 ObjectKind = _treeClipboardItem.ObjectKind
             };
 
+            // 跨 provider 複製 View 時，先詢問使用者複製方式
+            ViewCopyFallback viewFallback = ViewCopyFallback.AutoSnapshot;
+            bool isCrossProviderView = string.Equals(_treeClipboardItem.ObjectKind, "view", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(_treeClipboardItem.ProviderName, target.ProviderName, StringComparison.OrdinalIgnoreCase);
+            if (isCrossProviderView)
+            {
+                ViewCopyFallback? choice = ShowViewCopyOptionsDialog(
+                    _treeClipboardItem.ProviderName, target.ProviderName, _treeClipboardItem.ObjectName);
+                if (choice == null) return;
+                viewFallback = choice.Value;
+            }
+
             try
             {
                 Cursor = Cursors.WaitCursor;
@@ -4049,7 +4061,7 @@ namespace mySQLPunk
                 DatabaseCopyResult result = await Task.Run(() => service.Copy(_treeClipboardItem, targetItem, p =>
                 {
                     if (!string.IsNullOrEmpty(p.Message)) UpdateMainStatus(p.Message);
-                }));
+                }, viewFallback));
 
                 RefreshDatabaseObjectNodes(target.DatabaseNode);
                 SelectObjectNode(target.DatabaseNode, result.ObjectKind, result.TargetName);
@@ -4066,6 +4078,74 @@ namespace mySQLPunk
             {
                 Cursor = Cursors.Default;
             }
+        }
+
+        private ViewCopyFallback? ShowViewCopyOptionsDialog(string sourceProvider, string targetProvider, string viewName)
+        {
+            ViewCopyFallback selected = ViewCopyFallback.AutoSnapshot;
+            using (Form dlg = new Form())
+            {
+                dlg.Text = Localization.T("Object.ViewCopyTitle");
+                dlg.Size = new Size(520, 230);
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                ApplyModernTheme(dlg);
+
+                var lbl = new Label
+                {
+                    Text = Localization.Format("Object.ViewCopyPrompt", sourceProvider, viewName, targetProvider),
+                    Location = new Point(16, 14),
+                    Size = new Size(480, 40),
+                    AutoSize = false
+                };
+                lbl.ForeColor = ThemeManager.TextColor;
+
+                var rb1 = new RadioButton
+                {
+                    Text = Localization.T("Object.ViewCopyAutoConvert"),
+                    Location = new Point(16, 58),
+                    Size = new Size(480, 22),
+                    Checked = true,
+                    ForeColor = ThemeManager.TextColor
+                };
+                var rb2 = new RadioButton
+                {
+                    Text = Localization.T("Object.ViewCopyForceSnapshot"),
+                    Location = new Point(16, 84),
+                    Size = new Size(480, 22),
+                    ForeColor = ThemeManager.TextColor
+                };
+
+                var btnOk = new Button
+                {
+                    Text = Localization.T("Common.OK"),
+                    DialogResult = DialogResult.None,
+                    Location = new Point(322, 152),
+                    Size = new Size(80, 30)
+                };
+                var btnCancel = new Button
+                {
+                    Text = Localization.T("Common.Cancel"),
+                    DialogResult = DialogResult.Cancel,
+                    Location = new Point(414, 152),
+                    Size = new Size(80, 30)
+                };
+
+                btnOk.Click += (s, e) =>
+                {
+                    selected = rb2.Checked ? ViewCopyFallback.ForceTableSnapshot : ViewCopyFallback.AutoSnapshot;
+                    dlg.DialogResult = DialogResult.OK;
+                };
+
+                dlg.Controls.AddRange(new Control[] { lbl, rb1, rb2, btnOk, btnCancel });
+                dlg.AcceptButton = btnOk;
+                dlg.CancelButton = btnCancel;
+
+                if (dlg.ShowDialog(this) != DialogResult.OK) return null;
+            }
+            return selected;
         }
 
         private DatabaseCopyItem BuildCopyItemFromNode(TreeNode node)
@@ -7041,7 +7121,7 @@ namespace mySQLPunk
         {
             if (databaseNode == null) return;
             TreeNode root = databaseNode;
-            while (root.Parent != null) root = root.Parent;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
             CreateDatabaseFromConnection(root);
         }
 
@@ -7091,6 +7171,10 @@ namespace mySQLPunk
             if (string.Equals(provider, "mssql", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(provider, "sqlserver", StringComparison.OrdinalIgnoreCase))
                 return "DROP DATABASE " + QuoteDatabaseIdentifier(databaseName, "[", "]") + ";";
+            if (string.Equals(provider, "oracle", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException(Localization.T("Database.OracleUnsupportedDelete"));
+            if (string.Equals(provider, "sqlite", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException(Localization.T("Database.SqliteUnsupportedDelete"));
 
             throw new NotSupportedException(Localization.Format("Database.UnsupportedDelete", provider));
         }
@@ -7293,14 +7377,15 @@ namespace mySQLPunk
 
         private void CreateDatabaseFromConnection(TreeNode node)
         {
-            if (node == null || node.Index < 0 || node.Index >= myN.connections.Count) return;
-            if (!IsConnectionOpen(node.Index))
+            int nodeIdx = GetConnectionIndex(node);
+            if (node == null || nodeIdx < 0 || nodeIdx >= myN.connections.Count) return;
+            if (!IsConnectionOpen(nodeIdx))
             {
                 MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), Localization.T("Tool.NewDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            Dictionary<string, object> conn = myN.connections[node.Index];
+            Dictionary<string, object> conn = myN.connections[nodeIdx];
             IDatabase db = (IDatabase)conn["pdo"];
             string databaseName = PromptForText(Localization.T("Database.NewTitle"), Localization.T("Database.NewPrompt"), "");
             if (databaseName == null) return;
@@ -7343,6 +7428,10 @@ namespace mySQLPunk
             if (string.Equals(provider, "mssql", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(provider, "sqlserver", StringComparison.OrdinalIgnoreCase))
                 return "CREATE DATABASE " + QuoteDatabaseIdentifier(databaseName, "[", "]") + ";";
+            if (string.Equals(provider, "oracle", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException(Localization.T("Database.OracleUnsupportedCreate"));
+            if (string.Equals(provider, "sqlite", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException(Localization.T("Database.SqliteUnsupportedCreate"));
 
             throw new NotSupportedException(Localization.Format("Database.UnsupportedCreate", provider));
         }
@@ -7883,7 +7972,9 @@ namespace mySQLPunk
         }
         private void db_tree_second_click(int father_index, int index, string databaseName)
         {
-            TreeNode databaseNode = db_tree.Nodes[father_index].Nodes[index];
+            TreeNode connNode = FindConnectionNode(father_index);
+            if (connNode == null || index < 0 || index >= connNode.Nodes.Count) return;
+            TreeNode databaseNode = connNode.Nodes[index];
             if (databaseNode.Nodes.Count > 0) return;
             if (!(myN.connections[father_index]["pdo"] is IDatabase db)) return;
 
@@ -8617,6 +8708,13 @@ namespace mySQLPunk
 
         public void update_connection(int index, Dictionary<string, object> conn)
         {
+            // 保留舊連線的 conn_group，避免編輯時群組資訊消失
+            if (index >= 0 && index < myN.connections.Count)
+            {
+                var existing = myN.connections[index];
+                if (!conn.ContainsKey("conn_group") || conn["conn_group"] == null)
+                    conn["conn_group"] = existing.ContainsKey("conn_group") && existing["conn_group"] != null ? existing["conn_group"] : "";
+            }
             myN.connections[index] = conn;
             RememberRecentConnectionType(conn);
             myN.setSettingINI();

@@ -71,13 +71,17 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 完成內容：已加入 CLI 可用性偵測（先透過 `where.exe`，再掃描 `PATH`）。找不到時會顯示安裝說明連結，不會直接開啟空白終端機。
   - 後續方向：可自訂 CLI 路徑，以及更完整的密碼安全傳遞策略。
 
-- **部分連線類型尚未支援編輯**
-  - 現況：不支援的連線編輯會顯示「此連線類型尚未支援編輯」。
-  - 後續方向：檢查每個 template form 是否具備讀寫所有連線欄位的能力。
+- **部分連線類型尚未支援編輯 ✅ 已完成**
+  - 現況：MySQL、PostgreSQL、Oracle、SQLite、SQL Server 五種 provider 均有對應的編輯表單（template form）。
+  - 完成內容：已修正編輯連線後 `conn_group` 欄位消失的問題——`update_connection` 現在會自動保留原連線的群組歸屬。
+  - 後續方向：非上列 provider 的連線（未來擴充）仍會顯示「此連線類型尚未支援編輯」。
 
-- **由主機節點新增/刪除資料庫只支援部分 provider**
-  - 現況：不支援時會顯示 provider 不支援新增或刪除資料庫。
-  - 後續方向：補齊各 provider 的 `CREATE DATABASE` / `DROP DATABASE` SQL 與權限提示。
+- **由主機節點新增/刪除資料庫只支援部分 provider ✅ 提示已補齊**
+  - 現況：MySQL、PostgreSQL、SQL Server 支援從連線節點新增 / 刪除資料庫。
+  - 完成內容：
+    - Oracle：不支援直接 `CREATE DATABASE`（Oracle 使用 User/Schema 概念），操作時會顯示說明，提示改用 Oracle 管理工具或以 DBA 帳戶執行 `CREATE USER`。
+    - SQLite：資料庫為獨立檔案，操作時會顯示說明，提示直接建立新的 SQLite 連線或刪除對應 `.sqlite` 檔案。
+  - 後續方向：若有需求可在 Oracle 連線中實作 `CREATE USER` 精靈，但需要密碼與 Tablespace 等額外資訊。
 
 - **SQLite 欄位註解不支援**
   - 現況：SQLite 本身沒有欄位註解語法，Table Designer 與補註解流程會擋下。
@@ -119,10 +123,14 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 ### Table/View 複製限制
 
-- **View SQL 無法安全轉換時會改用 table snapshot**
+- **View SQL 無法安全轉換時會改用 table snapshot ✅ 使用者選項已補齊**
   - 現況：跨 provider 複製 View 時，如果無法解析或轉換 SQL，會以查詢結果建立資料表快照。
+  - 完成內容：複製前新增「跨 Provider 複製 View」對話框，讓使用者選擇：
+    - **嘗試轉換 View SQL**（無法轉換時自動改為 table snapshot）
+    - **直接建立 Table snapshot**（最穩定，不保留 View 語法）
+    - 取消複製
   - 已知情境：Oracle 階層查詢/ROWNUM、MySQL 專用 View 語法、無法解析的 SELECT SQL。
-  - 後續方向：新增轉換預覽與使用者選項，讓使用者決定要保留 View、改成 Table snapshot，或取消。
+  - 後續方向：顯示 View SQL 轉換後的預覽，讓使用者在確認前可以檢查語法。
 
 ## 專案檔案導覽
 

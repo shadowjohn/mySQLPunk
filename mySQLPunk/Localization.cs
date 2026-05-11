@@ -264,12 +264,16 @@ namespace mySQLPunk
             Add("Database.NewPrompt", "資料庫名稱:", "Database name:");
             Add("Database.NameRequired", "請輸入資料庫名稱。", "Enter a database name.");
             Add("Database.UnsupportedCreate", "此連線類型不支援由主機節點新增資料庫：{0}", "Creating a database from the connection node is not supported for: {0}");
+            Add("Database.OracleUnsupportedCreate", "Oracle 使用 User/Schema 概念，不支援由此介面直接建立資料庫。\n如需建立新 Schema，請使用 Oracle 管理工具或以 DBA 帳戶執行 CREATE USER 語句。", "Oracle uses the User/Schema concept and does not support creating databases from this interface.\nTo create a new schema, use Oracle administration tools or run CREATE USER as a DBA.");
+            Add("Database.SqliteUnsupportedCreate", "SQLite 資料庫是以檔案為單位，不支援由此介面新增資料庫。\n請直接建立新的 SQLite 連線，指向新的 .sqlite 檔案。", "SQLite databases are file-based and cannot be created from this interface.\nCreate a new SQLite connection pointing to a new .sqlite file.");
             Add("Database.Created", "資料庫已建立：{0}", "Database created: {0}");
             Add("Database.CreateFailed", "新增資料庫失敗：{0}", "Create database failed: {0}");
             Add("Database.Closed", "資料庫已關閉：{0}", "Database closed: {0}");
             Add("Database.EditOpened", "資料庫資訊已開啟：{0}", "Database information opened: {0}");
             Add("Database.ConfirmDelete", "確定要刪除資料庫「{0}」嗎？此操作不可還原！", "Delete database \"{0}\"? This action cannot be undone.");
             Add("Database.UnsupportedDelete", "此連線類型不支援由右鍵選單刪除資料庫：{0}", "Deleting a database from the context menu is not supported for: {0}");
+            Add("Database.OracleUnsupportedDelete", "Oracle 不支援由此介面刪除資料庫（Schema）。\n請使用 Oracle 管理工具或以 DBA 帳戶執行 DROP USER CASCADE 語句。", "Oracle does not support dropping databases (schemas) from this interface.\nUse Oracle administration tools or run DROP USER CASCADE as a DBA.");
+            Add("Database.SqliteUnsupportedDelete", "SQLite 資料庫是以檔案為單位，不支援由此介面刪除資料庫。\n請直接刪除對應的 .sqlite 檔案。", "SQLite databases are file-based and cannot be deleted from this interface.\nDelete the corresponding .sqlite file directly.");
             Add("Database.Deleted", "資料庫已刪除：{0}", "Database deleted: {0}");
             Add("Database.DeleteFailed", "刪除資料庫失敗：{0}", "Delete database failed: {0}");
             Add("Database.AutoCommentsConfirm", "要掃描資料庫「{0}」的全部資料表，並補上空白欄位註解嗎？", "Scan every table in database \"{0}\" and fill blank column comments?");
@@ -316,6 +320,10 @@ namespace mySQLPunk
             Add("Object.TargetNameExists", "目標名稱已存在：{0}", "Target name already exists: {0}");
             Add("Object.RenameFailed", "重新命名失敗：{0}", "Rename failed: {0}");
             Add("Object.CopyFailed", "複製失敗：{0}", "Copy failed: {0}");
+            Add("Object.ViewCopyTitle", "跨 Provider 複製 View", "Cross-provider View Copy");
+            Add("Object.ViewCopyPrompt", "來源（{0}）View：{1}\n目標 Provider：{2}\n\n選擇複製方式：", "Source ({0}) view: {1}\nTarget provider: {2}\n\nSelect copy mode:");
+            Add("Object.ViewCopyAutoConvert", "嘗試轉換 View SQL（無法轉換時改用 table snapshot）", "Try converting View SQL (fall back to table snapshot if conversion fails)");
+            Add("Object.ViewCopyForceSnapshot", "直接建立 Table snapshot（最穩定，不保留 View 語法）", "Create table snapshot directly (most stable, View SQL not preserved)");
             Add("Object.DeleteFailed", "刪除失敗：{0}", "Delete failed: {0}");
             Add("Object.UnknownError", "unknown error", "unknown error");
             Add("Object.ConfirmDeleteTable", "確定要刪除資料表「{0}」嗎？此操作不可還原！", "Delete table \"{0}\"? This action cannot be undone.");
