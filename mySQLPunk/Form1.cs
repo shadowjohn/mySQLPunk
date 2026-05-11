@@ -6050,16 +6050,15 @@ namespace mySQLPunk
                 return;
             }
 
-            ProgressBar progressBar;
-            Label progressLabel;
-            using (Form progressForm = CreateDatabaseAutoCommentProgressForm(out progressBar, out progressLabel))
+            AnimatedRunnerProgressBar runnerProgress;
+            using (Form progressForm = CreateDatabaseAutoCommentProgressForm(out runnerProgress))
             {
                 progressForm.Show(this);
                 progressForm.Refresh();
 
                 try
                 {
-                    progressLabel.Text = Localization.T("Designer.AutoCommentsLoading");
+                    runnerProgress.SetProgress(0, 1, Localization.T("Designer.AutoCommentsLoading"));
                     Dictionary<string, string> comments = await TableDesignerForm.GetAutoColumnCommentTask();
                     if (comments == null || comments.Count == 0)
                     {
@@ -6067,39 +6066,33 @@ namespace mySQLPunk
                         return;
                     }
 
-                    progressLabel.Text = Localization.T("Database.AutoCommentsScanning");
+                    runnerProgress.SetProgress(0, 1, Localization.T("Database.AutoCommentsScanning"));
                     List<AutoCommentColumnUpdate> updates = await Task.Run(() => BuildDatabaseAutoCommentUpdates(target.Database, target.DatabaseName, comments));
                     if (updates.Count == 0)
                     {
-                        progressBar.Value = progressBar.Maximum;
-                        progressLabel.Text = Localization.T("Designer.AutoCommentsNoMatches");
+                        runnerProgress.SetProgress(1, 1, Localization.T("Designer.AutoCommentsNoMatches"));
                         MessageBox.Show(Localization.T("Designer.AutoCommentsNoMatches"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }
-
-                    progressBar.Minimum = 0;
-                    progressBar.Maximum = updates.Count;
-                    progressBar.Value = 0;
 
                     int applied = 0;
                     for (int i = 0; i < updates.Count; i++)
                     {
                         AutoCommentColumnUpdate update = updates[i];
-                        progressLabel.Text = Localization.Format("Database.AutoCommentsProgress", i + 1, updates.Count, update.TableName, update.ColumnName);
+                        runnerProgress.SetProgress(i + 1, updates.Count, Localization.Format("Database.AutoCommentsProgress", i + 1, updates.Count, update.TableName, update.ColumnName));
                         progressForm.Refresh();
                         await Task.Run(() => ExecuteAutoCommentUpdate(target.Database, update));
                         applied++;
-                        progressBar.Value = Math.Min(i + 1, progressBar.Maximum);
                         await Task.Delay(20);
                     }
 
-                    progressLabel.Text = Localization.Format("Database.AutoCommentsDone", applied);
+                    runnerProgress.SetProgress(updates.Count, updates.Count, Localization.Format("Database.AutoCommentsDone", applied));
                     UpdateMainStatus(Localization.Format("Database.AutoCommentsDone", applied));
                     MessageBox.Show(Localization.Format("Database.AutoCommentsApplied", applied), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
-                    progressLabel.Text = Localization.Format("Database.AutoCommentsFailed", ex.Message);
+                    runnerProgress.SetProgress(1, 1, Localization.Format("Database.AutoCommentsFailed", ex.Message));
                     MessageBox.Show(Localization.Format("Database.AutoCommentsFailed", ex.Message), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 finally
@@ -6109,36 +6102,28 @@ namespace mySQLPunk
             }
         }
 
-        private Form CreateDatabaseAutoCommentProgressForm(out ProgressBar progressBar, out Label progressLabel)
+        private Form CreateDatabaseAutoCommentProgressForm(out AnimatedRunnerProgressBar runnerProgress)
         {
             Form form = new Form
             {
                 Text = Localization.T("Tool.FillAutoComments"),
-                Size = new Size(520, 140),
+                Size = new Size(560, 170),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterParent,
                 MaximizeBox = false,
                 MinimizeBox = false
             };
 
-            progressLabel = new Label
+            runnerProgress = new AnimatedRunnerProgressBar
             {
-                AutoSize = false,
-                Text = Localization.T("Designer.AutoCommentsLoading"),
-                Location = new Point(18, 18),
-                Size = new Size(470, 24)
+                Location = new Point(18, 22),
+                Size = new Size(508, 86),
+                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
             };
-            progressBar = new ProgressBar
-            {
-                Location = new Point(18, 52),
-                Size = new Size(470, 24),
-                Minimum = 0,
-                Maximum = 1,
-                Value = 0
-            };
+            runnerProgress.LoadRunnerImage(Path.Combine(Application.StartupPath, "image", "progress_runner.gif"));
+            runnerProgress.SetProgress(0, 1, Localization.T("Designer.AutoCommentsLoading"));
 
-            form.Controls.Add(progressLabel);
-            form.Controls.Add(progressBar);
+            form.Controls.Add(runnerProgress);
             return form;
         }
 

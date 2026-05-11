@@ -151,6 +151,9 @@
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
     <Compile Include="IDockableForm.cs" />
+    <Compile Include="AnimatedRunnerProgressBar.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Localization.cs" />
     <Compile Include="OptionsForm.cs">
       <SubType>Form</SubType>

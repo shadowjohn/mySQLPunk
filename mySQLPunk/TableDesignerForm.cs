@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -33,8 +34,8 @@ namespace mySQLPunk
         private ToolStripButton btnFloat;
         private ToolStripButton btnDock;
         private ToolStripButton btnFillAutoComments;
-        private ToolStripProgressBar progressAutoComments;
-        private ToolStripLabel lblAutoCommentProgress;
+        private AnimatedRunnerProgressBar autoCommentRunnerProgress;
+        private ToolStripControlHost autoCommentRunnerHost;
         private bool _isFillingAutoComments;
 
         private TabControl tcMain;
@@ -125,20 +126,22 @@ namespace mySQLPunk
             
             ToolStripSeparator sep2 = new ToolStripSeparator();
             btnFillAutoComments = new ToolStripButton(Localization.T("Designer.FillAutoComments"), GetIcon(iconPath + "table.png"), BtnFillAutoComments_Click);
-            progressAutoComments = new ToolStripProgressBar()
+            autoCommentRunnerProgress = new AnimatedRunnerProgressBar()
             {
-                Minimum = 0,
-                Maximum = 100,
-                Value = 0,
-                Width = 140,
-                Visible = false
+                Width = 360,
+                Height = 34,
+                Visible = false,
+                BackColor = Color.Transparent,
+                ForeColor = Color.FromArgb(45, 45, 45)
             };
-            lblAutoCommentProgress = new ToolStripLabel()
+            autoCommentRunnerProgress.LoadRunnerImage(Path.Combine(Application.StartupPath, "image", "progress_runner.gif"));
+            autoCommentRunnerHost = new ToolStripControlHost(autoCommentRunnerProgress)
             {
                 AutoSize = false,
-                Width = 240,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Visible = false
+                Width = 360,
+                Height = 34,
+                Visible = false,
+                Margin = new Padding(2, 0, 6, 0)
             };
             ToolStripSeparator sepAutoComment = new ToolStripSeparator();
             ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), GetIcon(iconPath + "up.png"));
@@ -148,7 +151,7 @@ namespace mySQLPunk
             btnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => _mainHost?.DockDockableForm(this)) { Visible = false, Alignment = ToolStripItemAlignment.Right };
             
             tsTop.Items.AddRange(new ToolStripItem[] { 
-                btnSave, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnFillAutoComments, progressAutoComments, lblAutoCommentProgress, sepAutoComment, btnMoveUp, btnMoveDown, btnFloat, btnDock
+                btnSave, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnFillAutoComments, autoCommentRunnerHost, sepAutoComment, btnMoveUp, btnMoveDown, btnFloat, btnDock
             });
 
             tcMain = new TabControl() { Dock = DockStyle.Fill, Padding = new Point(12, 5) };
@@ -804,17 +807,11 @@ namespace mySQLPunk
 
         private void ShowAutoCommentProgress(string message, int current, int total)
         {
-            if (progressAutoComments != null)
+            if (autoCommentRunnerProgress != null)
             {
-                progressAutoComments.Visible = true;
-                progressAutoComments.Minimum = 0;
-                progressAutoComments.Maximum = Math.Max(total, 1);
-                progressAutoComments.Value = Math.Min(Math.Max(current, 0), progressAutoComments.Maximum);
-            }
-            if (lblAutoCommentProgress != null)
-            {
-                lblAutoCommentProgress.Visible = true;
-                lblAutoCommentProgress.Text = message ?? "";
+                if (autoCommentRunnerHost != null) autoCommentRunnerHost.Visible = true;
+                autoCommentRunnerProgress.Visible = true;
+                autoCommentRunnerProgress.SetProgress(current, total, message);
             }
             Application.DoEvents();
         }
