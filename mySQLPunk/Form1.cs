@@ -245,10 +245,6 @@ namespace mySQLPunk
             if (parent is Form f)
             {
                 f.Opacity = 1.0f;
-                f.KeyPreview = true;
-                f.KeyDown += (s, e) => {
-                    if (e.KeyCode == Keys.Escape) f.Close();
-                };
             }
             ThemeManager.ApplyTo(parent);
         }
