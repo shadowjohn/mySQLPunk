@@ -104,6 +104,8 @@ namespace mySQLPunk
             Add("Tool.ExecuteSqlFile", "執行 SQL 檔案...", "Execute SQL File...");
             Add("Tool.DataDictionary", "資料字典...", "Data Dictionary...");
             Add("Tool.ReverseEngineerModel", "將資料庫逆向至模型...", "Reverse Engineer Database to Model...");
+            Add("Tool.GenerateData", "資料產生...", "Data Generation...");
+            Add("Tool.FindInDatabase", "在資料庫中尋找", "Find in Database");
             Add("Tool.EditConnection", "編輯連線", "Edit Connection");
             Add("Tool.DeleteConnection", "刪除連線", "Delete Connection");
             Add("Tool.CopyConnection", "複製連線...", "Duplicate Connection...");
@@ -237,6 +239,11 @@ namespace mySQLPunk
             Add("Database.Deleted", "資料庫已刪除：{0}", "Database deleted: {0}");
             Add("Database.DeleteFailed", "刪除資料庫失敗：{0}", "Delete database failed: {0}");
             Add("Database.ModelOpened", "資料庫模型已建立：{0}", "Database model opened: {0}");
+            Add("Database.SearchTitle", "在資料庫中尋找", "Find in Database");
+            Add("Database.SearchPrompt", "搜尋文字:", "Search text:");
+            Add("Database.SearchKeywordRequired", "請輸入要搜尋的文字。", "Enter text to search for.");
+            Add("Database.SearchCompleted", "搜尋完成：{0} 筆結果", "Search completed: {0} result(s)");
+            Add("Database.DataGenerationUnavailable", "資料產生功能尚未建立。", "Data generation is not available yet.");
             Add("Object.SelectDatabaseOrConnection", "請先選擇一個資料庫或連線！", "Select a database or connection first.");
             Add("Object.OpenConnectionFirst", "請先雙擊連線以開啟資料庫！", "Double-click the connection to open the database first.");
             Add("Object.SelectTable", "請先在左側選取一個具體的資料表 (Table)！", "Select a table in the left pane first.");

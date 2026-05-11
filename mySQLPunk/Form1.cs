@@ -5509,7 +5509,7 @@ namespace mySQLPunk
             else
             {
                 var pathParts = my.explode("\\", node.FullPath);
-                if (pathParts.Length == 3 && (pathParts[2] == "Tables" || pathParts[2] == "Views"))
+                if (pathParts.Length == 3 && pathParts[2] == "Views")
                 {
                     AddPasteObjectMenuItem(menu);
                 }
@@ -5519,9 +5519,7 @@ namespace mySQLPunk
                 }
                 if (pathParts.Length == 3 && pathParts[2] == "Tables")
                 {
-                    ToolStripMenuItem importSqlItem = new ToolStripMenuItem(Localization.T("Tool.ImportWizard"));
-                    importSqlItem.Click += (s, ev) => ImportSqlWithDialog();
-                    menu.Items.Add(importSqlItem);
+                    AddTableGroupMenuItems(menu, node);
                 }
                 if (pathParts.Length == 3 && pathParts[2] == "Backups")
                 {
@@ -5599,6 +5597,150 @@ namespace mySQLPunk
 
             ThemeManager.ApplyToolStrip(menu);
             return menu;
+        }
+
+        private void AddTableGroupMenuItems(ContextMenuStrip menu, TreeNode node)
+        {
+            ToolStripMenuItem newTableItem = new ToolStripMenuItem(Localization.T("Tool.NewTable"));
+            newTableItem.Click += (s, ev) => CreateNewTable();
+            menu.Items.Add(newTableItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem importSqlItem = new ToolStripMenuItem(Localization.T("Tool.ImportWizard"));
+            importSqlItem.Click += (s, ev) => ImportSqlWithDialog();
+            menu.Items.Add(importSqlItem);
+
+            ToolStripMenuItem exportWizardItem = new ToolStripMenuItem(Localization.T("Tool.ExportWizard"));
+            exportWizardItem.Click += (s, ev) => DumpCurrentSelectionSqlWithDialog(false);
+            menu.Items.Add(exportWizardItem);
+
+            ToolStripMenuItem dictionaryItem = new ToolStripMenuItem(Localization.T("Tool.DataDictionary"));
+            dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();
+            menu.Items.Add(dictionaryItem);
+
+            ToolStripMenuItem dataGeneratorItem = new ToolStripMenuItem(Localization.T("Tool.GenerateData"));
+            dataGeneratorItem.Click += (s, ev) => ShowDataGenerationUnavailable();
+            menu.Items.Add(dataGeneratorItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem executeSqlFileItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteSqlFile"));
+            executeSqlFileItem.Click += (s, ev) => ImportSqlWithDialog();
+            menu.Items.Add(executeSqlFileItem);
+
+            ToolStripMenuItem findItem = new ToolStripMenuItem(Localization.T("Tool.FindInDatabase"));
+            findItem.Click += (s, ev) => FindInSelectedDatabase();
+            menu.Items.Add(findItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem newGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewGroup"));
+            newGroupItem.Click += (s, ev) => ShowGroupUnavailable();
+            menu.Items.Add(newGroupItem);
+
+            AddPasteObjectMenuItem(menu);
+
+            ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
+            refreshItem.Click += (s, ev) => RefreshTableGroupNode(node);
+            menu.Items.Add(refreshItem);
+        }
+
+        private void ShowDataGenerationUnavailable()
+        {
+            string message = Localization.T("Database.DataGenerationUnavailable");
+            UpdateMainStatus(message);
+            MessageBox.Show(message, Localization.T("Tool.GenerateData"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void FindInSelectedDatabase()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null) return;
+
+            string keyword = PromptForText(Localization.T("Database.SearchTitle"), Localization.T("Database.SearchPrompt"), "");
+            if (keyword == null) return;
+            keyword = keyword.Trim();
+            if (keyword.Length == 0)
+            {
+                MessageBox.Show(Localization.T("Database.SearchKeywordRequired"), Localization.T("Database.SearchTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            DataTable results = BuildDatabaseSearchResults(target.Database, target.DatabaseName, keyword);
+            table_top.Visible = true;
+            queryTabs.Visible = false;
+            table_top.BringToFront();
+            table_top.DataSource = results;
+            lblSidebarTitle.Text = Localization.T("Database.SearchTitle") + ": " + target.DatabaseName;
+            dgvDetails.DataSource = null;
+            rtbDDL.Text = "-- " + Localization.T("Database.SearchTitle") + Environment.NewLine +
+                          "-- " + keyword;
+            UpdateMainStatus(Localization.Format("Database.SearchCompleted", results.Rows.Count));
+        }
+
+        private DataTable BuildDatabaseSearchResults(IDatabase db, string databaseName, string keyword)
+        {
+            DataTable results = new DataTable();
+            results.Columns.Add("類型");
+            results.Columns.Add("名稱");
+            results.Columns.Add("欄位");
+            results.Columns.Add("位置");
+
+            foreach (string tableName in db.GetTables(databaseName))
+            {
+                AddSearchResultIfMatches(results, "Table", tableName, "", "Tables", keyword);
+                AddColumnSearchResults(results, db, databaseName, tableName, "Table", keyword);
+            }
+
+            foreach (string viewName in db.GetViews(databaseName))
+            {
+                AddSearchResultIfMatches(results, "View", viewName, "", "Views", keyword);
+                AddColumnSearchResults(results, db, databaseName, viewName, "View", keyword);
+            }
+
+            return results;
+        }
+
+        private void AddColumnSearchResults(DataTable results, IDatabase db, string databaseName, string objectName, string objectType, string keyword)
+        {
+            DataTable columns = GetColumnsSafe(db, databaseName, objectName);
+            foreach (DataRow column in columns.Rows)
+            {
+                string columnName = GetModelColumnName(column);
+                AddSearchResultIfMatches(results, objectType + " Column", objectName, columnName, objectType == "View" ? "Views" : "Tables", keyword);
+            }
+        }
+
+        private static void AddSearchResultIfMatches(DataTable results, string type, string name, string column, string location, string keyword)
+        {
+            if (!ContainsIgnoreCase(name, keyword) && !ContainsIgnoreCase(column, keyword)) return;
+
+            DataRow row = results.NewRow();
+            row["類型"] = type;
+            row["名稱"] = name;
+            row["欄位"] = column;
+            row["位置"] = location;
+            results.Rows.Add(row);
+        }
+
+        private static bool ContainsIgnoreCase(string value, string keyword)
+        {
+            return (value ?? "").IndexOf(keyword ?? "", StringComparison.CurrentCultureIgnoreCase) >= 0;
+        }
+
+        private void RefreshTableGroupNode(TreeNode tablesNode)
+        {
+            if (tablesNode == null || tablesNode.Parent == null) return;
+            TreeNode databaseNode = tablesNode.Parent;
+            RefreshDatabaseObjectNodes(databaseNode);
+            foreach (TreeNode child in databaseNode.Nodes)
+            {
+                if (!string.Equals(child.Text, "Tables", StringComparison.OrdinalIgnoreCase)) continue;
+                db_tree.SelectedNode = child;
+                child.EnsureVisible();
+                return;
+            }
         }
 
         private void AddDatabaseNodeMenuItems(ContextMenuStrip menu, TreeNode node)
