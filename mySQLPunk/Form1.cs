@@ -6100,8 +6100,11 @@ namespace mySQLPunk
         private static List<AutoCommentColumnUpdate> BuildDatabaseAutoCommentUpdates(IDatabase db, string databaseName, Dictionary<string, string> comments)
         {
             List<AutoCommentColumnUpdate> updates = new List<AutoCommentColumnUpdate>();
+            HashSet<string> viewNames = GetDatabaseViewNameSet(db, databaseName);
             foreach (string tableName in db.GetTables(databaseName))
             {
+                if (viewNames.Contains(tableName)) continue;
+
                 DataTable columns = db.GetColumns(databaseName, tableName);
                 foreach (DataRow row in columns.Rows)
                 {
@@ -6127,6 +6130,24 @@ namespace mySQLPunk
                 }
             }
             return updates;
+        }
+
+        private static HashSet<string> GetDatabaseViewNameSet(IDatabase db, string databaseName)
+        {
+            HashSet<string> viewNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                List<string> views = db.GetViews(databaseName);
+                if (views == null) return viewNames;
+                foreach (string viewName in views)
+                {
+                    if (!string.IsNullOrWhiteSpace(viewName)) viewNames.Add(viewName);
+                }
+            }
+            catch
+            {
+            }
+            return viewNames;
         }
 
         private static string BuildAutoCommentSql(IDatabase db, string databaseName, string tableName, DataRow row, string columnName, string comment)

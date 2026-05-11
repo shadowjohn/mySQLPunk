@@ -165,7 +165,7 @@ namespace mySQLPunk.lib
         {
             string safeDB = databaseName.Replace("`", "``");
             List<string> tables = new List<string>();
-            DataTable dt = SelectSQL($"SHOW TABLES FROM `{safeDB}`;");
+            DataTable dt = SelectSQL($"SHOW FULL TABLES FROM `{safeDB}` WHERE Table_type = 'BASE TABLE';");
             foreach (DataRow row in dt.Rows)
             {
                 tables.Add(row[0].ToString());
