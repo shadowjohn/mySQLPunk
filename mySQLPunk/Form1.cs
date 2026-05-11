@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Data;
 using System.IO;
 using System.Drawing;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -11,6 +12,7 @@ using System.Windows.Forms;
 using mySQLPunk.entity;
 using utility;
 using System.Runtime.InteropServices;
+using Newtonsoft.Json;
 //using MySql.Data.MySqlClient;
 using mySQLPunk.lib;
 using mySQLPunk.template;
@@ -5456,13 +5458,7 @@ namespace mySQLPunk
 
             if (node.Parent == null)
             {
-                ToolStripMenuItem editItem = new ToolStripMenuItem(Localization.T("Tool.EditConnection"));
-                editItem.Click += (s, ev) => db_tree_edit_connection(node.Index);
-                menu.Items.Add(editItem);
-
-                ToolStripMenuItem deleteItem = new ToolStripMenuItem(Localization.T("Tool.DeleteConnection"));
-                deleteItem.Click += (s, ev) => db_tree_delete_connection(node.Index);
-                menu.Items.Add(deleteItem);
+                AddConnectionRootMenuItems(menu, node);
             }
             else
             {
@@ -5567,6 +5563,475 @@ namespace mySQLPunk
 
             ThemeManager.ApplyToolStrip(menu);
             return menu;
+        }
+
+        private void AddConnectionRootMenuItems(ContextMenuStrip menu, TreeNode node)
+        {
+            if (node == null || node.Index < 0 || node.Index >= myN.connections.Count) return;
+
+            bool isConnected = IsConnectionOpen(node.Index);
+
+            ToolStripMenuItem openItem = new ToolStripMenuItem(Localization.T("Menu.OpenConnection"));
+            openItem.Click += (s, ev) => OpenConnectionNode(node);
+            menu.Items.Add(openItem);
+
+            ToolStripMenuItem profileItem = new ToolStripMenuItem(Localization.T("Menu.ConnectionProfile"));
+            ToolStripMenuItem currentProfileItem = new ToolStripMenuItem(Localization.T("Menu.CurrentProfile"));
+            currentProfileItem.Enabled = false;
+            profileItem.DropDownItems.Add(currentProfileItem);
+            profileItem.ToolTipText = Localization.T("Connection.ProfileUnavailable");
+            menu.Items.Add(profileItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem editItem = new ToolStripMenuItem(Localization.T("Tool.EditConnection"));
+            editItem.Click += (s, ev) => db_tree_edit_connection(node.Index);
+            menu.Items.Add(editItem);
+
+            ToolStripMenuItem newItem = new ToolStripMenuItem(Localization.T("Menu.NewConnection"));
+            newItem.Click += (s, ev) => ShowConnectionTypeSelection();
+            menu.Items.Add(newItem);
+
+            ToolStripMenuItem deleteItem = new ToolStripMenuItem(Localization.T("Tool.DeleteConnection"));
+            deleteItem.Click += (s, ev) => db_tree_delete_connection(node.Index);
+            menu.Items.Add(deleteItem);
+
+            ToolStripMenuItem duplicateItem = new ToolStripMenuItem(Localization.T("Tool.CopyConnection"));
+            duplicateItem.Click += (s, ev) => DuplicateConnection(node.Index);
+            menu.Items.Add(duplicateItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem newDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.NewDatabase"));
+            newDatabaseItem.Enabled = isConnected;
+            newDatabaseItem.Click += (s, ev) => CreateDatabaseFromConnection(node);
+            menu.Items.Add(newDatabaseItem);
+
+            ToolStripMenuItem newQueryItem = new ToolStripMenuItem(Localization.T("Toolbar.NewQuery"));
+            newQueryItem.Enabled = isConnected;
+            newQueryItem.Click += (s, ev) => Query_btn_Click(s, ev);
+            menu.Items.Add(newQueryItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem commandLineItem = new ToolStripMenuItem(Localization.T("Tool.CommandLine"));
+            commandLineItem.Enabled = isConnected;
+            commandLineItem.Click += (s, ev) => OpenDatabaseCommandLine(node.Index);
+            menu.Items.Add(commandLineItem);
+
+            ToolStripMenuItem executeSqlFileItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteSqlFile"));
+            executeSqlFileItem.Enabled = isConnected;
+            executeSqlFileItem.Click += (s, ev) => ImportSqlWithDialog();
+            menu.Items.Add(executeSqlFileItem);
+
+            ToolStripMenuItem sortItem = new ToolStripMenuItem(Localization.T("Menu.Sort"));
+            ToolStripMenuItem sortAscItem = new ToolStripMenuItem(Localization.T("Menu.SortAscending"));
+            sortAscItem.Click += (s, ev) => SortConnectionDatabaseNodes(node, true);
+            ToolStripMenuItem sortDescItem = new ToolStripMenuItem(Localization.T("Menu.SortDescending"));
+            sortDescItem.Click += (s, ev) => SortConnectionDatabaseNodes(node, false);
+            sortItem.DropDownItems.AddRange(new ToolStripItem[] { sortAscItem, sortDescItem });
+            menu.Items.Add(sortItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            bool isFavorite = _favoriteNodePaths.Any(p => string.Equals(p, node.FullPath, StringComparison.OrdinalIgnoreCase));
+            ToolStripMenuItem starItem = new ToolStripMenuItem(isFavorite ? Localization.T("Menu.UnstarConnection") : Localization.T("Menu.StarConnection"));
+            starItem.Click += (s, ev) => ToggleConnectionFavorite(node);
+            menu.Items.Add(starItem);
+
+            AddConnectionColorMenu(menu, node);
+
+            ToolStripMenuItem groupItem = new ToolStripMenuItem(Localization.T("Menu.ManageGroups"));
+            ToolStripMenuItem groupUnavailableItem = new ToolStripMenuItem(Localization.T("Menu.GroupUnavailable"));
+            groupUnavailableItem.Enabled = false;
+            groupItem.DropDownItems.Add(groupUnavailableItem);
+            menu.Items.Add(groupItem);
+
+            ToolStripMenuItem shareItem = new ToolStripMenuItem(Localization.T("Menu.Share"));
+            shareItem.Click += (s, ev) => ShareConnection(node.Index);
+            menu.Items.Add(shareItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
+            refreshItem.Enabled = isConnected;
+            refreshItem.Click += (s, ev) => RefreshConnectionDatabaseNodes(node);
+            menu.Items.Add(refreshItem);
+        }
+
+        private bool IsConnectionOpen(int index)
+        {
+            if (index < 0 || index >= myN.connections.Count) return false;
+            Dictionary<string, object> conn = myN.connections[index];
+            return conn.ContainsKey("isConnect") && conn["isConnect"].ToString() == "T" &&
+                   conn.ContainsKey("pdo") && conn["pdo"] is IDatabase;
+        }
+
+        private void OpenConnectionNode(TreeNode node)
+        {
+            if (node == null) return;
+            db_tree.SelectedNode = node;
+            if (IsConnectionOpen(node.Index))
+            {
+                node.Expand();
+                UpdateMainStatus(Localization.Format("Status.ConnectionAlreadyOpen", node.Text));
+                return;
+            }
+
+            db_tree_DoubleClick(db_tree, EventArgs.Empty);
+        }
+
+        private void DuplicateConnection(int index)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+
+            Dictionary<string, object> source = myN.connections[index];
+            Dictionary<string, object> copy = new Dictionary<string, object>(source);
+            copy["conn_name"] = GetUniqueConnectionName(GetConnectionValue(source, "conn_name") + " Copy");
+            copy["isConnect"] = "F";
+            copy["pdo"] = null;
+            copy.Remove("connString");
+
+            myN.connections.Add(copy);
+            RememberRecentConnectionType(copy);
+            myN.setSettingINI();
+            drawLists();
+            UpdateMainStatus(Localization.Format("Connection.Duplicated", copy["conn_name"]));
+        }
+
+        private string GetUniqueConnectionName(string baseName)
+        {
+            string cleanBase = string.IsNullOrWhiteSpace(baseName) ? "Connection Copy" : baseName.Trim();
+            string candidate = cleanBase;
+            int seq = 1;
+            while (myN.connections.Any(c => string.Equals(GetConnectionValue(c, "conn_name"), candidate, StringComparison.OrdinalIgnoreCase)))
+            {
+                candidate = cleanBase + " " + seq;
+                seq++;
+            }
+
+            return candidate;
+        }
+
+        private void CreateDatabaseFromConnection(TreeNode node)
+        {
+            if (node == null || node.Index < 0 || node.Index >= myN.connections.Count) return;
+            if (!IsConnectionOpen(node.Index))
+            {
+                MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), Localization.T("Tool.NewDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            Dictionary<string, object> conn = myN.connections[node.Index];
+            IDatabase db = (IDatabase)conn["pdo"];
+            string databaseName = PromptForText(Localization.T("Database.NewTitle"), Localization.T("Database.NewPrompt"), "");
+            if (databaseName == null) return;
+            databaseName = databaseName.Trim();
+            if (databaseName.Length == 0)
+            {
+                MessageBox.Show(Localization.T("Database.NameRequired"), Localization.T("Database.NewTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                string sql = BuildCreateDatabaseSql(db, databaseName);
+                Dictionary<string, string> result = db.ExecSQL(sql);
+                if (!result.ContainsKey("status") || result["status"] != "OK")
+                {
+                    string reason = result.ContainsKey("reason") ? result["reason"] : Localization.T("Object.UnknownError");
+                    throw new Exception(reason);
+                }
+
+                RefreshConnectionDatabaseNodes(node);
+                SelectConnectionDatabaseNode(node, databaseName);
+                UpdateMainStatus(Localization.Format("Database.Created", databaseName));
+            }
+            catch (Exception ex)
+            {
+                string message = Localization.Format("Database.CreateFailed", ex.Message);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Database.NewTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static string BuildCreateDatabaseSql(IDatabase db, string databaseName)
+        {
+            string provider = db == null ? "" : db.ProviderName;
+            if (string.Equals(provider, "mysql", StringComparison.OrdinalIgnoreCase))
+                return "CREATE DATABASE " + QuoteDatabaseIdentifier(databaseName, "`", "`") + ";";
+            if (string.Equals(provider, "postgresql", StringComparison.OrdinalIgnoreCase))
+                return "CREATE DATABASE " + QuoteDatabaseIdentifier(databaseName, "\"", "\"") + ";";
+            if (string.Equals(provider, "mssql", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(provider, "sqlserver", StringComparison.OrdinalIgnoreCase))
+                return "CREATE DATABASE " + QuoteDatabaseIdentifier(databaseName, "[", "]") + ";";
+
+            throw new NotSupportedException(Localization.Format("Database.UnsupportedCreate", provider));
+        }
+
+        private static string QuoteDatabaseIdentifier(string name, string openQuote, string closeQuote)
+        {
+            if (openQuote == "[") return "[" + name.Replace("]", "]]") + "]";
+            return openQuote + name.Replace(openQuote, openQuote + openQuote) + closeQuote;
+        }
+
+        private void RefreshConnectionDatabaseNodes(TreeNode root)
+        {
+            if (root == null || root.Index < 0 || root.Index >= myN.connections.Count) return;
+            if (!IsConnectionOpen(root.Index)) return;
+
+            IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
+            root.Nodes.Clear();
+            foreach (string databaseName in db.GetDatabases())
+            {
+                TreeNode newNode = new TreeNode(databaseName);
+                newNode.ImageIndex = 10;
+                newNode.SelectedImageIndex = 10;
+                root.Nodes.Add(newNode);
+            }
+
+            root.Expand();
+            UpdateMainStatus(Localization.Format("Connection.Refreshed", root.Text));
+        }
+
+        private void SelectConnectionDatabaseNode(TreeNode root, string databaseName)
+        {
+            if (root == null) return;
+            foreach (TreeNode child in root.Nodes)
+            {
+                if (!string.Equals(child.Text, databaseName, StringComparison.OrdinalIgnoreCase)) continue;
+                db_tree.SelectedNode = child;
+                child.EnsureVisible();
+                return;
+            }
+        }
+
+        private void SortConnectionDatabaseNodes(TreeNode root, bool ascending)
+        {
+            if (root == null) return;
+            List<TreeNode> nodes = root.Nodes.Cast<TreeNode>()
+                .OrderBy(n => n.Text, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            if (!ascending) nodes.Reverse();
+
+            root.Nodes.Clear();
+            root.Nodes.AddRange(nodes.ToArray());
+            root.Expand();
+        }
+
+        private void ToggleConnectionFavorite(TreeNode node)
+        {
+            if (node == null) return;
+            string path = node.FullPath;
+            string existing = _favoriteNodePaths.FirstOrDefault(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+            if (existing == null)
+            {
+                _favoriteNodePaths.Add(path);
+            }
+            else
+            {
+                _favoriteNodePaths.Remove(existing);
+            }
+
+            SaveFavoriteNodePaths();
+            ConfigureMainMenu();
+            UpdateMainStatus(existing == null ? "Favorite added: " + path : "Favorite removed: " + path);
+        }
+
+        private void AddConnectionColorMenu(ContextMenuStrip menu, TreeNode node)
+        {
+            ToolStripMenuItem colorItem = new ToolStripMenuItem(Localization.T("Menu.Color"));
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorDefault"), Color.Empty);
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorRed"), Color.FromArgb(190, 44, 44));
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorOrange"), Color.FromArgb(204, 120, 50));
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorYellow"), Color.FromArgb(170, 140, 20));
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorGreen"), Color.FromArgb(50, 135, 90));
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorBlue"), Color.FromArgb(51, 103, 145));
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorPurple"), Color.FromArgb(125, 80, 160));
+            menu.Items.Add(colorItem);
+        }
+
+        private void AddConnectionColorMenuItem(ToolStripMenuItem parent, TreeNode node, string text, Color color)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(text);
+            item.Click += (s, ev) =>
+            {
+                node.ForeColor = color;
+                UpdateMainStatus(Localization.Format("Connection.MarkedColor", text));
+            };
+            parent.DropDownItems.Add(item);
+        }
+
+        private void ShareConnection(int index)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Title = Localization.T("Connection.ShareTitle");
+                dialog.Filter = Localization.T("Connection.ShareFilter");
+                dialog.DefaultExt = "json";
+                dialog.FileName = GetConnectionValue(myN.connections[index], "conn_name") + ".json";
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                try
+                {
+                    Dictionary<string, object> shared = BuildShareableConnection(myN.connections[index]);
+                    File.WriteAllText(dialog.FileName, JsonConvert.SerializeObject(shared, Formatting.Indented), Encoding.UTF8);
+                    MessageBox.Show(Localization.T("Connection.Shared"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UpdateMainStatus(Localization.T("Connection.Shared"));
+                }
+                catch (Exception ex)
+                {
+                    string message = Localization.Format("Connection.ShareFailed", ex.Message);
+                    UpdateMainStatus(message);
+                    MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private static Dictionary<string, object> BuildShareableConnection(Dictionary<string, object> source)
+        {
+            Dictionary<string, object> shared = new Dictionary<string, object>();
+            string[] keys =
+            {
+                "conn_name",
+                "db_kind",
+                "host",
+                "port",
+                "initial_database",
+                "path",
+                "username",
+                "trusted_connection",
+                "init_geospatial",
+                "connection_type",
+                "tns_name",
+                "service_name",
+                "sid",
+                "oracle_identifier_type"
+            };
+
+            foreach (string key in keys)
+            {
+                if (source.ContainsKey(key)) shared[key] = source[key];
+            }
+
+            shared["pwd"] = "";
+            return shared;
+        }
+
+        private void OpenDatabaseCommandLine(int index)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            Dictionary<string, object> conn = myN.connections[index];
+            string command = BuildDatabaseCommandLine(conn);
+            if (string.IsNullOrWhiteSpace(command))
+            {
+                string kind = GetConnectionValue(conn, "db_kind");
+                string message = Localization.Format("Connection.CommandLineUnavailable", kind);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.CommandLine"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            ProcessStartInfo psi = new ProcessStartInfo("cmd.exe");
+            psi.Arguments = "/k " + command;
+            psi.UseShellExecute = true;
+            Process.Start(psi);
+        }
+
+        private string BuildDatabaseCommandLine(Dictionary<string, object> conn)
+        {
+            string kind = GetConnectionValue(conn, "db_kind").ToLowerInvariant();
+            string host = GetConnectionValue(conn, "host");
+            string port = GetConnectionValue(conn, "port");
+            string user = GetConnectionValue(conn, "username");
+            string initialDatabase = GetConnectionValue(conn, "initial_database");
+
+            switch (kind)
+            {
+                case "mysql":
+                    return "mysql -h " + QuoteCommandArgument(host) +
+                           (string.IsNullOrWhiteSpace(port) ? "" : " -P " + QuoteCommandArgument(port)) +
+                           " -u " + QuoteCommandArgument(user) + " -p";
+                case "postgresql":
+                    if (string.IsNullOrWhiteSpace(initialDatabase)) initialDatabase = "postgres";
+                    return "psql -h " + QuoteCommandArgument(host) +
+                           (string.IsNullOrWhiteSpace(port) ? "" : " -p " + QuoteCommandArgument(port)) +
+                           " -U " + QuoteCommandArgument(user) + " " + QuoteCommandArgument(initialDatabase);
+                case "mssql":
+                case "sqlserver":
+                    string dataSource = BuildSqlServerDataSource(host, port);
+                    if (GetConnectionValue(conn, "trusted_connection") == "T")
+                    {
+                        return "sqlcmd -S " + QuoteCommandArgument(dataSource) + " -E";
+                    }
+                    return "sqlcmd -S " + QuoteCommandArgument(dataSource) + " -U " + QuoteCommandArgument(user);
+                case "sqlite":
+                    string sqliteExe = Path.Combine(my.pwd(), "binary", "sqlite3_ext", "sqlite3.exe");
+                    string sqlitePath = GetConnectionValue(conn, "path");
+                    string exe = File.Exists(sqliteExe) ? sqliteExe : "sqlite3";
+                    return QuoteCommandArgument(exe) + " " + QuoteCommandArgument(sqlitePath);
+                case "oracle":
+                    string connectName = GetConnectionValue(conn, "tns_name");
+                    if (string.IsNullOrWhiteSpace(connectName)) connectName = GetConnectionValue(conn, "service_name");
+                    if (string.IsNullOrWhiteSpace(connectName)) connectName = GetConnectionValue(conn, "sid");
+                    return "sqlplus " + QuoteCommandArgument(user + "@" + connectName);
+                default:
+                    return "";
+            }
+        }
+
+        private static string QuoteCommandArgument(string value)
+        {
+            value = value ?? "";
+            return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
+        private string PromptForText(string title, string label, string defaultValue)
+        {
+            using (Form prompt = new Form())
+            using (Label promptLabel = new Label())
+            using (TextBox input = new TextBox())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                prompt.Text = title;
+                prompt.StartPosition = FormStartPosition.CenterParent;
+                prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
+                prompt.MinimizeBox = false;
+                prompt.MaximizeBox = false;
+                prompt.ClientSize = new Size(420, 132);
+                prompt.ShowIcon = false;
+
+                promptLabel.Text = label;
+                promptLabel.AutoSize = true;
+                promptLabel.Location = new Point(14, 18);
+
+                input.Text = defaultValue ?? string.Empty;
+                input.Location = new Point(17, 45);
+                input.Width = 386;
+                input.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+
+                okButton.Text = Localization.T("Common.OK");
+                okButton.DialogResult = DialogResult.OK;
+                okButton.Location = new Point(247, 89);
+                okButton.Width = 75;
+
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.Location = new Point(328, 89);
+                cancelButton.Width = 75;
+
+                prompt.Controls.Add(promptLabel);
+                prompt.Controls.Add(input);
+                prompt.Controls.Add(okButton);
+                prompt.Controls.Add(cancelButton);
+                prompt.AcceptButton = okButton;
+                prompt.CancelButton = cancelButton;
+                ThemeManager.ApplyTo(prompt);
+
+                return prompt.ShowDialog(this) == DialogResult.OK ? input.Text : null;
+            }
         }
 
         private void AddCopyRenameObjectMenuItems(ContextMenuStrip menu)
