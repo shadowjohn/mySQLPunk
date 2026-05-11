@@ -48,6 +48,7 @@ namespace mySQLPunk
             Add("Menu.SortDescending", "名稱遞減", "Name Descending");
             Add("Menu.StarConnection", "加上星號", "Add Star");
             Add("Menu.UnstarConnection", "移除星號", "Remove Star");
+            Add("Menu.NewGroup", "新增群組", "New Group");
             Add("Menu.Color", "色彩", "Color");
             Add("Menu.ColorDefault", "預設", "Default");
             Add("Menu.ColorRed", "紅色", "Red");
@@ -131,6 +132,7 @@ namespace mySQLPunk
             Add("Status.ConnectionAlreadyOpen", "連線已開啟：{0}", "Connection already open: {0}");
             Add("Status.ConnectionsExported", "連線設定已匯出。", "Connections exported.");
             Add("Status.ConnectionsImported", "連線設定已匯入。", "Connections imported.");
+            Add("Status.ConnectionListRefreshed", "連線清單已重新整理。", "Connection list refreshed.");
             Add("Status.ExportFailed", "匯出失敗：", "Export failed: ");
             Add("Status.ImportFailed", "匯入失敗：", "Import failed: ");
             Add("Status.ThemeChanged", "主題已切換。", "Theme changed.");

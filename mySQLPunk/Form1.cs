@@ -861,6 +861,7 @@ namespace mySQLPunk
 
             // 連結右鍵選單事件
             db_tree.NodeMouseClick += db_tree_NodeMouseClick;
+            db_tree.MouseDown += db_tree_MouseDown;
 
             tool_Connection.BringToFront();
 
@@ -5448,6 +5449,50 @@ namespace mySQLPunk
                 if (menu == null) return;
                 menu.Show(db_tree, e.Location);
             }
+        }
+
+        private void db_tree_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right) return;
+            if (db_tree.GetNodeAt(e.Location) != null) return;
+
+            db_tree.SelectedNode = null;
+            ContextMenuStrip menu = BuildTreeBlankContextMenu();
+            menu.Show(db_tree, e.Location);
+        }
+
+        private ContextMenuStrip BuildTreeBlankContextMenu()
+        {
+            ContextMenuStrip menu = new ContextMenuStrip();
+
+            ToolStripMenuItem newConnectionItem = new ToolStripMenuItem(Localization.T("Menu.NewConnection"));
+            newConnectionItem.Click += (s, ev) => ShowConnectionTypeSelection();
+            menu.Items.Add(newConnectionItem);
+
+            ToolStripMenuItem newGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewGroup"));
+            newGroupItem.Click += (s, ev) => ShowGroupUnavailable();
+            menu.Items.Add(newGroupItem);
+
+            ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
+            refreshItem.Click += (s, ev) => RefreshConnectionList();
+            menu.Items.Add(refreshItem);
+
+            ThemeManager.ApplyToolStrip(menu);
+            return menu;
+        }
+
+        private void ShowGroupUnavailable()
+        {
+            string message = Localization.T("Menu.GroupUnavailable");
+            UpdateMainStatus(message);
+            MessageBox.Show(message, Localization.T("Menu.NewGroup"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void RefreshConnectionList()
+        {
+            drawLists();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("Status.ConnectionListRefreshed"));
         }
 
         private ContextMenuStrip BuildTreeContextMenu(TreeNode node)
