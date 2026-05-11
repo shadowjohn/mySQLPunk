@@ -237,14 +237,18 @@ namespace mySQLPunk.lib
         public List<string> GetTables(string databaseName)
         {
             List<string> tables = new List<string>();
-            // 排除系統內部表及 virtual table（virtual table 模組未載入時會異常）
+            // 排除系統內部表及 virtual table（模組未載入時會異常）
             DataTable dt = SelectSQL(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 + "AND name NOT LIKE 'sqlite_%' "
                 + "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%');");
+            // 從結果中再排除 FTS/RTree 影子表（名稱為 <virtual_table>_xxx）
+            var virtualNames = GetVirtualTableNames();
             foreach (DataRow row in dt.Rows)
             {
-                tables.Add(row[0].ToString());
+                string name = row[0].ToString();
+                if (!IsShadowTable(name, virtualNames))
+                    tables.Add(name);
             }
             return tables;
         }
@@ -275,9 +279,11 @@ namespace mySQLPunk.lib
                 + "AND name NOT LIKE 'sqlite_%' "
                 + "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%') "
                 + "ORDER BY name;");
+            var virtualNames = GetVirtualTableNames();
             foreach (DataRow row in tables.Rows)
             {
                 string tableName = row["name"].ToString();
+                if (IsShadowTable(tableName, virtualNames)) continue; // 跟着排除 FTS/RTree 影子表
                 DataRow nr = output.NewRow();
                 nr["Name"] = tableName;
                 nr["Auto_increment"] = DBNull.Value;
@@ -376,6 +382,34 @@ namespace mySQLPunk.lib
             dt.Columns.Add("Collation");
             dt.Columns.Add("Create_options");
             return dt;
+        }
+
+        /// <summary>
+        /// 取得所有 virtual table 名稱（FTS / RTree / SpatiaLite 等）。
+        /// </summary>
+        private HashSet<string> GetVirtualTableNames()
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                DataTable dt = SelectSQL(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE 'CREATE VIRTUAL%';");
+                foreach (DataRow row in dt.Rows)
+                    names.Add(row[0].ToString());
+            }
+            catch { }
+            return names;
+        }
+
+        /// <summary>
+        /// 判斷 tableName 是否為某個 virtual table 的影子表（格式：&lt;vtab&gt;_xxx）。
+        /// </summary>
+        private static bool IsShadowTable(string tableName, HashSet<string> virtualNames)
+        {
+            int idx = tableName.LastIndexOf('_');
+            if (idx <= 0) return false;
+            string prefix = tableName.Substring(0, idx);
+            return virtualNames.Contains(prefix);
         }
 
         private static DataTable CreateIndexSchema()
