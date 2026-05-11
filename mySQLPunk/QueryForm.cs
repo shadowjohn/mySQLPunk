@@ -123,6 +123,7 @@ namespace mySQLPunk
         private ToolStripMenuItem resultsViewBlobHexItem;
         private ToolStripMenuItem resultsCopyBlobHexItem;
         private ToolStripMenuItem resultsSaveBlobFileItem;
+        private ToolStripMenuItem resultsImportBlobFileItem;
         private ToolStripSeparator resultsGeometrySeparator;
         private ToolStripMenuItem resultsCopyGeometryWktItem;
         private ToolStripMenuItem resultsCopyWktGeometrySqlItem;
@@ -1334,6 +1335,7 @@ namespace mySQLPunk
                 resultsViewBlobHexItem = AddResultsMenuItem(resultsContextMenu, "viewBlobHex", (s, e) => ViewSelectedBlobHex());
                 resultsCopyBlobHexItem = AddResultsMenuItem(resultsContextMenu, "copyBlobHex", (s, e) => CopySelectedBlobHex());
                 resultsSaveBlobFileItem = AddResultsMenuItem(resultsContextMenu, "saveBlobFile", (s, e) => SaveSelectedBlobToFile());
+                resultsImportBlobFileItem = AddResultsMenuItem(resultsContextMenu, "importBlobFile", (s, e) => ImportBlobFromFile());
                 resultsGeometrySeparator = new ToolStripSeparator();
                 resultsContextMenu.Items.Add(resultsGeometrySeparator);
                 resultsCopyGeometryWktItem = AddResultsMenuItem(resultsContextMenu, "copyGeometryWkt", (s, e) => CopySelectedGeometryAsWkt());
@@ -1364,6 +1366,7 @@ namespace mySQLPunk
             AddResultsMenuItem(menu, "viewBlobHex", (s, e) => ViewSelectedBlobHex()).Text = Localization.T("Query.ViewBlobHex");
             AddResultsMenuItem(menu, "copyBlobHex", (s, e) => CopySelectedBlobHex()).Text = Localization.T("Query.CopyBlobHex");
             AddResultsMenuItem(menu, "saveBlobFile", (s, e) => SaveSelectedBlobToFile()).Text = Localization.T("Query.SaveBlobFile");
+            AddResultsMenuItem(menu, "importBlobFile", (s, e) => ImportBlobFromFile()).Text = Localization.T("Query.ImportBlobFile");
             menu.Items.Add(new ToolStripSeparator());
             AddResultsMenuItem(menu, "copyGeometryWkt", (s, e) => CopySelectedGeometryAsWkt()).Text = Localization.T("Query.CopyGeometryAsWkt");
             AddResultsMenuItem(menu, "copyWktGeometrySql", (s, e) => CopySelectedWktAsGeometrySql()).Text = Localization.T("Query.CopyWktAsGeometrySql");
@@ -1387,6 +1390,7 @@ namespace mySQLPunk
             if (resultsViewBlobHexItem != null) resultsViewBlobHexItem.Text = Localization.T("Query.ViewBlobHex");
             if (resultsCopyBlobHexItem != null) resultsCopyBlobHexItem.Text = Localization.T("Query.CopyBlobHex");
             if (resultsSaveBlobFileItem != null) resultsSaveBlobFileItem.Text = Localization.T("Query.SaveBlobFile");
+            if (resultsImportBlobFileItem != null) resultsImportBlobFileItem.Text = Localization.T("Query.ImportBlobFile");
             if (resultsCopyGeometryWktItem != null) resultsCopyGeometryWktItem.Text = Localization.T("Query.CopyGeometryAsWkt");
             if (resultsCopyWktGeometrySqlItem != null) resultsCopyWktGeometrySqlItem.Text = Localization.T("Query.CopyWktAsGeometrySql");
             if (resultsAddRowItem != null) resultsAddRowItem.Text = Localization.T("Query.Add");
@@ -1416,7 +1420,9 @@ namespace mySQLPunk
             bool hasData = ResultsHaveDataRows();
             bool hasSelection = HasResultsSelection();
             object currentValue = GetCurrentResultCellValue();
-            bool canUseBlobTools = currentValue is byte[];
+            bool isBinaryCell = IsCurrentResultCellBinaryColumn();
+            bool hasBlobValue = currentValue is byte[];
+            bool canImportBlob = _isTableDataMode && isBinaryCell;
             bool canCopyGeometryWkt = currentValue is byte[] bytes && GeometryWktConverter.TryGeometryBytesToWkt(bytes, out _);
             bool canCopyWktGeometrySql = currentValue != null && LooksLikeWkt(currentValue.ToString());
             SetResultsMenuItemEnabled(menu, "copyCells", hasSelection);
@@ -1424,19 +1430,22 @@ namespace mySQLPunk
             SetResultsMenuItemEnabled(menu, "copyRows", GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "selectAll", hasData);
             SetResultsMenuItemEnabled(menu, "export", hasData);
-            SetResultsMenuItemEnabled(menu, "viewBlobHex", canUseBlobTools);
-            SetResultsMenuItemEnabled(menu, "copyBlobHex", canUseBlobTools);
-            SetResultsMenuItemEnabled(menu, "saveBlobFile", canUseBlobTools);
+            SetResultsMenuItemEnabled(menu, "viewBlobHex", hasBlobValue);
+            SetResultsMenuItemEnabled(menu, "copyBlobHex", hasBlobValue);
+            SetResultsMenuItemEnabled(menu, "saveBlobFile", hasBlobValue);
+            SetResultsMenuItemEnabled(menu, "importBlobFile", canImportBlob);
             SetResultsMenuItemEnabled(menu, "copyGeometryWkt", canCopyGeometryWkt);
             SetResultsMenuItemEnabled(menu, "copyWktGeometrySql", canCopyWktGeometrySql);
             SetResultsMenuItemEnabled(menu, "addRow", dgvResults != null && dgvResults.DataSource is DataTable);
             SetResultsMenuItemEnabled(menu, "deleteRow", GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "saveRows", dgvResults != null && dgvResults.DataSource is DataTable);
 
-            if (resultsBinarySeparator != null) resultsBinarySeparator.Visible = canUseBlobTools;
-            if (resultsViewBlobHexItem != null) resultsViewBlobHexItem.Visible = canUseBlobTools;
-            if (resultsCopyBlobHexItem != null) resultsCopyBlobHexItem.Visible = canUseBlobTools;
-            if (resultsSaveBlobFileItem != null) resultsSaveBlobFileItem.Visible = canUseBlobTools;
+            bool showBlobTools = isBinaryCell || hasBlobValue;
+            if (resultsBinarySeparator != null) resultsBinarySeparator.Visible = showBlobTools;
+            if (resultsViewBlobHexItem != null) resultsViewBlobHexItem.Visible = hasBlobValue;
+            if (resultsCopyBlobHexItem != null) resultsCopyBlobHexItem.Visible = hasBlobValue;
+            if (resultsSaveBlobFileItem != null) resultsSaveBlobFileItem.Visible = hasBlobValue;
+            if (resultsImportBlobFileItem != null) resultsImportBlobFileItem.Visible = canImportBlob;
 
             bool showGeometryTools = canCopyGeometryWkt || canCopyWktGeometrySql;
             if (resultsGeometrySeparator != null) resultsGeometrySeparator.Visible = showGeometryTools;
@@ -1463,6 +1472,27 @@ namespace mySQLPunk
         private byte[] GetCurrentResultBlob()
         {
             return GetCurrentResultCellValue() as byte[];
+        }
+
+        private bool IsCurrentResultCellBinaryColumn()
+        {
+            if (dgvResults == null || dgvResults.CurrentCell == null) return false;
+            if (dgvResults.CurrentCell.RowIndex < 0 || dgvResults.CurrentCell.ColumnIndex < 0) return false;
+
+            DataTable source = dgvResults.DataSource as DataTable;
+            if (source == null) return false;
+            DataGridViewColumn column = dgvResults.Columns[dgvResults.CurrentCell.ColumnIndex];
+            return IsBinaryDataGridColumn(source, column);
+        }
+
+        private string GetCurrentResultColumnName()
+        {
+            if (dgvResults == null || dgvResults.CurrentCell == null || dgvResults.CurrentCell.ColumnIndex < 0) return "";
+            DataGridViewColumn column = dgvResults.Columns[dgvResults.CurrentCell.ColumnIndex];
+            if (column == null) return "";
+            string columnName = column.DataPropertyName;
+            if (string.IsNullOrWhiteSpace(columnName)) columnName = column.Name;
+            return columnName ?? "";
         }
 
         private void ViewSelectedBlobHex()
@@ -1546,6 +1576,47 @@ namespace mySQLPunk
                 File.WriteAllBytes(dialog.FileName, bytes);
                 UpdateStatus(Localization.Format("Query.BlobSaved", dialog.FileName));
             }
+        }
+
+        private void ImportBlobFromFile()
+        {
+            if (!IsCurrentResultCellBinaryColumn())
+            {
+                MessageBox.Show(Localization.T("Query.BlobRequired"), Localization.T("Common.Info"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = Localization.T("Query.ImportBlobFile");
+                dialog.Filter = Localization.T("Query.BlobImportFileFilter");
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                SetCurrentResultBlob(File.ReadAllBytes(dialog.FileName));
+                UpdateStatus(Localization.Format("Query.BlobImported", dialog.FileName));
+            }
+        }
+
+        private void SetCurrentResultBlob(byte[] bytes)
+        {
+            if (bytes == null) bytes = new byte[0];
+            if (!IsCurrentResultCellBinaryColumn())
+            {
+                throw new InvalidOperationException(Localization.T("Query.BlobRequired"));
+            }
+
+            DataGridViewCell cell = dgvResults.CurrentCell;
+            string columnName = GetCurrentResultColumnName();
+            if (string.IsNullOrWhiteSpace(columnName)) throw new InvalidOperationException(Localization.T("Query.BlobRequired"));
+
+            DataRowView rowView = dgvResults.Rows[cell.RowIndex].DataBoundItem as DataRowView;
+            if (rowView == null || !rowView.Row.Table.Columns.Contains(columnName))
+            {
+                throw new InvalidOperationException(Localization.T("Query.BlobRequired"));
+            }
+
+            rowView.Row[columnName] = bytes;
+            dgvResults.InvalidateCell(cell);
         }
 
         private void CopySelectedGeometryAsWkt()

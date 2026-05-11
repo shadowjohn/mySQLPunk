@@ -113,8 +113,8 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 後續方向：視使用者回饋決定是否提供「沒有 Primary Key 時唯讀」的選項。
 
 - **BLOB/geometry 欄位操作仍有部分限制**
-  - 現況：`byte[]` 欄位在結果表格中顯示為 `[BLOB n bytes] 0x...`，並設為唯讀；右鍵可檢視十六進位、複製 Hex、匯出檔案，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
-  - 後續方向：補 BLOB 匯入檔案與更完整的大型檔案串流檢視。
+  - 現況：`byte[]` 欄位在結果表格中顯示為 `[BLOB n bytes] 0x...`；右鍵可檢視十六進位、複製 Hex、匯出檔案，在資料表資料模式可匯入檔案寫回目前 BLOB 欄位，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
+  - 後續方向：補更完整的大型檔案串流檢視。
 
 ### Table/View 複製限制
 
