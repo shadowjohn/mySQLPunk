@@ -479,9 +479,9 @@ namespace mySQLPunk
             db_tree.ShowPlusMinus = true;
             db_tree.Nodes.Clear();
 
-            // 收集所有群組名稱（依字母排序）
-            var groupNames = myN.connections
-                .Select(c => GetConnectionValue(c, "conn_group"))
+            // 收集所有群組名稱：myN.groups（含空群組）＋連線衍生的群組，去重後排序
+            var groupNames = myN.groups
+                .Concat(myN.connections.Select(c => GetConnectionValue(c, "conn_group")))
                 .Where(g => !string.IsNullOrWhiteSpace(g))
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(g => g)
