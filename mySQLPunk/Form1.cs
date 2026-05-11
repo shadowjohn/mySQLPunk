@@ -5511,7 +5511,7 @@ namespace mySQLPunk
                 var pathParts = my.explode("\\", node.FullPath);
                 if (pathParts.Length == 3 && pathParts[2] == "Views")
                 {
-                    AddPasteObjectMenuItem(menu);
+                    AddViewGroupMenuItems(menu, node);
                 }
                 if (pathParts.Length == 2)
                 {
@@ -5599,6 +5599,35 @@ namespace mySQLPunk
             return menu;
         }
 
+        private void AddViewGroupMenuItems(ContextMenuStrip menu, TreeNode node)
+        {
+            ToolStripMenuItem newViewItem = new ToolStripMenuItem(Localization.T("Tool.NewView"));
+            newViewItem.Click += (s, ev) => CreateNewView();
+            menu.Items.Add(newViewItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem exportWizardItem = new ToolStripMenuItem(Localization.T("Tool.ExportWizard"));
+            exportWizardItem.Click += (s, ev) => DumpCurrentSelectionSqlWithDialog(false);
+            menu.Items.Add(exportWizardItem);
+
+            ToolStripMenuItem dictionaryItem = new ToolStripMenuItem(Localization.T("Tool.DataDictionary"));
+            dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();
+            menu.Items.Add(dictionaryItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem newGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewGroup"));
+            newGroupItem.Click += (s, ev) => ShowGroupUnavailable();
+            menu.Items.Add(newGroupItem);
+
+            AddPasteObjectMenuItem(menu);
+
+            ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
+            refreshItem.Click += (s, ev) => RefreshDatabaseGroupNode(node, "Views");
+            menu.Items.Add(refreshItem);
+        }
+
         private void AddTableGroupMenuItems(ContextMenuStrip menu, TreeNode node)
         {
             ToolStripMenuItem newTableItem = new ToolStripMenuItem(Localization.T("Tool.NewTable"));
@@ -5642,7 +5671,7 @@ namespace mySQLPunk
             AddPasteObjectMenuItem(menu);
 
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
-            refreshItem.Click += (s, ev) => RefreshTableGroupNode(node);
+            refreshItem.Click += (s, ev) => RefreshDatabaseGroupNode(node, "Tables");
             menu.Items.Add(refreshItem);
         }
 
@@ -5729,14 +5758,14 @@ namespace mySQLPunk
             return (value ?? "").IndexOf(keyword ?? "", StringComparison.CurrentCultureIgnoreCase) >= 0;
         }
 
-        private void RefreshTableGroupNode(TreeNode tablesNode)
+        private void RefreshDatabaseGroupNode(TreeNode groupNode, string groupName)
         {
-            if (tablesNode == null || tablesNode.Parent == null) return;
-            TreeNode databaseNode = tablesNode.Parent;
+            if (groupNode == null || groupNode.Parent == null) return;
+            TreeNode databaseNode = groupNode.Parent;
             RefreshDatabaseObjectNodes(databaseNode);
             foreach (TreeNode child in databaseNode.Nodes)
             {
-                if (!string.Equals(child.Text, "Tables", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(child.Text, groupName, StringComparison.OrdinalIgnoreCase)) continue;
                 db_tree.SelectedNode = child;
                 child.EnsureVisible();
                 return;
