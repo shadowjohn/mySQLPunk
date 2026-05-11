@@ -379,6 +379,8 @@ namespace mySQLPunk
             Add("Designer.DesignTable", "設計資料表", "Design Table");
             Add("Designer.NewTable", "新增資料表", "New Table");
             Add("Designer.Save", "儲存", "Save");
+            Add("Designer.ExecuteSql", "執行 SQL", "Execute SQL");
+            Add("Designer.ExecuteSqlTooltip", "執行 SQL 預覽中的語法", "Execute SQL from the SQL preview.");
             Add("Designer.AddColumn", "加入欄位", "Add Column");
             Add("Designer.InsertColumn", "插入欄位", "Insert Column");
             Add("Designer.DeleteColumn", "刪除欄位", "Delete Column");
@@ -429,6 +431,10 @@ namespace mySQLPunk
             Add("Designer.PrimaryKeyMissingColumns", "PRIMARY KEY 缺少欄位：{0}", "PRIMARY KEY is missing columns: {0}");
             Add("Designer.FullTextUnsupported", "此資料庫尚未支援 FULLTEXT 索引：{0}", "This database does not currently support FULLTEXT indexes: {0}");
             Add("Designer.SpatialUnsupported", "此資料庫尚未支援 SPATIAL 索引：{0}", "This database does not currently support SPATIAL indexes: {0}");
+            Add("Designer.NoSqlToExecute", "請先在 SQL 預覽輸入要執行的 SQL。", "Enter SQL in the SQL preview first.");
+            Add("Designer.ConfirmExecuteSqlTitle", "確認執行 SQL", "Confirm SQL Execution");
+            Add("Designer.ExecuteSqlSucceeded", "SQL 執行成功。", "SQL executed successfully.");
+            Add("Designer.ExecuteSqlFailedTitle", "SQL 執行失敗", "SQL Execution Failed");
             Add("Designer.CannotSaveTitle", "無法儲存", "Cannot Save");
             Add("Designer.ConfirmSaveTitle", "確認儲存", "Confirm Save");
             Add("Designer.ConfirmExecuteSql", "即將執行以下 SQL：\n\n{0}\n\n確定嗎？", "The following SQL will be executed:\n\n{0}\n\nContinue?");

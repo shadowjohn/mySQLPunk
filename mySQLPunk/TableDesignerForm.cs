@@ -32,6 +32,7 @@ namespace mySQLPunk
         private bool _isDocked;
         private ToolStripButton btnFloat;
         private ToolStripButton btnDock;
+        private ToolStripButton btnExecuteSql;
         private ToolStripSplitButton btnFillAutoComments;
         private RunnerProgressOverlay autoCommentProgressOverlay;
         private bool _isFillingAutoComments;
@@ -116,6 +117,8 @@ namespace mySQLPunk
             
             string iconPath = my.pwd() + "\\image\\";
             ToolStripButton btnSave = new ToolStripButton(Localization.T("Designer.Save"), GetIcon(iconPath + "save.png"), BtnSave_Click);
+            btnExecuteSql = new ToolStripButton(Localization.T("Designer.ExecuteSql"), GetIcon(iconPath + "new_query.png"), BtnExecuteSql_Click);
+            btnExecuteSql.ToolTipText = Localization.T("Designer.ExecuteSqlTooltip");
             
             ToolStripSeparator sep1 = new ToolStripSeparator();
             ToolStripButton btnAddCol = new ToolStripButton(Localization.T("Designer.AddColumn"), GetIcon(iconPath + "add.png"));
@@ -139,7 +142,7 @@ namespace mySQLPunk
             btnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => _mainHost?.DockDockableForm(this)) { Visible = false, Alignment = ToolStripItemAlignment.Right };
             
             tsTop.Items.AddRange(new ToolStripItem[] { 
-                btnSave, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnFillAutoComments, sepAutoComment, btnMoveUp, btnMoveDown, btnFloat, btnDock
+                btnSave, btnExecuteSql, sep1, btnAddCol, btnInsertCol, btnDelCol, sep2, btnFillAutoComments, sepAutoComment, btnMoveUp, btnMoveDown, btnFloat, btnDock
             });
 
             tcMain = new TabControl() { Dock = DockStyle.Fill, Padding = new Point(12, 5) };
@@ -215,7 +218,7 @@ namespace mySQLPunk
 
             // 5. SQL 預覽分頁
             tpSqlPreview = new TabPage(Localization.T("Designer.SqlPreview"));
-            rtbSqlPreview = new RichTextBox() { Dock = DockStyle.Fill, ReadOnly = true, Font = new Font("Consolas", 11), BackColor = Color.White };
+            rtbSqlPreview = new RichTextBox() { Dock = DockStyle.Fill, ReadOnly = false, Font = new Font("Consolas", 11), BackColor = Color.White };
             tpSqlPreview.Controls.Add(rtbSqlPreview);
 
             tcMain.TabPages.AddRange(new TabPage[] { tpColumns, tpIndexes, tpOptions, tpComment, tpSqlPreview });
@@ -884,6 +887,11 @@ namespace mySQLPunk
             if (tpSqlPreview != null) tpSqlPreview.Text = Localization.T("Designer.SqlPreview");
             if (btnFloat != null) btnFloat.Text = Localization.T("Query.Float");
             if (btnDock != null) btnDock.Text = Localization.T("Query.Dock");
+            if (btnExecuteSql != null)
+            {
+                btnExecuteSql.Text = Localization.T("Designer.ExecuteSql");
+                btnExecuteSql.ToolTipText = Localization.T("Designer.ExecuteSqlTooltip");
+            }
             if (btnFillAutoComments != null) btnFillAutoComments.Text = Localization.T("Designer.FillAutoComments");
             if (btnFillAutoComments != null && btnFillAutoComments.DropDownItems.Count >= 2)
             {
@@ -2687,6 +2695,64 @@ namespace mySQLPunk
                     MessageBox.Show(FormatDesignerSaveError(_db?.ProviderName, _databaseName, GetTableNameForSave(), res), Localization.T("Designer.SaveFailedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void BtnExecuteSql_Click(object sender, EventArgs e)
+        {
+            if (rtbSqlPreview == null) return;
+
+            if (tcMain != null && tpSqlPreview != null && tcMain.SelectedTab != tpSqlPreview)
+            {
+                GeneratePreviewSql();
+                tcMain.SelectedTab = tpSqlPreview;
+            }
+
+            string sql = rtbSqlPreview.Text == null ? "" : rtbSqlPreview.Text.Trim();
+            if (!ContainsExecutableSql(sql))
+            {
+                MessageBox.Show(Localization.T("Designer.NoSqlToExecute"), Localization.T("Designer.ExecuteSql"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (MessageBox.Show(Localization.Format("Designer.ConfirmExecuteSql", sql), Localization.T("Designer.ConfirmExecuteSqlTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            Dictionary<string, string> res = ExecuteDesignerSql(sql);
+            if (res.ContainsKey("status") && res["status"] == "OK")
+            {
+                MessageBox.Show(Localization.T("Designer.ExecuteSqlSucceeded"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (IsNewTable)
+                {
+                    _tableName = GetTableNameForSave();
+                    if (txtTableName != null) txtTableName.ReadOnly = true;
+                }
+                IsModified = false;
+                LoadColumns();
+                LoadIndexes();
+                GeneratePreviewSql();
+                UpdateTitle();
+                return;
+            }
+
+            MessageBox.Show(FormatDesignerSaveError(_db?.ProviderName, _databaseName, GetTableNameForSave(), res), Localization.T("Designer.ExecuteSqlFailedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private static bool ContainsExecutableSql(string sql)
+        {
+            if (string.IsNullOrWhiteSpace(sql)) return false;
+
+            string[] lines = sql.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            foreach (string line in lines)
+            {
+                string trimmed = line.Trim();
+                if (trimmed.Length == 0) continue;
+                if (trimmed.StartsWith("--", StringComparison.Ordinal)) continue;
+                return true;
+            }
+
+            return false;
         }
 
         private Dictionary<string, string> ExecuteDesignerSql(string sql)
