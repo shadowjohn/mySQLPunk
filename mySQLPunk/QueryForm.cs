@@ -209,13 +209,17 @@ namespace mySQLPunk
             tsBtnDelete.Visible = active;
             tsBtnRefresh.Visible = active;
             
-            tsBtnExecute.Visible = !active;
-            tsBtnBeautify.Visible = !active;
+            tsBtnExecute.Visible = true;
+            tsBtnBeautify.Visible = true;
             RefreshResultsContextMenu();
 
             if (active)
             {
-                if (split != null) split.Panel1Collapsed = true;
+                if (split != null)
+                {
+                    split.Panel1Collapsed = false;
+                    split.SplitterDistance = Math.Min(180, Math.Max(120, split.Height / 4));
+                }
                 this.Text = $"{_databaseName}.{GetTableNameFromSql()} - {Localization.T("Query.TableData")}";
                 
                 dgvResults.ReadOnly = false;
@@ -231,15 +235,24 @@ namespace mySQLPunk
 
         private string GetTableNameFromSql()
         {
-            if (string.IsNullOrEmpty(_baseSql)) return "Table";
+            string tableName = ExtractTableNameFromSql(txtSql == null ? "" : txtSql.Text);
+            if (!string.IsNullOrWhiteSpace(tableName)) return tableName;
+            tableName = ExtractTableNameFromSql(_baseSql);
+            if (!string.IsNullOrWhiteSpace(tableName)) return tableName;
+            return "Table";
+        }
+
+        private static string ExtractTableNameFromSql(string sql)
+        {
+            if (string.IsNullOrEmpty(sql)) return "";
             string pattern = @"FROM\s+([`\[\]\w\.\x22]+)";
-            Match match = Regex.Match(_baseSql, pattern, RegexOptions.IgnoreCase);
+            Match match = Regex.Match(sql, pattern, RegexOptions.IgnoreCase);
             if (match.Success)
             {
                 string path = match.Groups[1].Value.Replace("`", "").Replace("\"", "").Replace("[", "").Replace("]", "");
                 return path.Contains(".") ? path.Split('.').Last() : path;
             }
-            return "Table";
+            return "";
         }
 
         private static bool TryBuildTableDataBaseSql(string sql, out string baseSql)
@@ -288,7 +301,7 @@ namespace mySQLPunk
                 BackColor = Color.White
             };
             
-            tsBtnExecute = new ToolStripButton(Localization.T("Query.Execute"), null, (s, e) => ExecutePagedQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsBtnExecute = new ToolStripButton(Localization.T("Query.Execute"), null, (s, e) => ExecuteQueryAsync()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             tsBtnCancel = new ToolStripButton(Localization.T("Query.Stop"), null, (s, e) => CancelQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Enabled = false };
             tsBtnBeautify = new ToolStripButton(Localization.T("Query.Beautify"), null, (s, e) => BeautifySql()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             
@@ -463,7 +476,7 @@ namespace mySQLPunk
             menuWindow = new ToolStripMenuItem();
             menuHelp = new ToolStripMenuItem();
 
-            menuFileExecute = new ToolStripMenuItem(null, null, (s, e) => ExecutePagedQuery()) { ShortcutKeys = Keys.F5 };
+            menuFileExecute = new ToolStripMenuItem(null, null, (s, e) => ExecuteQueryAsync()) { ShortcutKeys = Keys.F5 };
             menuFileOpenSql = new ToolStripMenuItem(null, null, (s, e) => OpenSqlWithDialog()) { ShortcutKeys = Keys.Control | Keys.O };
             menuFileSaveSql = new ToolStripMenuItem(null, null, (s, e) => SaveSqlWithDialog()) { ShortcutKeys = Keys.Control | Keys.S };
             menuFileExport = new ToolStripMenuItem(null, null, (s, e) => ExportCsv());
@@ -1121,6 +1134,16 @@ namespace mySQLPunk
 
                 if (isQuery)
                 {
+                    if (_isTableDataMode)
+                    {
+                        string tableDataBaseSql;
+                        if (TryBuildTableDataBaseSql(rawSql, out tableDataBaseSql))
+                        {
+                            _baseSql = tableDataBaseSql;
+                            this.Text = $"{_databaseName}.{GetTableNameFromSql()} - {Localization.T("Query.TableData")}";
+                        }
+                    }
+
                     DataTable dt = await Task.Run(
                         () => _db.SelectSQL(sql),
                         _cts.Token);
