@@ -7108,10 +7108,20 @@ namespace mySQLPunk
                 return;
             }
 
-            ProcessStartInfo psi = new ProcessStartInfo("cmd.exe");
-            psi.Arguments = "/k " + command;
-            psi.UseShellExecute = true;
-            Process.Start(psi);
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe");
+                psi.Arguments = "/k " + command;
+                psi.UseShellExecute = true;
+                Process.Start(psi);
+                UpdateMainStatus(Localization.T("Connection.CommandLineOpened"));
+            }
+            catch (Exception ex)
+            {
+                string message = Localization.Format("Connection.CommandLineOpenFailed", ex.Message);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.CommandLine"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private string BuildDatabaseCommandLine(Dictionary<string, object> conn)
@@ -7150,13 +7160,33 @@ namespace mySQLPunk
                     string exe = File.Exists(sqliteExe) ? sqliteExe : "sqlite3";
                     return QuoteCommandArgument(exe) + " " + QuoteCommandArgument(sqlitePath);
                 case "oracle":
-                    string connectName = GetConnectionValue(conn, "tns_name");
-                    if (string.IsNullOrWhiteSpace(connectName)) connectName = GetConnectionValue(conn, "service_name");
-                    if (string.IsNullOrWhiteSpace(connectName)) connectName = GetConnectionValue(conn, "sid");
-                    return "sqlplus " + QuoteCommandArgument(user + "@" + connectName);
+                    string connectName = BuildOracleCommandLineConnectName(conn);
+                    string login = string.IsNullOrWhiteSpace(connectName) ? user : user + "@" + connectName;
+                    return string.IsNullOrWhiteSpace(login) ? "sqlplus" : "sqlplus " + QuoteCommandArgument(login);
                 default:
                     return "";
             }
+        }
+
+        private static string BuildOracleCommandLineConnectName(Dictionary<string, object> conn)
+        {
+            string tnsName = GetConnectionValue(conn, "tns_name");
+            if (!string.IsNullOrWhiteSpace(tnsName)) return tnsName;
+
+            string host = GetConnectionValue(conn, "host");
+            string port = GetConnectionValue(conn, "port");
+            string serviceName = GetConnectionValue(conn, "service_name");
+            string sid = GetConnectionValue(conn, "sid");
+            string identifier = string.Equals(GetConnectionValue(conn, "oracle_identifier_type"), "sid", StringComparison.OrdinalIgnoreCase)
+                ? sid
+                : serviceName;
+
+            if (string.IsNullOrWhiteSpace(identifier)) identifier = string.IsNullOrWhiteSpace(serviceName) ? sid : serviceName;
+            if (string.IsNullOrWhiteSpace(identifier)) return string.Empty;
+            if (string.IsNullOrWhiteSpace(host)) return identifier;
+
+            string hostPort = string.IsNullOrWhiteSpace(port) ? host : host + ":" + port;
+            return "//" + hostPort + "/" + identifier;
         }
 
         private static string QuoteCommandArgument(string value)

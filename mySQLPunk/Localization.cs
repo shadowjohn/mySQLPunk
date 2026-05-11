@@ -227,6 +227,8 @@ namespace mySQLPunk
             Add("Connection.Refreshed", "連線已重新整理：{0}", "Connection refreshed: {0}");
             Add("Connection.ProfileUnavailable", "此專案目前尚未支援多連線設定檔。", "This project does not support multiple connection profiles yet.");
             Add("Connection.CommandLineUnavailable", "命令列介面目前尚未支援此連線類型。", "Command line interface is not supported for this connection type yet.");
+            Add("Connection.CommandLineOpened", "已開啟命令列介面。", "Command line interface opened.");
+            Add("Connection.CommandLineOpenFailed", "開啟命令列介面失敗：{0}", "Open command line interface failed: {0}");
             Add("Connection.MarkedColor", "已標記連線色彩：{0}", "Connection color marked: {0}");
 
             Add("ConnectionWizard.Title", "選取連線類型", "Select Connection Type");

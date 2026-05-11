@@ -41,6 +41,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 不支援欄位註解。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
 | 資料產生 | 部分可用 | Tables 群組可產生指定資料表的 INSERT SQL 範本，先開到查詢視窗供使用者檢查再執行。 |
+| 命令列介面 | 可用 | 支援 MySQL、PostgreSQL、SQL Server、SQLite、Oracle 的 CLI 啟動指令；需本機已安裝對應客戶端工具。 |
 | Table/View 複製 | 可用 | 跨 provider 複製 Table/View；View SQL 無法安全轉換時會改用 table snapshot。 |
 | SQL Dump | 可用 | 支援多 provider Table dump；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
 
@@ -60,12 +61,11 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 現況：選單項目目前顯示為不可用。
   - 後續方向：設計 profile schema、UI 切換流程，以及既有 `setting.ini` 相容策略。
 
-- **命令列介面只支援部分連線類型**
-  - 觸發位置：資料庫右鍵選單「命令列介面」。
-  - 現況：不支援的 provider 會顯示「命令列介面目前尚未支援此連線類型」。
-  - 後續方向：逐一補 provider 對應的 CLI 啟動指令、環境變數、密碼傳遞與錯誤提示。
-
 ### Provider 與資料庫操作限制
+
+- **命令列介面依賴本機 CLI**
+  - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
+  - 後續方向：補上 CLI 可用性偵測、可自訂 CLI 路徑，以及更完整的密碼安全傳遞策略。
 
 - **部分連線類型尚未支援編輯**
   - 現況：不支援的連線編輯會顯示「此連線類型尚未支援編輯」。
