@@ -41,6 +41,41 @@ namespace mySQLPunk
         public const int WM_NCLBUTTONDOWN = 0xA1;
         public const int HTCAPTION = 0x2;
 
+        // Windows Shell API 用於取得系統資料夾圖示
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+        private struct SHFILEINFO
+        {
+            public IntPtr hIcon;
+            public int iIcon;
+            public uint dwAttributes;
+            [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szDisplayName;
+            [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 80)]
+            public string szTypeName;
+        }
+        [DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+        private static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
+        [DllImport("user32.dll")]
+        private static extern bool DestroyIcon(IntPtr hIcon);
+        private const uint SHGFI_ICON = 0x100;
+        private const uint SHGFI_SMALLICON = 0x001;
+        private const uint SHGFI_OPENICON = 0x002;
+        private const uint SHGFI_USEFILEATTRIBUTES = 0x010;
+        private const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
+
+        private static Bitmap GetShellFolderBitmap(bool open)
+        {
+            var shfi = new SHFILEINFO();
+            uint flags = SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES | (open ? SHGFI_OPENICON : 0);
+            SHGetFileInfo("folder", FILE_ATTRIBUTE_DIRECTORY, ref shfi,
+                (uint)System.Runtime.InteropServices.Marshal.SizeOf(shfi), flags);
+            if (shfi.hIcon == IntPtr.Zero) return new Bitmap(16, 16);
+            Bitmap bmp;
+            using (Icon ic = Icon.FromHandle(shfi.hIcon)) { bmp = ic.ToBitmap(); }
+            DestroyIcon(shfi.hIcon);
+            return bmp;
+        }
+
         public static Dictionary<string, List<object>> displayTools = new Dictionary<string, List<object>>();
         mySQLPunk_main myN = new mySQLPunk_main();
         myinclude my = new myinclude();
@@ -470,6 +505,8 @@ namespace mySQLPunk
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\model.png"));  //20
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\bi.png"));  //21
             myImageList.Images.Add(Image.FromFile(pwd + "\\image\\other.png"));  //22
+            myImageList.Images.Add(GetShellFolderBitmap(false)); //23 folder_closed
+            myImageList.Images.Add(GetShellFolderBitmap(true));  //24 folder_open
 
             // Assign the ImageList to the TreeView.
 
@@ -495,8 +532,8 @@ namespace mySQLPunk
                 {
                     Tag = ConnectionGroupNodeTag,
                     Name = ConnectionGroupNodeTag + ":" + grp,
-                    ImageIndex = 10,
-                    SelectedImageIndex = 10
+                    ImageIndex = 23,          // folder_closed
+                    SelectedImageIndex = 24   // folder_open
                 };
                 db_tree.Nodes.Add(gNode);
                 groupNodeMap[grp] = gNode;
