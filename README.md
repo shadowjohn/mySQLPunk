@@ -80,8 +80,8 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 後續方向：若需要 SQLite 註解，可另設 sidecar metadata table，但需先定義格式與匯出策略。
 
 - **SpatiaLite extension 可能載入失敗**
-  - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。
-  - 後續方向：補齊 UI 診斷、下載/放置說明，以及無 SpatiaLite 時的降級行為。
+  - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。
+  - 後續方向：補齊 UI 診斷與無 SpatiaLite 時的降級行為。
 
 ### Table Designer 限制
 
@@ -109,7 +109,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 後續方向：視使用者回饋決定是否提供「沒有 Primary Key 時唯讀」的選項。
 
 - **BLOB/geometry 欄位操作仍有部分限制**
-  - 現況：`byte[]` 欄位在結果表格中顯示為 `[BLOB n bytes] 0x...`；右鍵可檢視十六進位、複製 Hex、匯出檔案，在資料表資料模式可匯入檔案寫回目前 BLOB 欄位，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
+  - 現況：`byte[]` 欄位在結果表格中會先嘗試顯示為 `[Geometry] WKT`，無法解析時才顯示 `[BLOB n bytes] 0x...`；右鍵可檢視十六進位、複製 Hex、匯出檔案，在資料表資料模式可匯入檔案寫回目前 BLOB 欄位，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
   - 後續方向：補更完整的大型檔案串流檢視。
 
 ### Table/View 複製限制

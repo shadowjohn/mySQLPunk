@@ -873,6 +873,9 @@ namespace mySQLPunk
             queryTabs.MouseClick += queryTabs_MouseClick;
             table_top.CellMouseDown += table_top_CellMouseDown;
             table_top.CellDoubleClick += table_top_CellDoubleClick;
+            table_top.CellFormatting += table_top_CellFormatting;
+            table_top.DataBindingComplete += table_top_DataBindingComplete;
+            table_top.DataError += table_top_DataError;
             db_tree.KeyDown += db_tree_KeyDown;
             db_tree.LabelEdit = true;
             db_tree.BeforeLabelEdit += db_tree_BeforeLabelEdit;
@@ -3286,6 +3289,87 @@ namespace mySQLPunk
                 ThemeManager.ApplyToolStrip(cms);
                 cms.Show(table_top, table_top.PointToClient(Cursor.Position));
             }
+        }
+
+        private void table_top_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
+        {
+            ConfigureBinaryGridColumns(table_top);
+        }
+
+        private void table_top_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.Value is byte[] bytes)
+            {
+                e.Value = FormatBinaryGridCellValue(bytes);
+                e.FormattingApplied = true;
+            }
+        }
+
+        private void table_top_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            e.ThrowException = false;
+            e.Cancel = false;
+            UpdateMainStatus(Localization.T("Grid.BinaryFormatFallback"));
+        }
+
+        private static void ConfigureBinaryGridColumns(DataGridView grid)
+        {
+            if (grid == null || grid.Columns.Count == 0) return;
+
+            DataTable source = grid.DataSource as DataTable;
+            if (source == null) return;
+
+            for (int i = 0; i < grid.Columns.Count; i++)
+            {
+                DataGridViewColumn gridColumn = grid.Columns[i];
+                if (!IsBinaryDataGridColumn(source, gridColumn)) continue;
+
+                if (!(gridColumn is DataGridViewTextBoxColumn))
+                {
+                    DataGridViewTextBoxColumn textColumn = new DataGridViewTextBoxColumn
+                    {
+                        Name = gridColumn.Name,
+                        HeaderText = gridColumn.HeaderText,
+                        DataPropertyName = gridColumn.DataPropertyName,
+                        ReadOnly = gridColumn.ReadOnly,
+                        SortMode = DataGridViewColumnSortMode.Automatic,
+                        Width = gridColumn.Width,
+                        DisplayIndex = gridColumn.DisplayIndex
+                    };
+                    grid.Columns.RemoveAt(i);
+                    grid.Columns.Insert(i, textColumn);
+                    gridColumn = textColumn;
+                }
+
+                gridColumn.DefaultCellStyle.NullValue = "";
+            }
+        }
+
+        private static bool IsBinaryDataGridColumn(DataTable source, DataGridViewColumn gridColumn)
+        {
+            string columnName = gridColumn.DataPropertyName;
+            if (string.IsNullOrWhiteSpace(columnName)) columnName = gridColumn.Name;
+            if (string.IsNullOrWhiteSpace(columnName) || !source.Columns.Contains(columnName)) return false;
+            return source.Columns[columnName].DataType == typeof(byte[]);
+        }
+
+        private static string FormatBinaryGridCellValue(byte[] bytes)
+        {
+            if (bytes == null) return "";
+            if (GeometryWktConverter.TryGeometryBytesToWkt(bytes, out string wkt))
+            {
+                return "[Geometry] " + wkt;
+            }
+
+            int previewLength = Math.Min(bytes.Length, 12);
+            StringBuilder preview = new StringBuilder(previewLength * 2);
+            for (int i = 0; i < previewLength; i++)
+            {
+                preview.Append(bytes[i].ToString("X2"));
+            }
+            if (bytes.Length > previewLength) preview.Append("...");
+
+            return "[BLOB " + bytes.Length + " bytes] 0x" + preview;
         }
 
         private ContextMenuStrip BuildGridContextMenu(string groupName)

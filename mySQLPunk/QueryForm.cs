@@ -1816,6 +1816,10 @@ namespace mySQLPunk
         private static string FormatBinaryCellValue(byte[] bytes)
         {
             if (bytes == null) return "";
+            if (GeometryWktConverter.TryGeometryBytesToWkt(bytes, out string wkt))
+            {
+                return "[Geometry] " + wkt;
+            }
 
             int previewLength = Math.Min(bytes.Length, 12);
             StringBuilder preview = new StringBuilder(previewLength * 2);
