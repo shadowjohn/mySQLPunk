@@ -16,6 +16,7 @@ namespace mySQLPunk.entity
         myinclude my = new myinclude();
         private string the_code = "3WAAwesome";
         public List<Dictionary<string, object>> connections = new List<Dictionary<string, object>>();
+        public List<string> groups = new List<string>();
 
         public void getSettingINI()
         {
@@ -26,6 +27,7 @@ namespace mySQLPunk.entity
             }
 
             connections.Clear();
+            groups.Clear();
 
             string endata = my.b2s(my.file_get_contents(setting_path));
             if (string.IsNullOrWhiteSpace(endata))
@@ -33,10 +35,31 @@ namespace mySQLPunk.entity
                 return;
             }
 
-            JArray ja = my.json_decode(endata);
-            for (int i = 0, max_i = ja.Count; i < max_i; i++)
+            JToken root;
+            try { root = JToken.Parse(endata); }
+            catch { return; }
+
+            if (root.Type == JTokenType.Array)
             {
-                LoadConnectionToken(ja[i]);
+                // 舊格式：直接是連線陣列
+                foreach (JToken t in (JArray)root)
+                    LoadConnectionToken(t);
+            }
+            else if (root.Type == JTokenType.Object)
+            {
+                // 新格式：{ "connections": [...], "groups": [...] }
+                JObject obj = (JObject)root;
+                JArray connArray = obj["connections"] as JArray;
+                if (connArray != null)
+                    foreach (JToken t in connArray) LoadConnectionToken(t);
+                JArray grpArray = obj["groups"] as JArray;
+                if (grpArray != null)
+                    foreach (JToken g in grpArray)
+                    {
+                        string gName = g.ToString();
+                        if (!string.IsNullOrWhiteSpace(gName) && !groups.Contains(gName))
+                            groups.Add(gName);
+                    }
             }
         }
 
@@ -54,11 +77,27 @@ namespace mySQLPunk.entity
         public void importConnections(string path)
         {
             string json = File.ReadAllText(path, Encoding.UTF8);
-            JArray ja = JArray.Parse(json);
+            JToken root = JToken.Parse(json);
             connections.Clear();
-            for (int i = 0, max_i = ja.Count; i < max_i; i++)
+            groups.Clear();
+            if (root.Type == JTokenType.Array)
             {
-                LoadConnectionToken(ja[i]);
+                foreach (JToken t in (JArray)root) LoadConnectionToken(t);
+            }
+            else if (root.Type == JTokenType.Object)
+            {
+                JObject obj = (JObject)root;
+                JArray connArray = obj["connections"] as JArray;
+                if (connArray != null)
+                    foreach (JToken t in connArray) LoadConnectionToken(t);
+                JArray grpArray = obj["groups"] as JArray;
+                if (grpArray != null)
+                    foreach (JToken g in grpArray)
+                    {
+                        string gName = g.ToString();
+                        if (!string.IsNullOrWhiteSpace(gName) && !groups.Contains(gName))
+                            groups.Add(gName);
+                    }
             }
             setSettingINI();
         }
@@ -87,7 +126,23 @@ namespace mySQLPunk.entity
                 };
                 saveList.Add(item);
             }
-            return JsonConvert.SerializeObject(saveList, Formatting.Indented);
+
+            // 合併明確儲存的群組與連線衍生的群組（去重、排序）
+            var allGroups = new List<string>(groups);
+            foreach (var conn in connections)
+            {
+                string g = GetVal(conn, "conn_group");
+                if (!string.IsNullOrWhiteSpace(g) && !allGroups.Contains(g))
+                    allGroups.Add(g);
+            }
+            allGroups.Sort(StringComparer.Ordinal);
+
+            var root = new
+            {
+                connections = saveList,
+                groups = allGroups
+            };
+            return JsonConvert.SerializeObject(root, Formatting.Indented);
         }
 
         private void LoadConnectionToken(JToken token)

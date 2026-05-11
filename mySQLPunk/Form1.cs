@@ -1289,12 +1289,15 @@ namespace mySQLPunk
 
         private List<string> GetAllGroupNames()
         {
-            return myN.connections
-                .Select(c => GetConnectionValue(c, "conn_group"))
-                .Where(g => !string.IsNullOrWhiteSpace(g))
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(g => g)
-                .ToList();
+            var result = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string g in myN.groups)
+                if (!string.IsNullOrWhiteSpace(g)) result.Add(g);
+            foreach (var c in myN.connections)
+            {
+                string g = GetConnectionValue(c, "conn_group");
+                if (!string.IsNullOrWhiteSpace(g)) result.Add(g);
+            }
+            return result.OrderBy(g => g).ToList();
         }
 
         private void ShowCreateGroupDialog()
@@ -1314,7 +1317,11 @@ namespace mySQLPunk
                 return;
             }
 
-            // 新群組目前沒有連線，只記錄名稱（下次加入連線時自動建立）
+            // 儲存群組名稱並重繪
+            if (!myN.groups.Contains(name))
+                myN.groups.Add(name);
+            myN.setSettingINI();
+            drawLists();
             UpdateMainStatus(Localization.Format("Menu.GroupCreated", name));
         }
 
@@ -1322,6 +1329,8 @@ namespace mySQLPunk
         {
             if (index < 0 || index >= myN.connections.Count) return;
             myN.connections[index]["conn_group"] = groupName ?? "";
+            if (!string.IsNullOrWhiteSpace(groupName) && !myN.groups.Contains(groupName))
+                myN.groups.Add(groupName);
             myN.setSettingINI();
             drawLists();
             UpdateMainStatus(string.IsNullOrWhiteSpace(groupName)
@@ -1403,6 +1412,7 @@ namespace mySQLPunk
                 if (GetConnectionValue(conn, "conn_group") == groupName)
                     conn["conn_group"] = "";
             }
+            myN.groups.Remove(groupName);
             myN.setSettingINI();
             drawLists();
             UpdateMainStatus(Localization.Format("Menu.GroupDeleted", groupName));
@@ -1423,6 +1433,9 @@ namespace mySQLPunk
                 if (GetConnectionValue(conn, "conn_group") == oldName)
                     conn["conn_group"] = newName;
             }
+            int idx = myN.groups.IndexOf(oldName);
+            if (idx >= 0) myN.groups[idx] = newName;
+            else if (!myN.groups.Contains(newName)) myN.groups.Add(newName);
             myN.setSettingINI();
             drawLists();
             UpdateMainStatus(Localization.Format("Menu.GroupRenamed", oldName, newName));
