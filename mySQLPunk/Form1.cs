@@ -627,7 +627,7 @@ namespace mySQLPunk
                 return;
             }
 
-            CloseConnection(root.Index);
+            CloseConnection(GetConnectionIndex(root));
         }
 
         private void ExportToolStripMenuItem_Click(object sender, EventArgs e)
@@ -1650,8 +1650,10 @@ namespace mySQLPunk
             TreeNode selectedNode = db_tree.SelectedNode;
             TreeNode parent = selectedNode.Parent;
             TreeNode root = selectedNode;
-            while (root.Parent != null) root = root.Parent;
-            IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int rootConnIdx = GetConnectionIndex(root);
+            if (rootConnIdx < 0 || rootConnIdx >= myN.connections.Count) return false;
+            IDatabase db = (IDatabase)myN.connections[rootConnIdx]["pdo"];
 
             var res = db.ExecSQL("DROP TABLE " + BuildQualifiedObjectName(db, dbName, tableName));
             if (res.ContainsKey("status") && res["status"] == "OK")
@@ -1929,8 +1931,9 @@ namespace mySQLPunk
             {
                 int connIndex = -1;
                 TreeNode root = node;
-                while (root.Parent != null) root = root.Parent;
-                connIndex = root.Index;
+                while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+                connIndex = GetConnectionIndex(root);
+                if (connIndex < 0 || connIndex >= myN.connections.Count) return;
 
                 string dbName = pathParts[1];
                 string tableName = pathParts[3];
@@ -1968,10 +1971,10 @@ namespace mySQLPunk
 
             if (pathParts.Length >= 1)
             {
-                // 找根節點 (Connection)
+                // 找根節點 (Connection)，支援群組節點
                 TreeNode root = node;
-                while (root.Parent != null) root = root.Parent;
-                connIndex = root.Index;
+                while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+                connIndex = GetConnectionIndex(root);
             }
 
             if (pathParts.Length >= 2)
@@ -2025,12 +2028,11 @@ namespace mySQLPunk
             }
 
             TreeNode root = node;
-            while (root.Parent != null)
-            {
-                root = root.Parent;
-            }
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int rootIdx = GetConnectionIndex(root);
+            if (rootIdx < 0 || rootIdx >= myN.connections.Count) return;
 
-            var connInfo = myN.connections[root.Index];
+            var connInfo = myN.connections[rootIdx];
             if (connInfo["isConnect"].ToString() != "T")
             {
                 MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), Localization.T("Tool.OpenTable"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2111,8 +2113,10 @@ namespace mySQLPunk
             if (pathParts[2] != "Tables" && pathParts[2] != "Views" && pathParts[2] != "Functions") return null;
 
             TreeNode root = node;
-            while (root.Parent != null) root = root.Parent;
-            var connInfo = myN.connections[root.Index];
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connIdxSel = GetConnectionIndex(root);
+            if (connIdxSel < 0 || connIdxSel >= myN.connections.Count) return null;
+            var connInfo = myN.connections[connIdxSel];
             if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return null;
 
             return new DatabaseObjectSelection
@@ -2499,12 +2503,11 @@ namespace mySQLPunk
             }
 
             TreeNode root = node;
-            while (root.Parent != null)
-            {
-                root = root.Parent;
-            }
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connIdxDump = GetConnectionIndex(root);
+            if (connIdxDump < 0 || connIdxDump >= myN.connections.Count) return;
 
-            var connInfo = myN.connections[root.Index];
+            var connInfo = myN.connections[connIdxDump];
             if (connInfo["isConnect"].ToString() != "T")
             {
                 MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), Localization.T("Tool.DumpSql"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -3378,6 +3381,9 @@ namespace mySQLPunk
         {
             if (e.Node == null) return;
 
+            // 若點選的是連線群組節點，不做任何展開動作
+            if (IsConnectionGroupNode(e.Node)) return;
+
             string fullPath = e.Node.FullPath;
             var pathParts = GetTreePathParts(e.Node);
 
@@ -3385,10 +3391,12 @@ namespace mySQLPunk
             Control[] navControls = this.Controls.Find("lblNav", true);
             if (navControls.Length > 0) ((Label)navControls[0]).Text = "  " + fullPath.Replace("\\", " > ");
 
-            // 取得根連線資訊
+            // 取得根連線資訊（支援群組節點，利用 Tag 取得正確的連線索引）
             TreeNode root = e.Node;
-            while (root.Parent != null) root = root.Parent;
-            int connIndex = root.Index;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent))
+                root = root.Parent;
+            int connIndex = GetConnectionIndex(root);
+            if (connIndex < 0 || connIndex >= myN.connections.Count) return;
             var connInfo = myN.connections[connIndex];
 
             if (connInfo["isConnect"].ToString() != "T") return;
@@ -3907,8 +3915,9 @@ namespace mySQLPunk
                 if (pathParts.Length <= 2)
                 {
                     TreeNode root = db_tree.SelectedNode;
-                    while (root.Parent != null) root = root.Parent;
-                    CloseConnection(root.Index);
+                    while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+                    int closeIdx = GetConnectionIndex(root);
+                    if (closeIdx >= 0) CloseConnection(closeIdx);
                 }
                 
                 e.Handled = true;
@@ -4067,8 +4076,10 @@ namespace mySQLPunk
             if (pathParts[2] != "Tables" && pathParts[2] != "Views") return null;
 
             TreeNode root = node;
-            while (root.Parent != null) root = root.Parent;
-            var connInfo = myN.connections[root.Index];
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connIdxCopyItem = GetConnectionIndex(root);
+            if (connIdxCopyItem < 0 || connIdxCopyItem >= myN.connections.Count) return null;
+            var connInfo = myN.connections[connIdxCopyItem];
             if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return null;
 
             return new DatabaseCopyItem
@@ -4088,8 +4099,10 @@ namespace mySQLPunk
             if (pathParts.Length < 2) return null;
 
             TreeNode root = node;
-            while (root.Parent != null) root = root.Parent;
-            var connInfo = myN.connections[root.Index];
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connIdxTarget = GetConnectionIndex(root);
+            if (connIdxTarget < 0 || connIdxTarget >= myN.connections.Count) return null;
+            var connInfo = myN.connections[connIdxTarget];
             if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return null;
 
             TreeNode dbNode = node;
@@ -4119,8 +4132,10 @@ namespace mySQLPunk
         {
             if (databaseNode == null) return;
             TreeNode root = databaseNode;
-            while (root.Parent != null) root = root.Parent;
-            IDatabase db = (IDatabase)myN.connections[root.Index]["pdo"];
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connIdxRefresh = GetConnectionIndex(root);
+            if (connIdxRefresh < 0 || connIdxRefresh >= myN.connections.Count) return;
+            IDatabase db = (IDatabase)myN.connections[connIdxRefresh]["pdo"];
             databaseNode.Nodes.Clear();
             PopulateDatabaseChildren(databaseNode, db, databaseNode.Text);
             databaseNode.Expand();
@@ -4525,9 +4540,10 @@ namespace mySQLPunk
             if (pathParts.Length < 3 || pathParts[2] != "Queries") return;
 
             TreeNode root = db_tree.SelectedNode;
-            while (root.Parent != null) root = root.Parent;
-            if (root.Index < 0 || root.Index >= myN.connections.Count) return;
-            var connInfo = myN.connections[root.Index];
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connIdxQ = GetConnectionIndex(root);
+            if (connIdxQ < 0 || connIdxQ >= myN.connections.Count) return;
+            var connInfo = myN.connections[connIdxQ];
             if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return;
 
             ShowDatabaseGroupList(db, pathParts[1], "Queries", connInfo);
@@ -7083,8 +7099,9 @@ namespace mySQLPunk
         {
             if (databaseNode == null) return;
             TreeNode root = databaseNode;
-            while (root.Parent != null) root = root.Parent;
-            OpenDatabaseCommandLine(root.Index, databaseNode.Text);
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int cliIdx = GetConnectionIndex(root);
+            if (cliIdx >= 0) OpenDatabaseCommandLine(cliIdx, databaseNode.Text);
         }
 
         private void OpenSelectedDatabaseDictionary()
@@ -7107,8 +7124,9 @@ namespace mySQLPunk
         {
             if (databaseNode == null) return;
             TreeNode root = databaseNode;
-            while (root.Parent != null) root = root.Parent;
-            ShareConnection(root.Index);
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int shareIdx = GetConnectionIndex(root);
+            if (shareIdx >= 0) ShareConnection(shareIdx);
         }
 
         private void AddConnectionRootMenuItems(ContextMenuStrip menu, TreeNode node)
@@ -7337,10 +7355,12 @@ namespace mySQLPunk
 
         private void RefreshConnectionDatabaseNodes(TreeNode root)
         {
-            if (root == null || root.Index < 0 || root.Index >= myN.connections.Count) return;
-            if (!IsConnectionOpen(root.Index)) return;
+            if (root == null) return;
+            int connIdxRefreshConn = GetConnectionIndex(root);
+            if (connIdxRefreshConn < 0 || connIdxRefreshConn >= myN.connections.Count) return;
+            if (!IsConnectionOpen(connIdxRefreshConn)) return;
 
-            PopulateOpenConnectionDatabases(root, root.Index);
+            PopulateOpenConnectionDatabases(root, connIdxRefreshConn);
             root.Expand();
             UpdateMainStatus(Localization.Format("Connection.Refreshed", root.Text));
         }
@@ -7912,8 +7932,9 @@ namespace mySQLPunk
             databaseNode.Nodes.Add(newNode);
 
             TreeNode root = databaseNode;
-            while (root.Parent != null) root = root.Parent;
-            Dictionary<string, object> connInfo = root.Index >= 0 && root.Index < myN.connections.Count ? myN.connections[root.Index] : null;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connIdxUsers = GetConnectionIndex(root);
+            Dictionary<string, object> connInfo = connIdxUsers >= 0 && connIdxUsers < myN.connections.Count ? myN.connections[connIdxUsers] : null;
             foreach (DataRow userRow in GetDatabaseUsers(db, databaseName, connInfo).Rows)
             {
                 TreeNode userNode = new TreeNode(userRow["Name"].ToString());
@@ -8431,8 +8452,8 @@ namespace mySQLPunk
             if (databaseNode == null || databaseNode.Nodes.Count > 0) return;
 
             TreeNode root = databaseNode;
-            while (root.Parent != null) root = root.Parent;
-            int index = root.Index;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int index = GetConnectionIndex(root);
             if (index < 0 || index >= myN.connections.Count) return;
 
             Dictionary<string, object> conn = myN.connections[index];
