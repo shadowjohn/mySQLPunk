@@ -97,8 +97,13 @@ namespace mySQLPunk
             Add("Tool.DeleteFunction", "刪除函式", "Delete Function");
             Add("Tool.ExecuteFunction", "執行函式", "Execute Function");
             Add("Tool.NewDatabase", "新增資料庫...", "New Database...");
+            Add("Tool.CloseDatabase", "關閉資料庫", "Close Database");
+            Add("Tool.EditDatabase", "編輯資料庫...", "Edit Database...");
+            Add("Tool.DeleteDatabase", "刪除資料庫", "Delete Database");
             Add("Tool.CommandLine", "命令列介面...", "Command Line Interface...");
             Add("Tool.ExecuteSqlFile", "執行 SQL 檔案...", "Execute SQL File...");
+            Add("Tool.DataDictionary", "資料字典...", "Data Dictionary...");
+            Add("Tool.ReverseEngineerModel", "將資料庫逆向至模型...", "Reverse Engineer Database to Model...");
             Add("Tool.EditConnection", "編輯連線", "Edit Connection");
             Add("Tool.DeleteConnection", "刪除連線", "Delete Connection");
             Add("Tool.CopyConnection", "複製連線...", "Duplicate Connection...");
@@ -225,6 +230,13 @@ namespace mySQLPunk
             Add("Database.UnsupportedCreate", "此連線類型不支援由主機節點新增資料庫：{0}", "Creating a database from the connection node is not supported for: {0}");
             Add("Database.Created", "資料庫已建立：{0}", "Database created: {0}");
             Add("Database.CreateFailed", "新增資料庫失敗：{0}", "Create database failed: {0}");
+            Add("Database.Closed", "資料庫已關閉：{0}", "Database closed: {0}");
+            Add("Database.EditOpened", "資料庫資訊已開啟：{0}", "Database information opened: {0}");
+            Add("Database.ConfirmDelete", "確定要刪除資料庫「{0}」嗎？此操作不可還原！", "Delete database \"{0}\"? This action cannot be undone.");
+            Add("Database.UnsupportedDelete", "此連線類型不支援由右鍵選單刪除資料庫：{0}", "Deleting a database from the context menu is not supported for: {0}");
+            Add("Database.Deleted", "資料庫已刪除：{0}", "Database deleted: {0}");
+            Add("Database.DeleteFailed", "刪除資料庫失敗：{0}", "Delete database failed: {0}");
+            Add("Database.ModelOpened", "資料庫模型已建立：{0}", "Database model opened: {0}");
             Add("Object.SelectDatabaseOrConnection", "請先選擇一個資料庫或連線！", "Select a database or connection first.");
             Add("Object.OpenConnectionFirst", "請先雙擊連線以開啟資料庫！", "Double-click the connection to open the database first.");
             Add("Object.SelectTable", "請先在左側選取一個具體的資料表 (Table)！", "Select a table in the left pane first.");

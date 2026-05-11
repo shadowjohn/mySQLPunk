@@ -5509,23 +5509,13 @@ namespace mySQLPunk
             else
             {
                 var pathParts = my.explode("\\", node.FullPath);
-                if (pathParts.Length == 2 || (pathParts.Length == 3 && (pathParts[2] == "Tables" || pathParts[2] == "Views")))
+                if (pathParts.Length == 3 && (pathParts[2] == "Tables" || pathParts[2] == "Views"))
                 {
                     AddPasteObjectMenuItem(menu);
                 }
                 if (pathParts.Length == 2)
                 {
-                    ToolStripMenuItem dumpDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
-                    dumpDatabaseItem.Click += (s, ev) => DumpSelectedDatabaseSqlWithDialog();
-                    menu.Items.Add(dumpDatabaseItem);
-
-                    ToolStripMenuItem importSqlItem = new ToolStripMenuItem(Localization.T("Tool.ImportWizard"));
-                    importSqlItem.Click += (s, ev) => ImportSqlWithDialog();
-                    menu.Items.Add(importSqlItem);
-
-                    ToolStripMenuItem backupDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
-                    backupDatabaseItem.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
-                    menu.Items.Add(backupDatabaseItem);
+                    AddDatabaseNodeMenuItems(menu, node);
                 }
                 if (pathParts.Length == 3 && pathParts[2] == "Tables")
                 {
@@ -5609,6 +5599,182 @@ namespace mySQLPunk
 
             ThemeManager.ApplyToolStrip(menu);
             return menu;
+        }
+
+        private void AddDatabaseNodeMenuItems(ContextMenuStrip menu, TreeNode node)
+        {
+            ToolStripMenuItem closeItem = new ToolStripMenuItem(Localization.T("Tool.CloseDatabase"));
+            closeItem.Click += (s, ev) => CloseDatabaseNode(node);
+            menu.Items.Add(closeItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem editItem = new ToolStripMenuItem(Localization.T("Tool.EditDatabase"));
+            editItem.Click += (s, ev) => EditSelectedDatabase();
+            menu.Items.Add(editItem);
+
+            ToolStripMenuItem newDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.NewDatabase"));
+            newDatabaseItem.Click += (s, ev) => CreateDatabaseFromDatabaseNode(node);
+            menu.Items.Add(newDatabaseItem);
+
+            ToolStripMenuItem deleteItem = new ToolStripMenuItem(Localization.T("Tool.DeleteDatabase"));
+            deleteItem.Click += (s, ev) => DeleteSelectedDatabase();
+            menu.Items.Add(deleteItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem newQueryItem = new ToolStripMenuItem(Localization.T("Toolbar.NewQuery"));
+            newQueryItem.Click += (s, ev) => Query_btn_Click(s, ev);
+            menu.Items.Add(newQueryItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem commandLineItem = new ToolStripMenuItem(Localization.T("Tool.CommandLine"));
+            commandLineItem.Click += (s, ev) => OpenSelectedDatabaseCommandLine(node);
+            menu.Items.Add(commandLineItem);
+
+            ToolStripMenuItem executeSqlFileItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteSqlFile"));
+            executeSqlFileItem.Click += (s, ev) => ImportSqlWithDialog();
+            menu.Items.Add(executeSqlFileItem);
+
+            ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+            ToolStripMenuItem dumpStructureAndDataItem = new ToolStripMenuItem(Localization.T("Tool.StructureAndData"));
+            dumpStructureAndDataItem.Click += (s, ev) => DumpSelectedDatabaseSqlWithDialog();
+            dumpSqlItem.DropDownItems.Add(dumpStructureAndDataItem);
+            menu.Items.Add(dumpSqlItem);
+
+            ToolStripMenuItem dictionaryItem = new ToolStripMenuItem(Localization.T("Tool.DataDictionary"));
+            dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();
+            menu.Items.Add(dictionaryItem);
+
+            ToolStripMenuItem reverseModelItem = new ToolStripMenuItem(Localization.T("Tool.ReverseEngineerModel"));
+            reverseModelItem.Click += (s, ev) => ReverseEngineerSelectedDatabaseModel();
+            menu.Items.Add(reverseModelItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem shareItem = new ToolStripMenuItem(Localization.T("Menu.Share"));
+            shareItem.Click += (s, ev) => ShareSelectedDatabaseConnection(node);
+            menu.Items.Add(shareItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
+            refreshItem.Click += (s, ev) => RefreshDatabaseObjectNodes(node);
+            menu.Items.Add(refreshItem);
+        }
+
+        private void CloseDatabaseNode(TreeNode databaseNode)
+        {
+            if (databaseNode == null) return;
+            string databaseName = databaseNode.Text;
+            databaseNode.Nodes.Clear();
+            databaseNode.Collapse();
+            db_tree.SelectedNode = databaseNode;
+            table_top.DataSource = null;
+            dgvDetails.DataSource = null;
+            rtbDDL.Clear();
+            UpdateMainStatus(Localization.Format("Database.Closed", databaseName));
+        }
+
+        private void EditSelectedDatabase()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null) return;
+
+            db_tree_AfterSelect(db_tree, new TreeViewEventArgs(target.DatabaseNode));
+            ShowDatabaseInfo(target.Database, target.DatabaseName);
+            UpdateMainStatus(Localization.Format("Database.EditOpened", target.DatabaseName));
+        }
+
+        private void CreateDatabaseFromDatabaseNode(TreeNode databaseNode)
+        {
+            if (databaseNode == null) return;
+            TreeNode root = databaseNode;
+            while (root.Parent != null) root = root.Parent;
+            CreateDatabaseFromConnection(root);
+        }
+
+        private void DeleteSelectedDatabase()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null) return;
+
+            DialogResult result = MessageBox.Show(
+                Localization.Format("Database.ConfirmDelete", target.DatabaseName),
+                Localization.T("Tool.DeleteDatabase"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (result != DialogResult.Yes) return;
+
+            try
+            {
+                string sql = BuildDropDatabaseSql(target.Database, target.DatabaseName);
+                Dictionary<string, string> execResult = target.Database.ExecSQL(sql);
+                if (!execResult.ContainsKey("status") || execResult["status"] != "OK")
+                {
+                    string reason = execResult.ContainsKey("reason") ? execResult["reason"] : Localization.T("Object.UnknownError");
+                    throw new Exception(reason);
+                }
+
+                TreeNode root = target.DatabaseNode;
+                while (root.Parent != null) root = root.Parent;
+                target.DatabaseNode.Remove();
+                db_tree.SelectedNode = root;
+                UpdateMainStatus(Localization.Format("Database.Deleted", target.DatabaseName));
+            }
+            catch (Exception ex)
+            {
+                string message = Localization.Format("Database.DeleteFailed", ex.Message);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static string BuildDropDatabaseSql(IDatabase db, string databaseName)
+        {
+            string provider = db == null ? "" : db.ProviderName;
+            if (string.Equals(provider, "mysql", StringComparison.OrdinalIgnoreCase))
+                return "DROP DATABASE " + QuoteDatabaseIdentifier(databaseName, "`", "`") + ";";
+            if (string.Equals(provider, "postgresql", StringComparison.OrdinalIgnoreCase))
+                return "DROP DATABASE " + QuoteDatabaseIdentifier(databaseName, "\"", "\"") + ";";
+            if (string.Equals(provider, "mssql", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(provider, "sqlserver", StringComparison.OrdinalIgnoreCase))
+                return "DROP DATABASE " + QuoteDatabaseIdentifier(databaseName, "[", "]") + ";";
+
+            throw new NotSupportedException(Localization.Format("Database.UnsupportedDelete", provider));
+        }
+
+        private void OpenSelectedDatabaseCommandLine(TreeNode databaseNode)
+        {
+            if (databaseNode == null) return;
+            TreeNode root = databaseNode;
+            while (root.Parent != null) root = root.Parent;
+            OpenDatabaseCommandLine(root.Index, databaseNode.Text);
+        }
+
+        private void OpenSelectedDatabaseDictionary()
+        {
+            SelectDatabaseGroupNode("Models");
+        }
+
+        private void ReverseEngineerSelectedDatabaseModel()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null) return;
+
+            EnsureDatabaseGroupNodes(target.DatabaseNode);
+            SelectDatabaseGroupNode("Models");
+            ShowDatabaseModel(target.Database, target.DatabaseName, "Schema Overview");
+            UpdateMainStatus(Localization.Format("Database.ModelOpened", target.DatabaseName));
+        }
+
+        private void ShareSelectedDatabaseConnection(TreeNode databaseNode)
+        {
+            if (databaseNode == null) return;
+            TreeNode root = databaseNode;
+            while (root.Parent != null) root = root.Parent;
+            ShareConnection(root.Index);
         }
 
         private void AddConnectionRootMenuItems(ContextMenuStrip menu, TreeNode node)
@@ -5991,8 +6157,18 @@ namespace mySQLPunk
 
         private void OpenDatabaseCommandLine(int index)
         {
+            OpenDatabaseCommandLine(index, null);
+        }
+
+        private void OpenDatabaseCommandLine(int index, string databaseName)
+        {
             if (index < 0 || index >= myN.connections.Count) return;
-            Dictionary<string, object> conn = myN.connections[index];
+            Dictionary<string, object> conn = new Dictionary<string, object>(myN.connections[index]);
+            if (!string.IsNullOrWhiteSpace(databaseName))
+            {
+                conn["initial_database"] = databaseName;
+            }
+
             string command = BuildDatabaseCommandLine(conn);
             if (string.IsNullOrWhiteSpace(command))
             {
@@ -6022,7 +6198,8 @@ namespace mySQLPunk
                 case "mysql":
                     return "mysql -h " + QuoteCommandArgument(host) +
                            (string.IsNullOrWhiteSpace(port) ? "" : " -P " + QuoteCommandArgument(port)) +
-                           " -u " + QuoteCommandArgument(user) + " -p";
+                           " -u " + QuoteCommandArgument(user) + " -p" +
+                           (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " " + QuoteCommandArgument(initialDatabase));
                 case "postgresql":
                     if (string.IsNullOrWhiteSpace(initialDatabase)) initialDatabase = "postgres";
                     return "psql -h " + QuoteCommandArgument(host) +
@@ -6033,9 +6210,11 @@ namespace mySQLPunk
                     string dataSource = BuildSqlServerDataSource(host, port);
                     if (GetConnectionValue(conn, "trusted_connection") == "T")
                     {
-                        return "sqlcmd -S " + QuoteCommandArgument(dataSource) + " -E";
+                        return "sqlcmd -S " + QuoteCommandArgument(dataSource) + " -E" +
+                               (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " -d " + QuoteCommandArgument(initialDatabase));
                     }
-                    return "sqlcmd -S " + QuoteCommandArgument(dataSource) + " -U " + QuoteCommandArgument(user);
+                    return "sqlcmd -S " + QuoteCommandArgument(dataSource) + " -U " + QuoteCommandArgument(user) +
+                           (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " -d " + QuoteCommandArgument(initialDatabase));
                 case "sqlite":
                     string sqliteExe = Path.Combine(my.pwd(), "binary", "sqlite3_ext", "sqlite3.exe");
                     string sqlitePath = GetConnectionValue(conn, "path");
