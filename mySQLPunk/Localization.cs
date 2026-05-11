@@ -277,9 +277,16 @@ namespace mySQLPunk
             Add("Database.GenerateDataRows", "筆數：", "Rows:");
             Add("Database.GenerateDataPreview", "產生 SQL", "Generate SQL");
             Add("Database.GenerateDataOpenQuery", "開啟查詢", "Open Query");
+            Add("Database.GenerateDataExecute", "直接寫入", "Execute");
             Add("Database.DataGenerationHeader", "資料產生 SQL：{0}，筆數：{1}", "Data generation SQL: {0}, rows: {1}");
             Add("Database.DataGenerationNoColumns", "此資料表沒有可寫入的欄位。", "This table has no writable columns.");
             Add("Database.DataGenerationOpened", "資料產生 SQL 已開啟：{0}", "Data generation SQL opened: {0}");
+            Add("Database.DataGenerationNoTarget", "無法取得資料產生目標資料庫。", "Cannot get the data generation target database.");
+            Add("Database.DataGenerationNothingToExecute", "目前沒有可執行的 INSERT SQL。", "There is no executable INSERT SQL.");
+            Add("Database.DataGenerationExecuteConfirm", "要直接寫入資料表「{0}」嗎？\r\n\r\n預計寫入筆數：{1}", "Execute inserts into table \"{0}\"?\r\n\r\nRows to insert: {1}");
+            Add("Database.DataGenerationExecuting", "正在寫入資料：{0}/{1}", "Inserting data: {0}/{1}");
+            Add("Database.DataGenerationExecuted", "資料已寫入：{0}，筆數：{1}", "Data inserted: {0}, rows: {1}");
+            Add("Database.DataGenerationExecuteFailed", "資料寫入失敗：{0}", "Data generation execution failed: {0}");
             Add("Object.SelectDatabaseOrConnection", "請先選擇一個資料庫或連線！", "Select a database or connection first.");
             Add("Object.OpenConnectionFirst", "請先雙擊連線以開啟資料庫！", "Double-click the connection to open the database first.");
             Add("Object.SelectTable", "請先在左側選取一個具體的資料表 (Table)！", "Select a table in the left pane first.");

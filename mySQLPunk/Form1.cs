@@ -5917,6 +5917,7 @@ namespace mySQLPunk
             using (FlowLayoutPanel footer = new FlowLayoutPanel())
             using (Button generateButton = new Button())
             using (Button openQueryButton = new Button())
+            using (Button executeButton = new Button())
             using (Button closeButton = new Button())
             {
                 dialog.Text = Localization.T("Tool.GenerateData");
@@ -5962,6 +5963,8 @@ namespace mySQLPunk
                 generateButton.AutoSize = true;
                 openQueryButton.Text = Localization.T("Database.GenerateDataOpenQuery");
                 openQueryButton.AutoSize = true;
+                executeButton.Text = Localization.T("Database.GenerateDataExecute");
+                executeButton.AutoSize = true;
                 closeButton.Text = Localization.T("Common.Close");
                 closeButton.AutoSize = true;
 
@@ -5979,6 +5982,39 @@ namespace mySQLPunk
                     UpdateMainStatus(Localization.Format("Database.DataGenerationOpened", tableCombo.SelectedItem));
                     dialog.Close();
                 };
+                executeButton.Click += (s, e) =>
+                {
+                    if (string.IsNullOrWhiteSpace(preview.Text)) generatePreview();
+                    int statementCount = CountGeneratedDataStatements(preview.Text);
+                    if (statementCount == 0)
+                    {
+                        MessageBox.Show(Localization.T("Database.DataGenerationNothingToExecute"), Localization.T("Tool.GenerateData"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    string tableName = tableCombo.SelectedItem == null ? "" : tableCombo.SelectedItem.ToString();
+                    DialogResult confirm = MessageBox.Show(
+                        Localization.Format("Database.DataGenerationExecuteConfirm", tableName, statementCount),
+                        Localization.T("Tool.GenerateData"),
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning);
+                    if (confirm != DialogResult.Yes) return;
+
+                    try
+                    {
+                        ExecuteGeneratedDataSql(target.Database, preview.Text);
+                        string message = Localization.Format("Database.DataGenerationExecuted", tableName, statementCount);
+                        UpdateMainStatus(message);
+                        MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        dialog.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        string message = Localization.Format("Database.DataGenerationExecuteFailed", ex.Message);
+                        UpdateMainStatus(message);
+                        MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                };
                 closeButton.Click += (s, e) => dialog.Close();
 
                 layout.Controls.Add(new Label { Text = Localization.T("Database.GenerateDataTable"), AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
@@ -5988,6 +6024,7 @@ namespace mySQLPunk
                 layout.Controls.Add(preview, 0, 2);
                 layout.SetColumnSpan(preview, 2);
                 footer.Controls.Add(closeButton);
+                footer.Controls.Add(executeButton);
                 footer.Controls.Add(openQueryButton);
                 footer.Controls.Add(generateButton);
                 layout.Controls.Add(footer, 0, 3);
@@ -5997,6 +6034,51 @@ namespace mySQLPunk
                 ThemeManager.ApplyTo(dialog);
                 generatePreview();
                 dialog.ShowDialog(this);
+            }
+        }
+
+        private int CountGeneratedDataStatements(string sql)
+        {
+            return SplitGeneratedDataStatements(sql).Count;
+        }
+
+        private List<string> SplitGeneratedDataStatements(string sql)
+        {
+            List<string> statements = new List<string>();
+            if (string.IsNullOrWhiteSpace(sql)) return statements;
+
+            string[] lines = sql.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            foreach (string line in lines)
+            {
+                string statement = (line ?? string.Empty).Trim();
+                if (statement.Length == 0 || statement.StartsWith("--")) continue;
+                if (!statement.StartsWith("INSERT ", StringComparison.OrdinalIgnoreCase)) continue;
+                statements.Add(statement.TrimEnd(';'));
+            }
+
+            return statements;
+        }
+
+        private void ExecuteGeneratedDataSql(IDatabase db, string sql)
+        {
+            if (db == null) throw new InvalidOperationException(Localization.T("Database.DataGenerationNoTarget"));
+            List<string> statements = SplitGeneratedDataStatements(sql);
+            if (statements.Count == 0) throw new InvalidOperationException(Localization.T("Database.DataGenerationNothingToExecute"));
+
+            Form progressOwner = Form.ActiveForm ?? this;
+            using (RunnerProgressOverlay progressOverlay = RunnerProgressOverlay.Show(progressOwner, Localization.T("Tool.GenerateData"), Localization.Format("Database.DataGenerationExecuting", 0, statements.Count)))
+            {
+                for (int i = 0; i < statements.Count; i++)
+                {
+                    progressOverlay.SetProgress(i, statements.Count, Localization.Format("Database.DataGenerationExecuting", i, statements.Count));
+                    Dictionary<string, string> result = db.ExecSQL(statements[i]);
+                    if (result == null || !result.ContainsKey("status") || !string.Equals(result["status"], "OK", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string reason = result != null && result.ContainsKey("reason") ? result["reason"] : Localization.T("Common.Error");
+                        throw new InvalidOperationException(reason);
+                    }
+                    progressOverlay.SetProgress(i + 1, statements.Count, Localization.Format("Database.DataGenerationExecuting", i + 1, statements.Count));
+                }
             }
         }
 
