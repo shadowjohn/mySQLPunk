@@ -3046,6 +3046,14 @@ namespace mySQLPunk
                 {
                     return "HEXTORAW('" + hex + "')";
                 }
+                if (IsDumpProvider(db, "postgresql"))
+                {
+                    return "'\\x" + hex + "'";
+                }
+                if (IsDumpProvider(db, "sqlite"))
+                {
+                    return "X'" + hex + "'";
+                }
 
                 return "0x" + hex;
             }
@@ -5849,7 +5857,7 @@ namespace mySQLPunk
             menu.Items.Add(dictionaryItem);
 
             ToolStripMenuItem dataGeneratorItem = new ToolStripMenuItem(Localization.T("Tool.GenerateData"));
-            dataGeneratorItem.Click += (s, ev) => ShowDataGenerationUnavailable();
+            dataGeneratorItem.Click += (s, ev) => ShowDataGenerationDialog();
             menu.Items.Add(dataGeneratorItem);
 
             menu.Items.Add(new ToolStripSeparator());
@@ -5875,11 +5883,237 @@ namespace mySQLPunk
             menu.Items.Add(refreshItem);
         }
 
-        private void ShowDataGenerationUnavailable()
+        private void ShowDataGenerationDialog()
         {
-            string message = Localization.T("Database.DataGenerationUnavailable");
-            UpdateMainStatus(message);
-            MessageBox.Show(message, Localization.T("Tool.GenerateData"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Status.SelectExpandedDatabase"), Localization.T("Tool.GenerateData"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            List<string> tables;
+            try
+            {
+                tables = target.Database.GetTables(target.DatabaseName);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(Localization.Format("Database.DataGenerationLoadFailed", ex.Message), Localization.T("Tool.GenerateData"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (tables == null || tables.Count == 0)
+            {
+                MessageBox.Show(Localization.T("Database.DataGenerationNoTables"), Localization.T("Tool.GenerateData"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (Form dialog = new Form())
+            using (TableLayoutPanel layout = new TableLayoutPanel())
+            using (ComboBox tableCombo = new ComboBox())
+            using (NumericUpDown rowCountInput = new NumericUpDown())
+            using (RichTextBox preview = new RichTextBox())
+            using (FlowLayoutPanel footer = new FlowLayoutPanel())
+            using (Button generateButton = new Button())
+            using (Button openQueryButton = new Button())
+            using (Button closeButton = new Button())
+            {
+                dialog.Text = Localization.T("Tool.GenerateData");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.Size = new Size(860, 620);
+                dialog.MinimizeBox = false;
+                dialog.ShowInTaskbar = false;
+
+                layout.Dock = DockStyle.Fill;
+                layout.Padding = new Padding(12);
+                layout.ColumnCount = 2;
+                layout.RowCount = 4;
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+                layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+
+                tableCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+                tableCombo.Dock = DockStyle.Fill;
+                foreach (string table in tables.OrderBy(t => t, StringComparer.OrdinalIgnoreCase))
+                {
+                    tableCombo.Items.Add(table);
+                }
+                tableCombo.SelectedIndex = 0;
+
+                rowCountInput.Dock = DockStyle.Left;
+                rowCountInput.Minimum = 1;
+                rowCountInput.Maximum = 500;
+                rowCountInput.Value = 10;
+                rowCountInput.Width = 120;
+
+                preview.Dock = DockStyle.Fill;
+                preview.Font = new Font("Consolas", 10);
+                preview.WordWrap = false;
+                preview.ScrollBars = RichTextBoxScrollBars.Both;
+
+                footer.Dock = DockStyle.Fill;
+                footer.FlowDirection = FlowDirection.RightToLeft;
+                footer.Padding = new Padding(0, 8, 0, 0);
+                generateButton.Text = Localization.T("Database.GenerateDataPreview");
+                generateButton.AutoSize = true;
+                openQueryButton.Text = Localization.T("Database.GenerateDataOpenQuery");
+                openQueryButton.AutoSize = true;
+                closeButton.Text = Localization.T("Common.Close");
+                closeButton.AutoSize = true;
+
+                Action generatePreview = () =>
+                {
+                    string tableName = tableCombo.SelectedItem == null ? "" : tableCombo.SelectedItem.ToString();
+                    preview.Text = BuildDataGenerationSql(target.Database, target.DatabaseName, tableName, (int)rowCountInput.Value);
+                };
+
+                generateButton.Click += (s, e) => generatePreview();
+                openQueryButton.Click += (s, e) =>
+                {
+                    if (string.IsNullOrWhiteSpace(preview.Text)) generatePreview();
+                    OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), preview.Text, true);
+                    UpdateMainStatus(Localization.Format("Database.DataGenerationOpened", tableCombo.SelectedItem));
+                    dialog.Close();
+                };
+                closeButton.Click += (s, e) => dialog.Close();
+
+                layout.Controls.Add(new Label { Text = Localization.T("Database.GenerateDataTable"), AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+                layout.Controls.Add(tableCombo, 1, 0);
+                layout.Controls.Add(new Label { Text = Localization.T("Database.GenerateDataRows"), AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
+                layout.Controls.Add(rowCountInput, 1, 1);
+                layout.Controls.Add(preview, 0, 2);
+                layout.SetColumnSpan(preview, 2);
+                footer.Controls.Add(closeButton);
+                footer.Controls.Add(openQueryButton);
+                footer.Controls.Add(generateButton);
+                layout.Controls.Add(footer, 0, 3);
+                layout.SetColumnSpan(footer, 2);
+
+                dialog.Controls.Add(layout);
+                ThemeManager.ApplyTo(dialog);
+                generatePreview();
+                dialog.ShowDialog(this);
+            }
+        }
+
+        private string BuildDataGenerationSql(IDatabase db, string databaseName, string tableName, int rowCount)
+        {
+            if (db == null || string.IsNullOrWhiteSpace(tableName)) return string.Empty;
+            if (rowCount < 1) rowCount = 1;
+
+            DataTable columns = db.GetColumns(databaseName, tableName);
+            List<DataGenerationColumn> writableColumns = new List<DataGenerationColumn>();
+            foreach (DataRow row in columns.Rows)
+            {
+                DataGenerationColumn column = BuildDataGenerationColumn(row);
+                if (string.IsNullOrWhiteSpace(column.Name) || column.IsAutoGenerated) continue;
+                writableColumns.Add(column);
+            }
+
+            if (writableColumns.Count == 0)
+            {
+                return "-- " + Localization.T("Database.DataGenerationNoColumns");
+            }
+
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("-- " + Localization.Format("Database.DataGenerationHeader", tableName, rowCount));
+            string qualifiedTable = BuildQualifiedObjectName(db, databaseName, tableName);
+            string columnList = string.Join(", ", writableColumns.Select(c => QuoteDumpIdentifier(db, c.Name)).ToArray());
+
+            for (int rowIndex = 1; rowIndex <= rowCount; rowIndex++)
+            {
+                List<string> values = new List<string>();
+                foreach (DataGenerationColumn column in writableColumns)
+                {
+                    values.Add(ToSqlLiteral(db, BuildGeneratedSampleValue(column, rowIndex)));
+                }
+
+                builder.AppendLine("INSERT INTO " + qualifiedTable + " (" + columnList + ") VALUES (" + string.Join(", ", values.ToArray()) + ");");
+            }
+
+            return builder.ToString();
+        }
+
+        private static DataGenerationColumn BuildDataGenerationColumn(DataRow row)
+        {
+            string name = FirstColumnValue(row, "Field", "name", "Name", "COLUMN_NAME", "column_name");
+            string type = FirstColumnValue(row, "Type", "type", "COLUMN_TYPE", "DATA_TYPE", "data_type");
+            string extra = FirstColumnValue(row, "Extra", "EXTRA", "extra");
+            string defaultValue = FirstColumnValue(row, "Default", "dflt_value", "COLUMN_DEFAULT", "column_default", "DATA_DEFAULT");
+
+            bool autoGenerated =
+                extra.IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                extra.IndexOf("identity", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                defaultValue.IndexOf("nextval(", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                type.IndexOf("rowversion", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                type.IndexOf("timestamp without time zone", StringComparison.OrdinalIgnoreCase) >= 0 && defaultValue.IndexOf("now()", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            return new DataGenerationColumn
+            {
+                Name = name,
+                Type = type,
+                IsAutoGenerated = autoGenerated
+            };
+        }
+
+        private static object BuildGeneratedSampleValue(DataGenerationColumn column, int rowIndex)
+        {
+            string name = (column.Name ?? string.Empty).ToLowerInvariant();
+            string type = (column.Type ?? string.Empty).ToLowerInvariant();
+
+            if (type.Contains("uuid") || type.Contains("uniqueidentifier") || name == "uuid" || name.EndsWith("_uuid"))
+            {
+                return Guid.NewGuid();
+            }
+
+            if (type.Contains("bool") || type == "bit" || type.Contains("tinyint(1)"))
+            {
+                return rowIndex % 2 == 1;
+            }
+
+            if (type.Contains("date") || type.Contains("time"))
+            {
+                return DateTime.Today.AddDays(rowIndex - 1).AddMinutes(rowIndex);
+            }
+
+            if (type.Contains("int") || type.Contains("number") && !type.Contains(",") || type.Contains("numeric") && !type.Contains(","))
+            {
+                return rowIndex;
+            }
+
+            if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("float") || type.Contains("double") || type.Contains("real") || type.Contains("money"))
+            {
+                return rowIndex + 0.25m;
+            }
+
+            if (type.Contains("json"))
+            {
+                return "{\"sample\":" + rowIndex + "}";
+            }
+
+            if (type.Contains("blob") || type.Contains("binary") || type.Contains("bytea") || type.Contains("raw") || type.Contains("image"))
+            {
+                return new byte[] { (byte)(rowIndex & 0xff), 0x50, 0x4b };
+            }
+
+            if (type.Contains("geometry") || type.Contains("geography") || type.Contains("point") || type.Contains("polygon"))
+            {
+                return DBNull.Value;
+            }
+
+            string baseName = string.IsNullOrWhiteSpace(column.Name) ? "value" : column.Name;
+            return "sample_" + baseName + "_" + rowIndex;
+        }
+
+        private sealed class DataGenerationColumn
+        {
+            public string Name { get; set; }
+            public string Type { get; set; }
+            public bool IsAutoGenerated { get; set; }
         }
 
         private void FindInSelectedDatabase()

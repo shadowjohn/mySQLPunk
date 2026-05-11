@@ -269,7 +269,15 @@ namespace mySQLPunk
             Add("Database.SearchPrompt", "搜尋文字:", "Search text:");
             Add("Database.SearchKeywordRequired", "請輸入要搜尋的文字。", "Enter text to search for.");
             Add("Database.SearchCompleted", "搜尋完成：{0} 筆結果", "Search completed: {0} result(s)");
-            Add("Database.DataGenerationUnavailable", "資料產生功能尚未建立。", "Data generation is not available yet.");
+            Add("Database.DataGenerationLoadFailed", "載入資料表清單失敗：{0}", "Failed to load table list: {0}");
+            Add("Database.DataGenerationNoTables", "目前資料庫沒有可產生資料的資料表。", "There are no tables available for data generation.");
+            Add("Database.GenerateDataTable", "資料表：", "Table:");
+            Add("Database.GenerateDataRows", "筆數：", "Rows:");
+            Add("Database.GenerateDataPreview", "產生 SQL", "Generate SQL");
+            Add("Database.GenerateDataOpenQuery", "開啟查詢", "Open Query");
+            Add("Database.DataGenerationHeader", "資料產生 SQL：{0}，筆數：{1}", "Data generation SQL: {0}, rows: {1}");
+            Add("Database.DataGenerationNoColumns", "此資料表沒有可寫入的欄位。", "This table has no writable columns.");
+            Add("Database.DataGenerationOpened", "資料產生 SQL 已開啟：{0}", "Data generation SQL opened: {0}");
             Add("Object.SelectDatabaseOrConnection", "請先選擇一個資料庫或連線！", "Select a database or connection first.");
             Add("Object.OpenConnectionFirst", "請先雙擊連線以開啟資料庫！", "Double-click the connection to open the database first.");
             Add("Object.SelectTable", "請先在左側選取一個具體的資料表 (Table)！", "Select a table in the left pane first.");

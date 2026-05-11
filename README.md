@@ -40,6 +40,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；部分既有資料表修改與進階索引尚未完整支援。 |
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 不支援欄位註解。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
+| 資料產生 | 部分可用 | Tables 群組可產生指定資料表的 INSERT SQL 範本，先開到查詢視窗供使用者檢查再執行。 |
 | Table/View 複製 | 可用 | 跨 provider 複製 Table/View；View SQL 無法安全轉換時會改用 table snapshot。 |
 | SQL Dump | 可用 | 支援多 provider Table dump；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
 
@@ -53,11 +54,6 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 觸發位置：左側樹狀清單與右鍵選單中的「新增群組 / 管理群組」。
   - 現況：點擊會顯示「尚未建立群組功能」。
   - 後續方向：定義群組資料結構、儲存位置、拖曳/搬移節點規則，以及語系文字。
-
-- **資料產生功能尚未建立**
-  - 觸發位置：資料表分類右鍵選單的資料產生相關入口。
-  - 現況：點擊會顯示「資料產生功能尚未建立」。
-  - 後續方向：先定義可產生資料型別、筆數、欄位規則與安全確認流程。
 
 - **多連線設定檔尚未支援**
   - 觸發位置：連線根節點右鍵選單的「切換連線設定檔」。
@@ -86,6 +82,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 - **SpatiaLite extension 可能載入失敗**
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。
   - 後續方向：補齊 UI 診斷、下載/放置說明，以及無 SpatiaLite 時的降級行為。
+
+- **資料產生目前以 SQL 範本為主**
+  - 現況：Tables 群組右鍵「資料產生」可依欄位型別產生 INSERT SQL，並開到查詢視窗讓使用者檢查後自行執行。
+  - 後續方向：補更細的欄位規則、固定/隨機資料策略、外鍵關聯產生與直接執行前的安全確認流程。
 
 ### Table Designer 限制
 
