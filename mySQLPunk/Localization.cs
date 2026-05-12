@@ -297,6 +297,12 @@ namespace mySQLPunk
             Add("Database.OracleConfirmDropMismatch", "Schema 名稱不一致，已取消刪除。", "Schema name did not match. Delete cancelled.");
             Add("Database.OracleProtectedSchema", "不允許從此介面刪除 Oracle 系統 Schema：{0}", "Dropping Oracle system schema from this interface is not allowed: {0}");
             Add("Database.SqliteUnsupportedDelete", "SQLite 資料庫是以檔案為單位，不支援由此介面刪除資料庫。\n請直接刪除對應的 .sqlite 檔案。", "SQLite databases are file-based and cannot be deleted from this interface.\nDelete the corresponding .sqlite file directly.");
+            Add("Database.SqliteConfirmDeleteFile", "即將關閉 SQLite 連線並刪除檔案：\n{0}\n\n此操作不可還原。", "The SQLite connection will be closed and this file will be deleted:\n{0}\n\nThis action cannot be undone.");
+            Add("Database.SqliteConfirmDeletePrompt", "請輸入檔名「{0}」以確認刪除：", "Type file name \"{0}\" to confirm deletion:");
+            Add("Database.SqliteConfirmDeleteMismatch", "檔名不一致，已取消刪除。", "File name did not match. Delete cancelled.");
+            Add("Database.SqlitePathMissing", "無法判斷 SQLite 資料庫檔案路徑。", "Cannot determine the SQLite database file path.");
+            Add("Database.SqliteFileMissing", "SQLite 檔案不存在：{0}", "SQLite file does not exist: {0}");
+            Add("Database.SqliteUnsafePath", "SQLite 檔案路徑不安全，已取消刪除：{0}", "SQLite file path is unsafe. Delete cancelled: {0}");
             Add("Database.Deleted", "資料庫已刪除：{0}", "Database deleted: {0}");
             Add("Database.DeleteFailed", "刪除資料庫失敗：{0}", "Delete database failed: {0}");
             Add("Database.AutoCommentsConfirm", "要掃描資料庫「{0}」的全部資料表，並補上空白欄位註解嗎？", "Scan every table in database \"{0}\" and fill blank column comments?");

@@ -7381,6 +7381,12 @@ namespace mySQLPunk
                     return;
                 }
 
+                if (target.Database is my_sqlite)
+                {
+                    DeleteSqliteDatabaseFile(target);
+                    return;
+                }
+
                 string sql = BuildDropDatabaseSql(target.Database, target.DatabaseName);
                 Dictionary<string, string> execResult = target.Database.ExecSQL(sql);
                 if (!execResult.ContainsKey("status") || execResult["status"] != "OK")
@@ -7401,6 +7407,102 @@ namespace mySQLPunk
                 UpdateMainStatus(message);
                 MessageBox.Show(message, Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private void DeleteSqliteDatabaseFile(TreeDatabaseTarget target)
+        {
+            string fullPath;
+            string reason;
+            if (!TryGetSafeSqliteDeletePath(target.ConnectionInfo, target.Database, out fullPath, out reason))
+                throw new InvalidOperationException(reason);
+
+            DialogResult fileResult = MessageBox.Show(
+                Localization.Format("Database.SqliteConfirmDeleteFile", fullPath),
+                Localization.T("Tool.DeleteDatabase"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (fileResult != DialogResult.Yes) return;
+
+            string fileName = Path.GetFileName(fullPath);
+            string confirmation = PromptForText(
+                Localization.T("Tool.DeleteDatabase"),
+                Localization.Format("Database.SqliteConfirmDeletePrompt", fileName),
+                "");
+            if (confirmation == null) return;
+
+            if (!string.Equals(confirmation.Trim(), fileName, StringComparison.Ordinal))
+            {
+                string message = Localization.T("Database.SqliteConfirmDeleteMismatch");
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            target.Database.Close();
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            DeleteSqliteDatabaseFiles(fullPath);
+
+            if (target.ConnectionInfo != null)
+            {
+                target.ConnectionInfo["isConnect"] = "F";
+            }
+
+            TreeNode root = target.DatabaseNode;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            ApplyConnectionNodeIcon(root, GetConnectionValue(target.ConnectionInfo, "db_kind"), false);
+            target.DatabaseNode.Remove();
+            db_tree.SelectedNode = root;
+            table_top.DataSource = null;
+            dgvDetails.DataSource = null;
+            rtbDDL.Clear();
+            UpdateMainStatus(Localization.Format("Database.Deleted", target.DatabaseName));
+        }
+
+        private static bool TryGetSafeSqliteDeletePath(Dictionary<string, object> connInfo, IDatabase db, out string fullPath, out string reason)
+        {
+            fullPath = string.Empty;
+            reason = string.Empty;
+
+            string rawPath = GetSQLiteDatabasePath(connInfo, db);
+            if (string.IsNullOrWhiteSpace(rawPath))
+            {
+                reason = Localization.T("Database.SqlitePathMissing");
+                return false;
+            }
+
+            try
+            {
+                fullPath = Path.GetFullPath(rawPath);
+            }
+            catch
+            {
+                reason = Localization.Format("Database.SqliteUnsafePath", rawPath);
+                return false;
+            }
+
+            if (!Path.IsPathRooted(fullPath) || Directory.Exists(fullPath))
+            {
+                reason = Localization.Format("Database.SqliteUnsafePath", fullPath);
+                return false;
+            }
+
+            if (!File.Exists(fullPath))
+            {
+                reason = Localization.Format("Database.SqliteFileMissing", fullPath);
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void DeleteSqliteDatabaseFiles(string fullPath)
+        {
+            foreach (string companionPath in new[] { fullPath + "-wal", fullPath + "-shm", fullPath + "-journal" })
+            {
+                if (File.Exists(companionPath)) File.Delete(companionPath);
+            }
+
+            File.Delete(fullPath);
         }
 
         private bool ConfirmOracleSchemaDrop(string schemaName)

@@ -88,8 +88,8 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 完成內容：
     - Oracle：新增資料庫會開啟 Oracle Schema 精靈，輸入使用者、密碼、預設/暫存 Tablespace 後依序執行 `CREATE USER`、`ALTER USER ... QUOTA` 與常用物件建立權限 grant；需使用具備建立 user 權限的帳戶。
     - Oracle：刪除資料庫會使用 `DROP USER ... CASCADE`，執行前會先顯示高風險提示並要求再次輸入完整 Schema 名稱；SYS、SYSTEM、XDB、CTXSYS、MDSYS 等系統 Schema 會被阻擋。
-    - SQLite：資料庫為獨立檔案，操作時會顯示說明，提示直接建立新的 SQLite 連線或刪除對應 `.sqlite` 檔案。
-  - 後續方向：SQLite 仍維持檔案型資料庫提示；若要由 UI 直接刪除 `.sqlite` 檔案，需額外處理檔案鎖定與路徑安全檢查。
+    - SQLite：資料庫為獨立檔案；刪除時會解析連線檔案路徑、確認檔案存在且不是目錄，並要求再次輸入完整檔名後才會關閉連線、清除 SQLite connection pool，並刪除 `.sqlite`、`-wal`、`-shm`、`-journal` 檔案。
+  - 後續方向：若需要更貼近 Windows 使用習慣，可再評估改為移到資源回收筒或加入刪除前自動備份。
 
 - **SQLite 欄位註解不支援 ✅ sidecar metadata 已補齊**
   - 現況：SQLite 本身沒有欄位註解語法，因此 mySQLPunk 會使用 `__mysqlpunk_column_comments` sidecar metadata table 保存欄位註解。
