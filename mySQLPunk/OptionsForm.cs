@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
+using Newtonsoft.Json;
 
 namespace mySQLPunk
 {
@@ -8,11 +11,13 @@ namespace mySQLPunk
     {
         private readonly ListBox navigationList;
         private readonly Panel contentPanel;
-        private readonly RadioButton lightThemeRadio;
-        private readonly RadioButton darkThemeRadio;
-        private readonly ComboBox languageCombo;
-        private readonly ThemePreviewControl lightPreview;
-        private readonly ThemePreviewControl darkPreview;
+        private RadioButton lightThemeRadio;
+        private RadioButton darkThemeRadio;
+        private ComboBox languageCombo;
+        private ThemePreviewControl lightPreview;
+        private ThemePreviewControl darkPreview;
+        private readonly Button okButton;
+        private readonly Dictionary<string, TextBox> cliPathInputs = new Dictionary<string, TextBox>();
 
         public string SelectedLanguage { get; private set; }
         public string SelectedTheme { get; private set; }
@@ -52,6 +57,7 @@ namespace mySQLPunk
                 Localization.T("Options.Advanced")
             });
             navigationList.SelectedIndex = 0;
+            navigationList.SelectedIndexChanged += (s, e) => RenderSelectedPage();
 
             contentPanel = new Panel
             {
@@ -65,7 +71,7 @@ namespace mySQLPunk
                 Height = 52,
                 Padding = new Padding(12, 8, 12, 8)
             };
-            Button okButton = new Button
+            okButton = new Button
             {
                 Text = Localization.T("Common.OK"),
                 DialogResult = DialogResult.OK,
@@ -88,6 +94,48 @@ namespace mySQLPunk
             };
             buttonPanel.Controls.Add(okButton);
             buttonPanel.Controls.Add(cancelButton);
+            okButton.Click += (s, e) =>
+            {
+                SaveCliPathSettings();
+                UpdateSelection();
+            };
+
+            RenderGeneralPage();
+
+            Controls.Add(contentPanel);
+            Controls.Add(navigationList);
+            Controls.Add(buttonPanel);
+
+            AcceptButton = okButton;
+            CancelButton = cancelButton;
+
+            ThemeManager.ApplyTo(this);
+            navigationList.BackColor = ThemeManager.ElevatedColor;
+            navigationList.ForeColor = ThemeManager.TextColor;
+            contentPanel.BackColor = ThemeManager.WindowBackColor;
+            buttonPanel.BackColor = ThemeManager.SurfaceColor;
+            UpdateSelection();
+        }
+
+        private void RenderSelectedPage()
+        {
+            string selected = navigationList.SelectedItem == null ? string.Empty : navigationList.SelectedItem.ToString();
+            if (string.Equals(selected, Localization.T("Options.Environment"), StringComparison.Ordinal))
+            {
+                RenderEnvironmentPage();
+            }
+            else
+            {
+                RenderGeneralPage();
+            }
+
+            ThemeManager.ApplyTo(contentPanel);
+            contentPanel.BackColor = ThemeManager.WindowBackColor;
+        }
+
+        private void RenderGeneralPage()
+        {
+            contentPanel.Controls.Clear();
 
             Label sectionTitle = new Label
             {
@@ -160,7 +208,6 @@ namespace mySQLPunk
             lightPreview.Click += (s, e) => lightThemeRadio.Checked = true;
             darkPreview.Click += (s, e) => darkThemeRadio.Checked = true;
             languageCombo.SelectedIndexChanged += (s, e) => UpdateSelection();
-            okButton.Click += (s, e) => UpdateSelection();
 
             contentPanel.Controls.Add(sectionTitle);
             contentPanel.Controls.Add(themeLabel);
@@ -171,20 +218,87 @@ namespace mySQLPunk
             contentPanel.Controls.Add(languageLabel);
             contentPanel.Controls.Add(languageCombo);
             contentPanel.Controls.Add(noteLabel);
+        }
 
-            Controls.Add(contentPanel);
-            Controls.Add(navigationList);
-            Controls.Add(buttonPanel);
+        private void RenderEnvironmentPage()
+        {
+            contentPanel.Controls.Clear();
+            cliPathInputs.Clear();
 
-            AcceptButton = okButton;
-            CancelButton = cancelButton;
+            Label sectionTitle = new Label
+            {
+                Text = Localization.T("Options.Environment"),
+                AutoSize = true,
+                Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold),
+                Location = new Point(18, 18)
+            };
+            Label hintLabel = new Label
+            {
+                Text = Localization.T("Options.CliPathHint"),
+                AutoSize = true,
+                Location = new Point(18, 48),
+                MaximumSize = new Size(620, 0)
+            };
 
-            ThemeManager.ApplyTo(this);
-            navigationList.BackColor = ThemeManager.ElevatedColor;
-            navigationList.ForeColor = ThemeManager.TextColor;
-            contentPanel.BackColor = ThemeManager.WindowBackColor;
-            buttonPanel.BackColor = ThemeManager.SurfaceColor;
-            UpdateSelection();
+            contentPanel.Controls.Add(sectionTitle);
+            contentPanel.Controls.Add(hintLabel);
+
+            int top = 92;
+            AddCliPathRow("mysql", Localization.T("Options.CliPathMySql"), top);
+            AddCliPathRow("postgresql", Localization.T("Options.CliPathPostgreSql"), top + 42);
+            AddCliPathRow("sqlserver", Localization.T("Options.CliPathSqlServer"), top + 84);
+            AddCliPathRow("oracle", Localization.T("Options.CliPathOracle"), top + 126);
+            AddCliPathRow("sqlite", Localization.T("Options.CliPathSqlite"), top + 168);
+        }
+
+        private void AddCliPathRow(string provider, string labelText, int top)
+        {
+            Label label = new Label
+            {
+                Text = labelText,
+                AutoSize = true,
+                Location = new Point(18, top + 5)
+            };
+            TextBox input = new TextBox
+            {
+                Text = CliPathSettings.GetPath(provider),
+                Location = new Point(150, top),
+                Width = 390,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
+            };
+            Button browseButton = new Button
+            {
+                Text = Localization.T("Common.Browse"),
+                Location = new Point(550, top - 1),
+                Size = new Size(80, 28),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            browseButton.Click += (s, e) =>
+            {
+                using (OpenFileDialog dialog = new OpenFileDialog())
+                {
+                    dialog.Filter = Localization.T("Options.ExecutableFilter");
+                    dialog.FileName = string.IsNullOrWhiteSpace(input.Text) ? string.Empty : input.Text;
+                    if (dialog.ShowDialog(this) == DialogResult.OK)
+                    {
+                        input.Text = dialog.FileName;
+                    }
+                }
+            };
+
+            cliPathInputs[provider] = input;
+            contentPanel.Controls.Add(label);
+            contentPanel.Controls.Add(input);
+            contentPanel.Controls.Add(browseButton);
+        }
+
+        private void SaveCliPathSettings()
+        {
+            foreach (var pair in cliPathInputs)
+            {
+                CliPathSettings.SetPath(pair.Key, pair.Value.Text);
+            }
+            if (cliPathInputs.Count > 0) CliPathSettings.Save();
         }
 
         private void UpdateSelection()
@@ -311,6 +425,87 @@ namespace mySQLPunk
                     graphics.FillEllipse(brush, x - 4, y - 4, 8, 8);
                 }
             }
+        }
+    }
+
+    public static class CliPathSettings
+    {
+        private static readonly Dictionary<string, string> Paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static bool loaded;
+
+        public static string GetPath(string provider)
+        {
+            EnsureLoaded();
+            string value;
+            return Paths.TryGetValue(NormalizeProvider(provider), out value) ? value : string.Empty;
+        }
+
+        public static void SetPath(string provider, string path)
+        {
+            EnsureLoaded();
+            string key = NormalizeProvider(provider);
+            string value = (path ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                Paths.Remove(key);
+            }
+            else
+            {
+                Paths[key] = value;
+            }
+        }
+
+        public static void Save()
+        {
+            EnsureLoaded();
+            try
+            {
+                string path = GetSettingsFilePath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, JsonConvert.SerializeObject(Paths, Formatting.Indented));
+            }
+            catch
+            {
+            }
+        }
+
+        private static void EnsureLoaded()
+        {
+            if (loaded) return;
+            loaded = true;
+            Paths.Clear();
+
+            try
+            {
+                string path = GetSettingsFilePath();
+                if (!File.Exists(path)) return;
+
+                var loadedPaths = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+                if (loadedPaths == null) return;
+
+                foreach (var pair in loadedPaths)
+                {
+                    if (!string.IsNullOrWhiteSpace(pair.Value))
+                    {
+                        Paths[NormalizeProvider(pair.Key)] = pair.Value.Trim();
+                    }
+                }
+            }
+            catch
+            {
+                Paths.Clear();
+            }
+        }
+
+        private static string NormalizeProvider(string provider)
+        {
+            string key = (provider ?? string.Empty).Trim().ToLowerInvariant();
+            return key == "mssql" ? "sqlserver" : key;
+        }
+
+        private static string GetSettingsFilePath()
+        {
+            return Path.Combine(Application.UserAppDataPath, "cli-paths.json");
         }
     }
 }

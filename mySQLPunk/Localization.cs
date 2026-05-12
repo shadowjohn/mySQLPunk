@@ -538,6 +538,13 @@ namespace mySQLPunk
             Add("Options.Environment", "環境", "Environment");
             Add("Options.Advanced", "進階", "Advanced");
             Add("Options.RestartNote", "* 部分已開啟視窗可能需要重新開啟才能完整套用。", "* Some open windows may need to be reopened to fully apply changes.");
+            Add("Options.CliPathHint", "可指定各資料庫命令列工具的位置。留空時會使用 PATH，SQLite 會優先使用內建 sqlite3.exe。", "Set database CLI executable paths. Leave blank to use PATH; SQLite uses the bundled sqlite3.exe first.");
+            Add("Options.CliPathMySql", "MySQL:", "MySQL:");
+            Add("Options.CliPathPostgreSql", "PostgreSQL:", "PostgreSQL:");
+            Add("Options.CliPathSqlServer", "SQL Server:", "SQL Server:");
+            Add("Options.CliPathOracle", "Oracle:", "Oracle:");
+            Add("Options.CliPathSqlite", "SQLite:", "SQLite:");
+            Add("Options.ExecutableFilter", "執行檔 (*.exe)|*.exe|所有檔案 (*.*)|*.*", "Executable files (*.exe)|*.exe|All files (*.*)|*.*");
         }
 
         public static string CurrentLanguage

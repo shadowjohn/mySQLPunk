@@ -72,8 +72,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 - **命令列介面依賴本機 CLI ✅ 偵測已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
-  - 完成內容：已加入 CLI 可用性偵測（先透過 `where.exe`，再掃描 `PATH`）。找不到時會顯示安裝說明連結，不會直接開啟空白終端機。
-  - 後續方向：可自訂 CLI 路徑，以及更完整的密碼安全傳遞策略。
+  - 完成內容：
+    - 已加入 CLI 可用性偵測（先透過 `where.exe`，再掃描 `PATH`）。找不到時會顯示安裝說明連結，不會直接開啟空白終端機。
+    - `選項 > 環境` 可自訂 MySQL、PostgreSQL、SQL Server、Oracle、SQLite CLI 執行檔路徑；未設定時仍會使用 `PATH`，SQLite 會優先使用內建 `sqlite3.exe`。
+  - 後續方向：更完整的密碼安全傳遞策略。
 
 - **部分連線類型尚未支援編輯 ✅ 已完成**
   - 現況：MySQL、PostgreSQL、Oracle、SQLite、SQL Server 五種 provider 均有對應的編輯表單（template form）。

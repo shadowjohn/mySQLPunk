@@ -7777,12 +7777,11 @@ namespace mySQLPunk
                 return;
             }
 
-            // CLI 可用性偵測
-            string cliExe = GetCliExecutableName(GetConnectionValue(conn, "db_kind").ToLowerInvariant());
-            if (!string.IsNullOrEmpty(cliExe) && !IsCliInPath(cliExe))
+            string cliTarget = GetCliAvailabilityTarget(GetConnectionValue(conn, "db_kind").ToLowerInvariant());
+            if (!string.IsNullOrEmpty(cliTarget) && !IsCliAvailable(cliTarget))
             {
                 string installHint = GetCliInstallHint(GetConnectionValue(conn, "db_kind").ToLowerInvariant());
-                string notFoundMsg = Localization.Format("Connection.CliNotFound", cliExe, installHint);
+                string notFoundMsg = Localization.Format("Connection.CliNotFound", cliTarget, installHint);
                 UpdateMainStatus(notFoundMsg);
                 MessageBox.Show(notFoundMsg, Localization.T("Tool.CommandLine"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -7804,8 +7803,11 @@ namespace mySQLPunk
             }
         }
 
-        private static string GetCliExecutableName(string dbKind)
+        private static string GetCliAvailabilityTarget(string dbKind)
         {
+            string customPath = CliPathSettings.GetPath(GetCliProviderKey(dbKind));
+            if (!string.IsNullOrWhiteSpace(customPath)) return customPath;
+
             switch (dbKind)
             {
                 case "mysql":      return "mysql.exe";
@@ -7823,6 +7825,18 @@ namespace mySQLPunk
             }
         }
 
+        private static string GetCliProviderKey(string dbKind)
+        {
+            switch ((dbKind ?? string.Empty).ToLowerInvariant())
+            {
+                case "mssql":
+                case "sqlserver":
+                    return "sqlserver";
+                default:
+                    return (dbKind ?? string.Empty).ToLowerInvariant();
+            }
+        }
+
         private static string GetCliInstallHint(string dbKind)
         {
             switch (dbKind)
@@ -7837,16 +7851,20 @@ namespace mySQLPunk
             }
         }
 
-        private static bool IsCliInPath(string executableName)
+        private static bool IsCliAvailable(string executableOrPath)
         {
-            if (string.IsNullOrEmpty(executableName)) return true;
+            if (string.IsNullOrEmpty(executableOrPath)) return true;
+            if (Path.IsPathRooted(executableOrPath) || executableOrPath.Contains("\\") || executableOrPath.Contains("/"))
+            {
+                return File.Exists(executableOrPath);
+            }
 
             // 先用 where.exe 查詢（Windows）
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo("where")
                 {
-                    Arguments = executableName,
+                    Arguments = executableOrPath,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -7870,7 +7888,7 @@ namespace mySQLPunk
                 if (string.IsNullOrEmpty(trimmed)) continue;
                 try
                 {
-                    if (File.Exists(Path.Combine(trimmed, executableName)))
+                    if (File.Exists(Path.Combine(trimmed, executableOrPath)))
                         return true;
                 }
                 catch { }
@@ -7889,37 +7907,55 @@ namespace mySQLPunk
             switch (kind)
             {
                 case "mysql":
-                    return "mysql -h " + QuoteCommandArgument(host) +
+                    return GetCliCommand(kind, "mysql") + " -h " + QuoteCommandArgument(host) +
                            (string.IsNullOrWhiteSpace(port) ? "" : " -P " + QuoteCommandArgument(port)) +
                            " -u " + QuoteCommandArgument(user) + " -p" +
                            (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " " + QuoteCommandArgument(initialDatabase));
                 case "postgresql":
                     if (string.IsNullOrWhiteSpace(initialDatabase)) initialDatabase = "postgres";
-                    return "psql -h " + QuoteCommandArgument(host) +
+                    return GetCliCommand(kind, "psql") + " -h " + QuoteCommandArgument(host) +
                            (string.IsNullOrWhiteSpace(port) ? "" : " -p " + QuoteCommandArgument(port)) +
                            " -U " + QuoteCommandArgument(user) + " " + QuoteCommandArgument(initialDatabase);
                 case "mssql":
                 case "sqlserver":
                     string dataSource = BuildSqlServerDataSource(host, port);
+                    string sqlcmd = GetCliCommand(kind, "sqlcmd");
                     if (GetConnectionValue(conn, "trusted_connection") == "T")
                     {
-                        return "sqlcmd -S " + QuoteCommandArgument(dataSource) + " -E" +
+                        return sqlcmd + " -S " + QuoteCommandArgument(dataSource) + " -E" +
                                (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " -d " + QuoteCommandArgument(initialDatabase));
                     }
-                    return "sqlcmd -S " + QuoteCommandArgument(dataSource) + " -U " + QuoteCommandArgument(user) +
+                    return sqlcmd + " -S " + QuoteCommandArgument(dataSource) + " -U " + QuoteCommandArgument(user) +
                            (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " -d " + QuoteCommandArgument(initialDatabase));
                 case "sqlite":
                     string sqliteExe = Path.Combine(my.pwd(), "binary", "sqlite3_ext", "sqlite3.exe");
                     string sqlitePath = GetConnectionValue(conn, "path");
-                    string exe = File.Exists(sqliteExe) ? sqliteExe : "sqlite3";
-                    return QuoteCommandArgument(exe) + " " + QuoteCommandArgument(sqlitePath);
+                    string exe = GetCliCommand(kind, File.Exists(sqliteExe) ? sqliteExe : "sqlite3");
+                    return exe + " " + QuoteCommandArgument(sqlitePath);
                 case "oracle":
                     string connectName = BuildOracleCommandLineConnectName(conn);
                     string login = string.IsNullOrWhiteSpace(connectName) ? user : user + "@" + connectName;
-                    return string.IsNullOrWhiteSpace(login) ? "sqlplus" : "sqlplus " + QuoteCommandArgument(login);
+                    string sqlplus = GetCliCommand(kind, "sqlplus");
+                    return string.IsNullOrWhiteSpace(login) ? sqlplus : sqlplus + " " + QuoteCommandArgument(login);
                 default:
                     return "";
             }
+        }
+
+        private static string GetCliCommand(string dbKind, string fallbackCommand)
+        {
+            string configured = CliPathSettings.GetPath(GetCliProviderKey(dbKind));
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                return QuoteCommandArgument(configured);
+            }
+
+            if (Path.IsPathRooted(fallbackCommand) || fallbackCommand.Contains("\\") || fallbackCommand.Contains("/"))
+            {
+                return QuoteCommandArgument(fallbackCommand);
+            }
+
+            return fallbackCommand;
         }
 
         private static string BuildOracleCommandLineConnectName(Dictionary<string, object> conn)
