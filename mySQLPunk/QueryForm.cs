@@ -2703,7 +2703,8 @@ namespace mySQLPunk
             }
             if (IsSqlServerProvider())
             {
-                return QuoteIdentifier(_databaseName) + ".[dbo]." + QuoteIdentifier(tableName);
+                SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+                return QuoteIdentifier(_databaseName) + "." + QuoteIdentifier(target.Schema) + "." + QuoteIdentifier(target.Name);
             }
             if (IsPostgreSqlProvider())
             {
@@ -2714,6 +2715,28 @@ namespace mySQLPunk
                 return QuoteIdentifier(_databaseName) + "." + QuoteIdentifier(tableName);
             }
             return QuoteIdentifier(tableName);
+        }
+
+        private struct SqlServerObjectName
+        {
+            public string Schema;
+            public string Name;
+        }
+
+        private static SqlServerObjectName ParseSqlServerObjectName(string objectName)
+        {
+            string value = (objectName ?? string.Empty).Trim();
+            int dotIndex = value.IndexOf('.');
+            if (dotIndex > 0 && dotIndex < value.Length - 1)
+            {
+                return new SqlServerObjectName
+                {
+                    Schema = value.Substring(0, dotIndex).Trim(),
+                    Name = value.Substring(dotIndex + 1).Trim()
+                };
+            }
+
+            return new SqlServerObjectName { Schema = "dbo", Name = value };
         }
 
         private string QuoteIdentifier(string name)

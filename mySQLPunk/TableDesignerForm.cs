@@ -1499,8 +1499,9 @@ namespace mySQLPunk
         {
             if (_db is my_mssql)
             {
-                return "EXEC " + QuoteDesignerIdentifier(_databaseName) + ".sys.sp_rename N'dbo." +
-                       EscapeSqlServerLiteral(_tableName) + "." + EscapeSqlServerLiteral(oldName) +
+                SqlServerDesignerObjectName target = ParseSqlServerDesignerObjectName(_tableName);
+                return "EXEC " + QuoteDesignerIdentifier(_databaseName) + ".sys.sp_rename N'" +
+                       EscapeSqlServerLiteral(target.Schema) + "." + EscapeSqlServerLiteral(target.Name) + "." + EscapeSqlServerLiteral(oldName) +
                        "', N'" + EscapeSqlServerLiteral(newName) + "', N'COLUMN';";
             }
 
@@ -1613,20 +1614,21 @@ namespace mySQLPunk
         private string BuildSqlServerDropDefaultConstraintStatement(string columnName)
         {
             string database = QuoteDesignerIdentifier(_databaseName);
+            SqlServerDesignerObjectName target = ParseSqlServerDesignerObjectName(_tableName);
             return "DECLARE @constraintName nvarchar(128);\r\n" +
                    "SELECT @constraintName = dc.name\r\n" +
                    "FROM " + database + ".sys.default_constraints dc\r\n" +
                    "INNER JOIN " + database + ".sys.columns c ON c.default_object_id = dc.object_id\r\n" +
                    "INNER JOIN " + database + ".sys.tables t ON t.object_id = c.object_id\r\n" +
                    "INNER JOIN " + database + ".sys.schemas s ON s.schema_id = t.schema_id\r\n" +
-                   "WHERE s.name = N'dbo' AND t.name = N'" + EscapeSqlServerLiteral(_tableName) + "' AND c.name = N'" + EscapeSqlServerLiteral(columnName) + "';\r\n" +
+                   "WHERE s.name = N'" + EscapeSqlServerLiteral(target.Schema) + "' AND t.name = N'" + EscapeSqlServerLiteral(target.Name) + "' AND c.name = N'" + EscapeSqlServerLiteral(columnName) + "';\r\n" +
                    "IF @constraintName IS NOT NULL EXEC(N'ALTER TABLE " + GetQualifiedDesignerTableName(_tableName).Replace("'", "''") + " DROP CONSTRAINT [' + REPLACE(@constraintName, ']', ']]') + N']');";
         }
 
         private string BuildSqlServerAddDefaultConstraintStatement(string columnName, string defaultValue)
         {
             return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
-                   " ADD CONSTRAINT " + QuoteDesignerIdentifier(BuildSqlServerDefaultConstraintName(_tableName, columnName)) +
+                   " ADD CONSTRAINT " + QuoteDesignerIdentifier(BuildSqlServerDefaultConstraintName(GetSqlServerDesignerObjectName(_tableName), columnName)) +
                    " DEFAULT " + FormatGenericDefault(defaultValue) +
                    " FOR " + QuoteDesignerIdentifier(columnName) + ";";
         }
@@ -1684,7 +1686,9 @@ namespace mySQLPunk
         private string BuildSqlServerColumnCommentStatement(string tableName, string columnName, string comment)
         {
             string database = QuoteDesignerIdentifier(_databaseName);
-            string tableLiteral = EscapeSqlServerLiteral(tableName);
+            SqlServerDesignerObjectName target = ParseSqlServerDesignerObjectName(tableName);
+            string schemaLiteral = EscapeSqlServerLiteral(target.Schema);
+            string tableLiteral = EscapeSqlServerLiteral(target.Name);
             string columnLiteral = EscapeSqlServerLiteral(columnName);
             string valueLiteral = EscapeSqlServerLiteral(comment ?? "");
 
@@ -1693,10 +1697,10 @@ namespace mySQLPunk
                 "INNER JOIN " + database + ".sys.columns c ON c.object_id = ep.major_id AND c.column_id = ep.minor_id " +
                 "INNER JOIN " + database + ".sys.tables t ON t.object_id = c.object_id " +
                 "INNER JOIN " + database + ".sys.schemas s ON s.schema_id = t.schema_id " +
-                "WHERE ep.name = N'MS_Description' AND s.name = N'dbo' AND t.name = N'" + tableLiteral + "' AND c.name = N'" + columnLiteral + "')";
+                "WHERE ep.name = N'MS_Description' AND s.name = N'" + schemaLiteral + "' AND t.name = N'" + tableLiteral + "' AND c.name = N'" + columnLiteral + "')";
 
             string commonArgs =
-                "@name=N'MS_Description', @level0type=N'SCHEMA', @level0name=N'dbo', " +
+                "@name=N'MS_Description', @level0type=N'SCHEMA', @level0name=N'" + schemaLiteral + "', " +
                 "@level1type=N'TABLE', @level1name=N'" + tableLiteral + "', " +
                 "@level2type=N'COLUMN', @level2name=N'" + columnLiteral + "'";
 
@@ -1834,12 +1838,13 @@ namespace mySQLPunk
         private string BuildSqlServerDropPrimaryKeyStatement()
         {
             string database = QuoteDesignerIdentifier(_databaseName);
+            SqlServerDesignerObjectName target = ParseSqlServerDesignerObjectName(_tableName);
             return "DECLARE @primaryKeyName nvarchar(128);\r\n" +
                    "SELECT @primaryKeyName = kc.name\r\n" +
                    "FROM " + database + ".sys.key_constraints kc\r\n" +
                    "INNER JOIN " + database + ".sys.tables t ON t.object_id = kc.parent_object_id\r\n" +
                    "INNER JOIN " + database + ".sys.schemas s ON s.schema_id = t.schema_id\r\n" +
-                   "WHERE kc.[type] = 'PK' AND s.name = N'dbo' AND t.name = N'" + EscapeSqlServerLiteral(_tableName) + "';\r\n" +
+                   "WHERE kc.[type] = 'PK' AND s.name = N'" + EscapeSqlServerLiteral(target.Schema) + "' AND t.name = N'" + EscapeSqlServerLiteral(target.Name) + "';\r\n" +
                    "IF @primaryKeyName IS NOT NULL EXEC(N'ALTER TABLE " + GetQualifiedDesignerTableName(_tableName).Replace("'", "''") + " DROP CONSTRAINT [' + REPLACE(@primaryKeyName, ']', ']]') + N']');";
         }
 
@@ -1848,7 +1853,7 @@ namespace mySQLPunk
             string indexName = GetRowString(row, "名稱").Trim();
             if (string.IsNullOrWhiteSpace(indexName) || IsPrimaryIndexName(indexName))
             {
-                indexName = "PK_" + _tableName;
+                indexName = "PK_" + GetSqlServerDesignerObjectName(_tableName);
             }
 
             return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
@@ -2376,10 +2381,13 @@ namespace mySQLPunk
         {
             string fullTextColumns = FormatSqlServerFullTextColumns(columns);
             string catalogName = "mysqlpunk_ft";
-            string tableIdentifier = QuoteDesignerIdentifier(tableName).Replace("'", "''");
+            SqlServerDesignerObjectName target = ParseSqlServerDesignerObjectName(tableName);
+            string schemaIdentifier = QuoteDesignerIdentifier(target.Schema).Replace("'", "''");
+            string tableIdentifier = QuoteDesignerIdentifier(target.Name).Replace("'", "''");
             string catalogIdentifier = QuoteDesignerIdentifier(catalogName).Replace("'", "''");
             string escapedFullTextColumns = fullTextColumns.Replace("'", "''");
-            string tableLiteral = EscapeSqlServerLiteral(tableName);
+            string schemaLiteral = EscapeSqlServerLiteral(target.Schema);
+            string tableLiteral = EscapeSqlServerLiteral(target.Name);
             string databaseIdentifier = QuoteDesignerIdentifier(_databaseName);
 
             return "DECLARE @fullTextKeyIndex nvarchar(128);\r\n" +
@@ -2390,7 +2398,7 @@ namespace mySQLPunk
                    "FROM " + QuoteDesignerIdentifier(_databaseName) + ".sys.indexes i\r\n" +
                    "INNER JOIN " + QuoteDesignerIdentifier(_databaseName) + ".sys.objects o ON o.object_id = i.object_id\r\n" +
                    "INNER JOIN " + QuoteDesignerIdentifier(_databaseName) + ".sys.schemas s ON s.schema_id = o.schema_id\r\n" +
-                   "WHERE s.name = N'dbo' AND o.name = N'" + tableLiteral + "' AND (i.is_primary_key = 1 OR i.is_unique = 1) AND i.is_disabled = 0 AND i.has_filter = 0\r\n" +
+                   "WHERE s.name = N'" + schemaLiteral + "' AND o.name = N'" + tableLiteral + "' AND (i.is_primary_key = 1 OR i.is_unique = 1) AND i.is_disabled = 0 AND i.has_filter = 0\r\n" +
                    "ORDER BY CASE WHEN i.is_primary_key = 1 THEN 0 ELSE 1 END, i.index_id;\r\n" +
                    "IF @fullTextKeyIndex IS NULL\r\n" +
                    "BEGIN\r\n" +
@@ -2401,7 +2409,7 @@ namespace mySQLPunk
                    "    SET @createCatalogSql = N'CREATE FULLTEXT CATALOG " + catalogIdentifier + " AS DEFAULT;';\r\n" +
                    "    EXEC " + databaseIdentifier + ".sys.sp_executesql @createCatalogSql;\r\n" +
                    "END\r\n" +
-                   "SET @createIndexSql = N'CREATE FULLTEXT INDEX ON [dbo]." + tableIdentifier +
+                   "SET @createIndexSql = N'CREATE FULLTEXT INDEX ON " + schemaIdentifier + "." + tableIdentifier +
                    " (" + escapedFullTextColumns + ") KEY INDEX ' + QUOTENAME(@fullTextKeyIndex) + N' ON " + catalogIdentifier + " WITH CHANGE_TRACKING AUTO;';\r\n" +
                    "EXEC " + databaseIdentifier + ".sys.sp_executesql @createIndexSql;";
         }
@@ -2497,7 +2505,8 @@ namespace mySQLPunk
         {
             if (_db is my_mssql)
             {
-                return QuoteDesignerIdentifier(_databaseName) + ".[dbo]." + QuoteDesignerIdentifier(tableName);
+                SqlServerDesignerObjectName target = ParseSqlServerDesignerObjectName(tableName);
+                return QuoteDesignerIdentifier(_databaseName) + "." + QuoteDesignerIdentifier(target.Schema) + "." + QuoteDesignerIdentifier(target.Name);
             }
             if (_db is my_postgresql)
             {
@@ -2508,6 +2517,33 @@ namespace mySQLPunk
                 return QuoteDesignerIdentifier(_databaseName) + "." + QuoteDesignerIdentifier(tableName);
             }
             return QuoteDesignerIdentifier(tableName);
+        }
+
+        private struct SqlServerDesignerObjectName
+        {
+            public string Schema;
+            public string Name;
+        }
+
+        private static SqlServerDesignerObjectName ParseSqlServerDesignerObjectName(string objectName)
+        {
+            string value = (objectName ?? string.Empty).Trim();
+            int dotIndex = value.IndexOf('.');
+            if (dotIndex > 0 && dotIndex < value.Length - 1)
+            {
+                return new SqlServerDesignerObjectName
+                {
+                    Schema = value.Substring(0, dotIndex).Trim(),
+                    Name = value.Substring(dotIndex + 1).Trim()
+                };
+            }
+
+            return new SqlServerDesignerObjectName { Schema = "dbo", Name = value };
+        }
+
+        private static string GetSqlServerDesignerObjectName(string objectName)
+        {
+            return ParseSqlServerDesignerObjectName(objectName).Name;
         }
 
         private string QuoteDesignerIdentifier(string name)

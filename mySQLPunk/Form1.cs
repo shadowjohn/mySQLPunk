@@ -3255,7 +3255,8 @@ namespace mySQLPunk
             }
             if (IsDumpProvider(db, "mssql") || IsDumpProvider(db, "sqlserver"))
             {
-                return QuoteDumpIdentifier(db, databaseName) + ".[dbo]." + QuoteDumpIdentifier(db, objectName);
+                SqlServerObjectName target = ParseSqlServerObjectName(objectName);
+                return QuoteDumpIdentifier(db, databaseName) + "." + QuoteDumpIdentifier(db, target.Schema) + "." + QuoteDumpIdentifier(db, target.Name);
             }
             if (IsDumpProvider(db, "postgresql"))
             {
@@ -3270,6 +3271,28 @@ namespace mySQLPunk
                 return QuoteDumpIdentifier(db, databaseName) + "." + QuoteDumpIdentifier(db, objectName);
             }
             return QuoteDumpIdentifier(db, objectName);
+        }
+
+        private struct SqlServerObjectName
+        {
+            public string Schema;
+            public string Name;
+        }
+
+        private static SqlServerObjectName ParseSqlServerObjectName(string objectName)
+        {
+            string value = (objectName ?? string.Empty).Trim();
+            int dotIndex = value.IndexOf('.');
+            if (dotIndex > 0 && dotIndex < value.Length - 1)
+            {
+                return new SqlServerObjectName
+                {
+                    Schema = value.Substring(0, dotIndex).Trim(),
+                    Name = value.Substring(dotIndex + 1).Trim()
+                };
+            }
+
+            return new SqlServerObjectName { Schema = "dbo", Name = value };
         }
 
         private static bool IsDumpProvider(IDatabase db, string providerName)
@@ -7267,7 +7290,9 @@ namespace mySQLPunk
         private static string BuildSqlServerAutoCommentSql(string databaseName, string tableName, string columnName, string comment)
         {
             string database = "[" + EscapeSqlServerName(databaseName) + "]";
-            string tableLiteral = EscapeSqlLiteral(tableName);
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+            string schemaLiteral = EscapeSqlLiteral(target.Schema);
+            string tableLiteral = EscapeSqlLiteral(target.Name);
             string columnLiteral = EscapeSqlLiteral(columnName);
             string valueLiteral = EscapeSqlLiteral(comment ?? "");
 
@@ -7276,10 +7301,10 @@ namespace mySQLPunk
                 "INNER JOIN " + database + ".sys.columns c ON c.object_id = ep.major_id AND c.column_id = ep.minor_id " +
                 "INNER JOIN " + database + ".sys.tables t ON t.object_id = c.object_id " +
                 "INNER JOIN " + database + ".sys.schemas s ON s.schema_id = t.schema_id " +
-                "WHERE ep.name = N'MS_Description' AND s.name = N'dbo' AND t.name = N'" + tableLiteral + "' AND c.name = N'" + columnLiteral + "')";
+                "WHERE ep.name = N'MS_Description' AND s.name = N'" + schemaLiteral + "' AND t.name = N'" + tableLiteral + "' AND c.name = N'" + columnLiteral + "')";
 
             string commonArgs =
-                "@name=N'MS_Description', @level0type=N'SCHEMA', @level0name=N'dbo', " +
+                "@name=N'MS_Description', @level0type=N'SCHEMA', @level0name=N'" + schemaLiteral + "', " +
                 "@level1type=N'TABLE', @level1name=N'" + tableLiteral + "', " +
                 "@level2type=N'COLUMN', @level2name=N'" + columnLiteral + "'";
 

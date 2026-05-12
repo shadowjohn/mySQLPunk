@@ -158,7 +158,7 @@ namespace mySQLPunk.lib
         public List<string> GetTables(string databaseName)
         {
             List<string> tables = new List<string>();
-            DataTable dt = SelectSQL("SELECT TABLE_NAME FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_TYPE = 'BASE TABLE';");
+            DataTable dt = SelectSQL("SELECT CASE WHEN TABLE_SCHEMA = 'dbo' THEN TABLE_NAME ELSE TABLE_SCHEMA + '.' + TABLE_NAME END AS TABLE_NAME FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_SCHEMA, TABLE_NAME;");
             foreach (DataRow row in dt.Rows)
             {
                 tables.Add(row[0].ToString());
@@ -169,7 +169,7 @@ namespace mySQLPunk.lib
         public List<string> GetViews(string databaseName)
         {
             List<string> views = new List<string>();
-            DataTable dt = SelectSQL("SELECT TABLE_NAME FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_TYPE = 'VIEW';");
+            DataTable dt = SelectSQL("SELECT CASE WHEN TABLE_SCHEMA = 'dbo' THEN TABLE_NAME ELSE TABLE_SCHEMA + '.' + TABLE_NAME END AS TABLE_NAME FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'VIEW' ORDER BY TABLE_SCHEMA, TABLE_NAME;");
             foreach (DataRow row in dt.Rows)
             {
                 views.Add(row[0].ToString());
@@ -179,7 +179,8 @@ namespace mySQLPunk.lib
 
         public DataTable GetColumns(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "tableName", tableName } };
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schemaName", target.Schema }, { "tableName", target.Name } };
             return SelectSQL(@"
                 SELECT
                     c.COLUMN_NAME,
@@ -195,7 +196,7 @@ namespace mySQLPunk.lib
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.name = c.TABLE_NAME AND o.schema_id = s.schema_id
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns sc ON sc.object_id = o.object_id AND sc.name = c.COLUMN_NAME
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.extended_properties ep ON ep.major_id = sc.object_id AND ep.minor_id = sc.column_id AND ep.name = 'MS_Description'
-                WHERE c.TABLE_SCHEMA = 'dbo' AND c.TABLE_NAME = @tableName
+                WHERE c.TABLE_SCHEMA = @schemaName AND c.TABLE_NAME = @tableName
                 ORDER BY c.ORDINAL_POSITION", p);
         }
 
@@ -203,7 +204,7 @@ namespace mySQLPunk.lib
         {
             return SelectSQL(@"
                 SELECT
-                    t.name AS [Name],
+                    CASE WHEN s.name = 'dbo' THEN t.name ELSE s.name + '.' + t.name END AS [Name],
                     NULL AS [Auto_increment],
                     t.modify_date AS [Update_time],
                     t.create_date AS [Create_time],
@@ -230,13 +231,13 @@ namespace mySQLPunk.lib
                     GROUP BY object_id
                 ) ds ON ds.object_id = t.object_id
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.extended_properties ep ON ep.major_id = t.object_id AND ep.minor_id = 0 AND ep.name = 'MS_Description'
-                WHERE s.name = 'dbo'
-                ORDER BY t.name;");
+                ORDER BY s.name, t.name;");
         }
 
         public DataTable GetIndexes(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "name", tableName } };
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schemaName", target.Schema }, { "name", target.Name } };
             return SelectSQL(@"
                 SELECT
                     CASE WHEN i.is_primary_key = 1 THEN 'PRIMARY' ELSE i.name END AS [Key_name],
@@ -250,7 +251,7 @@ namespace mySQLPunk.lib
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.schema_id = o.schema_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
-                WHERE s.name = 'dbo' AND o.name = @name AND i.name IS NOT NULL
+                WHERE s.name = @schemaName AND o.name = @name AND i.name IS NOT NULL
                 ORDER BY i.name, ic.key_ordinal;", p);
         }
 
@@ -276,6 +277,7 @@ namespace mySQLPunk.lib
 
         private static string BuildSqlServerTableCreateStatement(string databaseName, string tableName, DataTable columns, DataTable indexes, DataTable copyIndexes)
         {
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
             List<string> definitions = new List<string>();
             foreach (DataRow row in columns.Rows)
             {
@@ -288,11 +290,11 @@ namespace mySQLPunk.lib
             List<string> primaryColumns = GetSqlServerPrimaryKeyColumns(indexes);
             if (primaryColumns.Count > 0)
             {
-                definitions.Add("  CONSTRAINT [PK_" + EscapeSqlServerName(tableName) + "] PRIMARY KEY (" + string.Join(", ", primaryColumns.ToArray()) + ")");
+                definitions.Add("  CONSTRAINT [PK_" + EscapeSqlServerName(target.Name) + "] PRIMARY KEY (" + string.Join(", ", primaryColumns.ToArray()) + ")");
             }
 
             List<string> statements = new List<string>();
-            statements.Add("CREATE TABLE [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (\r\n" +
+            statements.Add("CREATE TABLE " + BuildSqlServerQualifiedName(databaseName, target) + " (\r\n" +
                            string.Join(",\r\n", definitions.ToArray()) +
                            "\r\n);");
 
@@ -303,8 +305,8 @@ namespace mySQLPunk.lib
 
                 statements.Add("EXEC [" + EscapeSqlServerName(databaseName) + "].sys.sp_addextendedproperty " +
                                "@name=N'MS_Description', @value=N'" + EscapeSqlLiteral(comment) + "', " +
-                               "@level0type=N'SCHEMA', @level0name=N'dbo', " +
-                               "@level1type=N'TABLE', @level1name=N'" + EscapeSqlLiteral(tableName) + "', " +
+                               "@level0type=N'SCHEMA', @level0name=N'" + EscapeSqlLiteral(target.Schema) + "', " +
+                               "@level1type=N'TABLE', @level1name=N'" + EscapeSqlLiteral(target.Name) + "', " +
                                "@level2type=N'COLUMN', @level2name=N'" + EscapeSqlLiteral(row["Name"].ToString()) + "';");
             }
 
@@ -343,6 +345,7 @@ namespace mySQLPunk.lib
         {
             List<string> statements = new List<string>();
             if (indexes == null || indexes.Rows.Count == 0) return statements;
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
 
             foreach (var group in indexes.AsEnumerable().GroupBy(r => r["IndexName"].ToString()))
             {
@@ -368,8 +371,8 @@ namespace mySQLPunk.lib
                 }
                 if (cols.Count == 0) continue;
 
-                statements.Add("CREATE " + (unique ? "UNIQUE " : "") + indexType + "INDEX [" + EscapeSqlServerName(indexName) + "] ON [" +
-                               EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" +
+                statements.Add("CREATE " + (unique ? "UNIQUE " : "") + indexType + "INDEX [" + EscapeSqlServerName(indexName) + "] ON " +
+                               BuildSqlServerQualifiedName(databaseName, target) + " (" +
                                string.Join(", ", cols.ToArray()) + ");");
             }
 
@@ -391,15 +394,17 @@ namespace mySQLPunk.lib
 
         public bool TableExists(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "name", tableName } };
-            DataTable dt = SelectSQL("SELECT COUNT(*) FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @name AND TABLE_TYPE = 'BASE TABLE';", p);
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schemaName", target.Schema }, { "name", target.Name } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @schemaName AND TABLE_NAME = @name AND TABLE_TYPE = 'BASE TABLE';", p);
             return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
         }
 
         public bool ViewExists(string databaseName, string viewName)
         {
-            var p = new Dictionary<string, object> { { "name", viewName } };
-            DataTable dt = SelectSQL("SELECT COUNT(*) FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @name;", p);
+            SqlServerObjectName target = ParseSqlServerObjectName(viewName);
+            var p = new Dictionary<string, object> { { "schemaName", target.Schema }, { "name", target.Name } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM [" + EscapeSqlServerName(databaseName) + "].INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA = @schemaName AND TABLE_NAME = @name;", p);
             return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
         }
 
@@ -415,13 +420,14 @@ namespace mySQLPunk.lib
 
         public long CountRows(string databaseName, string tableName)
         {
-            DataTable dt = SelectSQL("SELECT COUNT_BIG(*) FROM [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "];");
+            DataTable dt = SelectSQL("SELECT COUNT_BIG(*) FROM " + BuildSqlServerQualifiedName(databaseName, tableName) + ";");
             return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
         }
 
         public DataTable GetCopyColumns(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "name", tableName } };
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schemaName", target.Schema }, { "name", target.Name } };
             return SelectSQL(@"
                 SELECT
                     c.COLUMN_NAME AS Name,
@@ -438,13 +444,14 @@ namespace mySQLPunk.lib
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.name = c.TABLE_NAME AND o.schema_id = s.schema_id
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns sc ON sc.object_id = o.object_id AND sc.name = c.COLUMN_NAME
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.extended_properties ep ON ep.major_id = sc.object_id AND ep.minor_id = sc.column_id AND ep.name = 'MS_Description'
-                WHERE c.TABLE_SCHEMA = 'dbo' AND c.TABLE_NAME = @name
+                WHERE c.TABLE_SCHEMA = @schemaName AND c.TABLE_NAME = @name
                 ORDER BY c.ORDINAL_POSITION;", p);
         }
 
         public DataTable GetCopyIndexes(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "name", tableName } };
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schemaName", target.Schema }, { "name", target.Name } };
             return SelectSQL(@"
                 SELECT
                     i.name AS IndexName,
@@ -454,9 +461,10 @@ namespace mySQLPunk.lib
                     i.type_desc AS IndexType
                 FROM [" + EscapeSqlServerName(databaseName) + @"].sys.indexes i
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.object_id = i.object_id
+                INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.schema_id = o.schema_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
-                WHERE o.name = @name AND i.name IS NOT NULL AND i.is_primary_key = 0 AND i.is_unique_constraint = 0
+                WHERE s.name = @schemaName AND o.name = @name AND i.name IS NOT NULL AND i.is_primary_key = 0 AND i.is_unique_constraint = 0
                 ORDER BY i.name, ic.key_ordinal;", p);
         }
 
@@ -470,6 +478,7 @@ namespace mySQLPunk.lib
 
         private static List<string> BuildSqlServerCopyCreateTableStatements(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
         {
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
             List<string> statements = new List<string>();
             List<string> defs = new List<string>();
             foreach (DataRow row in sourceColumns.Rows)
@@ -484,7 +493,7 @@ namespace mySQLPunk.lib
                 definition += " " + nullable;
                 defs.Add(definition);
             }
-            statements.Add("CREATE TABLE [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" + string.Join(", ", defs.ToArray()) + ");");
+            statements.Add("CREATE TABLE " + BuildSqlServerQualifiedName(databaseName, target) + " (" + string.Join(", ", defs.ToArray()) + ");");
 
             foreach (DataRow row in sourceColumns.Rows)
             {
@@ -492,8 +501,8 @@ namespace mySQLPunk.lib
                 if (string.IsNullOrWhiteSpace(comment)) continue;
                 statements.Add("EXEC [" + EscapeSqlServerName(databaseName) + "].sys.sp_addextendedproperty " +
                                "@name=N'MS_Description', @value=N'" + EscapeSqlLiteral(comment) + "', " +
-                               "@level0type=N'SCHEMA', @level0name=N'dbo', " +
-                               "@level1type=N'TABLE', @level1name=N'" + EscapeSqlLiteral(tableName) + "', " +
+                               "@level0type=N'SCHEMA', @level0name=N'" + EscapeSqlLiteral(target.Schema) + "', " +
+                               "@level1type=N'TABLE', @level1name=N'" + EscapeSqlLiteral(target.Name) + "', " +
                                "@level2type=N'COLUMN', @level2name=N'" + EscapeSqlLiteral(row["Name"].ToString()) + "';");
             }
 
@@ -514,6 +523,7 @@ namespace mySQLPunk.lib
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider)
         {
             if (sourceIndexes == null || sourceIndexes.Rows.Count == 0) return;
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
             foreach (var group in sourceIndexes.AsEnumerable().GroupBy(r => r["IndexName"].ToString()))
             {
                 string indexName = group.Key;
@@ -524,15 +534,15 @@ namespace mySQLPunk.lib
                 List<string> cols = new List<string>();
                 foreach (DataRow row in group.OrderBy(r => Convert.ToInt32(r["SeqInIndex"])))
                     cols.Add("[" + EscapeSqlServerName(row["ColumnName"].ToString()) + "]");
-                string targetIndexName = tableName + "_" + indexName;
-                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX [" + EscapeSqlServerName(targetIndexName) + "] ON [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" + string.Join(",", cols.ToArray()) + ");";
+                string targetIndexName = target.Name + "_" + indexName;
+                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX [" + EscapeSqlServerName(targetIndexName) + "] ON " + BuildSqlServerQualifiedName(databaseName, target) + " (" + string.Join(",", cols.ToArray()) + ");";
                 ExecOrThrow(sql);
             }
         }
 
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
         {
-            return SelectSQL("SELECT * FROM [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] ORDER BY (SELECT NULL) OFFSET " + offset + " ROWS FETCH NEXT " + limit + " ROWS ONLY;");
+            return SelectSQL("SELECT * FROM " + BuildSqlServerQualifiedName(databaseName, tableName) + " ORDER BY (SELECT NULL) OFFSET " + offset + " ROWS FETCH NEXT " + limit + " ROWS ONLY;");
         }
 
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows)
@@ -553,13 +563,14 @@ namespace mySQLPunk.lib
                 }
                 valueGroups.Add("(" + string.Join(",", vals.ToArray()) + ")");
             }
-            string sql = "INSERT INTO [" + EscapeSqlServerName(databaseName) + "].[dbo].[" + EscapeSqlServerName(tableName) + "] (" + string.Join(",", cols.ToArray()) + ") VALUES " + string.Join(",", valueGroups.ToArray()) + ";";
+            string sql = "INSERT INTO " + BuildSqlServerQualifiedName(databaseName, tableName) + " (" + string.Join(",", cols.ToArray()) + ") VALUES " + string.Join(",", valueGroups.ToArray()) + ";";
             ExecOrThrow(sql, p);
         }
 
         public string GetViewCreateStatement(string databaseName, string viewName)
         {
-            var p = new Dictionary<string, object> { { "fullName", databaseName + ".dbo." + viewName } };
+            SqlServerObjectName target = ParseSqlServerObjectName(viewName);
+            var p = new Dictionary<string, object> { { "fullName", databaseName + "." + target.Schema + "." + target.Name } };
             DataTable dt = SelectSQL("SELECT OBJECT_DEFINITION(OBJECT_ID(@fullName));", p);
             return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
         }
@@ -572,7 +583,8 @@ namespace mySQLPunk.lib
                 throw new Exception("無法解析 SQL Server View DDL");
             }
 
-            string sql = "CREATE VIEW [dbo].[" + EscapeSqlServerName(viewName) + "] AS " + selectSql.Trim().TrimEnd(';') + ";";
+            SqlServerObjectName target = ParseSqlServerObjectName(viewName);
+            string sql = "CREATE VIEW " + BuildSqlServerTwoPartName(target) + " AS " + selectSql.Trim().TrimEnd(';') + ";";
             string originalDb = MCT.Database;
             try
             {
@@ -594,11 +606,13 @@ namespace mySQLPunk.lib
 
         private void RenameSqlServerObject(string databaseName, string oldName, string newName)
         {
+            SqlServerObjectName oldTarget = ParseSqlServerObjectName(oldName);
+            SqlServerObjectName newTarget = ParseSqlServerObjectName(newName);
             string originalDb = MCT.Database;
             try
             {
                 MCT.ChangeDatabase(databaseName);
-                string sql = "EXEC sp_rename N'dbo." + EscapeSqlLiteral(oldName) + "', N'" + EscapeSqlLiteral(newName) + "', N'OBJECT';";
+                string sql = "EXEC sp_rename N'" + EscapeSqlLiteral(oldTarget.Schema) + "." + EscapeSqlLiteral(oldTarget.Name) + "', N'" + EscapeSqlLiteral(newTarget.Name) + "', N'OBJECT';";
                 ExecOrThrow(sql);
             }
             finally
@@ -609,6 +623,43 @@ namespace mySQLPunk.lib
 
         private static string EscapeSqlServerName(string name) => name.Replace("]", "]]");
         private static string EscapeSqlLiteral(string value) => value.Replace("'", "''");
+
+        private struct SqlServerObjectName
+        {
+            public string Schema;
+            public string Name;
+        }
+
+        private static SqlServerObjectName ParseSqlServerObjectName(string objectName)
+        {
+            string value = (objectName ?? string.Empty).Trim();
+            int dotIndex = value.IndexOf('.');
+            if (dotIndex > 0 && dotIndex < value.Length - 1)
+            {
+                return new SqlServerObjectName
+                {
+                    Schema = value.Substring(0, dotIndex).Trim(),
+                    Name = value.Substring(dotIndex + 1).Trim()
+                };
+            }
+
+            return new SqlServerObjectName { Schema = "dbo", Name = value };
+        }
+
+        private static string BuildSqlServerQualifiedName(string databaseName, string objectName)
+        {
+            return BuildSqlServerQualifiedName(databaseName, ParseSqlServerObjectName(objectName));
+        }
+
+        private static string BuildSqlServerQualifiedName(string databaseName, SqlServerObjectName objectName)
+        {
+            return "[" + EscapeSqlServerName(databaseName) + "]." + BuildSqlServerTwoPartName(objectName);
+        }
+
+        private static string BuildSqlServerTwoPartName(SqlServerObjectName objectName)
+        {
+            return "[" + EscapeSqlServerName(objectName.Schema) + "].[" + EscapeSqlServerName(objectName.Name) + "]";
+        }
 
         private static string GetOptionalString(DataRow row, string columnName)
         {
