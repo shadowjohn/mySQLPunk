@@ -8003,8 +8003,8 @@ namespace mySQLPunk
                 conn["initial_database"] = databaseName;
             }
 
-            string command = BuildDatabaseCommandLine(conn);
-            if (string.IsNullOrWhiteSpace(command))
+            DatabaseCliLaunch cliLaunch = BuildDatabaseCommandLineLaunch(conn);
+            if (cliLaunch == null || string.IsNullOrWhiteSpace(cliLaunch.Command))
             {
                 string kind = GetConnectionValue(conn, "db_kind");
                 string message = Localization.Format("Connection.CommandLineUnavailable", kind);
@@ -8026,8 +8026,12 @@ namespace mySQLPunk
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo("cmd.exe");
-                psi.Arguments = "/k " + command;
-                psi.UseShellExecute = true;
+                psi.Arguments = "/k " + cliLaunch.Command;
+                psi.UseShellExecute = false;
+                foreach (KeyValuePair<string, string> pair in cliLaunch.EnvironmentVariables)
+                {
+                    psi.EnvironmentVariables[pair.Key] = pair.Value ?? string.Empty;
+                }
                 Process.Start(psi);
                 UpdateMainStatus(Localization.T("Connection.CommandLineOpened"));
             }
@@ -8134,48 +8138,72 @@ namespace mySQLPunk
 
         private string BuildDatabaseCommandLine(Dictionary<string, object> conn)
         {
+            DatabaseCliLaunch launch = BuildDatabaseCommandLineLaunch(conn);
+            return launch == null ? "" : launch.Command;
+        }
+
+        private DatabaseCliLaunch BuildDatabaseCommandLineLaunch(Dictionary<string, object> conn)
+        {
             string kind = GetConnectionValue(conn, "db_kind").ToLowerInvariant();
             string host = GetConnectionValue(conn, "host");
             string port = GetConnectionValue(conn, "port");
             string user = GetConnectionValue(conn, "username");
+            string password = GetConnectionValue(conn, "pwd");
             string initialDatabase = GetConnectionValue(conn, "initial_database");
+            DatabaseCliLaunch launch = new DatabaseCliLaunch();
 
             switch (kind)
             {
                 case "mysql":
-                    return GetCliCommand(kind, "mysql") + " -h " + QuoteCommandArgument(host) +
+                    if (!string.IsNullOrEmpty(password)) launch.EnvironmentVariables["MYSQL_PWD"] = password;
+                    launch.Command = GetCliCommand(kind, "mysql") + " -h " + QuoteCommandArgument(host) +
                            (string.IsNullOrWhiteSpace(port) ? "" : " -P " + QuoteCommandArgument(port)) +
-                           " -u " + QuoteCommandArgument(user) + " -p" +
+                           " -u " + QuoteCommandArgument(user) +
+                           (string.IsNullOrEmpty(password) ? " -p" : "") +
                            (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " " + QuoteCommandArgument(initialDatabase));
+                    return launch;
                 case "postgresql":
                     if (string.IsNullOrWhiteSpace(initialDatabase)) initialDatabase = "postgres";
-                    return GetCliCommand(kind, "psql") + " -h " + QuoteCommandArgument(host) +
+                    if (!string.IsNullOrEmpty(password)) launch.EnvironmentVariables["PGPASSWORD"] = password;
+                    launch.Command = GetCliCommand(kind, "psql") + " -h " + QuoteCommandArgument(host) +
                            (string.IsNullOrWhiteSpace(port) ? "" : " -p " + QuoteCommandArgument(port)) +
                            " -U " + QuoteCommandArgument(user) + " " + QuoteCommandArgument(initialDatabase);
+                    return launch;
                 case "mssql":
                 case "sqlserver":
                     string dataSource = BuildSqlServerDataSource(host, port);
                     string sqlcmd = GetCliCommand(kind, "sqlcmd");
                     if (GetConnectionValue(conn, "trusted_connection") == "T")
                     {
-                        return sqlcmd + " -S " + QuoteCommandArgument(dataSource) + " -E" +
+                        launch.Command = sqlcmd + " -S " + QuoteCommandArgument(dataSource) + " -E" +
                                (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " -d " + QuoteCommandArgument(initialDatabase));
+                        return launch;
                     }
-                    return sqlcmd + " -S " + QuoteCommandArgument(dataSource) + " -U " + QuoteCommandArgument(user) +
+                    if (!string.IsNullOrEmpty(password)) launch.EnvironmentVariables["SQLCMDPASSWORD"] = password;
+                    launch.Command = sqlcmd + " -S " + QuoteCommandArgument(dataSource) + " -U " + QuoteCommandArgument(user) +
                            (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " -d " + QuoteCommandArgument(initialDatabase));
+                    return launch;
                 case "sqlite":
                     string sqliteExe = Path.Combine(my.pwd(), "binary", "sqlite3_ext", "sqlite3.exe");
                     string sqlitePath = GetConnectionValue(conn, "path");
                     string exe = GetCliCommand(kind, File.Exists(sqliteExe) ? sqliteExe : "sqlite3");
-                    return exe + " " + QuoteCommandArgument(sqlitePath);
+                    launch.Command = exe + " " + QuoteCommandArgument(sqlitePath);
+                    return launch;
                 case "oracle":
                     string connectName = BuildOracleCommandLineConnectName(conn);
                     string login = string.IsNullOrWhiteSpace(connectName) ? user : user + "@" + connectName;
                     string sqlplus = GetCliCommand(kind, "sqlplus");
-                    return string.IsNullOrWhiteSpace(login) ? sqlplus : sqlplus + " " + QuoteCommandArgument(login);
+                    launch.Command = string.IsNullOrWhiteSpace(login) ? sqlplus : sqlplus + " " + QuoteCommandArgument(login);
+                    return launch;
                 default:
-                    return "";
+                    return launch;
             }
+        }
+
+        private sealed class DatabaseCliLaunch
+        {
+            public string Command { get; set; } = "";
+            public Dictionary<string, string> EnvironmentVariables { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         private static string GetCliCommand(string dbKind, string fallbackCommand)
