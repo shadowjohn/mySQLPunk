@@ -299,7 +299,7 @@ namespace mySQLPunk
             Add("Database.OracleConfirmDropMismatch", "Schema 名稱不一致，已取消刪除。", "Schema name did not match. Delete cancelled.");
             Add("Database.OracleProtectedSchema", "不允許從此介面刪除 Oracle 系統 Schema：{0}", "Dropping Oracle system schema from this interface is not allowed: {0}");
             Add("Database.SqliteUnsupportedDelete", "SQLite 資料庫是以檔案為單位，不支援由此介面刪除資料庫。\n請直接刪除對應的 .sqlite 檔案。", "SQLite databases are file-based and cannot be deleted from this interface.\nDelete the corresponding .sqlite file directly.");
-            Add("Database.SqliteConfirmDeleteFile", "即將關閉 SQLite 連線並刪除檔案：\n{0}\n\n此操作不可還原。", "The SQLite connection will be closed and this file will be deleted:\n{0}\n\nThis action cannot be undone.");
+            Add("Database.SqliteConfirmDeleteFile", "即將關閉 SQLite 連線並將檔案移到資源回收筒：\n{0}\n\n若目前檔案系統不支援資源回收筒，將改為直接刪除。", "The SQLite connection will be closed and this file will be moved to the Recycle Bin:\n{0}\n\nIf the current file system does not support the Recycle Bin, it will be deleted directly.");
             Add("Database.SqliteConfirmDeletePrompt", "請輸入檔名「{0}」以確認刪除：", "Type file name \"{0}\" to confirm deletion:");
             Add("Database.SqliteConfirmDeleteMismatch", "檔名不一致，已取消刪除。", "File name did not match. Delete cancelled.");
             Add("Database.SqlitePathMissing", "無法判斷 SQLite 資料庫檔案路徑。", "Cannot determine the SQLite database file path.");

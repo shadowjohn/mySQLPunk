@@ -7524,10 +7524,27 @@ namespace mySQLPunk
         {
             foreach (string companionPath in new[] { fullPath + "-wal", fullPath + "-shm", fullPath + "-journal" })
             {
-                if (File.Exists(companionPath)) File.Delete(companionPath);
+                MoveFileToRecycleBinOrDelete(companionPath);
             }
 
-            File.Delete(fullPath);
+            MoveFileToRecycleBinOrDelete(fullPath);
+        }
+
+        private static void MoveFileToRecycleBinOrDelete(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+
+            try
+            {
+                Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
+                    path,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+            }
+            catch
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
         }
 
         private bool ConfirmOracleSchemaDrop(string schemaName)
