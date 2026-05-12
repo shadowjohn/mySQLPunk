@@ -146,8 +146,9 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
     - **直接建立 Table snapshot**（最穩定，不保留 View 語法）
     - 取消複製
     - 可在同一個對話框檢查來源 View SQL 與轉換後 SQL 預覽；若無法安全轉換，會顯示原因。
-  - 已知情境：Oracle 階層查詢/ROWNUM、MySQL 專用 View 語法、無法解析的 SELECT SQL。
-  - 後續方向：若需要更高相容性，可逐 provider 擴充更多 SQL 方言轉換規則。
+  - 方言轉換：已支援 SQL Server `TOP (n)` 轉 MySQL/PostgreSQL/SQLite `LIMIT n` 或 Oracle `FETCH FIRST`、MySQL/PostgreSQL/SQLite `LIMIT` 轉 SQL Server `TOP (n)` 或 Oracle `FETCH/OFFSET`、簡單 Oracle `ROWNUM <= n` 轉目標 provider row limit，以及 `NVL` / `IFNULL` / `ISNULL` / `GETDATE()` / `NOW()` 的常見函式轉換。
+  - 已知情境：Oracle 階層查詢、MySQL 專用 View 語法、帶 OFFSET 且缺少穩定排序的 SQL Server 轉換、無法解析的 SELECT SQL 仍會改用 table snapshot。
+  - 後續方向：若需要更高相容性，可再逐 provider 擴充日期格式、字串聚合與 JSON 函式等更複雜 SQL 方言轉換規則。
 
 ## 專案檔案導覽
 

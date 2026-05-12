@@ -279,6 +279,11 @@ namespace mySQLPunk.lib
                 return false;
             }
 
+            if (!TryRewritePortableSyntax(selectSql, sourceProvider, targetProvider, out selectSql, out reason))
+            {
+                return false;
+            }
+
             if (ContainsUnsupportedFeature(selectSql, targetProvider, out reason))
             {
                 return false;
@@ -301,6 +306,145 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
             return match.Success ? match.Groups["body"].Value.Trim().TrimEnd(';').Trim() : "";
+        }
+
+        private static bool TryRewritePortableSyntax(string selectSql, string sourceProvider, string targetProvider, out string rewrittenSql, out string reason)
+        {
+            reason = "";
+            rewrittenSql = (selectSql ?? "").Trim().TrimEnd(';').Trim();
+            string provider = NormalizeProvider(targetProvider);
+
+            if (!TryRewriteTopClause(rewrittenSql, provider, out rewrittenSql, out reason))
+                return false;
+            if (!TryRewriteLimitClause(rewrittenSql, provider, out rewrittenSql, out reason))
+                return false;
+            if (!TryRewriteRownumPredicate(rewrittenSql, provider, out rewrittenSql, out reason))
+                return false;
+
+            rewrittenSql = RewriteCommonFunctions(rewrittenSql, NormalizeProvider(sourceProvider), provider);
+            return true;
+        }
+
+        private static bool TryRewriteTopClause(string selectSql, string targetProvider, out string rewrittenSql, out string reason)
+        {
+            rewrittenSql = selectSql;
+            reason = "";
+
+            Match match = Regex.Match(
+                selectSql,
+                @"^\s*SELECT\s+(?<distinct>DISTINCT\s+)?TOP\s*\(?(?<limit>\d+)\)?\s+(?<body>.+)$",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!match.Success) return true;
+            if (targetProvider == "mssql") return true;
+
+            string body = match.Groups["body"].Value.Trim();
+            string distinct = match.Groups["distinct"].Value;
+            string withoutTop = "SELECT " + distinct + body;
+            rewrittenSql = AppendRowLimit(withoutTop, targetProvider, match.Groups["limit"].Value);
+            return true;
+        }
+
+        private static bool TryRewriteLimitClause(string selectSql, string targetProvider, out string rewrittenSql, out string reason)
+        {
+            rewrittenSql = selectSql;
+            reason = "";
+
+            Match match = Regex.Match(
+                selectSql,
+                @"\s+LIMIT\s+(?<first>\d+)(?:\s*,\s*(?<second>\d+)|\s+OFFSET\s+(?<offset>\d+))?\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!match.Success) return true;
+
+            string limit = match.Groups["second"].Success ? match.Groups["second"].Value : match.Groups["first"].Value;
+            string offset = match.Groups["second"].Success
+                ? match.Groups["first"].Value
+                : (match.Groups["offset"].Success ? match.Groups["offset"].Value : "");
+            string body = selectSql.Substring(0, match.Index).Trim();
+
+            if (targetProvider == "mssql")
+            {
+                if (!string.IsNullOrWhiteSpace(offset) && offset != "0")
+                {
+                    reason = "LIMIT OFFSET 轉 SQL Server 需要穩定 ORDER BY，無法安全自動轉換";
+                    return false;
+                }
+
+                rewrittenSql = InsertSqlServerTop(body, limit);
+                return true;
+            }
+
+            if (targetProvider == "oracle")
+            {
+                rewrittenSql = string.IsNullOrWhiteSpace(offset) || offset == "0"
+                    ? body + " FETCH FIRST " + limit + " ROWS ONLY"
+                    : body + " OFFSET " + offset + " ROWS FETCH NEXT " + limit + " ROWS ONLY";
+                return true;
+            }
+
+            rewrittenSql = selectSql;
+            return true;
+        }
+
+        private static bool TryRewriteRownumPredicate(string selectSql, string targetProvider, out string rewrittenSql, out string reason)
+        {
+            rewrittenSql = selectSql;
+            reason = "";
+            if (targetProvider == "oracle") return true;
+
+            Match limitMatch = Regex.Match(selectSql, @"\bROWNUM\s*<=\s*(?<limit>\d+)\b", RegexOptions.IgnoreCase);
+            if (!limitMatch.Success) return true;
+
+            string limit = limitMatch.Groups["limit"].Value;
+            string body = selectSql;
+            body = Regex.Replace(body, @"\s+WHERE\s+ROWNUM\s*<=\s*\d+\s+AND\s+", " WHERE ", RegexOptions.IgnoreCase);
+            body = Regex.Replace(body, @"\s+AND\s+ROWNUM\s*<=\s*\d+\b", "", RegexOptions.IgnoreCase);
+            body = Regex.Replace(body, @"\s+WHERE\s+ROWNUM\s*<=\s*\d+\b", "", RegexOptions.IgnoreCase);
+
+            if (Regex.IsMatch(body, @"\bROWNUM\b", RegexOptions.IgnoreCase))
+            {
+                reason = "ROWNUM 條件過於複雜，無法安全自動轉換";
+                return false;
+            }
+
+            rewrittenSql = AppendRowLimit(body.Trim(), targetProvider, limit);
+            return true;
+        }
+
+        private static string RewriteCommonFunctions(string selectSql, string sourceProvider, string targetProvider)
+        {
+            string sql = selectSql;
+
+            if (targetProvider != "oracle")
+                sql = Regex.Replace(sql, @"\bNVL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+            if (targetProvider != "mysql" && targetProvider != "sqlite")
+                sql = Regex.Replace(sql, @"\bIFNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+            if (targetProvider != "mssql")
+                sql = Regex.Replace(sql, @"\bISNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+            if (targetProvider != "mssql")
+                sql = Regex.Replace(sql, @"\bGETDATE\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
+            if (targetProvider == "mssql" || targetProvider == "oracle")
+                sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string AppendRowLimit(string selectSql, string targetProvider, string limit)
+        {
+            string sql = selectSql.Trim().TrimEnd(';').Trim();
+            if (Regex.IsMatch(sql, @"\b(TOP|LIMIT|FETCH\s+FIRST)\b", RegexOptions.IgnoreCase)) return sql;
+            if (targetProvider == "mssql") return InsertSqlServerTop(sql, limit);
+            if (targetProvider == "oracle") return sql + " FETCH FIRST " + limit + " ROWS ONLY";
+            return sql + " LIMIT " + limit;
+        }
+
+        private static string InsertSqlServerTop(string selectSql, string limit)
+        {
+            if (Regex.IsMatch(selectSql, @"^\s*SELECT\s+(DISTINCT\s+)?TOP\b", RegexOptions.IgnoreCase)) return selectSql;
+            return Regex.Replace(
+                selectSql,
+                @"^\s*SELECT\s+(?<distinct>DISTINCT\s+)?",
+                m => "SELECT " + m.Groups["distinct"].Value + "TOP (" + limit + ") ",
+                RegexOptions.IgnoreCase);
         }
 
         private static bool StartsWithQuery(string sql)
