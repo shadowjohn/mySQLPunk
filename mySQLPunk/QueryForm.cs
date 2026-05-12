@@ -25,6 +25,9 @@ namespace mySQLPunk
         // UI 元件 (已現代化)
         private RichTextBox txtSql;
         private DataGridView dgvResults;
+        private Panel loadingOverlay;
+        private Label lblLoadingTitle;
+        private Label lblLoadingMessage;
         private ListBox lstCompletion;
         private TabControl tabResults;
         private SplitContainer split;
@@ -453,6 +456,7 @@ namespace mySQLPunk
             dgvResults.DataError += DgvResults_DataError;
             RefreshResultsContextMenu();
             tabData.Controls.Add(dgvResults);
+            CreateLoadingOverlay(tabData);
             tabResults.TabPages.Add(tabData);
 
             split.Panel2.Controls.Add(tabResults);
@@ -471,6 +475,66 @@ namespace mySQLPunk
             // 將 dataToolStrip 放到 split.Panel2 的底部 (跟著表格走)
             split.Panel2.Controls.Add(dataToolStrip);
             ApplyTheme();
+        }
+
+        private void CreateLoadingOverlay(Control parent)
+        {
+            loadingOverlay = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Visible = false
+            };
+
+            Panel content = new Panel
+            {
+                Width = 360,
+                Height = 120,
+                Anchor = AnchorStyles.None,
+                Padding = new Padding(28, 20, 28, 20)
+            };
+            content.Location = new Point(
+                Math.Max(0, (parent.ClientSize.Width - content.Width) / 2),
+                Math.Max(0, (parent.ClientSize.Height - content.Height) / 2));
+
+            lblLoadingTitle = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Top,
+                Height = 28,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Microsoft JhengHei UI", 11F, FontStyle.Bold)
+            };
+
+            lblLoadingMessage = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Top,
+                Height = 30,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            ProgressBar loadingProgress = new ProgressBar
+            {
+                Dock = DockStyle.Bottom,
+                Height = 10,
+                Style = ProgressBarStyle.Marquee,
+                MarqueeAnimationSpeed = 35
+            };
+
+            content.Controls.Add(loadingProgress);
+            content.Controls.Add(lblLoadingMessage);
+            content.Controls.Add(lblLoadingTitle);
+            loadingOverlay.Controls.Add(content);
+            loadingOverlay.Resize += (s, e) =>
+            {
+                content.Location = new Point(
+                    Math.Max(0, (loadingOverlay.ClientSize.Width - content.Width) / 2),
+                    Math.Max(0, (loadingOverlay.ClientSize.Height - content.Height) / 2));
+            };
+
+            parent.Controls.Add(loadingOverlay);
+            loadingOverlay.BringToFront();
+            UpdateLoadingOverlayText();
         }
 
         private void BuildMainMenu()
@@ -980,6 +1044,7 @@ namespace mySQLPunk
             btnDataRefresh.Enabled = false;
             SetPaginationControlsEnabled(false);
             UpdateStatus(Localization.T("Query.LoadingTablePage"));
+            ShowLoadingOverlay();
 
             Stopwatch sw = Stopwatch.StartNew();
             try
@@ -1022,6 +1087,7 @@ namespace mySQLPunk
                     tsBtnRefresh.Enabled = true;
                     btnDataRefresh.Enabled = true;
                     if (txtPageSize != null) txtPageSize.Enabled = true;
+                    HideLoadingOverlay();
                     UpdatePaginationUI();
                 }
 
@@ -1251,6 +1317,29 @@ namespace mySQLPunk
             }
         }
 
+        private void ShowLoadingOverlay()
+        {
+            if (loadingOverlay == null) return;
+
+            UpdateLoadingOverlayText();
+            loadingOverlay.Visible = true;
+            loadingOverlay.BringToFront();
+        }
+
+        private void HideLoadingOverlay()
+        {
+            if (loadingOverlay == null) return;
+
+            loadingOverlay.Visible = false;
+            loadingOverlay.SendToBack();
+        }
+
+        private void UpdateLoadingOverlayText()
+        {
+            if (lblLoadingTitle != null) lblLoadingTitle.Text = Localization.T("Query.LoadingPleaseWait");
+            if (lblLoadingMessage != null) lblLoadingMessage.Text = Localization.T("Query.LoadingTablePage");
+        }
+
         private string BuildQueryStatus(int rowCount, long elapsedMilliseconds)
         {
             if (rowCount == 0)
@@ -1301,6 +1390,7 @@ namespace mySQLPunk
             if (tsBtnFloat != null) tsBtnFloat.Text = Localization.T("Query.Float");
             if (tsBtnDock != null) tsBtnDock.Text = Localization.T("Query.Dock");
             if (tabResults != null && tabResults.TabPages.Count > 0) tabResults.TabPages[0].Text = Localization.T("Query.Results");
+            UpdateLoadingOverlayText();
             if (lblStatus != null && (lblStatus.Text == "Ready" || lblStatus.Text == "就緒")) lblStatus.Text = Localization.T("Status.Ready");
             RefreshResultsContextMenu();
             UpdatePaginationUI();
@@ -1355,6 +1445,25 @@ namespace mySQLPunk
                 dgvResults.BackgroundColor = ThemeManager.WindowBackColor;
                 dgvResults.GridColor = ThemeManager.GridColor;
                 if (dgvResults.ContextMenuStrip != null) ThemeManager.ApplyToolStrip(dgvResults.ContextMenuStrip);
+            }
+            if (loadingOverlay != null)
+            {
+                loadingOverlay.BackColor = ThemeManager.WindowBackColor;
+                foreach (Control child in loadingOverlay.Controls)
+                {
+                    child.BackColor = ThemeManager.ElevatedColor;
+                    child.ForeColor = ThemeManager.TextColor;
+                }
+            }
+            if (lblLoadingTitle != null)
+            {
+                lblLoadingTitle.BackColor = ThemeManager.ElevatedColor;
+                lblLoadingTitle.ForeColor = ThemeManager.TextColor;
+            }
+            if (lblLoadingMessage != null)
+            {
+                lblLoadingMessage.BackColor = ThemeManager.ElevatedColor;
+                lblLoadingMessage.ForeColor = ThemeManager.MutedTextColor;
             }
             if (lblSqlPreview != null) lblSqlPreview.ForeColor = ThemeManager.MutedTextColor;
             if (lblStatus != null) lblStatus.ForeColor = ThemeManager.TextColor;

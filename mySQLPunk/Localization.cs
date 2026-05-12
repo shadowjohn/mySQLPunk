@@ -405,6 +405,7 @@ namespace mySQLPunk
             Add("Query.ExternalOpened", "外部查詢已開啟：{0}", "External query opened: {0}");
             Add("Query.FolderOpened", "查詢資料夾已開啟：{0}", "Query folder opened: {0}");
             Add("Query.CountRowsFailed", "計算資料列數失敗：{0}", "Count rows failed: {0}");
+            Add("Query.LoadingPleaseWait", "請稍候", "Please wait");
             Add("Query.LoadingTablePage", "正在載入資料表頁面...", "Loading table page...");
             Add("Query.Cancelled", "已取消。", "Cancelled.");
             Add("Query.LoadFailed", "載入失敗：{0}", "Load failed: {0}");
