@@ -507,6 +507,7 @@ namespace mySQLPunk
                 newRow["NotNull"] = (row["notnull"].ToString() == "1");
                 newRow["PK"] = (row["pk"].ToString() == "1");
                 newRow["Default"] = row["dflt_value"];
+                newRow["Comment"] = GetMetadataString(row, "Comment", "comment");
                 return;
             }
 
@@ -1593,8 +1594,54 @@ namespace mySQLPunk
         private string BuildSqlServerAddDefaultConstraintStatement(string columnName, string defaultValue)
         {
             return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
-                   " ADD DEFAULT " + FormatGenericDefault(defaultValue) +
+                   " ADD CONSTRAINT " + QuoteDesignerIdentifier(BuildSqlServerDefaultConstraintName(_tableName, columnName)) +
+                   " DEFAULT " + FormatGenericDefault(defaultValue) +
                    " FOR " + QuoteDesignerIdentifier(columnName) + ";";
+        }
+
+        private static string BuildSqlServerDefaultConstraintName(string tableName, string columnName)
+        {
+            string baseName = "DF_" + SanitizeSqlServerConstraintNamePart(tableName) + "_" + SanitizeSqlServerConstraintNamePart(columnName);
+            if (baseName.Length <= 120) return baseName;
+
+            string hash = StableHexHash(tableName + "." + columnName);
+            int keepLength = Math.Max(1, 120 - hash.Length - 1);
+            return baseName.Substring(0, keepLength) + "_" + hash;
+        }
+
+        private static string SanitizeSqlServerConstraintNamePart(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "column";
+
+            StringBuilder sb = new StringBuilder();
+            foreach (char ch in value.Trim())
+            {
+                if (char.IsLetterOrDigit(ch) || ch == '_')
+                {
+                    sb.Append(ch);
+                }
+                else
+                {
+                    sb.Append('_');
+                }
+            }
+
+            string result = sb.ToString().Trim('_');
+            return string.IsNullOrWhiteSpace(result) ? "column" : result;
+        }
+
+        private static string StableHexHash(string value)
+        {
+            unchecked
+            {
+                uint hash = 2166136261;
+                foreach (char ch in value ?? string.Empty)
+                {
+                    hash ^= ch;
+                    hash *= 16777619;
+                }
+                return hash.ToString("x8");
+            }
         }
 
         private string BuildSqlServerColumnCommentStatement(string columnName, string comment)

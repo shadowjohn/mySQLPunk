@@ -33,7 +33,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | PostgreSQL | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分進階索引仍有限制。 |
 | SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；欄位註解以 mySQLPunk sidecar metadata table 保存。 |
-| SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DEFAULT constraint 與進階索引仍有限制。 |
+| SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分進階索引仍有限制。 |
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
 | SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、CSV 匯出、語法格式化、查詢歷史。 |
 | 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
@@ -111,9 +111,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 現況：不支援時會顯示「此資料庫尚未支援 FULLTEXT/SPATIAL 索引」。
   - 後續方向：逐 provider 補 MySQL FULLTEXT/SPATIAL、PostgreSQL GIN/GiST、SQL Server Full-Text、Oracle CTXSYS/MDSYS 等語法。
 
-- **SQL Server DEFAULT constraint 變更仍有限制**
-  - 現況：部分 DEFAULT constraint 需要先查 constraint name 再 drop/create。
-  - 後續方向：建立完整 SQL Server column default 修改流程與測試。
+- **SQL Server DEFAULT constraint 變更仍有限制 ✅ 已補齊**
+  - 現況：SQL Server 會把欄位 DEFAULT 存成 default constraint，修改時不能只用一般 `ALTER COLUMN` 覆蓋。
+  - 完成內容：Table Designer 修改欄位 DEFAULT 時會先查 `sys.default_constraints` 找到實際 constraint name 後 drop，再以 `DF_<table>_<column>` 規則建立具名 DEFAULT constraint；SQL Server 預覽 SQL 分段執行時也會保留 `DECLARE` batch，避免變數 scope 被切壞。
+  - 後續方向：若未來支援非 `dbo` schema，需把 schema 選擇納入 Table Designer。
 
 - **Oracle Table Designer 對權限與物件狀態較敏感**
   - 現況：已有多種診斷提示，例如權限不足、物件不存在、跨 schema 權限、語法不符。
