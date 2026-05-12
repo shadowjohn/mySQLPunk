@@ -132,14 +132,15 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 ### Table/View 複製限制
 
-- **View SQL 無法安全轉換時會改用 table snapshot ✅ 使用者選項已補齊**
+- **View SQL 無法安全轉換時會改用 table snapshot ✅ 使用者選項與預覽已補齊**
   - 現況：跨 provider 複製 View 時，如果無法解析或轉換 SQL，會以查詢結果建立資料表快照。
   - 完成內容：複製前新增「跨 Provider 複製 View」對話框，讓使用者選擇：
     - **嘗試轉換 View SQL**（無法轉換時自動改為 table snapshot）
     - **直接建立 Table snapshot**（最穩定，不保留 View 語法）
     - 取消複製
+    - 可在同一個對話框檢查來源 View SQL 與轉換後 SQL 預覽；若無法安全轉換，會顯示原因。
   - 已知情境：Oracle 階層查詢/ROWNUM、MySQL 專用 View 語法、無法解析的 SELECT SQL。
-  - 後續方向：顯示 View SQL 轉換後的預覽，讓使用者在確認前可以檢查語法。
+  - 後續方向：若需要更高相容性，可逐 provider 擴充更多 SQL 方言轉換規則。
 
 ## 專案檔案導覽
 

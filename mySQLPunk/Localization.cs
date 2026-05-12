@@ -337,6 +337,9 @@ namespace mySQLPunk
             Add("Object.ViewCopyPrompt", "來源（{0}）View：{1}\n目標 Provider：{2}\n\n選擇複製方式：", "Source ({0}) view: {1}\nTarget provider: {2}\n\nSelect copy mode:");
             Add("Object.ViewCopyAutoConvert", "嘗試轉換 View SQL（無法轉換時改用 table snapshot）", "Try converting View SQL (fall back to table snapshot if conversion fails)");
             Add("Object.ViewCopyForceSnapshot", "直接建立 Table snapshot（最穩定，不保留 View 語法）", "Create table snapshot directly (most stable, View SQL not preserved)");
+            Add("Object.ViewCopySourceSql", "來源 View SQL", "Source View SQL");
+            Add("Object.ViewCopyConvertedSql", "轉換後 SQL 預覽", "Converted SQL Preview");
+            Add("Object.ViewCopyPreviewUnavailable", "無法產生安全轉換預覽：{0}", "Cannot generate a safe conversion preview: {0}");
             Add("Object.DeleteFailed", "刪除失敗：{0}", "Delete failed: {0}");
             Add("Object.UnknownError", "unknown error", "unknown error");
             Add("Object.ConfirmDeleteTable", "確定要刪除資料表「{0}」嗎？此操作不可還原！", "Delete table \"{0}\"? This action cannot be undone.");

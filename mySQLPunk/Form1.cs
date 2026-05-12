@@ -4128,7 +4128,7 @@ namespace mySQLPunk
             if (isCrossProviderView)
             {
                 ViewCopyFallback? choice = ShowViewCopyOptionsDialog(
-                    _treeClipboardItem.ProviderName, target.ProviderName, _treeClipboardItem.ObjectName);
+                    _treeClipboardItem, targetItem);
                 if (choice == null) return;
                 viewFallback = choice.Value;
             }
@@ -4159,14 +4159,16 @@ namespace mySQLPunk
             }
         }
 
-        private ViewCopyFallback? ShowViewCopyOptionsDialog(string sourceProvider, string targetProvider, string viewName)
+        private ViewCopyFallback? ShowViewCopyOptionsDialog(DatabaseCopyItem sourceItem, DatabaseCopyItem targetItem)
         {
             ViewCopyFallback selected = ViewCopyFallback.AutoSnapshot;
+            ViewSqlConversionPreview preview = BuildViewCopyPreview(sourceItem, targetItem);
             using (Form dlg = new Form())
             {
                 dlg.Text = Localization.T("Object.ViewCopyTitle");
-                dlg.Size = new Size(520, 230);
-                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.Size = new Size(760, 560);
+                dlg.MinimumSize = new Size(680, 460);
+                dlg.FormBorderStyle = FormBorderStyle.Sizable;
                 dlg.StartPosition = FormStartPosition.CenterParent;
                 dlg.MaximizeBox = false;
                 dlg.MinimizeBox = false;
@@ -4174,9 +4176,10 @@ namespace mySQLPunk
 
                 var lbl = new Label
                 {
-                    Text = Localization.Format("Object.ViewCopyPrompt", sourceProvider, viewName, targetProvider),
+                    Text = Localization.Format("Object.ViewCopyPrompt", sourceItem.ProviderName, sourceItem.ObjectName, targetItem.ProviderName),
                     Location = new Point(16, 14),
-                    Size = new Size(480, 40),
+                    Size = new Size(700, 54),
+                    Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
                     AutoSize = false
                 };
                 lbl.ForeColor = ThemeManager.TextColor;
@@ -4184,32 +4187,54 @@ namespace mySQLPunk
                 var rb1 = new RadioButton
                 {
                     Text = Localization.T("Object.ViewCopyAutoConvert"),
-                    Location = new Point(16, 58),
-                    Size = new Size(480, 22),
+                    Location = new Point(16, 72),
+                    Size = new Size(700, 22),
+                    Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
                     Checked = true,
                     ForeColor = ThemeManager.TextColor
                 };
                 var rb2 = new RadioButton
                 {
                     Text = Localization.T("Object.ViewCopyForceSnapshot"),
-                    Location = new Point(16, 84),
-                    Size = new Size(480, 22),
+                    Location = new Point(16, 98),
+                    Size = new Size(700, 22),
+                    Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
                     ForeColor = ThemeManager.TextColor
                 };
+
+                var tabs = new TabControl
+                {
+                    Location = new Point(16, 132),
+                    Size = new Size(718, 330),
+                    Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom
+                };
+                var sourcePage = new TabPage(Localization.T("Object.ViewCopySourceSql"));
+                var convertedPage = new TabPage(Localization.T("Object.ViewCopyConvertedSql"));
+                var sourceBox = CreateSqlPreviewBox(preview.SourceSql);
+                var convertedText = preview.CanConvert
+                    ? preview.ConvertedSql
+                    : Localization.Format("Object.ViewCopyPreviewUnavailable", preview.Reason);
+                var convertedBox = CreateSqlPreviewBox(convertedText);
+                sourcePage.Controls.Add(sourceBox);
+                convertedPage.Controls.Add(convertedBox);
+                tabs.TabPages.Add(sourcePage);
+                tabs.TabPages.Add(convertedPage);
 
                 var btnOk = new Button
                 {
                     Text = Localization.T("Common.OK"),
                     DialogResult = DialogResult.None,
-                    Location = new Point(322, 152),
-                    Size = new Size(80, 30)
+                    Location = new Point(562, 480),
+                    Size = new Size(80, 30),
+                    Anchor = AnchorStyles.Right | AnchorStyles.Bottom
                 };
                 var btnCancel = new Button
                 {
                     Text = Localization.T("Common.Cancel"),
                     DialogResult = DialogResult.Cancel,
-                    Location = new Point(414, 152),
-                    Size = new Size(80, 30)
+                    Location = new Point(654, 480),
+                    Size = new Size(80, 30),
+                    Anchor = AnchorStyles.Right | AnchorStyles.Bottom
                 };
 
                 btnOk.Click += (s, e) =>
@@ -4218,13 +4243,48 @@ namespace mySQLPunk
                     dlg.DialogResult = DialogResult.OK;
                 };
 
-                dlg.Controls.AddRange(new Control[] { lbl, rb1, rb2, btnOk, btnCancel });
+                dlg.Controls.AddRange(new Control[] { lbl, rb1, rb2, tabs, btnOk, btnCancel });
                 dlg.AcceptButton = btnOk;
                 dlg.CancelButton = btnCancel;
 
                 if (dlg.ShowDialog(this) != DialogResult.OK) return null;
             }
             return selected;
+        }
+
+        private ViewSqlConversionPreview BuildViewCopyPreview(DatabaseCopyItem sourceItem, DatabaseCopyItem targetItem)
+        {
+            try
+            {
+                string sourceSql = sourceItem.Database.GetViewCreateStatement(sourceItem.DatabaseName, sourceItem.ObjectName);
+                return ViewSqlDialectConverter.BuildPreview(sourceSql, sourceItem.ProviderName, targetItem.ProviderName);
+            }
+            catch (Exception ex)
+            {
+                return new ViewSqlConversionPreview
+                {
+                    SourceSql = "",
+                    ConvertedSql = "",
+                    CanConvert = false,
+                    Reason = ex.Message
+                };
+            }
+        }
+
+        private RichTextBox CreateSqlPreviewBox(string text)
+        {
+            RichTextBox box = new RichTextBox
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                WordWrap = false,
+                ScrollBars = RichTextBoxScrollBars.Both,
+                Font = new Font("Consolas", 10),
+                Text = text ?? ""
+            };
+            box.BackColor = ThemeManager.TextBoxBackColor;
+            box.ForeColor = ThemeManager.TextColor;
+            return box;
         }
 
         private DatabaseCopyItem BuildCopyItemFromNode(TreeNode node)

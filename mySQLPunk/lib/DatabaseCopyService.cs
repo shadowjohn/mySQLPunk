@@ -35,6 +35,14 @@ namespace mySQLPunk.lib
         ForceTableSnapshot, // 跨過轉換，直接建立 table snapshot
     }
 
+    public class ViewSqlConversionPreview
+    {
+        public string SourceSql { get; set; }
+        public string ConvertedSql { get; set; }
+        public string Reason { get; set; }
+        public bool CanConvert { get; set; }
+    }
+
     public class DatabaseCopyService
     {
         private readonly int _batchSize;
@@ -245,6 +253,20 @@ namespace mySQLPunk.lib
 
     internal static class ViewSqlDialectConverter
     {
+        public static ViewSqlConversionPreview BuildPreview(string sourceViewSql, string sourceProvider, string targetProvider)
+        {
+            string convertedSql;
+            string reason;
+            bool canConvert = TryConvertSelectForTarget(sourceViewSql, sourceProvider, targetProvider, out convertedSql, out reason);
+            return new ViewSqlConversionPreview
+            {
+                SourceSql = sourceViewSql ?? "",
+                ConvertedSql = convertedSql ?? "",
+                Reason = reason ?? "",
+                CanConvert = canConvert
+            };
+        }
+
         public static bool TryConvertSelectForTarget(string sourceViewSql, string sourceProvider, string targetProvider, out string convertedSql, out string reason)
         {
             convertedSql = "";
