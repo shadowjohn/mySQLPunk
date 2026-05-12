@@ -8603,19 +8603,33 @@ namespace mySQLPunk
         {
             TreeNode node = db_tree.SelectedNode;
             if (node == null) return null;
-            if (node.Parent == null)
+
+            TreeNode connectionRoot = GetSelectedConnectionRoot();
+            if (connectionRoot == null) return null;
+
+            if (ReferenceEquals(node, connectionRoot))
             {
-                TreeNode loadedDatabase = node.Nodes.Cast<TreeNode>().FirstOrDefault(n => n.IsExpanded || n.Nodes.Count > 0);
-                if (loadedDatabase != null) return loadedDatabase;
-                return node.Nodes.Count == 1 ? node.Nodes[0] : null;
+                return GetPreferredDatabaseNode(connectionRoot);
             }
 
-            while (node.Parent != null && node.Parent.Parent != null)
+            while (node != null && node.Parent != null && !ReferenceEquals(node.Parent, connectionRoot))
             {
                 node = node.Parent;
             }
 
-            return node.Parent == null ? null : node;
+            return node != null && ReferenceEquals(node.Parent, connectionRoot) ? node : null;
+        }
+
+        private static TreeNode GetPreferredDatabaseNode(TreeNode connectionNode)
+        {
+            if (connectionNode == null) return null;
+
+            TreeNode loadedDatabase = connectionNode.Nodes
+                .Cast<TreeNode>()
+                .FirstOrDefault(n => n.IsExpanded || n.Nodes.Count > 0);
+            if (loadedDatabase != null) return loadedDatabase;
+
+            return connectionNode.Nodes.Count == 1 ? connectionNode.Nodes[0] : null;
         }
 
         private void EnsureDatabaseGroupNodes(TreeNode databaseNode)

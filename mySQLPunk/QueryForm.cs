@@ -995,12 +995,11 @@ namespace mySQLPunk
                 PrepareTableDataForEditing(dt);
 
                 sw.Stop();
+                dgvResults.ReadOnly = false;
                 dgvResults.DataSource = dt;
                 AutoResizeColumns(dgvResults);
                 tsBtnExport.Enabled = dt.Rows.Count > 0;
-                UpdateStatus(string.Format(
-                    "OK  |  {0} rows  |  {1} ms",
-                    dt.Rows.Count, sw.ElapsedMilliseconds));
+                UpdateStatus(BuildQueryStatus(dt.Rows.Count, sw.ElapsedMilliseconds));
                 UpdatePaginationUI();
             }
             catch (OperationCanceledException)
@@ -1012,7 +1011,7 @@ namespace mySQLPunk
             {
                 if (!CanUpdateUi()) return;
                 UpdateStatus(Localization.Format("Query.LoadFailed", ex.Message));
-                MessageBox.Show(Localization.Format("Query.LoadTableFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ShowResultFeedback(Localization.T("Query.QueryError"), Localization.Format("Query.LoadTableFailed", ex.Message));
             }
             finally
             {
@@ -1153,6 +1152,7 @@ namespace mySQLPunk
                         () => _db.SelectSQL(sql),
                         _cts.Token);
                     if (!CanUpdateUi()) return;
+                    if (dt == null) dt = new DataTable();
                     if (_isTableDataMode)
                     {
                         dt.AcceptChanges();
@@ -1160,13 +1160,20 @@ namespace mySQLPunk
                     }
 
                     sw.Stop();
-                    dgvResults.DataSource = dt;
-                    AutoResizeColumns(dgvResults);
-                    tsBtnExport.Enabled = dt.Rows.Count > 0;
-                    string status = string.Format(
-                        "OK  |  {0} rows  |  {1} ms",
-                        dt.Rows.Count, sw.ElapsedMilliseconds);
-                    UpdateStatus(status);
+                    string status = BuildQueryStatus(dt.Rows.Count, sw.ElapsedMilliseconds);
+                    if (dt.Rows.Count == 0 && !_isTableDataMode)
+                    {
+                        UpdateStatus(status);
+                        ShowResultFeedback(Localization.T("Query.NoRowsStatus"), Localization.T("Query.NoRowsMessage"));
+                    }
+                    else
+                    {
+                        dgvResults.ReadOnly = !_isTableDataMode;
+                        dgvResults.DataSource = dt;
+                        AutoResizeColumns(dgvResults);
+                        tsBtnExport.Enabled = dt.Rows.Count > 0;
+                        UpdateStatus(status);
+                    }
                     _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, dt.Rows.Count, true);
                 }
                 else
@@ -1179,20 +1186,23 @@ namespace mySQLPunk
                     sw.Stop();
                     dgvResults.DataSource = null;
 
-                    if (result["status"] == "OK")
+                    string resultStatus = GetResultValue(result, "status");
+                    if (string.Equals(resultStatus, "OK", StringComparison.OrdinalIgnoreCase))
                     {
                         string status = string.Format(
                             "OK  |  {0} ms", sw.ElapsedMilliseconds);
                         UpdateStatus(status);
+                        ShowResultFeedback(Localization.T("Common.Success"), status);
                         _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
                     }
                     else
                     {
-                        string status = Localization.Format("Query.ErrorStatus", result["reason"]);
-                        lblStatus.Text = status;
+                        string reason = GetResultValue(result, "reason");
+                        if (string.IsNullOrWhiteSpace(reason)) reason = Localization.T("Query.UnknownError");
+                        string status = Localization.Format("Query.ErrorStatus", reason);
+                        UpdateStatus(status);
+                        ShowResultFeedback(Localization.T("Query.ExecuteError"), reason);
                         _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
-                        MessageBox.Show(result["reason"], Localization.T("Query.ExecuteError"),
-                            MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
             }
@@ -1208,9 +1218,8 @@ namespace mySQLPunk
                 sw.Stop();
                 string status = Localization.Format("Query.ErrorStatus", ex.Message);
                 UpdateStatus(status);
+                ShowResultFeedback(Localization.T("Query.QueryError"), ex.Message);
                 _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
-                MessageBox.Show(ex.Message, Localization.T("Query.QueryError"),
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -1240,6 +1249,41 @@ namespace mySQLPunk
             {
                 _mainHost.UpdateMainStatus(msg);
             }
+        }
+
+        private string BuildQueryStatus(int rowCount, long elapsedMilliseconds)
+        {
+            if (rowCount == 0)
+            {
+                return Localization.T("Query.NoRowsStatus") + "  |  " + elapsedMilliseconds + " ms";
+            }
+
+            return string.Format("OK  |  {0} rows  |  {1} ms", rowCount, elapsedMilliseconds);
+        }
+
+        private void ShowResultFeedback(string title, string message)
+        {
+            if (dgvResults == null) return;
+
+            DataTable feedback = new DataTable();
+            feedback.Columns.Add(Localization.T("Query.FeedbackTypeColumn"));
+            feedback.Columns.Add(Localization.T("Query.FeedbackMessageColumn"));
+            DataRow row = feedback.NewRow();
+            row[0] = title ?? string.Empty;
+            row[1] = message ?? string.Empty;
+            feedback.Rows.Add(row);
+            feedback.AcceptChanges();
+
+            dgvResults.ReadOnly = true;
+            dgvResults.DataSource = feedback;
+            AutoResizeColumns(dgvResults);
+            if (tsBtnExport != null) tsBtnExport.Enabled = false;
+        }
+
+        private static string GetResultValue(Dictionary<string, string> result, string key)
+        {
+            string value;
+            return result != null && result.TryGetValue(key, out value) ? value : string.Empty;
         }
 
         public void ApplyLanguage()

@@ -411,6 +411,10 @@ namespace mySQLPunk
             Add("Query.LoadTableFailed", "載入資料表失敗：{0}", "Load table failed: {0}");
             Add("Query.PageSizeInvalid", "每頁筆數必須大於 0。", "Page size must be greater than 0.");
             Add("Query.Executing", "正在執行...", "Executing...");
+            Add("Query.NoRowsStatus", "查無資料。", "No rows found.");
+            Add("Query.NoRowsMessage", "查詢已完成，但沒有符合條件的資料。", "The query completed, but no rows matched the condition.");
+            Add("Query.FeedbackTypeColumn", "狀態", "Status");
+            Add("Query.FeedbackMessageColumn", "訊息", "Message");
             Add("Query.ErrorStatus", "錯誤：{0}", "Error: {0}");
             Add("Query.ExecuteError", "執行錯誤", "Execute Error");
             Add("Query.QueryError", "查詢錯誤", "Query Error");
