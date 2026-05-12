@@ -292,7 +292,10 @@ namespace mySQLPunk
             Add("Database.EditOpened", "資料庫資訊已開啟：{0}", "Database information opened: {0}");
             Add("Database.ConfirmDelete", "確定要刪除資料庫「{0}」嗎？此操作不可還原！", "Delete database \"{0}\"? This action cannot be undone.");
             Add("Database.UnsupportedDelete", "此連線類型不支援由右鍵選單刪除資料庫：{0}", "Deleting a database from the context menu is not supported for: {0}");
-            Add("Database.OracleUnsupportedDelete", "Oracle 不支援由此介面刪除資料庫（Schema）。\n請使用 Oracle 管理工具或以 DBA 帳戶執行 DROP USER CASCADE 語句。", "Oracle does not support dropping databases (schemas) from this interface.\nUse Oracle administration tools or run DROP USER CASCADE as a DBA.");
+            Add("Database.OracleUnsupportedDelete", "Oracle Schema 刪除需要具備 DROP USER 權限，且會使用 DROP USER CASCADE 刪除該 Schema 底下所有物件。", "Dropping an Oracle schema requires DROP USER permission and uses DROP USER CASCADE to delete every object under the schema.");
+            Add("Database.OracleConfirmDropPrompt", "請輸入 Schema 名稱「{0}」以確認刪除：", "Type schema name \"{0}\" to confirm deletion:");
+            Add("Database.OracleConfirmDropMismatch", "Schema 名稱不一致，已取消刪除。", "Schema name did not match. Delete cancelled.");
+            Add("Database.OracleProtectedSchema", "不允許從此介面刪除 Oracle 系統 Schema：{0}", "Dropping Oracle system schema from this interface is not allowed: {0}");
             Add("Database.SqliteUnsupportedDelete", "SQLite 資料庫是以檔案為單位，不支援由此介面刪除資料庫。\n請直接刪除對應的 .sqlite 檔案。", "SQLite databases are file-based and cannot be deleted from this interface.\nDelete the corresponding .sqlite file directly.");
             Add("Database.Deleted", "資料庫已刪除：{0}", "Database deleted: {0}");
             Add("Database.DeleteFailed", "刪除資料庫失敗：{0}", "Delete database failed: {0}");

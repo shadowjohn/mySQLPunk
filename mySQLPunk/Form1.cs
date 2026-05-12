@@ -7376,6 +7376,11 @@ namespace mySQLPunk
 
             try
             {
+                if (target.Database is my_oracle && !ConfirmOracleSchemaDrop(target.DatabaseName))
+                {
+                    return;
+                }
+
                 string sql = BuildDropDatabaseSql(target.Database, target.DatabaseName);
                 Dictionary<string, string> execResult = target.Database.ExecSQL(sql);
                 if (!execResult.ContainsKey("status") || execResult["status"] != "OK")
@@ -7398,6 +7403,34 @@ namespace mySQLPunk
             }
         }
 
+        private bool ConfirmOracleSchemaDrop(string schemaName)
+        {
+            if (IsProtectedOracleSchema(schemaName))
+            {
+                string message = Localization.Format("Database.OracleProtectedSchema", schemaName);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            MessageBox.Show(Localization.T("Database.OracleUnsupportedDelete"), Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            string confirmation = PromptForText(
+                Localization.T("Tool.DeleteDatabase"),
+                Localization.Format("Database.OracleConfirmDropPrompt", schemaName),
+                "");
+            if (confirmation == null) return false;
+
+            if (!string.Equals(confirmation.Trim(), schemaName, StringComparison.Ordinal))
+            {
+                string message = Localization.T("Database.OracleConfirmDropMismatch");
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            return true;
+        }
+
         private static string BuildDropDatabaseSql(IDatabase db, string databaseName)
         {
             string provider = db == null ? "" : db.ProviderName;
@@ -7409,11 +7442,28 @@ namespace mySQLPunk
                 string.Equals(provider, "sqlserver", StringComparison.OrdinalIgnoreCase))
                 return "DROP DATABASE " + QuoteDatabaseIdentifier(databaseName, "[", "]") + ";";
             if (string.Equals(provider, "oracle", StringComparison.OrdinalIgnoreCase))
-                throw new NotSupportedException(Localization.T("Database.OracleUnsupportedDelete"));
+            {
+                if (IsProtectedOracleSchema(databaseName))
+                    throw new NotSupportedException(Localization.Format("Database.OracleProtectedSchema", databaseName));
+                return "DROP USER " + QuoteOracleIdentifier(databaseName) + " CASCADE";
+            }
             if (string.Equals(provider, "sqlite", StringComparison.OrdinalIgnoreCase))
                 throw new NotSupportedException(Localization.T("Database.SqliteUnsupportedDelete"));
 
             throw new NotSupportedException(Localization.Format("Database.UnsupportedDelete", provider));
+        }
+
+        private static bool IsProtectedOracleSchema(string schemaName)
+        {
+            string normalized = (schemaName ?? string.Empty).Trim().ToUpperInvariant();
+            return normalized == "SYS" ||
+                   normalized == "SYSTEM" ||
+                   normalized == "XDB" ||
+                   normalized == "CTXSYS" ||
+                   normalized == "MDSYS" ||
+                   normalized == "ORDSYS" ||
+                   normalized == "OUTLN" ||
+                   normalized == "DBSNMP";
         }
 
         private void OpenSelectedDatabaseCommandLine(TreeNode databaseNode)
