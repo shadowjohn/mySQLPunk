@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll mySQLPunk GitHub issues without spending Codex tokens
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

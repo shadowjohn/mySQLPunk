@@ -12,6 +12,7 @@ namespace mySQLPunk.lib
     public class my_sqlite : IDatabase
     {
         public const string ColumnCommentTableName = "__mysqlpunk_column_comments";
+        public const string QueryErrorExtendedProperty = "QueryError";
         myinclude my = new myinclude();
         public SQLiteConnection MCT = null;
         public SQLiteCommand MC = null;
@@ -60,16 +61,23 @@ namespace mySQLPunk.lib
         public DataTable selectSQL_SAFE(string SQL, Dictionary<string, object> key_value)
         {
             DataTable output = new DataTable();
-            using (SQLiteCommand cmd = new SQLiteCommand(SQL, MCT))
+            try
             {
-                foreach (var key in key_value.Keys)
+                using (SQLiteCommand cmd = new SQLiteCommand(SQL, MCT))
                 {
-                    cmd.Parameters.Add(new SQLiteParameter("@" + key, key_value[key]));
+                    foreach (var key in key_value.Keys)
+                    {
+                        cmd.Parameters.Add(new SQLiteParameter("@" + key, key_value[key]));
+                    }
+                    using (SQLiteDataReader reader = cmd.ExecuteReader())
+                    {
+                        output.Load(reader);
+                    }
                 }
-                using (SQLiteDataReader reader = cmd.ExecuteReader())
-                {
-                    output.Load(reader);
-                }
+            }
+            catch (Exception ex)
+            {
+                output.ExtendedProperties[QueryErrorExtendedProperty] = ex.Message;
             }
             return output;
         }
@@ -469,12 +477,18 @@ namespace mySQLPunk.lib
             try
             {
                 DataTable dt = SelectSQL("SELECT COUNT(*) FROM " + QuoteSqlite(tableName) + ";");
+                if (HasQueryError(dt)) return -1;
                 return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
             }
             catch
             {
                 return -1;
             }
+        }
+
+        private static bool HasQueryError(DataTable table)
+        {
+            return table != null && table.ExtendedProperties.ContainsKey(QueryErrorExtendedProperty);
         }
 
         public DataTable GetCopyColumns(string databaseName, string tableName)

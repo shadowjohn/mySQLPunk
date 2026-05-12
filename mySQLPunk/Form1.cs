@@ -8976,30 +8976,50 @@ namespace mySQLPunk
         }
         public void dialogMyBoxOn(string message, bool can_close)
         {
-            dialog.Size = new Size(250, 80);
+            if (dialog == null || dialog.IsDisposed) dialog = new Form();
+            if (dialogLabel == null || dialogLabel.IsDisposed) dialogLabel = new Label();
+
+            dialog.SuspendLayout();
+            dialog.ClientSize = new Size(320, 104);
             dialog.MaximizeBox = false;
             dialog.MinimizeBox = false;
-            dialog.AutoSize = true;
-            dialog.ControlBox = false;
+            dialog.AutoSize = false;
+            dialog.ControlBox = can_close;
             dialog.FormBorderStyle = FormBorderStyle.FixedSingle;
-            dialog.StartPosition = FormStartPosition.CenterScreen;
+            dialog.StartPosition = FormStartPosition.Manual;
+            dialog.ShowInTaskbar = false;
             dialog.BackColor = ThemeManager.ElevatedColor;
             dialog.ForeColor = ThemeManager.TextColor;
 
-            dialogLabel.Location = new Point(0, 0);
+            dialogLabel.Dock = DockStyle.Fill;
             dialogLabel.AutoSize = false;
-            dialogLabel.Size = new Size(250, 80);
             dialogLabel.TextAlign = ContentAlignment.MiddleCenter;
             dialogLabel.Text = message;
+            dialogLabel.BackColor = ThemeManager.ElevatedColor;
             dialogLabel.ForeColor = ThemeManager.TextColor;
-            dialogLabel.Font = new Font("Microsoft JhengHei", 18, FontStyle.Bold);
-            dialog.Controls.Add(dialogLabel);
+            dialogLabel.Padding = new Padding(18, 12, 18, 12);
+            dialogLabel.Font = new Font("Microsoft JhengHei UI", 14, FontStyle.Bold);
+            if (dialogLabel.Parent != dialog)
+            {
+                dialog.Controls.Add(dialogLabel);
+            }
+
+            Rectangle ownerBounds = RectangleToScreen(ClientRectangle);
+            dialog.Location = new Point(
+                ownerBounds.Left + Math.Max(0, (ownerBounds.Width - dialog.Width) / 2),
+                ownerBounds.Top + Math.Max(0, (ownerBounds.Height - dialog.Height) / 2));
             dialog.TopMost = true;
-            dialog.Show();
+            dialog.ResumeLayout(true);
+
+            if (!dialog.Visible) dialog.Show(this);
+            dialog.BringToFront();
+            dialogLabel.Refresh();
+            dialog.Refresh();
+            Application.DoEvents();
         }
         public void dialogMyBoxOff()
         {
-            dialog.Controls.Remove(dialogLabel);
+            if (dialog == null || dialog.IsDisposed) return;
             dialog.Hide();
         }
         private void db_tree_DoubleClick(object sender, EventArgs e)
@@ -9008,82 +9028,80 @@ namespace mySQLPunk
             if (tree.SelectedNode == null) return;
 
             dialogMyBoxOn("資料載入中...", false);
-            var m = GetTreePathParts(tree.SelectedNode);
-
-            // 取得根連線節點（跳過連線群組節點）
-            TreeNode rootNode = tree.SelectedNode;
-            while (rootNode.Parent != null && !IsConnectionGroupNode(rootNode.Parent))
-                rootNode = rootNode.Parent;
-            int index = GetConnectionIndex(rootNode);
-
-            if (m.Length == 2)
+            try
             {
-                // 代表是資料庫層級
-                db_tree_second_click(index, tree.SelectedNode.Index, tree.SelectedNode.Text);
-                dialogMyBoxOff();
-                return;
-            }
-            if (m.Length == 3)
-            {
-                // 代表是 Tables/Views 群組層級
-                if (m[2] == "Backups")
+                var m = GetTreePathParts(tree.SelectedNode);
+
+                // 取得根連線節點（跳過連線群組節點）
+                TreeNode rootNode = tree.SelectedNode;
+                while (rootNode.Parent != null && !IsConnectionGroupNode(rootNode.Parent))
+                    rootNode = rootNode.Parent;
+                int index = GetConnectionIndex(rootNode);
+
+                if (m.Length == 2)
                 {
-                    BackupSelectedDatabaseWithDialog();
-                    dialogMyBoxOff();
+                    // 代表是資料庫層級
+                    db_tree_second_click(index, tree.SelectedNode.Index, tree.SelectedNode.Text);
                     return;
                 }
-                db_tree_third_click(index, tree.SelectedNode.Parent.Index, tree.SelectedNode.Parent.Text, tree.SelectedNode.Text);
-                dialogMyBoxOff();
-                return;
-            }
-            if (m.Length == 4)
-            {
-                // 代表是資料表或檢視層級 -> 直接開啟
-                if (m[2] == "Views") OpenSelectedViewInQuery();
-                else if (m[2] == "Events") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
-                else if (m[2] == "Functions") ExecuteSelectedFunction();
-                else if (m[2] == "Users") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
-                else if (m[2] == "Models") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
-                else if (m[2] == "BI") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
-                else if (m[2] == "Other") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
-                else if (m[2] == "Reports") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
-                else OpenSelectedTableInQuery();
-                dialogMyBoxOff();
-                return;
-            }
-
-            // 如果是根連線節點 (m.Length == 1)
-            var db = myN.connections[index];
-            //連線測試
-            if (db["isConnect"].ToString() == "T")
-            {
-                if (tree.SelectedNode.Nodes.Count == 0)
+                if (m.Length == 3)
                 {
-                    RefreshConnectionDatabaseNodes(tree.SelectedNode);
+                    // 代表是 Tables/Views 群組層級
+                    if (m[2] == "Backups")
+                    {
+                        BackupSelectedDatabaseWithDialog();
+                        return;
+                    }
+                    db_tree_third_click(index, tree.SelectedNode.Parent.Index, tree.SelectedNode.Parent.Text, tree.SelectedNode.Text);
+                    return;
+                }
+                if (m.Length == 4)
+                {
+                    // 代表是資料表或檢視層級 -> 直接開啟
+                    if (m[2] == "Views") OpenSelectedViewInQuery();
+                    else if (m[2] == "Events") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                    else if (m[2] == "Functions") ExecuteSelectedFunction();
+                    else if (m[2] == "Users") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                    else if (m[2] == "Models") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                    else if (m[2] == "BI") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                    else if (m[2] == "Other") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                    else if (m[2] == "Reports") db_tree_AfterSelect(db_tree, new TreeViewEventArgs(tree.SelectedNode));
+                    else OpenSelectedTableInQuery();
+                    return;
                 }
 
-                tree.SelectedNode.Expand();
-                UpdateMainStatus(Localization.Format("Status.ConnectionAlreadyOpen", tree.SelectedNode.Text));
-                //((TreeView)sender).SelectedNode.Toggle();
-                /*switch (((TreeView)sender).SelectedNode.IsExpanded)
+                // 如果是根連線節點 (m.Length == 1)
+                var db = myN.connections[index];
+                //連線測試
+                if (db["isConnect"].ToString() == "T")
                 {
-                    case false:
-                        ((TreeView)sender).SelectedNode.ExpandAll();
-                        break;
-                    default:
-                        
-                        break;
-                }
-                */
-            }
-            else
-            {
-                TreeNode connRoot = FindConnectionNode(index);
-                if (connRoot != null) connRoot.Nodes.Clear();
+                    if (tree.SelectedNode.Nodes.Count == 0)
+                    {
+                        RefreshConnectionDatabaseNodes(tree.SelectedNode);
+                    }
 
-                //連線，展開
-                switch (db["db_kind"].ToString().ToLower())
+                    tree.SelectedNode.Expand();
+                    UpdateMainStatus(Localization.Format("Status.ConnectionAlreadyOpen", tree.SelectedNode.Text));
+                    //((TreeView)sender).SelectedNode.Toggle();
+                    /*switch (((TreeView)sender).SelectedNode.IsExpanded)
+                    {
+                        case false:
+                            ((TreeView)sender).SelectedNode.ExpandAll();
+                            break;
+                        default:
+
+                            break;
+                    }
+                    */
+                }
+                else
                 {
+                    TreeNode connRoot = FindConnectionNode(index);
+                    if (connRoot != null) connRoot.Nodes.Clear();
+
+                    //連線，展開
+                    switch (db["db_kind"].ToString().ToLower())
+                    {
                     case "postgresql":
                         {
                             //Server=127.0.0.1;Port=5432;Database=myDataBase;User Id=myUsername;
@@ -9293,7 +9311,11 @@ namespace mySQLPunk
                 }
 
             }
-            dialogMyBoxOff();
+            }
+            finally
+            {
+                dialogMyBoxOff();
+            }
         }
 
         private void splitContainer5_Panel1_Resize(object sender, EventArgs e)

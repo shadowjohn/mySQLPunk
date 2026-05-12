@@ -1,0 +1,7 @@
+[Unit]
+Description=Run Codex only when mySQLPunk GitHub issues changed
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/yangchen/projects/mySQLPunk
+ExecStart=/home/yangchen/projects/mySQLPunk/tools/codex-issue-watch.sh

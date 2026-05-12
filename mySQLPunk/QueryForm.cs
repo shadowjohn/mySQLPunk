@@ -61,6 +61,7 @@ namespace mySQLPunk
             public DataTable Rows { get; set; }
             public long TotalRows { get; set; }
             public int CurrentPage { get; set; }
+            public string ErrorMessage { get; set; }
         }
 
         // 工具列與狀態列
@@ -1054,6 +1055,10 @@ namespace mySQLPunk
                     () => LoadTablePage(tableName, offset, _pageSize, _cts.Token),
                     _cts.Token);
                 if (!CanUpdateUi()) return;
+                if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+                {
+                    throw new InvalidOperationException(result.ErrorMessage);
+                }
                 DataTable dt = result.Rows;
                 _totalRows = result.TotalRows;
                 _currentPage = result.CurrentPage;
@@ -1111,11 +1116,13 @@ namespace mySQLPunk
 
             int offset = (page - 1) * pageSize;
             DataTable rows = _db.SelectTablePage(_databaseName, tableName, offset, pageSize);
+            string errorMessage = GetQueryError(rows);
             return new TablePageLoadResult
             {
                 Rows = rows,
                 TotalRows = totalRows,
-                CurrentPage = page
+                CurrentPage = page,
+                ErrorMessage = errorMessage
             };
         }
 
@@ -1220,6 +1227,11 @@ namespace mySQLPunk
                         _cts.Token);
                     if (!CanUpdateUi()) return;
                     if (dt == null) dt = new DataTable();
+                    string queryError = GetQueryError(dt);
+                    if (!string.IsNullOrWhiteSpace(queryError))
+                    {
+                        throw new InvalidOperationException(queryError);
+                    }
                     if (_isTableDataMode)
                     {
                         dt.AcceptChanges();
@@ -1317,6 +1329,16 @@ namespace mySQLPunk
         private bool CanUpdateUi()
         {
             return !_isClosing && !IsDisposed && !Disposing;
+        }
+
+        private static string GetQueryError(DataTable table)
+        {
+            if (table == null || !table.ExtendedProperties.ContainsKey(my_sqlite.QueryErrorExtendedProperty))
+            {
+                return string.Empty;
+            }
+
+            return table.ExtendedProperties[my_sqlite.QueryErrorExtendedProperty]?.ToString() ?? string.Empty;
         }
 
         private void UpdateStatus(string msg)
