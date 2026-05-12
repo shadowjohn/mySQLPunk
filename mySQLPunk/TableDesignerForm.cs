@@ -1074,17 +1074,11 @@ namespace mySQLPunk
 
                     if (isNew)
                     {
-                        string type = curr["索引類型"].ToString();
-                        string method = curr["索引方法"].ToString();
-                        string cols = curr["欄位"].ToString();
-                        string colList = FormatMySqlIndexColumns(cols);
-                        string comment = curr["註解"].ToString();
-                        string commentStr = string.IsNullOrEmpty(comment) ? "" : $"COMMENT '{comment}'";
-
-                        if (type == "PRIMARY") changes.Add($"ADD PRIMARY KEY ({colList}) USING {method}");
-                        else if (type == "UNIQUE") changes.Add($"ADD UNIQUE INDEX `{idxName}` ({colList}) USING {method} {commentStr}");
-                        else if (type == "FULLTEXT") changes.Add($"ADD FULLTEXT INDEX `{idxName}` ({colList}) {commentStr}");
-                        else changes.Add($"ADD INDEX `{idxName}` ({colList}) USING {method} {commentStr}");
+                        string addIndexChange = BuildMySqlAddIndexChange(curr);
+                        if (!string.IsNullOrWhiteSpace(addIndexChange))
+                        {
+                            changes.Add(addIndexChange);
+                        }
                     }
                 }
             }
@@ -1098,6 +1092,44 @@ namespace mySQLPunk
             {
                 rtbSqlPreview.Text = "-- No changes detected.";
             }
+        }
+
+        private string BuildMySqlAddIndexChange(DataRow row)
+        {
+            string indexName = GetRowString(row, "名稱").Trim();
+            string type = GetRowString(row, "索引類型").Trim().ToUpperInvariant();
+            string method = GetRowString(row, "索引方法").Trim();
+            string columns = GetRowString(row, "欄位").Trim();
+            string columnList = FormatMySqlIndexColumns(columns);
+            if (string.IsNullOrWhiteSpace(columnList)) return "";
+
+            string methodClause = string.IsNullOrWhiteSpace(method) ? "" : " USING " + method;
+            string comment = GetRowString(row, "註解").Trim();
+            string commentClause = string.IsNullOrWhiteSpace(comment) ? "" : " COMMENT " + EscapeMySqlStringLiteral(comment);
+
+            if (type == "PRIMARY")
+            {
+                return "ADD PRIMARY KEY (" + columnList + ")" + methodClause;
+            }
+
+            if (string.IsNullOrWhiteSpace(indexName)) return "";
+
+            if (type == "UNIQUE")
+            {
+                return "ADD UNIQUE INDEX " + QuoteMySqlIdentifier(indexName) + " (" + columnList + ")" + methodClause + commentClause;
+            }
+
+            if (type == "FULLTEXT")
+            {
+                return "ADD FULLTEXT INDEX " + QuoteMySqlIdentifier(indexName) + " (" + columnList + ")" + commentClause;
+            }
+
+            if (type == "SPATIAL")
+            {
+                return "ADD SPATIAL INDEX " + QuoteMySqlIdentifier(indexName) + " (" + columnList + ")" + commentClause;
+            }
+
+            return "ADD INDEX " + QuoteMySqlIdentifier(indexName) + " (" + columnList + ")" + methodClause + commentClause;
         }
 
         private string BuildCreateTableSql(DataTable currentDt)

@@ -107,9 +107,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」。
   - 後續方向：以 provider 為單位補齊欄位改名、型別變更、NULL/DEFAULT、Primary Key 與 constraint 變更。
 
-- **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法**
-  - 現況：不支援時會顯示「此資料庫尚未支援 FULLTEXT/SPATIAL 索引」。
-  - 後續方向：逐 provider 補 MySQL FULLTEXT/SPATIAL、PostgreSQL GIN/GiST、SQL Server Full-Text、Oracle CTXSYS/MDSYS 等語法。
+- **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法 ✅ 主要 provider 已補齊**
+  - 現況：Table Designer 支援 MySQL FULLTEXT/SPATIAL、PostgreSQL FULLTEXT GIN 與 SPATIAL GiST、SQL Server Full-Text / Spatial、Oracle CTXSYS/MDSYS 索引 SQL 產生；SQLite 仍不提供一般 FULLTEXT/SPATIAL 索引設計器入口。
+  - 完成內容：新增與修改資料表流程都會依 provider 產生對應 FULLTEXT/SPATIAL 語法；MySQL 既有資料表 ALTER 已補上 `ADD SPATIAL INDEX`，索引註解也會套用 MySQL 字串 escape。
+  - 後續方向：若要支援 SQLite FTS virtual table、RTree 或 SpatiaLite spatial index，需要另做專用精靈，避免用一般索引 UI 產生錯誤語法。
 
 - **SQL Server DEFAULT constraint 變更仍有限制 ✅ 已補齊**
   - 現況：SQL Server 會把欄位 DEFAULT 存成 default constraint，修改時不能只用一般 `ALTER COLUMN` 覆蓋。
