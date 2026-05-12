@@ -425,7 +425,120 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql" || targetProvider == "oracle")
                 sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
 
+            sql = RewriteDateFormatFunctions(sql, targetProvider);
+            sql = RewriteStringAggregateFunctions(sql, targetProvider);
+            sql = RewriteJsonExtractFunctions(sql, targetProvider);
+
             return sql;
+        }
+
+        private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bDATE_FORMAT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string format = m.Groups["format"].Value;
+                    if (targetProvider == "mysql") return m.Value;
+                    if (targetProvider == "sqlite") return "strftime('" + EscapeSqlString(format) + "', " + expr + ")";
+
+                    string translated = TranslateDateFormatPattern(format, targetProvider);
+                    if (targetProvider == "mssql") return "FORMAT(" + expr + ", '" + EscapeSqlString(translated) + "')";
+                    return "TO_CHAR(" + expr + ", '" + EscapeSqlString(translated) + "')";
+                },
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteStringAggregateFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bGROUP_CONCAT\s*\(\s*(?<expr>[^()]*?)(?:\s+SEPARATOR\s*'(?<sep>[^']*)')?\s*\)",
+                m => BuildStringAggregate(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["sep"].Success ? m.Groups["sep"].Value : ","),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bgroup_concat\s*\(\s*(?![^)]*\bSEPARATOR\b)(?<expr>[^,()]+(?:\([^)]*\))?)\s*(?:,\s*'(?<sep>[^']*)')?\s*\)",
+                m => BuildStringAggregate(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["sep"].Success ? m.Groups["sep"].Value : ","),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bSTRING_AGG\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<sep>[^']*)'\s*\)",
+                m => BuildStringAggregate(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["sep"].Value),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bLISTAGG\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<sep>[^']*)'\s*\)\s+WITHIN\s+GROUP\s*\(\s*ORDER\s+BY\s+(?<order>[^)]+)\)",
+                m => BuildStringAggregate(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["sep"].Value),
+                RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string RewriteJsonExtractFunctions(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bJSON_EXTRACT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<path>\$[^']*)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string path = EscapeSqlString(m.Groups["path"].Value);
+                    if (targetProvider == "mssql" || targetProvider == "oracle") return "JSON_VALUE(" + expr + ", '" + path + "')";
+                    if (targetProvider == "sqlite") return "json_extract(" + expr + ", '" + path + "')";
+                    return m.Value;
+                },
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildStringAggregate(string targetProvider, string expr, string separator)
+        {
+            string sep = EscapeSqlString(separator);
+            if (targetProvider == "mysql") return "GROUP_CONCAT(" + expr + " SEPARATOR '" + sep + "')";
+            if (targetProvider == "sqlite") return "group_concat(" + expr + ", '" + sep + "')";
+            if (targetProvider == "oracle") return "LISTAGG(" + expr + ", '" + sep + "') WITHIN GROUP (ORDER BY " + expr + ")";
+            return "STRING_AGG(" + expr + ", '" + sep + "')";
+        }
+
+        private static string TranslateDateFormatPattern(string format, string targetProvider)
+        {
+            string translated = format ?? "";
+            if (targetProvider == "mssql")
+            {
+                translated = translated.Replace("%Y", "yyyy")
+                                       .Replace("%y", "yy")
+                                       .Replace("%m", "MM")
+                                       .Replace("%c", "M")
+                                       .Replace("%d", "dd")
+                                       .Replace("%e", "d")
+                                       .Replace("%H", "HH")
+                                       .Replace("%h", "hh")
+                                       .Replace("%i", "mm")
+                                       .Replace("%s", "ss");
+                return translated;
+            }
+
+            translated = translated.Replace("%Y", "YYYY")
+                                   .Replace("%y", "YY")
+                                   .Replace("%m", "MM")
+                                   .Replace("%c", "MM")
+                                   .Replace("%d", "DD")
+                                   .Replace("%e", "DD")
+                                   .Replace("%H", "HH24")
+                                   .Replace("%h", "HH12")
+                                   .Replace("%i", "MI")
+                                   .Replace("%s", "SS");
+            return translated;
+        }
+
+        private static string EscapeSqlString(string value)
+        {
+            return (value ?? "").Replace("'", "''");
         }
 
         private static string AppendRowLimit(string selectSql, string targetProvider, string limit)
