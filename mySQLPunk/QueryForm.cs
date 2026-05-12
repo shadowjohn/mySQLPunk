@@ -1668,9 +1668,18 @@ namespace mySQLPunk
                 return;
             }
 
+            const int pageSize = 4096;
+            int currentPage = 0;
+            int totalPages = Math.Max(1, (int)Math.Ceiling(bytes.Length / (double)pageSize));
+
             using (Form dialog = new Form())
             using (RichTextBox text = new RichTextBox())
-            using (Button copyButton = new Button())
+            using (Label pageLabel = new Label())
+            using (Button firstButton = new Button())
+            using (Button previousButton = new Button())
+            using (Button nextButton = new Button())
+            using (Button lastButton = new Button())
+            using (Button copyPageButton = new Button())
             using (Button closeButton = new Button())
             {
                 dialog.Text = Localization.T("Query.ViewBlobHex");
@@ -1683,7 +1692,6 @@ namespace mySQLPunk
                 text.ReadOnly = true;
                 text.WordWrap = false;
                 text.Font = new Font("Consolas", 10);
-                text.Text = BuildHexDump(bytes, 4096);
 
                 FlowLayoutPanel footer = new FlowLayoutPanel
                 {
@@ -1692,18 +1700,62 @@ namespace mySQLPunk
                     FlowDirection = FlowDirection.RightToLeft,
                     Padding = new Padding(8)
                 };
-                copyButton.Text = Localization.T("Query.CopyBlobHex");
-                copyButton.AutoSize = true;
-                copyButton.Click += (s, e) => CopySelectedBlobHex();
+                pageLabel.AutoSize = true;
+                pageLabel.TextAlign = ContentAlignment.MiddleLeft;
+                pageLabel.Padding = new Padding(0, 7, 12, 0);
+                pageLabel.ForeColor = ThemeManager.TextColor;
+                firstButton.Text = Localization.T("Query.BlobFirstPage");
+                firstButton.AutoSize = true;
+                previousButton.Text = Localization.T("Query.BlobPreviousPage");
+                previousButton.AutoSize = true;
+                nextButton.Text = Localization.T("Query.BlobNextPage");
+                nextButton.AutoSize = true;
+                lastButton.Text = Localization.T("Query.BlobLastPage");
+                lastButton.AutoSize = true;
+                copyPageButton.Text = Localization.T("Query.BlobCopyPageHex");
+                copyPageButton.AutoSize = true;
                 closeButton.Text = Localization.T("Common.Close");
                 closeButton.AutoSize = true;
+
+                Action renderPage = () =>
+                {
+                    int offset = currentPage * pageSize;
+                    int count = Math.Min(pageSize, Math.Max(0, bytes.Length - offset));
+                    text.Text = BuildHexDump(bytes, offset, count);
+                    int startByte = bytes.Length == 0 ? 0 : offset + 1;
+                    int endByte = bytes.Length == 0 ? 0 : offset + count;
+                    pageLabel.Text = Localization.Format("Query.BlobPageFormat", currentPage + 1, totalPages, startByte, endByte, bytes.Length);
+                    firstButton.Enabled = currentPage > 0;
+                    previousButton.Enabled = currentPage > 0;
+                    nextButton.Enabled = currentPage < totalPages - 1;
+                    lastButton.Enabled = currentPage < totalPages - 1;
+                    copyPageButton.Enabled = count > 0;
+                };
+
+                firstButton.Click += (s, e) => { currentPage = 0; renderPage(); };
+                previousButton.Click += (s, e) => { if (currentPage > 0) currentPage--; renderPage(); };
+                nextButton.Click += (s, e) => { if (currentPage < totalPages - 1) currentPage++; renderPage(); };
+                lastButton.Click += (s, e) => { currentPage = totalPages - 1; renderPage(); };
+                copyPageButton.Click += (s, e) =>
+                {
+                    int offset = currentPage * pageSize;
+                    int count = Math.Min(pageSize, Math.Max(0, bytes.Length - offset));
+                    Clipboard.SetText(BytesToHex(bytes, offset, count));
+                    UpdateStatus(Localization.T("Query.CopiedToClipboard"));
+                };
                 closeButton.Click += (s, e) => dialog.Close();
                 footer.Controls.Add(closeButton);
-                footer.Controls.Add(copyButton);
+                footer.Controls.Add(copyPageButton);
+                footer.Controls.Add(lastButton);
+                footer.Controls.Add(nextButton);
+                footer.Controls.Add(previousButton);
+                footer.Controls.Add(firstButton);
+                footer.Controls.Add(pageLabel);
 
                 dialog.Controls.Add(text);
                 dialog.Controls.Add(footer);
                 ThemeManager.ApplyTo(dialog);
+                renderPage();
                 dialog.ShowDialog(this);
             }
         }
@@ -1861,11 +1913,19 @@ namespace mySQLPunk
 
         private static string BytesToHex(byte[] bytes)
         {
+            if (bytes == null) return string.Empty;
+            return BytesToHex(bytes, 0, bytes.Length);
+        }
+
+        private static string BytesToHex(byte[] bytes, int offset, int count)
+        {
             if (bytes == null || bytes.Length == 0) return string.Empty;
-            StringBuilder sb = new StringBuilder(bytes.Length * 2);
-            for (int i = 0; i < bytes.Length; i++)
+            int safeOffset = Math.Max(0, Math.Min(offset, bytes.Length));
+            int length = Math.Min(Math.Max(0, count), bytes.Length - safeOffset);
+            StringBuilder sb = new StringBuilder(length * 2);
+            for (int i = 0; i < length; i++)
             {
-                sb.Append(bytes[i].ToString("X2"));
+                sb.Append(bytes[safeOffset + i].ToString("X2"));
             }
             return sb.ToString();
         }
@@ -1900,6 +1960,37 @@ namespace mySQLPunk
             {
                 sb.AppendLine();
                 sb.AppendLine(Localization.Format("Query.BlobPreviewTruncated", length, bytes.Length));
+            }
+
+            return sb.ToString();
+        }
+
+        private static string BuildHexDump(byte[] bytes, int offset, int count)
+        {
+            if (bytes == null) return string.Empty;
+
+            int safeOffset = Math.Max(0, Math.Min(offset, bytes.Length));
+            int length = Math.Min(Math.Max(0, count), bytes.Length - safeOffset);
+            StringBuilder sb = new StringBuilder();
+            for (int relativeOffset = 0; relativeOffset < length; relativeOffset += 16)
+            {
+                int lineLength = Math.Min(16, length - relativeOffset);
+                int absoluteOffset = safeOffset + relativeOffset;
+                sb.Append(absoluteOffset.ToString("X8"));
+                sb.Append("  ");
+                for (int i = 0; i < 16; i++)
+                {
+                    if (i < lineLength) sb.Append(bytes[absoluteOffset + i].ToString("X2"));
+                    else sb.Append("  ");
+                    sb.Append(i == 7 ? "  " : " ");
+                }
+                sb.Append(" ");
+                for (int i = 0; i < lineLength; i++)
+                {
+                    byte value = bytes[absoluteOffset + i];
+                    sb.Append(value >= 32 && value <= 126 ? (char)value : '.');
+                }
+                sb.AppendLine();
             }
 
             return sb.ToString();

@@ -126,9 +126,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 風險：資料列被其他人改過，或欄位包含 BLOB/浮點/大文字時，WHERE 可能不穩定。
   - 後續方向：若仍需要編輯無 Primary Key 資料表，可再評估更細的 provider-specific optimistic locking。
 
-- **BLOB/geometry 欄位操作仍有部分限制**
+- **BLOB/geometry 欄位操作仍有部分限制 ✅ 分頁檢視已補齊**
   - 現況：`byte[]` 欄位在結果表格中會先嘗試顯示為 `[Geometry] WKT`，無法解析時才顯示 `[BLOB n bytes] 0x...`；右鍵可檢視十六進位、複製 Hex、匯出檔案，在資料表資料模式可匯入檔案寫回目前 BLOB 欄位，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
-  - 後續方向：補更完整的大型檔案串流檢視。
+  - 完成內容：BLOB 十六進位檢視器改為 4KB 分頁顯示，支援首頁、上一頁、下一頁、末頁與複製本頁 Hex，避免大型 BLOB 一次轉成完整文字造成 UI 卡頓。
+  - 後續方向：若需要直接處理超大型欄位，可再評估 provider-level streaming 讀取，避免結果集本身先載入完整 `byte[]`。
 
 ### Table/View 複製限制
 

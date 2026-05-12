@@ -401,6 +401,12 @@ namespace mySQLPunk
             Add("Query.BlobImported", "BLOB 已匯入：{0}", "BLOB imported: {0}");
             Add("Grid.BinaryFormatFallback", "二進位欄位已改用文字方式顯示。", "Binary column displayed as text.");
             Add("Query.BlobPreviewTruncated", "僅顯示前 {0} bytes，完整大小：{1} bytes。", "Showing first {0} bytes only. Full size: {1} bytes.");
+            Add("Query.BlobCopyPageHex", "複製本頁 Hex", "Copy Page Hex");
+            Add("Query.BlobFirstPage", "首頁", "First");
+            Add("Query.BlobPreviousPage", "上一頁", "Previous");
+            Add("Query.BlobNextPage", "下一頁", "Next");
+            Add("Query.BlobLastPage", "末頁", "Last");
+            Add("Query.BlobPageFormat", "第 {0} / {1} 頁，bytes {2}-{3} / {4}", "Page {0} / {1}, bytes {2}-{3} / {4}");
             Add("Query.Paste", "貼上", "Paste");
             Add("Query.SelectAll", "全選", "Select All");
             Add("Query.SqlEditor", "SQL 編輯器", "SQL Editor");
