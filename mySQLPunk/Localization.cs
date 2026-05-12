@@ -277,7 +277,14 @@ namespace mySQLPunk
             Add("Database.NewPrompt", "資料庫名稱:", "Database name:");
             Add("Database.NameRequired", "請輸入資料庫名稱。", "Enter a database name.");
             Add("Database.UnsupportedCreate", "此連線類型不支援由主機節點新增資料庫：{0}", "Creating a database from the connection node is not supported for: {0}");
-            Add("Database.OracleUnsupportedCreate", "Oracle 使用 User/Schema 概念，不支援由此介面直接建立資料庫。\n如需建立新 Schema，請使用 Oracle 管理工具或以 DBA 帳戶執行 CREATE USER 語句。", "Oracle uses the User/Schema concept and does not support creating databases from this interface.\nTo create a new schema, use Oracle administration tools or run CREATE USER as a DBA.");
+            Add("Database.OracleUnsupportedCreate", "Oracle 使用 User/Schema 概念，請使用新增 Oracle Schema 精靈建立使用者。", "Oracle uses the User/Schema concept. Use the Oracle schema wizard to create a user.");
+            Add("Database.OracleCreateTitle", "新增 Oracle Schema", "New Oracle Schema");
+            Add("Database.OracleUserName", "Schema / 使用者名稱:", "Schema / user name:");
+            Add("Database.OraclePassword", "密碼:", "Password:");
+            Add("Database.OracleDefaultTablespace", "預設 Tablespace:", "Default tablespace:");
+            Add("Database.OracleTemporaryTablespace", "暫存 Tablespace:", "Temporary tablespace:");
+            Add("Database.OracleUnlimitedQuota", "在預設 Tablespace 設定 UNLIMITED QUOTA", "Grant UNLIMITED QUOTA on default tablespace");
+            Add("Database.OraclePasswordRequired", "請輸入 Oracle Schema 密碼。", "Enter the Oracle schema password.");
             Add("Database.SqliteUnsupportedCreate", "SQLite 資料庫是以檔案為單位，不支援由此介面新增資料庫。\n請直接建立新的 SQLite 連線，指向新的 .sqlite 檔案。", "SQLite databases are file-based and cannot be created from this interface.\nCreate a new SQLite connection pointing to a new .sqlite file.");
             Add("Database.Created", "資料庫已建立：{0}", "Database created: {0}");
             Add("Database.CreateFailed", "新增資料庫失敗：{0}", "Create database failed: {0}");

@@ -83,12 +83,12 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 完成內容：已修正編輯連線後 `conn_group` 欄位消失的問題——`update_connection` 現在會自動保留原連線的群組歸屬。
   - 後續方向：非上列 provider 的連線（未來擴充）仍會顯示「此連線類型尚未支援編輯」。
 
-- **由主機節點新增/刪除資料庫只支援部分 provider ✅ 提示已補齊**
+- **由主機節點新增/刪除資料庫只支援部分 provider ✅ Oracle Schema 精靈已補齊**
   - 現況：MySQL、PostgreSQL、SQL Server 支援從連線節點新增 / 刪除資料庫。
   - 完成內容：
-    - Oracle：不支援直接 `CREATE DATABASE`（Oracle 使用 User/Schema 概念），操作時會顯示說明，提示改用 Oracle 管理工具或以 DBA 帳戶執行 `CREATE USER`。
+    - Oracle：新增資料庫會開啟 Oracle Schema 精靈，輸入使用者、密碼、預設/暫存 Tablespace 後依序執行 `CREATE USER`、`ALTER USER ... QUOTA` 與常用物件建立權限 grant；需使用具備建立 user 權限的帳戶。
     - SQLite：資料庫為獨立檔案，操作時會顯示說明，提示直接建立新的 SQLite 連線或刪除對應 `.sqlite` 檔案。
-  - 後續方向：若有需求可在 Oracle 連線中實作 `CREATE USER` 精靈，但需要密碼與 Tablespace 等額外資訊。
+  - 後續方向：Oracle 刪除 Schema 仍只顯示提示，避免誤用 `DROP USER CASCADE` 刪除大量物件；若要支援需另加更明確的二次確認與權限提示。
 
 - **SQLite 欄位註解不支援 ✅ sidecar metadata 已補齊**
   - 現況：SQLite 本身沒有欄位註解語法，因此 mySQLPunk 會使用 `__mysqlpunk_column_comments` sidecar metadata table 保存欄位註解。

@@ -7769,6 +7769,12 @@ namespace mySQLPunk
 
             Dictionary<string, object> conn = myN.connections[nodeIdx];
             IDatabase db = (IDatabase)conn["pdo"];
+            if (db is my_oracle)
+            {
+                CreateOracleSchemaFromConnection(node, db);
+                return;
+            }
+
             string databaseName = PromptForText(Localization.T("Database.NewTitle"), Localization.T("Database.NewPrompt"), "");
             if (databaseName == null) return;
             databaseName = databaseName.Trim();
@@ -7800,6 +7806,142 @@ namespace mySQLPunk
             }
         }
 
+        private void CreateOracleSchemaFromConnection(TreeNode node, IDatabase db)
+        {
+            OracleSchemaCreateOptions options = ShowOracleCreateSchemaDialog();
+            if (options == null) return;
+
+            try
+            {
+                foreach (string statement in BuildOracleCreateSchemaStatements(options))
+                {
+                    Dictionary<string, string> result = db.ExecSQL(statement);
+                    if (!result.ContainsKey("status") || result["status"] != "OK")
+                    {
+                        string reason = result.ContainsKey("reason") ? result["reason"] : Localization.T("Object.UnknownError");
+                        throw new Exception(reason);
+                    }
+                }
+
+                RefreshConnectionDatabaseNodes(node);
+                SelectConnectionDatabaseNode(node, options.SchemaName);
+                UpdateMainStatus(Localization.Format("Database.Created", options.SchemaName));
+            }
+            catch (Exception ex)
+            {
+                string message = Localization.Format("Database.CreateFailed", ex.Message);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Database.OracleCreateTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private OracleSchemaCreateOptions ShowOracleCreateSchemaDialog()
+        {
+            using (Form dialog = new Form())
+            using (Label userLabel = new Label())
+            using (TextBox userBox = new TextBox())
+            using (Label passwordLabel = new Label())
+            using (TextBox passwordBox = new TextBox())
+            using (Label defaultTablespaceLabel = new Label())
+            using (TextBox defaultTablespaceBox = new TextBox())
+            using (Label temporaryTablespaceLabel = new Label())
+            using (TextBox temporaryTablespaceBox = new TextBox())
+            using (CheckBox quotaBox = new CheckBox())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = Localization.T("Database.OracleCreateTitle");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ClientSize = new Size(460, 252);
+                dialog.ShowIcon = false;
+                ApplyModernTheme(dialog);
+
+                userLabel.Text = Localization.T("Database.OracleUserName");
+                userLabel.AutoSize = true;
+                userLabel.Location = new Point(16, 18);
+                userBox.Location = new Point(170, 15);
+                userBox.Width = 260;
+
+                passwordLabel.Text = Localization.T("Database.OraclePassword");
+                passwordLabel.AutoSize = true;
+                passwordLabel.Location = new Point(16, 58);
+                passwordBox.Location = new Point(170, 55);
+                passwordBox.Width = 260;
+                passwordBox.PasswordChar = '*';
+
+                defaultTablespaceLabel.Text = Localization.T("Database.OracleDefaultTablespace");
+                defaultTablespaceLabel.AutoSize = true;
+                defaultTablespaceLabel.Location = new Point(16, 98);
+                defaultTablespaceBox.Location = new Point(170, 95);
+                defaultTablespaceBox.Width = 260;
+                defaultTablespaceBox.Text = "USERS";
+
+                temporaryTablespaceLabel.Text = Localization.T("Database.OracleTemporaryTablespace");
+                temporaryTablespaceLabel.AutoSize = true;
+                temporaryTablespaceLabel.Location = new Point(16, 138);
+                temporaryTablespaceBox.Location = new Point(170, 135);
+                temporaryTablespaceBox.Width = 260;
+                temporaryTablespaceBox.Text = "TEMP";
+
+                quotaBox.Text = Localization.T("Database.OracleUnlimitedQuota");
+                quotaBox.AutoSize = true;
+                quotaBox.Checked = true;
+                quotaBox.Location = new Point(170, 172);
+
+                okButton.Text = Localization.T("Common.OK");
+                okButton.DialogResult = DialogResult.OK;
+                okButton.Location = new Point(260, 210);
+                okButton.Width = 80;
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.Location = new Point(350, 210);
+                cancelButton.Width = 80;
+
+                dialog.Controls.AddRange(new Control[]
+                {
+                    userLabel, userBox,
+                    passwordLabel, passwordBox,
+                    defaultTablespaceLabel, defaultTablespaceBox,
+                    temporaryTablespaceLabel, temporaryTablespaceBox,
+                    quotaBox, okButton, cancelButton
+                });
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = cancelButton;
+
+                while (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    string schemaName = userBox.Text.Trim();
+                    string password = passwordBox.Text;
+                    if (string.IsNullOrWhiteSpace(schemaName))
+                    {
+                        MessageBox.Show(Localization.T("Database.NameRequired"), dialog.Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        userBox.Focus();
+                        continue;
+                    }
+                    if (string.IsNullOrEmpty(password))
+                    {
+                        MessageBox.Show(Localization.T("Database.OraclePasswordRequired"), dialog.Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        passwordBox.Focus();
+                        continue;
+                    }
+
+                    return new OracleSchemaCreateOptions
+                    {
+                        SchemaName = schemaName,
+                        Password = password,
+                        DefaultTablespace = defaultTablespaceBox.Text.Trim(),
+                        TemporaryTablespace = temporaryTablespaceBox.Text.Trim(),
+                        UnlimitedQuota = quotaBox.Checked
+                    };
+                }
+            }
+
+            return null;
+        }
+
         private static string BuildCreateDatabaseSql(IDatabase db, string databaseName)
         {
             string provider = db == null ? "" : db.ProviderName;
@@ -7816,6 +7958,54 @@ namespace mySQLPunk
                 throw new NotSupportedException(Localization.T("Database.SqliteUnsupportedCreate"));
 
             throw new NotSupportedException(Localization.Format("Database.UnsupportedCreate", provider));
+        }
+
+        private static List<string> BuildOracleCreateSchemaStatements(OracleSchemaCreateOptions options)
+        {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (string.IsNullOrWhiteSpace(options.SchemaName)) throw new ArgumentException(Localization.T("Database.NameRequired"));
+            if (string.IsNullOrEmpty(options.Password)) throw new ArgumentException(Localization.T("Database.OraclePasswordRequired"));
+
+            string schema = QuoteOracleIdentifier(options.SchemaName);
+            List<string> statements = new List<string>();
+            StringBuilder create = new StringBuilder();
+            create.Append("CREATE USER ");
+            create.Append(schema);
+            create.Append(" IDENTIFIED BY ");
+            create.Append(QuoteOracleIdentifier(options.Password));
+            if (!string.IsNullOrWhiteSpace(options.DefaultTablespace))
+            {
+                create.Append(" DEFAULT TABLESPACE ");
+                create.Append(QuoteOracleIdentifier(options.DefaultTablespace));
+            }
+            if (!string.IsNullOrWhiteSpace(options.TemporaryTablespace))
+            {
+                create.Append(" TEMPORARY TABLESPACE ");
+                create.Append(QuoteOracleIdentifier(options.TemporaryTablespace));
+            }
+            statements.Add(create.ToString());
+
+            if (options.UnlimitedQuota && !string.IsNullOrWhiteSpace(options.DefaultTablespace))
+            {
+                statements.Add("ALTER USER " + schema + " QUOTA UNLIMITED ON " + QuoteOracleIdentifier(options.DefaultTablespace));
+            }
+
+            statements.Add("GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE SEQUENCE, CREATE PROCEDURE TO " + schema);
+            return statements;
+        }
+
+        private static string QuoteOracleIdentifier(string value)
+        {
+            return "\"" + (value ?? string.Empty).Replace("\"", "\"\"") + "\"";
+        }
+
+        private sealed class OracleSchemaCreateOptions
+        {
+            public string SchemaName { get; set; }
+            public string Password { get; set; }
+            public string DefaultTablespace { get; set; }
+            public string TemporaryTablespace { get; set; }
+            public bool UnlimitedQuota { get; set; }
         }
 
         private static string QuoteDatabaseIdentifier(string name, string openQuote, string closeQuote)
