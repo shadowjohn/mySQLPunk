@@ -65,8 +65,8 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
     - 保留既有 `setting.ini` 作為預設設定檔，不破壞舊版連線資料。
     - 新增的連線設定檔會儲存在 `connection_profiles/*.json`，目前作用中的設定檔記錄於 `connection-profile.txt`。
     - 右鍵選單可查看目前設定檔、切換既有設定檔，或新增空白設定檔並立即切換。
+    - 支援複製目前設定檔；非預設設定檔可重新命名或刪除，刪除目前設定檔後會切回預設設定檔。
     - 切換設定檔前會先儲存目前設定並關閉已開啟的連線，避免跨 profile 共用舊連線狀態。
-  - 後續方向：若使用者需要，可再補「重新命名 / 刪除 / 複製目前設定檔」等進階管理功能。
 
 ### Provider 與資料庫操作限制
 

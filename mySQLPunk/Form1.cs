@@ -7414,6 +7414,21 @@ namespace mySQLPunk
             ToolStripMenuItem newProfileItem = new ToolStripMenuItem(Localization.T("Connection.NewProfile"));
             newProfileItem.Click += (s, ev) => CreateConnectionProfile();
             profileItem.DropDownItems.Add(newProfileItem);
+
+            ToolStripMenuItem copyProfileItem = new ToolStripMenuItem(Localization.T("Connection.CopyProfile"));
+            copyProfileItem.Click += (s, ev) => CopyConnectionProfile(activeProfile);
+            profileItem.DropDownItems.Add(copyProfileItem);
+
+            bool isDefaultProfile = string.Equals(activeProfile, mySQLPunk_main.DefaultProfileName, StringComparison.OrdinalIgnoreCase);
+            ToolStripMenuItem renameProfileItem = new ToolStripMenuItem(Localization.T("Connection.RenameProfile"));
+            renameProfileItem.Enabled = !isDefaultProfile;
+            renameProfileItem.Click += (s, ev) => RenameConnectionProfile(activeProfile);
+            profileItem.DropDownItems.Add(renameProfileItem);
+
+            ToolStripMenuItem deleteProfileItem = new ToolStripMenuItem(Localization.T("Connection.DeleteProfile"));
+            deleteProfileItem.Enabled = !isDefaultProfile;
+            deleteProfileItem.Click += (s, ev) => DeleteConnectionProfile(activeProfile);
+            profileItem.DropDownItems.Add(deleteProfileItem);
         }
 
         private string GetProfileDisplayName(string profileName)
@@ -7459,6 +7474,70 @@ namespace mySQLPunk
             drawLists();
             ConfigureMainMenu();
             UpdateMainStatus(Localization.Format("Connection.ProfileCreated", profileName));
+        }
+
+        private void CopyConnectionProfile(string sourceProfile)
+        {
+            string defaultName = GetProfileDisplayName(sourceProfile) + " Copy";
+            string profileName = PromptForText(
+                Localization.T("Connection.CopyProfile"),
+                Localization.T("Connection.ProfileNamePrompt"),
+                defaultName);
+            if (string.IsNullOrWhiteSpace(profileName)) return;
+
+            profileName = profileName.Trim();
+            if (myN.GetProfileNames().Contains(profileName, StringComparer.OrdinalIgnoreCase))
+            {
+                string message = Localization.Format("Connection.ProfileExists", profileName);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Connection.CopyProfile"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            myN.setSettingINI();
+            myN.CopyProfile(sourceProfile, profileName);
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.Format("Connection.ProfileCopied", profileName));
+        }
+
+        private void RenameConnectionProfile(string oldProfile)
+        {
+            string profileName = PromptForText(
+                Localization.T("Connection.RenameProfile"),
+                Localization.T("Connection.ProfileNamePrompt"),
+                oldProfile);
+            if (string.IsNullOrWhiteSpace(profileName)) return;
+
+            profileName = profileName.Trim();
+            if (string.Equals(profileName, oldProfile, StringComparison.OrdinalIgnoreCase)) return;
+            if (myN.GetProfileNames().Contains(profileName, StringComparer.OrdinalIgnoreCase))
+            {
+                string message = Localization.Format("Connection.ProfileExists", profileName);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Connection.RenameProfile"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            myN.setSettingINI();
+            myN.RenameProfile(oldProfile, profileName);
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.Format("Connection.ProfileRenamed", oldProfile, profileName));
+        }
+
+        private void DeleteConnectionProfile(string profileName)
+        {
+            DialogResult confirm = MessageBox.Show(
+                Localization.Format("Connection.ConfirmDeleteProfile", GetProfileDisplayName(profileName)),
+                Localization.T("Connection.DeleteProfile"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (confirm != DialogResult.Yes) return;
+
+            CloseAllConnectionsBeforeImport();
+            myN.DeleteProfile(profileName);
+            drawLists();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.Format("Connection.ProfileDeleted", GetProfileDisplayName(profileName)));
         }
 
         private bool IsConnectionOpen(int index)

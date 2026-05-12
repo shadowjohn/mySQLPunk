@@ -117,6 +117,76 @@ namespace mySQLPunk.entity
             SwitchProfile(normalized);
         }
 
+        public void CopyProfile(string sourceProfileName, string targetProfileName)
+        {
+            string source = NormalizeProfileName(sourceProfileName);
+            string target = NormalizeProfileName(targetProfileName);
+            if (string.Equals(target, DefaultProfileName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Default profile already exists.");
+            }
+            if (ProfileExists(target))
+            {
+                throw new InvalidOperationException("Profile already exists.");
+            }
+
+            Directory.CreateDirectory(GetProfilesDirectory());
+            string sourcePath = GetProfileReadPath(source);
+            string content = File.Exists(sourcePath) ? File.ReadAllText(sourcePath, Encoding.UTF8) : BuildEmptySettingsJson();
+            File.WriteAllText(GetProfileSettingPath(target), content, Encoding.UTF8);
+        }
+
+        public void RenameProfile(string oldProfileName, string newProfileName)
+        {
+            string oldName = NormalizeProfileName(oldProfileName);
+            string newName = NormalizeProfileName(newProfileName);
+            if (string.Equals(oldName, DefaultProfileName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Default profile cannot be renamed.");
+            }
+            if (string.Equals(newName, DefaultProfileName, StringComparison.OrdinalIgnoreCase) || ProfileExists(newName))
+            {
+                throw new InvalidOperationException("Profile already exists.");
+            }
+
+            string oldPath = GetProfileSettingPath(oldName);
+            string newPath = GetProfileSettingPath(newName);
+            Directory.CreateDirectory(GetProfilesDirectory());
+            if (!File.Exists(oldPath))
+            {
+                File.WriteAllText(oldPath, BuildEmptySettingsJson(), Encoding.UTF8);
+            }
+            File.Move(oldPath, newPath);
+
+            if (string.Equals(ActiveProfileName, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                ActiveProfileName = newName;
+                SaveActiveProfileName();
+            }
+        }
+
+        public void DeleteProfile(string profileName)
+        {
+            string normalized = NormalizeProfileName(profileName);
+            if (string.Equals(normalized, DefaultProfileName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Default profile cannot be deleted.");
+            }
+
+            string path = GetProfileSettingPath(normalized);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            if (string.Equals(ActiveProfileName, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                ActiveProfileName = DefaultProfileName;
+                SaveActiveProfileName();
+                getSettingINI();
+            }
+        }
+
         public void exportConnections(string path)
         {
             File.WriteAllText(path, BuildSettingsJson(), Encoding.UTF8);
@@ -171,6 +241,13 @@ namespace mySQLPunk.entity
             return Path.Combine(GetProfilesDirectory(), EncodeProfileFileName(profileName) + ".json");
         }
 
+        private string GetProfileReadPath(string profileName)
+        {
+            return string.Equals(profileName, DefaultProfileName, StringComparison.OrdinalIgnoreCase)
+                ? Path.Combine(my.pwd(), "setting.ini")
+                : GetProfileSettingPath(profileName);
+        }
+
         private string GetActiveProfilePath()
         {
             return Path.Combine(my.pwd(), "connection-profile.txt");
@@ -198,6 +275,13 @@ namespace mySQLPunk.entity
         {
             string name = (profileName ?? string.Empty).Trim();
             return string.IsNullOrWhiteSpace(name) ? DefaultProfileName : name;
+        }
+
+        private bool ProfileExists(string profileName)
+        {
+            string normalized = NormalizeProfileName(profileName);
+            if (string.Equals(normalized, DefaultProfileName, StringComparison.OrdinalIgnoreCase)) return true;
+            return File.Exists(GetProfileSettingPath(normalized));
         }
 
         private static string EncodeProfileFileName(string profileName)
