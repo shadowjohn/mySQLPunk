@@ -3104,6 +3104,13 @@ namespace mySQLPunk
                     builder.AppendLine(ddl.TrimEnd().TrimEnd(';') + ";");
                     builder.AppendLine();
                 }
+
+                string sqliteColumnComments = BuildSqliteColumnCommentsDump(db, databaseName, tableName);
+                if (!string.IsNullOrWhiteSpace(sqliteColumnComments))
+                {
+                    builder.AppendLine(sqliteColumnComments.TrimEnd());
+                    builder.AppendLine();
+                }
             }
 
             long total = db.CountRows(databaseName, tableName);
@@ -3138,6 +3145,53 @@ namespace mySQLPunk
                 }
 
                 copied += dataTable.Rows.Count;
+            }
+
+            return builder.ToString();
+        }
+
+        private static string BuildSqliteColumnCommentsDump(IDatabase db, string databaseName, string tableName)
+        {
+            if (!IsDumpProvider(db, "sqlite") || string.IsNullOrWhiteSpace(tableName)) return "";
+
+            DataTable columns;
+            try
+            {
+                columns = db.GetColumns(databaseName, tableName);
+            }
+            catch
+            {
+                return "";
+            }
+
+            if (columns == null || columns.Rows.Count == 0) return "";
+
+            List<string> inserts = new List<string>();
+            foreach (DataRow row in columns.Rows)
+            {
+                string columnName = FirstColumnValue(row, "name", "Name", "COLUMN_NAME", "column_name", "Field");
+                string comment = FirstColumnValue(row, "Comment", "comment");
+                if (string.IsNullOrWhiteSpace(columnName) || string.IsNullOrWhiteSpace(comment)) continue;
+
+                inserts.Add("INSERT OR REPLACE INTO " + QuoteSqliteIdentifier(my_sqlite.ColumnCommentTableName) +
+                            " (table_name, column_name, comment) VALUES (" +
+                            "'" + EscapeSqlLiteral(tableName) + "', " +
+                            "'" + EscapeSqlLiteral(columnName) + "', " +
+                            "'" + EscapeSqlLiteral(comment) + "');");
+            }
+
+            if (inserts.Count == 0) return "";
+
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("-- SQLite column comments sidecar metadata");
+            builder.AppendLine("CREATE TABLE IF NOT EXISTS " + QuoteSqliteIdentifier(my_sqlite.ColumnCommentTableName) + " (" +
+                               "table_name TEXT NOT NULL, " +
+                               "column_name TEXT NOT NULL, " +
+                               "comment TEXT NOT NULL, " +
+                               "PRIMARY KEY (table_name, column_name));");
+            foreach (string insert in inserts)
+            {
+                builder.AppendLine(insert);
             }
 
             return builder.ToString();

@@ -43,7 +43,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | 資料產生 | 可用 | Tables 群組可產生指定資料表的 INSERT SQL，可開到查詢視窗檢查，也可確認後逐筆直接寫入。 |
 | 命令列介面 | 可用 | 支援 MySQL、PostgreSQL、SQL Server、SQLite、Oracle 的 CLI 啟動指令；需本機已安裝對應客戶端工具。 |
 | Table/View 複製 | 可用 | 跨 provider 複製 Table/View；View SQL 無法安全轉換時會改用 table snapshot。 |
-| SQL Dump | 可用 | 支援多 provider Table dump；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
+| SQL Dump | 可用 | 支援多 provider Table dump；SQLite 欄位註解 sidecar metadata 會隨結構匯出；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
 
 ## 未完成功能與已知限制
 
@@ -92,7 +92,8 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 - **SQLite 欄位註解不支援 ✅ sidecar metadata 已補齊**
   - 現況：SQLite 本身沒有欄位註解語法，因此 mySQLPunk 會使用 `__mysqlpunk_column_comments` sidecar metadata table 保存欄位註解。
   - 完成內容：SQLite provider 讀取欄位時會合併 sidecar 註解；Table Designer 新增/修改/重建資料表與資料庫/資料表補註解流程都會寫入 sidecar metadata。
-  - 後續方向：跨工具匯出時若需要保留 SQLite 註解，可再把 sidecar metadata 納入 SQL Dump 或專用匯出格式。
+  - 匯出支援：SQL Dump 的結構匯出會附帶 sidecar table 建立語句與目前資料表的欄位註解 `INSERT OR REPLACE`，跨環境還原後可保留 mySQLPunk 欄位註解。
+  - 後續方向：若需要和其它 SQLite 工具交換欄位註解，可再定義專用匯出格式或轉換器。
 
 - **SpatiaLite extension 可能載入失敗 ✅ 診斷資訊已補齊**
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。
