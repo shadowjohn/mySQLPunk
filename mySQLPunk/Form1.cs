@@ -5879,6 +5879,11 @@ namespace mySQLPunk
             return "`" + (name ?? string.Empty).Replace("`", "``") + "`";
         }
 
+        private static string QuoteSqliteIdentifier(string name)
+        {
+            return "\"" + (name ?? string.Empty).Replace("\"", "\"\"") + "\"";
+        }
+
         private static string EscapeSqlServerName(string name)
         {
             return (name ?? string.Empty).Replace("]", "]]");
@@ -6947,12 +6952,6 @@ namespace mySQLPunk
                 return;
             }
 
-            if (target.Database is my_sqlite)
-            {
-                MessageBox.Show(Localization.T("Designer.AutoCommentsUnsupported"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
             string confirmKey = mode == AutoCommentMode.Overwrite ? "Database.AutoCommentsConfirmOverwrite" : "Database.AutoCommentsConfirm";
             if (MessageBox.Show(Localization.Format(confirmKey, target.DatabaseName), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             {
@@ -7091,7 +7090,25 @@ namespace mySQLPunk
             {
                 return BuildSqlServerAutoCommentSql(databaseName, tableName, columnName, comment);
             }
+            if (IsDumpProvider(db, "sqlite"))
+            {
+                return BuildSqliteAutoCommentSql(tableName, columnName, comment);
+            }
             return null;
+        }
+
+        private static string BuildSqliteAutoCommentSql(string tableName, string columnName, string comment)
+        {
+            return "CREATE TABLE IF NOT EXISTS " + QuoteSqliteIdentifier(my_sqlite.ColumnCommentTableName) + " (" +
+                   "table_name TEXT NOT NULL, " +
+                   "column_name TEXT NOT NULL, " +
+                   "comment TEXT NOT NULL, " +
+                   "PRIMARY KEY (table_name, column_name));" +
+                   "\r\nINSERT OR REPLACE INTO " + QuoteSqliteIdentifier(my_sqlite.ColumnCommentTableName) +
+                   " (table_name, column_name, comment) VALUES (" +
+                   "'" + EscapeSqlLiteral(tableName) + "', " +
+                   "'" + EscapeSqlLiteral(columnName) + "', " +
+                   "'" + EscapeSqlLiteral(comment ?? "") + "');";
         }
 
         private static string BuildMySqlAutoCommentSql(string databaseName, string tableName, DataRow row, string columnName, string comment)

@@ -11,6 +11,7 @@ namespace mySQLPunk.lib
 {
     public class my_sqlite : IDatabase
     {
+        public const string ColumnCommentTableName = "__mysqlpunk_column_comments";
         myinclude my = new myinclude();
         public SQLiteConnection MCT = null;
         public SQLiteCommand MC = null;
@@ -241,6 +242,7 @@ namespace mySQLPunk.lib
             DataTable dt = SelectSQL(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 + "AND name NOT LIKE 'sqlite_%' "
+                + "AND name <> '" + ColumnCommentTableName + "' "
                 + "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%');");
             // 從結果中再排除 FTS/RTree 影子表（名稱為 <virtual_table>_xxx）
             var virtualNames = GetVirtualTableNames();
@@ -267,7 +269,17 @@ namespace mySQLPunk.lib
         public DataTable GetColumns(string databaseName, string tableName)
         {
             string safeTable = tableName.Replace("'", "''");
-            return SelectSQL($"PRAGMA table_info('{safeTable}');");
+            DataTable columns = SelectSQL($"PRAGMA table_info('{safeTable}');");
+            if (!columns.Columns.Contains("Comment")) columns.Columns.Add("Comment");
+
+            Dictionary<string, string> comments = GetColumnComments(tableName);
+            foreach (DataRow row in columns.Rows)
+            {
+                string columnName = row["name"].ToString();
+                string comment;
+                row["Comment"] = comments.TryGetValue(columnName, out comment) ? comment : "";
+            }
+            return columns;
         }
 
         public DataTable GetTableStatus(string databaseName)
@@ -277,6 +289,7 @@ namespace mySQLPunk.lib
             DataTable tables = SelectSQL(
                 "SELECT name, sql FROM sqlite_master WHERE type='table' "
                 + "AND name NOT LIKE 'sqlite_%' "
+                + "AND name <> '" + ColumnCommentTableName + "' "
                 + "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%') "
                 + "ORDER BY name;");
             var virtualNames = GetVirtualTableNames();
@@ -467,6 +480,7 @@ namespace mySQLPunk.lib
         public DataTable GetCopyColumns(string databaseName, string tableName)
         {
             DataTable raw = SelectSQL("PRAGMA table_info(" + QuoteSqlite(tableName) + ");");
+            Dictionary<string, string> comments = GetColumnComments(tableName);
             DataTable dt = new DataTable();
             dt.Columns.Add("Name");
             dt.Columns.Add("DataType");
@@ -482,10 +496,40 @@ namespace mySQLPunk.lib
                 nr["Name"] = row["name"];
                 nr["DataType"] = row["type"];
                 nr["IsNullable"] = row["notnull"].ToString() == "1" ? "NO" : "YES";
+                string comment;
+                nr["Comment"] = comments.TryGetValue(row["name"].ToString(), out comment) ? comment : "";
                 nr["OrdinalPosition"] = Convert.ToInt32(row["cid"]) + 1;
                 dt.Rows.Add(nr);
             }
             return dt;
+        }
+
+        private Dictionary<string, string> GetColumnComments(string tableName)
+        {
+            Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(tableName)) return comments;
+
+            try
+            {
+                DataTable exists = SelectSQL("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='" + ColumnCommentTableName + "';");
+                if (exists.Rows.Count == 0 || Convert.ToInt64(exists.Rows[0][0]) <= 0) return comments;
+
+                DataTable rows = SelectSQL(
+                    "SELECT column_name, comment FROM " + QuoteSqlite(ColumnCommentTableName) +
+                    " WHERE table_name = '" + EscapeSqliteLiteral(tableName) + "';");
+                foreach (DataRow row in rows.Rows)
+                {
+                    string columnName = row["column_name"].ToString();
+                    if (string.IsNullOrWhiteSpace(columnName)) continue;
+                    comments[columnName] = row["comment"] == DBNull.Value ? "" : row["comment"].ToString();
+                }
+            }
+            catch
+            {
+                comments.Clear();
+            }
+
+            return comments;
         }
 
         public DataTable GetCopyIndexes(string databaseName, string tableName)
@@ -601,6 +645,11 @@ namespace mySQLPunk.lib
         }
 
         private static string QuoteSqlite(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+
+        private static string EscapeSqliteLiteral(string value)
+        {
+            return (value ?? "").Replace("'", "''");
+        }
 
         private static bool IsCopyNullable(DataRow row)
         {

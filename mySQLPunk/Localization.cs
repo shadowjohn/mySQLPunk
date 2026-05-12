@@ -498,7 +498,7 @@ namespace mySQLPunk
             Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
             Add("Designer.NoChangesDetected", "沒有偵測到變更。", "No changes detected.");
             Add("Designer.AutoCommentsUnavailable", "無法載入自動註解字典，請稍後再試。", "Cannot load the auto comment dictionary. Try again later.");
-            Add("Designer.AutoCommentsUnsupported", "SQLite 不支援欄位註解，無法直接補註解。", "SQLite does not support column comments, so comments cannot be filled directly.");
+            Add("Designer.AutoCommentsUnsupported", "目前連線類型不支援欄位註解，無法直接補註解。", "The current connection type does not support column comments, so comments cannot be filled directly.");
             Add("Designer.AutoCommentsApplied", "已補上 {0} 個欄位註解，請確認 SQL 預覽後儲存。", "Filled {0} column comments. Review the SQL preview, then save.");
             Add("Designer.AutoCommentsUpdated", "已更新 {0} 個欄位註解，請確認 SQL 預覽後儲存。", "Updated {0} column comments. Review the SQL preview, then save.");
             Add("Designer.AutoCommentsNoMatches", "沒有可補的空白欄位註解。", "There are no blank column comments to fill.");
@@ -509,7 +509,7 @@ namespace mySQLPunk
             Add("Designer.EnterTableNameInOptions", "請先在「選項」分頁輸入資料表名稱。", "Enter a table name on the Options tab first.");
             Add("Designer.AddAtLeastOneColumn", "請至少新增一個欄位。", "Add at least one column.");
             Add("Designer.KeepAtLeastOneColumn", "請至少保留一個欄位。", "Keep at least one column.");
-            Add("Designer.SqliteColumnCommentUnsupported", "SQLite 不支援欄位註解：{0}", "SQLite does not support column comments: {0}");
+            Add("Designer.SqliteColumnCommentUnsupported", "SQLite 欄位註解會保存到 mySQLPunk sidecar metadata：{0}", "SQLite column comments are saved to mySQLPunk sidecar metadata: {0}");
             Add("Designer.PrimaryKeyNeedsConstraintName", "PRIMARY KEY 修改需要資料庫特定 constraint 名稱：{0}", "PRIMARY KEY changes require a database-specific constraint name: {0}");
             Add("Designer.PrimaryKeyMissingColumns", "PRIMARY KEY 缺少欄位：{0}", "PRIMARY KEY is missing columns: {0}");
             Add("Designer.FullTextUnsupported", "此資料庫尚未支援 FULLTEXT 索引：{0}", "This database does not currently support FULLTEXT indexes: {0}");

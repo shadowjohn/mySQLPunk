@@ -32,13 +32,13 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，並支援切換多個連線設定檔。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | PostgreSQL | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分進階索引仍有限制。 |
-| SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；SQLite 本身不支援欄位註解。 |
+| SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；欄位註解以 mySQLPunk sidecar metadata table 保存。 |
 | SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DEFAULT constraint 與進階索引仍有限制。 |
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
 | SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、CSV 匯出、語法格式化、查詢歷史。 |
 | 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
 | Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；部分既有資料表修改與進階索引尚未完整支援。 |
-| 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 不支援欄位註解。 |
+| 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 會寫入 sidecar metadata table。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
 | 資料產生 | 可用 | Tables 群組可產生指定資料表的 INSERT SQL，可開到查詢視窗檢查，也可確認後逐筆直接寫入。 |
 | 命令列介面 | 可用 | 支援 MySQL、PostgreSQL、SQL Server、SQLite、Oracle 的 CLI 啟動指令；需本機已安裝對應客戶端工具。 |
@@ -89,9 +89,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
     - SQLite：資料庫為獨立檔案，操作時會顯示說明，提示直接建立新的 SQLite 連線或刪除對應 `.sqlite` 檔案。
   - 後續方向：若有需求可在 Oracle 連線中實作 `CREATE USER` 精靈，但需要密碼與 Tablespace 等額外資訊。
 
-- **SQLite 欄位註解不支援**
-  - 現況：SQLite 本身沒有欄位註解語法，Table Designer 與補註解流程會擋下。
-  - 後續方向：若需要 SQLite 註解，可另設 sidecar metadata table，但需先定義格式與匯出策略。
+- **SQLite 欄位註解不支援 ✅ sidecar metadata 已補齊**
+  - 現況：SQLite 本身沒有欄位註解語法，因此 mySQLPunk 會使用 `__mysqlpunk_column_comments` sidecar metadata table 保存欄位註解。
+  - 完成內容：SQLite provider 讀取欄位時會合併 sidecar 註解；Table Designer 新增/修改/重建資料表與資料庫/資料表補註解流程都會寫入 sidecar metadata。
+  - 後續方向：跨工具匯出時若需要保留 SQLite 註解，可再把 sidecar metadata 納入 SQL Dump 或專用匯出格式。
 
 - **SpatiaLite extension 可能載入失敗 ✅ 診斷資訊已補齊**
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。

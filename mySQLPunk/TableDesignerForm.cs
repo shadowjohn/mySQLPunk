@@ -716,15 +716,6 @@ namespace mySQLPunk
         {
             if (_isFillingAutoComments) return 0;
 
-            if (!IsNewTable && _db is my_sqlite)
-            {
-                if (showMessage)
-                {
-                    MessageBox.Show(Localization.T("Designer.AutoCommentsUnsupported"), Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                return 0;
-            }
-
             DataTable currentDt = dgvColumns?.DataSource as DataTable;
             if (currentDt == null) return 0;
 
@@ -1143,6 +1134,10 @@ namespace mySQLPunk
                 if (!stillExists)
                 {
                     statements.Add(BuildDropColumnStatement(oldName));
+                    if (_db is my_sqlite)
+                    {
+                        statements.Add(BuildSqliteDeleteColumnCommentStatement(_tableName, oldName));
+                    }
                 }
             }
 
@@ -1158,12 +1153,20 @@ namespace mySQLPunk
                 if (original == null)
                 {
                     statements.Add(BuildAddColumnStatement(current));
+                    if (_db is my_sqlite)
+                    {
+                        statements.AddRange(BuildSqliteColumnCommentStatements(_tableName, current));
+                    }
                     continue;
                 }
 
                 if (!oldName.Equals(columnName, StringComparison.Ordinal))
                 {
                     statements.Add(BuildRenameColumnStatement(oldName, columnName));
+                    if (_db is my_sqlite)
+                    {
+                        statements.Add(BuildSqliteDeleteColumnCommentStatement(_tableName, oldName));
+                    }
                 }
 
                 statements.AddRange(BuildAlterColumnStatements(original, current, columnName, unsupported));
@@ -1241,23 +1244,6 @@ namespace mySQLPunk
 
         private string BuildSqliteRebuildTableSql(DataTable currentDt)
         {
-            List<string> unsupported = new List<string>();
-            foreach (DataRow current in currentDt.Rows)
-            {
-                if (current.RowState == DataRowState.Deleted) continue;
-                string oldName = GetRowString(current, "_OldName").Trim();
-                DataRow original = FindOriginalColumn(oldName);
-                if (original != null && HasTextChanged(original, current, "Comment"))
-                {
-                    unsupported.Add(Localization.Format("Designer.SqliteColumnCommentUnsupported", GetRowString(current, "Name").Trim()));
-                }
-            }
-
-            if (unsupported.Count > 0)
-            {
-                return FormatUnsupportedChanges(unsupported);
-            }
-
             List<DataRow> currentColumns = new List<DataRow>();
             foreach (DataRow row in currentDt.Rows)
             {
@@ -1322,6 +1308,8 @@ namespace mySQLPunk
             {
                 statements.Add(indexStatement);
             }
+
+            statements.AddRange(BuildSqliteReplaceAllColumnCommentStatements(_tableName, currentDt));
 
             statements.Add("COMMIT;");
             statements.Add("PRAGMA foreign_keys=ON;");
@@ -1503,7 +1491,7 @@ namespace mySQLPunk
                 if (typeChanged || nullChanged || defaultChanged)
                     unsupported.Add("SQLite 修改既有欄位型別、NULL 或 DEFAULT 需要重建資料表：" + columnName);
                 if (commentChanged)
-                    unsupported.Add("SQLite 不支援欄位註解：" + columnName);
+                    statements.AddRange(BuildSqliteColumnCommentStatements(_tableName, current));
                 return statements;
             }
 
@@ -2036,7 +2024,12 @@ namespace mySQLPunk
         private List<string> BuildGenericCreateColumnCommentStatements(string tableName, DataTable currentDt)
         {
             List<string> statements = new List<string>();
-            if (currentDt == null || _db is my_sqlite) return statements;
+            if (currentDt == null) return statements;
+
+            if (_db is my_sqlite)
+            {
+                return BuildSqliteReplaceAllColumnCommentStatements(tableName, currentDt);
+            }
 
             foreach (DataRow row in currentDt.Rows)
             {
@@ -2060,6 +2053,71 @@ namespace mySQLPunk
             }
 
             return statements;
+        }
+
+        private List<string> BuildSqliteReplaceAllColumnCommentStatements(string tableName, DataTable currentDt)
+        {
+            List<string> statements = new List<string>();
+            if (currentDt == null || string.IsNullOrWhiteSpace(tableName)) return statements;
+
+            statements.Add(BuildSqliteEnsureColumnCommentTableStatement());
+            statements.Add("DELETE FROM " + QuoteDesignerIdentifier(my_sqlite.ColumnCommentTableName) +
+                           " WHERE table_name = " + EscapeSqlStringLiteral(tableName) + ";");
+
+            foreach (DataRow row in currentDt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                string columnName = GetRowString(row, "Name").Trim();
+                string comment = GetRowString(row, "Comment").Trim();
+                if (string.IsNullOrWhiteSpace(columnName) || string.IsNullOrWhiteSpace(comment)) continue;
+
+                statements.Add(BuildSqliteUpsertColumnCommentStatement(tableName, columnName, comment));
+            }
+
+            return statements;
+        }
+
+        private List<string> BuildSqliteColumnCommentStatements(string tableName, DataRow row)
+        {
+            List<string> statements = new List<string>();
+            if (row == null || string.IsNullOrWhiteSpace(tableName)) return statements;
+
+            string columnName = GetRowString(row, "Name").Trim();
+            if (string.IsNullOrWhiteSpace(columnName)) return statements;
+
+            statements.Add(BuildSqliteEnsureColumnCommentTableStatement());
+            string comment = GetRowString(row, "Comment").Trim();
+            statements.Add(string.IsNullOrWhiteSpace(comment)
+                ? BuildSqliteDeleteColumnCommentStatement(tableName, columnName)
+                : BuildSqliteUpsertColumnCommentStatement(tableName, columnName, comment));
+            return statements;
+        }
+
+        private string BuildSqliteEnsureColumnCommentTableStatement()
+        {
+            return "CREATE TABLE IF NOT EXISTS " + QuoteDesignerIdentifier(my_sqlite.ColumnCommentTableName) + " (" +
+                   "table_name TEXT NOT NULL, " +
+                   "column_name TEXT NOT NULL, " +
+                   "comment TEXT NOT NULL, " +
+                   "PRIMARY KEY (table_name, column_name)" +
+                   ");";
+        }
+
+        private string BuildSqliteUpsertColumnCommentStatement(string tableName, string columnName, string comment)
+        {
+            return "INSERT OR REPLACE INTO " + QuoteDesignerIdentifier(my_sqlite.ColumnCommentTableName) +
+                   " (table_name, column_name, comment) VALUES (" +
+                   EscapeSqlStringLiteral(tableName) + ", " +
+                   EscapeSqlStringLiteral(columnName) + ", " +
+                   EscapeSqlStringLiteral(comment) + ");";
+        }
+
+        private string BuildSqliteDeleteColumnCommentStatement(string tableName, string columnName)
+        {
+            return "DELETE FROM " + QuoteDesignerIdentifier(my_sqlite.ColumnCommentTableName) +
+                   " WHERE table_name = " + EscapeSqlStringLiteral(tableName) +
+                   " AND column_name = " + EscapeSqlStringLiteral(columnName) + ";";
         }
 
         private string BuildGenericColumnDefinition(DataRow row)
