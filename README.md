@@ -29,7 +29,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 | 功能 | 狀態 | 說明 |
 | --- | --- | --- |
-| 連線管理 | 可用 | 連線資訊儲存在 `setting.ini`。 |
+| 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，並支援切換多個連線設定檔。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | PostgreSQL | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分進階索引仍有限制。 |
 | SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；SQLite 本身不支援欄位註解。 |
@@ -59,10 +59,14 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
     - 右鍵選單支援「移至群組」、「移出群組」、「重新命名群組」、「刪除群組」。
     - 語系文字已補齊。
 
-- **多連線設定檔尚未支援**
+- **多連線設定檔 ✅ 已完成**
   - 觸發位置：連線根節點右鍵選單的「切換連線設定檔」。
-  - 現況：選單項目目前顯示為不可用。
-  - 後續方向：設計 profile schema、UI 切換流程，以及既有 `setting.ini` 相容策略。
+  - 完成內容：
+    - 保留既有 `setting.ini` 作為預設設定檔，不破壞舊版連線資料。
+    - 新增的連線設定檔會儲存在 `connection_profiles/*.json`，目前作用中的設定檔記錄於 `connection-profile.txt`。
+    - 右鍵選單可查看目前設定檔、切換既有設定檔，或新增空白設定檔並立即切換。
+    - 切換設定檔前會先儲存目前設定並關閉已開啟的連線，避免跨 profile 共用舊連線狀態。
+  - 後續方向：若使用者需要，可再補「重新命名 / 刪除 / 複製目前設定檔」等進階管理功能。
 
 ### Provider 與資料庫操作限制
 
@@ -155,8 +159,5 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 - 多人共同維護時，開工前先執行 `git pull --ff-only origin master`。
 - 修改完成後先建置或執行對應 smoke test，再 commit。
-- Commit message 使用繁體中文，並遵守 Conventional Commits：
-  - 例：`feat(comment): 新增補註解模式選擇`
-  - body 建議包含「原因 / 調整 / 影響」。
 - Commit 後推送到遠端，避免本機進度落後。
 - 修完 README 中的待辦或限制時，請同步更新本檔案狀態。

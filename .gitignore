@@ -353,4 +353,6 @@ MigrationBackup/
 .ionide/
 /history.md
 setting.ini
+connection-profile.txt
+connection_profiles/
 *.ini

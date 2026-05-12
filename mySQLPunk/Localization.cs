@@ -239,7 +239,13 @@ namespace mySQLPunk
             Add("Connection.Shared", "連線分享檔已建立。密碼不會寫入分享檔。", "Connection share file created. Password is not included.");
             Add("Connection.ShareFailed", "分享連線失敗：{0}", "Share connection failed: {0}");
             Add("Connection.Refreshed", "連線已重新整理：{0}", "Connection refreshed: {0}");
-            Add("Connection.ProfileUnavailable", "此專案目前尚未支援多連線設定檔。", "This project does not support multiple connection profiles yet.");
+            Add("Connection.DefaultProfile", "預設設定檔", "Default Profile");
+            Add("Connection.CurrentProfileName", "目前設定檔：{0}", "Current Profile: {0}");
+            Add("Connection.NewProfile", "新增連線設定檔...", "New Connection Profile...");
+            Add("Connection.ProfileNamePrompt", "請輸入設定檔名稱：", "Enter a profile name:");
+            Add("Connection.ProfileExists", "連線設定檔已存在：{0}", "Connection profile already exists: {0}");
+            Add("Connection.ProfileCreated", "已建立並切換連線設定檔：{0}", "Connection profile created and switched: {0}");
+            Add("Connection.ProfileSwitched", "已切換連線設定檔：{0}", "Connection profile switched: {0}");
             Add("Connection.CommandLineUnavailable", "命令列介面目前尚未支援此連線類型。", "Command line interface is not supported for this connection type yet.");
             Add("Connection.CommandLineOpened", "已開啟命令列介面。", "Command line interface opened.");
             Add("Connection.CommandLineOpenFailed", "開啟命令列介面失敗：{0}", "Open command line interface failed: {0}");

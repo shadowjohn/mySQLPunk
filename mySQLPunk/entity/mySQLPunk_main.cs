@@ -13,14 +13,16 @@ namespace mySQLPunk.entity
 {
     class mySQLPunk_main
     {
+        public const string DefaultProfileName = "default";
         myinclude my = new myinclude();
-        private string the_code = "3WAAwesome";
         public List<Dictionary<string, object>> connections = new List<Dictionary<string, object>>();
         public List<string> groups = new List<string>();
+        public string ActiveProfileName { get; private set; } = DefaultProfileName;
 
         public void getSettingINI()
         {
-            string setting_path = my.pwd() + "\\setting.ini";
+            LoadActiveProfileName();
+            string setting_path = GetSettingPath();
             if (!my.is_file(setting_path))
             {
                 my.file_put_contents(setting_path, "");
@@ -65,8 +67,54 @@ namespace mySQLPunk.entity
 
         public void setSettingINI()
         {
-            string setting_path = my.pwd() + "\\setting.ini";
+            string setting_path = GetSettingPath();
             my.file_put_contents(setting_path, BuildSettingsJson());
+        }
+
+        public List<string> GetProfileNames()
+        {
+            var result = new List<string> { DefaultProfileName };
+            string dir = GetProfilesDirectory();
+            if (Directory.Exists(dir))
+            {
+                foreach (string file in Directory.GetFiles(dir, "*.json"))
+                {
+                    string name = DecodeProfileFileName(Path.GetFileNameWithoutExtension(file));
+                    if (!string.IsNullOrWhiteSpace(name) &&
+                        !result.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        result.Add(name);
+                    }
+                }
+            }
+
+            return result.OrderBy(n => n == DefaultProfileName ? "" : n, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        public void SwitchProfile(string profileName)
+        {
+            string normalized = NormalizeProfileName(profileName);
+            ActiveProfileName = normalized;
+            SaveActiveProfileName();
+            getSettingINI();
+        }
+
+        public void CreateProfile(string profileName)
+        {
+            string normalized = NormalizeProfileName(profileName);
+            if (string.Equals(normalized, DefaultProfileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(GetProfilesDirectory());
+            string path = GetProfileSettingPath(normalized);
+            if (!File.Exists(path))
+            {
+                File.WriteAllText(path, BuildEmptySettingsJson(), Encoding.UTF8);
+            }
+
+            SwitchProfile(normalized);
         }
 
         public void exportConnections(string path)
@@ -100,6 +148,77 @@ namespace mySQLPunk.entity
                     }
             }
             setSettingINI();
+        }
+
+        private string GetSettingPath()
+        {
+            if (string.Equals(ActiveProfileName, DefaultProfileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.Combine(my.pwd(), "setting.ini");
+            }
+
+            Directory.CreateDirectory(GetProfilesDirectory());
+            return GetProfileSettingPath(ActiveProfileName);
+        }
+
+        private string GetProfilesDirectory()
+        {
+            return Path.Combine(my.pwd(), "connection_profiles");
+        }
+
+        private string GetProfileSettingPath(string profileName)
+        {
+            return Path.Combine(GetProfilesDirectory(), EncodeProfileFileName(profileName) + ".json");
+        }
+
+        private string GetActiveProfilePath()
+        {
+            return Path.Combine(my.pwd(), "connection-profile.txt");
+        }
+
+        private void LoadActiveProfileName()
+        {
+            string path = GetActiveProfilePath();
+            if (!File.Exists(path))
+            {
+                ActiveProfileName = DefaultProfileName;
+                return;
+            }
+
+            string name = File.ReadAllText(path, Encoding.UTF8).Trim();
+            ActiveProfileName = NormalizeProfileName(name);
+        }
+
+        private void SaveActiveProfileName()
+        {
+            File.WriteAllText(GetActiveProfilePath(), ActiveProfileName, Encoding.UTF8);
+        }
+
+        private static string NormalizeProfileName(string profileName)
+        {
+            string name = (profileName ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(name) ? DefaultProfileName : name;
+        }
+
+        private static string EncodeProfileFileName(string profileName)
+        {
+            return Uri.EscapeDataString(NormalizeProfileName(profileName));
+        }
+
+        private static string DecodeProfileFileName(string fileName)
+        {
+            try { return Uri.UnescapeDataString(fileName ?? string.Empty); }
+            catch { return fileName ?? string.Empty; }
+        }
+
+        private static string BuildEmptySettingsJson()
+        {
+            var root = new
+            {
+                connections = new object[0],
+                groups = new object[0]
+            };
+            return JsonConvert.SerializeObject(root, Formatting.Indented);
         }
 
         private string BuildSettingsJson()

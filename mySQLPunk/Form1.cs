@@ -7305,10 +7305,7 @@ namespace mySQLPunk
             menu.Items.Add(openItem);
 
             ToolStripMenuItem profileItem = new ToolStripMenuItem(Localization.T("Menu.ConnectionProfile"));
-            ToolStripMenuItem currentProfileItem = new ToolStripMenuItem(Localization.T("Menu.CurrentProfile"));
-            currentProfileItem.Enabled = false;
-            profileItem.DropDownItems.Add(currentProfileItem);
-            profileItem.ToolTipText = Localization.T("Connection.ProfileUnavailable");
+            AddConnectionProfileMenuItems(profileItem);
             menu.Items.Add(profileItem);
 
             menu.Items.Add(new ToolStripSeparator());
@@ -7393,6 +7390,75 @@ namespace mySQLPunk
             refreshItem.Enabled = isConnected;
             refreshItem.Click += (s, ev) => RefreshConnectionDatabaseNodes(node);
             menu.Items.Add(refreshItem);
+        }
+
+        private void AddConnectionProfileMenuItems(ToolStripMenuItem profileItem)
+        {
+            string activeProfile = myN.ActiveProfileName;
+            ToolStripMenuItem currentProfileItem = new ToolStripMenuItem(
+                Localization.Format("Connection.CurrentProfileName", GetProfileDisplayName(activeProfile)));
+            currentProfileItem.Enabled = false;
+            profileItem.DropDownItems.Add(currentProfileItem);
+            profileItem.DropDownItems.Add(new ToolStripSeparator());
+
+            foreach (string profileName in myN.GetProfileNames())
+            {
+                ToolStripMenuItem item = new ToolStripMenuItem(GetProfileDisplayName(profileName));
+                item.Checked = string.Equals(profileName, activeProfile, StringComparison.OrdinalIgnoreCase);
+                string targetProfile = profileName;
+                item.Click += (s, ev) => SwitchConnectionProfile(targetProfile);
+                profileItem.DropDownItems.Add(item);
+            }
+
+            profileItem.DropDownItems.Add(new ToolStripSeparator());
+            ToolStripMenuItem newProfileItem = new ToolStripMenuItem(Localization.T("Connection.NewProfile"));
+            newProfileItem.Click += (s, ev) => CreateConnectionProfile();
+            profileItem.DropDownItems.Add(newProfileItem);
+        }
+
+        private string GetProfileDisplayName(string profileName)
+        {
+            return string.Equals(profileName, mySQLPunk_main.DefaultProfileName, StringComparison.OrdinalIgnoreCase)
+                ? Localization.T("Connection.DefaultProfile")
+                : profileName;
+        }
+
+        private void SwitchConnectionProfile(string profileName)
+        {
+            if (string.IsNullOrWhiteSpace(profileName)) return;
+            if (string.Equals(profileName, myN.ActiveProfileName, StringComparison.OrdinalIgnoreCase)) return;
+
+            myN.setSettingINI();
+            CloseAllConnectionsBeforeImport();
+            myN.SwitchProfile(profileName);
+            drawLists();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.Format("Connection.ProfileSwitched", GetProfileDisplayName(profileName)));
+        }
+
+        private void CreateConnectionProfile()
+        {
+            string profileName = PromptForText(
+                Localization.T("Connection.NewProfile"),
+                Localization.T("Connection.ProfileNamePrompt"),
+                "");
+            if (string.IsNullOrWhiteSpace(profileName)) return;
+
+            profileName = profileName.Trim();
+            if (myN.GetProfileNames().Contains(profileName, StringComparer.OrdinalIgnoreCase))
+            {
+                string message = Localization.Format("Connection.ProfileExists", profileName);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Connection.NewProfile"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            myN.setSettingINI();
+            CloseAllConnectionsBeforeImport();
+            myN.CreateProfile(profileName);
+            drawLists();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.Format("Connection.ProfileCreated", profileName));
         }
 
         private bool IsConnectionOpen(int index)
