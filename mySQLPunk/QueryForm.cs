@@ -34,6 +34,7 @@ namespace mySQLPunk
         private Form1 _mainHost;
         private bool _isDocked;
         private bool _isTableDataMode; 
+        private bool _isNoPrimaryKeyReadOnlyMode;
 
         // 分頁相關
         private int _pageSize = 1000;
@@ -230,13 +231,13 @@ namespace mySQLPunk
                 }
                 this.Text = $"{_databaseName}.{GetTableNameFromSql()} - {Localization.T("Query.TableData")}";
                 
-                dgvResults.ReadOnly = false;
-                dgvResults.AllowUserToAddRows = true;
-                dgvResults.AllowUserToDeleteRows = true;
+                _isNoPrimaryKeyReadOnlyMode = false;
+                ApplyTableDataEditability();
 
             }
             else
             {
+                _isNoPrimaryKeyReadOnlyMode = false;
                 if (split != null) split.Panel1Collapsed = false;
             }
         }
@@ -1060,11 +1061,11 @@ namespace mySQLPunk
                 PrepareTableDataForEditing(dt);
 
                 sw.Stop();
-                dgvResults.ReadOnly = false;
                 dgvResults.DataSource = dt;
                 AutoResizeColumns(dgvResults);
                 tsBtnExport.Enabled = dt.Rows.Count > 0;
                 UpdateStatus(BuildQueryStatus(dt.Rows.Count, sw.ElapsedMilliseconds));
+                ApplyTableDataEditability();
                 UpdatePaginationUI();
             }
             catch (OperationCanceledException)
@@ -1234,11 +1235,20 @@ namespace mySQLPunk
                     }
                     else
                     {
-                        dgvResults.ReadOnly = !_isTableDataMode;
                         dgvResults.DataSource = dt;
                         AutoResizeColumns(dgvResults);
                         tsBtnExport.Enabled = dt.Rows.Count > 0;
                         UpdateStatus(status);
+                        if (_isTableDataMode)
+                        {
+                            ApplyTableDataEditability();
+                        }
+                        else
+                        {
+                            dgvResults.ReadOnly = true;
+                            dgvResults.AllowUserToAddRows = false;
+                            dgvResults.AllowUserToDeleteRows = false;
+                        }
                     }
                     _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, dt.Rows.Count, true);
                 }
@@ -1295,6 +1305,7 @@ namespace mySQLPunk
                     tsBtnCancel.Enabled = false;
                     tsBtnRefresh.Enabled = true;
                     btnDataRefresh.Enabled = true;
+                    if (_isTableDataMode) ApplyTableDataEditability();
                 }
 
                 CancellationTokenSource cts = _cts;
@@ -1586,12 +1597,12 @@ namespace mySQLPunk
             SetResultsMenuItemEnabled(menu, "viewBlobHex", hasBlobValue);
             SetResultsMenuItemEnabled(menu, "copyBlobHex", hasBlobValue);
             SetResultsMenuItemEnabled(menu, "saveBlobFile", hasBlobValue);
-            SetResultsMenuItemEnabled(menu, "importBlobFile", canImportBlob);
+            SetResultsMenuItemEnabled(menu, "importBlobFile", canImportBlob && CanEditTableData());
             SetResultsMenuItemEnabled(menu, "copyGeometryWkt", canCopyGeometryWkt);
             SetResultsMenuItemEnabled(menu, "copyWktGeometrySql", canCopyWktGeometrySql);
-            SetResultsMenuItemEnabled(menu, "addRow", dgvResults != null && dgvResults.DataSource is DataTable);
-            SetResultsMenuItemEnabled(menu, "deleteRow", GetSelectedResultRows().Count > 0);
-            SetResultsMenuItemEnabled(menu, "saveRows", dgvResults != null && dgvResults.DataSource is DataTable);
+            SetResultsMenuItemEnabled(menu, "addRow", CanEditTableData() && dgvResults != null && dgvResults.DataSource is DataTable);
+            SetResultsMenuItemEnabled(menu, "deleteRow", CanEditTableData() && GetSelectedResultRows().Count > 0);
+            SetResultsMenuItemEnabled(menu, "saveRows", CanEditTableData() && dgvResults != null && dgvResults.DataSource is DataTable);
 
             bool showBlobTools = isBinaryCell || hasBlobValue;
             if (resultsBinarySeparator != null) resultsBinarySeparator.Visible = showBlobTools;
@@ -2165,6 +2176,12 @@ namespace mySQLPunk
                 return;
             }
 
+            if (!CanEditTableData())
+            {
+                ShowNoPrimaryKeyReadOnlyMessage();
+                return;
+            }
+
             DataTable dt = dgvResults.DataSource as DataTable;
             if (dt == null)
             {
@@ -2230,6 +2247,7 @@ namespace mySQLPunk
                     btnDataApply.Enabled = true;
                     tsBtnRefresh.Enabled = true;
                     btnDataRefresh.Enabled = true;
+                    ApplyTableDataEditability();
                     if (txtPageSize != null) txtPageSize.Enabled = true;
                     UpdatePaginationUI();
                 }
@@ -2255,6 +2273,61 @@ namespace mySQLPunk
             {
                 return false;
             }
+        }
+
+        private bool CanEditTableData()
+        {
+            return _isTableDataMode && !_isNoPrimaryKeyReadOnlyMode;
+        }
+
+        private bool ShouldOpenNoPrimaryKeyAsReadOnly(string tableName)
+        {
+            if (!TableEditSettings.NoPrimaryKeyReadOnly) return false;
+            if (string.IsNullOrWhiteSpace(tableName) || tableName == "Table") return false;
+
+            try
+            {
+                List<TableColumnInfo> columns = GetTableColumns(tableName);
+                return columns.Count > 0 && !columns.Any(c => c.IsPrimaryKey);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void ApplyTableDataEditability()
+        {
+            bool editable = CanEditTableData();
+            if (dgvResults != null)
+            {
+                dgvResults.ReadOnly = !editable;
+                dgvResults.AllowUserToAddRows = editable;
+                dgvResults.AllowUserToDeleteRows = editable;
+            }
+
+            if (tsBtnSave != null) tsBtnSave.Enabled = editable;
+            if (tsBtnAdd != null) tsBtnAdd.Enabled = editable;
+            if (tsBtnDelete != null) tsBtnDelete.Enabled = editable;
+            if (btnDataAdd != null) btnDataAdd.Enabled = editable;
+            if (btnDataDelete != null) btnDataDelete.Enabled = editable;
+            if (btnDataApply != null) btnDataApply.Enabled = editable;
+            RefreshResultsContextMenu();
+
+            if (_isNoPrimaryKeyReadOnlyMode)
+            {
+                UpdateStatus(Localization.T("Query.NoPrimaryKeyReadOnlyStatus"));
+            }
+        }
+
+        private void ShowNoPrimaryKeyReadOnlyMessage()
+        {
+            UpdateStatus(Localization.T("Query.NoPrimaryKeyReadOnlyStatus"));
+            MessageBox.Show(
+                Localization.T("Query.NoPrimaryKeyReadOnlyMessage"),
+                Localization.T("Query.NoPrimaryKeySaveWarningTitle"),
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
         private static bool HasModifiedOrDeletedRows(DataTable changes)
@@ -2619,6 +2692,12 @@ namespace mySQLPunk
 
         private void AddNewRow()
         {
+            if (!CanEditTableData())
+            {
+                ShowNoPrimaryKeyReadOnlyMessage();
+                return;
+            }
+
             if (dgvResults.DataSource is DataTable dt)
             {
                 PrepareTableDataForEditing(dt);
@@ -2630,6 +2709,7 @@ namespace mySQLPunk
         {
             if (!_isTableDataMode || dt == null) return;
 
+            _isNoPrimaryKeyReadOnlyMode = false;
             string tableName = GetTableNameFromSql();
             if (string.IsNullOrWhiteSpace(tableName) || tableName == "Table") return;
 
@@ -2637,10 +2717,18 @@ namespace mySQLPunk
             {
                 dataColumn.AllowDBNull = true;
             }
+
+            _isNoPrimaryKeyReadOnlyMode = ShouldOpenNoPrimaryKeyAsReadOnly(tableName);
         }
 
         private void DeleteSelectedRows()
         {
+            if (!CanEditTableData())
+            {
+                ShowNoPrimaryKeyReadOnlyMessage();
+                return;
+            }
+
             if (dgvResults.SelectedRows.Count > 0)
             {
                 foreach (DataGridViewRow row in dgvResults.SelectedRows)

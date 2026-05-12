@@ -14,6 +14,7 @@ namespace mySQLPunk
         private RadioButton lightThemeRadio;
         private RadioButton darkThemeRadio;
         private ComboBox languageCombo;
+        private CheckBox noPrimaryKeyReadOnlyCheckBox;
         private ThemePreviewControl lightPreview;
         private ThemePreviewControl darkPreview;
         private readonly Button okButton;
@@ -97,6 +98,7 @@ namespace mySQLPunk
             okButton.Click += (s, e) =>
             {
                 SaveCliPathSettings();
+                SaveTableEditSettings();
                 UpdateSelection();
             };
 
@@ -202,6 +204,14 @@ namespace mySQLPunk
                 Location = new Point(18, 260),
                 MaximumSize = new Size(600, 0)
             };
+            noPrimaryKeyReadOnlyCheckBox = new CheckBox
+            {
+                Text = Localization.T("Options.NoPrimaryKeyReadOnly"),
+                AutoSize = true,
+                Checked = TableEditSettings.NoPrimaryKeyReadOnly,
+                Location = new Point(105, 300),
+                MaximumSize = new Size(600, 0)
+            };
 
             lightThemeRadio.CheckedChanged += (s, e) => UpdateSelection();
             darkThemeRadio.CheckedChanged += (s, e) => UpdateSelection();
@@ -218,6 +228,7 @@ namespace mySQLPunk
             contentPanel.Controls.Add(languageLabel);
             contentPanel.Controls.Add(languageCombo);
             contentPanel.Controls.Add(noteLabel);
+            contentPanel.Controls.Add(noPrimaryKeyReadOnlyCheckBox);
         }
 
         private void RenderEnvironmentPage()
@@ -299,6 +310,13 @@ namespace mySQLPunk
                 CliPathSettings.SetPath(pair.Key, pair.Value.Text);
             }
             if (cliPathInputs.Count > 0) CliPathSettings.Save();
+        }
+
+        private void SaveTableEditSettings()
+        {
+            if (noPrimaryKeyReadOnlyCheckBox == null) return;
+            TableEditSettings.NoPrimaryKeyReadOnly = noPrimaryKeyReadOnlyCheckBox.Checked;
+            TableEditSettings.Save();
         }
 
         private void UpdateSelection()
@@ -506,6 +524,75 @@ namespace mySQLPunk
         private static string GetSettingsFilePath()
         {
             return Path.Combine(Application.UserAppDataPath, "cli-paths.json");
+        }
+    }
+
+    public static class TableEditSettings
+    {
+        private static bool loaded;
+        private static bool noPrimaryKeyReadOnly;
+
+        public static bool NoPrimaryKeyReadOnly
+        {
+            get
+            {
+                EnsureLoaded();
+                return noPrimaryKeyReadOnly;
+            }
+            set
+            {
+                EnsureLoaded();
+                noPrimaryKeyReadOnly = value;
+            }
+        }
+
+        public static void Save()
+        {
+            EnsureLoaded();
+            try
+            {
+                string path = GetSettingsFilePath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, JsonConvert.SerializeObject(new SettingsData
+                {
+                    NoPrimaryKeyReadOnly = noPrimaryKeyReadOnly
+                }, Formatting.Indented));
+            }
+            catch
+            {
+            }
+        }
+
+        private static void EnsureLoaded()
+        {
+            if (loaded) return;
+            loaded = true;
+
+            try
+            {
+                string path = GetSettingsFilePath();
+                if (!File.Exists(path)) return;
+
+                SettingsData data = JsonConvert.DeserializeObject<SettingsData>(File.ReadAllText(path));
+                if (data != null)
+                {
+                    noPrimaryKeyReadOnly = data.NoPrimaryKeyReadOnly;
+                }
+            }
+            catch
+            {
+                noPrimaryKeyReadOnly = false;
+            }
+        }
+
+        private static string GetSettingsFilePath()
+        {
+            return Path.Combine(Application.UserAppDataPath, "table-edit-settings.json");
+        }
+
+        private class SettingsData
+        {
+            public bool NoPrimaryKeyReadOnly { get; set; }
         }
     }
 }

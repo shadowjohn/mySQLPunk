@@ -439,6 +439,8 @@ namespace mySQLPunk
             Add("Query.ConfirmSaveTitle", "確認儲存", "Confirm Save");
             Add("Query.NoPrimaryKeySaveWarningTitle", "資料表沒有 Primary Key", "Table Has No Primary Key");
             Add("Query.NoPrimaryKeySaveWarning", "目前資料表沒有 Primary Key，修改或刪除資料時會使用整列欄位組成 WHERE 條件。若資料列已被其他人修改，或包含 BLOB、浮點、大文字欄位，可能會更新失敗或影響非預期資料。仍要繼續儲存嗎？", "This table has no primary key. Updates and deletes will use the full row as the WHERE condition. If the row changed elsewhere, or contains BLOB, floating-point, or large text columns, saving may fail or affect unexpected data. Continue saving?");
+            Add("Query.NoPrimaryKeyReadOnlyStatus", "此資料表沒有 Primary Key，已依選項以唯讀模式開啟。", "This table has no primary key and was opened read-only by option.");
+            Add("Query.NoPrimaryKeyReadOnlyMessage", "此資料表沒有 Primary Key，目前已依選項設為唯讀，無法新增、修改、刪除或儲存。", "This table has no primary key and is read-only by option. Insert, update, delete, and save are disabled.");
             Add("Query.SavingChanges", "正在儲存變更...", "Saving changes...");
             Add("Query.SavedChangesStatus", "已儲存。新增：{0}，修改：{1}，刪除：{2}", "Saved. Inserted: {0}, Updated: {1}, Deleted: {2}");
             Add("Query.DataSaved", "資料已儲存。", "Data saved.");
@@ -545,6 +547,7 @@ namespace mySQLPunk
             Add("Options.Environment", "環境", "Environment");
             Add("Options.Advanced", "進階", "Advanced");
             Add("Options.RestartNote", "* 部分已開啟視窗可能需要重新開啟才能完整套用。", "* Some open windows may need to be reopened to fully apply changes.");
+            Add("Options.NoPrimaryKeyReadOnly", "沒有 Primary Key 的資料表以唯讀模式開啟", "Open tables without a primary key as read-only");
             Add("Options.CliPathHint", "可指定各資料庫命令列工具的位置。留空時會使用 PATH，SQLite 會優先使用內建 sqlite3.exe。", "Set database CLI executable paths. Leave blank to use PATH; SQLite uses the bundled sqlite3.exe first.");
             Add("Options.CliPathMySql", "MySQL:", "MySQL:");
             Add("Options.CliPathPostgreSql", "PostgreSQL:", "PostgreSQL:");

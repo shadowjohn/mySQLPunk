@@ -5299,7 +5299,33 @@ namespace mySQLPunk
             AddOtherToolRow(dt, "Functions", "Ready", GetDatabaseFunctions(db, dbName).Rows.Count.ToString());
             AddOtherToolRow(dt, "Events", "Ready", GetDatabaseEvents(db, dbName).Rows.Count.ToString());
             AddOtherToolRow(dt, "Backup Source", "Ready", GetBackupSourceDescription(db, connInfo));
+            if (db is my_sqlite sqlite)
+            {
+                AddSpatiaLiteDiagnosticsRows(dt, sqlite);
+            }
             return dt;
+        }
+
+        private void AddSpatiaLiteDiagnosticsRows(DataTable dt, my_sqlite sqlite)
+        {
+            string runtimeDir = my_sqlite.GetSpatiaLiteRuntimeDir();
+            string dllPath = Path.Combine(runtimeDir, "mod_spatialite.dll");
+            AddOtherToolRow(dt, "SpatiaLite Runtime", Directory.Exists(runtimeDir) ? "Ready" : "Warning", runtimeDir);
+            AddOtherToolRow(dt, "SpatiaLite DLL", File.Exists(dllPath) ? "Ready" : "Warning", dllPath);
+            AddOtherToolRow(dt, "SpatiaLite Loaded", sqlite.SpatiaLiteEnabled ? "Ready" : "Warning", sqlite.SpatiaLiteEnabled ? "Extension loaded" : sqlite.SpatiaLiteLoadError);
+
+            if (!sqlite.SpatiaLiteEnabled) return;
+
+            try
+            {
+                DataTable version = sqlite.SelectSQL("SELECT spatialite_version() AS Version");
+                string versionText = version.Rows.Count > 0 ? version.Rows[0]["Version"].ToString() : string.Empty;
+                AddOtherToolRow(dt, "SpatiaLite Version", string.IsNullOrWhiteSpace(versionText) ? "Warning" : "Ready", versionText);
+            }
+            catch (Exception ex)
+            {
+                AddOtherToolRow(dt, "SpatiaLite Version", "Warning", ex.Message);
+            }
         }
 
         private DataTable BuildProviderCapabilitiesTool(IDatabase db, string dbName)

@@ -36,7 +36,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DEFAULT constraint 與進階索引仍有限制。 |
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
 | SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、CSV 匯出、語法格式化、查詢歷史。 |
-| 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；若沒有 Primary Key，更新/刪除前會顯示風險警告。 |
+| 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
 | Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；部分既有資料表修改與進階索引尚未完整支援。 |
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 不支援欄位註解。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
@@ -93,10 +93,12 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 現況：SQLite 本身沒有欄位註解語法，Table Designer 與補註解流程會擋下。
   - 後續方向：若需要 SQLite 註解，可另設 sidecar metadata table，但需先定義格式與匯出策略。
 
-- **SpatiaLite extension 可能載入失敗 ✅ 降級行為已改善**
+- **SpatiaLite extension 可能載入失敗 ✅ 診斷資訊已補齊**
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。
-  - 完成內容：載入失敗訊息已改用語系化字串（`Connection.SpatiaLiteLoadFailed`），並同步更新狀態列，降級行為更清楚。
-  - 後續方向：UI 診斷工具（顯示 extension 路徑、版本等）。
+  - 完成內容：
+    - 載入失敗訊息已改用語系化字串（`Connection.SpatiaLiteLoadFailed`），並同步更新狀態列，降級行為更清楚。
+    - `其它 > 連線診斷` 會顯示 SpatiaLite runtime 目錄、`mod_spatialite.dll` 路徑、載入狀態與版本資訊。
+  - 後續方向：若需要更完整的環境修復流程，可再加入一鍵重建 runtime 或下載指引。
 
 ### Table Designer 限制
 
@@ -118,10 +120,11 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 ### 資料瀏覽與儲存限制
 
-- **沒有 Primary Key 的資料表儲存風險較高**
+- **沒有 Primary Key 的資料表儲存風險較高 ✅ 唯讀選項已補齊**
   - 現況：儲存更新/刪除時，若沒有 Primary Key，會先顯示風險警告；繼續儲存時仍會用可用欄位建立 WHERE 條件。
+  - 完成內容：`選項 > 一般` 新增「沒有 Primary Key 的資料表以唯讀模式開啟」。啟用後，開啟無 Primary Key 的資料表會自動停用新增、刪除與儲存操作，並在狀態列提示原因。
   - 風險：資料列被其他人改過，或欄位包含 BLOB/浮點/大文字時，WHERE 可能不穩定。
-  - 後續方向：視使用者回饋決定是否提供「沒有 Primary Key 時唯讀」的選項。
+  - 後續方向：若仍需要編輯無 Primary Key 資料表，可再評估更細的 provider-specific optimistic locking。
 
 - **BLOB/geometry 欄位操作仍有部分限制**
   - 現況：`byte[]` 欄位在結果表格中會先嘗試顯示為 `[Geometry] WKT`，無法解析時才顯示 `[BLOB n bytes] 0x...`；右鍵可檢視十六進位、複製 Hex、匯出檔案，在資料表資料模式可匯入檔案寫回目前 BLOB 欄位，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
