@@ -8390,6 +8390,14 @@ namespace mySQLPunk
                 return;
             }
 
+            if (!ApplyTemporaryCliPasswordIfNeeded(conn))
+            {
+                string message = Localization.T("Connection.CliTemporaryPasswordCancelled");
+                UpdateMainStatus(message);
+                return;
+            }
+            cliLaunch = BuildDatabaseCommandLineLaunch(conn);
+
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo("cmd.exe");
@@ -8408,6 +8416,23 @@ namespace mySQLPunk
                 UpdateMainStatus(message);
                 MessageBox.Show(message, Localization.T("Tool.CommandLine"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private bool ApplyTemporaryCliPasswordIfNeeded(Dictionary<string, object> conn)
+        {
+            if (!ShouldPromptForTemporaryCliPassword(conn)) return true;
+
+            string password = PromptForText(
+                Localization.T("Tool.CommandLine"),
+                Localization.T("Connection.CliTemporaryPasswordPrompt"),
+                "",
+                true);
+            if (password == null) return false;
+            if (!string.IsNullOrEmpty(password))
+            {
+                conn["pwd"] = password;
+            }
+            return true;
         }
 
         private static string GetCliAvailabilityTarget(string dbKind)
@@ -8507,6 +8532,19 @@ namespace mySQLPunk
         {
             DatabaseCliLaunch launch = BuildDatabaseCommandLineLaunch(conn);
             return launch == null ? "" : launch.Command;
+        }
+
+        private static bool ShouldPromptForTemporaryCliPassword(Dictionary<string, object> conn)
+        {
+            if (conn == null) return false;
+            if (!string.IsNullOrEmpty(GetConnectionValue(conn, "pwd"))) return false;
+            if (string.IsNullOrWhiteSpace(GetConnectionValue(conn, "username"))) return false;
+
+            string kind = GetConnectionValue(conn, "db_kind").ToLowerInvariant();
+            if (kind == "mysql" || kind == "postgresql") return true;
+            if (kind == "mssql" || kind == "sqlserver")
+                return GetConnectionValue(conn, "trusted_connection") != "T";
+            return false;
         }
 
         private DatabaseCliLaunch BuildDatabaseCommandLineLaunch(Dictionary<string, object> conn)
@@ -8618,6 +8656,11 @@ namespace mySQLPunk
 
         private string PromptForText(string title, string label, string defaultValue)
         {
+            return PromptForText(title, label, defaultValue, false);
+        }
+
+        private string PromptForText(string title, string label, string defaultValue, bool isPassword)
+        {
             using (Form prompt = new Form())
             using (Label promptLabel = new Label())
             using (TextBox input = new TextBox())
@@ -8629,27 +8672,29 @@ namespace mySQLPunk
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
                 prompt.MinimizeBox = false;
                 prompt.MaximizeBox = false;
-                prompt.ClientSize = new Size(420, 132);
                 prompt.ShowIcon = false;
 
                 promptLabel.Text = label;
                 promptLabel.AutoSize = true;
                 promptLabel.Location = new Point(14, 18);
+                promptLabel.MaximumSize = new Size(386, 0);
 
                 input.Text = defaultValue ?? string.Empty;
-                input.Location = new Point(17, 45);
+                input.Location = new Point(17, Math.Max(45, promptLabel.Bottom + 10));
                 input.Width = 386;
                 input.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+                input.UseSystemPasswordChar = isPassword;
 
                 okButton.Text = Localization.T("Common.OK");
                 okButton.DialogResult = DialogResult.OK;
-                okButton.Location = new Point(247, 89);
+                okButton.Location = new Point(247, input.Bottom + 18);
                 okButton.Width = 75;
 
                 cancelButton.Text = Localization.T("Common.Cancel");
                 cancelButton.DialogResult = DialogResult.Cancel;
-                cancelButton.Location = new Point(328, 89);
+                cancelButton.Location = new Point(328, input.Bottom + 18);
                 cancelButton.Width = 75;
+                prompt.ClientSize = new Size(420, cancelButton.Bottom + 14);
 
                 prompt.Controls.Add(promptLabel);
                 prompt.Controls.Add(input);

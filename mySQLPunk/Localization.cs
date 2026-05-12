@@ -257,6 +257,8 @@ namespace mySQLPunk
             Add("Connection.CommandLineOpened", "已開啟命令列介面。", "Command line interface opened.");
             Add("Connection.CommandLineOpenFailed", "開啟命令列介面失敗：{0}", "Open command line interface failed: {0}");
             Add("Connection.CliNotFound", "找不到 {0} 命令列工具，請先安裝並確認已加入 PATH。\n說明：{1}", "Cannot find {0} CLI tool. Please install it and make sure it is added to PATH.\nHelp: {1}");
+            Add("Connection.CliTemporaryPasswordPrompt", "此連線未儲存密碼。\n請輸入本次命令列介面要使用的密碼；留空會改由命令列工具自行提示。", "This connection does not have a saved password.\nEnter the password to use for this CLI session; leave blank to let the CLI prompt for it.");
+            Add("Connection.CliTemporaryPasswordCancelled", "已取消開啟命令列介面。", "Opening command line interface cancelled.");
             Add("Connection.MarkedColor", "已標記連線色彩：{0}", "Connection color marked: {0}");
 
             Add("ConnectionWizard.Title", "選取連線類型", "Select Connection Type");
