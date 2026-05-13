@@ -155,6 +155,7 @@ namespace mySQLPunk
             Add("Sidebar.Connections", "連線", "Connections");
             Add("Sidebar.ObjectDetails", "物件詳細資料", "Object Details");
             Add("Status.Ready", "就緒", "Ready");
+            Add("Status.LoadingData", "資料載入中...", "Loading data...");
             Add("Status.ReleaseToDock", "釋放滑鼠以嵌入視窗", "Release mouse to dock the window");
             Add("Status.LanguageChanged", "語言已切換。", "Language changed.");
             Add("Status.UserSelected", "使用者功能入口已選取。", "Users section selected.");
