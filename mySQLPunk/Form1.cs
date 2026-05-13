@@ -8979,42 +8979,72 @@ namespace mySQLPunk
         }
         public void dialogMyBoxOn(string message, bool can_close)
         {
-            if (dialog == null || dialog.IsDisposed) dialog = new Form();
-            if (dialogLabel == null || dialogLabel.IsDisposed) dialogLabel = new Label();
+            dialogMyBoxOff();
+            message = string.IsNullOrWhiteSpace(message) ? "資料載入中..." : message;
+
+            Color backColor = ThemeManager.ElevatedColor;
+            Color textColor = ThemeManager.TextColor;
+            if (textColor.ToArgb() == backColor.ToArgb())
+            {
+                textColor = Color.FromArgb(51, 51, 51);
+            }
+
+            dialog = new Form();
+            dialogLabel = new Label();
+
+            TableLayoutPanel layout = new TableLayoutPanel();
+            ProgressBar loadingBar = new ProgressBar();
 
             dialog.SuspendLayout();
-            dialog.ClientSize = new Size(320, 104);
+            layout.SuspendLayout();
+
+            dialog.ClientSize = new Size(360, 132);
+            dialog.Text = message;
             dialog.MaximizeBox = false;
             dialog.MinimizeBox = false;
             dialog.AutoSize = false;
             dialog.ControlBox = can_close;
-            dialog.FormBorderStyle = FormBorderStyle.FixedSingle;
+            dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
             dialog.StartPosition = FormStartPosition.Manual;
             dialog.ShowInTaskbar = false;
-            dialog.BackColor = ThemeManager.ElevatedColor;
-            dialog.ForeColor = ThemeManager.TextColor;
+            dialog.BackColor = backColor;
+            dialog.ForeColor = textColor;
+
+            layout.Dock = DockStyle.Fill;
+            layout.BackColor = backColor;
+            layout.ForeColor = textColor;
+            layout.Padding = new Padding(22, 18, 22, 18);
+            layout.ColumnCount = 1;
+            layout.RowCount = 2;
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
 
             dialogLabel.Dock = DockStyle.Fill;
             dialogLabel.AutoSize = false;
             dialogLabel.TextAlign = ContentAlignment.MiddleCenter;
             dialogLabel.Text = message;
-            dialogLabel.BackColor = ThemeManager.ElevatedColor;
-            dialogLabel.ForeColor = ThemeManager.TextColor;
-            dialogLabel.Padding = new Padding(18, 12, 18, 12);
+            dialogLabel.BackColor = backColor;
+            dialogLabel.ForeColor = textColor;
             dialogLabel.Font = new Font("Microsoft JhengHei UI", 14, FontStyle.Bold);
-            if (dialogLabel.Parent != dialog)
-            {
-                dialog.Controls.Add(dialogLabel);
-            }
+
+            loadingBar.Dock = DockStyle.Fill;
+            loadingBar.Style = ProgressBarStyle.Marquee;
+            loadingBar.MarqueeAnimationSpeed = 35;
+
+            layout.Controls.Add(dialogLabel, 0, 0);
+            layout.Controls.Add(loadingBar, 0, 1);
+            dialog.Controls.Add(layout);
 
             Rectangle ownerBounds = RectangleToScreen(ClientRectangle);
             dialog.Location = new Point(
                 ownerBounds.Left + Math.Max(0, (ownerBounds.Width - dialog.Width) / 2),
                 ownerBounds.Top + Math.Max(0, (ownerBounds.Height - dialog.Height) / 2));
             dialog.TopMost = true;
+            layout.ResumeLayout(true);
             dialog.ResumeLayout(true);
 
-            if (!dialog.Visible) dialog.Show(this);
+            dialog.Show(this);
             dialog.BringToFront();
             dialogLabel.Refresh();
             dialog.Refresh();
@@ -9023,7 +9053,12 @@ namespace mySQLPunk
         public void dialogMyBoxOff()
         {
             if (dialog == null || dialog.IsDisposed) return;
-            dialog.Hide();
+            Form oldDialog = dialog;
+            dialog = null;
+            dialogLabel = null;
+            oldDialog.Hide();
+            oldDialog.Close();
+            oldDialog.Dispose();
         }
         private void db_tree_DoubleClick(object sender, EventArgs e)
         {
