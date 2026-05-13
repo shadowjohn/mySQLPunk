@@ -8981,6 +8981,11 @@ namespace mySQLPunk
         {
             var tree = (TreeView)sender;
             if (tree.SelectedNode == null) return;
+            if (IsConnectionGroupNode(tree.SelectedNode))
+            {
+                if (tree.SelectedNode.Nodes.Count > 0) tree.SelectedNode.Toggle();
+                return;
+            }
 
             UpdateMainStatus(Localization.T("Status.LoadingData"));
             try
@@ -8992,6 +8997,11 @@ namespace mySQLPunk
                 while (rootNode.Parent != null && !IsConnectionGroupNode(rootNode.Parent))
                     rootNode = rootNode.Parent;
                 int index = GetConnectionIndex(rootNode);
+                if (index < 0 || index >= myN.connections.Count)
+                {
+                    UpdateMainStatus(Localization.T("Status.SelectConnection"));
+                    return;
+                }
 
                 if (m.Length == 2)
                 {
