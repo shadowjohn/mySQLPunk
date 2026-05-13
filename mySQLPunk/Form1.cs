@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using mySQLPunk.entity;
@@ -32,6 +33,8 @@ namespace mySQLPunk
         public Label dialogLabel = new Label();
         public int dialogFlag = 0;
         public string test = "";
+        private readonly object dialogSync = new object();
+        private Thread dialogThread;
         
         // Windows API 用於實作視窗拖拽接管
         [DllImport("user32.dll")]
@@ -8989,26 +8992,87 @@ namespace mySQLPunk
                 textColor = Color.FromArgb(51, 51, 51);
             }
 
-            dialog = new Form();
-            dialogLabel = new Label();
+            Rectangle ownerBounds = RectangleToScreen(ClientRectangle);
+            ManualResetEventSlim ready = new ManualResetEventSlim(false);
+            Thread thread = new Thread(() =>
+            {
+                Form loadingDialog = null;
+                Label loadingLabel = null;
+                try
+                {
+                    loadingDialog = BuildLoadingDialog(message, can_close, backColor, textColor, ownerBounds, out loadingLabel);
+                    lock (dialogSync)
+                    {
+                        if (!ReferenceEquals(dialogThread, Thread.CurrentThread))
+                        {
+                            loadingDialog.Dispose();
+                            ready.Set();
+                            return;
+                        }
 
+                        dialog = loadingDialog;
+                        dialogLabel = loadingLabel;
+                    }
+
+                    loadingDialog.FormClosed += (s, e) => Application.ExitThread();
+                    ready.Set();
+                    Application.Run(loadingDialog);
+                }
+                catch
+                {
+                    ready.Set();
+                }
+                finally
+                {
+                    lock (dialogSync)
+                    {
+                        if (ReferenceEquals(dialog, loadingDialog))
+                        {
+                            dialog = null;
+                            dialogLabel = null;
+                            dialogThread = null;
+                        }
+                    }
+
+                    if (loadingDialog != null && !loadingDialog.IsDisposed)
+                    {
+                        loadingDialog.Dispose();
+                    }
+                }
+            });
+
+            thread.IsBackground = true;
+            thread.Name = "mySQLPunk loading dialog";
+            thread.SetApartmentState(ApartmentState.STA);
+            lock (dialogSync)
+            {
+                dialogThread = thread;
+            }
+            thread.Start();
+            ready.Wait(1000);
+        }
+
+        private Form BuildLoadingDialog(string message, bool canClose, Color backColor, Color textColor, Rectangle ownerBounds, out Label loadingLabel)
+        {
+            Form loadingDialog = new Form();
+            loadingLabel = new Label();
             TableLayoutPanel layout = new TableLayoutPanel();
             ProgressBar loadingBar = new ProgressBar();
 
-            dialog.SuspendLayout();
+            loadingDialog.SuspendLayout();
             layout.SuspendLayout();
 
-            dialog.ClientSize = new Size(360, 132);
-            dialog.Text = message;
-            dialog.MaximizeBox = false;
-            dialog.MinimizeBox = false;
-            dialog.AutoSize = false;
-            dialog.ControlBox = can_close;
-            dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
-            dialog.StartPosition = FormStartPosition.Manual;
-            dialog.ShowInTaskbar = false;
-            dialog.BackColor = backColor;
-            dialog.ForeColor = textColor;
+            loadingDialog.ClientSize = new Size(360, 132);
+            loadingDialog.Text = message;
+            loadingDialog.MaximizeBox = false;
+            loadingDialog.MinimizeBox = false;
+            loadingDialog.AutoSize = false;
+            loadingDialog.ControlBox = canClose;
+            loadingDialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+            loadingDialog.StartPosition = FormStartPosition.Manual;
+            loadingDialog.ShowInTaskbar = false;
+            loadingDialog.BackColor = backColor;
+            loadingDialog.ForeColor = textColor;
 
             layout.Dock = DockStyle.Fill;
             layout.BackColor = backColor;
@@ -9020,45 +9084,63 @@ namespace mySQLPunk
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
 
-            dialogLabel.Dock = DockStyle.Fill;
-            dialogLabel.AutoSize = false;
-            dialogLabel.TextAlign = ContentAlignment.MiddleCenter;
-            dialogLabel.Text = message;
-            dialogLabel.BackColor = backColor;
-            dialogLabel.ForeColor = textColor;
-            dialogLabel.Font = new Font("Microsoft JhengHei UI", 14, FontStyle.Bold);
+            loadingLabel.Dock = DockStyle.Fill;
+            loadingLabel.AutoSize = false;
+            loadingLabel.TextAlign = ContentAlignment.MiddleCenter;
+            loadingLabel.Text = message;
+            loadingLabel.BackColor = backColor;
+            loadingLabel.ForeColor = textColor;
+            loadingLabel.Font = new Font("Microsoft JhengHei UI", 14, FontStyle.Bold);
 
             loadingBar.Dock = DockStyle.Fill;
             loadingBar.Style = ProgressBarStyle.Marquee;
             loadingBar.MarqueeAnimationSpeed = 35;
 
-            layout.Controls.Add(dialogLabel, 0, 0);
+            layout.Controls.Add(loadingLabel, 0, 0);
             layout.Controls.Add(loadingBar, 0, 1);
-            dialog.Controls.Add(layout);
+            loadingDialog.Controls.Add(layout);
 
-            Rectangle ownerBounds = RectangleToScreen(ClientRectangle);
-            dialog.Location = new Point(
-                ownerBounds.Left + Math.Max(0, (ownerBounds.Width - dialog.Width) / 2),
-                ownerBounds.Top + Math.Max(0, (ownerBounds.Height - dialog.Height) / 2));
-            dialog.TopMost = true;
+            loadingDialog.Location = new Point(
+                ownerBounds.Left + Math.Max(0, (ownerBounds.Width - loadingDialog.Width) / 2),
+                ownerBounds.Top + Math.Max(0, (ownerBounds.Height - loadingDialog.Height) / 2));
+            loadingDialog.TopMost = true;
             layout.ResumeLayout(true);
-            dialog.ResumeLayout(true);
-
-            dialog.Show(this);
-            dialog.BringToFront();
-            dialogLabel.Refresh();
-            dialog.Refresh();
-            Application.DoEvents();
+            loadingDialog.ResumeLayout(true);
+            return loadingDialog;
         }
         public void dialogMyBoxOff()
         {
-            if (dialog == null || dialog.IsDisposed) return;
-            Form oldDialog = dialog;
-            dialog = null;
-            dialogLabel = null;
-            oldDialog.Hide();
-            oldDialog.Close();
-            oldDialog.Dispose();
+            Form oldDialog;
+            lock (dialogSync)
+            {
+                oldDialog = dialog;
+                dialog = null;
+                dialogLabel = null;
+                dialogThread = null;
+            }
+
+            if (oldDialog == null || oldDialog.IsDisposed) return;
+            try
+            {
+                if (oldDialog.InvokeRequired)
+                {
+                    oldDialog.BeginInvoke(new Action(() => oldDialog.Close()));
+                }
+                else
+                {
+                    oldDialog.Close();
+                }
+            }
+            catch
+            {
+                try
+                {
+                    if (!oldDialog.IsDisposed) oldDialog.Dispose();
+                }
+                catch
+                {
+                }
+            }
         }
         private void db_tree_DoubleClick(object sender, EventArgs e)
         {
