@@ -1,23 +1,16 @@
-﻿using System;
-using System.Reflection;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Text;
-using System.IO;
-using System.Web;
-using System.Data.SqlClient;
-using System.Data;
-using System.Net;
-using System.Web.Services;
 using System.Configuration;
-using System.Runtime.Serialization;
+using System.Data;
 using System.Globalization;
-using System.Text.RegularExpressions;
-using System.Threading;
-using System.Diagnostics;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using System.IO;
 using System.Linq;
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
 
 
 
@@ -232,43 +225,6 @@ namespace utility
             return pwd();
         }
 
-        public string system(string command)
-        {
-            StringBuilder sb = new StringBuilder();
-            string version = System.Environment.OSVersion.VersionString;//读取操作系统版本  
-            if (version.Contains("Windows"))
-            {
-                using (Process p = new Process())
-                {
-                    p.StartInfo.FileName = "cmd.exe";
-
-                    p.StartInfo.UseShellExecute = false;//是否指定操作系统外壳进程启动程序  
-                    p.StartInfo.RedirectStandardInput = true;
-                    p.StartInfo.RedirectStandardOutput = true;
-                    p.StartInfo.CreateNoWindow = true;//不显示dos命令行窗口  
-
-                    p.Start();//启动cmd.exe  
-                    p.StandardInput.WriteLine(command);//输入命令  
-                    p.StandardInput.WriteLine("exit");//退出cmd.exe  
-                    p.WaitForExit();//等待执行完了，退出cmd.exe  
-
-                    using (StreamReader reader = p.StandardOutput)//截取输出流  
-                    {
-                        string line = reader.ReadLine();//每次读取一行  
-                        while (!reader.EndOfStream)
-                        {
-                            sb.Append(line).Append("<br />");//在Web中使用<br />换行  
-                            line = reader.ReadLine();
-                        }
-                        p.WaitForExit();//等待程序执行完退出进程  
-                        p.Close();//关闭进程  
-                        reader.Close();//关闭流  
-                    }
-                }
-            }
-            return sb.ToString();
-        }
-
         public string microtime()
         {
             System.DateTime dt = DateTime.Now;
@@ -325,10 +281,10 @@ namespace utility
             //base64解碼
             return Convert.FromBase64String(data);
         }
-        public string BuildQueryString(Dictionary<string,string> nvc)
+        public string BuildQueryString(Dictionary<string, string> nvc)
         {
             System.Collections.Specialized.NameValueCollection queryString = new System.Collections.Specialized.NameValueCollection();
-            foreach(var item in nvc.Keys)
+            foreach (var item in nvc.Keys)
             {
                 queryString[item] = nvc[item];
             }
@@ -402,8 +358,8 @@ namespace utility
         }
         public string enPWD_string(string input, string thekey)
         {
-            input = base64_encode( s2b(input));
-            thekey = base64_encode( s2b(thekey));
+            input = base64_encode(s2b(input));
+            thekey = base64_encode(s2b(thekey));
             string xored = "";
             char[] input_arr = input.ToCharArray();
             char[] thekey_arr = thekey.ToCharArray();
