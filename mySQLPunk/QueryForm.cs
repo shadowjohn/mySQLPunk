@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Data;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -12,6 +13,7 @@ using System.Windows.Forms;
 using System.Diagnostics;
 using System.Linq;
 using mySQLPunk.lib;
+using Newtonsoft.Json;
 
 namespace mySQLPunk
 {
@@ -2874,7 +2876,17 @@ namespace mySQLPunk
             }
         }
 
-        // ── 匯出 CSV ──
+        private enum QueryExportFormat
+        {
+            Xlsx,
+            Csv,
+            Tsv,
+            Json,
+            Html,
+            Markdown
+        }
+
+        // ── 匯出結果 ──
         private void ExportCsv()
         {
             DataTable dt = dgvResults.DataSource as DataTable;
@@ -2882,25 +2894,78 @@ namespace mySQLPunk
 
             using (SaveFileDialog dlg = new SaveFileDialog
             {
-                Filter = "CSV files (*.csv)|*.csv",
+                Filter = Localization.T("Query.ExportFileFilter"),
                 FileName = string.IsNullOrEmpty(_databaseName) ? "query" : _databaseName,
-                DefaultExt = "csv"
+                DefaultExt = "xlsx",
+                FilterIndex = 1
             })
             {
                 if (dlg.ShowDialog() != DialogResult.OK) return;
 
                 try
                 {
-                    int exportedRows;
-                    string csv = BuildCsv(dt, out exportedRows);
-                    File.WriteAllText(dlg.FileName, csv, Encoding.UTF8);
-                    lblStatus.Text = string.Format("Exported {0} rows to {1}", exportedRows, dlg.FileName);
+                    QueryExportFormat format = ResolveExportFormat(dlg.FileName, dlg.FilterIndex);
+                    int exportedRows = CountExportRows(dt);
+                    if (format == QueryExportFormat.Xlsx)
+                    {
+                        WriteXlsx(dt, dlg.FileName);
+                    }
+                    else
+                    {
+                        File.WriteAllText(dlg.FileName, BuildExportText(dt, format), Encoding.UTF8);
+                    }
+                    lblStatus.Text = Localization.Format("Query.ExportCompleted", exportedRows, dlg.FileName);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(ex.Message, "Export Error",
+                    MessageBox.Show(ex.Message, Localization.T("Query.ExportError"),
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+        }
+
+        private static QueryExportFormat ResolveExportFormat(string path, int filterIndex)
+        {
+            string ext = Path.GetExtension(path ?? string.Empty).ToLowerInvariant();
+            switch (ext)
+            {
+                case ".xlsx": return QueryExportFormat.Xlsx;
+                case ".csv": return QueryExportFormat.Csv;
+                case ".tsv":
+                case ".tab": return QueryExportFormat.Tsv;
+                case ".json": return QueryExportFormat.Json;
+                case ".html":
+                case ".htm": return QueryExportFormat.Html;
+                case ".md":
+                case ".markdown": return QueryExportFormat.Markdown;
+            }
+
+            switch (filterIndex)
+            {
+                case 1: return QueryExportFormat.Xlsx;
+                case 2: return QueryExportFormat.Csv;
+                case 3: return QueryExportFormat.Tsv;
+                case 4: return QueryExportFormat.Json;
+                case 5: return QueryExportFormat.Html;
+                case 6: return QueryExportFormat.Markdown;
+                default: return QueryExportFormat.Csv;
+            }
+        }
+
+        private static string BuildExportText(DataTable dt, QueryExportFormat format)
+        {
+            switch (format)
+            {
+                case QueryExportFormat.Tsv:
+                    return BuildDelimited(dt, '\t');
+                case QueryExportFormat.Json:
+                    return BuildJson(dt);
+                case QueryExportFormat.Html:
+                    return BuildHtml(dt);
+                case QueryExportFormat.Markdown:
+                    return BuildMarkdown(dt);
+                default:
+                    return BuildCsv(dt, out _);
             }
         }
 
@@ -2925,7 +2990,7 @@ namespace mySQLPunk
                 for (int c = 0; c < dt.Columns.Count; c++)
                 {
                     if (c > 0) sb.Append(',');
-                    sb.Append(CsvEscape(row[c] == DBNull.Value ? string.Empty : row[c].ToString()));
+                    sb.Append(CsvEscape(FormatExportValue(row[c])));
                 }
                 sb.AppendLine();
                 exportedRows++;
@@ -2934,12 +2999,303 @@ namespace mySQLPunk
             return sb.ToString();
         }
 
+        private static string BuildDelimited(DataTable dt, char delimiter)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+
+            StringBuilder sb = new StringBuilder();
+            for (int c = 0; c < dt.Columns.Count; c++)
+            {
+                if (c > 0) sb.Append(delimiter);
+                sb.Append(DelimitedEscape(dt.Columns[c].ColumnName, delimiter));
+            }
+            sb.AppendLine();
+
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                for (int c = 0; c < dt.Columns.Count; c++)
+                {
+                    if (c > 0) sb.Append(delimiter);
+                    sb.Append(DelimitedEscape(FormatExportValue(row[c]), delimiter));
+                }
+                sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+
+        private static string BuildJson(DataTable dt)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+
+                Dictionary<string, object> item = new Dictionary<string, object>();
+                foreach (DataColumn column in dt.Columns)
+                {
+                    object value = row[column];
+                    item[column.ColumnName] = value == DBNull.Value ? null : ConvertExportValue(value);
+                }
+                rows.Add(item);
+            }
+
+            return JsonConvert.SerializeObject(rows, Formatting.Indented);
+        }
+
+        private static string BuildHtml(DataTable dt)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("<!doctype html>");
+            sb.AppendLine("<html><head><meta charset=\"utf-8\"><title>mySQLPunk export</title>");
+            sb.AppendLine("<style>body{font-family:Segoe UI,Arial,sans-serif}table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:4px 8px;white-space:pre-wrap}th{background:#f2f2f2}</style>");
+            sb.AppendLine("</head><body><table>");
+            sb.AppendLine("<thead><tr>");
+            foreach (DataColumn column in dt.Columns)
+            {
+                sb.Append("<th>").Append(HtmlEscape(column.ColumnName)).AppendLine("</th>");
+            }
+            sb.AppendLine("</tr></thead><tbody>");
+
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                sb.AppendLine("<tr>");
+                foreach (DataColumn column in dt.Columns)
+                {
+                    sb.Append("<td>").Append(HtmlEscape(FormatExportValue(row[column]))).AppendLine("</td>");
+                }
+                sb.AppendLine("</tr>");
+            }
+
+            sb.AppendLine("</tbody></table></body></html>");
+            return sb.ToString();
+        }
+
+        private static string BuildMarkdown(DataTable dt)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+
+            StringBuilder sb = new StringBuilder();
+            sb.Append("| ");
+            for (int c = 0; c < dt.Columns.Count; c++)
+            {
+                if (c > 0) sb.Append(" | ");
+                sb.Append(MarkdownEscape(dt.Columns[c].ColumnName));
+            }
+            sb.AppendLine(" |");
+
+            sb.Append("| ");
+            for (int c = 0; c < dt.Columns.Count; c++)
+            {
+                if (c > 0) sb.Append(" | ");
+                sb.Append("---");
+            }
+            sb.AppendLine(" |");
+
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                sb.Append("| ");
+                for (int c = 0; c < dt.Columns.Count; c++)
+                {
+                    if (c > 0) sb.Append(" | ");
+                    sb.Append(MarkdownEscape(FormatExportValue(row[c])));
+                }
+                sb.AppendLine(" |");
+            }
+
+            return sb.ToString();
+        }
+
+        private static void WriteXlsx(DataTable dt, string path)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+            if (File.Exists(path)) File.Delete(path);
+
+            using (ZipArchive archive = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                AddZipEntry(archive, "[Content_Types].xml", BuildXlsxContentTypes());
+                AddZipEntry(archive, "_rels/.rels", BuildXlsxRootRelationships());
+                AddZipEntry(archive, "xl/workbook.xml", BuildXlsxWorkbook());
+                AddZipEntry(archive, "xl/_rels/workbook.xml.rels", BuildXlsxWorkbookRelationships());
+                AddZipEntry(archive, "xl/worksheets/sheet1.xml", BuildXlsxSheet(dt));
+                AddZipEntry(archive, "xl/styles.xml", BuildXlsxStyles());
+            }
+        }
+
+        private static void AddZipEntry(ZipArchive archive, string path, string content)
+        {
+            ZipArchiveEntry entry = archive.CreateEntry(path, CompressionLevel.Optimal);
+            using (Stream stream = entry.Open())
+            using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            {
+                writer.Write(content);
+            }
+        }
+
+        private static string BuildXlsxSheet(DataTable dt)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+            sb.AppendLine("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+
+            int rowIndex = 1;
+            sb.Append("<row r=\"").Append(rowIndex).Append("\">");
+            for (int c = 0; c < dt.Columns.Count; c++)
+            {
+                AppendInlineStringCell(sb, rowIndex, c + 1, dt.Columns[c].ColumnName);
+            }
+            sb.AppendLine("</row>");
+
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                rowIndex++;
+                sb.Append("<row r=\"").Append(rowIndex).Append("\">");
+                for (int c = 0; c < dt.Columns.Count; c++)
+                {
+                    AppendInlineStringCell(sb, rowIndex, c + 1, FormatExportValue(row[c]));
+                }
+                sb.AppendLine("</row>");
+            }
+
+            sb.AppendLine("</sheetData></worksheet>");
+            return sb.ToString();
+        }
+
+        private static void AppendInlineStringCell(StringBuilder sb, int rowIndex, int columnIndex, string value)
+        {
+            sb.Append("<c r=\"").Append(GetExcelColumnName(columnIndex)).Append(rowIndex).Append("\" t=\"inlineStr\"><is><t");
+            if (!string.IsNullOrEmpty(value) && (value.StartsWith(" ") || value.EndsWith(" ") || value.Contains("\n") || value.Contains("\r") || value.Contains("\t")))
+            {
+                sb.Append(" xml:space=\"preserve\"");
+            }
+            sb.Append(">").Append(XmlEscape(value)).Append("</t></is></c>");
+        }
+
+        private static string BuildXlsxContentTypes()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
+                   "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>" +
+                   "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+                   "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>" +
+                   "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" +
+                   "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>" +
+                   "</Types>";
+        }
+
+        private static string BuildXlsxRootRelationships()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+                   "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>" +
+                   "</Relationships>";
+        }
+
+        private static string BuildXlsxWorkbook()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">" +
+                   "<sheets><sheet name=\"Results\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>";
+        }
+
+        private static string BuildXlsxWorkbookRelationships()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+                   "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>" +
+                   "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" +
+                   "</Relationships>";
+        }
+
+        private static string BuildXlsxStyles()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
+                   "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>" +
+                   "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>" +
+                   "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>" +
+                   "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>" +
+                   "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>" +
+                   "</styleSheet>";
+        }
+
+        private static int CountExportRows(DataTable dt)
+        {
+            if (dt == null) return 0;
+            int count = 0;
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState != DataRowState.Deleted) count++;
+            }
+            return count;
+        }
+
+        private static object ConvertExportValue(object value)
+        {
+            if (value == null || value == DBNull.Value) return null;
+            if (value is byte[]) return FormatExportValue(value);
+            if (value is DateTime dt) return dt.ToString("o");
+            return value;
+        }
+
+        private static string FormatExportValue(object value)
+        {
+            if (value == null || value == DBNull.Value) return string.Empty;
+            if (value is byte[] bytes) return FormatBinaryCellValue(bytes);
+            if (value is DateTime dt) return dt.ToString("yyyy-MM-dd HH:mm:ss");
+            return value.ToString();
+        }
+
         private static string CsvEscape(string value)
         {
             value = value ?? string.Empty;
             if (value.Contains(",") || value.Contains("\"") || value.Contains("\r") || value.Contains("\n"))
                 return "\"" + value.Replace("\"", "\"\"") + "\"";
             return value;
+        }
+
+        private static string DelimitedEscape(string value, char delimiter)
+        {
+            value = value ?? string.Empty;
+            if (value.Contains(delimiter.ToString()) || value.Contains("\"") || value.Contains("\r") || value.Contains("\n"))
+                return "\"" + value.Replace("\"", "\"\"") + "\"";
+            return value;
+        }
+
+        private static string HtmlEscape(string value)
+        {
+            return System.Web.HttpUtility.HtmlEncode(value ?? string.Empty);
+        }
+
+        private static string XmlEscape(string value)
+        {
+            return System.Security.SecurityElement.Escape(value ?? string.Empty) ?? string.Empty;
+        }
+
+        private static string MarkdownEscape(string value)
+        {
+            value = (value ?? string.Empty).Replace("\r\n", "<br>").Replace("\n", "<br>").Replace("\r", "<br>");
+            return value.Replace("\\", "\\\\").Replace("|", "\\|");
+        }
+
+        private static string GetExcelColumnName(int columnNumber)
+        {
+            string columnName = string.Empty;
+            while (columnNumber > 0)
+            {
+                int modulo = (columnNumber - 1) % 26;
+                columnName = Convert.ToChar('A' + modulo) + columnName;
+                columnNumber = (columnNumber - modulo) / 26;
+            }
+            return columnName;
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
