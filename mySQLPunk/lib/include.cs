@@ -169,14 +169,23 @@ namespace utility
         //javascript用的吐js資料
         public string jsAddSlashes(string value)
         {
-            value = value.Replace("\\", "\\\\");
-            value = value.Replace("\n", "\\n");
-            value = value.Replace("\r", "\\r");
-            value = value.Replace("\"", "\\\"");
-            value = value.Replace("&", "\\x26");
-            value = value.Replace("<", "\\x3C");
-            value = value.Replace(">", "\\x3E");
-            return value;
+            if (string.IsNullOrEmpty(value)) return value;
+            StringBuilder sb = new StringBuilder(value.Length + 10);
+            foreach (char c in value)
+            {
+                switch (c)
+                {
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\"': sb.Append("\\\""); break;
+                    case '&': sb.Append("\\x26"); break;
+                    case '<': sb.Append("\\x3C"); break;
+                    case '>': sb.Append("\\x3E"); break;
+                    default: sb.Append(c); break;
+                }
+            }
+            return sb.ToString();
         }
 
         public string basename(string path)
@@ -358,22 +367,25 @@ namespace utility
         }
         public string enPWD_string(string input, string thekey)
         {
+            if (string.IsNullOrEmpty(input)) return "";
             input = base64_encode(s2b(input));
             thekey = base64_encode(s2b(thekey));
-            string xored = "";
-            char[] input_arr = input.ToCharArray();
-            char[] thekey_arr = thekey.ToCharArray();
-            foreach (char ich in input_arr)
+
+            // Pre-calculate XOR sum of the key (A ^ B ^ C is commutative)
+            int combinedKeyXor = 0;
+            foreach (char tch in thekey)
             {
-                int a = (int)ich;
-                foreach (char tch in thekey_arr)
-                {
-                    int k = (int)tch;
-                    a = a ^ k;
-                }
-                xored = string.Format("{0}{1}", xored, Convert.ToChar(a));
+                combinedKeyXor ^= (int)tch;
             }
-            return base64_encode(s2b(xored));
+
+            char[] input_arr = input.ToCharArray();
+            char[] output_arr = new char[input_arr.Length];
+            for (int i = 0; i < input_arr.Length; i++)
+            {
+                output_arr[i] = (char)((int)input_arr[i] ^ combinedKeyXor);
+            }
+
+            return base64_encode(s2b(new string(output_arr)));
         }
         string UTF8toBig5(string strUtf)
         {
@@ -403,23 +415,33 @@ namespace utility
         }
         public string dePWD_string(string input, string thekey)
         {
+            if (string.IsNullOrEmpty(input)) return "";
             input = b2s(base64_decode(input));
             thekey = base64_encode(s2b(thekey));
-            string xored = "";
-            char[] input_arr = input.ToCharArray();
-            char[] thekey_arr = thekey.ToCharArray();
-            foreach (char ich in input_arr)
+
+            // Pre-calculate XOR sum of the key (commutative)
+            int combinedKeyXor = 0;
+            foreach (char tch in thekey)
             {
-                int a = (int)ich;
-                for (int j = thekey_arr.Length - 1; j >= 0; j--)
-                {
-                    int k = (int)thekey_arr[j];
-                    a = a ^ k;
-                }
-                xored = string.Format("{0}{1}", xored, Convert.ToChar(a));
+                combinedKeyXor ^= (int)tch;
             }
-            xored = b2s(base64_decode(xored));
-            return xored;
+
+            char[] input_arr = input.ToCharArray();
+            char[] output_arr = new char[input_arr.Length];
+            for (int i = 0; i < input_arr.Length; i++)
+            {
+                output_arr[i] = (char)((int)input_arr[i] ^ combinedKeyXor);
+            }
+
+            string xored = new string(output_arr);
+            try
+            {
+                return b2s(base64_decode(xored));
+            }
+            catch
+            {
+                return xored;
+            }
         }
         public string EscapeUnicode(string input)
         {
@@ -536,36 +558,19 @@ namespace utility
         }
         public string implode(string keyword, List<string> arrays)
         {
-            return string.Join<string>(keyword, arrays);
+            return string.Join(keyword, arrays);
         }
         public string implode(string keyword, Dictionary<int, string> arrays)
         {
-            string[] tmp = new String[arrays.Keys.Count];
-            int i = 0;
-            foreach (int k in arrays.Keys)
-            {
-                tmp[i++] = arrays[k];
-            }
-            return string.Join(keyword, tmp);
+            return string.Join(keyword, arrays.Values);
         }
         public string implode(string keyword, Dictionary<string, string> arrays)
         {
-            string[] tmp = new String[arrays.Keys.Count];
-            int i = 0;
-            foreach (string k in arrays.Keys)
-            {
-                tmp[i++] = arrays[k];
-            }
-            return string.Join(keyword, tmp);
+            return string.Join(keyword, arrays.Values);
         }
         public string implode(string keyword, ArrayList arrays)
         {
-            string[] tmp = new String[arrays.Count];
-            for (int i = 0; i < arrays.Count; i++)
-            {
-                tmp[i] = arrays[i].ToString();
-            }
-            return string.Join(keyword, tmp);
+            return string.Join(keyword, arrays.Cast<object>());
         }
         public string[] explode(string keyword, string data)
         {
