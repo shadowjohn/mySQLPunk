@@ -2896,8 +2896,8 @@ namespace mySQLPunk
             {
                 Filter = Localization.T("Query.ExportFileFilter"),
                 FileName = string.IsNullOrEmpty(_databaseName) ? "query" : _databaseName,
-                DefaultExt = "xlsx",
-                FilterIndex = 1
+                DefaultExt = "csv",
+                FilterIndex = 2
             })
             {
                 if (dlg.ShowDialog() != DialogResult.OK) return;
