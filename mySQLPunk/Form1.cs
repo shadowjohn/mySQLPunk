@@ -984,7 +984,7 @@ namespace mySQLPunk
             table_top.DataBindingComplete += table_top_DataBindingComplete;
             table_top.DataError += table_top_DataError;
             db_tree.KeyDown += db_tree_KeyDown;
-            db_tree.LabelEdit = true;
+            db_tree.LabelEdit = false;
             db_tree.BeforeLabelEdit += db_tree_BeforeLabelEdit;
             db_tree.AfterLabelEdit += db_tree_AfterLabelEdit;
             newConnectionToolStripMenuItem.Click -= NewConnectionToolStripMenuItem_Click;
@@ -4090,6 +4090,7 @@ namespace mySQLPunk
             }
 
             _allowTreeLabelEdit = true;
+            db_tree.LabelEdit = true;
             db_tree.SelectedNode.BeginEdit();
         }
 
@@ -4099,12 +4100,14 @@ namespace mySQLPunk
             {
                 e.CancelEdit = true;
                 _allowTreeLabelEdit = false;
+                db_tree.LabelEdit = false;
             }
         }
 
         private void db_tree_AfterLabelEdit(object sender, NodeLabelEditEventArgs e)
         {
             _allowTreeLabelEdit = false;
+            db_tree.LabelEdit = false;
             e.CancelEdit = true;
 
             if (e.Node == null || e.Label == null) return;
