@@ -13,6 +13,7 @@ using mySQLPunk.entity;
 using utility;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
+using MySqlConnector;
 //using MySql.Data.MySqlClient;
 using mySQLPunk.lib;
 using mySQLPunk.template;
@@ -105,6 +106,7 @@ namespace mySQLPunk
         private DatabaseCopyItem _treeClipboardItem;
         private bool _allowTreeLabelEdit = false;
         private readonly List<string> _favoriteNodePaths = new List<string>();
+        private readonly HashSet<int> _openingConnectionIndices = new HashSet<int>();
 
         // 群組功能：快速查詢連線節點（key = 連線索引）
         private TreeNode[] _connectionTreeNodes = new TreeNode[0];
@@ -184,6 +186,156 @@ namespace mySQLPunk
             string provider = string.IsNullOrWhiteSpace(providerName) ? "Database" : providerName;
             string reason = ex == null ? "Unknown error" : ex.Message;
             return provider + " 連線失敗：" + reason;
+        }
+
+        private bool TryEnterConnectionOpenScope(int index)
+        {
+            lock (_openingConnectionIndices)
+            {
+                if (_openingConnectionIndices.Contains(index)) return false;
+                _openingConnectionIndices.Add(index);
+                return true;
+            }
+        }
+
+        private void ExitConnectionOpenScope(int index)
+        {
+            lock (_openingConnectionIndices)
+            {
+                _openingConnectionIndices.Remove(index);
+            }
+        }
+
+        private static bool ShouldOfferRetryForConnectionOpen(Exception ex)
+        {
+            if (ex is MySqlException mySqlEx)
+            {
+                // Access denied / credential mismatch: do not retry automatically.
+                if (mySqlEx.Number == 1045) return false;
+                return mySqlEx.IsTransient;
+            }
+
+            if (ex is TimeoutException) return true;
+            if (ex is IOException) return true;
+            if (ex is System.Net.Sockets.SocketException) return true;
+            if (ex?.InnerException != null) return ShouldOfferRetryForConnectionOpen(ex.InnerException);
+            return false;
+        }
+
+        private static string BuildMySqlConnectionString(Dictionary<string, object> conn)
+        {
+            string host = GetConnectionValue(conn, "host");
+            string portText = GetConnectionValue(conn, "port");
+            string user = GetConnectionValue(conn, "username");
+            string password = GetConnectionValue(conn, "pwd");
+            string initialDatabase = GetConnectionValue(conn, "initial_database");
+
+            uint port = 3306;
+            if (!string.IsNullOrWhiteSpace(portText)) uint.TryParse(portText, out port);
+
+            var builder = new MySqlConnectionStringBuilder
+            {
+                Server = host,
+                Port = port,
+                UserID = user,
+                Password = password,
+                Database = string.IsNullOrWhiteSpace(initialDatabase) ? string.Empty : initialDatabase,
+                SslMode = MySqlSslMode.None,
+                CharacterSet = "utf8",
+                AllowZeroDateTime = true,
+                ConnectionTimeout = 8
+            };
+
+            return builder.ConnectionString;
+        }
+
+        private void PopulateConnectionDatabaseNodes(TreeNode connectionNode, IEnumerable<string> databaseNames)
+        {
+            if (connectionNode == null) return;
+            connectionNode.Nodes.Clear();
+            if (databaseNames == null) return;
+
+            foreach (string databaseName in databaseNames)
+            {
+                TreeNode newNode = new TreeNode(databaseName);
+                newNode.ImageIndex = 10;
+                newNode.SelectedImageIndex = 10;
+                connectionNode.Nodes.Add(newNode);
+            }
+        }
+
+        private async Task OpenMySqlConnectionAsync(int index, TreeView tree)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            if (!TryEnterConnectionOpenScope(index)) return;
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = tree?.Enabled ?? true;
+            try
+            {
+                if (tree != null) tree.Enabled = false;
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield(); // 讓狀態列與游標有機會先更新，避免 UI 看起來卡住
+
+                var conn = myN.connections[index];
+                string connString = BuildMySqlConnectionString(conn);
+
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    my_mysql db = new my_mysql();
+                    try
+                    {
+                        db.setConn(connString);
+                        List<string> databases = await Task.Run(() =>
+                        {
+                            db.open();
+                            return db.GetDatabases();
+                        });
+
+                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["pdo"] = db;
+                        myN.connections[index]["isConnect"] = "T";
+                        ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
+
+                        TreeNode connNode = FindConnectionNode(index);
+                        PopulateConnectionDatabaseNodes(connNode, databases);
+                        if (connNode != null) connNode.Expand();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        try { db.Dispose(); } catch { }
+
+                        bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
+                        if (canRetry)
+                        {
+                            DialogResult retry = MessageBox.Show(
+                                "MySQL 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                "MySQL",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning);
+                            if (retry == DialogResult.Yes) continue;
+                        }
+
+                        myN.connections[index]["pdo"] = null;
+                        myN.connections[index]["isConnect"] = "F";
+                        HandleConnectionOpenFailure(index, tree, "MySQL", lastError);
+                        return;
+                    }
+                }
+
+                myN.connections[index]["pdo"] = null;
+                myN.connections[index]["isConnect"] = "F";
+                HandleConnectionOpenFailure(index, tree, "MySQL", lastError);
+            }
+            finally
+            {
+                if (tree != null) tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
+                ExitConnectionOpenScope(index);
+            }
         }
 
         private void HandleConnectionOpenFailure(int index, TreeView tree, string providerName, Exception ex)
@@ -8977,7 +9129,7 @@ namespace mySQLPunk
         {
             //MessageBox.Show(father_index + "," + index + "," + name);
         }
-        private void db_tree_DoubleClick(object sender, EventArgs e)
+        private async void db_tree_DoubleClick(object sender, EventArgs e)
         {
             var tree = (TreeView)sender;
             if (tree.SelectedNode == null) return;
@@ -9165,43 +9317,7 @@ namespace mySQLPunk
                         break;
                     case "mysql":
                         {
-                            myN.connections[index]["connString"] = "server=" + myN.connections[index]["host"].ToString() + ";" +
-                                "port=" + myN.connections[index]["port"].ToString() + ";" +
-                                "user id=" + myN.connections[index]["username"].ToString() + ";" +
-                                "Password=" + myN.connections[index]["pwd"].ToString() + ";" +
-                                "database=;sslmode=none;charset=utf8;";
-                            myN.connections[index]["pdo"] = new my_mysql();
-                            //((MySqlConnection)myN.connections[index]["pdo"]).ConnectionString = myN.connections[index]["connString"].ToString();
-                            ((my_mysql)myN.connections[index]["pdo"]).setConn(myN.connections[index]["connString"].ToString());
-                            if (((my_mysql)myN.connections[index]["pdo"]).MCT.State != ConnectionState.Open)
-                            {
-                                try
-                                {
-                                    ((my_mysql)myN.connections[index]["pdo"]).open();
-                                    myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
-                                    //取得 databases 列表
-                                    string SQL = @"
-                                    show databases;
-                                ";
-                                    //MySqlCommand cmd = new MySqlCommand(SQL, ((MySqlConnection)myN.connections[index]["pdo"]));
-                                    DataTable dt = ((my_mysql)myN.connections[index]["pdo"]).selectSQL_SAFE(SQL);
-                                    //dt.Load(cmd.ExecuteReader());
-                                    for (int i = 0, max_i = dt.Rows.Count; i < max_i; i++)
-                                    {
-                                        TreeNode newNode = new TreeNode(dt.Rows[i]["Database"].ToString(), i, i);
-                                        newNode.ImageIndex = 10;
-                                        newNode.SelectedImageIndex = 10;
-                                        FindConnectionNode(index)?.Nodes.Add(newNode);
-                                    }
-                                    ((TreeView)sender).SelectedNode.ExpandAll();
-                                }
-                                catch (Exception ex)
-                                {
-                                    HandleConnectionOpenFailure(index, (TreeView)sender, "MySQL", ex);
-                                }
-
-                            }
+                            await OpenMySqlConnectionAsync(index, (TreeView)sender);
                         }
                         break;
                     case "oracle":

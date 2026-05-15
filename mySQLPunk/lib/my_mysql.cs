@@ -18,6 +18,9 @@ namespace mySQLPunk.lib
         public ConnectionState State => MCT?.State ?? ConnectionState.Closed;
         public string ProviderName => "mysql";
 
+        private const int MetadataCommandTimeoutSeconds = 8;
+        private const uint DefaultConnectionTimeoutSeconds = 8;
+
         public void SetConn(string connection)
         {
             if (!connection.ToLower().Contains("allowzerodatetime"))
@@ -25,9 +28,59 @@ namespace mySQLPunk.lib
                 if (!connection.EndsWith(";")) connection += ";";
                 connection += "AllowZeroDateTime=True;";
             }
+            connection = EnsureMySqlConnectionTimeout(connection);
             MCT = new MySqlConnection(connection);
         }
         public void setConn(string connection) => SetConn(connection);
+
+        private static bool HasConnectionTimeoutSetting(string connection)
+        {
+            if (string.IsNullOrWhiteSpace(connection)) return false;
+            return connection.IndexOf("connection timeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   connection.IndexOf("connectiontimeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   connection.IndexOf("connect timeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   connection.IndexOf("connecttimeout", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string EnsureMySqlConnectionTimeout(string connection)
+        {
+            if (string.IsNullOrWhiteSpace(connection)) return connection;
+            if (HasConnectionTimeoutSetting(connection)) return connection;
+
+            try
+            {
+                var builder = new MySqlConnectionStringBuilder(connection)
+                {
+                    ConnectionTimeout = DefaultConnectionTimeoutSeconds
+                };
+                return builder.ConnectionString;
+            }
+            catch
+            {
+                return connection;
+            }
+        }
+
+        private DataTable ExecuteDataTable(string sql, Dictionary<string, object> parameters, int commandTimeoutSeconds)
+        {
+            DataTable output = new DataTable();
+            using (MySqlCommand cmd = new MySqlCommand(sql, MCT))
+            {
+                cmd.CommandTimeout = commandTimeoutSeconds;
+                if (parameters != null)
+                {
+                    foreach (var key in parameters.Keys)
+                    {
+                        cmd.Parameters.Add(new MySqlParameter("?" + key, parameters[key]));
+                    }
+                }
+                using (MySqlDataReader reader = cmd.ExecuteReader())
+                {
+                    output.Load(reader);
+                }
+            }
+            return output;
+        }
 
         public void setTimeout(int timeout)
         {
@@ -151,9 +204,8 @@ namespace mySQLPunk.lib
 
         public List<string> GetDatabases()
         {
-            // ... 同原本邏輯 ...
             List<string> dbs = new List<string>();
-            DataTable dt = SelectSQL("SHOW DATABASES;");
+            DataTable dt = ExecuteDataTable("SHOW DATABASES;", null, MetadataCommandTimeoutSeconds);
             foreach (DataRow row in dt.Rows)
             {
                 dbs.Add(row[0].ToString());
@@ -165,7 +217,10 @@ namespace mySQLPunk.lib
         {
             string safeDB = databaseName.Replace("`", "``");
             List<string> tables = new List<string>();
-            DataTable dt = SelectSQL($"SHOW FULL TABLES FROM `{safeDB}` WHERE Table_type = 'BASE TABLE';");
+            DataTable dt = ExecuteDataTable(
+                $"SHOW FULL TABLES FROM `{safeDB}` WHERE Table_type = 'BASE TABLE';",
+                null,
+                MetadataCommandTimeoutSeconds);
             foreach (DataRow row in dt.Rows)
             {
                 tables.Add(row[0].ToString());
@@ -177,7 +232,10 @@ namespace mySQLPunk.lib
         {
             string safeDB = databaseName.Replace("`", "``");
             List<string> views = new List<string>();
-            DataTable dt = SelectSQL($"SHOW FULL TABLES FROM `{safeDB}` WHERE Table_type = 'VIEW';");
+            DataTable dt = ExecuteDataTable(
+                $"SHOW FULL TABLES FROM `{safeDB}` WHERE Table_type = 'VIEW';",
+                null,
+                MetadataCommandTimeoutSeconds);
             foreach (DataRow row in dt.Rows)
             {
                 views.Add(row[0].ToString());
@@ -189,27 +247,39 @@ namespace mySQLPunk.lib
         {
             string safeDB = databaseName.Replace("`", "``");
             string safeTable = tableName.Replace("`", "``");
-            return SelectSQL($"SHOW FULL COLUMNS FROM `{safeDB}`.`{safeTable}`;");
+            return ExecuteDataTable(
+                $"SHOW FULL COLUMNS FROM `{safeDB}`.`{safeTable}`;",
+                null,
+                MetadataCommandTimeoutSeconds);
         }
 
         public DataTable GetIndexes(string databaseName, string tableName)
         {
             string safeDB = databaseName.Replace("`", "``");
             string safeTable = tableName.Replace("`", "``");
-            return SelectSQL($"SHOW INDEX FROM `{safeDB}`.`{safeTable}`;");
+            return ExecuteDataTable(
+                $"SHOW INDEX FROM `{safeDB}`.`{safeTable}`;",
+                null,
+                MetadataCommandTimeoutSeconds);
         }
 
         public DataTable GetTableStatus(string databaseName)
         {
             string safeDB = databaseName.Replace("`", "``");
-            return SelectSQL($"SHOW TABLE STATUS FROM `{safeDB}`;");
+            return ExecuteDataTable(
+                $"SHOW TABLE STATUS FROM `{safeDB}`;",
+                null,
+                MetadataCommandTimeoutSeconds);
         }
 
         public Dictionary<string, string> GetDatabaseInfo(string databaseName)
         {
             var output = new Dictionary<string, string>();
             var p = new Dictionary<string, object> { { "db", databaseName } };
-            DataTable dt = SelectSQL("SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = ?db", p);
+            DataTable dt = ExecuteDataTable(
+                "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = ?db",
+                p,
+                MetadataCommandTimeoutSeconds);
             if (dt.Rows.Count > 0)
             {
                 output["character_set"] = dt.Rows[0]["default_character_set_name"].ToString();
