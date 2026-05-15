@@ -8,8 +8,11 @@ CODEX_REASONING_EFFORT="${CODEX_REASONING_EFFORT:-high}"
 ISSUE_LIMIT="${ISSUE_LIMIT:-100}"
 STATE_DIR="${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mysqlpunk-codex-issue-watch}"
 STATE_FILE="$STATE_DIR/open-issues.tsv"
+FAILED_STATE_FILE="$STATE_DIR/failed-open-issues.tsv"
+FAILED_AT_FILE="$STATE_DIR/failed-at"
 LOCK_FILE="$STATE_DIR/watch.lock"
 LOG_FILE="$STATE_DIR/watch.log"
+FAILURE_RETRY_SECONDS="${FAILURE_RETRY_SECONDS:-3600}"
 
 mkdir -p "$STATE_DIR"
 touch "$LOG_FILE"
@@ -61,6 +64,7 @@ jq -r '.[] | [.number, .updatedAt, .title] | @tsv' "$issues_json" >"$current_tsv
 
 if [[ ! -s "$current_tsv" ]]; then
   : >"$STATE_FILE"
+  rm -f "$FAILED_STATE_FILE" "$FAILED_AT_FILE"
   log "no open issues"
   exit 0
 fi
@@ -84,10 +88,20 @@ if [[ ! -s "$changed_tsv" ]]; then
   exit 0
 fi
 
-cp "$current_tsv" "$STATE_FILE"
-
 issue_list="$(awk -F '\t' '{ printf "#%s (%s)\n", $1, $3 }' "$changed_tsv")"
 issue_numbers="$(awk -F '\t' '{ printf "#%s ", $1 }' "$changed_tsv" | sed 's/[[:space:]]*$//')"
+
+if [[ -f "$FAILED_STATE_FILE" && -f "$FAILED_AT_FILE" ]] &&
+   cmp -s "$changed_tsv" "$FAILED_STATE_FILE"; then
+  failed_at="$(cat "$FAILED_AT_FILE" 2>/dev/null || printf '0')"
+  now="$(date +%s)"
+  if [[ "$failed_at" =~ ^[0-9]+$ ]] &&
+     (( now - failed_at < FAILURE_RETRY_SECONDS )); then
+    retry_at="$(date -d "@$((failed_at + FAILURE_RETRY_SECONDS))" -Is)"
+    log "changed open issues previously failed: $issue_numbers; retry after $retry_at"
+    exit 0
+  fi
+fi
 
 log "changed open issues detected: $issue_numbers"
 
@@ -117,10 +131,16 @@ codex exec \
   -m "$CODEX_MODEL" \
   -c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\"" \
   --sandbox danger-full-access \
-  --ask-for-approval never \
   "$prompt"
 codex_status=$?
 set -e
+
+if [[ "$codex_status" -ne 0 ]]; then
+  cp "$changed_tsv" "$FAILED_STATE_FILE"
+  date +%s >"$FAILED_AT_FILE"
+  log "Codex run failed with exit code $codex_status; issue state was not marked successful and will retry after cooldown"
+  exit "$codex_status"
+fi
 
 gh issue list \
   --repo "$REPO" \
@@ -128,10 +148,6 @@ gh issue list \
   --json number,updatedAt,title \
   --limit "$ISSUE_LIMIT" |
   jq -r '.[] | [.number, .updatedAt, .title] | @tsv' >"$STATE_FILE"
-
-if [[ "$codex_status" -ne 0 ]]; then
-  log "Codex run failed with exit code $codex_status; issue state has been marked to avoid a retry loop"
-  exit "$codex_status"
-fi
+rm -f "$FAILED_STATE_FILE" "$FAILED_AT_FILE"
 
 log "Codex run completed"
