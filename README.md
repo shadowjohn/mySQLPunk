@@ -173,7 +173,27 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 ## 協作規範
 
-- 多人共同維護時，開工前先執行 `git pull --ff-only origin master`。
-- 修改完成後先建置或執行對應 smoke test，再 commit。
-- Commit 後推送到遠端，避免本機進度落後。
+- `history.md` 是本機筆記且已被 `.gitignore` 忽略；正式狀態以 git commit 與本 README 為準。
+- 每次新增或修改一個明確功能，先同步遠端、再修改、測試成功後 commit，最後 push 到 `origin/master` 上版。
+- 標準流程：
+
+```powershell
+git status --short --branch
+git fetch origin
+git pull --rebase origin master
+
+# 修改功能 / 修 bug
+
+dotnet msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU" /v:minimal /nologo
+
+git status --short
+git add <本次相關檔案>
+git commit -m "type(scope): 繁中說明"
+git push origin master
+```
+
+- 建置失敗不 commit、不 push；有 UI/DB 行為變更時，除了建置，還要做對應 smoke test。
+- 若 `git pull --rebase origin master` 發生衝突，先停下來處理衝突並重新測試，再進 commit/push 流程。
+- Commit message 延續現有格式：`feat(scope): ...`、`fix(scope): ...`、`docs(scope): ...`、`style(scope): ...`、`refactor(scope): ...`。
+- 常用 scope：`query`、`designer`、`sqlite`、`sqlserver`、`oracle`、`copy`、`cli`、`connection`、`tree`、`export`、`ui`。
 - 修完 README 中的待辦或限制時，請同步更新本檔案狀態。
