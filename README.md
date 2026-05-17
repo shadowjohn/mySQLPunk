@@ -108,6 +108,9 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 ### Table Designer 限制
 
+- **自動補註解字典為遠端服務，可能受網路影響**
+  - 現況：Table Designer 的「補註解」會載入遠端字典對照表；若網路/站台/SSL 等因素導致載入失敗，會提示錯誤原因並允許再次觸發重新載入。
+
 - **既有資料表修改仍有不支援情境**
   - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」。
   - 後續方向：以 provider 為單位補齊欄位改名、型別變更、NULL/DEFAULT、Primary Key 與 constraint 變更。

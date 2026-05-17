@@ -520,6 +520,7 @@ namespace mySQLPunk
             Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
             Add("Designer.NoChangesDetected", "沒有偵測到變更。", "No changes detected.");
             Add("Designer.AutoCommentsUnavailable", "無法載入自動註解字典，請稍後再試。", "Cannot load the auto comment dictionary. Try again later.");
+            Add("Designer.AutoCommentsLoadFailed", "無法載入自動註解字典：{0}", "Cannot load the auto comment dictionary: {0}");
             Add("Designer.AutoCommentsUnsupported", "目前連線類型不支援欄位註解，無法直接補註解。", "The current connection type does not support column comments, so comments cannot be filled directly.");
             Add("Designer.AutoCommentsApplied", "已補上 {0} 個欄位註解，請確認 SQL 預覽後儲存。", "Filled {0} column comments. Review the SQL preview, then save.");
             Add("Designer.AutoCommentsUpdated", "已更新 {0} 個欄位註解，請確認 SQL 預覽後儲存。", "Updated {0} column comments. Review the SQL preview, then save.");

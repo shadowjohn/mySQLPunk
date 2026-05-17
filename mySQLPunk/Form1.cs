@@ -7183,7 +7183,16 @@ namespace mySQLPunk
                 try
                 {
                     progressOverlay.SetProgress(0, 1, Localization.T("Designer.AutoCommentsLoading"));
-                    Dictionary<string, string> comments = await TableDesignerForm.GetAutoColumnCommentTask();
+                    Dictionary<string, string> comments;
+                    try
+                    {
+                        comments = await TableDesignerForm.GetAutoColumnCommentTask();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(Localization.Format("Designer.AutoCommentsLoadFailed", ex.Message), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
                     if (comments == null || comments.Count == 0)
                     {
                         MessageBox.Show(Localization.T("Designer.AutoCommentsUnavailable"), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);

@@ -13,11 +13,15 @@ using System.Diagnostics;
 using utility;
 namespace mySQLPunk
 {
-    public class TableDesignerForm : Form, IDockableForm
-    {
-        private const string AutoColumnCommentUrl = "https://3wa.tw/fast/all_my_columns.php?raw=1";
-        private static readonly object AutoColumnCommentSync = new object();
-        private static Task<Dictionary<string, string>> AutoColumnCommentTask;
+	    public class TableDesignerForm : Form, IDockableForm
+	    {
+	        private const string AutoColumnCommentUrl = "https://3wa.tw/fast/all_my_columns.php?raw=1";
+	        private const int AutoColumnCommentTimeoutMs = 8000;
+	        private const int AutoColumnCommentRetryCount = 2;
+	        private static readonly object AutoColumnCommentSync = new object();
+	        private static Task<Dictionary<string, string>> AutoColumnCommentTask;
+	        private static string AutoColumnCommentLastError;
+	        private static DateTime? AutoColumnCommentLastErrorUtc;
 
         private IDatabase _db;
         private string _databaseName;
@@ -583,7 +587,12 @@ namespace mySQLPunk
             Task<Dictionary<string, string>> task = GetAutoColumnCommentTask();
             task.ContinueWith(t =>
             {
-                if (t.IsCanceled || t.IsFaulted) return;
+                if (t.IsCanceled || t.IsFaulted)
+                {
+                    Exception ex = t.Exception?.GetBaseException();
+                    if (ex != null) Trace.WriteLine($"[AutoColumnComment] preload failed: {ex.Message}");
+                    return;
+                }
 
                 Action apply = () =>
                 {
@@ -605,7 +614,7 @@ namespace mySQLPunk
         {
             lock (AutoColumnCommentSync)
             {
-                if (AutoColumnCommentTask == null)
+                if (AutoColumnCommentTask == null || AutoColumnCommentTask.IsCanceled || AutoColumnCommentTask.IsFaulted)
                 {
                     AutoColumnCommentTask = Task.Factory.StartNew(
                         LoadAutoColumnComments,
@@ -618,32 +627,85 @@ namespace mySQLPunk
             }
         }
 
+        public static string GetAutoColumnCommentLastError()
+        {
+            lock (AutoColumnCommentSync)
+            {
+                return AutoColumnCommentLastError;
+            }
+        }
+
+        private sealed class AutoColumnCommentWebClient : WebClient
+        {
+            private readonly int _timeoutMs;
+
+            public AutoColumnCommentWebClient(int timeoutMs)
+            {
+                _timeoutMs = timeoutMs;
+            }
+
+            protected override WebRequest GetWebRequest(Uri address)
+            {
+                WebRequest request = base.GetWebRequest(address);
+                if (request == null) return null;
+                request.Timeout = _timeoutMs;
+                if (request is HttpWebRequest httpRequest)
+                {
+                    httpRequest.ReadWriteTimeout = _timeoutMs;
+                }
+                return request;
+            }
+        }
+
         private static Dictionary<string, string> LoadAutoColumnComments()
         {
-            Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            try
+            Exception lastException = null;
+            for (int attempt = 0; attempt <= AutoColumnCommentRetryCount; attempt++)
             {
-                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-                using (WebClient client = new WebClient())
+                try
                 {
-                    client.Encoding = Encoding.UTF8;
-                    string json = client.DownloadString(AutoColumnCommentUrl);
-                    Dictionary<string, string> parsed = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
-                    if (parsed == null) return comments;
+                    Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-                    foreach (var item in parsed)
+                    ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                    using (WebClient client = new AutoColumnCommentWebClient(AutoColumnCommentTimeoutMs))
                     {
-                        if (string.IsNullOrWhiteSpace(item.Key) || string.IsNullOrWhiteSpace(item.Value)) continue;
-                        comments[item.Key.Trim()] = item.Value.Trim();
+                        client.Encoding = Encoding.UTF8;
+                        string json = client.DownloadString(AutoColumnCommentUrl);
+                        Dictionary<string, string> parsed = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+                        if (parsed == null) throw new InvalidOperationException("字典回傳格式不正確（解析結果為 null）");
+
+                        foreach (var item in parsed)
+                        {
+                            if (string.IsNullOrWhiteSpace(item.Key) || string.IsNullOrWhiteSpace(item.Value)) continue;
+                            comments[item.Key.Trim()] = item.Value.Trim();
+                        }
+                    }
+
+                    lock (AutoColumnCommentSync)
+                    {
+                        AutoColumnCommentLastError = null;
+                        AutoColumnCommentLastErrorUtc = null;
+                    }
+
+                    return comments;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    lock (AutoColumnCommentSync)
+                    {
+                        AutoColumnCommentLastError = ex.Message;
+                        AutoColumnCommentLastErrorUtc = DateTime.UtcNow;
+                    }
+
+                    if (attempt < AutoColumnCommentRetryCount)
+                    {
+                        Thread.Sleep(200 * (attempt + 1));
                     }
                 }
             }
-            catch
-            {
-            }
 
-            return comments;
+            throw new Exception("自動註解字典載入失敗：" + (lastException?.Message ?? "未知錯誤"), lastException);
         }
 
         private void ApplyAutoColumnCommentForGridRow(int rowIndex)
@@ -729,7 +791,20 @@ namespace mySQLPunk
                 ShowAutoCommentProgress(Localization.T("Designer.AutoCommentsLoading"), 0, 1);
                 try
                 {
-                    Dictionary<string, string> comments = await GetAutoColumnCommentTask();
+                    Dictionary<string, string> comments;
+                    try
+                    {
+                        comments = await GetAutoColumnCommentTask();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (showMessage)
+                        {
+                            MessageBox.Show(Localization.Format("Designer.AutoCommentsLoadFailed", ex.Message), Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                        return 0;
+                    }
+
                     if (comments == null || comments.Count == 0)
                     {
                         if (showMessage)
