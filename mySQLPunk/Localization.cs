@@ -58,7 +58,6 @@ namespace mySQLPunk
             Add("Menu.ColorBlue", "藍色", "Blue");
             Add("Menu.ColorPurple", "紫色", "Purple");
             Add("Menu.ManageGroups", "管理群組", "Manage Groups");
-            Add("Menu.GroupUnavailable", "尚未建立群組功能", "Groups are not available yet");
             Add("Menu.GroupName", "群組名稱", "Group Name");
             Add("Menu.GroupNamePrompt", "請輸入群組名稱：", "Enter a group name:");
             Add("Menu.MoveToGroup", "移至群組...", "Move to Group...");
