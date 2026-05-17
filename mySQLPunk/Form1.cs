@@ -105,8 +105,9 @@ namespace mySQLPunk
         private Panel _dockHintOverlay;
         private DatabaseCopyItem _treeClipboardItem;
         private bool _allowTreeLabelEdit = false;
-        private readonly List<string> _favoriteNodePaths = new List<string>();
-        private readonly HashSet<int> _openingConnectionIndices = new HashSet<int>();
+	        private readonly List<string> _favoriteNodePaths = new List<string>();
+	        private readonly HashSet<int> _openingConnectionIndices = new HashSet<int>();
+	        private readonly HashSet<string> _loadingDatabaseMetadataKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 群組功能：快速查詢連線節點（key = 連線索引）
         private TreeNode[] _connectionTreeNodes = new TreeNode[0];
@@ -198,13 +199,38 @@ namespace mySQLPunk
             }
         }
 
-        private void ExitConnectionOpenScope(int index)
-        {
-            lock (_openingConnectionIndices)
-            {
-                _openingConnectionIndices.Remove(index);
-            }
-        }
+	        private void ExitConnectionOpenScope(int index)
+	        {
+	            lock (_openingConnectionIndices)
+	            {
+	                _openingConnectionIndices.Remove(index);
+	            }
+	        }
+
+	        private static string BuildDatabaseMetadataLoadKey(int connectionIndex, string databaseName)
+	        {
+	            return connectionIndex + "|" + (databaseName ?? string.Empty);
+	        }
+
+	        private bool TryEnterDatabaseMetadataLoadScope(int connectionIndex, string databaseName)
+	        {
+	            string key = BuildDatabaseMetadataLoadKey(connectionIndex, databaseName);
+	            lock (_loadingDatabaseMetadataKeys)
+	            {
+	                if (_loadingDatabaseMetadataKeys.Contains(key)) return false;
+	                _loadingDatabaseMetadataKeys.Add(key);
+	                return true;
+	            }
+	        }
+
+	        private void ExitDatabaseMetadataLoadScope(int connectionIndex, string databaseName)
+	        {
+	            string key = BuildDatabaseMetadataLoadKey(connectionIndex, databaseName);
+	            lock (_loadingDatabaseMetadataKeys)
+	            {
+	                _loadingDatabaseMetadataKeys.Remove(key);
+	            }
+	        }
 
         private static bool ShouldOfferRetryForConnectionOpen(Exception ex)
         {
@@ -214,6 +240,13 @@ namespace mySQLPunk
                 if (mySqlEx.Number == 1045) return false;
                 return mySqlEx.IsTransient;
             }
+
+            string message = ex?.Message ?? string.Empty;
+            if (message.IndexOf("28P01", StringComparison.OrdinalIgnoreCase) >= 0) return false; // PostgreSQL invalid_password
+            if (message.IndexOf("password authentication failed", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+            if (message.IndexOf("login failed for user", StringComparison.OrdinalIgnoreCase) >= 0) return false; // SQL Server credential failure
+            if (message.IndexOf("ORA-01017", StringComparison.OrdinalIgnoreCase) >= 0) return false; // Oracle invalid username/password
+            if (message.IndexOf("ORA-28000", StringComparison.OrdinalIgnoreCase) >= 0) return false; // Oracle account locked
 
             if (ex is TimeoutException) return true;
             if (ex is IOException) return true;
@@ -247,6 +280,20 @@ namespace mySQLPunk
             };
 
             return builder.ConnectionString;
+        }
+
+        private static string BuildPostgreSqlConnectionString(Dictionary<string, object> conn)
+        {
+            string host = GetConnectionValue(conn, "host");
+            string portText = GetConnectionValue(conn, "port");
+            string user = GetConnectionValue(conn, "username");
+            string password = GetConnectionValue(conn, "pwd");
+
+            int port = 5432;
+            if (!string.IsNullOrWhiteSpace(portText)) int.TryParse(portText, out port);
+
+            // 用 postgres 作為初始 DB 以便取得 database 清單
+            return $"Server={host};Port={port};User Id={user};Password={password};Database=postgres;Timeout=8;Command Timeout=8;";
         }
 
         private void PopulateConnectionDatabaseNodes(TreeNode connectionNode, IEnumerable<string> databaseNames)
@@ -329,6 +376,305 @@ namespace mySQLPunk
                 myN.connections[index]["pdo"] = null;
                 myN.connections[index]["isConnect"] = "F";
                 HandleConnectionOpenFailure(index, tree, "MySQL", lastError);
+            }
+            finally
+            {
+                if (tree != null) tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
+                ExitConnectionOpenScope(index);
+            }
+        }
+
+        private async Task OpenPostgreSqlConnectionAsync(int index, TreeView tree)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            if (!TryEnterConnectionOpenScope(index)) return;
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = tree?.Enabled ?? true;
+            try
+            {
+                if (tree != null) tree.Enabled = false;
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield();
+
+                var conn = myN.connections[index];
+                string connString = BuildPostgreSqlConnectionString(conn);
+
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    my_postgresql db = new my_postgresql();
+                    try
+                    {
+                        db.setConn(connString);
+                        List<string> databases = await Task.Run(() =>
+                        {
+                            db.open();
+                            return db.GetDatabases();
+                        });
+
+                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["pdo"] = db;
+                        myN.connections[index]["isConnect"] = "T";
+                        ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
+
+                        TreeNode connNode = FindConnectionNode(index);
+                        PopulateConnectionDatabaseNodes(connNode, databases);
+                        if (connNode != null) connNode.Expand();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        try { db.Dispose(); } catch { }
+
+                        bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
+                        if (canRetry)
+                        {
+                            DialogResult retry = MessageBox.Show(
+                                "PostgreSQL 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                "PostgreSQL",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning);
+                            if (retry == DialogResult.Yes) continue;
+                        }
+
+                        myN.connections[index]["pdo"] = null;
+                        myN.connections[index]["isConnect"] = "F";
+                        HandleConnectionOpenFailure(index, tree, "PostgreSQL", lastError);
+                        return;
+                    }
+                }
+
+                myN.connections[index]["pdo"] = null;
+                myN.connections[index]["isConnect"] = "F";
+                HandleConnectionOpenFailure(index, tree, "PostgreSQL", lastError);
+            }
+            finally
+            {
+                if (tree != null) tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
+                ExitConnectionOpenScope(index);
+            }
+        }
+
+        private async Task OpenSqliteConnectionAsync(int index, TreeView tree)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            if (!TryEnterConnectionOpenScope(index)) return;
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = tree?.Enabled ?? true;
+            try
+            {
+                if (tree != null) tree.Enabled = false;
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield();
+
+                var conn = myN.connections[index];
+                string connString = "Data Source=" + GetConnectionValue(conn, "path") + ";Version=3;";
+
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    my_sqlite db = new my_sqlite();
+                    try
+                    {
+                        db.setConn(connString);
+                        List<string> databases = await Task.Run(() =>
+                        {
+                            db.open();
+                            return db.GetDatabases();
+                        });
+
+                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["pdo"] = db;
+                        myN.connections[index]["isConnect"] = "T";
+                        ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
+
+                        if (db.SpatiaLiteEnabled) UpdateMainStatus("SQLite + SpatiaLite ready");
+                        else if (!string.IsNullOrWhiteSpace(db.SpatiaLiteLoadError)) UpdateMainStatus(db.SpatiaLiteLoadError);
+
+                        TreeNode connNode = FindConnectionNode(index);
+                        PopulateConnectionDatabaseNodes(connNode, databases);
+                        if (connNode != null) connNode.Expand();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        try { db.Dispose(); } catch { }
+
+                        bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
+                        if (canRetry)
+                        {
+                            DialogResult retry = MessageBox.Show(
+                                "SQLite 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                "SQLite",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning);
+                            if (retry == DialogResult.Yes) continue;
+                        }
+
+                        myN.connections[index]["pdo"] = null;
+                        myN.connections[index]["isConnect"] = "F";
+                        HandleConnectionOpenFailure(index, tree, "SQLite", lastError);
+                        return;
+                    }
+                }
+
+                myN.connections[index]["pdo"] = null;
+                myN.connections[index]["isConnect"] = "F";
+                HandleConnectionOpenFailure(index, tree, "SQLite", lastError);
+            }
+            finally
+            {
+                if (tree != null) tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
+                ExitConnectionOpenScope(index);
+            }
+        }
+
+        private async Task OpenOracleConnectionAsync(int index, TreeView tree)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            if (!TryEnterConnectionOpenScope(index)) return;
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = tree?.Enabled ?? true;
+            try
+            {
+                if (tree != null) tree.Enabled = false;
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield();
+
+                var conn = myN.connections[index];
+                string connString = BuildOracleConnectionString(conn);
+
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    my_oracle db = new my_oracle();
+                    try
+                    {
+                        db.setConn(connString);
+                        List<string> databases = await Task.Run(() =>
+                        {
+                            db.open();
+                            return db.GetDatabases();
+                        });
+
+                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["pdo"] = db;
+                        myN.connections[index]["isConnect"] = "T";
+                        ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
+
+                        TreeNode connNode = FindConnectionNode(index);
+                        PopulateConnectionDatabaseNodes(connNode, databases);
+                        if (connNode != null) connNode.Expand();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        try { db.Dispose(); } catch { }
+
+                        bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
+                        if (canRetry)
+                        {
+                            DialogResult retry = MessageBox.Show(
+                                "Oracle 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                "Oracle",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning);
+                            if (retry == DialogResult.Yes) continue;
+                        }
+
+                        myN.connections[index]["pdo"] = null;
+                        myN.connections[index]["isConnect"] = "F";
+                        HandleConnectionOpenFailure(index, tree, "Oracle", lastError);
+                        return;
+                    }
+                }
+
+                myN.connections[index]["pdo"] = null;
+                myN.connections[index]["isConnect"] = "F";
+                HandleConnectionOpenFailure(index, tree, "Oracle", lastError);
+            }
+            finally
+            {
+                if (tree != null) tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
+                ExitConnectionOpenScope(index);
+            }
+        }
+
+        private async Task OpenSqlServerConnectionAsync(int index, TreeView tree)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            if (!TryEnterConnectionOpenScope(index)) return;
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = tree?.Enabled ?? true;
+            try
+            {
+                if (tree != null) tree.Enabled = false;
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield();
+
+                var conn = myN.connections[index];
+                string connString = BuildSqlServerConnectionString(conn);
+
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    my_mssql db = new my_mssql();
+                    try
+                    {
+                        db.setConn(connString);
+                        List<string> databases = await Task.Run(() =>
+                        {
+                            db.open();
+                            return db.GetDatabases();
+                        });
+
+                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["pdo"] = db;
+                        myN.connections[index]["isConnect"] = "T";
+                        ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
+
+                        TreeNode connNode = FindConnectionNode(index);
+                        PopulateConnectionDatabaseNodes(connNode, databases);
+                        if (connNode != null) connNode.Expand();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        try { db.Dispose(); } catch { }
+
+                        bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
+                        if (canRetry)
+                        {
+                            DialogResult retry = MessageBox.Show(
+                                "SQL Server 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                "SQL Server",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning);
+                            if (retry == DialogResult.Yes) continue;
+                        }
+
+                        myN.connections[index]["pdo"] = null;
+                        myN.connections[index]["isConnect"] = "F";
+                        HandleConnectionOpenFailure(index, tree, "SQL Server", lastError);
+                        return;
+                    }
+                }
+
+                myN.connections[index]["pdo"] = null;
+                myN.connections[index]["isConnect"] = "F";
+                HandleConnectionOpenFailure(index, tree, "SQL Server", lastError);
             }
             finally
             {
@@ -4579,18 +4925,17 @@ namespace mySQLPunk
             return BuildTargetFromNode(databaseNode);
         }
 
-        private void RefreshDatabaseObjectNodes(TreeNode databaseNode)
-        {
-            if (databaseNode == null) return;
-            TreeNode root = databaseNode;
-            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
-            int connIdxRefresh = GetConnectionIndex(root);
-            if (connIdxRefresh < 0 || connIdxRefresh >= myN.connections.Count) return;
-            IDatabase db = (IDatabase)myN.connections[connIdxRefresh]["pdo"];
-            databaseNode.Nodes.Clear();
-            PopulateDatabaseChildren(databaseNode, db, databaseNode.Text);
-            databaseNode.Expand();
-        }
+	        private void RefreshDatabaseObjectNodes(TreeNode databaseNode)
+	        {
+	            if (databaseNode == null) return;
+	            TreeNode root = databaseNode;
+	            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+	            int connIdxRefresh = GetConnectionIndex(root);
+	            if (connIdxRefresh < 0 || connIdxRefresh >= myN.connections.Count) return;
+	            IDatabase db = (IDatabase)myN.connections[connIdxRefresh]["pdo"];
+	            databaseNode.Nodes.Clear();
+	            _ = LoadDatabaseMetadataAsync(connIdxRefresh, databaseNode, db, databaseNode.Text);
+	        }
 
         private void SelectObjectNode(TreeNode databaseNode, string objectKind, string objectName)
         {
@@ -8997,18 +9342,241 @@ namespace mySQLPunk
                 drawLists();
             }
         }
-        private void db_tree_second_click(int father_index, int index, string databaseName)
+        private async Task db_tree_second_click(int father_index, int index, string databaseName)
         {
             TreeNode connNode = FindConnectionNode(father_index);
             if (connNode == null || index < 0 || index >= connNode.Nodes.Count) return;
             TreeNode databaseNode = connNode.Nodes[index];
-            if (databaseNode.Nodes.Count > 0) return;
             if (!(myN.connections[father_index]["pdo"] is IDatabase db)) return;
 
-            PopulateDatabaseChildren(databaseNode, db, databaseName);
-            databaseNode.Expand();
-            databaseNode.ImageIndex = 11;
-            databaseNode.SelectedImageIndex = 11;
+            await LoadDatabaseMetadataAsync(father_index, databaseNode, db, databaseName);
+        }
+
+        private sealed class DatabaseChildrenSnapshot
+        {
+            public List<string> Tables;
+            public List<string> Views;
+            public DataTable Functions;
+            public DataTable Users;
+            public DataTable Events;
+        }
+
+        private DatabaseChildrenSnapshot BuildDatabaseChildrenSnapshot(IDatabase db, string databaseName, Dictionary<string, object> connInfo)
+        {
+            if (db == null) throw new ArgumentNullException(nameof(db));
+
+            var snapshot = new DatabaseChildrenSnapshot();
+            try { snapshot.Tables = db.GetTables(databaseName) ?? new List<string>(); }
+            catch (Exception ex) { throw new Exception("載入 Tables 失敗：" + ex.Message, ex); }
+            try { snapshot.Views = db.GetViews(databaseName) ?? new List<string>(); }
+            catch (Exception ex) { throw new Exception("載入 Views 失敗：" + ex.Message, ex); }
+            try { snapshot.Functions = GetDatabaseFunctions(db, databaseName); }
+            catch (Exception ex) { throw new Exception("載入 Functions 失敗：" + ex.Message, ex); }
+            try { snapshot.Users = GetDatabaseUsers(db, databaseName, connInfo); }
+            catch (Exception ex) { throw new Exception("載入 Users 失敗：" + ex.Message, ex); }
+            try { snapshot.Events = GetDatabaseEvents(db, databaseName); }
+            catch (Exception ex) { throw new Exception("載入 Events 失敗：" + ex.Message, ex); }
+            return snapshot;
+        }
+
+        private async Task LoadDatabaseMetadataAsync(int connectionIndex, TreeNode databaseNode, IDatabase db, string databaseName)
+        {
+            if (databaseNode == null || db == null) return;
+            if (databaseNode.Nodes.Count > 0)
+            {
+                databaseNode.Expand();
+                return;
+            }
+
+            if (!TryEnterDatabaseMetadataLoadScope(connectionIndex, databaseName))
+            {
+                databaseNode.Expand();
+                return;
+            }
+
+            Cursor previousCursor = Cursor;
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield();
+
+                db_tree?.BeginUpdate();
+                try
+                {
+                    databaseNode.Nodes.Clear();
+                    TreeNode loading = new TreeNode(Localization.T("Status.LoadingData"));
+                    loading.ImageIndex = 11;
+                    loading.SelectedImageIndex = 11;
+                    databaseNode.Nodes.Add(loading);
+                    databaseNode.Expand();
+                    databaseNode.ImageIndex = 11;
+                    databaseNode.SelectedImageIndex = 11;
+                }
+                finally
+                {
+                    db_tree?.EndUpdate();
+                }
+
+                Dictionary<string, object> connInfo = connectionIndex >= 0 && connectionIndex < myN.connections.Count ? myN.connections[connectionIndex] : null;
+                DatabaseChildrenSnapshot snapshot = await Task.Run(() => BuildDatabaseChildrenSnapshot(db, databaseName, connInfo));
+                if (IsDisposed) return;
+
+                db_tree?.BeginUpdate();
+                try
+                {
+                    databaseNode.Nodes.Clear();
+                    PopulateDatabaseChildren(databaseNode, snapshot, databaseName, connInfo);
+                    databaseNode.Expand();
+                    databaseNode.ImageIndex = 11;
+                    databaseNode.SelectedImageIndex = 11;
+                }
+                finally
+                {
+                    db_tree?.EndUpdate();
+                }
+            }
+            catch (Exception ex)
+            {
+                db_tree?.BeginUpdate();
+                try
+                {
+                    databaseNode.Nodes.Clear();
+                }
+                finally
+                {
+                    db_tree?.EndUpdate();
+                }
+
+                string providerName = db?.ProviderName ?? "database";
+                string message = $"{providerName} metadata 載入失敗（{databaseName}）：{ex.Message}";
+                Console.WriteLine(message);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, "Metadata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Cursor = previousCursor;
+                ExitDatabaseMetadataLoadScope(connectionIndex, databaseName);
+            }
+        }
+
+        private void PopulateDatabaseChildren(TreeNode databaseNode, DatabaseChildrenSnapshot snapshot, string databaseName, Dictionary<string, object> connInfo)
+        {
+            if (databaseNode == null || snapshot == null) return;
+
+            TreeNode tablesNode = CreateTreeGroupNode("Tables", 12);
+            databaseNode.Nodes.Add(tablesNode);
+
+            foreach (string tableName in snapshot.Tables ?? new List<string>())
+            {
+                TreeNode tN = new TreeNode(tableName);
+                tN.SelectedImageIndex = 12;
+                tN.ImageIndex = 12;
+                tablesNode.Nodes.Add(tN);
+            }
+
+            TreeNode viewsNode = CreateTreeGroupNode("Views", 13);
+            databaseNode.Nodes.Add(viewsNode);
+
+            foreach (string viewName in snapshot.Views ?? new List<string>())
+            {
+                TreeNode vN = new TreeNode(viewName);
+                vN.SelectedImageIndex = 13;
+                vN.ImageIndex = 13;
+                viewsNode.Nodes.Add(vN);
+            }
+
+            TreeNode newNode = CreateTreeGroupNode("Functions", 14);
+            databaseNode.Nodes.Add(newNode);
+
+            if (snapshot.Functions != null)
+            {
+                foreach (DataRow functionRow in snapshot.Functions.Rows)
+                {
+                    TreeNode functionNode = new TreeNode(functionRow["Name"].ToString());
+                    functionNode.ImageIndex = 14;
+                    functionNode.SelectedImageIndex = 14;
+                    newNode.Nodes.Add(functionNode);
+                }
+            }
+
+            newNode = CreateTreeGroupNode("Users", 19);
+            databaseNode.Nodes.Add(newNode);
+
+            if (snapshot.Users != null)
+            {
+                foreach (DataRow userRow in snapshot.Users.Rows)
+                {
+                    TreeNode userNode = new TreeNode(userRow["Name"].ToString());
+                    userNode.ImageIndex = 19;
+                    userNode.SelectedImageIndex = 19;
+                    newNode.Nodes.Add(userNode);
+                }
+            }
+
+            newNode = CreateTreeGroupNode("Models", 20);
+            databaseNode.Nodes.Add(newNode);
+
+            foreach (string modelName in DatabaseModelNames)
+            {
+                TreeNode modelNode = new TreeNode(modelName);
+                modelNode.ImageIndex = 20;
+                modelNode.SelectedImageIndex = 20;
+                newNode.Nodes.Add(modelNode);
+            }
+
+            newNode = CreateTreeGroupNode("BI", 21);
+            databaseNode.Nodes.Add(newNode);
+
+            foreach (string biName in DatabaseBIReportNames)
+            {
+                TreeNode biNode = new TreeNode(biName);
+                biNode.ImageIndex = 21;
+                biNode.SelectedImageIndex = 21;
+                newNode.Nodes.Add(biNode);
+            }
+
+            newNode = CreateTreeGroupNode("Other", 22);
+            databaseNode.Nodes.Add(newNode);
+
+            foreach (string toolName in DatabaseOtherToolNames)
+            {
+                TreeNode toolNode = new TreeNode(toolName);
+                toolNode.ImageIndex = 22;
+                toolNode.SelectedImageIndex = 22;
+                newNode.Nodes.Add(toolNode);
+            }
+
+            newNode = CreateTreeGroupNode("Events", 15);
+            databaseNode.Nodes.Add(newNode);
+
+            if (snapshot.Events != null)
+            {
+                foreach (DataRow eventRow in snapshot.Events.Rows)
+                {
+                    TreeNode eventNode = new TreeNode(eventRow["Name"].ToString());
+                    eventNode.ImageIndex = 15;
+                    eventNode.SelectedImageIndex = 15;
+                    newNode.Nodes.Add(eventNode);
+                }
+            }
+
+            newNode = CreateTreeGroupNode("Queries", 16);
+            databaseNode.Nodes.Add(newNode);
+
+            newNode = CreateTreeGroupNode("Reports", 17);
+            databaseNode.Nodes.Add(newNode);
+
+            foreach (string reportName in DatabaseReportNames)
+            {
+                TreeNode reportNode = new TreeNode(reportName);
+                reportNode.ImageIndex = 17;
+                reportNode.SelectedImageIndex = 17;
+                newNode.Nodes.Add(reportNode);
+            }
+
+            newNode = CreateTreeGroupNode("Backups", 18);
+            databaseNode.Nodes.Add(newNode);
         }
 
         private void PopulateDatabaseChildren(TreeNode databaseNode, IDatabase db, string databaseName)
@@ -9155,7 +9723,7 @@ namespace mySQLPunk
                 if (m.Length == 2)
                 {
                     // 代表是資料庫層級
-                    db_tree_second_click(index, tree.SelectedNode.Index, tree.SelectedNode.Text);
+                    await db_tree_second_click(index, tree.SelectedNode.Index, tree.SelectedNode.Text);
                     return;
                 }
                 if (m.Length == 3)
@@ -9214,178 +9782,34 @@ namespace mySQLPunk
                     if (connRoot != null) connRoot.Nodes.Clear();
 
                     //連線，展開
-                    switch (db["db_kind"].ToString().ToLower())
-                    {
-                    case "postgresql":
-                        {
-                            //Server=127.0.0.1;Port=5432;Database=myDataBase;User Id=myUsername;
-                            //Password = myPassword;
-                            myN.connections[index]["connString"] = "Server=" + myN.connections[index]["host"].ToString() + ";" +
-                               "Port=" + myN.connections[index]["port"].ToString() + ";" +
-                               "User Id=" + myN.connections[index]["username"].ToString() + ";" +
-                               "Password=" + myN.connections[index]["pwd"].ToString() + ";" +
-                               "Database=postgres;";
-                            myN.connections[index]["pdo"] = new my_postgresql();
-                            //((MySqlConnection)myN.connections[index]["pdo"]).ConnectionString = myN.connections[index]["connString"].ToString();
-                            ((my_postgresql)myN.connections[index]["pdo"]).setConn(myN.connections[index]["connString"].ToString());
-                            if (((my_postgresql)myN.connections[index]["pdo"]).MCT.State != ConnectionState.Open)
-                            {
-                                try
-                                {
-                                    ((my_postgresql)myN.connections[index]["pdo"]).open();
-                                    myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
-                                    //取得 databases 列表
-                                    string SQL = @"
-                                        SELECT
-                                           ""datname"" AS ""Database""
-                                        FROM
-                                           ""pg_database""
-                                    ";
-                                    //MySqlCommand cmd = new MySqlCommand(SQL, ((MySqlConnection)myN.connections[index]["pdo"]));
-                                    DataTable dt = ((my_postgresql)myN.connections[index]["pdo"]).selectSQL_SAFE(SQL);
-                                    //dt.Load(cmd.ExecuteReader());
-                                    for (int i = 0, max_i = dt.Rows.Count; i < max_i; i++)
-                                    {
-                                        TreeNode newNode = new TreeNode(dt.Rows[i]["Database"].ToString(), i, i);
-                                        newNode.ImageIndex = 10;
-                                        newNode.SelectedImageIndex = 10;
-                                        FindConnectionNode(index)?.Nodes.Add(newNode);
-                                    }
-                                    ((TreeView)sender).SelectedNode.ExpandAll();
-                                }
-                                catch (Exception ex)
-                                {
-                                    HandleConnectionOpenFailure(index, (TreeView)sender, "PostgreSQL", ex);
-                                }
-
-                            }
-                        }
-                        break;
-                    case "sqlite":
-                        {
-                            //Console.WriteLine(myN.connections[index]["path"].ToString());
-                            myN.connections[index]["connString"] = "Data Source=" + myN.connections[index]["path"].ToString() + ";Version=3;";
-                            myN.connections[index]["pdo"] = new my_sqlite();
-                            //((MySqlConnection)myN.connections[index]["pdo"]).ConnectionString = myN.connections[index]["connString"].ToString();
-                            ((my_sqlite)myN.connections[index]["pdo"]).setConn(myN.connections[index]["connString"].ToString());
-                            if (((my_sqlite)myN.connections[index]["pdo"]).MCT.State != ConnectionState.Open)
-                            {
-                                try
-                                {
-                                    ((my_sqlite)myN.connections[index]["pdo"]).open();
-                                    myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
-                                    if (!((my_sqlite)myN.connections[index]["pdo"]).SpatiaLiteEnabled)
-                                    {
-                                        string spatiaLiteErr = ((my_sqlite)myN.connections[index]["pdo"]).SpatiaLiteLoadError;
-                                        UpdateMainStatus(Localization.Format("Connection.SpatiaLiteLoadFailed", spatiaLiteErr));
-                                        MessageBox.Show(
-                                            Localization.Format("Connection.SpatiaLiteLoadFailed", spatiaLiteErr),
-                                            "SpatiaLite",
-                                            MessageBoxButtons.OK,
-                                            MessageBoxIcon.Warning);
-                                    }
-                                    else
-                                    {
-                                        UpdateMainStatus("SQLite + SpatiaLite ready");
-                                    }
-                                    //取得 databases 列表
-                                    string SQL = @"
-                                    select 'main' AS `Database`;
-                                ";
-                                    DataTable dt = ((my_sqlite)myN.connections[index]["pdo"]).selectSQL_SAFE(SQL);
-                                    for (int i = 0, max_i = dt.Rows.Count; i < max_i; i++)
-                                    {
-                                        TreeNode newNode = new TreeNode(dt.Rows[i]["Database"].ToString(), i, i);
-                                        newNode.ImageIndex = 10;
-                                        newNode.SelectedImageIndex = 10;
-                                        FindConnectionNode(index)?.Nodes.Add(newNode);
-                                    }
-                                    ((TreeView)sender).SelectedNode.ExpandAll();
-                                }
-                                catch (Exception ex)
-                                {
-                                    HandleConnectionOpenFailure(index, (TreeView)sender, "SQLite", ex);
-                                }
-
-                            }
-                        }
-                        break;
+	                    switch (db["db_kind"].ToString().ToLower())
+	                    {
+	                    case "postgresql":
+	                        {
+	                            await OpenPostgreSqlConnectionAsync(index, (TreeView)sender);
+	                        }
+	                        break;
+		                    case "sqlite":
+	                        {
+	                            await OpenSqliteConnectionAsync(index, (TreeView)sender);
+	                        }
+	                        break;
                     case "mysql":
                         {
                             await OpenMySqlConnectionAsync(index, (TreeView)sender);
                         }
                         break;
-                    case "oracle":
-                        {
-                            myN.connections[index]["connString"] = BuildOracleConnectionString(myN.connections[index]);
-                            myN.connections[index]["pdo"] = new my_oracle();
-                            ((my_oracle)myN.connections[index]["pdo"]).setConn(myN.connections[index]["connString"].ToString());
-                            if (((my_oracle)myN.connections[index]["pdo"]).MCT.State != ConnectionState.Open)
-                            {
-                                try
-                                {
-                                    ((my_oracle)myN.connections[index]["pdo"]).open();
-                                    myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
-                                    List<string> schemas = ((my_oracle)myN.connections[index]["pdo"]).GetDatabases();
-                                    for (int i = 0, max_i = schemas.Count; i < max_i; i++)
-                                    {
-                                        TreeNode newNode = new TreeNode(schemas[i], i, i);
-                                        newNode.ImageIndex = 10;
-                                        newNode.SelectedImageIndex = 10;
-                                        FindConnectionNode(index)?.Nodes.Add(newNode);
-                                    }
-                                    ((TreeView)sender).SelectedNode.ExpandAll();
-                                }
-                                catch (Exception ex)
-                                {
-                                    HandleConnectionOpenFailure(index, (TreeView)sender, "Oracle", ex);
-                                }
-
-                            }
-                        }
-                        break;
-                    case "mssql":
-                    case "sqlserver":
-                        {
-                            myN.connections[index]["connString"] = BuildSqlServerConnectionString(myN.connections[index]);
-                            //Console.WriteLine(myN.connections[index]["connString"]);
-                            myN.connections[index]["pdo"] = new my_mssql();
-                            //((MySqlConnection)myN.connections[index]["pdo"]).ConnectionString = myN.connections[index]["connString"].ToString();
-                            ((my_mssql)myN.connections[index]["pdo"]).setConn(myN.connections[index]["connString"].ToString());
-                            if (((my_mssql)myN.connections[index]["pdo"]).MCT.State != ConnectionState.Open)
-                            {
-                                try
-                                {
-                                    ((my_mssql)myN.connections[index]["pdo"]).open();
-                                    myN.connections[index]["isConnect"] = "T";
-                                    ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
-                                    //取得 databases 列表
-                                    string SQL = @"
-                                  select [name] as [Database] from sys.databases WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb')
-                                ";
-                                    //MySqlCommand cmd = new MySqlCommand(SQL, ((MySqlConnection)myN.connections[index]["pdo"]));
-                                    DataTable dt = ((my_mssql)myN.connections[index]["pdo"]).selectSQL_SAFE(SQL);
-                                    //dt.Load(cmd.ExecuteReader());
-                                    for (int i = 0, max_i = dt.Rows.Count; i < max_i; i++)
-                                    {
-                                        TreeNode newNode = new TreeNode(dt.Rows[i]["Database"].ToString(), i, i);
-                                        newNode.ImageIndex = 10;
-                                        newNode.SelectedImageIndex = 10;
-                                        FindConnectionNode(index)?.Nodes.Add(newNode);
-                                    }
-                                    ((TreeView)sender).SelectedNode.ExpandAll();
-                                }
-                                catch (Exception ex)
-                                {
-                                    HandleConnectionOpenFailure(index, (TreeView)sender, "SQL Server", ex);
-                                }
-
-                            }
-                        }
-                        break;
+	                    case "oracle":
+	                        {
+	                            await OpenOracleConnectionAsync(index, (TreeView)sender);
+	                        }
+	                        break;
+	                    case "mssql":
+	                    case "sqlserver":
+	                        {
+	                            await OpenSqlServerConnectionAsync(index, (TreeView)sender);
+	                        }
+	                        break;
                 }
 
             }
@@ -9530,22 +9954,21 @@ namespace mySQLPunk
             return connectionNode.Nodes.Count == 1 ? connectionNode.Nodes[0] : null;
         }
 
-        private void EnsureDatabaseGroupNodes(TreeNode databaseNode)
-        {
-            if (databaseNode == null || databaseNode.Nodes.Count > 0) return;
+	        private void EnsureDatabaseGroupNodes(TreeNode databaseNode)
+	        {
+	            if (databaseNode == null || databaseNode.Nodes.Count > 0) return;
 
             TreeNode root = databaseNode;
             while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
             int index = GetConnectionIndex(root);
             if (index < 0 || index >= myN.connections.Count) return;
 
-            Dictionary<string, object> conn = myN.connections[index];
-            if (!conn.ContainsKey("isConnect") || conn["isConnect"].ToString() != "T") return;
-            if (!(conn.ContainsKey("pdo") && conn["pdo"] is IDatabase db)) return;
+	            Dictionary<string, object> conn = myN.connections[index];
+	            if (!conn.ContainsKey("isConnect") || conn["isConnect"].ToString() != "T") return;
+	            if (!(conn.ContainsKey("pdo") && conn["pdo"] is IDatabase db)) return;
 
-            PopulateDatabaseChildren(databaseNode, db, databaseNode.Text);
-            databaseNode.Expand();
-        }
+	            _ = LoadDatabaseMetadataAsync(index, databaseNode, db, databaseNode.Text);
+	        }
 
         private void tool_Connection_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
         {
