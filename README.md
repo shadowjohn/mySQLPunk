@@ -188,12 +188,15 @@ dotnet msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU" /v:m
 
 git status --short
 git add <本次相關檔案>
+git diff --cached
 git commit -m "type(scope): 繁中說明"
 git push origin master
 ```
 
 - 建置失敗不 commit、不 push；有 UI/DB 行為變更時，除了建置，還要做對應 smoke test。
 - 若 `git pull --rebase origin master` 發生衝突，先停下來處理衝突並重新測試，再進 commit/push 流程。
+- Commit 前必須執行 `git diff --cached` 確認 staged 內容只包含本次相關修改，避免簽入非預期檔案。
+- 非必要禁止 `git push --force` 或 `git push --force-with-lease`；若真的需要改寫遠端歷史，先明確確認原因、影響範圍與回復方式。
 - Commit message 延續現有格式：`feat(scope): ...`、`fix(scope): ...`、`docs(scope): ...`、`style(scope): ...`、`refactor(scope): ...`。
 - 常用 scope：`query`、`designer`、`sqlite`、`sqlserver`、`oracle`、`copy`、`cli`、`connection`、`tree`、`export`、`ui`。
 - 修完 README 中的待辦或限制時，請同步更新本檔案狀態。
