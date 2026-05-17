@@ -6564,10 +6564,6 @@ namespace mySQLPunk
 
             menu.Items.Add(new ToolStripSeparator());
 
-            ToolStripMenuItem newGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewGroup"));
-            newGroupItem.Click += (s, ev) => ShowGroupUnavailable();
-            menu.Items.Add(newGroupItem);
-
             AddPasteObjectMenuItem(menu);
 
             menu.Items.Add(new ToolStripSeparator());
@@ -6647,10 +6643,6 @@ namespace mySQLPunk
 
             menu.Items.Add(new ToolStripSeparator());
 
-            ToolStripMenuItem newGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewGroup"));
-            newGroupItem.Click += (s, ev) => ShowGroupUnavailable();
-            menu.Items.Add(newGroupItem);
-
             AddPasteObjectMenuItem(menu);
 
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
@@ -6693,10 +6685,6 @@ namespace mySQLPunk
             menu.Items.Add(findItem);
 
             menu.Items.Add(new ToolStripSeparator());
-
-            ToolStripMenuItem newGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewGroup"));
-            newGroupItem.Click += (s, ev) => ShowGroupUnavailable();
-            menu.Items.Add(newGroupItem);
 
             AddPasteObjectMenuItem(menu);
 

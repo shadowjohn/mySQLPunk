@@ -40,7 +40,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 | Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；部分既有資料表修改與進階索引尚未完整支援。 |
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 會寫入 sidecar metadata table。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
-| 資料產生 | 可用 | Tables 群組可產生指定資料表的 INSERT SQL，可開到查詢視窗檢查，也可確認後逐筆直接寫入。 |
+| 資料產生 | 可用 | Tables 節點可產生指定資料表的 INSERT SQL，可開到查詢視窗檢查，也可確認後逐筆直接寫入。 |
 | 命令列介面 | 可用 | 支援 MySQL、PostgreSQL、SQL Server、SQLite、Oracle 的 CLI 啟動指令；需本機已安裝對應客戶端工具。 |
 | Table/View 複製 | 可用 | 跨 provider 複製 Table/View；View SQL 無法安全轉換時會改用 table snapshot。 |
 | SQL Dump | 可用 | 支援多 provider Table dump；SQLite 欄位註解 sidecar metadata 會隨結構匯出；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
@@ -51,13 +51,14 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 ### 優先待辦
 
-- **群組功能 ✅ 已完成**
-  - 觸發位置：左側樹狀清單與右鍵選單中的「新增群組 / 管理群組」。
+- **連線群組功能 ✅ 已完成**
+  - 觸發位置：左側樹狀清單空白處右鍵選單的「新增群組」，以及連線/群組節點右鍵選單的群組操作項目。
   - 完成內容：
     - 連線支援 `conn_group` 欄位，儲存與讀取已整合至 `setting.ini`。
     - 左側樹狀清單以群組節點分類顯示連線。
     - 右鍵選單支援「移至群組」、「移出群組」、「重新命名群組」、「刪除群組」。
     - 語系文字已補齊。
+  - 備註：資料庫物件分類（Tables / Views / Queries）目前不支援群組分類。
 
 - **多連線設定檔 ✅ 已完成**
   - 觸發位置：連線根節點右鍵選單的「切換連線設定檔」。
