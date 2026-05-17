@@ -6762,13 +6762,6 @@ namespace mySQLPunk
             return menu;
         }
 
-        private void ShowGroupUnavailable()
-        {
-            string message = Localization.T("Menu.GroupUnavailable");
-            UpdateMainStatus(message);
-            MessageBox.Show(message, Localization.T("Menu.NewGroup"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-
         private void RefreshConnectionList()
         {
             drawLists();
