@@ -802,9 +802,14 @@ namespace mySQLPunk
 
             txtSql.SuspendLayout();
 
-            // 先全部重置為黑色
+            Color defaultTextColor = ThemeManager.TextColor;
+            Color keywordColor = ThemeManager.AccentColor;
+            Color stringColor = ThemeManager.IsDark ? Color.FromArgb(206, 145, 120) : Color.DarkOrange;
+            Color commentColor = ThemeManager.IsDark ? Color.FromArgb(106, 153, 85) : Color.DarkGreen;
+
+            // 先全部重置為預設文字色
             txtSql.SelectAll();
-            txtSql.SelectionColor = Color.Black;
+            txtSql.SelectionColor = defaultTextColor;
             txtSql.SelectionFont = new Font(txtSql.Font, FontStyle.Regular);
 
             string text = txtSql.Text;
@@ -824,7 +829,7 @@ namespace mySQLPunk
                     if (leftOk && rightOk)
                     {
                         txtSql.Select(idx, kw.Length);
-                        txtSql.SelectionColor = Color.FromArgb(0, 0, 205);
+                        txtSql.SelectionColor = keywordColor;
                         txtSql.SelectionFont = new Font(txtSql.Font, FontStyle.Bold);
                     }
                     idx += kw.Length;
@@ -832,14 +837,14 @@ namespace mySQLPunk
             }
 
             // 字串常值 (橙色)
-            HighlightPattern(text, @"'[^']*'", Color.DarkOrange, FontStyle.Regular);
+            HighlightPattern(text, @"'[^']*'", stringColor, FontStyle.Regular);
 
             // 單行注釋 (綠色)
-            HighlightPattern(text, @"--[^\r\n]*", Color.DarkGreen, FontStyle.Italic);
+            HighlightPattern(text, @"--[^\r\n]*", commentColor, FontStyle.Italic);
 
             // 還原游標
             txtSql.Select(selStart, selLen);
-            txtSql.SelectionColor = Color.Black;
+            txtSql.SelectionColor = defaultTextColor;
             txtSql.SelectionFont = new Font(txtSql.Font, FontStyle.Regular);
 
             txtSql.ResumeLayout();
@@ -1469,6 +1474,7 @@ namespace mySQLPunk
             {
                 txtSql.BackColor = ThemeManager.TextBoxBackColor;
                 txtSql.ForeColor = ThemeManager.TextColor;
+                ApplySyntaxHighlight();
             }
             if (lstCompletion != null)
             {
