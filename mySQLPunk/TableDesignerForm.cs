@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using mySQLPunk.lib;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using utility;
 namespace mySQLPunk
@@ -776,7 +777,7 @@ namespace mySQLPunk
 
         private static Dictionary<string, string> ParseAutoColumnCommentJson(string json)
         {
-            Dictionary<string, string> parsed = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+            Dictionary<string, string> parsed = ParseAutoColumnCommentDictionaryPayload(json);
             if (parsed == null) throw new InvalidOperationException("字典回傳格式不正確（解析結果為 null）");
 
             Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -794,6 +795,47 @@ namespace mySQLPunk
             string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (string.IsNullOrWhiteSpace(appDataPath)) appDataPath = AppDomain.CurrentDomain.BaseDirectory;
             return Path.Combine(appDataPath, "mySQLPunk", AutoColumnCommentCacheFileName);
+        }
+
+        private static Dictionary<string, string> ParseAutoColumnCommentDictionaryPayload(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return null;
+
+            JToken token = JToken.Parse(json);
+            JObject obj = token as JObject;
+            if (obj == null) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsInvalidDictionaryFormat"));
+
+            JToken dictionaryToken = GetAutoColumnCommentDictionaryToken(obj);
+            return dictionaryToken.ToObject<Dictionary<string, string>>();
+        }
+
+        private static JToken GetAutoColumnCommentDictionaryToken(JObject obj)
+        {
+            foreach (string propertyName in new[] { "columns", "comments", "entries" })
+            {
+                JToken candidate;
+                if (TryGetJObjectProperty(obj, propertyName, out candidate) && candidate is JObject)
+                {
+                    return candidate;
+                }
+            }
+
+            return obj;
+        }
+
+        private static bool TryGetJObjectProperty(JObject obj, string propertyName, out JToken value)
+        {
+            foreach (JProperty property in obj.Properties())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+
+            value = null;
+            return false;
         }
 
         private static void SaveAutoColumnCommentCache(Dictionary<string, string> comments)
@@ -842,8 +884,28 @@ namespace mySQLPunk
 
             string dir = Path.GetDirectoryName(targetPath);
             if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllText(targetPath, JsonConvert.SerializeObject(comments, Formatting.Indented), new UTF8Encoding(false));
+            File.WriteAllText(targetPath, BuildAutoColumnCommentDictionaryExportJson(comments), new UTF8Encoding(false));
             return comments.Count;
+        }
+
+        private static string BuildAutoColumnCommentDictionaryExportJson(Dictionary<string, string> comments)
+        {
+            Dictionary<string, string> normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in comments)
+            {
+                if (string.IsNullOrWhiteSpace(item.Key) || string.IsNullOrWhiteSpace(item.Value)) continue;
+                normalized[item.Key.Trim()] = item.Value.Trim();
+            }
+
+            JObject root = new JObject
+            {
+                ["version"] = 1,
+                ["exportedAtUtc"] = DateTime.UtcNow.ToString("o"),
+                ["source"] = "mySQLPunk",
+                ["entryCount"] = normalized.Count,
+                ["columns"] = JObject.FromObject(normalized)
+            };
+            return root.ToString(Formatting.Indented);
         }
 
         private static void SetAutoColumnCommentDictionary(Dictionary<string, string> comments, string source)

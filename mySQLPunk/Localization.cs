@@ -537,6 +537,7 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsImportSuccess", "已匯入 {0} 筆自動註解字典。", "Imported {0} auto comment dictionary entries.");
             Add("Designer.AutoCommentsImportFailed", "匯入自動註解字典失敗：{0}", "Import auto comment dictionary failed: {0}");
             Add("Designer.AutoCommentsImportEmpty", "自動註解字典沒有可用項目。", "The auto comment dictionary has no usable entries.");
+            Add("Designer.AutoCommentsInvalidDictionaryFormat", "自動註解字典格式不正確。", "The auto comment dictionary format is invalid.");
             Add("Designer.AutoCommentsExportSuccess", "已匯出 {0} 筆自動註解字典。", "Exported {0} auto comment dictionary entries.");
             Add("Designer.AutoCommentsExportFailed", "匯出自動註解字典失敗：{0}", "Export auto comment dictionary failed: {0}");
             Add("Designer.AutoCommentsProgress", "補註解 {0}/{1}：{2}", "Filling comments {0}/{1}: {2}");
