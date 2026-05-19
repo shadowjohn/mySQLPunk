@@ -115,6 +115,8 @@ namespace mySQLPunk
         private TreeNode[] _connectionTreeNodes = new TreeNode[0];
 
         private const string ConnectionGroupNodeTag = "__CONN_GROUP__";
+        private const string ConnectionExportSourceIdFileName = "connection-export-source-id.txt";
+        private const string TrustedConnectionImportSourcesFileName = "trusted-connection-import-sources.json";
 
         private class TreeDatabaseTarget
         {
@@ -155,6 +157,8 @@ namespace mySQLPunk
             public bool SourceSignaturePresent { get; set; }
             public bool SourceSignatureValid { get; set; }
             public string SourceExportedAtUtc { get; set; }
+            public string SourceId { get; set; }
+            public bool SourceTrusted { get; set; }
             public int Added { get; set; }
             public int Updated { get; set; }
             public int Unchanged { get; set; }
@@ -1343,6 +1347,7 @@ namespace mySQLPunk
             using (DataGridView grid = new DataGridView())
             using (Button replaceButton = new Button())
             using (Button mergeButton = new Button())
+            using (Button trustSourceButton = new Button())
             using (Button cancelButton = new Button())
             {
                 dialog.Text = Localization.T("Connection.ImportPreviewTitle");
@@ -1388,6 +1393,7 @@ namespace mySQLPunk
                 replaceButton.AutoSize = true;
                 replaceButton.Click += (s, e) =>
                 {
+                    if (!ConfirmConnectionImportTrust(preview)) return;
                     if (MessageBox.Show(Localization.T("Connection.ImportReplaceConfirm"), Localization.T("Common.Confirm"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                     {
                         dialog.Tag = CreateConnectionImportDecision(ConnectionImportMode.Replace, table);
@@ -1407,8 +1413,30 @@ namespace mySQLPunk
                         return;
                     }
 
+                    if (!ConfirmConnectionImportTrust(preview)) return;
                     dialog.Tag = decision;
                     dialog.DialogResult = DialogResult.OK;
+                };
+
+                trustSourceButton.Text = Localization.T("Connection.ImportTrustSource");
+                trustSourceButton.AutoSize = true;
+                trustSourceButton.Enabled = CanTrustConnectionImportSource(preview);
+                trustSourceButton.Visible = trustSourceButton.Enabled;
+                trustSourceButton.Click += (s, e) =>
+                {
+                    try
+                    {
+                        TrustConnectionImportSource(preview.SourceId, preview.SourceSignature, BuildTrustedConnectionImportSourcesPath());
+                        preview.SourceTrusted = true;
+                        summaryLabel.Text = BuildConnectionImportPreviewSummary(preview);
+                        trustSourceButton.Enabled = false;
+                        trustSourceButton.Visible = false;
+                        MessageBox.Show(Localization.T("Connection.ImportSourceTrusted"), dialog.Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(Localization.Format("Connection.ImportTrustSourceFailed", ex.Message), dialog.Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                 };
 
                 cancelButton.Text = Localization.T("Common.Cancel");
@@ -1417,6 +1445,7 @@ namespace mySQLPunk
                 footer.Controls.Add(cancelButton);
                 footer.Controls.Add(mergeButton);
                 footer.Controls.Add(replaceButton);
+                footer.Controls.Add(trustSourceButton);
 
                 dialog.Controls.Add(grid);
                 dialog.Controls.Add(summaryLabel);
@@ -1467,7 +1496,9 @@ namespace mySQLPunk
                 preview?.ExistingOnly ?? 0);
 
             if (preview == null) return summary;
-            return summary + Environment.NewLine + BuildConnectionImportSignatureSummary(preview);
+            return summary + Environment.NewLine +
+                   BuildConnectionImportSignatureSummary(preview) + Environment.NewLine +
+                   BuildConnectionImportTrustSummary(preview);
         }
 
         private static string BuildConnectionImportSignatureSummary(ConnectionImportPreviewReport preview)
@@ -1489,6 +1520,63 @@ namespace mySQLPunk
             }
 
             return Localization.Format("Connection.ImportSignatureSummaryWithTime", status, shortSignature, preview.SourceExportedAtUtc);
+        }
+
+        private static string BuildConnectionImportTrustSummary(ConnectionImportPreviewReport preview)
+        {
+            if (preview == null || !preview.SourceSignaturePresent)
+            {
+                return Localization.T("Connection.ImportTrustMissingSignature");
+            }
+
+            if (!preview.SourceSignatureValid)
+            {
+                return Localization.T("Connection.ImportTrustSkippedInvalidSignature");
+            }
+
+            if (string.IsNullOrWhiteSpace(preview.SourceId))
+            {
+                return Localization.T("Connection.ImportTrustMissingSourceId");
+            }
+
+            return preview.SourceTrusted
+                ? Localization.T("Connection.ImportTrustKnown")
+                : Localization.T("Connection.ImportTrustUnknown");
+        }
+
+        private static bool CanTrustConnectionImportSource(ConnectionImportPreviewReport preview)
+        {
+            return preview != null &&
+                   preview.SourceSignaturePresent &&
+                   preview.SourceSignatureValid &&
+                   !preview.SourceTrusted &&
+                   !string.IsNullOrWhiteSpace(preview.SourceId);
+        }
+
+        private bool ConfirmConnectionImportTrust(ConnectionImportPreviewReport preview)
+        {
+            if (preview == null) return true;
+            if (preview.SourceSignaturePresent && preview.SourceSignatureValid && preview.SourceTrusted) return true;
+
+            string message;
+            if (!preview.SourceSignaturePresent)
+            {
+                message = Localization.T("Connection.ImportTrustConfirmMissingSignature");
+            }
+            else if (!preview.SourceSignatureValid)
+            {
+                message = Localization.T("Connection.ImportTrustConfirmInvalidSignature");
+            }
+            else if (string.IsNullOrWhiteSpace(preview.SourceId))
+            {
+                message = Localization.T("Connection.ImportTrustConfirmMissingSourceId");
+            }
+            else
+            {
+                message = Localization.T("Connection.ImportTrustConfirmUnknown");
+            }
+
+            return MessageBox.Show(message, Localization.T("Common.Warning"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
         }
 
         private static ConnectionImportDecision CreateConnectionImportDecision(ConnectionImportMode mode, DataTable table)
@@ -8954,6 +9042,7 @@ namespace mySQLPunk
             metadata["formatVersion"] = 1;
             metadata["app"] = "mySQLPunk";
             metadata["exportedAtUtc"] = DateTime.UtcNow.ToString("o");
+            metadata["sourceId"] = GetConnectionExportSourceId();
             metadata.Remove("signatureSha256");
             root["exportMetadata"] = metadata;
 
@@ -8971,10 +9060,167 @@ namespace mySQLPunk
 
             string signature = metadata.Value<string>("signatureSha256");
             report.SourceExportedAtUtc = metadata.Value<string>("exportedAtUtc") ?? "";
+            report.SourceId = metadata.Value<string>("sourceId") ?? "";
             report.SourceSignature = signature ?? "";
             report.SourceSignaturePresent = !string.IsNullOrWhiteSpace(signature);
             report.SourceSignatureValid = report.SourceSignaturePresent &&
                                           string.Equals(signature, ComputeConnectionImportSignature(root), StringComparison.OrdinalIgnoreCase);
+            report.SourceTrusted = report.SourceSignatureValid &&
+                                   IsConnectionImportSourceTrusted(report.SourceId, BuildTrustedConnectionImportSourcesPath());
+        }
+
+        private static string BuildConnectionExportSourceIdPath()
+        {
+            return Path.Combine(GetConnectionTrustStoreDirectory(), ConnectionExportSourceIdFileName);
+        }
+
+        private static string BuildTrustedConnectionImportSourcesPath()
+        {
+            return Path.Combine(GetConnectionTrustStoreDirectory(), TrustedConnectionImportSourcesFileName);
+        }
+
+        private static string GetConnectionTrustStoreDirectory()
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(Application.UserAppDataPath))
+                {
+                    return Application.UserAppDataPath;
+                }
+            }
+            catch
+            {
+            }
+
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(appData)) appData = AppDomain.CurrentDomain.BaseDirectory;
+            return Path.Combine(appData, "mySQLPunk");
+        }
+
+        private static string GetConnectionExportSourceId()
+        {
+            string path = BuildConnectionExportSourceIdPath();
+            try
+            {
+                if (File.Exists(path))
+                {
+                    string existing = File.ReadAllText(path, Encoding.UTF8).Trim();
+                    if (IsValidConnectionImportSourceId(existing)) return existing;
+                }
+
+                string sourceId = Guid.NewGuid().ToString("N");
+                string dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+                File.WriteAllText(path, sourceId, new UTF8Encoding(false));
+                return sourceId;
+            }
+            catch
+            {
+                return Guid.NewGuid().ToString("N");
+            }
+        }
+
+        private static bool IsValidConnectionImportSourceId(string sourceId)
+        {
+            if (string.IsNullOrWhiteSpace(sourceId)) return false;
+            string text = sourceId.Trim();
+            Guid parsed;
+            return Guid.TryParse(text, out parsed) || text.Length >= 16;
+        }
+
+        private static bool IsConnectionImportSourceTrusted(string sourceId, string trustedSourcesPath)
+        {
+            if (!IsValidConnectionImportSourceId(sourceId)) return false;
+            return LoadTrustedConnectionImportSourceIds(trustedSourcesPath).Contains(sourceId.Trim());
+        }
+
+        private static HashSet<string> LoadTrustedConnectionImportSourceIds(string trustedSourcesPath)
+        {
+            HashSet<string> trusted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(trustedSourcesPath) || !File.Exists(trustedSourcesPath)) return trusted;
+
+            try
+            {
+                JToken root = JToken.Parse(File.ReadAllText(trustedSourcesPath, Encoding.UTF8));
+                JArray sources = root as JArray ?? root["sources"] as JArray;
+                if (sources == null) return trusted;
+
+                foreach (JToken token in sources)
+                {
+                    string sourceId = token.Type == JTokenType.String
+                        ? token.ToString()
+                        : token.Value<string>("sourceId");
+                    if (IsValidConnectionImportSourceId(sourceId)) trusted.Add(sourceId.Trim());
+                }
+            }
+            catch
+            {
+            }
+
+            return trusted;
+        }
+
+        private static void TrustConnectionImportSource(string sourceId, string signature, string trustedSourcesPath)
+        {
+            if (!IsValidConnectionImportSourceId(sourceId))
+            {
+                throw new ArgumentException(Localization.T("Connection.ImportTrustInvalidSourceId"));
+            }
+
+            if (string.IsNullOrWhiteSpace(trustedSourcesPath))
+            {
+                throw new ArgumentException(Localization.T("Connection.ImportTrustStoreUnavailable"));
+            }
+
+            JObject root = new JObject
+            {
+                ["formatVersion"] = 1,
+                ["sources"] = new JArray()
+            };
+
+            if (File.Exists(trustedSourcesPath))
+            {
+                try
+                {
+                    JObject existing = JToken.Parse(File.ReadAllText(trustedSourcesPath, Encoding.UTF8)) as JObject;
+                    if (existing != null) root = existing;
+                }
+                catch
+                {
+                }
+            }
+
+            JArray sources = root["sources"] as JArray;
+            if (sources == null)
+            {
+                sources = new JArray();
+                root["sources"] = sources;
+            }
+
+            JObject entry = null;
+            foreach (JToken token in sources)
+            {
+                JObject obj = token as JObject;
+                if (obj == null) continue;
+                if (string.Equals(obj.Value<string>("sourceId"), sourceId.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    entry = obj;
+                    break;
+                }
+            }
+
+            if (entry == null)
+            {
+                entry = new JObject { ["sourceId"] = sourceId.Trim() };
+                sources.Add(entry);
+            }
+
+            entry["trustedAtUtc"] = DateTime.UtcNow.ToString("o");
+            if (!string.IsNullOrWhiteSpace(signature)) entry["lastSignatureSha256"] = signature.Trim();
+
+            string dir = Path.GetDirectoryName(trustedSourcesPath);
+            if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(trustedSourcesPath, root.ToString(Formatting.Indented), new UTF8Encoding(false));
         }
 
         private static string ComputeConnectionImportSignature(JToken root)

@@ -647,11 +647,16 @@ public static class SmokeTests
         MethodInfo computeMethod = typeof(Form1).GetMethod("ComputeConnectionImportSignature", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo readMethod = typeof(Form1).GetMethod("ReadConnectionImportSignature", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo summaryMethod = typeof(Form1).GetMethod("BuildConnectionImportSignatureSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo trustSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportTrustSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo trustSourceMethod = typeof(Form1).GetMethod("TrustConnectionImportSource", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo isTrustedMethod = typeof(Form1).GetMethod("IsConnectionImportSourceTrusted", BindingFlags.Static | BindingFlags.NonPublic);
         Type reportType = typeof(Form1).GetNestedType("ConnectionImportPreviewReport", BindingFlags.NonPublic);
 
         string importPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_import_signature_" + Guid.NewGuid().ToString("N") + ".json");
+        string trustedSourcesPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_trusted_sources_" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
+            string sourceId = Guid.NewGuid().ToString("N");
             JObject root = JObject.Parse(@"{
   ""connections"": [
     { ""conn_name"": ""signed"", ""db_kind"": ""mysql"", ""host"": ""localhost"", ""port"": ""3306"", ""username"": ""u"" }
@@ -663,6 +668,7 @@ public static class SmokeTests
     ""exportedAtUtc"": ""2026-05-19T08:00:00.0000000Z""
   }
 }");
+            ((JObject)root["exportMetadata"])["sourceId"] = sourceId;
             string signature = (string)computeMethod.Invoke(null, new object[] { root });
             ((JObject)root["exportMetadata"])["signatureSha256"] = signature;
             File.WriteAllText(importPath, root.ToString(Formatting.Indented), Encoding.UTF8);
@@ -674,6 +680,12 @@ public static class SmokeTests
             AssertEquals(signature, (string)GetProperty(report, "SourceSignature"), "Signed import should keep the source signature.");
             string summary = (string)summaryMethod.Invoke(null, new object[] { report });
             AssertContains(summary, "SHA-256", "Signature summary should show the hash algorithm.");
+            string trustSummary = (string)trustSummaryMethod.Invoke(null, new object[] { report });
+            AssertContains(trustSummary, "尚未加入白名單", "Untrusted signed source should be called out.");
+
+            Assert(!(bool)isTrustedMethod.Invoke(null, new object[] { sourceId, trustedSourcesPath }), "New source should not be trusted before whitelisting.");
+            trustSourceMethod.Invoke(null, new object[] { sourceId, signature, trustedSourcesPath });
+            Assert((bool)isTrustedMethod.Invoke(null, new object[] { sourceId, trustedSourcesPath }), "Trusted source whitelist should persist source IDs.");
 
             root["connections"][0]["host"] = "changed.example.test";
             File.WriteAllText(importPath, root.ToString(Formatting.Indented), Encoding.UTF8);
@@ -685,6 +697,7 @@ public static class SmokeTests
         finally
         {
             if (File.Exists(importPath)) File.Delete(importPath);
+            if (File.Exists(trustedSourcesPath)) File.Delete(trustedSourcesPath);
         }
     }
 
