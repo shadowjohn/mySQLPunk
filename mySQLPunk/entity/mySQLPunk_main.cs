@@ -18,10 +18,12 @@ namespace mySQLPunk.entity
         public List<Dictionary<string, object>> connections = new List<Dictionary<string, object>>();
         public List<string> groups = new List<string>();
         public string ActiveProfileName { get; private set; } = DefaultProfileName;
+        private bool _credentialsMigrated;
 
         public void getSettingINI()
         {
             LoadActiveProfileName();
+            _credentialsMigrated = false;
             string setting_path = GetSettingPath();
             if (!my.is_file(setting_path))
             {
@@ -62,6 +64,11 @@ namespace mySQLPunk.entity
                         if (!string.IsNullOrWhiteSpace(gName) && !groups.Contains(gName))
                             groups.Add(gName);
                     }
+            }
+
+            if (_credentialsMigrated)
+            {
+                setSettingINI();
             }
         }
 
@@ -317,7 +324,8 @@ namespace mySQLPunk.entity
                 {
                     { "host", GetVal(conn, "host") },
                     { "username", Crypto.Encrypt(GetVal(conn, "username")) },
-                    { "pwd", Crypto.Encrypt(GetVal(conn, "pwd")) },
+                    { "pwd", "" },
+                    { "credential_target", SaveConnectionPasswordToCredential(conn) },
                     { "port", GetVal(conn, "port") },
                     { "initial_database", GetVal(conn, "initial_database") },
                     { "db_kind", GetVal(conn, "db_kind") },
@@ -373,9 +381,63 @@ namespace mySQLPunk.entity
 
             NormalizeConnection(conn);
             conn["username"] = SafeDecrypt(GetVal(conn, "username"));
-            conn["pwd"] = SafeDecrypt(GetVal(conn, "pwd"));
+            LoadConnectionPassword(conn);
             conn["isConnect"] = "F";
             connections.Add(conn);
+        }
+
+        private string SaveConnectionPasswordToCredential(Dictionary<string, object> conn)
+        {
+            string existingTarget = GetVal(conn, "credential_target");
+            string password = GetVal(conn, "pwd");
+            if (string.IsNullOrEmpty(password))
+            {
+                if (!string.IsNullOrWhiteSpace(existingTarget))
+                {
+                    WindowsCredentialService.TryDeletePassword(existingTarget);
+                }
+                return "";
+            }
+
+            string target = WindowsCredentialService.BuildTargetName(ActiveProfileName, conn);
+            if (!string.Equals(existingTarget, target, StringComparison.OrdinalIgnoreCase))
+            {
+                WindowsCredentialService.TryDeletePassword(existingTarget);
+            }
+
+            if (WindowsCredentialService.TryWritePassword(target, GetVal(conn, "username"), password))
+            {
+                return target;
+            }
+
+            return "";
+        }
+
+        private void LoadConnectionPassword(Dictionary<string, object> conn)
+        {
+            string legacyPassword = SafeDecrypt(GetVal(conn, "pwd"));
+            string target = GetVal(conn, "credential_target");
+            string credentialPassword;
+
+            if (!string.IsNullOrWhiteSpace(target) && WindowsCredentialService.TryReadPassword(target, out credentialPassword))
+            {
+                conn["pwd"] = credentialPassword;
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(legacyPassword))
+            {
+                target = WindowsCredentialService.BuildTargetName(ActiveProfileName, conn);
+                if (WindowsCredentialService.TryWritePassword(target, GetVal(conn, "username"), legacyPassword))
+                {
+                    conn["credential_target"] = target;
+                    _credentialsMigrated = true;
+                }
+                conn["pwd"] = legacyPassword;
+                return;
+            }
+
+            conn["pwd"] = "";
         }
 
         private void NormalizeConnection(Dictionary<string, object> conn)
@@ -400,6 +462,10 @@ namespace mySQLPunk.entity
             if (!conn.ContainsKey("conn_group"))
             {
                 conn["conn_group"] = "";
+            }
+            if (!conn.ContainsKey("credential_target"))
+            {
+                conn["credential_target"] = "";
             }
         }
 

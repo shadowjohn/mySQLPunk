@@ -175,6 +175,7 @@
     <Compile Include="lib\my_sqlite.cs" />
     <Compile Include="lib\QueryResultExportService.cs" />
     <Compile Include="lib\SqliteSpecialObjectSqlBuilder.cs" />
+    <Compile Include="lib\WindowsCredentialService.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="QueryForm.cs">
       <SubType>Form</SubType>

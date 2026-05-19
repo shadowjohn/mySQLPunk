@@ -23,6 +23,7 @@ public static class SmokeTests
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Windows credential service", TestWindowsCredentialService, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
     }
@@ -347,6 +348,32 @@ public static class SmokeTests
         AssertEquals("fn_ping", snapshot.Functions.Rows[0]["Name"].ToString(), "MetadataLoadService should use the function loader.");
         AssertEquals("tester", snapshot.Users.Rows[0]["Name"].ToString(), "MetadataLoadService should pass connection info to the user loader.");
         AssertEquals("ev_daily", snapshot.Events.Rows[0]["Name"].ToString(), "MetadataLoadService should use the event loader.");
+    }
+
+    private static void TestWindowsCredentialService()
+    {
+        Dictionary<string, object> conn = new Dictionary<string, object>
+        {
+            { "conn_name", "Smoke Test/Connection" },
+            { "db_kind", "mysql" },
+            { "username", "tester" },
+            { "host", "localhost" },
+            { "port", "3306" }
+        };
+        string target = WindowsCredentialService.BuildTargetName("default", conn) + "/" + Guid.NewGuid().ToString("N");
+        AssertContains(target, "mySQLPunk/default/mysql/Smoke_Test_Connection/tester@localhost_3306", "Credential target should be deterministic and sanitized.");
+
+        try
+        {
+            Assert(WindowsCredentialService.TryWritePassword(target, "tester", "secret-value"), "Credential service should write a password.");
+            string password;
+            Assert(WindowsCredentialService.TryReadPassword(target, out password), "Credential service should read a password.");
+            AssertEquals("secret-value", password, "Credential service should round-trip the password.");
+        }
+        finally
+        {
+            Assert(WindowsCredentialService.TryDeletePassword(target), "Credential service should delete the test credential.");
+        }
     }
 
     private static DataTable CreateNamedRowsTable(string columnName, string value)

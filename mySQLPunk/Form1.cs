@@ -9549,11 +9549,22 @@ namespace mySQLPunk
 
             if (result == DialogResult.Yes)
             {
+                DeleteConnectionCredential(conn);
                 myN.connections.RemoveAt(index);
                 myN.setSettingINI();
                 drawLists();
             }
         }
+
+        private static void DeleteConnectionCredential(Dictionary<string, object> conn)
+        {
+            string target = GetConnectionValue(conn, "credential_target");
+            if (!string.IsNullOrWhiteSpace(target))
+            {
+                WindowsCredentialService.TryDeletePassword(target);
+            }
+        }
+
         private async Task db_tree_second_click(int father_index, int index, string databaseName)
         {
             TreeNode connNode = FindConnectionNode(father_index);
