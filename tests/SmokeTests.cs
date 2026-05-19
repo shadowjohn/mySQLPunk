@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.Reflection;
+using System.Runtime.Serialization;
 using System.Windows.Forms;
 using mySQLPunk;
 using mySQLPunk.lib;
@@ -16,6 +17,7 @@ public static class SmokeTests
         Run("View SQL 進階轉換案例", TestAdvancedViewSqlConversion, ref passed);
         Run("SQLite 專用物件 SQL builder", TestSqliteSpecialObjectSqlBuilder, ref passed);
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
+        Run("Table Designer ALTER provider matrix", TestTableDesignerAlterProviderMatrix, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
     }
@@ -201,6 +203,174 @@ public static class SmokeTests
             MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod("BuildCreateTableSql", BindingFlags.Instance | BindingFlags.NonPublic);
             return (string)buildMethod.Invoke(form, new object[] { columns });
         }
+    }
+
+    private static void TestTableDesignerAlterProviderMatrix()
+    {
+        string mysqlSql = BuildExistingAlterSql(
+            new my_mysql(),
+            "main",
+            "demo_table",
+            CreateOriginalColumnsForAlter(includeRemovedColumn: true),
+            CreateChangedColumnsForAlter(includeRemovedColumn: false),
+            "BuildMySqlAlterTableSql");
+        AssertContains(mysqlSql, "ALTER TABLE `main`.`demo_table`", "MySQL ALTER should target the existing table.");
+        AssertContains(mysqlSql, "DROP COLUMN `removed_col`", "MySQL ALTER should drop removed columns.");
+        AssertContains(mysqlSql, "CHANGE COLUMN `legacy_name` `display_name`", "MySQL ALTER should rename changed columns.");
+        AssertContains(mysqlSql, "ADD COLUMN `created_at`", "MySQL ALTER should add new columns.");
+
+        string postgresqlSql = BuildExistingAlterSql(
+            CreateProvider<my_postgresql>(),
+            "main",
+            "public.demo_table",
+            CreateOriginalColumnsForAlter(includeRemovedColumn: false),
+            CreateChangedColumnsForAlter(includeRemovedColumn: false),
+            "BuildGenericAlterTableSql");
+        AssertContains(postgresqlSql, "RENAME COLUMN \"legacy_name\" TO \"display_name\"", "PostgreSQL ALTER should rename columns.");
+        AssertContains(postgresqlSql, "ALTER COLUMN \"display_name\" TYPE VARCHAR(120)", "PostgreSQL ALTER should change column type.");
+        AssertContains(postgresqlSql, "ALTER COLUMN \"display_name\" SET NOT NULL", "PostgreSQL ALTER should change nullability.");
+        AssertContains(postgresqlSql, "ALTER COLUMN \"display_name\" SET DEFAULT", "PostgreSQL ALTER should change defaults.");
+        AssertContains(postgresqlSql, "COMMENT ON COLUMN \"public\".\"demo_table\".\"display_name\"", "PostgreSQL ALTER should update comments.");
+
+        string sqlServerSql = BuildExistingAlterSql(
+            CreateProvider<my_mssql>(),
+            "main",
+            "dbo.demo_table",
+            CreateOriginalColumnsForAlter(includeRemovedColumn: false),
+            CreateChangedColumnsForAlter(includeRemovedColumn: false),
+            "BuildGenericAlterTableSql");
+        AssertContains(sqlServerSql, "sys.sp_rename", "SQL Server ALTER should rename columns.");
+        AssertContains(sqlServerSql, "ALTER COLUMN [display_name] NVARCHAR(120) NOT NULL", "SQL Server ALTER should change type and nullability.");
+        AssertContains(sqlServerSql, "sys.default_constraints", "SQL Server ALTER should drop existing default constraints safely.");
+        AssertContains(sqlServerSql, "ADD CONSTRAINT [DF_demo_table_display_name]", "SQL Server ALTER should add named default constraints.");
+        AssertContains(sqlServerSql, "sp_addextendedproperty", "SQL Server ALTER should update column comments.");
+
+        string oracleSql = BuildExistingAlterSql(
+            CreateProvider<my_oracle>(),
+            "MAIN",
+            "DEMO_TABLE",
+            CreateOriginalColumnsForAlter(includeRemovedColumn: false),
+            CreateChangedColumnsForAlter(includeRemovedColumn: false),
+            "BuildGenericAlterTableSql");
+        AssertContains(oracleSql, "RENAME COLUMN \"legacy_name\" TO \"display_name\"", "Oracle ALTER should rename columns.");
+        AssertContains(oracleSql, "MODIFY (\"display_name\" VARCHAR2(120)", "Oracle ALTER should modify column definitions.");
+        AssertContains(oracleSql, "COMMENT ON COLUMN \"MAIN\".\"DEMO_TABLE\".\"display_name\"", "Oracle ALTER should update comments.");
+
+        string sqliteSql = BuildExistingAlterSql(
+            new my_sqlite(),
+            "main",
+            "demo_table",
+            CreateOriginalColumnsForAlter(includeRemovedColumn: true),
+            CreateChangedColumnsForAlter(includeRemovedColumn: false),
+            "BuildGenericAlterTableSql");
+        AssertContains(sqliteSql, "BEGIN TRANSACTION", "SQLite ALTER should rebuild the table inside a transaction.");
+        AssertContains(sqliteSql, "CREATE TABLE \"__mysqlpunk_rebuild_demo_table\"", "SQLite ALTER should create a rebuild table.");
+        AssertContains(sqliteSql, "DROP TABLE \"demo_table\"", "SQLite ALTER should drop the old table during rebuild.");
+        AssertContains(sqliteSql, "RENAME TO \"demo_table\"", "SQLite ALTER should rename the rebuild table back.");
+        AssertContains(sqliteSql, "__mysqlpunk_column_comments", "SQLite ALTER should preserve sidecar comments.");
+    }
+
+    private static string BuildExistingAlterSql(IDatabase db, string databaseName, string tableName, DataTable originalColumns, DataTable currentColumns, string methodName)
+    {
+        TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
+        DataGridView indexesGrid = new DataGridView();
+        DataTable indexes = CreateDesignerIndexesTable();
+        indexesGrid.DataSource = indexes;
+
+        SetPrivateField(form, "_db", db);
+        SetPrivateField(form, "_databaseName", databaseName);
+        SetPrivateField(form, "_tableName", tableName);
+        SetPrivateField(form, "_originalDt", originalColumns);
+        SetPrivateField(form, "_originalIdxDt", indexes.Copy());
+        SetPrivateField(form, "dgvIndexes", indexesGrid);
+
+        try
+        {
+            MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+            return (string)buildMethod.Invoke(form, new object[] { currentColumns });
+        }
+        finally
+        {
+            indexesGrid.Dispose();
+        }
+    }
+
+    private static T CreateProvider<T>() where T : class, IDatabase
+    {
+        return (T)FormatterServices.GetUninitializedObject(typeof(T));
+    }
+
+    private static DataTable CreateOriginalColumnsForAlter(bool includeRemovedColumn)
+    {
+        DataTable columns = CreateDesignerColumnsTable();
+        AddDesignerColumn(columns, "legacy_name", "varchar", "50", "", false, false, "", "old comment", "legacy_name");
+        if (includeRemovedColumn)
+        {
+            AddDesignerColumn(columns, "removed_col", "int", "", "", false, false, "", "", "removed_col");
+        }
+        return columns;
+    }
+
+    private static DataTable CreateChangedColumnsForAlter(bool includeRemovedColumn)
+    {
+        DataTable columns = CreateDesignerColumnsTable();
+        AddDesignerColumn(columns, "display_name", "varchar", "120", "", true, false, "unknown", "display comment", "legacy_name");
+        if (includeRemovedColumn)
+        {
+            AddDesignerColumn(columns, "removed_col", "int", "", "", false, false, "", "", "removed_col");
+        }
+        AddDesignerColumn(columns, "created_at", "datetime", "", "", false, false, "CURRENT_TIMESTAMP", "created time", "");
+        return columns;
+    }
+
+    private static DataTable CreateDesignerColumnsTable()
+    {
+        DataTable columns = new DataTable();
+        columns.Columns.Add("Name");
+        columns.Columns.Add("Type");
+        columns.Columns.Add("Length");
+        columns.Columns.Add("Decimals");
+        columns.Columns.Add("NotNull", typeof(bool));
+        columns.Columns.Add("PK", typeof(bool));
+        columns.Columns.Add("Default");
+        columns.Columns.Add("Comment");
+        columns.Columns.Add("_OldName");
+        columns.Columns.Add("_AutoComment", typeof(bool));
+        return columns;
+    }
+
+    private static void AddDesignerColumn(DataTable table, string name, string type, string length, string decimals, bool notNull, bool primaryKey, string defaultValue, string comment, string oldName)
+    {
+        DataRow row = table.NewRow();
+        row["Name"] = name;
+        row["Type"] = type;
+        row["Length"] = length;
+        row["Decimals"] = decimals;
+        row["NotNull"] = notNull;
+        row["PK"] = primaryKey;
+        row["Default"] = defaultValue;
+        row["Comment"] = comment;
+        row["_OldName"] = oldName;
+        row["_AutoComment"] = false;
+        table.Rows.Add(row);
+    }
+
+    private static DataTable CreateDesignerIndexesTable()
+    {
+        DataTable indexes = new DataTable();
+        indexes.Columns.Add("?迂");
+        indexes.Columns.Add("甈?");
+        indexes.Columns.Add("蝝Ｗ?憿?");
+        indexes.Columns.Add("蝝Ｗ??寞?");
+        indexes.Columns.Add("閮餉圾");
+        indexes.Columns.Add("_OldName");
+        return indexes;
+    }
+
+    private static void SetPrivateField(object target, string fieldName, object value)
+    {
+        FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        field.SetValue(target, value);
     }
 
     private static void SetTextBoxField(object target, string fieldName, string value)

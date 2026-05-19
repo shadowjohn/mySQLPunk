@@ -1759,8 +1759,35 @@ namespace mySQLPunk
                 return;
             }
 
+            rtbSqlPreview.Text = BuildMySqlAlterTableSql(currentDt);
+        }
+
+        private string BuildMySqlAlterTableSql(DataTable currentDt)
+        {
             List<string> changes = new List<string>();
             string prevCol = null;
+
+            foreach (DataRow original in _originalDt.Rows)
+            {
+                string oldName = GetRowString(original, "Name").Trim();
+                if (string.IsNullOrWhiteSpace(oldName)) continue;
+
+                bool stillExists = false;
+                foreach (DataRow current in currentDt.Rows)
+                {
+                    if (current.RowState == DataRowState.Deleted) continue;
+                    if (GetRowString(current, "_OldName").Trim() == oldName)
+                    {
+                        stillExists = true;
+                        break;
+                    }
+                }
+
+                if (!stillExists)
+                {
+                    changes.Add("DROP COLUMN " + QuoteMySqlIdentifier(oldName));
+                }
+            }
 
             for (int i = 0; i < currentDt.Rows.Count; i++)
             {
@@ -1898,13 +1925,11 @@ namespace mySQLPunk
 
             if (changes.Count > 0)
             {
-                rtbSqlPreview.Text = $"ALTER TABLE `{_databaseName}`.`{_tableName}`\n  " + 
-                                     string.Join(",\n  ", changes) + ";";
+                return $"ALTER TABLE `{_databaseName}`.`{_tableName}`\n  " +
+                       string.Join(",\n  ", changes) + ";";
             }
-            else
-            {
-                rtbSqlPreview.Text = "-- No changes detected.";
-            }
+
+            return "-- No changes detected.";
         }
 
         private string BuildMySqlAddIndexChange(DataRow row)

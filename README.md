@@ -31,7 +31,7 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder，以及 Table Designer 主要 DDL builder 的 MySQL / SQLite 建表輸出。
+目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder，以及 Table Designer 主要 DDL builder 的 MySQL / SQLite 建表與 MySQL / PostgreSQL / SQL Server / Oracle / SQLite 既有資料表 ALTER 輸出。
 
 ## 目前功能概況
 
@@ -45,7 +45,7 @@ Smoke test harness：
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
 | SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、多格式匯出、語法格式化、查詢歷史。 |
 | 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
-| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；部分既有資料表修改與進階索引尚未完整支援。 |
+| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；既有資料表欄位改名、型別、NULL、DEFAULT、註解、MySQL 刪欄位與 SQLite 重建表已納入 smoke test，部分進階索引與 constraint 情境仍需實機驗證。 |
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 會寫入 sidecar metadata table。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
 | 資料產生 | 可用 | Tables 節點可產生指定資料表的 INSERT SQL，可開到查詢視窗檢查，也可確認後逐筆直接寫入。 |
@@ -121,10 +121,11 @@ Smoke test harness：
   - 完成內容：若網路/站台/SSL 等因素導致遠端載入失敗，會在重試後改用上次成功的本機快取，避免補註解功能完全不可用；補註解進度視窗會標示目前使用的是遠端字典、本機快取、匯入字典或已命名字典；Table Designer 的補註解下拉選單可手動匯入 / 匯出 JSON 字典檔，方便離線環境或團隊共用欄位註解對照；匯出的字典會包含 `version`、`exportedAtUtc`、`source` 與 `entryCount`，匯入仍相容舊版純 key/value JSON；匯入前會顯示新增、更新、移除與不變項目的差異預覽，確認後才覆蓋本機字典；也可以將目前字典另存為命名字典，之後直接從下拉選單切換、重新命名或刪除。
   - 後續方向：若需要更完整的字典管理，可再加入命名字典逐項差異檢視。
 
-- **既有資料表修改仍有不支援情境**
+- **既有資料表修改仍有不支援情境 ✅ provider ALTER smoke test 已補齊**
   - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」；PostgreSQL Table Designer 已支援 `schema.table` 形式的既有資料表 SQL 產生，不再固定套用 `public` schema。
   - 本輪補齊：PostgreSQL provider 會列出非 `public` schema 的 Table/View、Function 與 Trigger，並讓欄位、索引、資料瀏覽、列數、複製建表、View DDL 與批次寫入等主要操作依 `schema.table` 產生正確 SQL；QueryForm 資料表新增/更新/刪除與 Form1 共用物件 SQL（開啟查詢、Drop、Dump/DDL、資料產生、補註解）也會依 `schema.table` 寫入正確 schema；Table Designer 欄位修改、註解、Primary Key 變更與索引刪除的 SQL 預覽也會依目前資料表 schema 產生正確物件名稱；新增 View / Function 範本會沿用目前選取物件的 schema，避免在非預設 schema 工作時又產生 `public` / `dbo` 範本。
-  - 後續方向：以 provider 為單位補齊欄位改名、型別變更、NULL/DEFAULT、Primary Key 與 constraint 變更。
+  - 本輪驗證：新增 MySQL / PostgreSQL / SQL Server / Oracle / SQLite 既有資料表 ALTER smoke test，覆蓋欄位改名、型別變更、NULL / DEFAULT、註解、新增欄位、MySQL 刪欄位，以及 SQLite 受限 ALTER 的重建表策略。
+  - 後續方向：進階索引、Primary Key 與 constraint 變更仍需依 provider 增加更多實機測試資料庫案例。
 
 - **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法 ✅ 主要 provider 與 SQLite 專用精靈已補齊**
   - 現況：Table Designer 支援 MySQL FULLTEXT/SPATIAL、PostgreSQL FULLTEXT GIN 與 SPATIAL GiST、SQL Server Full-Text / Spatial、Oracle CTXSYS/MDSYS 索引 SQL 產生；SQLite FTS virtual table、RTree 與 SpatiaLite spatial index 不混入一般索引 UI，改由 database 右鍵選單的專用精靈產生 SQL。
