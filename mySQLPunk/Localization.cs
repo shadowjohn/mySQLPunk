@@ -146,6 +146,7 @@ namespace mySQLPunk
             Add("Tool.DumpSql", "傾印 SQL 檔案", "Dump SQL File");
             Add("Tool.CreateBackup", "建立備份", "Create Backup");
             Add("Tool.RestoreBackup", "還原備份...", "Restore Backup...");
+            Add("Tool.RestoreQuarantinedBackup", "還原隔離備份...", "Restore Quarantined Backup...");
             Add("Tool.StructureAndData", "結構與資料", "Structure and Data");
             Add("Tool.DataOnly", "僅資料", "Data Only");
             Add("Tool.OpenQuery", "開啟查詢", "Open Query");
@@ -331,6 +332,12 @@ namespace mySQLPunk
             Add("Backup.RestoreFailed", "還原備份失敗：{0}", "Backup restore failed: {0}");
             Add("Backup.RestoreSafetyBackupCreated", "還原前快照已建立：{0}", "Pre-restore snapshot created: {0}");
             Add("Backup.RestoreSafetyBackupFailedCancelled", "建立還原前快照失敗，已取消還原：{0}", "Failed to create pre-restore snapshot; restore canceled: {0}");
+            Add("Backup.QuarantineRestoreTitle", "還原隔離備份", "Restore Quarantined Backup");
+            Add("Backup.QuarantineRestoreFileFilter", "備份檔案 (*.sql;*.zip;*.sqlite;*.sqlite3;*.db)|*.sql;*.zip;*.sqlite;*.sqlite3;*.db|所有檔案 (*.*)|*.*", "Backup files (*.sql;*.zip;*.sqlite;*.sqlite3;*.db)|*.sql;*.zip;*.sqlite;*.sqlite3;*.db|All files (*.*)|*.*");
+            Add("Backup.QuarantineRestoreEmpty", "目前沒有可還原的隔離備份。", "There are no quarantined backups to restore.");
+            Add("Backup.QuarantineRestoreOverwrite", "目標檔案已存在：\n{0}\n\n是否覆蓋？", "The destination file already exists:\n{0}\n\nOverwrite it?");
+            Add("Backup.QuarantineRestoreSuccess", "隔離備份已還原：\n{0}", "Quarantined backup restored:\n{0}");
+            Add("Backup.QuarantineRestoreFailed", "還原隔離備份失敗：{0}", "Failed to restore quarantined backup: {0}");
             Add("Database.NewTitle", "新增資料庫", "New Database");
             Add("Database.NewPrompt", "資料庫名稱:", "Database name:");
             Add("Database.NameRequired", "請輸入資料庫名稱。", "Enter a database name.");

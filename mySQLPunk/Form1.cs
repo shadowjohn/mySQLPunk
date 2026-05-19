@@ -4055,6 +4055,72 @@ namespace mySQLPunk
             }
         }
 
+        private void RestoreQuarantinedBackupWithDialog()
+        {
+            string quarantineDirectory = GetBackupIntegrityQuarantineDirectory();
+            List<BackupQuarantineRestoreCandidate> candidates = BackupQuarantineRestoreService.FindCandidates(quarantineDirectory);
+            if (candidates.Count == 0)
+            {
+                MessageBox.Show(Localization.T("Backup.QuarantineRestoreEmpty"), Localization.T("Backup.QuarantineRestoreTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (OpenFileDialog openDialog = new OpenFileDialog())
+            {
+                openDialog.Title = Localization.T("Backup.QuarantineRestoreTitle");
+                openDialog.Filter = Localization.T("Backup.QuarantineRestoreFileFilter");
+                openDialog.Multiselect = false;
+                if (Directory.Exists(quarantineDirectory))
+                {
+                    openDialog.InitialDirectory = quarantineDirectory;
+                }
+                if (openDialog.ShowDialog(this) != DialogResult.OK) return;
+
+                BackupQuarantineRestoreCandidate candidate = BackupQuarantineRestoreService.FindCandidate(openDialog.FileName, quarantineDirectory);
+                string suggestedPath = candidate != null && candidate.HasOriginalPath
+                    ? candidate.OriginalPath
+                    : openDialog.FileName;
+
+                using (SaveFileDialog saveDialog = new SaveFileDialog())
+                {
+                    saveDialog.Title = Localization.T("Backup.QuarantineRestoreTitle");
+                    saveDialog.Filter = Localization.T("Backup.QuarantineRestoreFileFilter");
+                    saveDialog.FileName = Path.GetFileName(suggestedPath);
+                    string suggestedDirectory = Path.GetDirectoryName(suggestedPath);
+                    if (!string.IsNullOrWhiteSpace(suggestedDirectory) && Directory.Exists(suggestedDirectory))
+                    {
+                        saveDialog.InitialDirectory = suggestedDirectory;
+                    }
+                    if (saveDialog.ShowDialog(this) != DialogResult.OK) return;
+
+                    bool overwrite = false;
+                    if (File.Exists(saveDialog.FileName))
+                    {
+                        string overwriteMessage = Localization.Format("Backup.QuarantineRestoreOverwrite", saveDialog.FileName);
+                        if (MessageBox.Show(overwriteMessage, Localization.T("Backup.QuarantineRestoreTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                        {
+                            return;
+                        }
+                        overwrite = true;
+                    }
+
+                    try
+                    {
+                        BackupQuarantineRestoreResult result = BackupQuarantineRestoreService.RestoreQuarantinedFile(openDialog.FileName, saveDialog.FileName, overwrite);
+                        string message = Localization.Format("Backup.QuarantineRestoreSuccess", result.RestoredPath);
+                        MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        UpdateMainStatus(message);
+                    }
+                    catch (Exception ex)
+                    {
+                        string message = Localization.Format("Backup.QuarantineRestoreFailed", ex.Message);
+                        MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        UpdateMainStatus(message);
+                    }
+                }
+            }
+        }
+
         private DatabaseRestoreSnapshot CaptureDatabaseRestoreSnapshot(TreeDatabaseTarget target)
         {
             if (target == null || target.Database == null)
@@ -5281,6 +5347,10 @@ namespace mySQLPunk
                 var itemRestore = new ToolStripMenuItem(Localization.T("Tool.RestoreBackup"));
                 itemRestore.Click += (s, ev) => RestoreBackupWithDialog();
                 cms.Items.Add(itemRestore);
+
+                var itemRestoreQuarantine = new ToolStripMenuItem(Localization.T("Tool.RestoreQuarantinedBackup"));
+                itemRestoreQuarantine.Click += (s, ev) => RestoreQuarantinedBackupWithDialog();
+                cms.Items.Add(itemRestoreQuarantine);
             }
             else if (groupName == "Functions")
             {
@@ -7817,6 +7887,10 @@ namespace mySQLPunk
                     ToolStripMenuItem restoreBackupItem = new ToolStripMenuItem(Localization.T("Tool.RestoreBackup"));
                     restoreBackupItem.Click += (s, ev) => RestoreBackupWithDialog();
                     menu.Items.Add(restoreBackupItem);
+
+                    ToolStripMenuItem restoreQuarantinedBackupItem = new ToolStripMenuItem(Localization.T("Tool.RestoreQuarantinedBackup"));
+                    restoreQuarantinedBackupItem.Click += (s, ev) => RestoreQuarantinedBackupWithDialog();
+                    menu.Items.Add(restoreQuarantinedBackupItem);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                 {
@@ -8504,6 +8578,10 @@ namespace mySQLPunk
             ToolStripMenuItem restoreBackupItem = new ToolStripMenuItem(Localization.T("Tool.RestoreBackup"));
             restoreBackupItem.Click += (s, ev) => RestoreBackupWithDialog();
             menu.Items.Add(restoreBackupItem);
+
+            ToolStripMenuItem restoreQuarantinedBackupItem = new ToolStripMenuItem(Localization.T("Tool.RestoreQuarantinedBackup"));
+            restoreQuarantinedBackupItem.Click += (s, ev) => RestoreQuarantinedBackupWithDialog();
+            menu.Items.Add(restoreQuarantinedBackupItem);
 
             ToolStripMenuItem dictionaryItem = new ToolStripMenuItem(Localization.T("Tool.DataDictionary"));
             dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();

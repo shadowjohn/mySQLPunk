@@ -38,13 +38,24 @@ namespace mySQLPunk.lib
         public string QuarantineDirectory { get; set; }
         public string ManifestPath { get; set; }
         public List<string> MovedPaths { get; private set; }
+        public List<BackupIntegrityQuarantineEntry> Entries { get; private set; }
 
         public BackupIntegrityQuarantineResult()
         {
             QuarantineDirectory = "";
             ManifestPath = "";
             MovedPaths = new List<string>();
+            Entries = new List<BackupIntegrityQuarantineEntry>();
         }
+    }
+
+    public sealed class BackupIntegrityQuarantineEntry
+    {
+        public string OriginalPath { get; set; }
+        public string QuarantinedPath { get; set; }
+        public string Message { get; set; }
+        public long SizeBytes { get; set; }
+        public DateTime QuarantinedAtUtc { get; set; }
     }
 
     public static class BackupIntegrityScheduleService
@@ -157,6 +168,14 @@ namespace mySQLPunk.lib
                     File.Move(sourcePath, destinationPath);
                     result.MovedFiles++;
                     result.MovedPaths.Add(destinationPath);
+                    result.Entries.Add(new BackupIntegrityQuarantineEntry
+                    {
+                        OriginalPath = sourcePath,
+                        QuarantinedPath = destinationPath,
+                        Message = failure.Message ?? string.Empty,
+                        SizeBytes = failure.SizeBytes,
+                        QuarantinedAtUtc = DateTime.UtcNow
+                    });
                     failure.SourcePath = destinationPath;
                     failure.Message = failure.Message + " Quarantined from: " + sourcePath;
                 }

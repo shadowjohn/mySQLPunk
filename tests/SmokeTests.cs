@@ -452,8 +452,15 @@ public static class SmokeTests
             BackupIntegrityQuarantineResult quarantineResult = BackupIntegrityScheduleService.QuarantineFailedBackups(scheduleReport, quarantineDirectory);
             Assert(quarantineResult.MovedFiles >= 1, "Backup integrity quarantine should move invalid backups.");
             Assert(quarantineResult.MovedPaths.Count >= 1 && File.Exists(quarantineResult.MovedPaths[0]), "Quarantined backup file should exist in quarantine folder.");
+            Assert(quarantineResult.Entries.Count >= 1, "Backup integrity quarantine should remember original paths.");
             Assert(File.Exists(quarantineResult.ManifestPath), "Backup integrity quarantine should write a manifest file.");
             Assert(!File.Exists(emptySqlPath), "Invalid backup should be moved out of the original folder.");
+            BackupQuarantineRestoreCandidate candidate = BackupQuarantineRestoreService.FindCandidate(quarantineResult.MovedPaths[0], quarantineDirectory);
+            Assert(candidate != null && candidate.HasOriginalPath, "Quarantine restore should find the original path from the manifest.");
+            AssertEquals(emptySqlPath, candidate.OriginalPath, "Quarantine restore candidate should keep the original backup path.");
+            BackupQuarantineRestoreResult restoreResult = BackupQuarantineRestoreService.RestoreQuarantinedFile(candidate.QuarantinedPath, candidate.OriginalPath, false);
+            Assert(File.Exists(restoreResult.RestoredPath), "Quarantined backup should be restored to the original folder.");
+            Assert(!File.Exists(candidate.QuarantinedPath), "Quarantined backup should be moved out of quarantine after restore.");
             for (int i = 0; i < 5; i++)
             {
                 string oldQuarantine = Path.Combine(quarantineDirectory, "2024010" + (i + 1) + "_120000_old_" + i + ".sql");
