@@ -548,6 +548,16 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsImportEmpty", "自動註解字典沒有可用項目。", "The auto comment dictionary has no usable entries.");
             Add("Designer.AutoCommentsInvalidDictionaryFormat", "自動註解字典格式不正確。", "The auto comment dictionary format is invalid.");
             Add("Designer.AutoCommentsImportDiffSummary", "即將匯入 {0} 筆自動註解字典。\n\n新增：{1}\n更新：{2}\n匯入後會移除：{3}\n不變：{4}\n\n按確定後會覆蓋目前本機字典。", "Import {0} auto comment dictionary entries.\n\nAdded: {1}\nUpdated: {2}\nRemoved after import: {3}\nUnchanged: {4}\n\nClick OK to replace the current local dictionary.");
+            Add("Designer.AutoCommentsImportDiffTitle", "註解字典差異預覽", "Comment Dictionary Diff Preview");
+            Add("Designer.AutoCommentsImportApply", "套用匯入", "Apply Import");
+            Add("Designer.AutoCommentsDiffStatus", "狀態", "Status");
+            Add("Designer.AutoCommentsDiffKey", "欄位名稱", "Column");
+            Add("Designer.AutoCommentsDiffExisting", "目前註解", "Current Comment");
+            Add("Designer.AutoCommentsDiffImported", "匯入註解", "Imported Comment");
+            Add("Designer.AutoCommentsDiffAdded", "新增", "Added");
+            Add("Designer.AutoCommentsDiffUpdated", "更新", "Updated");
+            Add("Designer.AutoCommentsDiffRemoved", "移除", "Removed");
+            Add("Designer.AutoCommentsDiffUnchanged", "不變", "Unchanged");
             Add("Designer.AutoCommentsExportSuccess", "已匯出 {0} 筆自動註解字典。", "Exported {0} auto comment dictionary entries.");
             Add("Designer.AutoCommentsExportFailed", "匯出自動註解字典失敗：{0}", "Export auto comment dictionary failed: {0}");
             Add("Designer.AutoCommentsDictionaryNameTitle", "註解字典名稱", "Comment Dictionary Name");

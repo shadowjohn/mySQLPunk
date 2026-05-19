@@ -20,6 +20,7 @@ public static class SmokeTests
         Run("SQLite 專用物件 SQL builder", TestSqliteSpecialObjectSqlBuilder, ref passed);
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
         Run("Table Designer ALTER provider matrix", TestTableDesignerAlterProviderMatrix, ref passed);
+        Run("Table Designer comment dictionary diff", TestTableDesignerCommentDictionaryDiff, ref passed);
         Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
@@ -286,6 +287,39 @@ public static class SmokeTests
         AssertContains(path, "mySQLPunk", "Pre-delete backup path should live under the mySQLPunk backup directory.");
         AssertContains(path, "pre-delete-backups", "Pre-delete backup path should use the pre-delete backup directory.");
         AssertContains(path, "sales_db_2026_mysql_before_delete_20260519_080706.sql", "Pre-delete backup file name should be deterministic and sanitized.");
+    }
+
+    private static void TestTableDesignerCommentDictionaryDiff()
+    {
+        Dictionary<string, string> existing = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "NAME", "名稱" },
+            { "STATUS", "狀態" },
+            { "OLD_ONLY", "舊欄位" }
+        };
+        Dictionary<string, string> imported = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "name", "姓名" },
+            { "STATUS", "狀態" },
+            { "NEW_ONLY", "新欄位" }
+        };
+
+        TableDesignerForm.AutoColumnCommentDictionaryDiffReport report =
+            TableDesignerForm.BuildAutoColumnCommentDictionaryDiffReport(existing, imported);
+
+        Assert(report.ImportedCount == 3, "Diff report should count imported entries.");
+        Assert(report.Added == 1, "Diff report should count added entries.");
+        Assert(report.Updated == 1, "Diff report should count updated entries.");
+        Assert(report.Removed == 1, "Diff report should count removed entries.");
+        Assert(report.Unchanged == 1, "Diff report should count unchanged entries.");
+        Assert(report.Entries.Count == 4, "Diff report should include every changed and unchanged entry.");
+
+        TableDesignerForm.AutoColumnCommentDictionaryDiffEntry updated = report.Entries.Find(e => e.Status == "updated");
+        Assert(updated != null && updated.Key.Equals("name", StringComparison.OrdinalIgnoreCase), "Diff report should include updated key.");
+        Assert(updated.ExistingValue == "名稱" && updated.ImportedValue == "姓名", "Updated entry should keep both old and new comments.");
+
+        TableDesignerForm.AutoColumnCommentDictionaryDiffEntry removed = report.Entries.Find(e => e.Status == "removed");
+        Assert(removed != null && removed.Key == "OLD_ONLY" && removed.ExistingValue == "舊欄位", "Removed entry should keep the current comment.");
     }
 
     private static void TestDatabaseDumpService()

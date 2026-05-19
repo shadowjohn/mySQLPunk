@@ -57,6 +57,24 @@ namespace mySQLPunk
         private bool _isModified = false;
         private bool IsNewTable => string.IsNullOrWhiteSpace(_tableName);
 
+        public class AutoColumnCommentDictionaryDiffEntry
+        {
+            public string Key { get; set; }
+            public string Status { get; set; }
+            public string ExistingValue { get; set; }
+            public string ImportedValue { get; set; }
+        }
+
+        public class AutoColumnCommentDictionaryDiffReport
+        {
+            public List<AutoColumnCommentDictionaryDiffEntry> Entries { get; } = new List<AutoColumnCommentDictionaryDiffEntry>();
+            public int Added { get; set; }
+            public int Updated { get; set; }
+            public int Removed { get; set; }
+            public int Unchanged { get; set; }
+            public int ImportedCount { get; set; }
+        }
+
         public bool IsModified 
         { 
             get => _isModified; 
@@ -1103,8 +1121,8 @@ namespace mySQLPunk
                 {
                     Dictionary<string, string> comments = PreviewAutoColumnCommentDictionaryFile(dialog.FileName);
                     Dictionary<string, string> existing = LoadAutoColumnCommentCache() ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    string diffSummary = BuildAutoColumnCommentDictionaryDiffSummary(existing, comments);
-                    if (MessageBox.Show(diffSummary, Localization.T("Designer.ImportAutoCommentsDictionary"), MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
+                    AutoColumnCommentDictionaryDiffReport diffReport = BuildAutoColumnCommentDictionaryDiffReport(existing, comments);
+                    if (ShowAutoColumnCommentDictionaryDiffDialog(this, diffReport) != DialogResult.OK)
                     {
                         return;
                     }
@@ -1130,42 +1148,171 @@ namespace mySQLPunk
 
         private static string BuildAutoColumnCommentDictionaryDiffSummary(Dictionary<string, string> existing, Dictionary<string, string> imported)
         {
+            return BuildAutoColumnCommentDictionaryDiffSummary(BuildAutoColumnCommentDictionaryDiffReport(existing, imported));
+        }
+
+        private static string BuildAutoColumnCommentDictionaryDiffSummary(AutoColumnCommentDictionaryDiffReport report)
+        {
+            if (report == null) report = new AutoColumnCommentDictionaryDiffReport();
+
+            return Localization.Format(
+                "Designer.AutoCommentsImportDiffSummary",
+                report.ImportedCount,
+                report.Added,
+                report.Updated,
+                report.Removed,
+                report.Unchanged);
+        }
+
+        public static AutoColumnCommentDictionaryDiffReport BuildAutoColumnCommentDictionaryDiffReport(Dictionary<string, string> existing, Dictionary<string, string> imported)
+        {
             existing = existing ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             imported = imported ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            int added = 0;
-            int updated = 0;
-            int unchanged = 0;
+            AutoColumnCommentDictionaryDiffReport report = new AutoColumnCommentDictionaryDiffReport
+            {
+                ImportedCount = imported.Count
+            };
+
             foreach (var item in imported)
             {
                 string existingValue;
                 if (!existing.TryGetValue(item.Key, out existingValue))
                 {
-                    added++;
+                    report.Added++;
+                    report.Entries.Add(CreateAutoColumnCommentDictionaryDiffEntry(item.Key, "added", "", item.Value));
                 }
                 else if (string.Equals(existingValue, item.Value, StringComparison.Ordinal))
                 {
-                    unchanged++;
+                    report.Unchanged++;
+                    report.Entries.Add(CreateAutoColumnCommentDictionaryDiffEntry(item.Key, "unchanged", existingValue, item.Value));
                 }
                 else
                 {
-                    updated++;
+                    report.Updated++;
+                    report.Entries.Add(CreateAutoColumnCommentDictionaryDiffEntry(item.Key, "updated", existingValue, item.Value));
                 }
             }
 
-            int removed = 0;
             foreach (var item in existing)
             {
-                if (!imported.ContainsKey(item.Key)) removed++;
+                if (imported.ContainsKey(item.Key)) continue;
+                report.Removed++;
+                report.Entries.Add(CreateAutoColumnCommentDictionaryDiffEntry(item.Key, "removed", item.Value, ""));
             }
 
-            return Localization.Format(
-                "Designer.AutoCommentsImportDiffSummary",
-                imported.Count,
-                added,
-                updated,
-                removed,
-                unchanged);
+            report.Entries.Sort((left, right) =>
+            {
+                int statusCompare = GetAutoColumnCommentDictionaryDiffStatusOrder(left.Status)
+                    .CompareTo(GetAutoColumnCommentDictionaryDiffStatusOrder(right.Status));
+                if (statusCompare != 0) return statusCompare;
+                return string.Compare(left.Key, right.Key, StringComparison.OrdinalIgnoreCase);
+            });
+            return report;
+        }
+
+        private static AutoColumnCommentDictionaryDiffEntry CreateAutoColumnCommentDictionaryDiffEntry(string key, string status, string existingValue, string importedValue)
+        {
+            return new AutoColumnCommentDictionaryDiffEntry
+            {
+                Key = key ?? "",
+                Status = status ?? "",
+                ExistingValue = existingValue ?? "",
+                ImportedValue = importedValue ?? ""
+            };
+        }
+
+        private static int GetAutoColumnCommentDictionaryDiffStatusOrder(string status)
+        {
+            if (string.Equals(status, "added", StringComparison.OrdinalIgnoreCase)) return 0;
+            if (string.Equals(status, "updated", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (string.Equals(status, "removed", StringComparison.OrdinalIgnoreCase)) return 2;
+            return 3;
+        }
+
+        private static string FormatAutoColumnCommentDictionaryDiffStatus(string status)
+        {
+            if (string.Equals(status, "added", StringComparison.OrdinalIgnoreCase)) return Localization.T("Designer.AutoCommentsDiffAdded");
+            if (string.Equals(status, "updated", StringComparison.OrdinalIgnoreCase)) return Localization.T("Designer.AutoCommentsDiffUpdated");
+            if (string.Equals(status, "removed", StringComparison.OrdinalIgnoreCase)) return Localization.T("Designer.AutoCommentsDiffRemoved");
+            return Localization.T("Designer.AutoCommentsDiffUnchanged");
+        }
+
+        private static DataTable BuildAutoColumnCommentDictionaryDiffTable(AutoColumnCommentDictionaryDiffReport report)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(Localization.T("Designer.AutoCommentsDiffStatus"));
+            table.Columns.Add(Localization.T("Designer.AutoCommentsDiffKey"));
+            table.Columns.Add(Localization.T("Designer.AutoCommentsDiffExisting"));
+            table.Columns.Add(Localization.T("Designer.AutoCommentsDiffImported"));
+
+            if (report == null) return table;
+            foreach (AutoColumnCommentDictionaryDiffEntry entry in report.Entries)
+            {
+                DataRow row = table.NewRow();
+                row[0] = FormatAutoColumnCommentDictionaryDiffStatus(entry.Status);
+                row[1] = entry.Key;
+                row[2] = entry.ExistingValue;
+                row[3] = entry.ImportedValue;
+                table.Rows.Add(row);
+            }
+            return table;
+        }
+
+        private static DialogResult ShowAutoColumnCommentDictionaryDiffDialog(Form owner, AutoColumnCommentDictionaryDiffReport report)
+        {
+            using (Form dialog = new Form())
+            using (Label summaryLabel = new Label())
+            using (DataGridView grid = new DataGridView())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = Localization.T("Designer.AutoCommentsImportDiffTitle");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.MinimizeBox = false;
+                dialog.ShowInTaskbar = false;
+                dialog.Size = new Size(820, 560);
+                dialog.MinimumSize = new Size(680, 420);
+
+                summaryLabel.Dock = DockStyle.Top;
+                summaryLabel.Height = 96;
+                summaryLabel.Padding = new Padding(12, 10, 12, 8);
+                summaryLabel.Text = BuildAutoColumnCommentDictionaryDiffSummary(report);
+
+                grid.Dock = DockStyle.Fill;
+                grid.ReadOnly = true;
+                grid.AllowUserToAddRows = false;
+                grid.AllowUserToDeleteRows = false;
+                grid.RowHeadersVisible = false;
+                grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                grid.DataSource = BuildAutoColumnCommentDictionaryDiffTable(report);
+
+                FlowLayoutPanel footer = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 48,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(8)
+                };
+
+                okButton.Text = Localization.T("Designer.AutoCommentsImportApply");
+                okButton.DialogResult = DialogResult.OK;
+                okButton.AutoSize = true;
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.AutoSize = true;
+
+                footer.Controls.Add(cancelButton);
+                footer.Controls.Add(okButton);
+                dialog.Controls.Add(grid);
+                dialog.Controls.Add(summaryLabel);
+                dialog.Controls.Add(footer);
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = cancelButton;
+                ThemeManager.ApplyTo(dialog);
+                return dialog.ShowDialog(owner);
+            }
         }
 
         private async Task ExportAutoColumnCommentsDictionaryWithDialogAsync()
