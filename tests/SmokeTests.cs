@@ -23,6 +23,7 @@ public static class SmokeTests
         Run("Table Designer ALTER provider matrix", TestTableDesignerAlterProviderMatrix, ref passed);
         Run("Table Designer comment dictionary diff", TestTableDesignerCommentDictionaryDiff, ref passed);
         Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
+        Run("Pre-delete backup archive service", TestPreDeleteBackupArchiveService, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -289,6 +290,43 @@ public static class SmokeTests
         AssertContains(path, "mySQLPunk", "Pre-delete backup path should live under the mySQLPunk backup directory.");
         AssertContains(path, "pre-delete-backups", "Pre-delete backup path should use the pre-delete backup directory.");
         AssertContains(path, "sales_db_2026_mysql_before_delete_20260519_080706.sql", "Pre-delete backup file name should be deterministic and sanitized.");
+    }
+
+    private static void TestPreDeleteBackupArchiveService()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk_predelete_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string sqlPath = Path.Combine(dir, "main_mysql_before_delete_20260519_080706.sql");
+            File.WriteAllText(sqlPath, "SELECT 1;", Encoding.UTF8);
+            string archivePath = PreDeleteBackupArchiveService.ArchiveBackupFile(sqlPath);
+
+            Assert(!File.Exists(sqlPath), "Archive service should remove the uncompressed backup after zip succeeds.");
+            Assert(File.Exists(archivePath), "Archive service should create a zip file.");
+            Assert(Path.GetExtension(archivePath).Equals(".zip", StringComparison.OrdinalIgnoreCase), "Archive path should use zip extension.");
+
+            byte[] archiveBytes = File.ReadAllBytes(archivePath);
+            Assert(archiveBytes.Length > 4 && archiveBytes[0] == 0x50 && archiveBytes[1] == 0x4B, "Archive should have a zip header.");
+            string archiveText = Encoding.UTF8.GetString(archiveBytes);
+            AssertContains(archiveText, "main_mysql_before_delete_20260519_080706.sql", "Archive should keep the original backup file name as entry.");
+
+            for (int i = 0; i < 5; i++)
+            {
+                string oldPath = Path.Combine(dir, "old_" + i + "_before_delete_20260519_08070" + i + ".zip");
+                File.WriteAllText(oldPath, "zip-placeholder");
+                File.SetLastWriteTimeUtc(oldPath, new DateTime(2026, 5, 19, 8, 0, i, DateTimeKind.Utc));
+            }
+
+            int deleted = PreDeleteBackupArchiveService.PruneOldArchives(dir, PreDeleteBackupArchiveService.BackupArchivePattern, 3);
+            int remaining = Directory.GetFiles(dir, PreDeleteBackupArchiveService.BackupArchivePattern).Length;
+            Assert(deleted >= 3, "Prune service should delete archives beyond retention count.");
+            Assert(remaining == 3, "Prune service should keep only the retention count.");
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
     }
 
     private static void TestTableDesignerCommentDictionaryDiff()

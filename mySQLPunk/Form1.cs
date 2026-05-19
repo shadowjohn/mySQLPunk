@@ -8478,6 +8478,7 @@ namespace mySQLPunk
             }
 
             string createdBackupPath = CreateSqlitePreDeleteBackup(target.Database as my_sqlite, fullPath, backupPath);
+            createdBackupPath = PreDeleteBackupArchiveService.ArchiveAndPrune(createdBackupPath);
             target.Database.Close();
             System.Data.SQLite.SQLiteConnection.ClearAllPools();
             DeleteSqliteDatabaseFiles(fullPath);
@@ -8517,8 +8518,8 @@ namespace mySQLPunk
             try
             {
                 CreateDatabaseBackup(target, backupPath);
-                createdBackupPath = backupPath;
-                UpdateMainStatus(Localization.Format("Database.PreDeleteBackupCreated", backupPath));
+                createdBackupPath = PreDeleteBackupArchiveService.ArchiveAndPrune(backupPath);
+                UpdateMainStatus(Localization.Format("Database.PreDeleteBackupCreated", createdBackupPath));
                 return true;
             }
             catch (Exception ex)
