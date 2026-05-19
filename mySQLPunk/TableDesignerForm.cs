@@ -138,8 +138,15 @@ namespace mySQLPunk
             fillBlankCommentsItem.Click += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.FillBlanks, true);
             ToolStripMenuItem overwriteCommentsItem = new ToolStripMenuItem(Localization.T("Designer.OverwriteAutoComments"));
             overwriteCommentsItem.Click += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.Overwrite, true);
+            ToolStripMenuItem importCommentsDictionaryItem = new ToolStripMenuItem(Localization.T("Designer.ImportAutoCommentsDictionary"));
+            importCommentsDictionaryItem.Click += (s, e) => ImportAutoColumnCommentsDictionaryWithDialog();
+            ToolStripMenuItem exportCommentsDictionaryItem = new ToolStripMenuItem(Localization.T("Designer.ExportAutoCommentsDictionary"));
+            exportCommentsDictionaryItem.Click += async (s, e) => await ExportAutoColumnCommentsDictionaryWithDialogAsync();
             btnFillAutoComments.DropDownItems.Add(fillBlankCommentsItem);
             btnFillAutoComments.DropDownItems.Add(overwriteCommentsItem);
+            btnFillAutoComments.DropDownItems.Add(new ToolStripSeparator());
+            btnFillAutoComments.DropDownItems.Add(importCommentsDictionaryItem);
+            btnFillAutoComments.DropDownItems.Add(exportCommentsDictionaryItem);
             btnFillAutoComments.ButtonClick += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.FillBlanks, true);
             ToolStripSeparator sepAutoComment = new ToolStripSeparator();
             ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), GetIcon(iconPath + "up.png"));
@@ -657,6 +664,10 @@ namespace mySQLPunk
             {
                 return Localization.T("Designer.AutoCommentsDictionaryRemote");
             }
+            if (string.Equals(source, "import", StringComparison.OrdinalIgnoreCase))
+            {
+                return Localization.T("Designer.AutoCommentsDictionaryImport");
+            }
             return Localization.T("Designer.AutoCommentsLoading");
         }
 
@@ -811,6 +822,85 @@ namespace mySQLPunk
             string cachePath = GetAutoColumnCommentCachePath();
             if (!File.Exists(cachePath)) return null;
             return ParseAutoColumnCommentJson(File.ReadAllText(cachePath, Encoding.UTF8));
+        }
+
+        public static Dictionary<string, string> ImportAutoColumnCommentDictionaryFile(string sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            Dictionary<string, string> comments = ParseAutoColumnCommentJson(File.ReadAllText(sourcePath, Encoding.UTF8));
+            if (comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsImportEmpty"));
+
+            SaveAutoColumnCommentCache(comments);
+            SetAutoColumnCommentDictionary(comments, "import");
+            return comments;
+        }
+
+        public static int ExportAutoColumnCommentDictionaryFile(string targetPath, Dictionary<string, string> comments)
+        {
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("targetPath");
+            if (comments == null || comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsUnavailable"));
+
+            string dir = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(targetPath, JsonConvert.SerializeObject(comments, Formatting.Indented), new UTF8Encoding(false));
+            return comments.Count;
+        }
+
+        private static void SetAutoColumnCommentDictionary(Dictionary<string, string> comments, string source)
+        {
+            Dictionary<string, string> normalized = new Dictionary<string, string>(comments, StringComparer.OrdinalIgnoreCase);
+            lock (AutoColumnCommentSync)
+            {
+                AutoColumnCommentTask = Task.FromResult(normalized);
+                AutoColumnCommentLastError = null;
+                AutoColumnCommentLastErrorUtc = null;
+                AutoColumnCommentLastSource = source;
+            }
+        }
+
+        private void ImportAutoColumnCommentsDictionaryWithDialog()
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = Localization.T("Designer.ImportAutoCommentsDictionary");
+                dialog.Filter = Localization.T("Designer.AutoCommentsDictionaryFileFilter");
+                dialog.DefaultExt = "json";
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                try
+                {
+                    Dictionary<string, string> comments = ImportAutoColumnCommentDictionaryFile(dialog.FileName);
+                    ApplyAutoColumnCommentsToEmptyRows();
+                    MessageBox.Show(Localization.Format("Designer.AutoCommentsImportSuccess", comments.Count), Localization.T("Designer.ImportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(Localization.Format("Designer.AutoCommentsImportFailed", ex.Message), Localization.T("Designer.ImportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private async Task ExportAutoColumnCommentsDictionaryWithDialogAsync()
+        {
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Title = Localization.T("Designer.ExportAutoCommentsDictionary");
+                dialog.Filter = Localization.T("Designer.AutoCommentsDictionaryFileFilter");
+                dialog.DefaultExt = "json";
+                dialog.FileName = AutoColumnCommentCacheFileName;
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                try
+                {
+                    Dictionary<string, string> comments = await GetAutoColumnCommentTask();
+                    int count = ExportAutoColumnCommentDictionaryFile(dialog.FileName, comments);
+                    MessageBox.Show(Localization.Format("Designer.AutoCommentsExportSuccess", count), Localization.T("Designer.ExportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(Localization.Format("Designer.AutoCommentsExportFailed", ex.Message), Localization.T("Designer.ExportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
         }
 
         private void ApplyAutoColumnCommentForGridRow(int rowIndex)
@@ -1070,6 +1160,11 @@ namespace mySQLPunk
             {
                 btnFillAutoComments.DropDownItems[0].Text = Localization.T("Designer.FillBlankAutoComments");
                 btnFillAutoComments.DropDownItems[1].Text = Localization.T("Designer.OverwriteAutoComments");
+                if (btnFillAutoComments.DropDownItems.Count >= 5)
+                {
+                    btnFillAutoComments.DropDownItems[3].Text = Localization.T("Designer.ImportAutoCommentsDictionary");
+                    btnFillAutoComments.DropDownItems[4].Text = Localization.T("Designer.ExportAutoCommentsDictionary");
+                }
             }
             ApplyColumnHeaders();
             UpdateTitle();

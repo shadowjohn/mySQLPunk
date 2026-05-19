@@ -491,6 +491,8 @@ namespace mySQLPunk
             Add("Designer.FillAutoComments", "補註解", "Fill Comments");
             Add("Designer.FillBlankAutoComments", "補空白註解", "Fill Blank Comments");
             Add("Designer.OverwriteAutoComments", "覆蓋註解", "Overwrite Comments");
+            Add("Designer.ImportAutoCommentsDictionary", "匯入註解字典...", "Import Comment Dictionary...");
+            Add("Designer.ExportAutoCommentsDictionary", "匯出註解字典...", "Export Comment Dictionary...");
             Add("Designer.AddIndex", "加入索引", "Add Index");
             Add("Designer.DeleteIndex", "刪除索引", "Delete Index");
             Add("Designer.MoveUp", "上移", "Move Up");
@@ -528,6 +530,13 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsLoading", "正在載入自動註解字典...", "Loading the auto comment dictionary...");
             Add("Designer.AutoCommentsDictionaryRemote", "已載入遠端自動註解字典。", "Loaded the remote auto comment dictionary.");
             Add("Designer.AutoCommentsDictionaryCache", "已使用本機快取自動註解字典。", "Using the local cached auto comment dictionary.");
+            Add("Designer.AutoCommentsDictionaryImport", "已使用匯入的自動註解字典。", "Using the imported auto comment dictionary.");
+            Add("Designer.AutoCommentsDictionaryFileFilter", "自動註解字典 JSON (*.json)|*.json|所有檔案 (*.*)|*.*", "Auto Comment Dictionary JSON (*.json)|*.json|All Files (*.*)|*.*");
+            Add("Designer.AutoCommentsImportSuccess", "已匯入 {0} 筆自動註解字典。", "Imported {0} auto comment dictionary entries.");
+            Add("Designer.AutoCommentsImportFailed", "匯入自動註解字典失敗：{0}", "Import auto comment dictionary failed: {0}");
+            Add("Designer.AutoCommentsImportEmpty", "自動註解字典沒有可用項目。", "The auto comment dictionary has no usable entries.");
+            Add("Designer.AutoCommentsExportSuccess", "已匯出 {0} 筆自動註解字典。", "Exported {0} auto comment dictionary entries.");
+            Add("Designer.AutoCommentsExportFailed", "匯出自動註解字典失敗：{0}", "Export auto comment dictionary failed: {0}");
             Add("Designer.AutoCommentsProgress", "補註解 {0}/{1}：{2}", "Filling comments {0}/{1}: {2}");
             Add("Designer.AutoCommentsDone", "補註解完成：{0}/{1}", "Fill comments done: {0}/{1}");
             Add("Designer.EnterTableNameInOptions", "請先在「選項」分頁輸入資料表名稱。", "Enter a table name on the Options tab first.");
