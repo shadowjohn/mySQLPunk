@@ -3895,6 +3895,50 @@ namespace mySQLPunk
             }
         }
 
+        private void RestoreBackupWithDialog()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Backup.SelectDatabase"), Localization.T("Backup.RestoreTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = Localization.T("Backup.RestoreTitle");
+                dialog.Filter = Localization.T("Backup.RestoreFileFilter");
+                dialog.Multiselect = false;
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                try
+                {
+                    BackupRestorePackage package = BackupRestoreService.LoadRestorePackage(dialog.FileName, CountSqlScriptStatements);
+                    string confirmMessage = Localization.Format(
+                        "Backup.RestoreConfirm",
+                        package.EntryName,
+                        package.StatementCount,
+                        FormatBytes(package.SizeBytes),
+                        target.DatabaseName);
+                    if (MessageBox.Show(confirmMessage, Localization.T("Backup.RestoreTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                    {
+                        return;
+                    }
+
+                    int executed = ImportSqlScript(target, package.Script);
+                    string message = Localization.Format("Backup.RestoreSuccess", executed);
+                    MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UpdateMainStatus(message);
+                }
+                catch (Exception ex)
+                {
+                    string message = Localization.Format("Backup.RestoreFailed", ex.Message);
+                    MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateMainStatus(message);
+                }
+            }
+        }
+
         private int ImportSqlScriptToSelectedDatabase(string script)
         {
             TreeDatabaseTarget target = GetTargetFromCurrentSelection();
@@ -3939,6 +3983,11 @@ namespace mySQLPunk
             }
 
             return executed;
+        }
+
+        private static int CountSqlScriptStatements(string script)
+        {
+            return SplitSqlScript(script).Count(statement => !string.IsNullOrWhiteSpace(statement));
         }
 
         private static List<string> SplitSqlScript(string script)
@@ -4942,6 +4991,10 @@ namespace mySQLPunk
                 var itemBackup = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
                 itemBackup.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
                 cms.Items.Add(itemBackup);
+
+                var itemRestore = new ToolStripMenuItem(Localization.T("Tool.RestoreBackup"));
+                itemRestore.Click += (s, ev) => RestoreBackupWithDialog();
+                cms.Items.Add(itemRestore);
             }
             else if (groupName == "Functions")
             {
@@ -7472,6 +7525,10 @@ namespace mySQLPunk
                     ToolStripMenuItem backupDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
                     backupDatabaseItem.Click += (s, ev) => BackupSelectedDatabaseWithDialog();
                     menu.Items.Add(backupDatabaseItem);
+
+                    ToolStripMenuItem restoreBackupItem = new ToolStripMenuItem(Localization.T("Tool.RestoreBackup"));
+                    restoreBackupItem.Click += (s, ev) => RestoreBackupWithDialog();
+                    menu.Items.Add(restoreBackupItem);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                 {
@@ -8155,6 +8212,10 @@ namespace mySQLPunk
             dumpStructureAndDataItem.Click += (s, ev) => DumpSelectedDatabaseSqlWithDialog();
             dumpSqlItem.DropDownItems.Add(dumpStructureAndDataItem);
             menu.Items.Add(dumpSqlItem);
+
+            ToolStripMenuItem restoreBackupItem = new ToolStripMenuItem(Localization.T("Tool.RestoreBackup"));
+            restoreBackupItem.Click += (s, ev) => RestoreBackupWithDialog();
+            menu.Items.Add(restoreBackupItem);
 
             ToolStripMenuItem dictionaryItem = new ToolStripMenuItem(Localization.T("Tool.DataDictionary"));
             dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();

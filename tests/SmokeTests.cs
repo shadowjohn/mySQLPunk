@@ -27,6 +27,7 @@ public static class SmokeTests
         Run("Table Designer comment dictionary versions", TestTableDesignerCommentDictionaryVersions, ref passed);
         Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
         Run("Pre-delete backup archive service", TestPreDeleteBackupArchiveService, ref passed);
+        Run("Backup restore service", TestBackupRestoreService, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
@@ -327,6 +328,42 @@ public static class SmokeTests
             int remaining = Directory.GetFiles(dir, PreDeleteBackupArchiveService.BackupArchivePattern).Length;
             Assert(deleted >= 3, "Prune service should delete archives beyond retention count.");
             Assert(remaining == 3, "Prune service should keep only the retention count.");
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    private static void TestBackupRestoreService()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk_restore_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string sql = "CREATE TABLE a (id int);\nINSERT INTO a VALUES (1);\n";
+            string sqlPath = Path.Combine(dir, "backup.sql");
+            File.WriteAllText(sqlPath, sql, Encoding.UTF8);
+
+            BackupRestorePackage sqlPackage = BackupRestoreService.LoadRestorePackage(
+                sqlPath,
+                script => (int)typeof(Form1)
+                    .GetMethod("CountSqlScriptStatements", BindingFlags.Static | BindingFlags.NonPublic)
+                    .Invoke(null, new object[] { script }));
+
+            Assert(!sqlPackage.IsZip, "SQL restore package should not be marked as zip.");
+            Assert(sqlPackage.StatementCount == 2, "SQL restore package should count executable statements.");
+            AssertContains(sqlPackage.Script, "CREATE TABLE a", "SQL restore package should read script content.");
+
+            string zipSourcePath = Path.Combine(dir, "restore.sql");
+            File.WriteAllText(zipSourcePath, sql, Encoding.UTF8);
+            string zipPath = PreDeleteBackupArchiveService.ArchiveBackupFile(zipSourcePath);
+
+            BackupRestorePackage zipPackage = BackupRestoreService.LoadRestorePackage(zipPath, script => 7);
+            Assert(zipPackage.IsZip, "Zip restore package should be marked as zip.");
+            AssertEquals("restore.sql", zipPackage.EntryName, "Zip restore package should expose selected SQL entry name.");
+            Assert(zipPackage.StatementCount == 7, "Zip restore package should use provided statement counter.");
+            AssertContains(zipPackage.Script, "INSERT INTO a", "Zip restore package should read SQL entry content.");
         }
         finally
         {

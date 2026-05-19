@@ -145,6 +145,7 @@ namespace mySQLPunk
             Add("Tool.SelectAllColumns", "SELECT 全部欄位", "SELECT All Columns");
             Add("Tool.DumpSql", "傾印 SQL 檔案", "Dump SQL File");
             Add("Tool.CreateBackup", "建立備份", "Create Backup");
+            Add("Tool.RestoreBackup", "還原備份...", "Restore Backup...");
             Add("Tool.StructureAndData", "結構與資料", "Structure and Data");
             Add("Tool.DataOnly", "僅資料", "Data Only");
             Add("Tool.OpenQuery", "開啟查詢", "Open Query");
@@ -299,6 +300,11 @@ namespace mySQLPunk
             Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
             Add("Backup.Success", "備份已建立。", "Backup created.");
             Add("Backup.Failed", "建立備份失敗：", "Backup failed: ");
+            Add("Backup.RestoreTitle", "還原備份", "Restore Backup");
+            Add("Backup.RestoreFileFilter", "SQL / ZIP 備份 (*.sql;*.zip)|*.sql;*.zip|SQL 檔案 (*.sql)|*.sql|ZIP 備份 (*.zip)|*.zip|所有檔案 (*.*)|*.*", "SQL / ZIP backups (*.sql;*.zip)|*.sql;*.zip|SQL files (*.sql)|*.sql|ZIP backups (*.zip)|*.zip|All files (*.*)|*.*");
+            Add("Backup.RestoreConfirm", "即將還原備份：\n{0}\n\nSQL 語句數：{1}\n大小：{2}\n目標資料庫：{3}\n\n還原會直接執行 SQL，可能覆蓋或刪除現有資料。是否繼續？", "Restore backup:\n{0}\n\nSQL statements: {1}\nSize: {2}\nTarget database: {3}\n\nRestore executes SQL directly and may overwrite or delete existing data. Continue?");
+            Add("Backup.RestoreSuccess", "備份還原完成。執行語句數：{0}", "Backup restore completed. Statements executed: {0}");
+            Add("Backup.RestoreFailed", "還原備份失敗：{0}", "Backup restore failed: {0}");
             Add("Database.NewTitle", "新增資料庫", "New Database");
             Add("Database.NewPrompt", "資料庫名稱:", "Database name:");
             Add("Database.NameRequired", "請輸入資料庫名稱。", "Enter a database name.");

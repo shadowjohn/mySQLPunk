@@ -161,6 +161,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="ThemeManager.cs" />
+    <Compile Include="lib\BackupRestoreService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
     <Compile Include="lib\BinaryCellStreamingService.cs" />
     <Compile Include="lib\crypto.cs" />
