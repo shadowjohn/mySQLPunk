@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -18,6 +19,7 @@ namespace mySQLPunk
 	        private const string AutoColumnCommentUrl = "https://3wa.tw/fast/all_my_columns.php?raw=1";
 	        private const int AutoColumnCommentTimeoutMs = 8000;
 	        private const int AutoColumnCommentRetryCount = 2;
+	        private const string AutoColumnCommentCacheFileName = "auto_column_comments_cache.json";
 	        private static readonly object AutoColumnCommentSync = new object();
 	        private static Task<Dictionary<string, string>> AutoColumnCommentTask;
 	        private static string AutoColumnCommentLastError;
@@ -659,27 +661,25 @@ namespace mySQLPunk
 
         private static Dictionary<string, string> LoadAutoColumnComments()
         {
+            return LoadAutoColumnCommentsCore(
+                DownloadAutoColumnCommentJson,
+                SaveAutoColumnCommentCache,
+                LoadAutoColumnCommentCache);
+        }
+
+        private static Dictionary<string, string> LoadAutoColumnCommentsCore(
+            Func<string> downloadJson,
+            Action<Dictionary<string, string>> saveCache,
+            Func<Dictionary<string, string>> loadCache)
+        {
             Exception lastException = null;
             for (int attempt = 0; attempt <= AutoColumnCommentRetryCount; attempt++)
             {
                 try
                 {
-                    Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                    ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-                    using (WebClient client = new AutoColumnCommentWebClient(AutoColumnCommentTimeoutMs))
-                    {
-                        client.Encoding = Encoding.UTF8;
-                        string json = client.DownloadString(AutoColumnCommentUrl);
-                        Dictionary<string, string> parsed = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
-                        if (parsed == null) throw new InvalidOperationException("字典回傳格式不正確（解析結果為 null）");
-
-                        foreach (var item in parsed)
-                        {
-                            if (string.IsNullOrWhiteSpace(item.Key) || string.IsNullOrWhiteSpace(item.Value)) continue;
-                            comments[item.Key.Trim()] = item.Value.Trim();
-                        }
-                    }
+                    Dictionary<string, string> comments = ParseAutoColumnCommentJson(downloadJson());
+                    if (comments.Count == 0) throw new InvalidOperationException("字典沒有可用資料");
+                    saveCache?.Invoke(comments);
 
                     lock (AutoColumnCommentSync)
                     {
@@ -705,7 +705,86 @@ namespace mySQLPunk
                 }
             }
 
+            try
+            {
+                Dictionary<string, string> cachedComments = loadCache?.Invoke();
+                if (cachedComments != null && cachedComments.Count > 0)
+                {
+                    lock (AutoColumnCommentSync)
+                    {
+                        AutoColumnCommentLastError = "遠端自動註解字典載入失敗，已改用本機快取：" + (lastException?.Message ?? "未知錯誤");
+                        AutoColumnCommentLastErrorUtc = DateTime.UtcNow;
+                    }
+
+                    return cachedComments;
+                }
+            }
+            catch (Exception cacheEx)
+            {
+                Trace.WriteLine("[AutoColumnComment] cache load failed: " + cacheEx.Message);
+            }
+
             throw new Exception("自動註解字典載入失敗：" + (lastException?.Message ?? "未知錯誤"), lastException);
+        }
+
+        private static string DownloadAutoColumnCommentJson()
+        {
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+            using (WebClient client = new AutoColumnCommentWebClient(AutoColumnCommentTimeoutMs))
+            {
+                client.Encoding = Encoding.UTF8;
+                return client.DownloadString(AutoColumnCommentUrl);
+            }
+        }
+
+        private static Dictionary<string, string> ParseAutoColumnCommentJson(string json)
+        {
+            Dictionary<string, string> parsed = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+            if (parsed == null) throw new InvalidOperationException("字典回傳格式不正確（解析結果為 null）");
+
+            Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in parsed)
+            {
+                if (string.IsNullOrWhiteSpace(item.Key) || string.IsNullOrWhiteSpace(item.Value)) continue;
+                comments[item.Key.Trim()] = item.Value.Trim();
+            }
+
+            return comments;
+        }
+
+        private static string GetAutoColumnCommentCachePath()
+        {
+            string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(appDataPath)) appDataPath = AppDomain.CurrentDomain.BaseDirectory;
+            return Path.Combine(appDataPath, "mySQLPunk", AutoColumnCommentCacheFileName);
+        }
+
+        private static void SaveAutoColumnCommentCache(Dictionary<string, string> comments)
+        {
+            if (comments == null || comments.Count == 0) return;
+
+            try
+            {
+                string cachePath = GetAutoColumnCommentCachePath();
+                string cacheDir = Path.GetDirectoryName(cachePath);
+                if (!Directory.Exists(cacheDir)) Directory.CreateDirectory(cacheDir);
+
+                string tempPath = cachePath + ".tmp";
+                File.WriteAllText(tempPath, JsonConvert.SerializeObject(comments, Formatting.Indented), new UTF8Encoding(false));
+                if (File.Exists(cachePath)) File.Delete(cachePath);
+                File.Move(tempPath, cachePath);
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[AutoColumnComment] cache save failed: " + ex.Message);
+            }
+        }
+
+        private static Dictionary<string, string> LoadAutoColumnCommentCache()
+        {
+            string cachePath = GetAutoColumnCommentCachePath();
+            if (!File.Exists(cachePath)) return null;
+            return ParseAutoColumnCommentJson(File.ReadAllText(cachePath, Encoding.UTF8));
         }
 
         private void ApplyAutoColumnCommentForGridRow(int rowIndex)
