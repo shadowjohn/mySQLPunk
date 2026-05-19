@@ -32,6 +32,7 @@ public static class SmokeTests
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
+        Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
@@ -656,6 +657,55 @@ public static class SmokeTests
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
     }
 
+    private static void TestQueryFormOptionSettings()
+    {
+        bool oldRecordLimitEnabled = ApplicationOptionSettings.GetBool("RecordLimitEnabled");
+        int oldRecordLimit = ApplicationOptionSettings.GetInt("RecordLimit");
+        string oldEditorFontName = ApplicationOptionSettings.GetString("EditorFontName");
+        int oldEditorFontSize = ApplicationOptionSettings.GetInt("EditorFontSize");
+        bool oldEditorWordWrap = ApplicationOptionSettings.GetBool("EditorWordWrap");
+        bool oldAutoCompleteEnabled = ApplicationOptionSettings.GetBool("AutoCompleteEnabled");
+        string oldGridFontName = ApplicationOptionSettings.GetString("RecordGridFontName");
+        int oldGridFontSize = ApplicationOptionSettings.GetInt("RecordGridFontSize");
+
+        try
+        {
+            ApplicationOptionSettings.SetBool("RecordLimitEnabled", true);
+            ApplicationOptionSettings.SetInt("RecordLimit", 321);
+            ApplicationOptionSettings.SetString("EditorFontName", "Consolas");
+            ApplicationOptionSettings.SetInt("EditorFontSize", 13);
+            ApplicationOptionSettings.SetBool("EditorWordWrap", false);
+            ApplicationOptionSettings.SetBool("AutoCompleteEnabled", false);
+            ApplicationOptionSettings.SetString("RecordGridFontName", "Consolas");
+            ApplicationOptionSettings.SetInt("RecordGridFontSize", 12);
+
+            using (QueryForm form = new QueryForm(new FakeDumpDatabase(), "main"))
+            {
+                ToolStripTextBox pageSize = GetPrivateField<ToolStripTextBox>(form, "txtPageSize");
+                RichTextBox editor = GetPrivateField<RichTextBox>(form, "txtSql");
+                DataGridView grid = GetPrivateField<DataGridView>(form, "dgvResults");
+                List<string> completionTables = GetPrivateField<List<string>>(form, "_tableNames");
+
+                AssertEquals("321", pageSize.Text, "Query form should use the configured record limit.");
+                Assert(!editor.WordWrap, "Query editor should honor the configured word wrap setting.");
+                Assert(Math.Abs(editor.Font.SizeInPoints - 13f) < 0.1f, "Query editor should honor the configured font size.");
+                Assert(Math.Abs(grid.DefaultCellStyle.Font.SizeInPoints - 12f) < 0.1f, "Result grid should honor the configured font size.");
+                Assert(completionTables.Count == 0, "Disabled auto-complete should skip metadata loading.");
+            }
+        }
+        finally
+        {
+            ApplicationOptionSettings.SetBool("RecordLimitEnabled", oldRecordLimitEnabled);
+            ApplicationOptionSettings.SetInt("RecordLimit", oldRecordLimit);
+            ApplicationOptionSettings.SetString("EditorFontName", oldEditorFontName);
+            ApplicationOptionSettings.SetInt("EditorFontSize", oldEditorFontSize);
+            ApplicationOptionSettings.SetBool("EditorWordWrap", oldEditorWordWrap);
+            ApplicationOptionSettings.SetBool("AutoCompleteEnabled", oldAutoCompleteEnabled);
+            ApplicationOptionSettings.SetString("RecordGridFontName", oldGridFontName);
+            ApplicationOptionSettings.SetInt("RecordGridFontSize", oldGridFontSize);
+        }
+    }
+
     private static void TestBinaryCellStreamingService()
     {
         byte[] payload = new byte[200000];
@@ -1048,6 +1098,12 @@ public static class SmokeTests
     {
         FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         field.SetValue(target, value);
+    }
+
+    private static T GetPrivateField<T>(object target, string fieldName)
+    {
+        FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        return (T)field.GetValue(target);
     }
 
     private static void SetTextBoxField(object target, string fieldName, string value)

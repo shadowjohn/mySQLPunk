@@ -37,6 +37,7 @@ namespace mySQLPunk
         private bool _isDocked;
         private bool _isTableDataMode; 
         private bool _isNoPrimaryKeyReadOnlyMode;
+        private bool _recordLimitEnabled = true;
 
         // 分頁相關
         private int _pageSize = 1000;
@@ -297,6 +298,8 @@ namespace mySQLPunk
 
         private void InitializeQueryForm()
         {
+            LoadInitialQueryOptions();
+
             Size = new Size(1100, 750);
             StartPosition = FormStartPosition.CenterParent;
             MinimumSize = new Size(600, 400);
@@ -417,9 +420,9 @@ namespace mySQLPunk
             txtSql = new RichTextBox
             {
                 Dock = DockStyle.Fill,
-                Font = new Font("Consolas", 11),
+                Font = BuildConfiguredFont("EditorFontName", "Consolas", "EditorFontSize", 11),
                 AcceptsTab = true,
-                WordWrap = false,
+                WordWrap = ApplicationOptionSettings.GetBool("EditorWordWrap"),
                 ScrollBars = RichTextBoxScrollBars.Both,
                 Text = "SELECT * FROM "
             };
@@ -458,6 +461,9 @@ namespace mySQLPunk
             dgvResults.CellFormatting += DgvResults_CellFormatting;
             dgvResults.DataBindingComplete += DgvResults_DataBindingComplete;
             dgvResults.DataError += DgvResults_DataError;
+            Font configuredGridFont = BuildConfiguredFont("RecordGridFontName", "Microsoft JhengHei UI", "RecordGridFontSize", 9);
+            dgvResults.DefaultCellStyle.Font = configuredGridFont;
+            dgvResults.ColumnHeadersDefaultCellStyle.Font = configuredGridFont;
             RefreshResultsContextMenu();
             tabData.Controls.Add(dgvResults);
             CreateLoadingOverlay(tabData);
@@ -479,6 +485,48 @@ namespace mySQLPunk
             // 將 dataToolStrip 放到 split.Panel2 的底部 (跟著表格走)
             split.Panel2.Controls.Add(dataToolStrip);
             ApplyTheme();
+        }
+
+        private void LoadInitialQueryOptions()
+        {
+            _recordLimitEnabled = ApplicationOptionSettings.GetBool("RecordLimitEnabled");
+            int configuredPageSize = ApplicationOptionSettings.GetInt("RecordLimit");
+            if (configuredPageSize <= 0) configuredPageSize = 1000;
+            _pageSize = _recordLimitEnabled ? configuredPageSize : 1000000;
+        }
+
+        private static Font BuildConfiguredFont(string fontNameKey, string fallbackName, string fontSizeKey, float fallbackSize)
+        {
+            string fontName = ApplicationOptionSettings.GetString(fontNameKey);
+            if (string.IsNullOrWhiteSpace(fontName)) fontName = fallbackName;
+
+            int configuredSize = ApplicationOptionSettings.GetInt(fontSizeKey);
+            float fontSize = configuredSize > 0 ? configuredSize : fallbackSize;
+
+            try
+            {
+                return new Font(fontName, fontSize);
+            }
+            catch
+            {
+                return new Font(fallbackName, fallbackSize);
+            }
+        }
+
+        private static string GetConfiguredDirectory(string optionKey)
+        {
+            string path = ApplicationOptionSettings.GetString(optionKey);
+            if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+
+            try
+            {
+                Directory.CreateDirectory(path);
+                return Directory.Exists(path) ? path : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private void CreateLoadingOverlay(Control parent)
@@ -711,7 +759,8 @@ namespace mySQLPunk
             {
                 Filter = Localization.T("Common.SqlFilesFilter"),
                 DefaultExt = "sql",
-                FileName = string.IsNullOrWhiteSpace(_databaseName) ? "query.sql" : _databaseName + ".sql"
+                FileName = string.IsNullOrWhiteSpace(_databaseName) ? "query.sql" : _databaseName + ".sql",
+                InitialDirectory = GetConfiguredDirectory("FileQueryDirectory")
             })
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
@@ -725,7 +774,8 @@ namespace mySQLPunk
             using (OpenFileDialog dialog = new OpenFileDialog
             {
                 Filter = Localization.T("Common.SqlFilesFilter"),
-                CheckFileExists = true
+                CheckFileExists = true,
+                InitialDirectory = GetConfiguredDirectory("FileQueryDirectory")
             })
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
@@ -781,7 +831,9 @@ namespace mySQLPunk
         {
             try
             {
-                if (!string.IsNullOrEmpty(_databaseName) && _db != null)
+                if (ApplicationOptionSettings.GetBool("AutoCompleteEnabled") &&
+                    ApplicationOptionSettings.GetBool("AutoCompleteAutoRefresh") &&
+                    !string.IsNullOrEmpty(_databaseName) && _db != null)
                 {
                     _tableNames = _db.GetTables(_databaseName);
                 }
@@ -795,6 +847,12 @@ namespace mySQLPunk
         // ── SQL 語法高亮 ──
         private void ApplySyntaxHighlight()
         {
+            if (!ApplicationOptionSettings.GetBool("EditorSyntaxHighlight"))
+            {
+                ApplyPlainEditorFormatting();
+                return;
+            }
+
             txtSql.TextChanged -= TxtSql_TextChanged;
 
             int selStart = txtSql.SelectionStart;
@@ -851,6 +909,20 @@ namespace mySQLPunk
             txtSql.TextChanged += TxtSql_TextChanged;
         }
 
+        private void ApplyPlainEditorFormatting()
+        {
+            if (txtSql == null) return;
+
+            txtSql.TextChanged -= TxtSql_TextChanged;
+            int selStart = txtSql.SelectionStart;
+            int selLen = txtSql.SelectionLength;
+            txtSql.SelectAll();
+            txtSql.SelectionColor = ThemeManager.TextColor;
+            txtSql.SelectionFont = new Font(txtSql.Font, FontStyle.Regular);
+            txtSql.Select(selStart, selLen);
+            txtSql.TextChanged += TxtSql_TextChanged;
+        }
+
         private void HighlightPattern(string text, string pattern, Color color, FontStyle style)
         {
             foreach (Match m in Regex.Matches(text, pattern))
@@ -892,6 +964,12 @@ namespace mySQLPunk
         // ── 自動補完 ──
         private void ShowCompletion()
         {
+            if (!ApplicationOptionSettings.GetBool("AutoCompleteEnabled"))
+            {
+                lstCompletion.Visible = false;
+                return;
+            }
+
             int pos = txtSql.SelectionStart;
             if (pos <= 0) { lstCompletion.Visible = false; return; }
 
@@ -915,7 +993,7 @@ namespace mySQLPunk
                 lstCompletion.Location = new Point(p.X, p.Y + txtSql.Font.Height + 4);
                 lstCompletion.Visible = true;
                 lstCompletion.BringToFront();
-                lstCompletion.SelectedIndex = 0;
+                lstCompletion.SelectedIndex = ApplicationOptionSettings.GetBool("AutoCompleteSelectFirst") ? 0 : -1;
             }
             else
             {
@@ -961,8 +1039,11 @@ namespace mySQLPunk
         // ── 事件處理 ──
         private void TxtSql_TextChanged(object sender, EventArgs e)
         {
-            ApplySyntaxHighlight();
-            ShowCompletion();
+            if (ApplicationOptionSettings.GetBool("EditorSyntaxHighlight")) ApplySyntaxHighlight();
+            else ApplyPlainEditorFormatting();
+
+            if (ApplicationOptionSettings.GetBool("AutoCompleteEnabled")) ShowCompletion();
+            else if (lstCompletion != null) lstCompletion.Visible = false;
         }
 
         private void TxtSql_KeyDown(object sender, KeyEventArgs e)
@@ -990,6 +1071,16 @@ namespace mySQLPunk
             }
 
             // F5 或 Ctrl+Enter 執行
+            if (e.KeyCode == Keys.Tab && ApplicationOptionSettings.GetBool("EditorInsertSpaces"))
+            {
+                int tabWidth = ApplicationOptionSettings.GetInt("EditorTabWidth");
+                if (tabWidth <= 0) tabWidth = 2;
+                txtSql.SelectedText = new string(' ', Math.Min(tabWidth, 16));
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
             if (e.KeyCode == Keys.F5 || (e.Control && e.KeyCode == Keys.Return))
             {
                 ExecuteQueryAsync();
@@ -1172,8 +1263,12 @@ namespace mySQLPunk
             }
 
             _pageSize = parsed;
+            _recordLimitEnabled = true;
             _currentPage = 1;
             if (txtPageSize.Text != _pageSize.ToString()) txtPageSize.Text = _pageSize.ToString();
+            ApplicationOptionSettings.SetBool("RecordLimitEnabled", true);
+            ApplicationOptionSettings.SetInt("RecordLimit", _pageSize);
+            ApplicationOptionSettings.Save();
             if (_isTableDataMode)
             {
                 ExecutePagedQuery();
@@ -1474,7 +1569,9 @@ namespace mySQLPunk
             {
                 txtSql.BackColor = ThemeManager.TextBoxBackColor;
                 txtSql.ForeColor = ThemeManager.TextColor;
-                ApplySyntaxHighlight();
+                txtSql.WordWrap = ApplicationOptionSettings.GetBool("EditorWordWrap");
+                if (ApplicationOptionSettings.GetBool("EditorSyntaxHighlight")) ApplySyntaxHighlight();
+                else ApplyPlainEditorFormatting();
             }
             if (lstCompletion != null)
             {
@@ -1485,6 +1582,9 @@ namespace mySQLPunk
             {
                 dgvResults.BackgroundColor = ThemeManager.WindowBackColor;
                 dgvResults.GridColor = ThemeManager.GridColor;
+                Font configuredGridFont = BuildConfiguredFont("RecordGridFontName", "Microsoft JhengHei UI", "RecordGridFontSize", 9);
+                dgvResults.DefaultCellStyle.Font = configuredGridFont;
+                dgvResults.ColumnHeadersDefaultCellStyle.Font = configuredGridFont;
                 if (dgvResults.ContextMenuStrip != null) ThemeManager.ApplyToolStrip(dgvResults.ContextMenuStrip);
             }
             if (loadingOverlay != null)
@@ -3003,7 +3103,8 @@ namespace mySQLPunk
                 Filter = Localization.T("Query.ExportFileFilter"),
                 FileName = string.IsNullOrEmpty(_databaseName) ? "query" : _databaseName,
                 DefaultExt = "csv",
-                FilterIndex = 2
+                FilterIndex = 2,
+                InitialDirectory = GetConfiguredDirectory("FileExportDirectory")
             })
             {
                 if (dlg.ShowDialog() != DialogResult.OK) return;
