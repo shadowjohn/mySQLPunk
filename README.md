@@ -123,8 +123,8 @@ Smoke test harness：
 - **SQLite 欄位註解不支援 ✅ sidecar metadata 與交換格式已補齊**
   - 現況：SQLite 本身沒有欄位註解語法，因此 mySQLPunk 會使用 `__mysqlpunk_column_comments` sidecar metadata table 保存欄位註解。
   - 完成內容：SQLite provider 讀取欄位時會合併 sidecar 註解；Table Designer 新增/修改/重建資料表與資料庫/資料表補註解流程都會寫入 sidecar metadata。
-  - 匯出支援：SQL Dump 的結構匯出會附帶 sidecar table 建立語句與目前資料表的欄位註解 `INSERT OR REPLACE`，跨環境還原後可保留 mySQLPunk 欄位註解；SQLite 資料庫、Tables 節點與單一資料表右鍵可匯出 / 匯入專用欄位註解 JSON，匯入時會建立 sidecar table 並覆蓋匯入範圍內資料表的註解。
-  - 後續方向：若需要和其它 SQLite 工具深度整合，可再加入第三方註解格式轉換器或 CLI 匯入匯出參數。
+  - 匯出支援：SQL Dump 的結構匯出會附帶 sidecar table 建立語句與目前資料表的欄位註解 `INSERT OR REPLACE`，跨環境還原後可保留 mySQLPunk 欄位註解；SQLite 資料庫、Tables 節點與單一資料表右鍵可匯出 / 匯入專用欄位註解 JSON，匯入時會建立 sidecar table 並覆蓋匯入範圍內資料表的註解；CLI 可用 `--sqlite-comments-export --database <sqlite> --output <json> [--table <name>]` 與 `--sqlite-comments-import --database <sqlite> --input <json> [--table <name>]` 進行自動化交換。
+  - 後續方向：若需要和其它 SQLite 工具深度整合，可再加入第三方註解格式轉換器。
 
 - **SpatiaLite extension 可能載入失敗 ✅ 診斷資訊已補齊**
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。

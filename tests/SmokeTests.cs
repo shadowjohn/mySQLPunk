@@ -684,6 +684,61 @@ public static class SmokeTests
         {
             if (File.Exists(tempPath)) File.Delete(tempPath);
         }
+
+        string sqlitePath = Path.Combine(Path.GetTempPath(), "sqlite_comments_cli_" + Guid.NewGuid().ToString("N") + ".sqlite");
+        string exportPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_cli_" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            using (my_sqlite sqliteDb = new my_sqlite())
+            {
+                sqliteDb.SetConn("Data Source=" + sqlitePath + ";Version=3;New=True;");
+                sqliteDb.Open();
+                sqliteDb.ExecSQL("CREATE TABLE users (ID INTEGER PRIMARY KEY, NAME TEXT);");
+                sqliteDb.ExecSQL(SqliteColumnCommentExchangeService.BuildEnsureSidecarTableSql());
+                sqliteDb.ExecSQL("INSERT OR REPLACE INTO " + my_sqlite.ColumnCommentTableName + " (table_name, column_name, comment) VALUES ('users', 'NAME', '姓名');");
+            }
+
+            SqliteColumnCommentCliResult exportResult = SqliteColumnCommentCliService.TryRun(new[]
+            {
+                "--sqlite-comments-export",
+                "--database", sqlitePath,
+                "--output", exportPath,
+                "--table", "users"
+            });
+            Assert(exportResult.Handled && exportResult.ExitCode == 0, "SQLite comment CLI export should be handled successfully.");
+            Assert(File.Exists(exportPath), "SQLite comment CLI export should write the JSON file.");
+            AssertContains(File.ReadAllText(exportPath, Encoding.UTF8), "\"NAME\": \"姓名\"", "SQLite comment CLI export should include sidecar comments.");
+
+            using (my_sqlite sqliteDb = new my_sqlite())
+            {
+                sqliteDb.SetConn("Data Source=" + sqlitePath + ";Version=3;");
+                sqliteDb.Open();
+                sqliteDb.ExecSQL("DELETE FROM " + my_sqlite.ColumnCommentTableName + ";");
+            }
+
+            SqliteColumnCommentCliResult importResult = SqliteColumnCommentCliService.TryRun(new[]
+            {
+                "--sqlite-comments-import",
+                "--database", sqlitePath,
+                "--input", exportPath,
+                "--table", "users"
+            });
+            Assert(importResult.Handled && importResult.ExitCode == 0, "SQLite comment CLI import should be handled successfully.");
+
+            using (my_sqlite sqliteDb = new my_sqlite())
+            {
+                sqliteDb.SetConn("Data Source=" + sqlitePath + ";Version=3;");
+                sqliteDb.Open();
+                DataTable importedComments = sqliteDb.SelectSQL("SELECT comment FROM " + my_sqlite.ColumnCommentTableName + " WHERE table_name = 'users' AND column_name = 'NAME';");
+                Assert(importedComments.Rows.Count == 1, "SQLite comment CLI import should restore the sidecar row.");
+                AssertEquals("姓名", importedComments.Rows[0]["comment"].ToString(), "SQLite comment CLI import should restore the comment text.");
+            }
+        }
+        finally
+        {
+            if (File.Exists(exportPath)) File.Delete(exportPath);
+            if (File.Exists(sqlitePath)) File.Delete(sqlitePath);
+        }
     }
 
     private static void TestQueryResultExportService()

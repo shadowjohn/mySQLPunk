@@ -28,6 +28,124 @@ namespace mySQLPunk.lib
         }
     }
 
+    public sealed class SqliteColumnCommentCliResult
+    {
+        public bool Handled { get; set; }
+        public int ExitCode { get; set; }
+        public string Message { get; set; }
+    }
+
+    public static class SqliteColumnCommentCliService
+    {
+        private const string ExportCommand = "--sqlite-comments-export";
+        private const string ImportCommand = "--sqlite-comments-import";
+
+        public static SqliteColumnCommentCliResult TryRun(string[] args)
+        {
+            if (args == null || args.Length == 0 || !IsCommand(args[0]))
+            {
+                return new SqliteColumnCommentCliResult { Handled = false, ExitCode = 0, Message = "" };
+            }
+
+            try
+            {
+                return RunCommand(args);
+            }
+            catch (Exception ex)
+            {
+                return new SqliteColumnCommentCliResult
+                {
+                    Handled = true,
+                    ExitCode = 1,
+                    Message = ex.Message
+                };
+            }
+        }
+
+        private static SqliteColumnCommentCliResult RunCommand(string[] args)
+        {
+            string command = args[0];
+            Dictionary<string, string> options = ParseOptions(args);
+            string databasePath = RequireOption(options, "--database");
+            string tableName = GetOption(options, "--table");
+
+            using (my_sqlite db = new my_sqlite())
+            {
+                db.SetConn(BuildSqliteConnectionString(databasePath));
+                db.Open();
+
+                if (string.Equals(command, ExportCommand, StringComparison.OrdinalIgnoreCase))
+                {
+                    string outputPath = RequireOption(options, "--output");
+                    SqliteColumnCommentExportResult result =
+                        SqliteColumnCommentExchangeService.WriteExportFile(db, "main", tableName, outputPath);
+                    return new SqliteColumnCommentCliResult
+                    {
+                        Handled = true,
+                        ExitCode = 0,
+                        Message = "Exported " + result.TableCount + " tables and " + result.CommentCount + " comments."
+                    };
+                }
+
+                string inputPath = RequireOption(options, "--input");
+                SqliteColumnCommentImportPlan plan =
+                    SqliteColumnCommentExchangeService.ImportFromFile(db, inputPath, tableName);
+                return new SqliteColumnCommentCliResult
+                {
+                    Handled = true,
+                    ExitCode = 0,
+                    Message = "Imported " + plan.TableCount + " tables and " + plan.CommentCount + " comments."
+                };
+            }
+        }
+
+        private static Dictionary<string, string> ParseOptions(string[] args)
+        {
+            Dictionary<string, string> options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 1; i < args.Length; i++)
+            {
+                string key = args[i] ?? string.Empty;
+                if (!key.StartsWith("--", StringComparison.Ordinal)) continue;
+                if (i + 1 >= args.Length || (args[i + 1] ?? string.Empty).StartsWith("--", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException("Missing value for " + key + ".");
+                }
+                options[key] = args[++i];
+            }
+            return options;
+        }
+
+        private static string RequireOption(Dictionary<string, string> options, string key)
+        {
+            string value = GetOption(options, key);
+            if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException("Missing required option " + key + ".");
+            return value;
+        }
+
+        private static string GetOption(Dictionary<string, string> options, string key)
+        {
+            string value;
+            return options != null && options.TryGetValue(key, out value) ? value : "";
+        }
+
+        private static bool IsCommand(string value)
+        {
+            return string.Equals(value, ExportCommand, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, ImportCommand, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildSqliteConnectionString(string databasePath)
+        {
+            if (string.IsNullOrWhiteSpace(databasePath)) throw new ArgumentException("SQLite database path is required.");
+            System.Data.SQLite.SQLiteConnectionStringBuilder builder = new System.Data.SQLite.SQLiteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Version = 3
+            };
+            return builder.ConnectionString;
+        }
+    }
+
     public static class SqliteColumnCommentExchangeService
     {
         public const int FormatVersion = 1;
