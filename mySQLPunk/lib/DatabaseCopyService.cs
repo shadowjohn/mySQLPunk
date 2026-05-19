@@ -559,6 +559,12 @@ namespace mySQLPunk.lib
 
             sql = Regex.Replace(
                 sql,
+                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+DAY\s*\)",
+                m => BuildDateAddDaysExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value)),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
                 @"\bDATEADD\s*\(\s*(?<part>day|dd|d)\s*,\s*(?<amount>-?\d+)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDateAddDaysExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value),
                 RegexOptions.IgnoreCase);
@@ -578,6 +584,25 @@ namespace mySQLPunk.lib
         private static string BuildSqliteDayModifier(string amount)
         {
             return amount.StartsWith("-", StringComparison.Ordinal) ? amount : "+" + amount;
+        }
+
+        private static string NegateIntegerString(string amount)
+        {
+            string text = (amount ?? "0").Trim();
+            if (text.Length == 0) return "0";
+            if (IsZeroIntegerString(text)) return "0";
+            return text.StartsWith("-", StringComparison.Ordinal) ? text.Substring(1) : "-" + text;
+        }
+
+        private static bool IsZeroIntegerString(string value)
+        {
+            string text = (value ?? string.Empty).Trim().TrimStart('-');
+            if (text.Length == 0) return false;
+            foreach (char ch in text)
+            {
+                if (ch != '0') return false;
+            }
+            return true;
         }
 
         private static string BuildDateDiffDaysExpression(string targetProvider, string endDate, string startDate)

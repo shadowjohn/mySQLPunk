@@ -222,6 +222,22 @@ public static class SmokeTests
         string pgDateAddSql = (string)GetProperty(pgDateAddPreview, "ConvertedSql");
         AssertContains(pgDateAddSql, "created_at + INTERVAL '14 day'", "Converted PostgreSQL SQL should use interval addition.");
 
+        object mssqlDateSubPreview = BuildViewSqlPreview(
+            "SELECT DATE_SUB(expires_at, INTERVAL 7 DAY) AS warning_at FROM sessions",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDateSubPreview, "CanConvert"), "MySQL DATE_SUB should convert to SQL Server.");
+        string mssqlDateSubSql = (string)GetProperty(mssqlDateSubPreview, "ConvertedSql");
+        AssertContains(mssqlDateSubSql, "DATEADD(day, -7, expires_at)", "Converted SQL Server SQL should use negative DATEADD.");
+
+        object sqliteDateSubPreview = BuildViewSqlPreview(
+            "SELECT DATE_SUB(expires_at, INTERVAL 7 DAY) AS warning_at FROM sessions",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDateSubPreview, "CanConvert"), "MySQL DATE_SUB should convert to SQLite.");
+        string sqliteDateSubSql = (string)GetProperty(sqliteDateSubPreview, "ConvertedSql");
+        AssertContains(sqliteDateSubSql, "date(expires_at, '-7 day')", "Converted SQLite SQL should use a negative date modifier.");
+
         object pgIfPreview = BuildViewSqlPreview(
             "SELECT IF(is_active = 1, 'Y', 'N') AS active_text FROM users",
             "mysql",
