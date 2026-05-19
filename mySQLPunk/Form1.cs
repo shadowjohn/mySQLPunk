@@ -7570,6 +7570,14 @@ namespace mySQLPunk
             dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();
             menu.Items.Add(dictionaryItem);
 
+            TreeDatabaseTarget sqliteTarget = BuildTargetFromNode(node);
+            if (sqliteTarget != null && sqliteTarget.Database is my_sqlite)
+            {
+                ToolStripMenuItem sqliteSpecialItem = new ToolStripMenuItem(Localization.T("Tool.SqliteSpecialObjectWizard"));
+                sqliteSpecialItem.Click += (s, ev) => OpenSqliteSpecialObjectWizard(node);
+                menu.Items.Add(sqliteSpecialItem);
+            }
+
             menu.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedDatabaseComments(node, mode)));
 
             ToolStripMenuItem reverseModelItem = new ToolStripMenuItem(Localization.T("Tool.ReverseEngineerModel"));
@@ -8253,6 +8261,22 @@ namespace mySQLPunk
         private void OpenSelectedDatabaseDictionary()
         {
             SelectDatabaseGroupNode("Models");
+        }
+
+        private void OpenSqliteSpecialObjectWizard(TreeNode databaseNode)
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(databaseNode);
+            if (target == null || !(target.Database is my_sqlite))
+            {
+                MessageBox.Show(Localization.T("Object.SelectDatabaseOrConnection"), Localization.T("Tool.SqliteSpecialObjectWizard"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SqliteSpecialObjectWizardForm form = new SqliteSpecialObjectWizardForm(target.Database, target.DatabaseName))
+            {
+                form.ShowDialog(this);
+            }
+            RefreshDatabaseObjectNodes(databaseNode);
         }
 
         private void ReverseEngineerSelectedDatabaseModel()

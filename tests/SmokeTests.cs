@@ -14,6 +14,7 @@ public static class SmokeTests
         Run("Geometry WKB 轉 WKT", TestGeometryWktConverter, ref passed);
         Run("View SQL 跨 provider 轉換", TestViewSqlConversion, ref passed);
         Run("View SQL 進階轉換案例", TestAdvancedViewSqlConversion, ref passed);
+        Run("SQLite 專用物件 SQL builder", TestSqliteSpecialObjectSqlBuilder, ref passed);
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
@@ -131,6 +132,40 @@ public static class SmokeTests
     private static object GetProperty(object target, string name)
     {
         return target.GetType().GetProperty(name).GetValue(target, null);
+    }
+
+    private static void TestSqliteSpecialObjectSqlBuilder()
+    {
+        string ftsSql = SqliteSpecialObjectSqlBuilder.BuildFtsVirtualTable(
+            "doc_search",
+            SqliteSpecialObjectSqlBuilder.SplitCommaSeparatedNames("title, body"),
+            "unicode61",
+            "documents");
+        AssertContains(ftsSql, "CREATE VIRTUAL TABLE \"doc_search\" USING fts5", "FTS SQL should create an fts5 virtual table.");
+        AssertContains(ftsSql, "\"title\"", "FTS SQL should quote title column.");
+        AssertContains(ftsSql, "tokenize = 'unicode61'", "FTS SQL should include tokenizer.");
+        AssertContains(ftsSql, "content = 'documents'", "FTS SQL should include content table.");
+
+        string rtreeSql = SqliteSpecialObjectSqlBuilder.BuildRTreeVirtualTable(
+            "idx_boxes",
+            "id",
+            SqliteSpecialObjectSqlBuilder.SplitCommaSeparatedNames("minX, maxX, minY, maxY"));
+        AssertContains(rtreeSql, "CREATE VIRTUAL TABLE \"idx_boxes\" USING rtree", "RTree SQL should create an rtree virtual table.");
+        AssertContains(rtreeSql, "\"minX\"", "RTree SQL should quote dimension columns.");
+
+        string spatialSql = SqliteSpecialObjectSqlBuilder.BuildSpatiaLiteSpatialIndex("places", "geom");
+        AssertEquals("SELECT CreateSpatialIndex('places', 'geom');", spatialSql, "SpatiaLite spatial index SQL should call CreateSpatialIndex.");
+
+        bool rejected = false;
+        try
+        {
+            SqliteSpecialObjectSqlBuilder.BuildRTreeVirtualTable("bad", "id", SqliteSpecialObjectSqlBuilder.SplitCommaSeparatedNames("minX, maxX, minY"));
+        }
+        catch (ArgumentException)
+        {
+            rejected = true;
+        }
+        Assert(rejected, "RTree builder should reject incomplete min/max dimension pairs.");
     }
 
     private static void TestTableDesignerDdlBuilder()

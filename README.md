@@ -31,7 +31,7 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例，以及 Table Designer 主要 DDL builder 的 MySQL / SQLite 建表輸出。
+目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder，以及 Table Designer 主要 DDL builder 的 MySQL / SQLite 建表輸出。
 
 ## 目前功能概況
 
@@ -126,10 +126,10 @@ Smoke test harness：
   - 本輪補齊：PostgreSQL provider 會列出非 `public` schema 的 Table/View、Function 與 Trigger，並讓欄位、索引、資料瀏覽、列數、複製建表、View DDL 與批次寫入等主要操作依 `schema.table` 產生正確 SQL；QueryForm 資料表新增/更新/刪除與 Form1 共用物件 SQL（開啟查詢、Drop、Dump/DDL、資料產生、補註解）也會依 `schema.table` 寫入正確 schema；Table Designer 欄位修改、註解、Primary Key 變更與索引刪除的 SQL 預覽也會依目前資料表 schema 產生正確物件名稱；新增 View / Function 範本會沿用目前選取物件的 schema，避免在非預設 schema 工作時又產生 `public` / `dbo` 範本。
   - 後續方向：以 provider 為單位補齊欄位改名、型別變更、NULL/DEFAULT、Primary Key 與 constraint 變更。
 
-- **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法 ✅ 主要 provider 已補齊**
-  - 現況：Table Designer 支援 MySQL FULLTEXT/SPATIAL、PostgreSQL FULLTEXT GIN 與 SPATIAL GiST、SQL Server Full-Text / Spatial、Oracle CTXSYS/MDSYS 索引 SQL 產生；SQLite 仍不提供一般 FULLTEXT/SPATIAL 索引設計器入口。
-  - 完成內容：新增與修改資料表流程都會依 provider 產生對應 FULLTEXT/SPATIAL 語法；MySQL 既有資料表 ALTER 已補上 `ADD SPATIAL INDEX`，索引註解也會套用 MySQL 字串 escape。
-  - 後續方向：若要支援 SQLite FTS virtual table、RTree 或 SpatiaLite spatial index，需要另做專用精靈，避免用一般索引 UI 產生錯誤語法。
+- **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法 ✅ 主要 provider 與 SQLite 專用精靈已補齊**
+  - 現況：Table Designer 支援 MySQL FULLTEXT/SPATIAL、PostgreSQL FULLTEXT GIN 與 SPATIAL GiST、SQL Server Full-Text / Spatial、Oracle CTXSYS/MDSYS 索引 SQL 產生；SQLite FTS virtual table、RTree 與 SpatiaLite spatial index 不混入一般索引 UI，改由 database 右鍵選單的專用精靈產生 SQL。
+  - 完成內容：新增與修改資料表流程都會依 provider 產生對應 FULLTEXT/SPATIAL 語法；MySQL 既有資料表 ALTER 已補上 `ADD SPATIAL INDEX`，索引註解也會套用 MySQL 字串 escape；SQLite 專用精靈可產生 FTS5 virtual table、RTree virtual table 與 `CreateSpatialIndex` SQL，並可直接執行。
+  - 測試覆蓋：`tests/SmokeTests.cs` 已涵蓋 FTS5、RTree、SpatiaLite spatial index SQL 產生與 RTree 維度欄位驗證。
 
 - **SQL Server DEFAULT constraint 變更仍有限制 ✅ 已補齊**
   - 現況：SQL Server 會把欄位 DEFAULT 存成 default constraint，修改時不能只用一般 `ALTER COLUMN` 覆蓋。
