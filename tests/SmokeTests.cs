@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Reflection;
 using System.Runtime.Serialization;
@@ -19,6 +20,8 @@ public static class SmokeTests
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
         Run("Table Designer ALTER provider matrix", TestTableDesignerAlterProviderMatrix, ref passed);
         Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
+        Run("Database dump service", TestDatabaseDumpService, ref passed);
+        Run("Query result export service", TestQueryResultExportService, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
     }
@@ -281,6 +284,41 @@ public static class SmokeTests
         AssertContains(path, "sales_db_2026_mysql_before_delete_20260519_080706.sql", "Pre-delete backup file name should be deterministic and sanitized.");
     }
 
+    private static void TestDatabaseDumpService()
+    {
+        FakeDumpDatabase db = new FakeDumpDatabase();
+        string dump = DatabaseDumpService.BuildDatabaseDump(db, "main");
+
+        AssertContains(dump, "-- mySQLPunk Database Backup", "Database dump service should emit the backup header.");
+        AssertContains(dump, "CREATE TABLE \"public\".\"users\"", "Database dump service should include table DDL.");
+        AssertContains(dump, "INSERT INTO \"public.users\" (\"id\", \"name\", \"payload\") VALUES (1, 'O''Reilly', '\\x0102');", "Database dump service should preserve existing INSERT target behavior and escaped values.");
+        AssertContains(dump, "CREATE VIEW \"public\".\"active_users\"", "Database dump service should include view DDL.");
+
+        AssertEquals("\"public\".\"users\"", DatabaseDumpService.BuildQualifiedObjectName(db, "main", "public.users"), "PostgreSQL qualified table name should preserve schema.");
+        AssertEquals("'\\x0A0B'", DatabaseDumpService.ToSqlLiteral(db, new byte[] { 0x0A, 0x0B }), "PostgreSQL byte literal should be hex escaped.");
+    }
+
+    private static void TestQueryResultExportService()
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("Name", typeof(string));
+        table.Columns.Add("Amount", typeof(decimal));
+        table.Columns.Add("Payload", typeof(byte[]));
+        table.Rows.Add("A, B", 12.5m, new byte[] { 0xAA, 0xBB, 0xCC });
+
+        string csv = QueryResultExportService.BuildText(table, QueryResultExportFormat.Csv);
+        AssertContains(csv, "\"A, B\",12.5,[BLOB 3 bytes] 0xAABBCC", "CSV export should escape commas and format BLOB values.");
+
+        string json = QueryResultExportService.BuildText(table, QueryResultExportFormat.Json);
+        AssertContains(json, "\"Name\": \"A, B\"", "JSON export should include string values.");
+        AssertContains(json, "[BLOB 3 bytes] 0xAABBCC", "JSON export should use the shared BLOB preview.");
+
+        string markdown = QueryResultExportService.BuildText(table, QueryResultExportFormat.Markdown);
+        AssertContains(markdown, "| Name | Amount | Payload |", "Markdown export should include headers.");
+        Assert(QueryResultExportService.ResolveFormat("result.json", 2) == QueryResultExportFormat.Json, "Extension should determine query export format.");
+        Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
+    }
+
     private static string BuildExistingAlterSql(IDatabase db, string databaseName, string tableName, DataTable originalColumns, DataTable currentColumns, string methodName)
     {
         TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
@@ -418,5 +456,50 @@ public static class SmokeTests
         {
             throw new Exception(message + " Unexpected fragment: " + unexpected + " Actual: " + value);
         }
+    }
+
+    private sealed class FakeDumpDatabase : IDatabase
+    {
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => "postgresql";
+
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public List<string> GetDatabases() { return new List<string> { "main" }; }
+        public List<string> GetTables(string databaseName) { return new List<string> { "public.users" }; }
+        public List<string> GetViews(string databaseName) { return new List<string> { "public.active_users" }; }
+        public DataTable GetColumns(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return "CREATE TABLE \"public\".\"users\" (\"id\" integer, \"name\" text, \"payload\" bytea)"; }
+        public bool TableExists(string databaseName, string tableName) { return true; }
+        public bool ViewExists(string databaseName, string viewName) { return true; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 1; }
+        public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("id", typeof(int));
+            table.Columns.Add("name", typeof(string));
+            table.Columns.Add("payload", typeof(byte[]));
+            table.Rows.Add(1, "O'Reilly", new byte[] { 0x01, 0x02 });
+            return table;
+        }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return "CREATE VIEW \"public\".\"active_users\" AS SELECT * FROM \"public\".\"users\""; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
     }
 }

@@ -2934,16 +2934,9 @@ namespace mySQLPunk
 
                 try
                 {
-                    QueryExportFormat format = ResolveExportFormat(dlg.FileName, dlg.FilterIndex);
-                    int exportedRows = CountExportRows(dt);
-                    if (format == QueryExportFormat.Xlsx)
-                    {
-                        WriteXlsx(dt, dlg.FileName);
-                    }
-                    else
-                    {
-                        File.WriteAllText(dlg.FileName, BuildExportText(dt, format), Encoding.UTF8);
-                    }
+                    QueryResultExportFormat format = QueryResultExportService.ResolveFormat(dlg.FileName, dlg.FilterIndex);
+                    int exportedRows = QueryResultExportService.CountExportRows(dt);
+                    QueryResultExportService.Write(dt, dlg.FileName, format);
                     lblStatus.Text = Localization.Format("Query.ExportCompleted", exportedRows, dlg.FileName);
                 }
                 catch (Exception ex)

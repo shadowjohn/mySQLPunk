@@ -163,6 +163,7 @@
     <Compile Include="ThemeManager.cs" />
     <Compile Include="lib\crypto.cs" />
     <Compile Include="lib\DatabaseCopyService.cs" />
+    <Compile Include="lib\DatabaseDumpService.cs" />
     <Compile Include="lib\IDatabase.cs" />
     <Compile Include="lib\include.cs" />
     <Compile Include="lib\my_mssql.cs" />
@@ -170,6 +171,7 @@
     <Compile Include="lib\my_oracle.cs" />
     <Compile Include="lib\my_postgresql.cs" />
     <Compile Include="lib\my_sqlite.cs" />
+    <Compile Include="lib\QueryResultExportService.cs" />
     <Compile Include="lib\SqliteSpecialObjectSqlBuilder.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="QueryForm.cs">

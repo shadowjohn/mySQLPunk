@@ -3106,7 +3106,7 @@ namespace mySQLPunk
 
                 try
                 {
-                    string sql = BuildTableDump(db, dbName, tableName, dataOnly);
+                    string sql = DatabaseDumpService.BuildTableDump(db, dbName, tableName, dataOnly);
                     File.WriteAllText(dialog.FileName, sql, Encoding.UTF8);
                     MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -3139,7 +3139,7 @@ namespace mySQLPunk
 
                 try
                 {
-                    string sql = BuildViewDump(selection.Database, selection.DatabaseName, selection.ObjectName);
+                    string sql = DatabaseDumpService.BuildViewDump(selection.Database, selection.DatabaseName, selection.ObjectName);
                     File.WriteAllText(dialog.FileName, sql, Encoding.UTF8);
                     MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -3212,12 +3212,12 @@ namespace mySQLPunk
 
             if (selection != null && selection.GroupName == "Tables")
             {
-                sql = BuildTableDump(selection.Database, selection.DatabaseName, selection.ObjectName, dataOnlyForTable);
+                sql = DatabaseDumpService.BuildTableDump(selection.Database, selection.DatabaseName, selection.ObjectName, dataOnlyForTable);
                 statusTarget = Localization.Format("Object.TableTarget", selection.ObjectName);
             }
             else if (selection != null && selection.GroupName == "Views")
             {
-                sql = BuildViewDump(selection.Database, selection.DatabaseName, selection.ObjectName);
+                sql = DatabaseDumpService.BuildViewDump(selection.Database, selection.DatabaseName, selection.ObjectName);
                 statusTarget = Localization.Format("Object.ViewTarget", selection.ObjectName);
             }
             else
@@ -3228,7 +3228,7 @@ namespace mySQLPunk
                     return false;
                 }
 
-                sql = BuildDatabaseDump(target.Database, target.DatabaseName);
+                sql = DatabaseDumpService.BuildDatabaseDump(target.Database, target.DatabaseName);
                 statusTarget = Localization.Format("Object.DatabaseTarget", target.DatabaseName);
             }
 
@@ -3289,7 +3289,7 @@ namespace mySQLPunk
                 Directory.CreateDirectory(dir);
             }
 
-            File.WriteAllText(targetPath, BuildDatabaseDump(target.Database, target.DatabaseName), Encoding.UTF8);
+            DatabaseDumpService.WriteDatabaseDump(target.Database, target.DatabaseName, targetPath);
             UpdateMainStatus(Localization.Format("Object.SqlDumpCreated", targetPath));
             return true;
         }
@@ -3551,7 +3551,7 @@ namespace mySQLPunk
                 return;
             }
 
-            File.WriteAllText(targetPath, BuildDatabaseDump(target.Database, target.DatabaseName), Encoding.UTF8);
+            DatabaseDumpService.WriteDatabaseDump(target.Database, target.DatabaseName, targetPath);
         }
 
         private static string BuildDatabaseDump(IDatabase db, string databaseName)
