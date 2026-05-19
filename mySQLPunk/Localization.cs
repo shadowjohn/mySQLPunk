@@ -497,6 +497,8 @@ namespace mySQLPunk
             Add("Designer.ExportAutoCommentsDictionary", "匯出註解字典...", "Export Comment Dictionary...");
             Add("Designer.SaveAutoCommentsDictionaryAs", "另存目前註解字典...", "Save Current Comment Dictionary As...");
             Add("Designer.SwitchAutoCommentsDictionary", "切換註解字典...", "Switch Comment Dictionary...");
+            Add("Designer.RenameAutoCommentsDictionary", "重新命名註解字典...", "Rename Comment Dictionary...");
+            Add("Designer.DeleteAutoCommentsDictionary", "刪除註解字典...", "Delete Comment Dictionary...");
             Add("Designer.AddIndex", "加入索引", "Add Index");
             Add("Designer.DeleteIndex", "刪除索引", "Delete Index");
             Add("Designer.MoveUp", "上移", "Move Up");
@@ -552,6 +554,12 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsNoSavedDictionaries", "目前沒有已保存的註解字典。", "There are no saved comment dictionaries.");
             Add("Designer.AutoCommentsDictionarySwitched", "已切換到「{0}」註解字典，共 {1} 筆。", "Switched to \"{0}\" comment dictionary with {1} entries.");
             Add("Designer.AutoCommentsDictionarySwitchFailed", "切換註解字典失敗：{0}", "Switch comment dictionary failed: {0}");
+            Add("Designer.AutoCommentsDictionaryRenamed", "已將註解字典「{0}」重新命名為「{1}」。", "Renamed comment dictionary \"{0}\" to \"{1}\".");
+            Add("Designer.AutoCommentsDictionaryRenameFailed", "重新命名註解字典失敗：{0}", "Rename comment dictionary failed: {0}");
+            Add("Designer.AutoCommentsDictionaryDeleteConfirm", "確定要刪除註解字典「{0}」嗎？", "Delete comment dictionary \"{0}\"?");
+            Add("Designer.AutoCommentsDictionaryDeleted", "已刪除註解字典「{0}」。", "Deleted comment dictionary \"{0}\".");
+            Add("Designer.AutoCommentsDictionaryDeleteFailed", "刪除註解字典失敗：{0}", "Delete comment dictionary failed: {0}");
+            Add("Designer.AutoCommentsDictionaryAlreadyExists", "註解字典「{0}」已存在。", "Comment dictionary \"{0}\" already exists.");
             Add("Designer.AutoCommentsDictionaryNotFound", "找不到指定的註解字典。", "The specified comment dictionary was not found.");
             Add("Designer.AutoCommentsProgress", "補註解 {0}/{1}：{2}", "Filling comments {0}/{1}: {2}");
             Add("Designer.AutoCommentsDone", "補註解完成：{0}/{1}", "Fill comments done: {0}/{1}");
