@@ -177,6 +177,7 @@ namespace mySQLPunk
             Add("Status.BackupIntegrityPassed", "備份完整性定期驗證完成：{0} 個檔案通過。", "Scheduled backup integrity check completed: {0} files passed.");
             Add("Status.BackupIntegrityFailed", "備份完整性定期驗證發現 {0} 個異常檔案。", "Scheduled backup integrity check found {0} invalid files.");
             Add("Status.BackupIntegritySkipped", "備份完整性定期驗證已略過：目前沒有備份檔。", "Scheduled backup integrity check skipped: no backup files found.");
+            Add("Status.BackupIntegrityReportPath", "報表：{0}", "Report: {0}");
             Add("Status.ExportFailed", "匯出失敗：", "Export failed: ");
             Add("Status.ImportFailed", "匯入失敗：", "Import failed: ");
             Add("Status.ThemeChanged", "主題已切換。", "Theme changed.");

@@ -740,6 +740,7 @@ namespace mySQLPunk
         private static bool integrityScheduleEnabled = true;
         private static int integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
         private static DateTime lastIntegrityVerifiedUtc = DateTime.MinValue;
+        private static string lastIntegrityReportPath = string.Empty;
 
         public static string RemoteDirectory
         {
@@ -811,6 +812,20 @@ namespace mySQLPunk
             }
         }
 
+        public static string LastIntegrityReportPath
+        {
+            get
+            {
+                EnsureLoaded();
+                return lastIntegrityReportPath;
+            }
+            set
+            {
+                EnsureLoaded();
+                lastIntegrityReportPath = (value ?? string.Empty).Trim();
+            }
+        }
+
         public static void Save()
         {
             EnsureLoaded();
@@ -824,7 +839,8 @@ namespace mySQLPunk
                     RetainCount = retainCount,
                     IntegrityScheduleEnabled = integrityScheduleEnabled,
                     IntegrityIntervalHours = integrityIntervalHours,
-                    LastIntegrityVerifiedUtc = lastIntegrityVerifiedUtc
+                    LastIntegrityVerifiedUtc = lastIntegrityVerifiedUtc,
+                    LastIntegrityReportPath = lastIntegrityReportPath
                 }, Formatting.Indented));
             }
             catch
@@ -858,6 +874,7 @@ namespace mySQLPunk
                     lastIntegrityVerifiedUtc = data.LastIntegrityVerifiedUtc == DateTime.MinValue
                         ? DateTime.MinValue
                         : data.LastIntegrityVerifiedUtc.ToUniversalTime();
+                    lastIntegrityReportPath = (data.LastIntegrityReportPath ?? string.Empty).Trim();
                 }
             }
             catch
@@ -867,6 +884,7 @@ namespace mySQLPunk
                 integrityScheduleEnabled = true;
                 integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
                 lastIntegrityVerifiedUtc = DateTime.MinValue;
+                lastIntegrityReportPath = string.Empty;
             }
         }
 
@@ -882,6 +900,7 @@ namespace mySQLPunk
             public bool? IntegrityScheduleEnabled { get; set; }
             public int IntegrityIntervalHours { get; set; }
             public DateTime LastIntegrityVerifiedUtc { get; set; }
+            public string LastIntegrityReportPath { get; set; }
         }
     }
 }

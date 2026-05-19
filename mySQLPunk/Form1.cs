@@ -4852,21 +4852,25 @@ namespace mySQLPunk
                 string[] directories = GetBackupIntegrityDirectories().ToArray();
                 BackupIntegrityScheduleReport report = await Task.Run(() =>
                     BackupIntegrityScheduleService.VerifyDirectories(directories, CountSqlScriptStatements));
+                string reportPath = BackupIntegrityScheduleService.WriteReport(report, GetBackupIntegrityReportDirectory());
 
                 BackupMirrorSettings.LastIntegrityVerifiedUtc = report.VerifiedAtUtc;
+                BackupMirrorSettings.LastIntegrityReportPath = reportPath;
                 BackupMirrorSettings.Save();
+
+                string reportNote = Localization.Format("Status.BackupIntegrityReportPath", reportPath);
 
                 if (report.TotalFiles <= 0)
                 {
-                    UpdateMainStatus(Localization.T("Status.BackupIntegritySkipped"));
+                    UpdateMainStatus(Localization.T("Status.BackupIntegritySkipped") + " " + reportNote);
                 }
                 else if (report.HasFailures)
                 {
-                    UpdateMainStatus(Localization.Format("Status.BackupIntegrityFailed", report.FailedFiles));
+                    UpdateMainStatus(Localization.Format("Status.BackupIntegrityFailed", report.FailedFiles) + " " + reportNote);
                 }
                 else
                 {
-                    UpdateMainStatus(Localization.Format("Status.BackupIntegrityPassed", report.VerifiedFiles));
+                    UpdateMainStatus(Localization.Format("Status.BackupIntegrityPassed", report.VerifiedFiles) + " " + reportNote);
                 }
             }
             catch (Exception ex)
@@ -4896,6 +4900,16 @@ namespace mySQLPunk
             }
 
             return directories;
+        }
+
+        private static string GetBackupIntegrityReportDirectory()
+        {
+            string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (string.IsNullOrWhiteSpace(documents))
+            {
+                documents = Application.UserAppDataPath;
+            }
+            return Path.Combine(documents, "mySQLPunk", "backup-integrity-reports");
         }
 
         private void Form1_Resize(object sender, EventArgs e)

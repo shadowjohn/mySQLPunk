@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
+using Newtonsoft.Json;
 
 namespace mySQLPunk.lib
 {
@@ -87,6 +89,18 @@ namespace mySQLPunk.lib
             }
 
             return report;
+        }
+
+        public static string WriteReport(BackupIntegrityScheduleReport report, string reportDirectory)
+        {
+            if (report == null) throw new ArgumentNullException(nameof(report));
+            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException("Report directory is required.", nameof(reportDirectory));
+
+            Directory.CreateDirectory(reportDirectory);
+            string fileName = "backup-integrity-report_" + report.VerifiedAtUtc.ToString("yyyyMMdd_HHmmss") + ".json";
+            string path = Path.Combine(reportDirectory, fileName);
+            File.WriteAllText(path, JsonConvert.SerializeObject(report, Formatting.Indented), Encoding.UTF8);
+            return path;
         }
 
         private static List<FileInfo> FindBackupFiles(IEnumerable<string> directories, int maxFiles, out int skippedFiles)
