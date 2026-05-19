@@ -1117,13 +1117,13 @@ namespace mySQLPunk
 
             if (IsNewTable)
             {
-                rtbSqlPreview.Text = BuildCreateTableSql(currentDt);
+                rtbSqlPreview.Text = BuildSqlPreviewText(BuildCreateTableSql(currentDt));
                 return;
             }
 
             if (!(_db is my_mysql))
             {
-                rtbSqlPreview.Text = BuildGenericAlterTableSql(currentDt);
+                rtbSqlPreview.Text = BuildSqlPreviewText(BuildGenericAlterTableSql(currentDt));
                 return;
             }
 
@@ -3076,7 +3076,7 @@ namespace mySQLPunk
             GeneratePreviewSql();
             string sql = rtbSqlPreview.Text;
             
-            if (sql.StartsWith("--"))
+            if (!ContainsExecutableSql(sql))
             {
                 MessageBox.Show(sql.TrimStart('-', ' '), Localization.T("Designer.CannotSaveTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -3161,6 +3161,40 @@ namespace mySQLPunk
             }
 
             return false;
+        }
+
+        private string BuildSqlPreviewText(string sql)
+        {
+            if (_db is my_oracle)
+            {
+                return AddOraclePreviewNotice(sql, _databaseName, GetTableNameForSave());
+            }
+
+            return sql;
+        }
+
+        private static string AddOraclePreviewNotice(string sql, string databaseName, string tableName)
+        {
+            if (!ContainsExecutableSql(sql)) return sql;
+
+            List<string> lines = new List<string>();
+            lines.Add("-- " + Localization.T("Designer.OraclePreviewNoticeTitle"));
+            foreach (string hint in GetOracleDesignerPreviewHints(databaseName, tableName))
+            {
+                lines.Add("-- - " + hint);
+            }
+            lines.Add("");
+            lines.Add((sql ?? "").TrimStart());
+            return string.Join("\r\n", lines.ToArray());
+        }
+
+        private static IEnumerable<string> GetOracleDesignerPreviewHints(string databaseName, string tableName)
+        {
+            string owner = string.IsNullOrWhiteSpace(databaseName) ? Localization.T("Designer.CurrentSchema") : databaseName;
+            string objectName = string.IsNullOrWhiteSpace(tableName) ? Localization.T("Designer.CurrentTable") : tableName;
+            yield return Localization.Format("Designer.OraclePreviewObjectHint", owner, objectName);
+            yield return Localization.T("Designer.OraclePreviewPrivilegeHint");
+            yield return Localization.T("Designer.OraclePreviewStepHint");
         }
 
         private Dictionary<string, string> ExecuteDesignerSql(string sql)
@@ -3457,7 +3491,7 @@ namespace mySQLPunk
             if (pending.Length == 0) return;
             foreach (string statement in SplitSqlStatements(pending.ToString()))
             {
-                if (!string.IsNullOrWhiteSpace(statement)) statements.Add(statement);
+                if (!string.IsNullOrWhiteSpace(statement) && ContainsExecutableSql(statement)) statements.Add(statement);
             }
             pending.Clear();
         }

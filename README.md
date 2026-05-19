@@ -128,9 +128,10 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 完成內容：Table Designer 修改欄位 DEFAULT 時會先查 `sys.default_constraints` 找到實際 constraint name 後 drop，再以 `DF_<table>_<column>` 規則建立具名 DEFAULT constraint；SQL Server 預覽 SQL 分段執行時也會保留 `DECLARE` batch，避免變數 scope 被切壞。
   - Schema 支援：SQL Server provider 會列出所有 schema 的 Table/View；`dbo` 維持原表名顯示，非 `dbo` 會顯示為 `schema.table`。資料瀏覽、資料編輯、DDL/Dump、Table/View 複製、補註解與 Table Designer SQL 產生都會解析 schema，不再硬套 `dbo`。
 
-- **Oracle Table Designer 對權限與物件狀態較敏感**
+- **Oracle Table Designer 對權限與物件狀態較敏感 ✅ 預覽提示已補齊**
   - 現況：已有多種診斷提示，例如權限不足、物件不存在、跨 schema 權限、語法不符。
-  - 後續方向：把 Oracle DDL 拆成更小步驟，並在預覽中標示可能需要的權限。
+  - 完成內容：Oracle SQL 預覽會在可執行 SQL 前加入註解提示，標示目標物件、直接授權需求（ALTER / CREATE INDEX / DROP / COMMENT 等）與分段執行方式；儲存判斷也改成檢查是否存在真正可執行 SQL，避免預覽註解誤擋操作。
+  - 後續方向：若需要更完整的 Oracle 風險控管，可再加入實際權限偵測查詢與執行前逐步確認。
 
 ### 資料瀏覽與儲存限制
 
