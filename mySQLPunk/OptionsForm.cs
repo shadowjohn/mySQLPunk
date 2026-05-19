@@ -112,6 +112,7 @@ namespace mySQLPunk
                 SaveTableEditSettings();
                 SaveBackupMirrorSettings();
                 SaveApplicationOptionSettings();
+                ApplyAdvancedRegistrationSettings();
                 UpdateSelection();
             };
 
@@ -858,6 +859,22 @@ namespace mySQLPunk
                 ApplicationOptionSettings.SetString(pair.Key, pair.Value.Text);
             }
             ApplicationOptionSettings.Save();
+        }
+
+        private void ApplyAdvancedRegistrationSettings()
+        {
+            try
+            {
+                mySQLPunk.lib.AdvancedRegistrationService.ApplyFromOptions(Application.ExecutablePath);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    T("套用進階註冊設定失敗：", "Failed to apply advanced registration settings: ") + ex.Message,
+                    Localization.T("Common.Error"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
 
         private void UpdateSelection()

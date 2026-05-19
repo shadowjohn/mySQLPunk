@@ -40,6 +40,7 @@ public static class SmokeTests
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
+        Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
@@ -919,6 +920,25 @@ public static class SmokeTests
         };
         Assert(ConnectionProxySettingsService.CreateWebProxy(socks) == null, "SOCKS5 should be stored but not applied to WebRequest.");
         AssertContains(ConnectionProxySettingsService.BuildStatusText(socks), "not supported", "SOCKS5 status should explain WebRequest limitation.");
+    }
+
+    private static void TestAdvancedRegistrationService()
+    {
+        string appPath = @"C:\Program Files\mySQLPunk\mySQLPunk.exe";
+        AdvancedRegistrationPlan plan = AdvancedRegistrationService.BuildPlan(appPath, true, true);
+
+        Assert(plan.RegisterSqlOpenWith, "SQL Open With registration should be enabled in the plan.");
+        Assert(plan.RegisterUrlProtocol, "URL protocol registration should be enabled in the plan.");
+        AssertEquals(appPath, plan.ApplicationPath, "Plan should keep the application path.");
+        AssertEquals("\"" + appPath + "\" \"%1\"", plan.OpenWithCommand, "SQL Open With command should quote the executable and SQL file argument.");
+        AssertEquals("\"" + appPath + "\" \"%1\"", plan.UrlProtocolCommand, "URL protocol command should quote the executable and URL argument.");
+        AssertContains(string.Join("\n", plan.RegistryPaths.ToArray()), @"Software\Classes\Applications\mySQLPunk.exe\SupportedTypes", "Plan should include SQL supported types registry path.");
+        AssertContains(string.Join("\n", plan.RegistryPaths.ToArray()), @"Software\Classes\mysqlpunk", "Plan should include URL protocol registry path.");
+
+        AdvancedRegistrationPlan disabled = AdvancedRegistrationService.BuildPlan(appPath, false, false);
+        Assert(!disabled.RegisterSqlOpenWith, "Disabled plan should not register SQL Open With.");
+        Assert(!disabled.RegisterUrlProtocol, "Disabled plan should not register URL protocol.");
+        AssertEquals(0.ToString(), disabled.RegistryPaths.Count.ToString(), "Disabled plan should not report registry paths.");
     }
 
     private static void TestDarkThemeControlCoverage()
