@@ -426,6 +426,7 @@ namespace mySQLPunk.lib
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
             sql = RewriteDateDiffFunctions(sql, targetProvider);
+            sql = RewriteDateAddFunctions(sql, targetProvider);
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
@@ -546,6 +547,37 @@ namespace mySQLPunk.lib
             }
 
             return match.Value;
+        }
+
+        private static string RewriteDateAddFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+DAY\s*\)",
+                m => BuildDateAddDaysExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bDATEADD\s*\(\s*(?<part>day|dd|d)\s*,\s*(?<amount>-?\d+)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildDateAddDaysExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value),
+                RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string BuildDateAddDaysExpression(string targetProvider, string expr, string amount)
+        {
+            if (targetProvider == "mssql") return "DATEADD(day, " + amount + ", " + expr + ")";
+            if (targetProvider == "mysql") return "DATE_ADD(" + expr + ", INTERVAL " + amount + " DAY)";
+            if (targetProvider == "sqlite") return "date(" + expr + ", '" + BuildSqliteDayModifier(amount) + " day')";
+            if (targetProvider == "oracle") return expr + " + " + amount;
+            return expr + " + INTERVAL '" + amount + " day'";
+        }
+
+        private static string BuildSqliteDayModifier(string amount)
+        {
+            return amount.StartsWith("-", StringComparison.Ordinal) ? amount : "+" + amount;
         }
 
         private static string BuildDateDiffDaysExpression(string targetProvider, string endDate, string startDate)

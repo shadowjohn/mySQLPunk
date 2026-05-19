@@ -198,6 +198,30 @@ public static class SmokeTests
         string sqliteDateDiffSql = (string)GetProperty(sqliteDateDiffPreview, "ConvertedSql");
         AssertContains(sqliteDateDiffSql, "CAST(julianday(end_date) - julianday(start_date) AS INTEGER)", "Converted SQLite SQL should use julianday day difference.");
 
+        object mssqlDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATE_ADD(created_at, INTERVAL 7 DAY) AS expires_at FROM sessions",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDateAddPreview, "CanConvert"), "MySQL DATE_ADD should convert to SQL Server.");
+        string mssqlDateAddSql = (string)GetProperty(mssqlDateAddPreview, "ConvertedSql");
+        AssertContains(mssqlDateAddSql, "DATEADD(day, 7, created_at)", "Converted SQL Server SQL should use DATEADD.");
+
+        object sqliteDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATEADD(day, -3, due_at) AS reminder_at FROM tasks",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDateAddPreview, "CanConvert"), "SQL Server DATEADD should convert to SQLite.");
+        string sqliteDateAddSql = (string)GetProperty(sqliteDateAddPreview, "ConvertedSql");
+        AssertContains(sqliteDateAddSql, "date(due_at, '-3 day')", "Converted SQLite SQL should use date modifier.");
+
+        object pgDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATEADD(day, 14, created_at) AS expires_at FROM sessions",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgDateAddPreview, "CanConvert"), "SQL Server DATEADD should convert to PostgreSQL.");
+        string pgDateAddSql = (string)GetProperty(pgDateAddPreview, "ConvertedSql");
+        AssertContains(pgDateAddSql, "created_at + INTERVAL '14 day'", "Converted PostgreSQL SQL should use interval addition.");
+
         object pgIfPreview = BuildViewSqlPreview(
             "SELECT IF(is_active = 1, 'Y', 'N') AS active_text FROM users",
             "mysql",
