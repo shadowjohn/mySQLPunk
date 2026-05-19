@@ -16,6 +16,7 @@ namespace mySQLPunk
         private ComboBox languageCombo;
         private CheckBox noPrimaryKeyReadOnlyCheckBox;
         private TextBox remoteBackupDirectoryInput;
+        private NumericUpDown remoteBackupRetainCountInput;
         private ThemePreviewControl lightPreview;
         private ThemePreviewControl darkPreview;
         private readonly Button okButton;
@@ -272,6 +273,7 @@ namespace mySQLPunk
         {
             contentPanel.Controls.Clear();
             remoteBackupDirectoryInput = null;
+            remoteBackupRetainCountInput = null;
 
             Label sectionTitle = new Label
             {
@@ -319,12 +321,28 @@ namespace mySQLPunk
                     }
                 }
             };
+            Label retainLabel = new Label
+            {
+                Text = Localization.T("Options.BackupMirrorRetainCount"),
+                AutoSize = true,
+                Location = new Point(18, 150)
+            };
+            remoteBackupRetainCountInput = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 999,
+                Value = BackupMirrorSettings.RetainCount,
+                Location = new Point(150, 146),
+                Width = 90
+            };
 
             contentPanel.Controls.Add(sectionTitle);
             contentPanel.Controls.Add(hintLabel);
             contentPanel.Controls.Add(pathLabel);
             contentPanel.Controls.Add(remoteBackupDirectoryInput);
             contentPanel.Controls.Add(browseButton);
+            contentPanel.Controls.Add(retainLabel);
+            contentPanel.Controls.Add(remoteBackupRetainCountInput);
         }
 
         private void AddCliPathRow(string provider, string labelText, int top)
@@ -388,6 +406,10 @@ namespace mySQLPunk
         {
             if (remoteBackupDirectoryInput == null) return;
             BackupMirrorSettings.RemoteDirectory = remoteBackupDirectoryInput.Text;
+            if (remoteBackupRetainCountInput != null)
+            {
+                BackupMirrorSettings.RetainCount = (int)remoteBackupRetainCountInput.Value;
+            }
             BackupMirrorSettings.Save();
         }
 
@@ -672,6 +694,7 @@ namespace mySQLPunk
     {
         private static bool loaded;
         private static string remoteDirectory = string.Empty;
+        private static int retainCount = mySQLPunk.lib.BackupRemoteMirrorService.DefaultRetainCount;
 
         public static string RemoteDirectory
         {
@@ -687,6 +710,20 @@ namespace mySQLPunk
             }
         }
 
+        public static int RetainCount
+        {
+            get
+            {
+                EnsureLoaded();
+                return retainCount;
+            }
+            set
+            {
+                EnsureLoaded();
+                retainCount = Math.Max(1, value);
+            }
+        }
+
         public static void Save()
         {
             EnsureLoaded();
@@ -696,7 +733,8 @@ namespace mySQLPunk
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 File.WriteAllText(path, JsonConvert.SerializeObject(new SettingsData
                 {
-                    RemoteDirectory = remoteDirectory
+                    RemoteDirectory = remoteDirectory,
+                    RetainCount = retainCount
                 }, Formatting.Indented));
             }
             catch
@@ -718,11 +756,15 @@ namespace mySQLPunk
                 if (data != null)
                 {
                     remoteDirectory = (data.RemoteDirectory ?? string.Empty).Trim();
+                    retainCount = data.RetainCount <= 0
+                        ? mySQLPunk.lib.BackupRemoteMirrorService.DefaultRetainCount
+                        : data.RetainCount;
                 }
             }
             catch
             {
                 remoteDirectory = string.Empty;
+                retainCount = mySQLPunk.lib.BackupRemoteMirrorService.DefaultRetainCount;
             }
         }
 
@@ -734,6 +776,7 @@ namespace mySQLPunk
         private class SettingsData
         {
             public string RemoteDirectory { get; set; }
+            public int RetainCount { get; set; }
         }
     }
 }

@@ -1277,7 +1277,7 @@ namespace mySQLPunk
             AutoColumnCommentDictionarySignatureInfo info = new AutoColumnCommentDictionarySignatureInfo();
             if (string.IsNullOrWhiteSpace(json)) return info;
 
-            JObject root = JToken.Parse(json) as JObject;
+            JObject root = ParseAutoColumnCommentDictionaryJObject(json);
             if (root == null) return info;
 
             string signature = root.Value<string>("signatureSha256") ?? "";
@@ -1288,6 +1288,16 @@ namespace mySQLPunk
             info.SignatureValid = info.SignaturePresent &&
                                   string.Equals(signature, ComputeAutoColumnCommentDictionarySignature(root), StringComparison.OrdinalIgnoreCase);
             return info;
+        }
+
+        private static JObject ParseAutoColumnCommentDictionaryJObject(string json)
+        {
+            using (StringReader stringReader = new StringReader(json))
+            using (JsonTextReader jsonReader = new JsonTextReader(stringReader))
+            {
+                jsonReader.DateParseHandling = DateParseHandling.None;
+                return JToken.ReadFrom(jsonReader) as JObject;
+            }
         }
 
         public static string ComputeAutoColumnCommentDictionarySignature(JToken root)

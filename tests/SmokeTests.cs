@@ -353,6 +353,21 @@ public static class SmokeTests
             string secondMirrorPath = BackupRemoteMirrorService.MirrorBackup(restoreArchivePath, remoteDir);
             Assert(File.Exists(secondMirrorPath), "Remote mirror service should avoid overwriting existing copies.");
             Assert(!string.Equals(mirrorPath, secondMirrorPath, StringComparison.OrdinalIgnoreCase), "Remote mirror duplicate should receive a unique file name.");
+
+            for (int i = 0; i < 4; i++)
+            {
+                string managedPath = Path.Combine(remoteDir, "main_backup_20260519_08070" + i + ".sql");
+                File.WriteAllText(managedPath, "remote-placeholder");
+                File.SetLastWriteTimeUtc(managedPath, new DateTime(2026, 5, 19, 8, 10, i, DateTimeKind.Utc));
+            }
+            string unrelatedPath = Path.Combine(remoteDir, "keep_me.txt");
+            File.WriteAllText(unrelatedPath, "not a backup");
+
+            int pruned = BackupRemoteMirrorService.PruneRemoteBackups(remoteDir, 2);
+            int remoteManagedCount = Directory.GetFiles(remoteDir, "*_backup_*.sql").Length;
+            Assert(pruned >= 2, "Remote mirror retention should prune old managed backup files.");
+            Assert(remoteManagedCount == 2, "Remote mirror retention should keep configured managed backup count.");
+            Assert(File.Exists(unrelatedPath), "Remote mirror retention should not delete unrelated files.");
         }
         finally
         {

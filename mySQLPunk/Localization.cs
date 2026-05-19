@@ -730,6 +730,7 @@ namespace mySQLPunk
             Add("Options.CliPathSqlite", "SQLite:", "SQLite:");
             Add("Options.BackupMirrorHint", "可指定備份完成後要同步複製的遠端或共享資料夾，例如 NAS、雲端同步資料夾或團隊共享磁碟。留空時不會建立遠端副本。", "Set a remote or shared folder to copy backups after they are created, such as a NAS, cloud-synced folder, or team share. Leave blank to skip remote copies.");
             Add("Options.BackupMirrorDirectory", "遠端備份資料夾:", "Remote backup folder:");
+            Add("Options.BackupMirrorRetainCount", "遠端保留份數:", "Remote copies to keep:");
             Add("Options.ExecutableFilter", "執行檔 (*.exe)|*.exe|所有檔案 (*.*)|*.*", "Executable files (*.exe)|*.exe|All files (*.*)|*.*");
         }
 

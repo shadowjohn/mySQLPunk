@@ -5,7 +5,14 @@ namespace mySQLPunk.lib
 {
     public static class BackupRemoteMirrorService
     {
+        public const int DefaultRetainCount = 20;
+
         public static string MirrorBackup(string sourcePath, string destinationDirectory)
+        {
+            return MirrorBackup(sourcePath, destinationDirectory, DefaultRetainCount);
+        }
+
+        public static string MirrorBackup(string sourcePath, string destinationDirectory, int retainCount)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
             if (!File.Exists(sourcePath)) throw new FileNotFoundException("Backup file not found.", sourcePath);
@@ -22,7 +29,46 @@ namespace mySQLPunk.lib
             Directory.CreateDirectory(destinationFullDirectory);
             string targetPath = BuildUniqueMirrorPath(destinationFullDirectory, Path.GetFileName(sourceFullPath));
             File.Copy(sourceFullPath, targetPath, false);
+            PruneRemoteBackups(destinationFullDirectory, retainCount);
             return targetPath;
+        }
+
+        public static int PruneRemoteBackups(string destinationDirectory, int retainCount)
+        {
+            if (string.IsNullOrWhiteSpace(destinationDirectory) || !Directory.Exists(destinationDirectory)) return 0;
+            if (retainCount <= 0) return 0;
+
+            FileInfo[] files = new DirectoryInfo(destinationDirectory).GetFiles();
+            Array.Sort(files, (left, right) => right.LastWriteTimeUtc.CompareTo(left.LastWriteTimeUtc));
+
+            int kept = 0;
+            int deleted = 0;
+            foreach (FileInfo file in files)
+            {
+                if (!IsManagedBackupFile(file.Name)) continue;
+                kept++;
+                if (kept <= retainCount) continue;
+
+                try
+                {
+                    file.Delete();
+                    deleted++;
+                }
+                catch
+                {
+                }
+            }
+
+            return deleted;
+        }
+
+        private static bool IsManagedBackupFile(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName)) return false;
+            string lower = fileName.ToLowerInvariant();
+            return lower.Contains("_backup_") ||
+                   lower.Contains("_before_delete_") ||
+                   lower.Contains("_before_restore_");
         }
 
         private static string BuildUniqueMirrorPath(string directory, string fileName)

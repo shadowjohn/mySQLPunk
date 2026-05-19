@@ -4307,7 +4307,7 @@ namespace mySQLPunk
         {
             string remoteDirectory = BackupMirrorSettings.RemoteDirectory;
             if (string.IsNullOrWhiteSpace(remoteDirectory)) return string.Empty;
-            return BackupRemoteMirrorService.MirrorBackup(targetPath, remoteDirectory);
+            return BackupRemoteMirrorService.MirrorBackup(targetPath, remoteDirectory, BackupMirrorSettings.RetainCount);
         }
 
         private static string BuildDatabaseDump(IDatabase db, string databaseName)
