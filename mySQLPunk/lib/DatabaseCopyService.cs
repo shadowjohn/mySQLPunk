@@ -431,6 +431,7 @@ namespace mySQLPunk.lib
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
+            sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
@@ -519,6 +520,57 @@ namespace mySQLPunk.lib
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
             if (args.Count < 2) return match.Value;
             return functionName + "(" + string.Join(", ", args.ToArray()) + ")";
+        }
+
+        private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bLOCATE\s*\((?<args>[^()]*)\)",
+                m => RewriteStringPositionFromNeedleHaystack(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bCHARINDEX\s*\((?<args>[^()]*)\)",
+                m => RewriteStringPositionFromNeedleHaystack(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bINSTR\s*\((?<args>[^()]*)\)",
+                m => RewriteStringPositionFromHaystackNeedle(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bPOSITION\s*\(\s*(?<needle>[^()]+?)\s+IN\s+(?<haystack>[^()]+?)\s*\)",
+                m => BuildStringPositionFunction(targetProvider, m.Groups["needle"].Value.Trim(), m.Groups["haystack"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string RewriteStringPositionFromNeedleHaystack(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 2) return match.Value;
+            return BuildStringPositionFunction(targetProvider, args[0], args[1]);
+        }
+
+        private static string RewriteStringPositionFromHaystackNeedle(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 2) return match.Value;
+            return BuildStringPositionFunction(targetProvider, args[1], args[0]);
+        }
+
+        private static string BuildStringPositionFunction(string targetProvider, string needle, string haystack)
+        {
+            if (targetProvider == "mysql") return "LOCATE(" + needle + ", " + haystack + ")";
+            if (targetProvider == "mssql") return "CHARINDEX(" + needle + ", " + haystack + ")";
+            if (targetProvider == "postgresql") return "POSITION(" + needle + " IN " + haystack + ")";
+            return "INSTR(" + haystack + ", " + needle + ")";
         }
 
         private static string RewriteStringAggregateFunctions(string selectSql, string targetProvider)
@@ -752,29 +804,68 @@ namespace mySQLPunk.lib
         {
             reason = "";
             string provider = NormalizeProvider(targetProvider);
+            string featureSql = MaskStringLiterals(selectSql);
 
             if (!provider.Equals("mssql", StringComparison.OrdinalIgnoreCase) &&
-                Regex.IsMatch(selectSql, @"\bTOP\s+\(?\d+", RegexOptions.IgnoreCase))
+                Regex.IsMatch(featureSql, @"\bTOP\s+\(?\d+", RegexOptions.IgnoreCase))
             {
                 reason = "TOP 語法不是目標資料庫通用語法";
                 return true;
             }
 
             if (!provider.Equals("oracle", StringComparison.OrdinalIgnoreCase) &&
-                Regex.IsMatch(selectSql, @"\b(CONNECT\s+BY|START\s+WITH|ROWNUM)\b", RegexOptions.IgnoreCase))
+                Regex.IsMatch(featureSql, @"\b(CONNECT\s+BY|START\s+WITH|ROWNUM)\b", RegexOptions.IgnoreCase))
             {
                 reason = "Oracle 階層查詢或 ROWNUM 無法自動轉換";
                 return true;
             }
 
             if (!provider.Equals("mysql", StringComparison.OrdinalIgnoreCase) &&
-                Regex.IsMatch(selectSql, @"\bSQL\s+SECURITY\b|@", RegexOptions.IgnoreCase))
+                Regex.IsMatch(featureSql, @"\bSQL\s+SECURITY\b|@", RegexOptions.IgnoreCase))
             {
                 reason = "MySQL 專用 View 語法無法自動轉換";
                 return true;
             }
 
             return false;
+        }
+
+        private static string MaskStringLiterals(string sql)
+        {
+            if (string.IsNullOrEmpty(sql)) return "";
+
+            StringBuilder builder = new StringBuilder(sql.Length);
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            for (int i = 0; i < sql.Length; i++)
+            {
+                char ch = sql[i];
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    builder.Append(' ');
+                    if (inSingleQuote && i + 1 < sql.Length && sql[i + 1] == '\'')
+                    {
+                        builder.Append(' ');
+                        i++;
+                    }
+                    else
+                    {
+                        inSingleQuote = !inSingleQuote;
+                    }
+                    continue;
+                }
+
+                if (ch == '"' && !inSingleQuote)
+                {
+                    builder.Append(' ');
+                    inDoubleQuote = !inDoubleQuote;
+                    continue;
+                }
+
+                builder.Append(inSingleQuote || inDoubleQuote ? ' ' : ch);
+            }
+
+            return builder.ToString();
         }
 
         private static string NormalizeIdentifiersForTarget(string selectSql, string targetProvider)

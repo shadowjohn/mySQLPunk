@@ -197,6 +197,30 @@ public static class SmokeTests
         string mssqlSubstringSql = (string)GetProperty(mssqlSubstringPreview, "ConvertedSql");
         AssertContains(mssqlSubstringSql, "SUBSTRING(code, 1, 3)", "Converted SQL Server SQL should use SUBSTRING.");
 
+        object mssqlPositionPreview = BuildViewSqlPreview(
+            "SELECT LOCATE('@', email) AS at_pos FROM users",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlPositionPreview, "CanConvert"), "MySQL LOCATE should convert to SQL Server.");
+        string mssqlPositionSql = (string)GetProperty(mssqlPositionPreview, "ConvertedSql");
+        AssertContains(mssqlPositionSql, "CHARINDEX('@', email)", "Converted SQL Server SQL should use CHARINDEX.");
+
+        object pgPositionPreview = BuildViewSqlPreview(
+            "SELECT INSTR(email, '@') AS at_pos FROM users",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgPositionPreview, "CanConvert"), "Oracle INSTR should convert to PostgreSQL.");
+        string pgPositionSql = (string)GetProperty(pgPositionPreview, "ConvertedSql");
+        AssertContains(pgPositionSql, "POSITION('@' IN email)", "Converted PostgreSQL SQL should use POSITION.");
+
+        object sqlitePositionPreview = BuildViewSqlPreview(
+            "SELECT CHARINDEX('@', email) AS at_pos FROM users",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqlitePositionPreview, "CanConvert"), "SQL Server CHARINDEX should convert to SQLite.");
+        string sqlitePositionSql = (string)GetProperty(sqlitePositionPreview, "ConvertedSql");
+        AssertContains(sqlitePositionSql, "INSTR(email, '@')", "Converted SQLite SQL should use INSTR.");
+
         object cteWindowPreview = BuildViewSqlPreview(
             "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
             "postgresql",
