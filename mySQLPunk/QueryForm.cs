@@ -2888,6 +2888,7 @@ namespace mySQLPunk
             Csv,
             Tsv,
             Json,
+            Xml,
             Html,
             Markdown
         }
@@ -2940,6 +2941,7 @@ namespace mySQLPunk
                 case ".tsv":
                 case ".tab": return QueryExportFormat.Tsv;
                 case ".json": return QueryExportFormat.Json;
+                case ".xml": return QueryExportFormat.Xml;
                 case ".html":
                 case ".htm": return QueryExportFormat.Html;
                 case ".md":
@@ -2952,8 +2954,9 @@ namespace mySQLPunk
                 case 2: return QueryExportFormat.Csv;
                 case 3: return QueryExportFormat.Tsv;
                 case 4: return QueryExportFormat.Json;
-                case 5: return QueryExportFormat.Html;
-                case 6: return QueryExportFormat.Markdown;
+                case 5: return QueryExportFormat.Xml;
+                case 6: return QueryExportFormat.Html;
+                case 7: return QueryExportFormat.Markdown;
                 default: return QueryExportFormat.Csv;
             }
         }
@@ -2966,6 +2969,8 @@ namespace mySQLPunk
                     return BuildDelimited(dt, '\t');
                 case QueryExportFormat.Json:
                     return BuildJson(dt);
+                case QueryExportFormat.Xml:
+                    return BuildXml(dt);
                 case QueryExportFormat.Html:
                     return BuildHtml(dt);
                 case QueryExportFormat.Markdown:
@@ -3050,6 +3055,40 @@ namespace mySQLPunk
             }
 
             return JsonConvert.SerializeObject(rows, Formatting.Indented);
+        }
+
+        private static string BuildXml(DataTable dt)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+            sb.AppendLine("<results>");
+
+            foreach (DataRow row in dt.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                sb.AppendLine("  <row>");
+                foreach (DataColumn column in dt.Columns)
+                {
+                    object value = row[column];
+                    string columnName = XmlEscape(column.ColumnName);
+                    if (value == DBNull.Value || value == null)
+                    {
+                        sb.Append("    <field name=\"").Append(columnName).AppendLine("\" isNull=\"true\" />");
+                    }
+                    else
+                    {
+                        sb.Append("    <field name=\"").Append(columnName).Append("\">")
+                          .Append(XmlEscape(FormatExportValue(value)))
+                          .AppendLine("</field>");
+                    }
+                }
+                sb.AppendLine("  </row>");
+            }
+
+            sb.AppendLine("</results>");
+            return sb.ToString();
         }
 
         private static string BuildHtml(DataTable dt)
