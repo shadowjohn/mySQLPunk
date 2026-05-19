@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -73,6 +75,22 @@ namespace mySQLPunk
             public int Removed { get; set; }
             public int Unchanged { get; set; }
             public int ImportedCount { get; set; }
+            public AutoColumnCommentDictionarySignatureInfo SignatureInfo { get; set; }
+        }
+
+        public class AutoColumnCommentDictionaryImportPreview
+        {
+            public Dictionary<string, string> Comments { get; set; }
+            public AutoColumnCommentDictionarySignatureInfo SignatureInfo { get; set; }
+        }
+
+        public class AutoColumnCommentDictionarySignatureInfo
+        {
+            public string Signature { get; set; }
+            public bool SignaturePresent { get; set; }
+            public bool SignatureValid { get; set; }
+            public string ExportedAtUtc { get; set; }
+            public string Source { get; set; }
         }
 
         public class AutoColumnCommentDictionaryVersionInfo
@@ -1213,7 +1231,8 @@ namespace mySQLPunk
         public static Dictionary<string, string> ImportAutoColumnCommentDictionaryFile(string sourcePath)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
-            Dictionary<string, string> comments = ParseAutoColumnCommentJson(File.ReadAllText(sourcePath, Encoding.UTF8));
+            AutoColumnCommentDictionaryImportPreview preview = PreviewAutoColumnCommentDictionaryImportFile(sourcePath);
+            Dictionary<string, string> comments = preview.Comments;
             if (comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsImportEmpty"));
 
             SaveAutoColumnCommentCache(comments);
@@ -1249,7 +1268,71 @@ namespace mySQLPunk
                 ["entryCount"] = normalized.Count,
                 ["columns"] = JObject.FromObject(normalized)
             };
+            root["signatureSha256"] = ComputeAutoColumnCommentDictionarySignature(root);
             return root.ToString(Formatting.Indented);
+        }
+
+        public static AutoColumnCommentDictionarySignatureInfo ReadAutoColumnCommentDictionarySignature(string json)
+        {
+            AutoColumnCommentDictionarySignatureInfo info = new AutoColumnCommentDictionarySignatureInfo();
+            if (string.IsNullOrWhiteSpace(json)) return info;
+
+            JObject root = JToken.Parse(json) as JObject;
+            if (root == null) return info;
+
+            string signature = root.Value<string>("signatureSha256") ?? "";
+            info.Signature = signature;
+            info.SignaturePresent = !string.IsNullOrWhiteSpace(signature);
+            info.ExportedAtUtc = root.Value<string>("exportedAtUtc") ?? "";
+            info.Source = root.Value<string>("source") ?? "";
+            info.SignatureValid = info.SignaturePresent &&
+                                  string.Equals(signature, ComputeAutoColumnCommentDictionarySignature(root), StringComparison.OrdinalIgnoreCase);
+            return info;
+        }
+
+        public static string ComputeAutoColumnCommentDictionarySignature(JToken root)
+        {
+            if (root == null) return "";
+
+            JToken clone = root.DeepClone();
+            JObject obj = clone as JObject;
+            if (obj != null) obj.Remove("signatureSha256");
+
+            string canonical = CanonicalizeAutoColumnCommentDictionaryJsonToken(clone).ToString(Formatting.None);
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(canonical));
+                StringBuilder sb = new StringBuilder(bytes.Length * 2);
+                foreach (byte b in bytes) sb.Append(b.ToString("x2"));
+                return sb.ToString();
+            }
+        }
+
+        private static JToken CanonicalizeAutoColumnCommentDictionaryJsonToken(JToken token)
+        {
+            JObject obj = token as JObject;
+            if (obj != null)
+            {
+                JObject sorted = new JObject();
+                foreach (JProperty property in obj.Properties().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    sorted[property.Name] = CanonicalizeAutoColumnCommentDictionaryJsonToken(property.Value);
+                }
+                return sorted;
+            }
+
+            JArray array = token as JArray;
+            if (array != null)
+            {
+                JArray normalized = new JArray();
+                foreach (JToken item in array)
+                {
+                    normalized.Add(CanonicalizeAutoColumnCommentDictionaryJsonToken(item));
+                }
+                return normalized;
+            }
+
+            return token == null ? JValue.CreateNull() : token.DeepClone();
         }
 
         private static void SetAutoColumnCommentDictionary(Dictionary<string, string> comments, string source, string sourceName = null)
@@ -1276,10 +1359,24 @@ namespace mySQLPunk
 
                 try
                 {
-                    Dictionary<string, string> comments = PreviewAutoColumnCommentDictionaryFile(dialog.FileName);
+                    AutoColumnCommentDictionaryImportPreview preview = PreviewAutoColumnCommentDictionaryImportFile(dialog.FileName);
+                    Dictionary<string, string> comments = preview.Comments;
                     Dictionary<string, string> existing = LoadAutoColumnCommentCache() ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     AutoColumnCommentDictionaryDiffReport diffReport = BuildAutoColumnCommentDictionaryDiffReport(existing, comments);
+                    diffReport.SignatureInfo = preview.SignatureInfo;
                     if (ShowAutoColumnCommentDictionaryDiffDialog(this, diffReport) != DialogResult.OK)
+                    {
+                        return;
+                    }
+
+                    if (preview.SignatureInfo != null &&
+                        preview.SignatureInfo.SignaturePresent &&
+                        !preview.SignatureInfo.SignatureValid &&
+                        MessageBox.Show(
+                            Localization.T("Designer.AutoCommentsDictionaryInvalidSignatureConfirm"),
+                            Localization.T("Common.Warning"),
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Warning) != DialogResult.Yes)
                     {
                         return;
                     }
@@ -1297,10 +1394,20 @@ namespace mySQLPunk
 
         public static Dictionary<string, string> PreviewAutoColumnCommentDictionaryFile(string sourcePath)
         {
+            return PreviewAutoColumnCommentDictionaryImportFile(sourcePath).Comments;
+        }
+
+        public static AutoColumnCommentDictionaryImportPreview PreviewAutoColumnCommentDictionaryImportFile(string sourcePath)
+        {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
-            Dictionary<string, string> comments = ParseAutoColumnCommentJson(File.ReadAllText(sourcePath, Encoding.UTF8));
+            string json = File.ReadAllText(sourcePath, Encoding.UTF8);
+            Dictionary<string, string> comments = ParseAutoColumnCommentJson(json);
             if (comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsImportEmpty"));
-            return comments;
+            return new AutoColumnCommentDictionaryImportPreview
+            {
+                Comments = comments,
+                SignatureInfo = ReadAutoColumnCommentDictionarySignature(json)
+            };
         }
 
         private static string BuildAutoColumnCommentDictionaryDiffSummary(Dictionary<string, string> existing, Dictionary<string, string> imported)
@@ -1312,13 +1419,38 @@ namespace mySQLPunk
         {
             if (report == null) report = new AutoColumnCommentDictionaryDiffReport();
 
-            return Localization.Format(
+            string summary = Localization.Format(
                 "Designer.AutoCommentsImportDiffSummary",
                 report.ImportedCount,
                 report.Added,
                 report.Updated,
                 report.Removed,
                 report.Unchanged);
+
+            if (report.SignatureInfo == null) return summary;
+            return summary + Environment.NewLine + Environment.NewLine +
+                   BuildAutoColumnCommentDictionarySignatureSummary(report.SignatureInfo);
+        }
+
+        private static string BuildAutoColumnCommentDictionarySignatureSummary(AutoColumnCommentDictionarySignatureInfo info)
+        {
+            if (info == null || !info.SignaturePresent)
+            {
+                return Localization.T("Designer.AutoCommentsDictionarySignatureMissing");
+            }
+
+            string shortSignature = info.Signature ?? "";
+            if (shortSignature.Length > 12) shortSignature = shortSignature.Substring(0, 12);
+            string status = info.SignatureValid
+                ? Localization.T("Designer.AutoCommentsDictionarySignatureValid")
+                : Localization.T("Designer.AutoCommentsDictionarySignatureInvalid");
+
+            if (string.IsNullOrWhiteSpace(info.ExportedAtUtc))
+            {
+                return Localization.Format("Designer.AutoCommentsDictionarySignatureSummary", status, shortSignature);
+            }
+
+            return Localization.Format("Designer.AutoCommentsDictionarySignatureSummaryWithTime", status, shortSignature, info.ExportedAtUtc);
         }
 
         public static AutoColumnCommentDictionaryDiffReport BuildAutoColumnCommentDictionaryDiffReport(Dictionary<string, string> existing, Dictionary<string, string> imported)

@@ -418,6 +418,35 @@ public static class SmokeTests
 
         TableDesignerForm.AutoColumnCommentDictionaryDiffEntry removed = report.Entries.Find(e => e.Status == "removed");
         Assert(removed != null && removed.Key == "OLD_ONLY" && removed.ExistingValue == "舊欄位", "Removed entry should keep the current comment.");
+
+        string signedPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_comment_dictionary_" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            TableDesignerForm.ExportAutoColumnCommentDictionaryFile(signedPath, imported);
+            TableDesignerForm.AutoColumnCommentDictionaryImportPreview signedPreview =
+                TableDesignerForm.PreviewAutoColumnCommentDictionaryImportFile(signedPath);
+            Assert(signedPreview.SignatureInfo.SignaturePresent, "Exported comment dictionary should include a signature.");
+            Assert(signedPreview.SignatureInfo.SignatureValid, "Exported comment dictionary signature should validate.");
+            Assert(signedPreview.Comments.ContainsKey("NEW_ONLY"), "Signed comment dictionary preview should keep comments.");
+
+            JObject tampered = JObject.Parse(File.ReadAllText(signedPath, Encoding.UTF8));
+            tampered["columns"]["NEW_ONLY"] = "被修改";
+            File.WriteAllText(signedPath, tampered.ToString(Formatting.Indented), Encoding.UTF8);
+            TableDesignerForm.AutoColumnCommentDictionaryImportPreview tamperedPreview =
+                TableDesignerForm.PreviewAutoColumnCommentDictionaryImportFile(signedPath);
+            Assert(tamperedPreview.SignatureInfo.SignaturePresent, "Tampered comment dictionary should still report the stored signature.");
+            Assert(!tamperedPreview.SignatureInfo.SignatureValid, "Tampered comment dictionary signature should fail validation.");
+
+            File.WriteAllText(signedPath, "{ \"LEGACY\": \"舊格式\" }", Encoding.UTF8);
+            TableDesignerForm.AutoColumnCommentDictionaryImportPreview legacyPreview =
+                TableDesignerForm.PreviewAutoColumnCommentDictionaryImportFile(signedPath);
+            Assert(!legacyPreview.SignatureInfo.SignaturePresent, "Legacy comment dictionary should be accepted without a signature.");
+            Assert(legacyPreview.Comments["LEGACY"] == "舊格式", "Legacy comment dictionary should still parse key/value JSON.");
+        }
+        finally
+        {
+            if (File.Exists(signedPath)) File.Delete(signedPath);
+        }
     }
 
     private static void TestTableDesignerCommentDictionaryVersions()

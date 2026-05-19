@@ -605,6 +605,12 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsImportEmpty", "自動註解字典沒有可用項目。", "The auto comment dictionary has no usable entries.");
             Add("Designer.AutoCommentsInvalidDictionaryFormat", "自動註解字典格式不正確。", "The auto comment dictionary format is invalid.");
             Add("Designer.AutoCommentsImportDiffSummary", "即將匯入 {0} 筆自動註解字典。\n\n新增：{1}\n更新：{2}\n匯入後會移除：{3}\n不變：{4}\n\n按確定後會覆蓋目前本機字典。", "Import {0} auto comment dictionary entries.\n\nAdded: {1}\nUpdated: {2}\nRemoved after import: {3}\nUnchanged: {4}\n\nClick OK to replace the current local dictionary.");
+            Add("Designer.AutoCommentsDictionarySignatureMissing", "來源簽章：無簽章（舊版或外部 JSON）", "Source signature: missing (legacy or external JSON)");
+            Add("Designer.AutoCommentsDictionarySignatureValid", "有效", "valid");
+            Add("Designer.AutoCommentsDictionarySignatureInvalid", "無效，內容可能已被修改", "invalid, content may have been modified");
+            Add("Designer.AutoCommentsDictionarySignatureSummary", "來源簽章：{0}，SHA-256 {1}...", "Source signature: {0}, SHA-256 {1}...");
+            Add("Designer.AutoCommentsDictionarySignatureSummaryWithTime", "來源簽章：{0}，SHA-256 {1}...，匯出時間 {2}", "Source signature: {0}, SHA-256 {1}..., exported at {2}");
+            Add("Designer.AutoCommentsDictionaryInvalidSignatureConfirm", "這個註解字典的來源簽章無效，內容可能已被修改。仍要繼續匯入並覆蓋目前本機字典嗎？", "This comment dictionary has an invalid source signature and may have been modified. Continue importing and replace the local dictionary?");
             Add("Designer.AutoCommentsImportDiffTitle", "註解字典差異預覽", "Comment Dictionary Diff Preview");
             Add("Designer.AutoCommentsImportApply", "套用匯入", "Apply Import");
             Add("Designer.AutoCommentsDiffStatus", "狀態", "Status");
