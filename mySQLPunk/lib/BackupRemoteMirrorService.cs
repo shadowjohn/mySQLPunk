@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace mySQLPunk.lib
@@ -41,12 +42,17 @@ namespace mySQLPunk.lib
             FileInfo[] files = new DirectoryInfo(destinationDirectory).GetFiles();
             Array.Sort(files, (left, right) => right.LastWriteTimeUtc.CompareTo(left.LastWriteTimeUtc));
 
-            int kept = 0;
+            Dictionary<string, int> keptByKind = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             int deleted = 0;
             foreach (FileInfo file in files)
             {
-                if (!IsManagedBackupFile(file.Name)) continue;
+                string kind = GetManagedBackupKind(file.Name);
+                if (string.IsNullOrWhiteSpace(kind)) continue;
+
+                int kept;
+                keptByKind.TryGetValue(kind, out kept);
                 kept++;
+                keptByKind[kind] = kept;
                 if (kept <= retainCount) continue;
 
                 try
@@ -62,13 +68,14 @@ namespace mySQLPunk.lib
             return deleted;
         }
 
-        private static bool IsManagedBackupFile(string fileName)
+        private static string GetManagedBackupKind(string fileName)
         {
-            if (string.IsNullOrWhiteSpace(fileName)) return false;
+            if (string.IsNullOrWhiteSpace(fileName)) return "";
             string lower = fileName.ToLowerInvariant();
-            return lower.Contains("_backup_") ||
-                   lower.Contains("_before_delete_") ||
-                   lower.Contains("_before_restore_");
+            if (lower.Contains("_before_delete_")) return "before_delete";
+            if (lower.Contains("_before_restore_")) return "before_restore";
+            if (lower.Contains("_backup_")) return "backup";
+            return "";
         }
 
         private static string BuildUniqueMirrorPath(string directory, string fileName)

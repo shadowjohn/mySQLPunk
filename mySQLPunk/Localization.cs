@@ -462,7 +462,7 @@ namespace mySQLPunk
             Add("Object.ViewTarget", "檢視 {0}", "view {0}");
             Add("Object.DatabaseTarget", "資料庫 {0}", "database {0}");
             Add("Object.SqliteColumnCommentExchangeRequiresSqlite", "SQLite 欄位註解交換只支援 SQLite 連線。", "SQLite column comment exchange only supports SQLite connections.");
-            Add("Object.SqliteColumnCommentJsonFilter", "SQLite 欄位註解 JSON (*.json)|*.json|所有檔案 (*.*)|*.*", "SQLite Column Comment JSON (*.json)|*.json|All Files (*.*)|*.*");
+            Add("Object.SqliteColumnCommentJsonFilter", "SQLite 欄位註解 JSON (*.json)|*.json|SQLite 欄位註解 Excel (*.xlsx)|*.xlsx|SQLite 欄位註解 CSV (*.csv)|*.csv|SQLite 欄位註解 YAML (*.yaml;*.yml)|*.yaml;*.yml|所有檔案 (*.*)|*.*", "SQLite Column Comment JSON (*.json)|*.json|SQLite Column Comment Excel (*.xlsx)|*.xlsx|SQLite Column Comment CSV (*.csv)|*.csv|SQLite Column Comment YAML (*.yaml;*.yml)|*.yaml;*.yml|All Files (*.*)|*.*");
             Add("Object.SqliteColumnCommentsExported", "已匯出 {0} 個資料表、{1} 筆欄位註解。", "Exported {0} tables and {1} column comments.");
             Add("Object.SqliteColumnCommentsExportedStatus", "SQLite 欄位註解已匯出 {0} 筆：{1}", "SQLite column comments exported ({0}): {1}");
             Add("Object.SqliteColumnCommentsExportFailed", "匯出 SQLite 欄位註解失敗：{0}", "Export SQLite column comments failed: {0}");

@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
+using System.Xml.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -158,6 +160,12 @@ namespace mySQLPunk.lib
             if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
             SqliteColumnCommentExportResult result;
+            if (IsXlsxPath(targetPath))
+            {
+                WriteExportXlsxFile(db, databaseName, tableName, targetPath, out result);
+                return result;
+            }
+
             string content = IsCsvPath(targetPath)
                 ? BuildExportCsv(db, databaseName, tableName, out result)
                 : (IsYamlPath(targetPath)
@@ -296,6 +304,8 @@ namespace mySQLPunk.lib
         public static SqliteColumnCommentImportPlan BuildImportPlanFromFile(string sourcePath, string tableNameFilter = null)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            if (IsXlsxPath(sourcePath)) return BuildImportPlanFromXlsx(sourcePath, tableNameFilter);
+
             string text = File.ReadAllText(sourcePath, Encoding.UTF8);
             return IsCsvPath(sourcePath)
                 ? BuildImportPlanFromCsv(text, tableNameFilter)
@@ -319,6 +329,12 @@ namespace mySQLPunk.lib
         public static SqliteColumnCommentImportPlan BuildImportPlanFromYaml(string yaml, string tableNameFilter = null)
         {
             Dictionary<string, Dictionary<string, string>> tables = ParseExchangeYaml(yaml, tableNameFilter);
+            return BuildImportPlanFromTables(tables);
+        }
+
+        public static SqliteColumnCommentImportPlan BuildImportPlanFromXlsx(string sourcePath, string tableNameFilter = null)
+        {
+            Dictionary<string, Dictionary<string, string>> tables = ParseExchangeXlsx(sourcePath, tableNameFilter);
             return BuildImportPlanFromTables(tables);
         }
 
@@ -417,15 +433,22 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(csv)) throw new InvalidOperationException("SQLite column comment CSV is empty.");
 
             List<List<string>> rows = ParseCsvRows(csv);
-            if (rows.Count == 0) throw new InvalidOperationException("SQLite column comment CSV has no rows.");
+            return ParseExchangeRows(rows, "CSV", tableNameFilter);
+        }
 
+        private static Dictionary<string, Dictionary<string, string>> ParseExchangeRows(
+            List<List<string>> rows,
+            string sourceName,
+            string tableNameFilter)
+        {
+            if (rows == null || rows.Count == 0) throw new InvalidOperationException("SQLite column comment " + sourceName + " has no rows.");
             Dictionary<string, int> header = BuildCsvHeaderMap(rows[0]);
             int tableIndex = FindCsvIndex(header, "table", "tablename", "table_name");
             int columnIndex = FindCsvIndex(header, "column", "columnname", "column_name", "name");
             int commentIndex = FindCsvIndex(header, "comment", "description", "remarks");
             if (tableIndex < 0 || columnIndex < 0 || commentIndex < 0)
             {
-                throw new InvalidOperationException("SQLite column comment CSV requires table, column and comment headers.");
+                throw new InvalidOperationException("SQLite column comment " + sourceName + " requires table, column and comment headers.");
             }
 
             Dictionary<string, Dictionary<string, string>> tables =
@@ -457,7 +480,7 @@ namespace mySQLPunk.lib
                 columns[columnName.Trim()] = comment.Trim();
             }
 
-            if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment CSV has no usable comments.");
+            if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment " + sourceName + " has no usable comments.");
             return tables;
         }
 
@@ -508,6 +531,15 @@ namespace mySQLPunk.lib
 
             if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment YAML has no usable comments.");
             return tables;
+        }
+
+        public static Dictionary<string, Dictionary<string, string>> ParseExchangeXlsx(string sourcePath, string tableNameFilter = null)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            if (!File.Exists(sourcePath)) throw new FileNotFoundException("SQLite column comment XLSX file does not exist.", sourcePath);
+
+            List<List<string>> rows = ReadXlsxRows(sourcePath);
+            return ParseExchangeRows(rows, "XLSX", tableNameFilter);
         }
 
         public static string BuildEnsureSidecarTableSql()
@@ -649,6 +681,11 @@ namespace mySQLPunk.lib
             string extension = Path.GetExtension(path);
             return string.Equals(extension, ".yaml", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(extension, ".yml", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsXlsxPath(string path)
+        {
+            return string.Equals(Path.GetExtension(path), ".xlsx", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void AddYamlCommentRow(
@@ -819,6 +856,291 @@ namespace mySQLPunk.lib
         private static string CsvValue(List<string> row, int index)
         {
             return row != null && index >= 0 && index < row.Count ? row[index] : "";
+        }
+
+        private static void WriteExportXlsxFile(IDatabase db, string databaseName, string tableName, string targetPath, out SqliteColumnCommentExportResult result)
+        {
+            EnsureSqlite(db);
+            result = new SqliteColumnCommentExportResult();
+            if (File.Exists(targetPath)) File.Delete(targetPath);
+
+            List<List<string>> rows = BuildExportRows(db, databaseName, tableName, result);
+            using (ZipArchive archive = ZipFile.Open(targetPath, ZipArchiveMode.Create))
+            {
+                AddZipEntry(archive, "[Content_Types].xml", BuildXlsxContentTypes());
+                AddZipEntry(archive, "_rels/.rels", BuildXlsxRootRelationships());
+                AddZipEntry(archive, "xl/workbook.xml", BuildXlsxWorkbook());
+                AddZipEntry(archive, "xl/_rels/workbook.xml.rels", BuildXlsxWorkbookRelationships());
+                AddZipEntry(archive, "xl/worksheets/sheet1.xml", BuildXlsxSheet(rows));
+                AddZipEntry(archive, "xl/styles.xml", BuildXlsxStyles());
+            }
+        }
+
+        private static List<List<string>> BuildExportRows(IDatabase db, string databaseName, string tableName, SqliteColumnCommentExportResult result)
+        {
+            List<List<string>> rows = new List<List<string>>();
+            rows.Add(new List<string> { "table", "column", "comment" });
+
+            List<string> tableNames = new List<string>();
+            if (!string.IsNullOrWhiteSpace(tableName))
+            {
+                tableNames.Add(tableName);
+            }
+            else
+            {
+                tableNames.AddRange(db.GetTables(databaseName) ?? new List<string>());
+            }
+
+            foreach (string currentTable in tableNames)
+            {
+                if (string.IsNullOrWhiteSpace(currentTable)) continue;
+                Dictionary<string, string> comments = ReadColumnComments(db, databaseName, currentTable);
+                if (comments.Count == 0) continue;
+
+                result.TableCount++;
+                foreach (var item in comments)
+                {
+                    rows.Add(new List<string> { currentTable, item.Key, item.Value });
+                    result.CommentCount++;
+                }
+            }
+
+            return rows;
+        }
+
+        private static List<List<string>> ReadXlsxRows(string sourcePath)
+        {
+            using (ZipArchive archive = ZipFile.OpenRead(sourcePath))
+            {
+                List<string> sharedStrings = LoadSharedStrings(archive);
+                ZipArchiveEntry sheet = archive.GetEntry("xl/worksheets/sheet1.xml");
+                if (sheet == null) throw new InvalidOperationException("SQLite column comment XLSX has no first worksheet.");
+
+                XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+                XDocument document;
+                using (Stream stream = sheet.Open())
+                {
+                    document = XDocument.Load(stream);
+                }
+
+                List<List<string>> rows = new List<List<string>>();
+                foreach (XElement rowElement in document.Descendants(ns + "row"))
+                {
+                    List<string> row = new List<string>();
+                    foreach (XElement cell in rowElement.Elements(ns + "c"))
+                    {
+                        int columnIndex = GetXlsxColumnIndex((string)cell.Attribute("r"));
+                        if (columnIndex <= 0) columnIndex = row.Count + 1;
+                        while (row.Count < columnIndex) row.Add("");
+                        row[columnIndex - 1] = GetXlsxCellText(cell, sharedStrings, ns);
+                    }
+
+                    if (HasAnyValue(row)) rows.Add(row);
+                }
+
+                return rows;
+            }
+        }
+
+        private static List<string> LoadSharedStrings(ZipArchive archive)
+        {
+            List<string> sharedStrings = new List<string>();
+            ZipArchiveEntry entry = archive.GetEntry("xl/sharedStrings.xml");
+            if (entry == null) return sharedStrings;
+
+            XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+            XDocument document;
+            using (Stream stream = entry.Open())
+            {
+                document = XDocument.Load(stream);
+            }
+
+            foreach (XElement item in document.Descendants(ns + "si"))
+            {
+                StringBuilder builder = new StringBuilder();
+                foreach (XElement text in item.Descendants(ns + "t"))
+                {
+                    builder.Append(text.Value);
+                }
+                sharedStrings.Add(builder.ToString());
+            }
+
+            return sharedStrings;
+        }
+
+        private static string GetXlsxCellText(XElement cell, List<string> sharedStrings, XNamespace ns)
+        {
+            string cellType = ((string)cell.Attribute("t") ?? "").Trim();
+            if (string.Equals(cellType, "inlineStr", StringComparison.OrdinalIgnoreCase))
+            {
+                StringBuilder builder = new StringBuilder();
+                foreach (XElement text in cell.Descendants(ns + "t"))
+                {
+                    builder.Append(text.Value);
+                }
+                return builder.ToString();
+            }
+
+            XElement valueElement = cell.Element(ns + "v");
+            string rawValue = valueElement == null ? "" : valueElement.Value;
+            if (string.Equals(cellType, "s", StringComparison.OrdinalIgnoreCase))
+            {
+                int sharedIndex;
+                if (int.TryParse(rawValue, out sharedIndex) &&
+                    sharedIndex >= 0 &&
+                    sharedIndex < sharedStrings.Count)
+                {
+                    return sharedStrings[sharedIndex];
+                }
+                return "";
+            }
+
+            return rawValue;
+        }
+
+        private static bool HasAnyValue(List<string> row)
+        {
+            if (row == null) return false;
+            foreach (string value in row)
+            {
+                if (!string.IsNullOrWhiteSpace(value)) return true;
+            }
+            return false;
+        }
+
+        private static int GetXlsxColumnIndex(string cellReference)
+        {
+            if (string.IsNullOrWhiteSpace(cellReference)) return -1;
+            int index = 0;
+            foreach (char ch in cellReference)
+            {
+                if (ch >= 'A' && ch <= 'Z')
+                {
+                    index = index * 26 + (ch - 'A' + 1);
+                }
+                else if (ch >= 'a' && ch <= 'z')
+                {
+                    index = index * 26 + (ch - 'a' + 1);
+                }
+                else
+                {
+                    break;
+                }
+            }
+            return index;
+        }
+
+        private static void AddZipEntry(ZipArchive archive, string path, string content)
+        {
+            ZipArchiveEntry entry = archive.CreateEntry(path, CompressionLevel.Optimal);
+            using (Stream stream = entry.Open())
+            using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            {
+                writer.Write(content);
+            }
+        }
+
+        private static string BuildXlsxSheet(List<List<string>> rows)
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+            builder.AppendLine("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+
+            for (int r = 0; r < rows.Count; r++)
+            {
+                int rowIndex = r + 1;
+                builder.Append("<row r=\"").Append(rowIndex).Append("\">");
+                List<string> row = rows[r];
+                for (int c = 0; c < row.Count; c++)
+                {
+                    AppendInlineStringCell(builder, rowIndex, c + 1, row[c]);
+                }
+                builder.AppendLine("</row>");
+            }
+
+            builder.AppendLine("</sheetData></worksheet>");
+            return builder.ToString();
+        }
+
+        private static void AppendInlineStringCell(StringBuilder builder, int rowIndex, int columnIndex, string value)
+        {
+            builder.Append("<c r=\"")
+                .Append(GetExcelColumnName(columnIndex))
+                .Append(rowIndex)
+                .Append("\" t=\"inlineStr\"><is><t");
+            if (!string.IsNullOrEmpty(value) &&
+                (value.StartsWith(" ") || value.EndsWith(" ") || value.Contains("\n") || value.Contains("\r") || value.Contains("\t")))
+            {
+                builder.Append(" xml:space=\"preserve\"");
+            }
+            builder.Append(">")
+                .Append(XmlEscape(value))
+                .Append("</t></is></c>");
+        }
+
+        private static string BuildXlsxContentTypes()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
+                   "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>" +
+                   "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+                   "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>" +
+                   "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" +
+                   "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>" +
+                   "</Types>";
+        }
+
+        private static string BuildXlsxRootRelationships()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+                   "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>" +
+                   "</Relationships>";
+        }
+
+        private static string BuildXlsxWorkbook()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">" +
+                   "<sheets><sheet name=\"Comments\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>";
+        }
+
+        private static string BuildXlsxWorkbookRelationships()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+                   "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>" +
+                   "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" +
+                   "</Relationships>";
+        }
+
+        private static string BuildXlsxStyles()
+        {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
+                   "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>" +
+                   "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>" +
+                   "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>" +
+                   "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>" +
+                   "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>" +
+                   "</styleSheet>";
+        }
+
+        private static string XmlEscape(string value)
+        {
+            return System.Security.SecurityElement.Escape(value ?? string.Empty) ?? string.Empty;
+        }
+
+        private static string GetExcelColumnName(int columnNumber)
+        {
+            string columnName = string.Empty;
+            while (columnNumber > 0)
+            {
+                int modulo = (columnNumber - 1) % 26;
+                columnName = Convert.ToChar('A' + modulo) + columnName;
+                columnNumber = (columnNumber - modulo) / 26;
+            }
+            return columnName;
         }
 
         private static void EnsureSqlite(IDatabase db)

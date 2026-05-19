@@ -757,6 +757,26 @@ public static class SmokeTests
         AssertContains(exportYaml, "comments:", "SQLite comment YAML export should include comments root.");
         AssertContains(exportYaml, "column: \"NAME\"", "SQLite comment YAML export should include column names.");
 
+        string xlsxPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_" + Guid.NewGuid().ToString("N") + ".xlsx");
+        try
+        {
+            SqliteColumnCommentExportResult xlsxExportResult =
+                SqliteColumnCommentExchangeService.WriteExportFile(db, "main", "users", xlsxPath);
+            Assert(xlsxExportResult.TableCount == 1 && xlsxExportResult.CommentCount == 2, "SQLite comment XLSX export should count exported comments.");
+            Assert(File.Exists(xlsxPath), "SQLite comment XLSX export should write a workbook.");
+
+            SqliteColumnCommentImportPlan xlsxPlan =
+                SqliteColumnCommentExchangeService.BuildImportPlanFromFile(xlsxPath, "users");
+            string xlsxSql = string.Join("\n", xlsxPlan.Statements.ToArray());
+            Assert(xlsxPlan.TableCount == 1 && xlsxPlan.CommentCount == 2, "SQLite comment XLSX import should read exported comments.");
+            AssertContains(xlsxSql, "'NAME'", "SQLite comment XLSX import should include exported columns.");
+            AssertContains(xlsxSql, "'姓名'", "SQLite comment XLSX import should preserve Unicode comments.");
+        }
+        finally
+        {
+            if (File.Exists(xlsxPath)) File.Delete(xlsxPath);
+        }
+
         string tempPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
