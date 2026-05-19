@@ -931,7 +931,15 @@ namespace mySQLPunk
 
                 try
                 {
-                    Dictionary<string, string> comments = ImportAutoColumnCommentDictionaryFile(dialog.FileName);
+                    Dictionary<string, string> comments = PreviewAutoColumnCommentDictionaryFile(dialog.FileName);
+                    Dictionary<string, string> existing = LoadAutoColumnCommentCache() ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    string diffSummary = BuildAutoColumnCommentDictionaryDiffSummary(existing, comments);
+                    if (MessageBox.Show(diffSummary, Localization.T("Designer.ImportAutoCommentsDictionary"), MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
+                    {
+                        return;
+                    }
+
+                    comments = ImportAutoColumnCommentDictionaryFile(dialog.FileName);
                     ApplyAutoColumnCommentsToEmptyRows();
                     MessageBox.Show(Localization.Format("Designer.AutoCommentsImportSuccess", comments.Count), Localization.T("Designer.ImportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -940,6 +948,54 @@ namespace mySQLPunk
                     MessageBox.Show(Localization.Format("Designer.AutoCommentsImportFailed", ex.Message), Localization.T("Designer.ImportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        public static Dictionary<string, string> PreviewAutoColumnCommentDictionaryFile(string sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            Dictionary<string, string> comments = ParseAutoColumnCommentJson(File.ReadAllText(sourcePath, Encoding.UTF8));
+            if (comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsImportEmpty"));
+            return comments;
+        }
+
+        private static string BuildAutoColumnCommentDictionaryDiffSummary(Dictionary<string, string> existing, Dictionary<string, string> imported)
+        {
+            existing = existing ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            imported = imported ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            int added = 0;
+            int updated = 0;
+            int unchanged = 0;
+            foreach (var item in imported)
+            {
+                string existingValue;
+                if (!existing.TryGetValue(item.Key, out existingValue))
+                {
+                    added++;
+                }
+                else if (string.Equals(existingValue, item.Value, StringComparison.Ordinal))
+                {
+                    unchanged++;
+                }
+                else
+                {
+                    updated++;
+                }
+            }
+
+            int removed = 0;
+            foreach (var item in existing)
+            {
+                if (!imported.ContainsKey(item.Key)) removed++;
+            }
+
+            return Localization.Format(
+                "Designer.AutoCommentsImportDiffSummary",
+                imported.Count,
+                added,
+                updated,
+                removed,
+                unchanged);
         }
 
         private async Task ExportAutoColumnCommentsDictionaryWithDialogAsync()
