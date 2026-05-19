@@ -429,6 +429,7 @@ namespace mySQLPunk.lib
 
             sql = RewriteDateFormatFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
+            sql = RewriteStringLengthFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
@@ -468,6 +469,24 @@ namespace mySQLPunk.lib
                     if (args.Count < 2) return m.Value;
                     return string.Join(" || ", args.ToArray());
                 },
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteStringLengthFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mssql")
+            {
+                return Regex.Replace(
+                    selectSql,
+                    @"\bLENGTH\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                    m => "LEN(" + m.Groups["expr"].Value.Trim() + ")",
+                    RegexOptions.IgnoreCase);
+            }
+
+            return Regex.Replace(
+                selectSql,
+                @"\bLEN\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => "LENGTH(" + m.Groups["expr"].Value.Trim() + ")",
                 RegexOptions.IgnoreCase);
         }
 

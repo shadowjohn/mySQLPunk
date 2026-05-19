@@ -165,6 +165,22 @@ public static class SmokeTests
         string sqliteConcatSql = (string)GetProperty(sqliteConcatPreview, "ConvertedSql");
         AssertContains(sqliteConcatSql, "code || '-' || name", "Converted SQLite SQL should use concatenation operator.");
 
+        object pgLengthPreview = BuildViewSqlPreview(
+            "SELECT LEN(display_name) AS name_length FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgLengthPreview, "CanConvert"), "SQL Server LEN should convert to PostgreSQL.");
+        string pgLengthSql = (string)GetProperty(pgLengthPreview, "ConvertedSql");
+        AssertContains(pgLengthSql, "LENGTH(display_name)", "Converted PostgreSQL SQL should use LENGTH.");
+
+        object mssqlLengthPreview = BuildViewSqlPreview(
+            "SELECT LENGTH(display_name) AS name_length FROM users",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlLengthPreview, "CanConvert"), "PostgreSQL LENGTH should convert to SQL Server.");
+        string mssqlLengthSql = (string)GetProperty(mssqlLengthPreview, "ConvertedSql");
+        AssertContains(mssqlLengthSql, "LEN(display_name)", "Converted SQL Server SQL should use LEN.");
+
         object cteWindowPreview = BuildViewSqlPreview(
             "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
             "postgresql",
