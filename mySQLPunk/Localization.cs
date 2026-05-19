@@ -212,6 +212,7 @@ namespace mySQLPunk
             Add("Common.Info", "資訊", "Information");
             Add("Common.Complete", "完成", "Done");
             Add("Common.Confirm", "確認", "Confirm");
+            Add("Common.None", "無", "None");
             Add("Common.SqlFilesFilter", "SQL 檔案 (*.sql)|*.sql|所有檔案 (*.*)|*.*", "SQL files (*.sql)|*.sql|All files (*.*)|*.*");
             Add("Common.WindowsAuth", "使用 Windows 驗證", "Use Windows Authentication");
             Add("Common.SQLiteFile", "SQLite 檔案", "SQLite File");
@@ -335,6 +336,9 @@ namespace mySQLPunk
             Add("Backup.QuarantineRestoreTitle", "還原隔離備份", "Restore Quarantined Backup");
             Add("Backup.QuarantineRestoreFileFilter", "備份檔案 (*.sql;*.zip;*.sqlite;*.sqlite3;*.db)|*.sql;*.zip;*.sqlite;*.sqlite3;*.db|所有檔案 (*.*)|*.*", "Backup files (*.sql;*.zip;*.sqlite;*.sqlite3;*.db)|*.sql;*.zip;*.sqlite;*.sqlite3;*.db|All files (*.*)|*.*");
             Add("Backup.QuarantineRestoreEmpty", "目前沒有可還原的隔離備份。", "There are no quarantined backups to restore.");
+            Add("Backup.QuarantineRestorePreviewConfirm", "隔離備份預覽：\n{0}\n\n原始路徑：{1}\n大小：{2}\n二次完整性驗證：{3}\n{4}\n\n此動作只會把檔案移回指定位置，不會直接還原到資料庫。是否繼續？", "Quarantined backup preview:\n{0}\n\nOriginal path: {1}\nSize: {2}\nSecond integrity check: {3}\n{4}\n\nThis only moves the file back to the selected location and does not restore it into the database. Continue?");
+            Add("Backup.QuarantineRestoreIntegrityPassed", "通過", "Passed");
+            Add("Backup.QuarantineRestoreIntegrityFailed", "未通過", "Failed");
             Add("Backup.QuarantineRestoreOverwrite", "目標檔案已存在：\n{0}\n\n是否覆蓋？", "The destination file already exists:\n{0}\n\nOverwrite it?");
             Add("Backup.QuarantineRestoreSuccess", "隔離備份已還原：\n{0}", "Quarantined backup restored:\n{0}");
             Add("Backup.QuarantineRestoreFailed", "還原隔離備份失敗：{0}", "Failed to restore quarantined backup: {0}");

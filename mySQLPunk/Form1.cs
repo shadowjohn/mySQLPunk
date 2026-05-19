@@ -4077,6 +4077,31 @@ namespace mySQLPunk
                 if (openDialog.ShowDialog(this) != DialogResult.OK) return;
 
                 BackupQuarantineRestoreCandidate candidate = BackupQuarantineRestoreService.FindCandidate(openDialog.FileName, quarantineDirectory);
+                if (candidate == null)
+                {
+                    MessageBox.Show(Localization.T("Backup.QuarantineRestoreEmpty"), Localization.T("Backup.QuarantineRestoreTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                BackupQuarantineRestorePreview preview = BackupQuarantineRestoreService.BuildPreview(candidate, CountSqlScriptStatements);
+                BackupIntegrityResult integrity = preview.IntegrityResult;
+                string originalPathText = candidate.HasOriginalPath ? candidate.OriginalPath : Localization.T("Common.None");
+                string integrityStatus = preview.PassedIntegrityCheck
+                    ? Localization.T("Backup.QuarantineRestoreIntegrityPassed")
+                    : Localization.T("Backup.QuarantineRestoreIntegrityFailed");
+                string integrityMessage = integrity == null ? string.Empty : integrity.Message;
+                string previewMessage = Localization.Format(
+                    "Backup.QuarantineRestorePreviewConfirm",
+                    candidate.QuarantinedPath,
+                    originalPathText,
+                    FormatBytes(candidate.SizeBytes),
+                    integrityStatus,
+                    integrityMessage);
+                if (MessageBox.Show(previewMessage, Localization.T("Backup.QuarantineRestoreTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                {
+                    return;
+                }
+
                 string suggestedPath = candidate != null && candidate.HasOriginalPath
                     ? candidate.OriginalPath
                     : openDialog.FileName;

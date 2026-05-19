@@ -27,6 +27,17 @@ namespace mySQLPunk.lib
         public long SizeBytes { get; set; }
     }
 
+    public sealed class BackupQuarantineRestorePreview
+    {
+        public BackupQuarantineRestoreCandidate Candidate { get; set; }
+        public BackupIntegrityResult IntegrityResult { get; set; }
+
+        public bool PassedIntegrityCheck
+        {
+            get { return IntegrityResult != null && IntegrityResult.IsValid; }
+        }
+    }
+
     public static class BackupQuarantineRestoreService
     {
         public static List<BackupQuarantineRestoreCandidate> FindCandidates(string quarantineDirectory)
@@ -85,6 +96,36 @@ namespace mySQLPunk.lib
                 ManifestPath = "",
                 SizeBytes = info.Length,
                 QuarantinedAtUtc = info.LastWriteTimeUtc
+            };
+        }
+
+        public static BackupQuarantineRestorePreview BuildPreview(
+            BackupQuarantineRestoreCandidate candidate,
+            Func<string, int> countStatements)
+        {
+            if (candidate == null) throw new ArgumentNullException(nameof(candidate));
+            BackupIntegrityResult result;
+            try
+            {
+                result = BackupIntegrityService.VerifyBackup(candidate.QuarantinedPath, countStatements);
+            }
+            catch (Exception ex)
+            {
+                result = new BackupIntegrityResult
+                {
+                    IsValid = false,
+                    Kind = Path.GetExtension(candidate.QuarantinedPath).TrimStart('.').ToLowerInvariant(),
+                    EntryName = candidate.QuarantinedPath,
+                    SourcePath = candidate.QuarantinedPath,
+                    Message = ex.Message,
+                    SizeBytes = candidate.SizeBytes
+                };
+            }
+
+            return new BackupQuarantineRestorePreview
+            {
+                Candidate = candidate,
+                IntegrityResult = result
             };
         }
 
