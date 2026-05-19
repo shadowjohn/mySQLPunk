@@ -683,6 +683,19 @@ public static class SmokeTests
         SqliteColumnCommentImportPlan tableColumnArrayPlan = SqliteColumnCommentExchangeService.BuildImportPlan(tableColumnArrayJson);
         Assert(tableColumnArrayPlan.TableCount == 1 && tableColumnArrayPlan.CommentCount == 1, "SQLite comment import should support table column-array JSON.");
 
+        string csv = "table,column,comment\r\nusers,ADDRESS,\"地址, 含逗號\"\r\nlogs,MESSAGE,訊息\r\n";
+        SqliteColumnCommentImportPlan csvPlan = SqliteColumnCommentExchangeService.BuildImportPlanFromCsv(csv, "users");
+        string csvSql = string.Join("\n", csvPlan.Statements.ToArray());
+        Assert(csvPlan.TableCount == 1 && csvPlan.CommentCount == 1, "SQLite comment import should support CSV with table filters.");
+        AssertContains(csvSql, "地址, 含逗號", "SQLite comment CSV import should preserve quoted commas.");
+        AssertNotContains(csvSql, "MESSAGE", "SQLite comment CSV import should honor table filters.");
+
+        SqliteColumnCommentExportResult csvExportResult;
+        string exportCsv = SqliteColumnCommentExchangeService.BuildExportCsv(db, "main", "users", out csvExportResult);
+        Assert(csvExportResult.TableCount == 1 && csvExportResult.CommentCount == 2, "SQLite comment CSV export should count exported comments.");
+        AssertContains(exportCsv, "table,column,comment", "SQLite comment CSV export should include headers.");
+        AssertContains(exportCsv, "users,NAME", "SQLite comment CSV export should include table and column.");
+
         string tempPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_" + Guid.NewGuid().ToString("N") + ".json");
         try
         {

@@ -158,8 +158,10 @@ namespace mySQLPunk.lib
             if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
             SqliteColumnCommentExportResult result;
-            string json = BuildExportJson(db, databaseName, tableName, out result);
-            File.WriteAllText(targetPath, json, new UTF8Encoding(false));
+            string content = IsCsvPath(targetPath)
+                ? BuildExportCsv(db, databaseName, tableName, out result)
+                : BuildExportJson(db, databaseName, tableName, out result);
+            File.WriteAllText(targetPath, content, new UTF8Encoding(false));
             return result;
         }
 
@@ -215,15 +217,66 @@ namespace mySQLPunk.lib
             return root.ToString(Formatting.Indented);
         }
 
+        public static string BuildExportCsv(IDatabase db, string databaseName, string tableName, out SqliteColumnCommentExportResult result)
+        {
+            EnsureSqlite(db);
+
+            result = new SqliteColumnCommentExportResult();
+            List<string> tableNames = new List<string>();
+            if (!string.IsNullOrWhiteSpace(tableName))
+            {
+                tableNames.Add(tableName);
+            }
+            else
+            {
+                tableNames.AddRange(db.GetTables(databaseName) ?? new List<string>());
+            }
+
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("table,column,comment");
+            foreach (string currentTable in tableNames)
+            {
+                if (string.IsNullOrWhiteSpace(currentTable)) continue;
+                Dictionary<string, string> comments = ReadColumnComments(db, databaseName, currentTable);
+                if (comments.Count == 0) continue;
+
+                result.TableCount++;
+                foreach (var item in comments)
+                {
+                    builder.Append(CsvField(currentTable));
+                    builder.Append(",");
+                    builder.Append(CsvField(item.Key));
+                    builder.Append(",");
+                    builder.AppendLine(CsvField(item.Value));
+                    result.CommentCount++;
+                }
+            }
+            return builder.ToString();
+        }
+
         public static SqliteColumnCommentImportPlan BuildImportPlanFromFile(string sourcePath, string tableNameFilter = null)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
-            return BuildImportPlan(File.ReadAllText(sourcePath, Encoding.UTF8), tableNameFilter);
+            string text = File.ReadAllText(sourcePath, Encoding.UTF8);
+            return IsCsvPath(sourcePath)
+                ? BuildImportPlanFromCsv(text, tableNameFilter)
+                : BuildImportPlan(text, tableNameFilter);
         }
 
         public static SqliteColumnCommentImportPlan BuildImportPlan(string json, string tableNameFilter = null)
         {
             Dictionary<string, Dictionary<string, string>> tables = ParseExchangeJson(json, tableNameFilter);
+            return BuildImportPlanFromTables(tables);
+        }
+
+        public static SqliteColumnCommentImportPlan BuildImportPlanFromCsv(string csv, string tableNameFilter = null)
+        {
+            Dictionary<string, Dictionary<string, string>> tables = ParseExchangeCsv(csv, tableNameFilter);
+            return BuildImportPlanFromTables(tables);
+        }
+
+        private static SqliteColumnCommentImportPlan BuildImportPlanFromTables(Dictionary<string, Dictionary<string, string>> tables)
+        {
             SqliteColumnCommentImportPlan plan = new SqliteColumnCommentImportPlan();
             plan.Tables = tables;
             plan.TableCount = tables.Count;
@@ -309,6 +362,55 @@ namespace mySQLPunk.lib
             }
 
             if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment exchange file has no usable comments.");
+            return tables;
+        }
+
+        public static Dictionary<string, Dictionary<string, string>> ParseExchangeCsv(string csv, string tableNameFilter = null)
+        {
+            if (string.IsNullOrWhiteSpace(csv)) throw new InvalidOperationException("SQLite column comment CSV is empty.");
+
+            List<List<string>> rows = ParseCsvRows(csv);
+            if (rows.Count == 0) throw new InvalidOperationException("SQLite column comment CSV has no rows.");
+
+            Dictionary<string, int> header = BuildCsvHeaderMap(rows[0]);
+            int tableIndex = FindCsvIndex(header, "table", "tablename", "table_name");
+            int columnIndex = FindCsvIndex(header, "column", "columnname", "column_name", "name");
+            int commentIndex = FindCsvIndex(header, "comment", "description", "remarks");
+            if (tableIndex < 0 || columnIndex < 0 || commentIndex < 0)
+            {
+                throw new InvalidOperationException("SQLite column comment CSV requires table, column and comment headers.");
+            }
+
+            Dictionary<string, Dictionary<string, string>> tables =
+                new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 1; i < rows.Count; i++)
+            {
+                List<string> row = rows[i];
+                string tableName = CsvValue(row, tableIndex);
+                string columnName = CsvValue(row, columnIndex);
+                string comment = CsvValue(row, commentIndex);
+                if (string.IsNullOrWhiteSpace(tableName) ||
+                    string.IsNullOrWhiteSpace(columnName) ||
+                    string.IsNullOrWhiteSpace(comment))
+                {
+                    continue;
+                }
+                if (!string.IsNullOrWhiteSpace(tableNameFilter) &&
+                    !string.Equals(tableName, tableNameFilter, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                Dictionary<string, string> columns;
+                if (!tables.TryGetValue(tableName.Trim(), out columns))
+                {
+                    columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    tables[tableName.Trim()] = columns;
+                }
+                columns[columnName.Trim()] = comment.Trim();
+            }
+
+            if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment CSV has no usable comments.");
             return tables;
         }
 
@@ -439,6 +541,112 @@ namespace mySQLPunk.lib
                 }
             }
             return "";
+        }
+
+        private static bool IsCsvPath(string path)
+        {
+            return string.Equals(Path.GetExtension(path), ".csv", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string CsvField(string value)
+        {
+            string text = value ?? string.Empty;
+            if (text.IndexOfAny(new[] { ',', '"', '\r', '\n' }) < 0) return text;
+            return "\"" + text.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static List<List<string>> ParseCsvRows(string csv)
+        {
+            List<List<string>> rows = new List<List<string>>();
+            List<string> row = new List<string>();
+            StringBuilder field = new StringBuilder();
+            bool inQuotes = false;
+
+            for (int i = 0; i < csv.Length; i++)
+            {
+                char ch = csv[i];
+                if (inQuotes)
+                {
+                    if (ch == '"')
+                    {
+                        if (i + 1 < csv.Length && csv[i + 1] == '"')
+                        {
+                            field.Append('"');
+                            i++;
+                        }
+                        else
+                        {
+                            inQuotes = false;
+                        }
+                    }
+                    else
+                    {
+                        field.Append(ch);
+                    }
+                    continue;
+                }
+
+                if (ch == '"')
+                {
+                    inQuotes = true;
+                }
+                else if (ch == ',')
+                {
+                    row.Add(field.ToString());
+                    field.Length = 0;
+                }
+                else if (ch == '\r' || ch == '\n')
+                {
+                    if (ch == '\r' && i + 1 < csv.Length && csv[i + 1] == '\n') i++;
+                    row.Add(field.ToString());
+                    field.Length = 0;
+                    if (row.Count > 1 || !string.IsNullOrWhiteSpace(row[0])) rows.Add(row);
+                    row = new List<string>();
+                }
+                else
+                {
+                    field.Append(ch);
+                }
+            }
+
+            if (field.Length > 0 || row.Count > 0)
+            {
+                row.Add(field.ToString());
+                if (row.Count > 1 || !string.IsNullOrWhiteSpace(row[0])) rows.Add(row);
+            }
+            return rows;
+        }
+
+        private static Dictionary<string, int> BuildCsvHeaderMap(List<string> headerRow)
+        {
+            Dictionary<string, int> map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (headerRow == null) return map;
+            for (int i = 0; i < headerRow.Count; i++)
+            {
+                string name = NormalizeCsvHeader(headerRow[i]);
+                if (!string.IsNullOrWhiteSpace(name) && !map.ContainsKey(name)) map[name] = i;
+            }
+            return map;
+        }
+
+        private static int FindCsvIndex(Dictionary<string, int> header, params string[] names)
+        {
+            foreach (string name in names)
+            {
+                int index;
+                if (header.TryGetValue(NormalizeCsvHeader(name), out index)) return index;
+            }
+            return -1;
+        }
+
+        private static string NormalizeCsvHeader(string value)
+        {
+            return (value ?? string.Empty).Trim().Replace("-", "").Replace("_", "").Replace(" ", "").ToLowerInvariant();
+        }
+
+        private static string CsvValue(List<string> row, int index)
+        {
+            return row != null && index >= 0 && index < row.Count ? row[index] : "";
         }
 
         private static void EnsureSqlite(IDatabase db)
