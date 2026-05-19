@@ -262,9 +262,25 @@ namespace mySQLPunk.lib
         {
             if (string.IsNullOrWhiteSpace(json)) throw new InvalidOperationException("SQLite column comment exchange file is empty.");
 
-            JObject root = JObject.Parse(json);
             Dictionary<string, Dictionary<string, string>> tables =
                 new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            JToken rootToken = JToken.Parse(json);
+            JArray rootArray = rootToken as JArray;
+            if (rootArray != null)
+            {
+                AddParsedCommentRows(tables, rootArray, tableNameFilter);
+                if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment exchange file has no usable comments.");
+                return tables;
+            }
+
+            JObject root = rootToken as JObject;
+            if (root == null) throw new InvalidOperationException("SQLite column comment exchange file is not a supported JSON object.");
+
+            JArray commentArray = root["comments"] as JArray;
+            if (commentArray != null)
+            {
+                AddParsedCommentRows(tables, commentArray, tableNameFilter);
+            }
 
             JArray tableArray = root["tables"] as JArray;
             if (tableArray != null)
@@ -272,10 +288,18 @@ namespace mySQLPunk.lib
                 foreach (JObject tableObject in tableArray)
                 {
                     string tableName = tableObject.Value<string>("name");
-                    AddParsedTable(tables, tableName, tableObject["columns"] as JObject, tableNameFilter);
+                    JArray columnArray = tableObject["columns"] as JArray;
+                    if (columnArray != null)
+                    {
+                        AddParsedCommentRows(tables, columnArray, tableNameFilter, tableName);
+                    }
+                    else
+                    {
+                        AddParsedTable(tables, tableName, tableObject["columns"] as JObject, tableNameFilter);
+                    }
                 }
             }
-            else
+            else if (commentArray == null)
             {
                 foreach (JProperty property in root.Properties())
                 {
@@ -338,6 +362,60 @@ namespace mySQLPunk.lib
             if (comments.Count > 0) tables[tableName.Trim()] = comments;
         }
 
+        private static void AddParsedCommentRows(
+            Dictionary<string, Dictionary<string, string>> tables,
+            JArray rows,
+            string tableNameFilter,
+            string fallbackTableName = null)
+        {
+            if (rows == null) return;
+            foreach (JObject row in rows)
+            {
+                if (row == null) continue;
+                string tableName = FirstJsonValue(row, "table", "tableName", "table_name", "TABLE_NAME");
+                if (string.IsNullOrWhiteSpace(tableName)) tableName = fallbackTableName;
+                string columnName = FirstJsonValue(row, "column", "columnName", "column_name", "COLUMN_NAME", "name", "Name");
+                string comment = FirstJsonValue(row, "comment", "Comment", "description", "Description", "remarks", "Remarks");
+
+                if (string.IsNullOrWhiteSpace(tableName) ||
+                    string.IsNullOrWhiteSpace(columnName) ||
+                    string.IsNullOrWhiteSpace(comment))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(tableNameFilter) &&
+                    !string.Equals(tableName, tableNameFilter, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                Dictionary<string, string> columns;
+                if (!tables.TryGetValue(tableName.Trim(), out columns))
+                {
+                    columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    tables[tableName.Trim()] = columns;
+                }
+                columns[columnName.Trim()] = comment.Trim();
+            }
+        }
+
+        private static string FirstJsonValue(JObject row, params string[] names)
+        {
+            if (row == null) return "";
+            foreach (string name in names)
+            {
+                JToken value;
+                if (row.TryGetValue(name, StringComparison.OrdinalIgnoreCase, out value) &&
+                    value != null &&
+                    value.Type != JTokenType.Null)
+                {
+                    return value.ToString();
+                }
+            }
+            return "";
+        }
+
         private static bool IsReservedRootProperty(string name)
         {
             return string.Equals(name, "version", StringComparison.OrdinalIgnoreCase) ||
@@ -346,7 +424,8 @@ namespace mySQLPunk.lib
                    string.Equals(name, "database", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(name, "exportedAtUtc", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(name, "tableCount", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "commentCount", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(name, "commentCount", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "comments", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string FirstColumnValue(DataRow row, params string[] names)

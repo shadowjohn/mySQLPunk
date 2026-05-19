@@ -672,6 +672,17 @@ public static class SmokeTests
         AssertContains(filteredSql, "'O''Reilly'", "SQLite comment import should escape single quotes.");
         AssertNotContains(filteredSql, "logs", "SQLite comment table filter should skip other tables.");
 
+        string flatArrayJson = "[{\"table\":\"users\",\"column\":\"EMAIL\",\"comment\":\"電子郵件\"},{\"table\":\"logs\",\"column\":\"MESSAGE\",\"comment\":\"訊息\"}]";
+        SqliteColumnCommentImportPlan flatArrayPlan = SqliteColumnCommentExchangeService.BuildImportPlan(flatArrayJson, "users");
+        string flatArraySql = string.Join("\n", flatArrayPlan.Statements.ToArray());
+        Assert(flatArrayPlan.TableCount == 1 && flatArrayPlan.CommentCount == 1, "SQLite comment import should support third-party flat array JSON.");
+        AssertContains(flatArraySql, "'EMAIL'", "SQLite comment flat array import should include selected column.");
+        AssertNotContains(flatArraySql, "MESSAGE", "SQLite comment flat array import should honor table filters.");
+
+        string tableColumnArrayJson = "{ \"tables\": [{ \"name\": \"users\", \"columns\": [{ \"name\": \"PHONE\", \"description\": \"電話\" }] }] }";
+        SqliteColumnCommentImportPlan tableColumnArrayPlan = SqliteColumnCommentExchangeService.BuildImportPlan(tableColumnArrayJson);
+        Assert(tableColumnArrayPlan.TableCount == 1 && tableColumnArrayPlan.CommentCount == 1, "SQLite comment import should support table column-array JSON.");
+
         string tempPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
