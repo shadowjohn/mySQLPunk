@@ -8020,8 +8020,9 @@ namespace mySQLPunk
             if (!TryGetSafeSqliteDeletePath(target.ConnectionInfo, target.Database, out fullPath, out reason))
                 throw new InvalidOperationException(reason);
 
+            string backupPath = BuildSqlitePreDeleteBackupPath(fullPath, DateTime.Now);
             DialogResult fileResult = MessageBox.Show(
-                Localization.Format("Database.SqliteConfirmDeleteFile", fullPath),
+                Localization.Format("Database.SqliteConfirmDeleteFile", fullPath, backupPath),
                 Localization.T("Tool.DeleteDatabase"),
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning);
@@ -8042,6 +8043,7 @@ namespace mySQLPunk
                 return;
             }
 
+            string createdBackupPath = CreateSqlitePreDeleteBackup(target.Database as my_sqlite, fullPath, backupPath);
             target.Database.Close();
             System.Data.SQLite.SQLiteConnection.ClearAllPools();
             DeleteSqliteDatabaseFiles(fullPath);
@@ -8059,7 +8061,7 @@ namespace mySQLPunk
             table_top.DataSource = null;
             dgvDetails.DataSource = null;
             rtbDDL.Clear();
-            UpdateMainStatus(Localization.Format("Database.Deleted", target.DatabaseName));
+            UpdateMainStatus(Localization.Format("Database.DeletedWithBackup", target.DatabaseName, createdBackupPath));
         }
 
         private static bool TryGetSafeSqliteDeletePath(Dictionary<string, object> connInfo, IDatabase db, out string fullPath, out string reason)
@@ -8097,6 +8099,56 @@ namespace mySQLPunk
             }
 
             return true;
+        }
+
+        private static string BuildSqlitePreDeleteBackupPath(string fullPath, DateTime timestamp)
+        {
+            string directory = Path.GetDirectoryName(fullPath);
+            string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fullPath);
+            string extension = Path.GetExtension(fullPath);
+            if (string.IsNullOrWhiteSpace(fileNameWithoutExtension)) fileNameWithoutExtension = "sqlite_database";
+            if (string.IsNullOrWhiteSpace(extension)) extension = ".sqlite";
+
+            string stamp = timestamp.ToString("yyyyMMdd_HHmmss");
+            string basePath = Path.Combine(directory, fileNameWithoutExtension + "_before_delete_" + stamp + extension);
+            string candidate = basePath;
+            int suffix = 2;
+            while (File.Exists(candidate))
+            {
+                candidate = Path.Combine(directory, fileNameWithoutExtension + "_before_delete_" + stamp + "_" + suffix + extension);
+                suffix++;
+            }
+
+            return candidate;
+        }
+
+        private static string CreateSqlitePreDeleteBackup(my_sqlite sqlite, string fullPath, string backupPath)
+        {
+            if (sqlite == null) throw new InvalidOperationException(Localization.T("Database.SqliteBackupBeforeDeleteConnectionMissing"));
+            if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath)) throw new FileNotFoundException(Localization.Format("Database.SqliteFileMissing", fullPath), fullPath);
+            if (string.IsNullOrWhiteSpace(backupPath)) throw new ArgumentException("backupPath");
+
+            string backupDir = Path.GetDirectoryName(backupPath);
+            if (!string.IsNullOrWhiteSpace(backupDir) && !Directory.Exists(backupDir))
+            {
+                Directory.CreateDirectory(backupDir);
+            }
+            if (File.Exists(backupPath)) File.Delete(backupPath);
+
+            if (sqlite.MCT != null && sqlite.MCT.State == ConnectionState.Open)
+            {
+                using (System.Data.SQLite.SQLiteConnection destination = new System.Data.SQLite.SQLiteConnection("Data Source=" + backupPath + ";Version=3;"))
+                {
+                    destination.Open();
+                    sqlite.MCT.BackupDatabase(destination, "main", "main", -1, null, 0);
+                }
+            }
+            else
+            {
+                File.Copy(fullPath, backupPath, false);
+            }
+
+            return backupPath;
         }
 
         private static void DeleteSqliteDatabaseFiles(string fullPath)
