@@ -173,6 +173,7 @@
     <Compile Include="lib\DatabaseCopyService.cs" />
     <Compile Include="lib\DatabaseDumpService.cs" />
     <Compile Include="lib\DiagnosticLogService.cs" />
+    <Compile Include="lib\DockableTabOptionService.cs" />
     <Compile Include="lib\IDatabase.cs" />
     <Compile Include="lib\MetadataLoadService.cs" />
     <Compile Include="lib\include.cs" />

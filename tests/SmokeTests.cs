@@ -33,6 +33,7 @@ public static class SmokeTests
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
+        Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -706,6 +707,21 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString("RecordGridFontName", oldGridFontName);
             ApplicationOptionSettings.SetInt("RecordGridFontSize", oldGridFontSize);
         }
+    }
+
+    private static void TestDockableTabOptionService()
+    {
+        Assert(DockableTabOptionService.ResolveDockPreference(true, "main", false), "Main target should dock in the main tab area.");
+        Assert(!DockableTabOptionService.ResolveDockPreference(true, "new", true), "New target should open as a floating window.");
+        Assert(DockableTabOptionService.ResolveDockPreference(false, "last", true), "Last target should reuse docked tabs when tabs already exist.");
+        Assert(!DockableTabOptionService.ResolveDockPreference(false, "last", false), "Last target should keep floating when no docked tab exists.");
+
+        Assert(DockableTabOptionService.ShouldReuseTab(false, "main.users - table data", "main.users - table data", typeof(QueryForm), typeof(QueryForm)),
+            "Duplicate disabled should reuse the same dockable title and type.");
+        Assert(!DockableTabOptionService.ShouldReuseTab(true, "main.users", "main.users", typeof(QueryForm), typeof(QueryForm)),
+            "Duplicate enabled should not reuse tabs.");
+        Assert(!DockableTabOptionService.ShouldReuseTab(false, "main.users", "main.users", typeof(QueryForm), typeof(TableDesignerForm)),
+            "Different dockable types should not be treated as duplicates.");
     }
 
     private static void TestDiagnosticLogService()

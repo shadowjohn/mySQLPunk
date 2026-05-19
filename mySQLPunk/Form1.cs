@@ -3406,6 +3406,10 @@ namespace mySQLPunk
         private void OpenQuery(IDatabase db, string dbName, string host, string initialSql, bool docked)
         {
             QueryForm queryForm = new QueryForm(db, dbName, host, initialSql);
+            docked = DockableTabOptionService.ResolveDockPreference(
+                docked,
+                ApplicationOptionSettings.GetString("IndexOpenTarget"),
+                queryTabs != null && queryTabs.TabPages.Count > 0);
             if (docked)
             {
                 DockDockableForm(queryForm);
@@ -3428,6 +3432,20 @@ namespace mySQLPunk
                 if (tp.Tag == dockable)
                 {
                     queryTabs.SelectedTab = tp;
+                    return;
+                }
+
+                IDockableForm existingDockable = tp.Tag as IDockableForm;
+                if (existingDockable != null &&
+                    DockableTabOptionService.ShouldReuseTab(
+                        ApplicationOptionSettings.GetBool("AllowDuplicateObjects"),
+                        existingDockable.GetDisplayTitle(),
+                        dockable.GetDisplayTitle(),
+                        existingDockable.GetType(),
+                        dockable.GetType()))
+                {
+                    queryTabs.SelectedTab = tp;
+                    f.Dispose();
                     return;
                 }
             }
