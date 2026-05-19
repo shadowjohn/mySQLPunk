@@ -13,6 +13,7 @@ using mySQLPunk.entity;
 using utility;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using MySqlConnector;
 //using MySql.Data.MySqlClient;
 using mySQLPunk.lib;
@@ -130,6 +131,42 @@ namespace mySQLPunk
             public string DbKind;
             public string Username;
             public string Target;
+        }
+
+        private class ConnectionImportPreviewEntry
+        {
+            public bool Include;
+            public string Status;
+            public int ImportedIndex;
+            public int ExistingIndex;
+            public string Key;
+            public string ConnectionName;
+            public string DbKind;
+            public string Target;
+        }
+
+        private class ConnectionImportPreviewReport
+        {
+            public List<Dictionary<string, object>> ImportedConnections { get; } = new List<Dictionary<string, object>>();
+            public List<string> ImportedGroups { get; } = new List<string>();
+            public List<ConnectionImportPreviewEntry> Entries { get; } = new List<ConnectionImportPreviewEntry>();
+            public int Added { get; set; }
+            public int Updated { get; set; }
+            public int Unchanged { get; set; }
+            public int ExistingOnly { get; set; }
+        }
+
+        private enum ConnectionImportMode
+        {
+            Cancel,
+            Replace,
+            Merge
+        }
+
+        private class ConnectionImportDecision
+        {
+            public ConnectionImportMode Mode { get; set; }
+            public HashSet<int> SelectedImportedIndexes { get; } = new HashSet<int>();
         }
 
         private static int GetConnectionIconIndex(string dbKind, bool isConnected)
@@ -1191,16 +1228,21 @@ namespace mySQLPunk
                 dialog.Filter = Localization.T("Connection.JsonFilter");
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-                DialogResult answer = MessageBox.Show(
-                    Localization.T("Connection.ImportReplaceConfirm"),
-                    Localization.T("Common.Confirm"),
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-                if (answer != DialogResult.Yes) return;
-
                 try
                 {
-                    ImportConnectionsFromFile(dialog.FileName);
+                    ConnectionImportPreviewReport preview = BuildConnectionImportPreview(dialog.FileName, myN.connections);
+                    ConnectionImportDecision decision = ShowConnectionImportPreviewDialog(preview);
+                    if (decision == null || decision.Mode == ConnectionImportMode.Cancel) return;
+
+                    if (decision.Mode == ConnectionImportMode.Replace)
+                    {
+                        ImportConnectionsFromFile(dialog.FileName);
+                    }
+                    else
+                    {
+                        MergeImportedConnections(preview, decision.SelectedImportedIndexes);
+                    }
+
                     int savedPasswords = PromptForImportedConnectionPasswords();
                     string message = savedPasswords > 0
                         ? Localization.Format("Status.ConnectionsImportedWithPasswords", savedPasswords)
@@ -1243,6 +1285,201 @@ namespace mySQLPunk
             myN.importConnections(sourcePath);
             drawLists();
             return myN.connections.Count;
+        }
+
+        private void MergeImportedConnections(ConnectionImportPreviewReport preview, HashSet<int> selectedImportedIndexes)
+        {
+            if (preview == null || selectedImportedIndexes == null || selectedImportedIndexes.Count == 0) return;
+
+            CloseAllConnectionsBeforeImport();
+            Dictionary<string, int> existingIndexByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < myN.connections.Count; i++)
+            {
+                string key = BuildConnectionImportKey(myN.connections[i]);
+                if (!existingIndexByKey.ContainsKey(key)) existingIndexByKey[key] = i;
+            }
+
+            foreach (int importedIndex in selectedImportedIndexes.OrderBy(i => i))
+            {
+                if (importedIndex < 0 || importedIndex >= preview.ImportedConnections.Count) continue;
+                Dictionary<string, object> imported = new Dictionary<string, object>(preview.ImportedConnections[importedIndex]);
+                imported["isConnect"] = "F";
+                imported["pdo"] = null;
+                string key = BuildConnectionImportKey(imported);
+                int existingIndex;
+                if (existingIndexByKey.TryGetValue(key, out existingIndex))
+                {
+                    myN.connections[existingIndex] = imported;
+                }
+                else
+                {
+                    myN.connections.Add(imported);
+                    existingIndexByKey[key] = myN.connections.Count - 1;
+                }
+            }
+
+            foreach (string groupName in preview.ImportedGroups)
+            {
+                if (!string.IsNullOrWhiteSpace(groupName) && !myN.groups.Contains(groupName))
+                {
+                    myN.groups.Add(groupName);
+                }
+            }
+
+            myN.setSettingINI();
+            drawLists();
+        }
+
+        private ConnectionImportDecision ShowConnectionImportPreviewDialog(ConnectionImportPreviewReport preview)
+        {
+            using (Form dialog = new Form())
+            using (Label summaryLabel = new Label())
+            using (DataGridView grid = new DataGridView())
+            using (Button replaceButton = new Button())
+            using (Button mergeButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = Localization.T("Connection.ImportPreviewTitle");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.MinimizeBox = false;
+                dialog.ShowInTaskbar = false;
+                dialog.Size = new Size(900, 560);
+                dialog.MinimumSize = new Size(760, 440);
+
+                summaryLabel.Dock = DockStyle.Top;
+                summaryLabel.Height = 72;
+                summaryLabel.Padding = new Padding(12, 10, 12, 8);
+                summaryLabel.Text = Localization.Format(
+                    "Connection.ImportPreviewSummary",
+                    preview?.Added ?? 0,
+                    preview?.Updated ?? 0,
+                    preview?.Unchanged ?? 0,
+                    preview?.ExistingOnly ?? 0);
+
+                DataTable table = BuildConnectionImportPreviewTable(preview);
+                grid.Dock = DockStyle.Fill;
+                grid.AllowUserToAddRows = false;
+                grid.AllowUserToDeleteRows = false;
+                grid.RowHeadersVisible = false;
+                grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                grid.DataSource = table;
+                grid.DataBindingComplete += (s, e) =>
+                {
+                    if (grid.Columns.Contains("_importedIndex")) grid.Columns["_importedIndex"].Visible = false;
+                    if (grid.Columns.Contains("_status")) grid.Columns["_status"].Visible = false;
+                    if (grid.Columns.Contains(Localization.T("Connection.ImportPreviewInclude")))
+                    {
+                        grid.Columns[Localization.T("Connection.ImportPreviewInclude")].Width = 64;
+                        grid.Columns[Localization.T("Connection.ImportPreviewInclude")].AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                    }
+                };
+
+                FlowLayoutPanel footer = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 52,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(8)
+                };
+
+                replaceButton.Text = Localization.T("Connection.ImportPreviewReplaceAll");
+                replaceButton.AutoSize = true;
+                replaceButton.Click += (s, e) =>
+                {
+                    if (MessageBox.Show(Localization.T("Connection.ImportReplaceConfirm"), Localization.T("Common.Confirm"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                    {
+                        dialog.Tag = CreateConnectionImportDecision(ConnectionImportMode.Replace, table);
+                        dialog.DialogResult = DialogResult.OK;
+                    }
+                };
+
+                mergeButton.Text = Localization.T("Connection.ImportPreviewMergeSelected");
+                mergeButton.AutoSize = true;
+                mergeButton.Click += (s, e) =>
+                {
+                    grid.EndEdit();
+                    ConnectionImportDecision decision = CreateConnectionImportDecision(ConnectionImportMode.Merge, table);
+                    if (decision.SelectedImportedIndexes.Count == 0)
+                    {
+                        MessageBox.Show(Localization.T("Connection.ImportPreviewSelectAtLeastOne"), dialog.Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    dialog.Tag = decision;
+                    dialog.DialogResult = DialogResult.OK;
+                };
+
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.AutoSize = true;
+                cancelButton.DialogResult = DialogResult.Cancel;
+                footer.Controls.Add(cancelButton);
+                footer.Controls.Add(mergeButton);
+                footer.Controls.Add(replaceButton);
+
+                dialog.Controls.Add(grid);
+                dialog.Controls.Add(summaryLabel);
+                dialog.Controls.Add(footer);
+                dialog.CancelButton = cancelButton;
+                ThemeManager.ApplyTo(dialog);
+
+                return dialog.ShowDialog(this) == DialogResult.OK
+                    ? dialog.Tag as ConnectionImportDecision
+                    : new ConnectionImportDecision { Mode = ConnectionImportMode.Cancel };
+            }
+        }
+
+        private static DataTable BuildConnectionImportPreviewTable(ConnectionImportPreviewReport preview)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("_importedIndex", typeof(int));
+            table.Columns.Add("_status");
+            table.Columns.Add(Localization.T("Connection.ImportPreviewInclude"), typeof(bool));
+            table.Columns.Add(Localization.T("Connection.ImportPreviewStatus"));
+            table.Columns.Add(Localization.T("Common.ConnectionName"));
+            table.Columns.Add(Localization.T("Common.ConnectionType"));
+            table.Columns.Add(Localization.T("Common.Host"));
+
+            if (preview == null) return table;
+            foreach (ConnectionImportPreviewEntry entry in preview.Entries)
+            {
+                DataRow row = table.NewRow();
+                row["_importedIndex"] = entry.ImportedIndex;
+                row["_status"] = entry.Status;
+                row[Localization.T("Connection.ImportPreviewInclude")] = entry.Include;
+                row[Localization.T("Connection.ImportPreviewStatus")] = FormatConnectionImportPreviewStatus(entry.Status);
+                row[Localization.T("Common.ConnectionName")] = entry.ConnectionName;
+                row[Localization.T("Common.ConnectionType")] = entry.DbKind;
+                row[Localization.T("Common.Host")] = entry.Target;
+                table.Rows.Add(row);
+            }
+            return table;
+        }
+
+        private static ConnectionImportDecision CreateConnectionImportDecision(ConnectionImportMode mode, DataTable table)
+        {
+            ConnectionImportDecision decision = new ConnectionImportDecision { Mode = mode };
+            if (table == null) return decision;
+
+            foreach (DataRow row in table.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                if (row["_importedIndex"] == DBNull.Value) continue;
+                int importedIndex = Convert.ToInt32(row["_importedIndex"]);
+                if (importedIndex < 0) continue;
+                bool include = row[Localization.T("Connection.ImportPreviewInclude")] != DBNull.Value &&
+                               Convert.ToBoolean(row[Localization.T("Connection.ImportPreviewInclude")]);
+                if (include) decision.SelectedImportedIndexes.Add(importedIndex);
+            }
+            return decision;
+        }
+
+        private static string FormatConnectionImportPreviewStatus(string status)
+        {
+            if (string.Equals(status, "added", StringComparison.OrdinalIgnoreCase)) return Localization.T("Connection.ImportPreviewAdded");
+            if (string.Equals(status, "updated", StringComparison.OrdinalIgnoreCase)) return Localization.T("Connection.ImportPreviewUpdated");
+            if (string.Equals(status, "unchanged", StringComparison.OrdinalIgnoreCase)) return Localization.T("Connection.ImportPreviewUnchanged");
+            return Localization.T("Connection.ImportPreviewExistingOnly");
         }
 
         private int PromptForImportedConnectionPasswords()
@@ -8327,6 +8564,197 @@ namespace mySQLPunk
                 return false;
             }
 
+            return true;
+        }
+
+        private static ConnectionImportPreviewReport BuildConnectionImportPreview(string sourcePath, IEnumerable<Dictionary<string, object>> existingConnections)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+            {
+                throw new FileNotFoundException(sourcePath);
+            }
+
+            ConnectionImportPreviewReport report = new ConnectionImportPreviewReport();
+            LoadConnectionImportFile(sourcePath, report.ImportedConnections, report.ImportedGroups);
+
+            List<Dictionary<string, object>> existing = existingConnections == null
+                ? new List<Dictionary<string, object>>()
+                : existingConnections.ToList();
+            Dictionary<string, int> existingIndexByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < existing.Count; i++)
+            {
+                string key = BuildConnectionImportKey(existing[i]);
+                if (!existingIndexByKey.ContainsKey(key)) existingIndexByKey[key] = i;
+            }
+
+            HashSet<int> matchedExisting = new HashSet<int>();
+            for (int i = 0; i < report.ImportedConnections.Count; i++)
+            {
+                Dictionary<string, object> imported = report.ImportedConnections[i];
+                string key = BuildConnectionImportKey(imported);
+                int existingIndex;
+                bool hasExisting = existingIndexByKey.TryGetValue(key, out existingIndex);
+                string status;
+                bool include = true;
+
+                if (!hasExisting)
+                {
+                    status = "added";
+                    report.Added++;
+                }
+                else
+                {
+                    matchedExisting.Add(existingIndex);
+                    if (ConnectionImportEquivalent(existing[existingIndex], imported))
+                    {
+                        status = "unchanged";
+                        include = false;
+                        report.Unchanged++;
+                    }
+                    else
+                    {
+                        status = "updated";
+                        report.Updated++;
+                    }
+                }
+
+                report.Entries.Add(new ConnectionImportPreviewEntry
+                {
+                    Include = include,
+                    Status = status,
+                    ImportedIndex = i,
+                    ExistingIndex = hasExisting ? existingIndex : -1,
+                    Key = key,
+                    ConnectionName = GetConnectionValue(imported, "conn_name"),
+                    DbKind = GetConnectionValue(imported, "db_kind"),
+                    Target = BuildImportedConnectionPasswordTargetText(imported)
+                });
+            }
+
+            for (int i = 0; i < existing.Count; i++)
+            {
+                if (matchedExisting.Contains(i)) continue;
+                report.ExistingOnly++;
+                Dictionary<string, object> conn = existing[i];
+                report.Entries.Add(new ConnectionImportPreviewEntry
+                {
+                    Include = false,
+                    Status = "existingOnly",
+                    ImportedIndex = -1,
+                    ExistingIndex = i,
+                    Key = BuildConnectionImportKey(conn),
+                    ConnectionName = GetConnectionValue(conn, "conn_name"),
+                    DbKind = GetConnectionValue(conn, "db_kind"),
+                    Target = BuildImportedConnectionPasswordTargetText(conn)
+                });
+            }
+
+            return report;
+        }
+
+        private static void LoadConnectionImportFile(string sourcePath, List<Dictionary<string, object>> connections, List<string> groups)
+        {
+            JToken root = JToken.Parse(File.ReadAllText(sourcePath, Encoding.UTF8));
+            if (root.Type == JTokenType.Array)
+            {
+                foreach (JToken token in (JArray)root) AddImportedConnectionToken(token, connections);
+                return;
+            }
+
+            JObject obj = root as JObject;
+            if (obj == null) return;
+            JArray connArray = obj["connections"] as JArray;
+            if (connArray != null)
+            {
+                foreach (JToken token in connArray) AddImportedConnectionToken(token, connections);
+            }
+
+            JArray groupArray = obj["groups"] as JArray;
+            if (groupArray != null)
+            {
+                foreach (JToken token in groupArray)
+                {
+                    string groupName = token.ToString();
+                    if (!string.IsNullOrWhiteSpace(groupName) && !groups.Contains(groupName)) groups.Add(groupName);
+                }
+            }
+        }
+
+        private static void AddImportedConnectionToken(JToken token, List<Dictionary<string, object>> connections)
+        {
+            if (token == null) return;
+            if (token.Type == JTokenType.Array)
+            {
+                foreach (JToken child in (JArray)token) AddImportedConnectionToken(child, connections);
+                return;
+            }
+
+            Dictionary<string, object> conn = token.ToObject<Dictionary<string, object>>();
+            if (conn == null) return;
+            NormalizeImportedConnectionForPreview(conn);
+            connections.Add(conn);
+        }
+
+        private static void NormalizeImportedConnectionForPreview(Dictionary<string, object> conn)
+        {
+            CopyImportedConnectionValueIfMissing(conn, "name", "conn_name");
+            CopyImportedConnectionValueIfMissing(conn, "ip", "host");
+            CopyImportedConnectionValueIfMissing(conn, "kind", "db_kind");
+            CopyImportedConnectionValueIfMissing(conn, "login_id", "username");
+
+            if (!conn.ContainsKey("initial_database")) conn["initial_database"] = "";
+            if (!conn.ContainsKey("trusted_connection")) conn["trusted_connection"] = "F";
+            if (!conn.ContainsKey("conn_group")) conn["conn_group"] = "";
+            if (!conn.ContainsKey("credential_target")) conn["credential_target"] = "";
+            conn["username"] = TryDecryptConnectionImportValue(GetConnectionValue(conn, "username"));
+            conn["pwd"] = TryDecryptConnectionImportValue(GetConnectionValue(conn, "pwd"));
+            conn["isConnect"] = "F";
+            conn["pdo"] = null;
+        }
+
+        private static void CopyImportedConnectionValueIfMissing(Dictionary<string, object> conn, string oldKey, string newKey)
+        {
+            if (!conn.ContainsKey(newKey) && conn.ContainsKey(oldKey)) conn[newKey] = conn[oldKey];
+        }
+
+        private static string TryDecryptConnectionImportValue(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            try { return Crypto.Decrypt(value); }
+            catch { return value; }
+        }
+
+        private static string BuildConnectionImportKey(Dictionary<string, object> conn)
+        {
+            return string.Join("|", new[]
+            {
+                GetConnectionValue(conn, "conn_name"),
+                GetConnectionValue(conn, "db_kind"),
+                GetConnectionValue(conn, "host"),
+                GetConnectionValue(conn, "port"),
+                GetConnectionValue(conn, "path"),
+                GetConnectionValue(conn, "username"),
+                GetConnectionValue(conn, "tns_name"),
+                GetConnectionValue(conn, "service_name"),
+                GetConnectionValue(conn, "sid")
+            }).ToLowerInvariant();
+        }
+
+        private static bool ConnectionImportEquivalent(Dictionary<string, object> left, Dictionary<string, object> right)
+        {
+            string[] keys =
+            {
+                "conn_name", "db_kind", "host", "port", "initial_database", "path",
+                "username", "trusted_connection", "init_geospatial", "connection_type",
+                "tns_name", "service_name", "sid", "oracle_identifier_type", "conn_group"
+            };
+            foreach (string key in keys)
+            {
+                if (!string.Equals(GetConnectionValue(left, key), GetConnectionValue(right, key), StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
             return true;
         }
 

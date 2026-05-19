@@ -81,7 +81,7 @@ Smoke test harness：
 
 ### Provider 與資料庫操作限制
 
-- **命令列介面依賴本機 CLI ✅ 偵測與匯入後補密碼已補齊**
+- **命令列介面依賴本機 CLI ✅ 偵測、匯入預覽與匯入後補密碼已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
   - 完成內容：
     - 已加入 CLI 可用性偵測（先透過 `where.exe`，再掃描 `PATH`）。找不到時會顯示安裝說明連結，不會直接開啟空白終端機。
@@ -89,8 +89,9 @@ Smoke test harness：
     - 已補上密碼傳遞策略：MySQL、PostgreSQL、SQL Server 會透過 `MYSQL_PWD`、`PGPASSWORD`、`SQLCMDPASSWORD` 環境變數傳給 CLI，不把密碼寫進命令列參數；未儲存密碼時仍會保留 CLI 互動式密碼提示。Oracle `sqlplus` 目前仍採互動式密碼輸入，避免把密碼放進連線字串。
     - 連線密碼會儲存在 Windows Credential Manager；舊版 `setting.ini` / profile JSON 中的加密 `pwd` 會在讀取時自動遷移到 credential，並重寫設定檔清空 `pwd`。編輯連線時若清空密碼欄位，會同步清除對應 credential。
     - 未儲存密碼時，MySQL、PostgreSQL、SQL Server 會在開啟 CLI 前顯示一次性密碼輸入框；輸入的密碼只放入本次 process environment，不會回寫到連線設定或設定檔。
+    - 匯入連線設定前會顯示差異預覽，依新增、更新、不變與只存在目前設定分類；使用者可選擇整包取代，也可只合併勾選的匯入連線，保留未勾選與本機既有連線。
     - 匯入連線設定後，若偵測到 MySQL、PostgreSQL、Oracle 或非 Windows 驗證的 SQL Server 連線缺少密碼，會詢問是否開啟批次補密碼視窗；使用者可一次補多筆密碼，密碼只會寫入 Windows Credential Manager，不會出現在匯入檔或設定檔明文中。
-  - 後續方向：若要進一步強化跨機匯入，可再加入匯入前差異預覽與選擇性合併。
+  - 後續方向：若要進一步強化跨機匯入，可再加入匯入來源簽章或團隊共享設定審核流程。
 
 - **部分連線類型尚未支援編輯 ✅ 已完成**
   - 現況：MySQL、PostgreSQL、Oracle、SQLite、SQL Server 五種 provider 均有對應的編輯表單（template form）。

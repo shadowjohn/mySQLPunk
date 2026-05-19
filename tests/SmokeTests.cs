@@ -4,6 +4,7 @@ using System.Data;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Serialization;
+using System.Text;
 using System.Windows.Forms;
 using mySQLPunk;
 using mySQLPunk.lib;
@@ -468,6 +469,7 @@ public static class SmokeTests
         MethodInfo needsPasswordMethod = typeof(Form1).GetMethod("ConnectionNeedsPasswordAfterImport", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo targetTextMethod = typeof(Form1).GetMethod("BuildImportedConnectionPasswordTargetText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo collectMethod = typeof(Form1).GetMethod("CollectImportedConnectionPasswords", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo previewMethod = typeof(Form1).GetMethod("BuildConnectionImportPreview", BindingFlags.Static | BindingFlags.NonPublic);
 
         Dictionary<string, object> mysqlConn = new Dictionary<string, object>
         {
@@ -506,6 +508,38 @@ public static class SmokeTests
         passwordTable.Rows.Add(2, "secret-c");
         var collected = (Dictionary<int, string>)collectMethod.Invoke(null, new object[] { passwordTable });
         Assert(collected.Count == 2 && collected[0] == "secret-a" && collected[2] == "secret-c", "Imported password collector should skip blank rows.");
+
+        string importPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_import_preview_" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(importPath, @"{
+  ""connections"": [
+    { ""conn_name"": ""same"", ""db_kind"": ""mysql"", ""host"": ""localhost"", ""port"": ""3306"", ""username"": ""u"", ""initial_database"": ""main"" },
+    { ""conn_name"": ""changed"", ""db_kind"": ""mysql"", ""host"": ""localhost"", ""port"": ""3306"", ""username"": ""u"", ""initial_database"": ""next"" },
+    { ""conn_name"": ""new"", ""db_kind"": ""postgresql"", ""host"": ""pg"", ""port"": ""5432"", ""username"": ""pguser"" }
+  ],
+  ""groups"": [""imported""]
+}", Encoding.UTF8);
+
+            List<Dictionary<string, object>> existing = new List<Dictionary<string, object>>
+            {
+                new Dictionary<string, object> { { "conn_name", "same" }, { "db_kind", "mysql" }, { "host", "localhost" }, { "port", "3306" }, { "username", "u" }, { "initial_database", "main" }, { "trusted_connection", "F" }, { "conn_group", "" } },
+                new Dictionary<string, object> { { "conn_name", "changed" }, { "db_kind", "mysql" }, { "host", "localhost" }, { "port", "3306" }, { "username", "u" }, { "initial_database", "old" }, { "trusted_connection", "F" }, { "conn_group", "" } },
+                new Dictionary<string, object> { { "conn_name", "local-only" }, { "db_kind", "sqlite" }, { "path", "D:\\data\\main.sqlite" }, { "trusted_connection", "F" }, { "conn_group", "" } }
+            };
+
+            object report = previewMethod.Invoke(null, new object[] { importPath, existing });
+            Assert((int)GetProperty(report, "Added") == 1, "Import preview should count added connections.");
+            Assert((int)GetProperty(report, "Updated") == 1, "Import preview should count updated connections.");
+            Assert((int)GetProperty(report, "Unchanged") == 1, "Import preview should count unchanged connections.");
+            Assert((int)GetProperty(report, "ExistingOnly") == 1, "Import preview should count existing-only connections.");
+            var importedGroups = (System.Collections.ICollection)GetProperty(report, "ImportedGroups");
+            Assert(importedGroups.Count == 1, "Import preview should keep imported groups for merge.");
+        }
+        finally
+        {
+            if (File.Exists(importPath)) File.Delete(importPath);
+        }
     }
 
     private static DataTable CreateNamedRowsTable(string columnName, string value)

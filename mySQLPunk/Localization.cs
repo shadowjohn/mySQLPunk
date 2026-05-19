@@ -277,6 +277,17 @@ namespace mySQLPunk
             Add("Connection.ImportPasswordDescription", "請在需要補密碼的連線列輸入密碼；留空的列會略過。密碼只會存入 Windows Credential Manager，不會寫入匯入檔。", "Enter passwords for the imported connections that need them; blank rows are skipped. Passwords are stored only in Windows Credential Manager, not in the import file.");
             Add("Connection.ImportPasswordSave", "儲存密碼", "Save Passwords");
             Add("Status.ConnectionsImportedWithPasswords", "連線設定已匯入，並已保存 {0} 筆密碼。", "Connections imported and {0} passwords saved.");
+            Add("Connection.ImportPreviewTitle", "匯入連線差異預覽", "Connection Import Preview");
+            Add("Connection.ImportPreviewSummary", "新增：{0}　更新：{1}　不變：{2}　只存在目前設定：{3}", "Added: {0}  Updated: {1}  Unchanged: {2}  Existing only: {3}");
+            Add("Connection.ImportPreviewInclude", "合併", "Merge");
+            Add("Connection.ImportPreviewStatus", "狀態", "Status");
+            Add("Connection.ImportPreviewAdded", "新增", "Added");
+            Add("Connection.ImportPreviewUpdated", "更新", "Updated");
+            Add("Connection.ImportPreviewUnchanged", "不變", "Unchanged");
+            Add("Connection.ImportPreviewExistingOnly", "只存在目前設定", "Existing Only");
+            Add("Connection.ImportPreviewReplaceAll", "取代全部", "Replace All");
+            Add("Connection.ImportPreviewMergeSelected", "合併勾選項目", "Merge Selected");
+            Add("Connection.ImportPreviewSelectAtLeastOne", "請至少勾選一筆要合併的匯入連線。", "Select at least one imported connection to merge.");
             Add("Backup.Title", "建立備份", "Create Backup");
             Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
             Add("Backup.Success", "備份已建立。", "Backup created.");
