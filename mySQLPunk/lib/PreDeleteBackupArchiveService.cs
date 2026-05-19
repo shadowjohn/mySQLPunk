@@ -10,14 +10,15 @@ namespace mySQLPunk.lib
     {
         public const int DefaultRetainCount = 20;
         public const string BackupArchivePattern = "*_before_delete_*.zip";
+        public const string PreRestoreBackupArchivePattern = "*_before_restore_*.zip";
 
-        public static string ArchiveAndPrune(string sourcePath, int retainCount = DefaultRetainCount)
+        public static string ArchiveAndPrune(string sourcePath, int retainCount = DefaultRetainCount, string searchPattern = BackupArchivePattern)
         {
             string archivePath = ArchiveBackupFile(sourcePath);
             string directory = Path.GetDirectoryName(archivePath);
             if (!string.IsNullOrWhiteSpace(directory))
             {
-                PruneOldArchives(directory, BackupArchivePattern, retainCount);
+                PruneOldArchives(directory, searchPattern, retainCount);
             }
             return archivePath;
         }

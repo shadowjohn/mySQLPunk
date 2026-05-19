@@ -106,8 +106,8 @@ Smoke test harness：
     - SQLite：資料庫為獨立檔案；刪除時會解析連線檔案路徑、確認檔案存在且不是目錄，並要求再次輸入完整檔名後才會先建立刪除前備份，再關閉連線、清除 SQLite connection pool，並將 `.sqlite`、`-wal`、`-shm`、`-journal` 檔案移到資源回收筒；若檔案系統不支援資源回收筒，才會 fallback 成直接刪除。
     - MySQL / PostgreSQL / SQL Server / Oracle：刪除前會詢問是否先建立邏輯 SQL 備份，預設輸出到文件目錄的 `mySQLPunk/pre-delete-backups`；選擇備份時若建立失敗，刪除會中止，不會直接執行 `DROP DATABASE` 或 `DROP USER ... CASCADE`。
     - 刪除前備份建立成功後會自動封存為 `.zip`，zip 內保留原始 `.sql` 或 SQLite 備份檔名；封存成功後會移除未壓縮暫存檔，並在同目錄保留最近 20 份 `*_before_delete_*.zip`，降低備份目錄長期膨脹風險。
-    - 還原支援：資料庫與 Backups 節點右鍵可開啟「還原備份」，支援 `.sql` 與含 `.sql` 的 `.zip`，還原前會顯示 SQL 語句數、大小與目標資料庫，確認後才沿用 SQL 匯入執行器套用。
-  - 後續方向：若需要更完整的資料保護，可再加入遠端備份目的地或還原前建立自動快照。
+    - 還原支援：資料庫與 Backups 節點右鍵可開啟「還原備份」，支援 `.sql` 與含 `.sql` 的 `.zip`；還原前會顯示 SQL 語句數、大小與目標資料庫，確認後會先建立還原前快照並壓縮保存到 `mySQLPunk/pre-restore-backups`，快照成功後才沿用 SQL 匯入執行器套用。
+  - 後續方向：若需要更完整的資料保護，可再加入遠端備份目的地或還原後差異檢查。
 
 - **SQLite 欄位註解不支援 ✅ sidecar metadata 與交換格式已補齊**
   - 現況：SQLite 本身沒有欄位註解語法，因此 mySQLPunk 會使用 `__mysqlpunk_column_comments` sidecar metadata table 保存欄位註解。

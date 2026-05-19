@@ -296,6 +296,13 @@ public static class SmokeTests
         AssertContains(path, "mySQLPunk", "Pre-delete backup path should live under the mySQLPunk backup directory.");
         AssertContains(path, "pre-delete-backups", "Pre-delete backup path should use the pre-delete backup directory.");
         AssertContains(path, "sales_db_2026_mysql_before_delete_20260519_080706.sql", "Pre-delete backup file name should be deterministic and sanitized.");
+
+        MethodInfo restoreBuildMethod = typeof(Form1).GetMethod("BuildPreRestoreBackupPath", BindingFlags.Static | BindingFlags.NonPublic);
+        string sqliteRestorePath = (string)restoreBuildMethod.Invoke(null, new object[] { "main/db", "sqlite", new DateTime(2026, 5, 19, 8, 7, 6) });
+        string mysqlRestorePath = (string)restoreBuildMethod.Invoke(null, new object[] { "main/db", "mysql", new DateTime(2026, 5, 19, 8, 7, 6) });
+        AssertContains(sqliteRestorePath, "pre-restore-backups", "Pre-restore backup path should use the pre-restore backup directory.");
+        AssertContains(sqliteRestorePath, "main_db_sqlite_before_restore_20260519_080706.sqlite", "SQLite pre-restore backup should keep a SQLite file extension.");
+        AssertContains(mysqlRestorePath, "main_db_mysql_before_restore_20260519_080706.sql", "Logical pre-restore backup should use SQL extension.");
     }
 
     private static void TestPreDeleteBackupArchiveService()
@@ -328,6 +335,15 @@ public static class SmokeTests
             int remaining = Directory.GetFiles(dir, PreDeleteBackupArchiveService.BackupArchivePattern).Length;
             Assert(deleted >= 3, "Prune service should delete archives beyond retention count.");
             Assert(remaining == 3, "Prune service should keep only the retention count.");
+
+            string restoreSqlPath = Path.Combine(dir, "main_mysql_before_restore_20260519_080706.sql");
+            File.WriteAllText(restoreSqlPath, "SELECT 2;", Encoding.UTF8);
+            string restoreArchivePath = PreDeleteBackupArchiveService.ArchiveAndPrune(
+                restoreSqlPath,
+                2,
+                PreDeleteBackupArchiveService.PreRestoreBackupArchivePattern);
+            Assert(File.Exists(restoreArchivePath), "Archive service should create pre-restore zip archives.");
+            Assert(Path.GetFileName(restoreArchivePath).Contains("before_restore"), "Pre-restore archive should keep the restore marker.");
         }
         finally
         {

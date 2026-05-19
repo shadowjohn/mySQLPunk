@@ -304,7 +304,10 @@ namespace mySQLPunk
             Add("Backup.RestoreFileFilter", "SQL / ZIP 備份 (*.sql;*.zip)|*.sql;*.zip|SQL 檔案 (*.sql)|*.sql|ZIP 備份 (*.zip)|*.zip|所有檔案 (*.*)|*.*", "SQL / ZIP backups (*.sql;*.zip)|*.sql;*.zip|SQL files (*.sql)|*.sql|ZIP backups (*.zip)|*.zip|All files (*.*)|*.*");
             Add("Backup.RestoreConfirm", "即將還原備份：\n{0}\n\nSQL 語句數：{1}\n大小：{2}\n目標資料庫：{3}\n\n還原會直接執行 SQL，可能覆蓋或刪除現有資料。是否繼續？", "Restore backup:\n{0}\n\nSQL statements: {1}\nSize: {2}\nTarget database: {3}\n\nRestore executes SQL directly and may overwrite or delete existing data. Continue?");
             Add("Backup.RestoreSuccess", "備份還原完成。執行語句數：{0}", "Backup restore completed. Statements executed: {0}");
+            Add("Backup.RestoreSuccessWithSnapshot", "備份還原完成。執行語句數：{0}\n還原前快照：{1}", "Backup restore completed. Statements executed: {0}\nPre-restore snapshot: {1}");
             Add("Backup.RestoreFailed", "還原備份失敗：{0}", "Backup restore failed: {0}");
+            Add("Backup.RestoreSafetyBackupCreated", "還原前快照已建立：{0}", "Pre-restore snapshot created: {0}");
+            Add("Backup.RestoreSafetyBackupFailedCancelled", "建立還原前快照失敗，已取消還原：{0}", "Failed to create pre-restore snapshot; restore canceled: {0}");
             Add("Database.NewTitle", "新增資料庫", "New Database");
             Add("Database.NewPrompt", "資料庫名稱:", "Database name:");
             Add("Database.NameRequired", "請輸入資料庫名稱。", "Enter a database name.");

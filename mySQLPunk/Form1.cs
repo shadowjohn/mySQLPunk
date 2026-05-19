@@ -3925,8 +3925,9 @@ namespace mySQLPunk
                         return;
                     }
 
+                    string safetyBackupPath = CreatePreRestoreSafetyBackup(target);
                     int executed = ImportSqlScript(target, package.Script);
-                    string message = Localization.Format("Backup.RestoreSuccess", executed);
+                    string message = Localization.Format("Backup.RestoreSuccessWithSnapshot", executed, safetyBackupPath);
                     MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     UpdateMainStatus(message);
                 }
@@ -3936,6 +3937,25 @@ namespace mySQLPunk
                     MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                     UpdateMainStatus(message);
                 }
+            }
+        }
+
+        private string CreatePreRestoreSafetyBackup(TreeDatabaseTarget target)
+        {
+            string backupPath = BuildPreRestoreBackupPath(target.DatabaseName, target.Database.ProviderName, DateTime.Now);
+            try
+            {
+                CreateDatabaseBackup(target, backupPath);
+                string archivePath = PreDeleteBackupArchiveService.ArchiveAndPrune(
+                    backupPath,
+                    PreDeleteBackupArchiveService.DefaultRetainCount,
+                    PreDeleteBackupArchiveService.PreRestoreBackupArchivePattern);
+                UpdateMainStatus(Localization.Format("Backup.RestoreSafetyBackupCreated", archivePath));
+                return archivePath;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(Localization.Format("Backup.RestoreSafetyBackupFailedCancelled", ex.Message), ex);
             }
         }
 
@@ -9090,6 +9110,19 @@ namespace mySQLPunk
             string safeProviderName = SanitizeBackupFileNamePart(providerName);
             string stamp = timestamp.ToString("yyyyMMdd_HHmmss");
             string fileName = safeDatabaseName + "_" + safeProviderName + "_before_delete_" + stamp + ".sql";
+            return BuildUniqueFilePath(directory, fileName);
+        }
+
+        private static string BuildPreRestoreBackupPath(string databaseName, string providerName, DateTime timestamp)
+        {
+            string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (string.IsNullOrWhiteSpace(documents)) documents = AppDomain.CurrentDomain.BaseDirectory;
+            string directory = Path.Combine(documents, "mySQLPunk", "pre-restore-backups");
+            string safeDatabaseName = SanitizeBackupFileNamePart(databaseName);
+            string safeProviderName = SanitizeBackupFileNamePart(providerName);
+            string stamp = timestamp.ToString("yyyyMMdd_HHmmss");
+            string extension = string.Equals(providerName, "sqlite", StringComparison.OrdinalIgnoreCase) ? ".sqlite" : ".sql";
+            string fileName = safeDatabaseName + "_" + safeProviderName + "_before_restore_" + stamp + extension;
             return BuildUniqueFilePath(directory, fileName);
         }
 
