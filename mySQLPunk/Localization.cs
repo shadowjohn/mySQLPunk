@@ -308,6 +308,9 @@ namespace mySQLPunk
             Add("Database.SqliteUnsafePath", "SQLite 檔案路徑不安全，已取消刪除：{0}", "SQLite file path is unsafe. Delete cancelled: {0}");
             Add("Database.Deleted", "資料庫已刪除：{0}", "Database deleted: {0}");
             Add("Database.DeletedWithBackup", "資料庫已刪除：{0}；刪除前備份：{1}", "Database deleted: {0}; pre-delete backup: {1}");
+            Add("Database.PreDeleteBackupPrompt", "即將刪除資料庫「{0}」。是否要先建立刪除前 SQL 備份？\n\n備份位置：\n{1}\n\n選擇「是」會先備份再刪除；若備份失敗，刪除會中止。\n選擇「否」會不備份直接刪除。", "Database \"{0}\" is about to be deleted. Create a pre-delete SQL backup first?\n\nBackup path:\n{1}\n\nYes backs up first, then deletes. If backup fails, deletion is cancelled.\nNo deletes without backup.");
+            Add("Database.PreDeleteBackupCreated", "刪除前備份已建立：{0}", "Pre-delete backup created: {0}");
+            Add("Database.PreDeleteBackupFailedCancelled", "刪除前備份失敗，已取消刪除：{0}", "Pre-delete backup failed. Delete cancelled: {0}");
             Add("Database.SqliteBackupBeforeDeleteConnectionMissing", "無法取得 SQLite 連線，已取消刪除前備份。", "Cannot get the SQLite connection. Pre-delete backup cancelled.");
             Add("Database.DeleteFailed", "刪除資料庫失敗：{0}", "Delete database failed: {0}");
             Add("Database.AutoCommentsConfirm", "要掃描資料庫「{0}」的全部資料表，並補上空白欄位註解嗎？", "Scan every table in database \"{0}\" and fill blank column comments?");

@@ -7999,6 +7999,12 @@ namespace mySQLPunk
                     return;
                 }
 
+                string createdBackupPath;
+                if (!ConfirmAndCreatePreDeleteBackup(target, out createdBackupPath))
+                {
+                    return;
+                }
+
                 string sql = BuildDropDatabaseSql(target.Database, target.DatabaseName);
                 Dictionary<string, string> execResult = target.Database.ExecSQL(sql);
                 if (!execResult.ContainsKey("status") || execResult["status"] != "OK")
@@ -8011,7 +8017,9 @@ namespace mySQLPunk
                 while (root.Parent != null) root = root.Parent;
                 target.DatabaseNode.Remove();
                 db_tree.SelectedNode = root;
-                UpdateMainStatus(Localization.Format("Database.Deleted", target.DatabaseName));
+                UpdateMainStatus(string.IsNullOrWhiteSpace(createdBackupPath)
+                    ? Localization.Format("Database.Deleted", target.DatabaseName)
+                    : Localization.Format("Database.DeletedWithBackup", target.DatabaseName, createdBackupPath));
             }
             catch (Exception ex)
             {
@@ -8072,6 +8080,38 @@ namespace mySQLPunk
             UpdateMainStatus(Localization.Format("Database.DeletedWithBackup", target.DatabaseName, createdBackupPath));
         }
 
+        private bool ConfirmAndCreatePreDeleteBackup(TreeDatabaseTarget target, out string createdBackupPath)
+        {
+            createdBackupPath = string.Empty;
+            if (target == null || target.Database == null) return false;
+
+            string backupPath = BuildLogicalPreDeleteBackupPath(target.DatabaseName, target.Database.ProviderName, DateTime.Now);
+            DialogResult backupResult = MessageBox.Show(
+                Localization.Format("Database.PreDeleteBackupPrompt", target.DatabaseName, backupPath),
+                Localization.T("Tool.DeleteDatabase"),
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button1);
+
+            if (backupResult == DialogResult.Cancel) return false;
+            if (backupResult == DialogResult.No) return true;
+
+            try
+            {
+                CreateDatabaseBackup(target, backupPath);
+                createdBackupPath = backupPath;
+                UpdateMainStatus(Localization.Format("Database.PreDeleteBackupCreated", backupPath));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                string message = Localization.Format("Database.PreDeleteBackupFailedCancelled", ex.Message);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
         private static bool TryGetSafeSqliteDeletePath(Dictionary<string, object> connInfo, IDatabase db, out string fullPath, out string reason)
         {
             fullPath = string.Empty;
@@ -8107,6 +8147,63 @@ namespace mySQLPunk
             }
 
             return true;
+        }
+
+        private static string BuildLogicalPreDeleteBackupPath(string databaseName, string providerName, DateTime timestamp)
+        {
+            string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (string.IsNullOrWhiteSpace(documents)) documents = AppDomain.CurrentDomain.BaseDirectory;
+            string directory = Path.Combine(documents, "mySQLPunk", "pre-delete-backups");
+            string safeDatabaseName = SanitizeBackupFileNamePart(databaseName);
+            string safeProviderName = SanitizeBackupFileNamePart(providerName);
+            string stamp = timestamp.ToString("yyyyMMdd_HHmmss");
+            string fileName = safeDatabaseName + "_" + safeProviderName + "_before_delete_" + stamp + ".sql";
+            return BuildUniqueFilePath(directory, fileName);
+        }
+
+        private static string SanitizeBackupFileNamePart(string value)
+        {
+            string text = (value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(text)) text = "database";
+
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            StringBuilder builder = new StringBuilder();
+            foreach (char ch in text)
+            {
+                bool invalid = false;
+                foreach (char invalidChar in invalidChars)
+                {
+                    if (ch == invalidChar)
+                    {
+                        invalid = true;
+                        break;
+                    }
+                }
+
+                builder.Append(invalid || char.IsWhiteSpace(ch) ? '_' : ch);
+            }
+
+            string result = builder.ToString().Trim('_');
+            return string.IsNullOrWhiteSpace(result) ? "database" : result;
+        }
+
+        private static string BuildUniqueFilePath(string directory, string fileName)
+        {
+            string basePath = Path.Combine(directory, fileName);
+            if (!File.Exists(basePath)) return basePath;
+
+            string name = Path.GetFileNameWithoutExtension(fileName);
+            string extension = Path.GetExtension(fileName);
+            int suffix = 2;
+            string candidate;
+            do
+            {
+                candidate = Path.Combine(directory, name + "_" + suffix + extension);
+                suffix++;
+            }
+            while (File.Exists(candidate));
+
+            return candidate;
         }
 
         private static string BuildSqlitePreDeleteBackupPath(string fullPath, DateTime timestamp)

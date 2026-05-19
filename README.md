@@ -93,12 +93,13 @@ Smoke test harness：
   - 完成內容：已修正編輯連線後 `conn_group` 欄位消失的問題——`update_connection` 現在會自動保留原連線的群組歸屬。
   - 後續方向：非上列 provider 的連線（未來擴充）仍會顯示「此連線類型尚未支援編輯」。
 
-- **由主機節點新增/刪除資料庫只支援部分 provider ✅ Oracle Schema 精靈已補齊**
+- **由主機節點新增/刪除資料庫只支援部分 provider ✅ 高風險刪除備份已補齊**
   - 現況：MySQL、PostgreSQL、SQL Server 支援從連線節點新增 / 刪除資料庫。
   - 完成內容：
     - Oracle：新增資料庫會開啟 Oracle Schema 精靈，輸入使用者、密碼、預設/暫存 Tablespace 後依序執行 `CREATE USER`、`ALTER USER ... QUOTA` 與常用物件建立權限 grant；需使用具備建立 user 權限的帳戶。
     - Oracle：刪除資料庫會使用 `DROP USER ... CASCADE`，執行前會先顯示高風險提示並要求再次輸入完整 Schema 名稱；SYS、SYSTEM、XDB、CTXSYS、MDSYS 等系統 Schema 會被阻擋。
     - SQLite：資料庫為獨立檔案；刪除時會解析連線檔案路徑、確認檔案存在且不是目錄，並要求再次輸入完整檔名後才會先建立刪除前備份，再關閉連線、清除 SQLite connection pool，並將 `.sqlite`、`-wal`、`-shm`、`-journal` 檔案移到資源回收筒；若檔案系統不支援資源回收筒，才會 fallback 成直接刪除。
+    - MySQL / PostgreSQL / SQL Server / Oracle：刪除前會詢問是否先建立邏輯 SQL 備份，預設輸出到文件目錄的 `mySQLPunk/pre-delete-backups`；選擇備份時若建立失敗，刪除會中止，不會直接執行 `DROP DATABASE` 或 `DROP USER ... CASCADE`。
   - 後續方向：若需要更完整的資料保護，可再加入多版本備份保留策略或刪除前壓縮封存。
 
 - **SQLite 欄位註解不支援 ✅ sidecar metadata 已補齊**

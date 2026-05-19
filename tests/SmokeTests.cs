@@ -18,6 +18,7 @@ public static class SmokeTests
         Run("SQLite 專用物件 SQL builder", TestSqliteSpecialObjectSqlBuilder, ref passed);
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
         Run("Table Designer ALTER provider matrix", TestTableDesignerAlterProviderMatrix, ref passed);
+        Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
     }
@@ -268,6 +269,16 @@ public static class SmokeTests
         AssertContains(sqliteSql, "DROP TABLE \"demo_table\"", "SQLite ALTER should drop the old table during rebuild.");
         AssertContains(sqliteSql, "RENAME TO \"demo_table\"", "SQLite ALTER should rename the rebuild table back.");
         AssertContains(sqliteSql, "__mysqlpunk_column_comments", "SQLite ALTER should preserve sidecar comments.");
+    }
+
+    private static void TestPreDeleteBackupPathBuilder()
+    {
+        MethodInfo buildMethod = typeof(Form1).GetMethod("BuildLogicalPreDeleteBackupPath", BindingFlags.Static | BindingFlags.NonPublic);
+        string path = (string)buildMethod.Invoke(null, new object[] { "sales db:2026", "mysql", new DateTime(2026, 5, 19, 8, 7, 6) });
+
+        AssertContains(path, "mySQLPunk", "Pre-delete backup path should live under the mySQLPunk backup directory.");
+        AssertContains(path, "pre-delete-backups", "Pre-delete backup path should use the pre-delete backup directory.");
+        AssertContains(path, "sales_db_2026_mysql_before_delete_20260519_080706.sql", "Pre-delete backup file name should be deterministic and sanitized.");
     }
 
     private static string BuildExistingAlterSql(IDatabase db, string databaseName, string tableName, DataTable originalColumns, DataTable currentColumns, string methodName)
