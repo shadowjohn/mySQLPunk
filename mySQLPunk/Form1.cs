@@ -6110,9 +6110,7 @@ namespace mySQLPunk
                 AppendDatabaseEventsFromQuery(events, db, BuildPostgreSqlTriggerMetadataSql());
                 if (events.Rows.Count == 0)
                 {
-                    AppendDatabaseEventsFromQuery(events, db,
-                        "SELECT trigger_name AS \"Name\", 'Trigger' AS \"Type\", event_manipulation AS \"Status\", action_statement AS \"DDL\" " +
-                        "FROM information_schema.triggers WHERE trigger_schema = 'public' ORDER BY trigger_name;");
+                    AppendDatabaseEventsFromQuery(events, db, BuildPostgreSqlTriggerInformationSchemaSql());
                 }
                 return events;
             }
@@ -6171,13 +6169,20 @@ namespace mySQLPunk
 
         private static string BuildPostgreSqlTriggerMetadataSql()
         {
-            return "SELECT t.tgname AS \"Name\", 'Trigger' AS \"Type\", " +
+            return "SELECT CASE WHEN n.nspname = 'public' THEN t.tgname ELSE n.nspname || '.' || t.tgname END AS \"Name\", 'Trigger' AS \"Type\", " +
                    "CASE WHEN t.tgenabled = 'D' THEN 'DISABLED' ELSE 'ENABLED' END AS \"Status\", " +
                    "pg_catalog.pg_get_triggerdef(t.oid, true) AS \"DDL\" " +
                    "FROM pg_catalog.pg_trigger t " +
                    "INNER JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid " +
                    "INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace " +
-                   "WHERE NOT t.tgisinternal AND n.nspname = 'public' ORDER BY t.tgname;";
+                   "WHERE NOT t.tgisinternal AND n.nspname NOT IN ('pg_catalog', 'information_schema') ORDER BY n.nspname, t.tgname;";
+        }
+
+        private static string BuildPostgreSqlTriggerInformationSchemaSql()
+        {
+            return "SELECT CASE WHEN trigger_schema = 'public' THEN trigger_name ELSE trigger_schema || '.' || trigger_name END AS \"Name\", " +
+                   "'Trigger' AS \"Type\", event_manipulation AS \"Status\", action_statement AS \"DDL\" " +
+                   "FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY trigger_schema, trigger_name;";
         }
 
         private static string BuildOracleTriggerMetadataSql(string ownerName)
@@ -6209,11 +6214,7 @@ namespace mySQLPunk
 
             if (db is my_postgresql)
             {
-                AppendDatabaseFunctionsFromQuery(functions, db,
-                    "SELECT p.proname AS \"Name\", CASE WHEN p.prokind = 'p' THEN 'Procedure' ELSE 'Function' END AS \"Type\", " +
-                    "COALESCE(pg_catalog.pg_get_function_result(p.oid), '') AS \"ReturnType\", COALESCE(l.lanname, '') AS \"Status\", pg_catalog.pg_get_functiondef(p.oid) AS \"DDL\" " +
-                    "FROM pg_catalog.pg_proc p INNER JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace " +
-                    "LEFT JOIN pg_catalog.pg_language l ON l.oid = p.prolang WHERE n.nspname = 'public' ORDER BY p.proname;");
+                AppendDatabaseFunctionsFromQuery(functions, db, BuildPostgreSqlRoutineMetadataSql());
                 return functions;
             }
 
@@ -6273,6 +6274,17 @@ namespace mySQLPunk
         {
             string kind = IsProcedureRoutine(routineType) ? "PROCEDURE" : "FUNCTION";
             return "SHOW CREATE " + kind + " " + QuoteMySqlIdentifier(databaseName) + "." + QuoteMySqlIdentifier(routineName) + ";";
+        }
+
+        private static string BuildPostgreSqlRoutineMetadataSql()
+        {
+            return "SELECT CASE WHEN n.nspname = 'public' THEN p.proname ELSE n.nspname || '.' || p.proname END AS \"Name\", " +
+                   "CASE WHEN p.prokind = 'p' THEN 'Procedure' ELSE 'Function' END AS \"Type\", " +
+                   "COALESCE(pg_catalog.pg_get_function_result(p.oid), '') AS \"ReturnType\", " +
+                   "COALESCE(l.lanname, '') AS \"Status\", pg_catalog.pg_get_functiondef(p.oid) AS \"DDL\" " +
+                   "FROM pg_catalog.pg_proc p INNER JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace " +
+                   "LEFT JOIN pg_catalog.pg_language l ON l.oid = p.prolang " +
+                   "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') ORDER BY n.nspname, p.proname;";
         }
 
         private static string BuildOracleRoutineMetadataSql(string ownerName)
