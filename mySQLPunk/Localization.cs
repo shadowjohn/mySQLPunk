@@ -133,6 +133,8 @@ namespace mySQLPunk
             Add("Tool.ReverseEngineerModel", "將資料庫逆向至模型...", "Reverse Engineer Database to Model...");
             Add("Tool.GenerateData", "資料產生...", "Data Generation...");
             Add("Tool.SqliteSpecialObjectWizard", "SQLite FTS / RTree / Spatial 精靈...", "SQLite FTS / RTree / Spatial Wizard...");
+            Add("Tool.ExportSqliteColumnComments", "匯出 SQLite 欄位註解...", "Export SQLite Column Comments...");
+            Add("Tool.ImportSqliteColumnComments", "匯入 SQLite 欄位註解...", "Import SQLite Column Comments...");
             Add("Tool.FindInDatabase", "在資料庫中尋找", "Find in Database");
             Add("Tool.OpenContainingFolder", "開啟所屬資料夾...", "Open Containing Folder...");
             Add("Tool.OpenExternalQuery", "開啟外部查詢...", "Open External Query...");
@@ -408,6 +410,15 @@ namespace mySQLPunk
             Add("Object.TableTarget", "資料表 {0}", "table {0}");
             Add("Object.ViewTarget", "檢視 {0}", "view {0}");
             Add("Object.DatabaseTarget", "資料庫 {0}", "database {0}");
+            Add("Object.SqliteColumnCommentExchangeRequiresSqlite", "SQLite 欄位註解交換只支援 SQLite 連線。", "SQLite column comment exchange only supports SQLite connections.");
+            Add("Object.SqliteColumnCommentJsonFilter", "SQLite 欄位註解 JSON (*.json)|*.json|所有檔案 (*.*)|*.*", "SQLite Column Comment JSON (*.json)|*.json|All Files (*.*)|*.*");
+            Add("Object.SqliteColumnCommentsExported", "已匯出 {0} 個資料表、{1} 筆欄位註解。", "Exported {0} tables and {1} column comments.");
+            Add("Object.SqliteColumnCommentsExportedStatus", "SQLite 欄位註解已匯出 {0} 筆：{1}", "SQLite column comments exported ({0}): {1}");
+            Add("Object.SqliteColumnCommentsExportFailed", "匯出 SQLite 欄位註解失敗：{0}", "Export SQLite column comments failed: {0}");
+            Add("Object.SqliteColumnCommentsImportConfirm", "即將匯入 {0} 個資料表、{1} 筆欄位註解，並覆蓋這些資料表目前的 mySQLPunk sidecar 註解。是否繼續？", "Import {0} tables and {1} column comments, replacing current mySQLPunk sidecar comments for those tables. Continue?");
+            Add("Object.SqliteColumnCommentsImported", "已匯入 {0} 個資料表、{1} 筆欄位註解。", "Imported {0} tables and {1} column comments.");
+            Add("Object.SqliteColumnCommentsImportedStatus", "SQLite 欄位註解已匯入 {0} 筆。", "SQLite column comments imported: {0}.");
+            Add("Object.SqliteColumnCommentsImportFailed", "匯入 SQLite 欄位註解失敗：{0}", "Import SQLite column comments failed: {0}");
             Add("ImportSql.Title", "匯入 SQL 檔案", "Import SQL File");
             Add("ImportSql.SelectDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
             Add("ImportSql.Success", "SQL 匯入完成。執行語句數：{0}", "SQL import completed. Statements executed: {0}");

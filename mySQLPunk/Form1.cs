@@ -3535,6 +3535,118 @@ namespace mySQLPunk
             }
         }
 
+        private void ExportSqliteColumnCommentsWithDialog(string tableName)
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (!IsSqliteTarget(target))
+            {
+                MessageBox.Show(Localization.T("Object.SqliteColumnCommentExchangeRequiresSqlite"), Localization.T("Tool.ExportSqliteColumnComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Title = Localization.T("Tool.ExportSqliteColumnComments");
+                dialog.Filter = Localization.T("Object.SqliteColumnCommentJsonFilter");
+                dialog.DefaultExt = "json";
+                dialog.FileName = BuildSqliteColumnCommentExchangeFileName(target.DatabaseName, tableName);
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                try
+                {
+                    SqliteColumnCommentExportResult result =
+                        SqliteColumnCommentExchangeService.WriteExportFile(target.Database, target.DatabaseName, tableName, dialog.FileName);
+                    UpdateMainStatus(Localization.Format("Object.SqliteColumnCommentsExportedStatus", result.CommentCount, dialog.FileName));
+                    MessageBox.Show(
+                        Localization.Format("Object.SqliteColumnCommentsExported", result.TableCount, result.CommentCount),
+                        Localization.T("Tool.ExportSqliteColumnComments"),
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        Localization.Format("Object.SqliteColumnCommentsExportFailed", ex.Message),
+                        Localization.T("Tool.ExportSqliteColumnComments"),
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void ImportSqliteColumnCommentsWithDialog(string tableName)
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (!IsSqliteTarget(target))
+            {
+                MessageBox.Show(Localization.T("Object.SqliteColumnCommentExchangeRequiresSqlite"), Localization.T("Tool.ImportSqliteColumnComments"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = Localization.T("Tool.ImportSqliteColumnComments");
+                dialog.Filter = Localization.T("Object.SqliteColumnCommentJsonFilter");
+                dialog.CheckFileExists = true;
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                try
+                {
+                    SqliteColumnCommentImportPlan plan =
+                        SqliteColumnCommentExchangeService.BuildImportPlanFromFile(dialog.FileName, tableName);
+                    if (MessageBox.Show(
+                        Localization.Format("Object.SqliteColumnCommentsImportConfirm", plan.TableCount, plan.CommentCount),
+                        Localization.T("Tool.ImportSqliteColumnComments"),
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question) != DialogResult.Yes)
+                    {
+                        return;
+                    }
+
+                    foreach (string statement in plan.Statements)
+                    {
+                        target.Database.ExecSQL(statement);
+                    }
+
+                    RefreshDatabaseObjectNodes(target.DatabaseNode);
+                    UpdateMainStatus(Localization.Format("Object.SqliteColumnCommentsImportedStatus", plan.CommentCount));
+                    MessageBox.Show(
+                        Localization.Format("Object.SqliteColumnCommentsImported", plan.TableCount, plan.CommentCount),
+                        Localization.T("Tool.ImportSqliteColumnComments"),
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        Localization.Format("Object.SqliteColumnCommentsImportFailed", ex.Message),
+                        Localization.T("Tool.ImportSqliteColumnComments"),
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private static bool IsSqliteTarget(TreeDatabaseTarget target)
+        {
+            return target != null &&
+                   target.Database != null &&
+                   string.Equals(target.Database.ProviderName, "sqlite", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildSqliteColumnCommentExchangeFileName(string databaseName, string tableName)
+        {
+            string baseName = string.IsNullOrWhiteSpace(tableName)
+                ? databaseName
+                : databaseName + "_" + tableName;
+            if (string.IsNullOrWhiteSpace(baseName)) baseName = "sqlite";
+            foreach (char invalid in Path.GetInvalidFileNameChars())
+            {
+                baseName = baseName.Replace(invalid, '_');
+            }
+            return baseName + "_column_comments.json";
+        }
+
         private void DumpSelectedViewSql()
         {
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
@@ -7342,6 +7454,19 @@ namespace mySQLPunk
 
                     menu.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
 
+                    TreeDatabaseTarget tableTarget = BuildTargetFromNode(node);
+                    if (IsSqliteTarget(tableTarget))
+                    {
+                        string selectedTableName = pathParts[3];
+                        ToolStripMenuItem exportSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ExportSqliteColumnComments"));
+                        exportSqliteCommentsItem.Click += (s, ev) => ExportSqliteColumnCommentsWithDialog(selectedTableName);
+                        menu.Items.Add(exportSqliteCommentsItem);
+
+                        ToolStripMenuItem importSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ImportSqliteColumnComments"));
+                        importSqliteCommentsItem.Click += (s, ev) => ImportSqliteColumnCommentsWithDialog(selectedTableName);
+                        menu.Items.Add(importSqliteCommentsItem);
+                    }
+
                     ToolStripMenuItem deleteTableItem = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
                     deleteTableItem.Click += (s, ev) => DeleteSelectedTable();
                     menu.Items.Add(deleteTableItem);
@@ -7517,6 +7642,18 @@ namespace mySQLPunk
             ToolStripMenuItem dataGeneratorItem = new ToolStripMenuItem(Localization.T("Tool.GenerateData"));
             dataGeneratorItem.Click += (s, ev) => ShowDataGenerationDialog();
             menu.Items.Add(dataGeneratorItem);
+
+            TreeDatabaseTarget sqliteTarget = BuildTargetFromNode(node);
+            if (IsSqliteTarget(sqliteTarget))
+            {
+                ToolStripMenuItem exportSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ExportSqliteColumnComments"));
+                exportSqliteCommentsItem.Click += (s, ev) => ExportSqliteColumnCommentsWithDialog(null);
+                menu.Items.Add(exportSqliteCommentsItem);
+
+                ToolStripMenuItem importSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ImportSqliteColumnComments"));
+                importSqliteCommentsItem.Click += (s, ev) => ImportSqliteColumnCommentsWithDialog(null);
+                menu.Items.Add(importSqliteCommentsItem);
+            }
 
             menu.Items.Add(new ToolStripSeparator());
 
@@ -7989,11 +8126,19 @@ namespace mySQLPunk
             menu.Items.Add(dictionaryItem);
 
             TreeDatabaseTarget sqliteTarget = BuildTargetFromNode(node);
-            if (sqliteTarget != null && sqliteTarget.Database is my_sqlite)
+            if (IsSqliteTarget(sqliteTarget))
             {
                 ToolStripMenuItem sqliteSpecialItem = new ToolStripMenuItem(Localization.T("Tool.SqliteSpecialObjectWizard"));
                 sqliteSpecialItem.Click += (s, ev) => OpenSqliteSpecialObjectWizard(node);
                 menu.Items.Add(sqliteSpecialItem);
+
+                ToolStripMenuItem exportSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ExportSqliteColumnComments"));
+                exportSqliteCommentsItem.Click += (s, ev) => ExportSqliteColumnCommentsWithDialog(null);
+                menu.Items.Add(exportSqliteCommentsItem);
+
+                ToolStripMenuItem importSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ImportSqliteColumnComments"));
+                importSqliteCommentsItem.Click += (s, ev) => ImportSqliteColumnCommentsWithDialog(null);
+                menu.Items.Add(importSqliteCommentsItem);
             }
 
             menu.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedDatabaseComments(node, mode)));

@@ -26,6 +26,7 @@ public static class SmokeTests
         Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
         Run("Pre-delete backup archive service", TestPreDeleteBackupArchiveService, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
+        Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
@@ -419,6 +420,44 @@ public static class SmokeTests
 
         AssertEquals("\"public\".\"users\"", DatabaseDumpService.BuildQualifiedObjectName(db, "main", "public.users"), "PostgreSQL qualified table name should preserve schema.");
         AssertEquals("'\\x0A0B'", DatabaseDumpService.ToSqlLiteral(db, new byte[] { 0x0A, 0x0B }), "PostgreSQL byte literal should be hex escaped.");
+    }
+
+    private static void TestSqliteColumnCommentExchangeService()
+    {
+        FakeSqliteCommentDatabase db = new FakeSqliteCommentDatabase();
+        SqliteColumnCommentExportResult result;
+        string json = SqliteColumnCommentExchangeService.BuildExportJson(db, "main", null, out result);
+
+        Assert(result.TableCount == 1, "SQLite comment export should skip tables without comments.");
+        Assert(result.CommentCount == 2, "SQLite comment export should count non-empty comments.");
+        AssertContains(json, "\"provider\": \"sqlite\"", "SQLite comment export should mark provider.");
+        AssertContains(json, "\"users\"", "SQLite comment export should include table name.");
+        AssertContains(json, "\"NAME\": \"姓名\"", "SQLite comment export should include comments.");
+
+        SqliteColumnCommentImportPlan plan = SqliteColumnCommentExchangeService.BuildImportPlan(json);
+        Assert(plan.TableCount == 1 && plan.CommentCount == 2, "SQLite comment import plan should count imported comments.");
+        AssertContains(string.Join("\n", plan.Statements.ToArray()), "CREATE TABLE IF NOT EXISTS \"__mysqlpunk_column_comments\"", "SQLite comment import should ensure sidecar table.");
+        AssertContains(string.Join("\n", plan.Statements.ToArray()), "DELETE FROM \"__mysqlpunk_column_comments\" WHERE table_name = 'users';", "SQLite comment import should replace selected table comments.");
+
+        string legacyJson = "{ \"users\": { \"TITLE\": \"標題\", \"QUOTE\": \"O'Reilly\" }, \"logs\": { \"MESSAGE\": \"訊息\" } }";
+        SqliteColumnCommentImportPlan filteredPlan = SqliteColumnCommentExchangeService.BuildImportPlan(legacyJson, "users");
+        string filteredSql = string.Join("\n", filteredPlan.Statements.ToArray());
+        Assert(filteredPlan.TableCount == 1 && filteredPlan.CommentCount == 2, "SQLite comment import should support legacy table-map JSON and table filters.");
+        AssertContains(filteredSql, "'O''Reilly'", "SQLite comment import should escape single quotes.");
+        AssertNotContains(filteredSql, "logs", "SQLite comment table filter should skip other tables.");
+
+        string tempPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(tempPath, legacyJson, Encoding.UTF8);
+            SqliteColumnCommentImportPlan imported = SqliteColumnCommentExchangeService.ImportFromFile(db, tempPath, "users");
+            Assert(imported.CommentCount == 2, "SQLite comment import from file should return import counts.");
+            Assert(db.ExecutedSql.Count == imported.Statements.Count, "SQLite comment import from file should execute every planned statement.");
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
     }
 
     private static void TestQueryResultExportService()
@@ -850,6 +889,63 @@ public static class SmokeTests
         }
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
         public string GetViewCreateStatement(string databaseName, string viewName) { return "CREATE VIEW \"public\".\"active_users\" AS SELECT * FROM \"public\".\"users\""; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
+    }
+
+    private sealed class FakeSqliteCommentDatabase : IDatabase
+    {
+        public List<string> ExecutedSql = new List<string>();
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => "sqlite";
+
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            ExecutedSql.Add(sql);
+            return new Dictionary<string, string> { { "status", "success" } };
+        }
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public List<string> GetDatabases() { return new List<string> { "main" }; }
+        public List<string> GetTables(string databaseName) { return new List<string> { "users", "empty_comments" }; }
+        public List<string> GetViews(string databaseName) { return new List<string>(); }
+        public DataTable GetColumns(string databaseName, string tableName)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Name");
+            table.Columns.Add("Comment");
+            if (tableName == "users")
+            {
+                table.Rows.Add("ID", "識別碼");
+                table.Rows.Add("NAME", "姓名");
+                table.Rows.Add("IGNORED", "");
+            }
+            else
+            {
+                table.Rows.Add("ID", "");
+            }
+            return table;
+        }
+        public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return ""; }
+        public bool TableExists(string databaseName, string tableName) { return true; }
+        public bool ViewExists(string databaseName, string viewName) { return false; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 0; }
+        public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return ""; }
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
     }
 }
