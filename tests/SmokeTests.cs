@@ -33,6 +33,7 @@ public static class SmokeTests
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
+        Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
@@ -703,6 +704,45 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", oldAutoCompleteEnabled);
             ApplicationOptionSettings.SetString("RecordGridFontName", oldGridFontName);
             ApplicationOptionSettings.SetInt("RecordGridFontSize", oldGridFontSize);
+        }
+    }
+
+    private static void TestDiagnosticLogService()
+    {
+        bool oldEnabled = ApplicationOptionSettings.GetBool("AdvancedEnableDiagnosticsLog");
+        string oldLogDirectory = ApplicationOptionSettings.GetString("FileLogDirectory");
+        string tempDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk_diag_" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            string sql = "SELECT secret_token, name FROM users WHERE id = 1";
+            string line = DiagnosticLogService.BuildQueryHistoryJsonLine("main", sql, "OK", 42, 3, true);
+            JObject entry = JObject.Parse(line);
+
+            AssertEquals("query-history", entry.Value<string>("Category"), "Diagnostic query log should identify its category.");
+            AssertEquals("main", entry.Value<string>("DatabaseName"), "Diagnostic query log should keep the database name.");
+            Assert(entry.Value<string>("SqlSha256").Length == 64, "Diagnostic query log should include a SHA-256 fingerprint.");
+            AssertContains(entry.Value<string>("SqlPreview"), "SELECT secret_token", "Diagnostic query log should include a short preview.");
+
+            ApplicationOptionSettings.SetBool("AdvancedEnableDiagnosticsLog", true);
+            ApplicationOptionSettings.SetString("FileLogDirectory", tempDirectory);
+            DiagnosticLogService.AppendQueryHistory("main", sql, "OK", 42, 3, true);
+
+            string[] files = Directory.GetFiles(tempDirectory, "diagnostics-*.jsonl");
+            Assert(files.Length == 1, "Enabled diagnostics should write one JSONL log file.");
+            string written = File.ReadAllText(files[0], Encoding.UTF8);
+            AssertContains(written, "\"Category\":\"query-history\"", "Written diagnostic log should contain JSONL data.");
+
+            File.Delete(files[0]);
+            ApplicationOptionSettings.SetBool("AdvancedEnableDiagnosticsLog", false);
+            DiagnosticLogService.AppendQueryHistory("main", sql, "OK", 42, 3, true);
+            Assert(Directory.GetFiles(tempDirectory, "diagnostics-*.jsonl").Length == 0, "Disabled diagnostics should not write log files.");
+        }
+        finally
+        {
+            ApplicationOptionSettings.SetBool("AdvancedEnableDiagnosticsLog", oldEnabled);
+            ApplicationOptionSettings.SetString("FileLogDirectory", oldLogDirectory);
+            if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
         }
     }
 

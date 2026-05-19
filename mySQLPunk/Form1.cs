@@ -6234,6 +6234,8 @@ namespace mySQLPunk
         {
             if (string.IsNullOrWhiteSpace(sql)) return;
 
+            DiagnosticLogService.AppendQueryHistory(databaseName, sql, status, elapsedMilliseconds, rows, isQuery);
+
             _queryHistory.Insert(0, new QueryHistoryEntry
             {
                 ExecutedAt = DateTime.Now,
