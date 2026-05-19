@@ -15,6 +15,7 @@ namespace mySQLPunk
         private RadioButton darkThemeRadio;
         private ComboBox languageCombo;
         private CheckBox noPrimaryKeyReadOnlyCheckBox;
+        private TextBox remoteBackupDirectoryInput;
         private ThemePreviewControl lightPreview;
         private ThemePreviewControl darkPreview;
         private readonly Button okButton;
@@ -99,6 +100,7 @@ namespace mySQLPunk
             {
                 SaveCliPathSettings();
                 SaveTableEditSettings();
+                SaveBackupMirrorSettings();
                 UpdateSelection();
             };
 
@@ -125,6 +127,10 @@ namespace mySQLPunk
             if (string.Equals(selected, Localization.T("Options.Environment"), StringComparison.Ordinal))
             {
                 RenderEnvironmentPage();
+            }
+            else if (string.Equals(selected, Localization.T("Options.FileLocation"), StringComparison.Ordinal))
+            {
+                RenderFileLocationPage();
             }
             else
             {
@@ -262,6 +268,65 @@ namespace mySQLPunk
             AddCliPathRow("sqlite", Localization.T("Options.CliPathSqlite"), top + 168);
         }
 
+        private void RenderFileLocationPage()
+        {
+            contentPanel.Controls.Clear();
+            remoteBackupDirectoryInput = null;
+
+            Label sectionTitle = new Label
+            {
+                Text = Localization.T("Options.FileLocation"),
+                AutoSize = true,
+                Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold),
+                Location = new Point(18, 18)
+            };
+            Label hintLabel = new Label
+            {
+                Text = Localization.T("Options.BackupMirrorHint"),
+                AutoSize = true,
+                Location = new Point(18, 48),
+                MaximumSize = new Size(620, 0)
+            };
+            Label pathLabel = new Label
+            {
+                Text = Localization.T("Options.BackupMirrorDirectory"),
+                AutoSize = true,
+                Location = new Point(18, 105)
+            };
+            remoteBackupDirectoryInput = new TextBox
+            {
+                Text = BackupMirrorSettings.RemoteDirectory,
+                Location = new Point(150, 100),
+                Width = 390,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
+            };
+            Button browseButton = new Button
+            {
+                Text = Localization.T("Common.Browse"),
+                Location = new Point(550, 99),
+                Size = new Size(80, 28),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            browseButton.Click += (s, e) =>
+            {
+                using (FolderBrowserDialog dialog = new FolderBrowserDialog())
+                {
+                    dialog.Description = Localization.T("Options.BackupMirrorDirectory");
+                    dialog.SelectedPath = Directory.Exists(remoteBackupDirectoryInput.Text) ? remoteBackupDirectoryInput.Text : string.Empty;
+                    if (dialog.ShowDialog(this) == DialogResult.OK)
+                    {
+                        remoteBackupDirectoryInput.Text = dialog.SelectedPath;
+                    }
+                }
+            };
+
+            contentPanel.Controls.Add(sectionTitle);
+            contentPanel.Controls.Add(hintLabel);
+            contentPanel.Controls.Add(pathLabel);
+            contentPanel.Controls.Add(remoteBackupDirectoryInput);
+            contentPanel.Controls.Add(browseButton);
+        }
+
         private void AddCliPathRow(string provider, string labelText, int top)
         {
             Label label = new Label
@@ -317,6 +382,13 @@ namespace mySQLPunk
             if (noPrimaryKeyReadOnlyCheckBox == null) return;
             TableEditSettings.NoPrimaryKeyReadOnly = noPrimaryKeyReadOnlyCheckBox.Checked;
             TableEditSettings.Save();
+        }
+
+        private void SaveBackupMirrorSettings()
+        {
+            if (remoteBackupDirectoryInput == null) return;
+            BackupMirrorSettings.RemoteDirectory = remoteBackupDirectoryInput.Text;
+            BackupMirrorSettings.Save();
         }
 
         private void UpdateSelection()
@@ -593,6 +665,75 @@ namespace mySQLPunk
         private class SettingsData
         {
             public bool NoPrimaryKeyReadOnly { get; set; }
+        }
+    }
+
+    public static class BackupMirrorSettings
+    {
+        private static bool loaded;
+        private static string remoteDirectory = string.Empty;
+
+        public static string RemoteDirectory
+        {
+            get
+            {
+                EnsureLoaded();
+                return remoteDirectory;
+            }
+            set
+            {
+                EnsureLoaded();
+                remoteDirectory = (value ?? string.Empty).Trim();
+            }
+        }
+
+        public static void Save()
+        {
+            EnsureLoaded();
+            try
+            {
+                string path = GetSettingsFilePath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, JsonConvert.SerializeObject(new SettingsData
+                {
+                    RemoteDirectory = remoteDirectory
+                }, Formatting.Indented));
+            }
+            catch
+            {
+            }
+        }
+
+        private static void EnsureLoaded()
+        {
+            if (loaded) return;
+            loaded = true;
+
+            try
+            {
+                string path = GetSettingsFilePath();
+                if (!File.Exists(path)) return;
+
+                SettingsData data = JsonConvert.DeserializeObject<SettingsData>(File.ReadAllText(path));
+                if (data != null)
+                {
+                    remoteDirectory = (data.RemoteDirectory ?? string.Empty).Trim();
+                }
+            }
+            catch
+            {
+                remoteDirectory = string.Empty;
+            }
+        }
+
+        private static string GetSettingsFilePath()
+        {
+            return Path.Combine(Application.UserAppDataPath, "backup-mirror-settings.json");
+        }
+
+        private class SettingsData
+        {
+            public string RemoteDirectory { get; set; }
         }
     }
 }

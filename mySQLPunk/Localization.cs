@@ -313,6 +313,7 @@ namespace mySQLPunk
             Add("Backup.Title", "建立備份", "Create Backup");
             Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
             Add("Backup.Success", "備份已建立。", "Backup created.");
+            Add("Backup.SuccessWithRemoteMirror", "備份已建立。\n遠端備份副本：{0}", "Backup created.\nRemote backup copy: {0}");
             Add("Backup.Failed", "建立備份失敗：", "Backup failed: ");
             Add("Backup.RestoreTitle", "還原備份", "Restore Backup");
             Add("Backup.RestoreFileFilter", "SQL / ZIP 備份 (*.sql;*.zip)|*.sql;*.zip|SQL 檔案 (*.sql)|*.sql|ZIP 備份 (*.zip)|*.zip|所有檔案 (*.*)|*.*", "SQL / ZIP backups (*.sql;*.zip)|*.sql;*.zip|SQL files (*.sql)|*.sql|ZIP backups (*.zip)|*.zip|All files (*.*)|*.*");
@@ -727,6 +728,8 @@ namespace mySQLPunk
             Add("Options.CliPathSqlServer", "SQL Server:", "SQL Server:");
             Add("Options.CliPathOracle", "Oracle:", "Oracle:");
             Add("Options.CliPathSqlite", "SQLite:", "SQLite:");
+            Add("Options.BackupMirrorHint", "可指定備份完成後要同步複製的遠端或共享資料夾，例如 NAS、雲端同步資料夾或團隊共享磁碟。留空時不會建立遠端副本。", "Set a remote or shared folder to copy backups after they are created, such as a NAS, cloud-synced folder, or team share. Leave blank to skip remote copies.");
+            Add("Options.BackupMirrorDirectory", "遠端備份資料夾:", "Remote backup folder:");
             Add("Options.ExecutableFilter", "執行檔 (*.exe)|*.exe|所有檔案 (*.*)|*.*", "Executable files (*.exe)|*.exe|All files (*.*)|*.*");
         }
 

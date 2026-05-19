@@ -4242,9 +4242,12 @@ namespace mySQLPunk
 
                 try
                 {
-                    CreateDatabaseBackup(target, dialog.FileName);
-                    MessageBox.Show(Localization.T("Backup.Success"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    UpdateMainStatus("Backup created: " + dialog.FileName);
+                    string remoteMirrorPath = CreateDatabaseBackup(target, dialog.FileName);
+                    string message = string.IsNullOrWhiteSpace(remoteMirrorPath)
+                        ? Localization.T("Backup.Success")
+                        : Localization.Format("Backup.SuccessWithRemoteMirror", remoteMirrorPath);
+                    MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UpdateMainStatus(message);
                 }
                 catch (Exception ex)
                 {
@@ -4262,12 +4265,14 @@ namespace mySQLPunk
                 return false;
             }
 
-            CreateDatabaseBackup(target, targetPath);
-            UpdateMainStatus("Backup created: " + targetPath);
+            string remoteMirrorPath = CreateDatabaseBackup(target, targetPath);
+            UpdateMainStatus(string.IsNullOrWhiteSpace(remoteMirrorPath)
+                ? "Backup created: " + targetPath
+                : Localization.Format("Backup.SuccessWithRemoteMirror", remoteMirrorPath));
             return true;
         }
 
-        private void CreateDatabaseBackup(TreeDatabaseTarget target, string targetPath)
+        private string CreateDatabaseBackup(TreeDatabaseTarget target, string targetPath)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
             if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("Target path is required.", nameof(targetPath));
@@ -4291,10 +4296,18 @@ namespace mySQLPunk
                     destination.Open();
                     sqlite.MCT.BackupDatabase(destination, "main", "main", -1, null, 0);
                 }
-                return;
+                return MirrorDatabaseBackupToRemote(targetPath);
             }
 
             DatabaseDumpService.WriteDatabaseDump(target.Database, target.DatabaseName, targetPath);
+            return MirrorDatabaseBackupToRemote(targetPath);
+        }
+
+        private static string MirrorDatabaseBackupToRemote(string targetPath)
+        {
+            string remoteDirectory = BackupMirrorSettings.RemoteDirectory;
+            if (string.IsNullOrWhiteSpace(remoteDirectory)) return string.Empty;
+            return BackupRemoteMirrorService.MirrorBackup(targetPath, remoteDirectory);
         }
 
         private static string BuildDatabaseDump(IDatabase db, string databaseName)

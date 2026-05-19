@@ -344,6 +344,15 @@ public static class SmokeTests
                 PreDeleteBackupArchiveService.PreRestoreBackupArchivePattern);
             Assert(File.Exists(restoreArchivePath), "Archive service should create pre-restore zip archives.");
             Assert(Path.GetFileName(restoreArchivePath).Contains("before_restore"), "Pre-restore archive should keep the restore marker.");
+
+            string remoteDir = Path.Combine(dir, "remote");
+            string mirrorPath = BackupRemoteMirrorService.MirrorBackup(restoreArchivePath, remoteDir);
+            Assert(File.Exists(mirrorPath), "Remote mirror service should copy backup files.");
+            AssertEquals(Path.GetFileName(restoreArchivePath), Path.GetFileName(mirrorPath), "Remote mirror should preserve the backup file name.");
+
+            string secondMirrorPath = BackupRemoteMirrorService.MirrorBackup(restoreArchivePath, remoteDir);
+            Assert(File.Exists(secondMirrorPath), "Remote mirror service should avoid overwriting existing copies.");
+            Assert(!string.Equals(mirrorPath, secondMirrorPath, StringComparison.OrdinalIgnoreCase), "Remote mirror duplicate should receive a unique file name.");
         }
         finally
         {
