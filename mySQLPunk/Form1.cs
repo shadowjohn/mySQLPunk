@@ -1952,11 +1952,11 @@ namespace mySQLPunk
             _dockHintOverlay = new Panel() { Dock = DockStyle.Top, Height = 36, Visible = false, BackColor = Color.FromArgb(220, 235, 255) };
             _dockHintOverlay.Paint += (s, e) =>
             {
-                using (var pen = new Pen(Color.FromArgb(0, 120, 212), 4))
+                using (var pen = new Pen(ThemeManager.AccentColor, 4))
                     e.Graphics.DrawRectangle(pen, 2, 2, _dockHintOverlay.Width - 5, _dockHintOverlay.Height - 5);
                 string msg = Localization.T("Status.ReleaseToDock");
                 using (var font = new Font("Microsoft JhengHei", 14, FontStyle.Bold))
-                using (var brush = new SolidBrush(Color.FromArgb(0, 120, 212)))
+                using (var brush = new SolidBrush(ThemeManager.SelectionTextColor))
                 {
                     var sz = e.Graphics.MeasureString(msg, font);
                     e.Graphics.DrawString(msg, font, brush,

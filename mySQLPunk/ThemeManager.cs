@@ -35,6 +35,8 @@ namespace mySQLPunk
         public static Color HoverColor => IsDark ? Color.FromArgb(48, 73, 88) : Color.FromArgb(232, 242, 255);
         public static Color ButtonBackColor => IsDark ? Color.FromArgb(54, 61, 68) : Color.FromArgb(245, 245, 245);
         public static Color TextBoxBackColor => IsDark ? Color.FromArgb(25, 29, 33) : Color.White;
+        public static Color DisabledBackColor => IsDark ? Color.FromArgb(36, 40, 45) : Color.FromArgb(240, 240, 240);
+        public static Color DisabledTextColor => IsDark ? Color.FromArgb(125, 135, 145) : Color.FromArgb(130, 130, 130);
 
         public static void Load()
         {
@@ -94,6 +96,11 @@ namespace mySQLPunk
 
         private static void ApplyControl(Control control)
         {
+            if (control.ContextMenuStrip != null)
+            {
+                ApplyToolStrip(control.ContextMenuStrip);
+            }
+
             ToolStrip toolStrip = control as ToolStrip;
             if (toolStrip != null)
             {
@@ -135,11 +142,46 @@ namespace mySQLPunk
                 return;
             }
 
+            UpDownBase upDown = control as UpDownBase;
+            if (upDown != null)
+            {
+                upDown.BackColor = TextBoxBackColor;
+                upDown.ForeColor = TextColor;
+                upDown.BorderStyle = BorderStyle.FixedSingle;
+                upDown.Margin = new Padding(3, 4, 3, 4);
+                return;
+            }
+
+            DateTimePicker dateTimePicker = control as DateTimePicker;
+            if (dateTimePicker != null)
+            {
+                dateTimePicker.BackColor = TextBoxBackColor;
+                dateTimePicker.ForeColor = TextColor;
+                dateTimePicker.CalendarMonthBackground = TextBoxBackColor;
+                dateTimePicker.CalendarForeColor = TextColor;
+                dateTimePicker.CalendarTitleBackColor = SurfaceColor;
+                dateTimePicker.CalendarTitleForeColor = TextColor;
+                dateTimePicker.CalendarTrailingForeColor = MutedTextColor;
+                dateTimePicker.Margin = new Padding(3, 4, 3, 4);
+                return;
+            }
+
+            MonthCalendar monthCalendar = control as MonthCalendar;
+            if (monthCalendar != null)
+            {
+                monthCalendar.BackColor = TextBoxBackColor;
+                monthCalendar.ForeColor = TextColor;
+                monthCalendar.TitleBackColor = SurfaceColor;
+                monthCalendar.TitleForeColor = TextColor;
+                monthCalendar.TrailingForeColor = MutedTextColor;
+                return;
+            }
+
             TextBoxBase textBox = control as TextBoxBase;
             if (textBox != null)
             {
-                textBox.BackColor = TextBoxBackColor;
-                textBox.ForeColor = TextColor;
+                textBox.BackColor = textBox.ReadOnly ? DisabledBackColor : TextBoxBackColor;
+                textBox.ForeColor = textBox.Enabled ? TextColor : DisabledTextColor;
                 textBox.BorderStyle = BorderStyle.FixedSingle;
                 textBox.Margin = new Padding(3, 4, 3, 4);
                 return;
@@ -148,8 +190,8 @@ namespace mySQLPunk
             ComboBox comboBox = control as ComboBox;
             if (comboBox != null)
             {
-                comboBox.BackColor = TextBoxBackColor;
-                comboBox.ForeColor = TextColor;
+                comboBox.BackColor = comboBox.Enabled ? TextBoxBackColor : DisabledBackColor;
+                comboBox.ForeColor = comboBox.Enabled ? TextColor : DisabledTextColor;
                 comboBox.FlatStyle = FlatStyle.Flat;
                 comboBox.Margin = new Padding(3, 4, 3, 4);
                 return;
@@ -159,8 +201,8 @@ namespace mySQLPunk
             if (button != null)
             {
                 button.UseVisualStyleBackColor = false;
-                button.BackColor = ButtonBackColor;
-                button.ForeColor = TextColor;
+                button.BackColor = button.Enabled ? ButtonBackColor : DisabledBackColor;
+                button.ForeColor = button.Enabled ? TextColor : DisabledTextColor;
                 button.FlatStyle = FlatStyle.Flat;
                 button.FlatAppearance.BorderColor = BorderColor;
                 button.FlatAppearance.MouseOverBackColor = HoverColor;
@@ -254,6 +296,17 @@ namespace mySQLPunk
                 return;
             }
 
+            LinkLabel linkLabel = control as LinkLabel;
+            if (linkLabel != null)
+            {
+                linkLabel.BackColor = Color.Transparent;
+                linkLabel.ForeColor = TextColor;
+                linkLabel.LinkColor = AccentColor;
+                linkLabel.ActiveLinkColor = SelectionTextColor;
+                linkLabel.VisitedLinkColor = MutedTextColor;
+                return;
+            }
+
             Label label = control as Label;
             if (label != null)
             {
@@ -324,6 +377,12 @@ namespace mySQLPunk
             dgv.DefaultCellStyle.SelectionForeColor = SelectionTextColor;
             dgv.DefaultCellStyle.Padding = new Padding(6, 2, 6, 2);
 
+            dgv.RowsDefaultCellStyle.BackColor = ElevatedColor;
+            dgv.RowsDefaultCellStyle.ForeColor = TextColor;
+            dgv.RowsDefaultCellStyle.SelectionBackColor = SelectionColor;
+            dgv.RowsDefaultCellStyle.SelectionForeColor = SelectionTextColor;
+            dgv.RowsDefaultCellStyle.Padding = new Padding(6, 2, 6, 2);
+
             dgv.AlternatingRowsDefaultCellStyle.BackColor = IsDark ? Color.FromArgb(34, 39, 44) : Color.FromArgb(250, 250, 250);
             dgv.AlternatingRowsDefaultCellStyle.ForeColor = TextColor;
             dgv.AlternatingRowsDefaultCellStyle.SelectionBackColor = SelectionColor;
@@ -341,6 +400,12 @@ namespace mySQLPunk
             dgv.RowHeadersDefaultCellStyle.ForeColor = TextColor;
             dgv.RowHeadersDefaultCellStyle.SelectionBackColor = SelectionColor;
             dgv.RowHeadersDefaultCellStyle.SelectionForeColor = SelectionTextColor;
+            dgv.RowHeadersDefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
+
+            dgv.TopLeftHeaderCell.Style.BackColor = SurfaceColor;
+            dgv.TopLeftHeaderCell.Style.ForeColor = TextColor;
+            dgv.TopLeftHeaderCell.Style.SelectionBackColor = SurfaceColor;
+            dgv.TopLeftHeaderCell.Style.SelectionForeColor = TextColor;
         }
 
         private static string GetThemeFilePath()

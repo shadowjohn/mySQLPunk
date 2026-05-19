@@ -123,9 +123,12 @@ namespace mySQLPunk
             Rectangle barRect = new Rectangle(8, Height - 14, Math.Max(10, Width - 16), 8);
             float percent = maximum <= 0 ? 0f : (float)value / maximum;
             percent = Math.Max(0f, Math.Min(1f, percent));
+            Color trackColor = ThemeManager.IsDark ? ThemeManager.BorderColor : Color.FromArgb(218, 224, 232);
+            Color fillStart = ThemeManager.IsDark ? Color.FromArgb(255, 205, 70) : Color.FromArgb(255, 205, 70);
+            Color fillEnd = ThemeManager.IsDark ? ThemeManager.AccentColor : Color.FromArgb(75, 198, 118);
 
             using (GraphicsPath trackPath = CreateRoundRect(barRect, 4))
-            using (SolidBrush trackBrush = new SolidBrush(Color.FromArgb(218, 224, 232)))
+            using (SolidBrush trackBrush = new SolidBrush(trackColor))
             {
                 g.FillPath(trackBrush, trackPath);
             }
@@ -135,7 +138,7 @@ namespace mySQLPunk
             {
                 Rectangle fillRect = new Rectangle(barRect.X, barRect.Y, fillWidth, barRect.Height);
                 using (GraphicsPath fillPath = CreateRoundRect(fillRect, 4))
-                using (LinearGradientBrush fillBrush = new LinearGradientBrush(fillRect, Color.FromArgb(255, 205, 70), Color.FromArgb(75, 198, 118), LinearGradientMode.Horizontal))
+                using (LinearGradientBrush fillBrush = new LinearGradientBrush(fillRect, fillStart, fillEnd, LinearGradientMode.Horizontal))
                 {
                     g.FillPath(fillBrush, fillPath);
                 }

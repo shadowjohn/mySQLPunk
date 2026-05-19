@@ -31,7 +31,7 @@ namespace mySQLPunk
             progressForm = new Form
             {
                 Text = title,
-                BackColor = Color.White,
+                BackColor = ThemeManager.ElevatedColor,
                 ClientSize = new Size(560, 138),
                 ControlBox = false,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
@@ -47,12 +47,16 @@ namespace mySQLPunk
                 Location = new Point(22, 28),
                 Size = new Size(516, 88),
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
-                BackColor = Color.White,
-                ForeColor = Color.FromArgb(45, 45, 45)
+                BackColor = ThemeManager.ElevatedColor,
+                ForeColor = ThemeManager.TextColor
             };
             ProgressBar.LoadRunnerImage(Path.Combine(Application.StartupPath, "image", "progress_runner.gif"));
             ProgressBar.SetProgress(0, 1, initialMessage);
             progressForm.Controls.Add(ProgressBar);
+            ThemeManager.ApplyTo(progressForm);
+            progressForm.BackColor = ThemeManager.ElevatedColor;
+            ProgressBar.BackColor = ThemeManager.ElevatedColor;
+            ProgressBar.ForeColor = ThemeManager.TextColor;
 
             if (owner != null)
             {

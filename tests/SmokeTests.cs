@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Drawing;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Serialization;
@@ -33,6 +34,7 @@ public static class SmokeTests
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
         Run("Windows credential service", TestWindowsCredentialService, ref passed);
@@ -733,6 +735,47 @@ public static class SmokeTests
         AssertEquals("ev_daily", snapshot.Events.Rows[0]["Name"].ToString(), "MetadataLoadService should use the event loader.");
     }
 
+    private static void TestDarkThemeControlCoverage()
+    {
+        string originalTheme = ThemeManager.CurrentTheme;
+        try
+        {
+            ThemeManager.SetTheme(ThemeManager.Dark, false);
+            using (Form form = new Form())
+            using (NumericUpDown number = new NumericUpDown())
+            using (DateTimePicker dateTimePicker = new DateTimePicker())
+            using (DataGridView grid = new DataGridView())
+            using (ContextMenuStrip menu = new ContextMenuStrip())
+            {
+                menu.Items.Add(new ToolStripMenuItem("Open"));
+                grid.ContextMenuStrip = menu;
+                grid.Columns.Add("name", "name");
+                grid.Rows.Add("value");
+
+                form.Controls.Add(number);
+                form.Controls.Add(dateTimePicker);
+                form.Controls.Add(grid);
+
+                ThemeManager.ApplyTo(form);
+
+                AssertSameColor(ThemeManager.WindowBackColor, form.BackColor, "Dark theme should apply form background.");
+                AssertSameColor(ThemeManager.TextBoxBackColor, number.BackColor, "Dark theme should apply numeric input background.");
+                AssertSameColor(ThemeManager.TextColor, number.ForeColor, "Dark theme should apply numeric input text.");
+                AssertSameColor(ThemeManager.TextBoxBackColor, dateTimePicker.BackColor, "Dark theme should apply date picker background.");
+                AssertSameColor(ThemeManager.TextColor, dateTimePicker.ForeColor, "Dark theme should apply date picker text.");
+                AssertSameColor(ThemeManager.WindowBackColor, grid.BackgroundColor, "Dark theme should apply grid background.");
+                AssertSameColor(ThemeManager.ElevatedColor, grid.RowsDefaultCellStyle.BackColor, "Dark theme should apply grid row background.");
+                AssertSameColor(ThemeManager.SelectionColor, grid.DefaultCellStyle.SelectionBackColor, "Dark theme should apply grid selection color.");
+                AssertSameColor(ThemeManager.SurfaceColor, menu.BackColor, "Dark theme should apply context menu background.");
+                AssertSameColor(ThemeManager.TextColor, menu.Items[0].ForeColor, "Dark theme should apply context menu item text.");
+            }
+        }
+        finally
+        {
+            ThemeManager.SetTheme(originalTheme, false);
+        }
+    }
+
     private static void TestWindowsCredentialService()
     {
         Dictionary<string, object> conn = new Dictionary<string, object>
@@ -1056,6 +1099,14 @@ public static class SmokeTests
     private static void AssertEquals(string expected, string actual, string message)
     {
         if (!string.Equals(expected, actual, StringComparison.Ordinal))
+        {
+            throw new Exception(message + " Expected: " + expected + " Actual: " + actual);
+        }
+    }
+
+    private static void AssertSameColor(Color expected, Color actual, string message)
+    {
+        if (expected.ToArgb() != actual.ToArgb())
         {
             throw new Exception(message + " Expected: " + expected + " Actual: " + actual);
         }
