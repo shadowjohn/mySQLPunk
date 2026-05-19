@@ -769,6 +769,7 @@ namespace mySQLPunk
                 WebRequest request = base.GetWebRequest(address);
                 if (request == null) return null;
                 request.Timeout = _timeoutMs;
+                ConnectionProxySettingsService.ApplyTo(request);
                 if (request is HttpWebRequest httpRequest)
                 {
                     httpRequest.ReadWriteTimeout = _timeoutMs;

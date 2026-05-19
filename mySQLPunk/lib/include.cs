@@ -313,7 +313,7 @@ namespace utility
 
                 request = (HttpWebRequest)WebRequest.Create(url);
                 request.Timeout = 60000;
-                request.Proxy = null;
+                mySQLPunk.lib.ConnectionProxySettingsService.ApplyTo(request);
                 request.UserAgent = "user_agent','Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1)";
                 //request.Referer = getSystemKey("HTTP_REFERER");
                 response = (HttpWebResponse)request.GetResponse();
@@ -343,7 +343,7 @@ namespace utility
             httpWReq.Method = "POST";
             httpWReq.ContentType = "application/x-www-form-urlencoded";
             httpWReq.UserAgent = "user_agent','Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1)";
-            httpWReq.Proxy = null;
+            mySQLPunk.lib.ConnectionProxySettingsService.ApplyTo(httpWReq);
             httpWReq.Timeout = 60000;
             //httpWReq.Referer = HttpContext.Current.Request.ServerVariables["SERVER_NAME"];
             //httpWReq.Referer = url;//getSystemKey("HTTP_REFERER");

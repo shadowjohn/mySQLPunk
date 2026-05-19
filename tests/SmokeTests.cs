@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Serialization;
+using System.Net;
 using System.Text;
 using System.Windows.Forms;
 using mySQLPunk;
@@ -38,6 +39,7 @@ public static class SmokeTests
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
@@ -880,6 +882,43 @@ public static class SmokeTests
         AssertEquals("fn_ping", snapshot.Functions.Rows[0]["Name"].ToString(), "MetadataLoadService should use the function loader.");
         AssertEquals("tester", snapshot.Users.Rows[0]["Name"].ToString(), "MetadataLoadService should pass connection info to the user loader.");
         AssertEquals("ev_daily", snapshot.Events.Rows[0]["Name"].ToString(), "MetadataLoadService should use the event loader.");
+    }
+
+    private static void TestConnectionProxySettingsService()
+    {
+        ConnectionProxySettings disabled = new ConnectionProxySettings
+        {
+            Enabled = false,
+            Type = "http",
+            Host = "127.0.0.1",
+            Port = 8080
+        };
+        Assert(ConnectionProxySettingsService.CreateWebProxy(disabled) == null, "Disabled proxy should not create a WebProxy.");
+
+        ConnectionProxySettings http = new ConnectionProxySettings
+        {
+            Enabled = true,
+            Type = "http",
+            Host = "proxy.local",
+            Port = 3128,
+            UserName = "user",
+            Password = "pass"
+        };
+        IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxy(http);
+        Assert(proxy != null, "HTTP proxy settings should create a WebProxy.");
+        Uri proxyUri = proxy.GetProxy(new Uri("http://example.test/"));
+        AssertEquals("http://proxy.local:3128/", proxyUri.ToString(), "HTTP proxy URI should include host and port.");
+        AssertContains(ConnectionProxySettingsService.BuildStatusText(http), "proxy.local:3128", "Proxy status should describe host and port.");
+
+        ConnectionProxySettings socks = new ConnectionProxySettings
+        {
+            Enabled = true,
+            Type = "socks5",
+            Host = "proxy.local",
+            Port = 1080
+        };
+        Assert(ConnectionProxySettingsService.CreateWebProxy(socks) == null, "SOCKS5 should be stored but not applied to WebRequest.");
+        AssertContains(ConnectionProxySettingsService.BuildStatusText(socks), "not supported", "SOCKS5 status should explain WebRequest limitation.");
     }
 
     private static void TestDarkThemeControlCoverage()

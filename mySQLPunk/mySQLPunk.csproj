@@ -168,6 +168,7 @@
     <Compile Include="lib\BackupRemoteMirrorService.cs" />
     <Compile Include="lib\AutoRecoveryDraftService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
+    <Compile Include="lib\ConnectionProxySettingsService.cs" />
     <Compile Include="lib\BinaryCellStreamingService.cs" />
     <Compile Include="lib\crypto.cs" />
     <Compile Include="lib\DatabaseCopyService.cs" />
