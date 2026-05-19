@@ -337,7 +337,7 @@ namespace mySQLPunk
             Add("Backup.QuarantineRestoreTitle", "還原隔離備份", "Restore Quarantined Backup");
             Add("Backup.QuarantineRestoreFileFilter", "備份檔案 (*.sql;*.zip;*.sqlite;*.sqlite3;*.db)|*.sql;*.zip;*.sqlite;*.sqlite3;*.db|所有檔案 (*.*)|*.*", "Backup files (*.sql;*.zip;*.sqlite;*.sqlite3;*.db)|*.sql;*.zip;*.sqlite;*.sqlite3;*.db|All files (*.*)|*.*");
             Add("Backup.QuarantineRestoreEmpty", "目前沒有可還原的隔離備份。", "There are no quarantined backups to restore.");
-            Add("Backup.QuarantineRestorePreviewConfirm", "隔離備份預覽：\n{0}\n\n原始路徑：{1}\n大小：{2}\n二次完整性驗證：{3}\n{4}\n\n此動作只會把檔案移回指定位置，不會直接還原到資料庫。是否繼續？", "Quarantined backup preview:\n{0}\n\nOriginal path: {1}\nSize: {2}\nSecond integrity check: {3}\n{4}\n\nThis only moves the file back to the selected location and does not restore it into the database. Continue?");
+            Add("Backup.QuarantineRestorePreviewConfirm", "隔離備份預覽：\n{0}\n\n原始路徑：{1}\n大小：{2}\n二次完整性驗證：{3}\n{4}\n\n{5}\n\n此動作只會把檔案移回指定位置，不會直接還原到資料庫。是否繼續？", "Quarantined backup preview:\n{0}\n\nOriginal path: {1}\nSize: {2}\nSecond integrity check: {3}\n{4}\n\n{5}\n\nThis only moves the file back to the selected location and does not restore it into the database. Continue?");
             Add("Backup.QuarantineRestoreIntegrityPassed", "通過", "Passed");
             Add("Backup.QuarantineRestoreIntegrityFailed", "未通過", "Failed");
             Add("Backup.QuarantineRestoreOverwrite", "目標檔案已存在：\n{0}\n\n是否覆蓋？", "The destination file already exists:\n{0}\n\nOverwrite it?");

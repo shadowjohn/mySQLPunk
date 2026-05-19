@@ -688,9 +688,20 @@ public static class SmokeTests
             BackupQuarantineRestorePreview preview = BackupQuarantineRestoreService.BuildPreview(candidate, countSqlStatements);
             Assert(!preview.PassedIntegrityCheck, "Quarantine restore preview should rerun integrity verification before restore.");
             AssertContains(preview.IntegrityResult.Message, "empty", "Quarantine restore preview should include the integrity failure reason.");
+            AssertContains(preview.DestinationDiffSummary, "原始路徑目前不存在", "Quarantine restore preview should show destination diff for missing original path.");
             BackupQuarantineRestoreResult restoreResult = BackupQuarantineRestoreService.RestoreQuarantinedFile(candidate.QuarantinedPath, candidate.OriginalPath, false);
             Assert(File.Exists(restoreResult.RestoredPath), "Quarantined backup should be restored to the original folder.");
             Assert(!File.Exists(candidate.QuarantinedPath), "Quarantined backup should be moved out of quarantine after restore.");
+            File.WriteAllText(restoreResult.RestoredPath, "SELECT 1;", Encoding.UTF8);
+            BackupQuarantineRestoreCandidate changedCandidate = new BackupQuarantineRestoreCandidate
+            {
+                QuarantinedPath = batchEmptySqlPath,
+                OriginalPath = restoreResult.RestoredPath,
+                SizeBytes = 0,
+                QuarantinedAtUtc = DateTime.UtcNow
+            };
+            string diffSummary = BackupQuarantineRestoreService.BuildDestinationDiffSummary(changedCandidate);
+            AssertContains(diffSummary, "大小", "Quarantine restore preview should compare destination file sizes.");
             string orphanQuarantinePath = Path.Combine(quarantineDirectory, "20240201_120000_orphan.sql");
             File.WriteAllText(orphanQuarantinePath, "SELECT 1;", Encoding.UTF8);
             BackupQuarantineBatchRestoreResult batchRestore = BackupQuarantineRestoreService.RestoreAllToOriginalPaths(

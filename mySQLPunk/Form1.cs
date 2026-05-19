@@ -4096,7 +4096,8 @@ namespace mySQLPunk
                     originalPathText,
                     FormatBytes(candidate.SizeBytes),
                     integrityStatus,
-                    integrityMessage);
+                    integrityMessage,
+                    preview.DestinationDiffSummary);
                 if (MessageBox.Show(previewMessage, Localization.T("Backup.QuarantineRestoreTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 {
                     return;

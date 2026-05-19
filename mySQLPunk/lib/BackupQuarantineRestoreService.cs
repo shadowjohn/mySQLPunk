@@ -31,6 +31,7 @@ namespace mySQLPunk.lib
     {
         public BackupQuarantineRestoreCandidate Candidate { get; set; }
         public BackupIntegrityResult IntegrityResult { get; set; }
+        public string DestinationDiffSummary { get; set; }
 
         public bool PassedIntegrityCheck
         {
@@ -142,8 +143,32 @@ namespace mySQLPunk.lib
             return new BackupQuarantineRestorePreview
             {
                 Candidate = candidate,
-                IntegrityResult = result
+                IntegrityResult = result,
+                DestinationDiffSummary = BuildDestinationDiffSummary(candidate)
             };
+        }
+
+        public static string BuildDestinationDiffSummary(BackupQuarantineRestoreCandidate candidate)
+        {
+            if (candidate == null) return string.Empty;
+            if (!candidate.HasOriginalPath)
+            {
+                return "目標差異：沒有 manifest 原始路徑，需手動選擇還原位置。";
+            }
+
+            string originalPath = candidate.OriginalPath;
+            if (!File.Exists(originalPath))
+            {
+                return "目標差異：原始路徑目前不存在，還原會重新建立檔案。";
+            }
+
+            FileInfo destination = new FileInfo(originalPath);
+            long beforeSize = destination.Exists ? destination.Length : 0;
+            long afterSize = candidate.SizeBytes;
+            long delta = afterSize - beforeSize;
+            string deltaText = delta == 0 ? "0" : (delta > 0 ? "+" : "") + delta.ToString();
+            return "目標差異：原始路徑已有檔案，大小 " +
+                   beforeSize + " -> " + afterSize + " bytes (" + deltaText + " bytes)，還原時需確認是否覆蓋。";
         }
 
         public static BackupQuarantineRestoreResult RestoreQuarantinedFile(string quarantinedPath, string destinationPath, bool overwrite)
