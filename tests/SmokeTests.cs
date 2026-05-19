@@ -246,6 +246,22 @@ public static class SmokeTests
         string mssqlSubstringSql = (string)GetProperty(mssqlSubstringPreview, "ConvertedSql");
         AssertContains(mssqlSubstringSql, "SUBSTRING(code, 1, 3)", "Converted SQL Server SQL should use SUBSTRING.");
 
+        object oracleLeftPreview = BuildViewSqlPreview(
+            "SELECT LEFT(code, 3) AS prefix FROM items",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleLeftPreview, "CanConvert"), "MySQL LEFT should convert to Oracle.");
+        string oracleLeftSql = (string)GetProperty(oracleLeftPreview, "ConvertedSql");
+        AssertContains(oracleLeftSql, "SUBSTR(code, 1, 3)", "Converted Oracle SQL should use SUBSTR for LEFT.");
+
+        object sqliteRightPreview = BuildViewSqlPreview(
+            "SELECT RIGHT(code, 2) AS suffix FROM items",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteRightPreview, "CanConvert"), "SQL Server RIGHT should convert to SQLite.");
+        string sqliteRightSql = (string)GetProperty(sqliteRightPreview, "ConvertedSql");
+        AssertContains(sqliteRightSql, "SUBSTR(code, -2)", "Converted SQLite SQL should use negative SUBSTR for RIGHT.");
+
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
             "mysql",

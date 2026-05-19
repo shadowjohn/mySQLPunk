@@ -429,6 +429,7 @@ namespace mySQLPunk.lib
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
+            sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
@@ -583,6 +584,39 @@ namespace mySQLPunk.lib
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
             if (args.Count < 2) return match.Value;
             return functionName + "(" + string.Join(", ", args.ToArray()) + ")";
+        }
+
+        private static string RewriteEdgeSubstringFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider != "oracle" && targetProvider != "sqlite") return selectSql;
+
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bLEFT\s*\((?<args>[^()]*)\)",
+                m => RewriteLeftFunction(m),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bRIGHT\s*\((?<args>[^()]*)\)",
+                m => RewriteRightFunction(m),
+                RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string RewriteLeftFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+            return "SUBSTR(" + args[0] + ", 1, " + args[1] + ")";
+        }
+
+        private static string RewriteRightFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+            return "SUBSTR(" + args[0] + ", -" + args[1] + ")";
         }
 
         private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)
