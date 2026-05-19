@@ -2017,7 +2017,9 @@ namespace mySQLPunk
 
         private string BuildPostgreSqlDropPrimaryKeyStatement()
         {
-            string tableLiteral = EscapeSqlStringValue(_tableName);
+            PostgreSqlDesignerObjectName target = ParsePostgreSqlDesignerObjectName(_tableName);
+            string schemaLiteral = EscapeSqlStringValue(target.Schema);
+            string tableLiteral = EscapeSqlStringValue(target.Name);
             string qualifiedTable = GetQualifiedDesignerTableName(_tableName).Replace("'", "''");
 
             return "DO $mysqlpunk$\r\n" +
@@ -2025,7 +2027,7 @@ namespace mySQLPunk
                    "BEGIN\r\n" +
                    "  SELECT tc.constraint_name INTO primary_key_name\r\n" +
                    "  FROM information_schema.table_constraints tc\r\n" +
-                   "  WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public' AND tc.table_name = '" + tableLiteral + "';\r\n" +
+                   "  WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = '" + schemaLiteral + "' AND tc.table_name = '" + tableLiteral + "';\r\n" +
                    "  IF primary_key_name IS NOT NULL THEN\r\n" +
                    "    EXECUTE 'ALTER TABLE " + qualifiedTable + " DROP CONSTRAINT ' || quote_ident(primary_key_name);\r\n" +
                    "  END IF;\r\n" +
@@ -2035,7 +2037,7 @@ namespace mySQLPunk
 
         private string BuildPostgreSqlAddPrimaryKeyStatement(DataRow row)
         {
-            string indexName = GetPrimaryKeyConstraintName(row, "pk_");
+            string indexName = GetPostgreSqlPrimaryKeyConstraintName(row);
             return "ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
                    " ADD CONSTRAINT " + QuoteDesignerIdentifier(indexName) +
                    " PRIMARY KEY (" + FormatGenericIndexColumns(GetRowString(row, "欄位").Trim()) + ");";
@@ -2077,11 +2079,25 @@ namespace mySQLPunk
             return indexName;
         }
 
+        private string GetPostgreSqlPrimaryKeyConstraintName(DataRow row)
+        {
+            string indexName = GetRowString(row, "名稱").Trim();
+            if (string.IsNullOrWhiteSpace(indexName) || IsPrimaryIndexName(indexName))
+            {
+                indexName = "pk_" + ParsePostgreSqlDesignerObjectName(_tableName).Name;
+            }
+            return indexName;
+        }
+
         private string BuildDropIndexStatement(string indexName)
         {
             if (_db is my_mssql)
             {
                 return "DROP INDEX " + QuoteDesignerIdentifier(indexName) + " ON " + GetQualifiedDesignerTableName(_tableName) + ";";
+            }
+            if (_db is my_postgresql)
+            {
+                return "DROP INDEX " + GetPostgreSqlQualifiedObjectName(indexName) + ";";
             }
             return "DROP INDEX " + QuoteDesignerIdentifier(indexName) + ";";
         }
@@ -2664,7 +2680,8 @@ namespace mySQLPunk
             }
             if (_db is my_postgresql)
             {
-                return "public." + QuoteDesignerIdentifier(tableName);
+                PostgreSqlDesignerObjectName target = ParsePostgreSqlDesignerObjectName(tableName);
+                return QuoteDesignerIdentifier(target.Schema) + "." + QuoteDesignerIdentifier(target.Name);
             }
             if (_db is my_oracle)
             {
@@ -2673,10 +2690,25 @@ namespace mySQLPunk
             return QuoteDesignerIdentifier(tableName);
         }
 
+        private string GetPostgreSqlQualifiedObjectName(string objectName)
+        {
+            PostgreSqlDesignerObjectName tableTarget = ParsePostgreSqlDesignerObjectName(_tableName);
+            PostgreSqlDesignerObjectName objectTarget = ParsePostgreSqlDesignerObjectName(objectName);
+            string schema = objectTarget.HasExplicitSchema ? objectTarget.Schema : tableTarget.Schema;
+            return QuoteDesignerIdentifier(schema) + "." + QuoteDesignerIdentifier(objectTarget.Name);
+        }
+
         private struct SqlServerDesignerObjectName
         {
             public string Schema;
             public string Name;
+        }
+
+        private struct PostgreSqlDesignerObjectName
+        {
+            public string Schema;
+            public string Name;
+            public bool HasExplicitSchema;
         }
 
         private static SqlServerDesignerObjectName ParseSqlServerDesignerObjectName(string objectName)
@@ -2693,6 +2725,28 @@ namespace mySQLPunk
             }
 
             return new SqlServerDesignerObjectName { Schema = "dbo", Name = value };
+        }
+
+        private static PostgreSqlDesignerObjectName ParsePostgreSqlDesignerObjectName(string objectName)
+        {
+            string value = (objectName ?? string.Empty).Trim();
+            int dotIndex = value.IndexOf('.');
+            if (dotIndex > 0 && dotIndex < value.Length - 1)
+            {
+                return new PostgreSqlDesignerObjectName
+                {
+                    Schema = value.Substring(0, dotIndex).Trim(),
+                    Name = value.Substring(dotIndex + 1).Trim(),
+                    HasExplicitSchema = true
+                };
+            }
+
+            return new PostgreSqlDesignerObjectName
+            {
+                Schema = "public",
+                Name = value,
+                HasExplicitSchema = false
+            };
         }
 
         private static string GetSqlServerDesignerObjectName(string objectName)

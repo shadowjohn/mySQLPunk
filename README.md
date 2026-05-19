@@ -114,7 +114,8 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
   - 後續方向：若需要更透明的狀態呈現，可在補註解進度視窗或狀態列標示目前使用的是遠端字典或本機快取。
 
 - **既有資料表修改仍有不支援情境**
-  - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」。
+  - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」；PostgreSQL Table Designer 已支援 `schema.table` 形式的既有資料表 SQL 產生，不再固定套用 `public` schema。
+  - 本輪補齊：PostgreSQL 欄位修改、註解、Primary Key 變更與索引刪除的 SQL 預覽會依目前資料表 schema 產生正確物件名稱。
   - 後續方向：以 provider 為單位補齊欄位改名、型別變更、NULL/DEFAULT、Primary Key 與 constraint 變更。
 
 - **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法 ✅ 主要 provider 已補齊**
