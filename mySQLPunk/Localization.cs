@@ -313,8 +313,10 @@ namespace mySQLPunk
             Add("Backup.Title", "建立備份", "Create Backup");
             Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
             Add("Backup.Success", "備份已建立。", "Backup created.");
-            Add("Backup.SuccessWithRemoteMirror", "備份已建立。\n遠端備份副本：{0}", "Backup created.\nRemote backup copy: {0}");
+            Add("Backup.SuccessVerified", "備份已建立並通過完整性驗證。", "Backup created and passed integrity verification.");
+            Add("Backup.SuccessWithRemoteMirror", "備份已建立並通過完整性驗證。\n遠端備份副本：{0}", "Backup created and passed integrity verification.\nRemote backup copy: {0}");
             Add("Backup.Failed", "建立備份失敗：", "Backup failed: ");
+            Add("Backup.IntegrityFailed", "備份完整性驗證失敗：{0}\n原因：{1}", "Backup integrity verification failed: {0}\nReason: {1}");
             Add("Backup.RestoreTitle", "還原備份", "Restore Backup");
             Add("Backup.RestoreFileFilter", "SQL / ZIP 備份 (*.sql;*.zip)|*.sql;*.zip|SQL 檔案 (*.sql)|*.sql|ZIP 備份 (*.zip)|*.zip|所有檔案 (*.*)|*.*", "SQL / ZIP backups (*.sql;*.zip)|*.sql;*.zip|SQL files (*.sql)|*.sql|ZIP backups (*.zip)|*.zip|All files (*.*)|*.*");
             Add("Backup.RestoreConfirm", "即將還原備份：\n{0}\n\nSQL 語句數：{1}\n大小：{2}\n目標資料庫：{3}\n\n還原會直接執行 SQL，可能覆蓋或刪除現有資料。是否繼續？", "Restore backup:\n{0}\n\nSQL statements: {1}\nSize: {2}\nTarget database: {3}\n\nRestore executes SQL directly and may overwrite or delete existing data. Continue?");

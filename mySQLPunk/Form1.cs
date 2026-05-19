@@ -4244,7 +4244,7 @@ namespace mySQLPunk
                 {
                     string remoteMirrorPath = CreateDatabaseBackup(target, dialog.FileName);
                     string message = string.IsNullOrWhiteSpace(remoteMirrorPath)
-                        ? Localization.T("Backup.Success")
+                        ? Localization.T("Backup.SuccessVerified")
                         : Localization.Format("Backup.SuccessWithRemoteMirror", remoteMirrorPath);
                     MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     UpdateMainStatus(message);
@@ -4296,10 +4296,12 @@ namespace mySQLPunk
                     destination.Open();
                     sqlite.MCT.BackupDatabase(destination, "main", "main", -1, null, 0);
                 }
+                VerifyDatabaseBackupOrThrow(targetPath);
                 return MirrorDatabaseBackupToRemote(targetPath);
             }
 
             DatabaseDumpService.WriteDatabaseDump(target.Database, target.DatabaseName, targetPath);
+            VerifyDatabaseBackupOrThrow(targetPath);
             return MirrorDatabaseBackupToRemote(targetPath);
         }
 
@@ -4307,7 +4309,21 @@ namespace mySQLPunk
         {
             string remoteDirectory = BackupMirrorSettings.RemoteDirectory;
             if (string.IsNullOrWhiteSpace(remoteDirectory)) return string.Empty;
-            return BackupRemoteMirrorService.MirrorBackup(targetPath, remoteDirectory, BackupMirrorSettings.RetainCount);
+            string mirrorPath = BackupRemoteMirrorService.MirrorBackup(targetPath, remoteDirectory, BackupMirrorSettings.RetainCount);
+            if (!string.IsNullOrWhiteSpace(mirrorPath))
+            {
+                VerifyDatabaseBackupOrThrow(mirrorPath);
+            }
+            return mirrorPath;
+        }
+
+        private static void VerifyDatabaseBackupOrThrow(string backupPath)
+        {
+            BackupIntegrityResult result = BackupIntegrityService.VerifyBackup(backupPath, CountSqlScriptStatements);
+            if (!result.IsValid)
+            {
+                throw new InvalidOperationException(Localization.Format("Backup.IntegrityFailed", backupPath, result.Message));
+            }
         }
 
         private static string BuildDatabaseDump(IDatabase db, string databaseName)

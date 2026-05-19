@@ -405,6 +405,30 @@ public static class SmokeTests
             Assert(zipPackage.StatementCount == 7, "Zip restore package should use provided statement counter.");
             AssertContains(zipPackage.Script, "INSERT INTO a", "Zip restore package should read SQL entry content.");
 
+            BackupIntegrityResult sqlIntegrity = BackupIntegrityService.VerifyBackup(sqlPath, script => (int)typeof(Form1)
+                .GetMethod("CountSqlScriptStatements", BindingFlags.Static | BindingFlags.NonPublic)
+                .Invoke(null, new object[] { script }));
+            Assert(sqlIntegrity.IsValid && sqlIntegrity.StatementCount == 2, "SQL backup integrity should validate executable statements.");
+
+            BackupIntegrityResult zipIntegrity = BackupIntegrityService.VerifyBackup(zipPath, script => 2);
+            Assert(zipIntegrity.IsValid && zipIntegrity.Kind == "sql", "Zip SQL backup integrity should validate the SQL entry.");
+
+            string sqlitePath = Path.Combine(dir, "verify.sqlite");
+            using (my_sqlite sqliteDb = new my_sqlite())
+            {
+                sqliteDb.SetConn("Data Source=" + sqlitePath + ";Version=3;New=True;");
+                sqliteDb.Open();
+                Dictionary<string, string> createSqliteResult = sqliteDb.ExecSQL("CREATE TABLE ok_test (id INTEGER PRIMARY KEY);");
+                AssertEquals("OK", createSqliteResult["status"], "SQLite integrity test database should be created.");
+            }
+            BackupIntegrityResult sqliteIntegrity = BackupIntegrityService.VerifyBackup(sqlitePath, null);
+            Assert(sqliteIntegrity.IsValid && sqliteIntegrity.Kind == "sqlite", "SQLite backup integrity should run integrity_check.");
+
+            string emptySqlPath = Path.Combine(dir, "empty.sql");
+            File.WriteAllText(emptySqlPath, "-- only comments", Encoding.UTF8);
+            BackupIntegrityResult emptyIntegrity = BackupIntegrityService.VerifyBackup(emptySqlPath, script => 0);
+            Assert(!emptyIntegrity.IsValid, "Empty SQL backup should fail integrity verification.");
+
             DatabaseRestoreSnapshot before = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", 2, 1, 0, 1);
             DatabaseRestoreSnapshot after = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", 3, 1, 1, 0);
             string summary = BackupRestoreDiffService.BuildSummary(before, after);
