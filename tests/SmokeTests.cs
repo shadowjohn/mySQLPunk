@@ -149,6 +149,31 @@ public static class SmokeTests
         string mysqlJsonValueSql = (string)GetProperty(mysqlJsonValuePreview, "ConvertedSql");
         AssertContains(mysqlJsonValueSql, "JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status'))", "Converted MySQL SQL should use JSON_EXTRACT with unquote.");
 
+        object sqliteNowPreview = BuildViewSqlPreview(
+            "SELECT NOW() AS created_at FROM users",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteNowPreview, "CanConvert"), "MySQL NOW should convert to SQLite.");
+        string sqliteNowSql = (string)GetProperty(sqliteNowPreview, "ConvertedSql");
+        AssertContains(sqliteNowSql, "CURRENT_TIMESTAMP", "Converted SQLite SQL should use CURRENT_TIMESTAMP.");
+        AssertNotContains(sqliteNowSql, "NOW()", "Converted SQLite SQL should remove NOW().");
+
+        object mssqlCurrentDatePreview = BuildViewSqlPreview(
+            "SELECT CURDATE() AS today FROM users",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCurrentDatePreview, "CanConvert"), "MySQL CURDATE should convert to SQL Server.");
+        string mssqlCurrentDateSql = (string)GetProperty(mssqlCurrentDatePreview, "ConvertedSql");
+        AssertContains(mssqlCurrentDateSql, "CAST(GETDATE() AS date)", "Converted SQL Server SQL should use a date expression.");
+
+        object mysqlCurrentDatePreview = BuildViewSqlPreview(
+            "SELECT CURRENT_DATE AS today FROM users",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlCurrentDatePreview, "CanConvert"), "PostgreSQL CURRENT_DATE should convert to MySQL.");
+        string mysqlCurrentDateSql = (string)GetProperty(mysqlCurrentDatePreview, "ConvertedSql");
+        AssertContains(mysqlCurrentDateSql, "CURDATE()", "Converted MySQL SQL should use CURDATE().");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",

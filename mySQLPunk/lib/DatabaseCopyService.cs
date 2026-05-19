@@ -422,11 +422,8 @@ namespace mySQLPunk.lib
                 sql = Regex.Replace(sql, @"\bIFNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
             if (targetProvider != "mssql")
                 sql = Regex.Replace(sql, @"\bISNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
-            if (targetProvider != "mssql")
-                sql = Regex.Replace(sql, @"\bGETDATE\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
-            if (targetProvider == "mssql" || targetProvider == "oracle")
-                sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
 
+            sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
@@ -437,6 +434,41 @@ namespace mySQLPunk.lib
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
 
             return sql;
+        }
+
+        private static string RewriteCurrentDateTimeFunctions(string selectSql, string targetProvider)
+        {
+            string sql = selectSql;
+            if (targetProvider != "mssql")
+            {
+                sql = Regex.Replace(sql, @"\bGETDATE\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
+            }
+
+            if (targetProvider != "mysql")
+            {
+                sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
+            }
+
+            sql = Regex.Replace(
+                sql,
+                @"\bCURDATE\s*\(\s*\)",
+                m => BuildCurrentDateExpression(targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bCURRENT_DATE\s*(?:\(\s*\))?",
+                m => BuildCurrentDateExpression(targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string BuildCurrentDateExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "CAST(GETDATE() AS date)";
+            if (targetProvider == "mysql") return "CURDATE()";
+            return "CURRENT_DATE";
         }
 
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)
