@@ -174,6 +174,30 @@ public static class SmokeTests
         string mysqlCurrentDateSql = (string)GetProperty(mysqlCurrentDatePreview, "ConvertedSql");
         AssertContains(mysqlCurrentDateSql, "CURDATE()", "Converted MySQL SQL should use CURDATE().");
 
+        object mssqlDateDiffPreview = BuildViewSqlPreview(
+            "SELECT DATEDIFF(end_date, start_date) AS days_open FROM tickets",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDateDiffPreview, "CanConvert"), "MySQL DATEDIFF should convert to SQL Server.");
+        string mssqlDateDiffSql = (string)GetProperty(mssqlDateDiffPreview, "ConvertedSql");
+        AssertContains(mssqlDateDiffSql, "DATEDIFF(day, start_date, end_date)", "Converted SQL Server SQL should use day datepart.");
+
+        object mysqlDateDiffPreview = BuildViewSqlPreview(
+            "SELECT DATEDIFF(day, start_date, end_date) AS days_open FROM tickets",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlDateDiffPreview, "CanConvert"), "SQL Server DATEDIFF should convert to MySQL.");
+        string mysqlDateDiffSql = (string)GetProperty(mysqlDateDiffPreview, "ConvertedSql");
+        AssertContains(mysqlDateDiffSql, "DATEDIFF(end_date, start_date)", "Converted MySQL SQL should use two-argument DATEDIFF.");
+
+        object sqliteDateDiffPreview = BuildViewSqlPreview(
+            "SELECT DATEDIFF(day, start_date, end_date) AS days_open FROM tickets",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDateDiffPreview, "CanConvert"), "SQL Server DATEDIFF should convert to SQLite.");
+        string sqliteDateDiffSql = (string)GetProperty(sqliteDateDiffPreview, "ConvertedSql");
+        AssertContains(sqliteDateDiffSql, "CAST(julianday(end_date) - julianday(start_date) AS INTEGER)", "Converted SQLite SQL should use julianday day difference.");
+
         object pgIfPreview = BuildViewSqlPreview(
             "SELECT IF(is_active = 1, 'Y', 'N') AS active_text FROM users",
             "mysql",

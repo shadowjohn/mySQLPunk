@@ -425,6 +425,7 @@ namespace mySQLPunk.lib
 
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
+            sql = RewriteDateDiffFunctions(sql, targetProvider);
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
@@ -520,6 +521,46 @@ namespace mySQLPunk.lib
                     return "TO_CHAR(" + expr + ", '" + EscapeSqlString(translated) + "')";
                 },
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteDateDiffFunctions(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bDATEDIFF\s*\((?<args>[^()]*)\)",
+                m => RewriteDateDiffFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteDateDiffFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count == 2)
+            {
+                return BuildDateDiffDaysExpression(targetProvider, args[0], args[1]);
+            }
+
+            if (args.Count == 3 && IsDayDatePart(args[0]))
+            {
+                return BuildDateDiffDaysExpression(targetProvider, args[2], args[1]);
+            }
+
+            return match.Value;
+        }
+
+        private static string BuildDateDiffDaysExpression(string targetProvider, string endDate, string startDate)
+        {
+            if (targetProvider == "mssql") return "DATEDIFF(day, " + startDate + ", " + endDate + ")";
+            if (targetProvider == "mysql") return "DATEDIFF(" + endDate + ", " + startDate + ")";
+            if (targetProvider == "sqlite") return "CAST(julianday(" + endDate + ") - julianday(" + startDate + ") AS INTEGER)";
+            if (targetProvider == "oracle") return "TRUNC(" + endDate + ") - TRUNC(" + startDate + ")";
+            return "(" + endDate + "::date - " + startDate + "::date)";
+        }
+
+        private static bool IsDayDatePart(string value)
+        {
+            string text = (value ?? string.Empty).Trim().Trim('\'', '"', '[', ']').ToLowerInvariant();
+            return text == "day" || text == "dd" || text == "d";
         }
 
         private static string RewriteConcatFunctions(string selectSql, string targetProvider)
