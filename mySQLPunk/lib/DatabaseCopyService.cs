@@ -430,6 +430,7 @@ namespace mySQLPunk.lib
             sql = RewriteDateFormatFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
+            sql = RewriteSubstringFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
@@ -488,6 +489,36 @@ namespace mySQLPunk.lib
                 @"\bLEN\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => "LENGTH(" + m.Groups["expr"].Value.Trim() + ")",
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteSubstringFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mssql")
+            {
+                return Regex.Replace(
+                    selectSql,
+                    @"\bSUBSTR\s*\((?<args>[^()]*)\)",
+                    m => RewriteFunctionName(m, "SUBSTRING"),
+                    RegexOptions.IgnoreCase);
+            }
+
+            if (targetProvider == "oracle" || targetProvider == "sqlite")
+            {
+                return Regex.Replace(
+                    selectSql,
+                    @"\bSUBSTRING\s*\((?<args>[^()]*)\)",
+                    m => RewriteFunctionName(m, "SUBSTR"),
+                    RegexOptions.IgnoreCase);
+            }
+
+            return selectSql;
+        }
+
+        private static string RewriteFunctionName(Match match, string functionName)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 2) return match.Value;
+            return functionName + "(" + string.Join(", ", args.ToArray()) + ")";
         }
 
         private static string RewriteStringAggregateFunctions(string selectSql, string targetProvider)

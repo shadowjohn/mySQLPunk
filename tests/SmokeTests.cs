@@ -181,6 +181,22 @@ public static class SmokeTests
         string mssqlLengthSql = (string)GetProperty(mssqlLengthPreview, "ConvertedSql");
         AssertContains(mssqlLengthSql, "LEN(display_name)", "Converted SQL Server SQL should use LEN.");
 
+        object sqliteSubstringPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING(code, 1, 3) AS prefix FROM items",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSubstringPreview, "CanConvert"), "SQL Server SUBSTRING should convert to SQLite.");
+        string sqliteSubstringSql = (string)GetProperty(sqliteSubstringPreview, "ConvertedSql");
+        AssertContains(sqliteSubstringSql, "SUBSTR(code, 1, 3)", "Converted SQLite SQL should use SUBSTR.");
+
+        object mssqlSubstringPreview = BuildViewSqlPreview(
+            "SELECT SUBSTR(code, 1, 3) AS prefix FROM items",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlSubstringPreview, "CanConvert"), "Oracle SUBSTR should convert to SQL Server.");
+        string mssqlSubstringSql = (string)GetProperty(mssqlSubstringPreview, "ConvertedSql");
+        AssertContains(mssqlSubstringSql, "SUBSTRING(code, 1, 3)", "Converted SQL Server SQL should use SUBSTRING.");
+
         object cteWindowPreview = BuildViewSqlPreview(
             "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
             "postgresql",
