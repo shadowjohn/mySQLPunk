@@ -1819,9 +1819,85 @@ namespace mySQLPunk
                 dialog.FileName = BuildBlobFileName();
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-                File.WriteAllBytes(dialog.FileName, bytes);
+                long streamedBytes;
+                string streamError;
+                if (!TrySaveSelectedTableBlobByStreaming(dialog.FileName, out streamedBytes, out streamError))
+                {
+                    BinaryCellStreamingService.WriteBytesToFile(bytes, dialog.FileName, (written, total) =>
+                    {
+                        UpdateBlobExportProgress(written, total);
+                    });
+                }
+
                 UpdateStatus(Localization.Format("Query.BlobSaved", dialog.FileName));
             }
+        }
+
+        private bool TrySaveSelectedTableBlobByStreaming(string targetPath, out long writtenBytes, out string errorMessage)
+        {
+            writtenBytes = 0;
+            errorMessage = "";
+
+            try
+            {
+                if (!_isTableDataMode || dgvResults == null || dgvResults.CurrentCell == null) return false;
+                if (dgvResults.CurrentCell.RowIndex < 0 || dgvResults.CurrentCell.ColumnIndex < 0) return false;
+
+                string tableName = GetTableNameFromSql();
+                string columnName = GetCurrentResultColumnName();
+                if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName)) return false;
+
+                DataGridViewRow gridRow = dgvResults.Rows[dgvResults.CurrentCell.RowIndex];
+                DataRowView rowView = gridRow.DataBoundItem as DataRowView;
+                if (rowView == null || rowView.Row == null || rowView.Row.RowState != DataRowState.Unchanged) return false;
+
+                List<TableColumnInfo> columns = GetTableColumns(tableName);
+                List<string> primaryKeys = columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
+                if (primaryKeys.Count == 0) return false;
+
+                foreach (string primaryKey in primaryKeys)
+                {
+                    if (!rowView.Row.Table.Columns.Contains(primaryKey)) return false;
+                }
+
+                Dictionary<string, object> parameters = new Dictionary<string, object>();
+                int index = 0;
+                string whereSql = BuildWhereClause(rowView.Row, columns, primaryKeys, parameters, ref index);
+                string sql = "SELECT " + QuoteIdentifier(columnName) +
+                             " FROM " + GetQualifiedTableName(tableName) +
+                             " WHERE " + whereSql + ";";
+
+                writtenBytes = BinaryCellStreamingService.WriteFirstColumnToFile(_db, sql, parameters, targetPath, (written, total) =>
+                {
+                    UpdateBlobExportProgress(written, total);
+                });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                return false;
+            }
+        }
+
+        private void UpdateBlobExportProgress(long written, long total)
+        {
+            if (lblStatus == null) return;
+
+            string totalText = total >= 0 ? FormatByteCount(total) : "?";
+            lblStatus.Text = "BLOB 串流匯出中：" + FormatByteCount(written) + " / " + totalText;
+            Application.DoEvents();
+        }
+
+        private static string FormatByteCount(long bytes)
+        {
+            if (bytes < 1024) return bytes + " B";
+            double value = bytes / 1024d;
+            if (value < 1024) return value.ToString("0.##") + " KB";
+            value /= 1024d;
+            if (value < 1024) return value.ToString("0.##") + " MB";
+            value /= 1024d;
+            return value.ToString("0.##") + " GB";
         }
 
         private void ImportBlobFromFile()

@@ -162,6 +162,7 @@
     </Compile>
     <Compile Include="ThemeManager.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
+    <Compile Include="lib\BinaryCellStreamingService.cs" />
     <Compile Include="lib\crypto.cs" />
     <Compile Include="lib\DatabaseCopyService.cs" />
     <Compile Include="lib\DatabaseDumpService.cs" />

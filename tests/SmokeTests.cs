@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.IO;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Windows.Forms;
@@ -22,6 +23,7 @@ public static class SmokeTests
         Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
+        Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Run("Windows credential service", TestWindowsCredentialService, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
@@ -319,6 +321,56 @@ public static class SmokeTests
         AssertContains(markdown, "| Name | Amount | Payload |", "Markdown export should include headers.");
         Assert(QueryResultExportService.ResolveFormat("result.json", 2) == QueryResultExportFormat.Json, "Extension should determine query export format.");
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
+    }
+
+    private static void TestBinaryCellStreamingService()
+    {
+        byte[] payload = new byte[200000];
+        for (int i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte)(i % 251);
+        }
+
+        string tempPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_" + Guid.NewGuid().ToString("N") + ".bin");
+        my_sqlite db = new my_sqlite();
+        try
+        {
+            db.SetConn("Data Source=:memory:;Version=3;New=True;");
+            db.Open();
+            Dictionary<string, string> createResult = db.ExecSQL("CREATE TABLE stream_test (id INTEGER PRIMARY KEY, payload BLOB);");
+            AssertEquals("OK", createResult["status"], "SQLite test table should be created.");
+
+            Dictionary<string, object> insertParameters = new Dictionary<string, object> { { "p0", 1 }, { "p1", payload } };
+            Dictionary<string, string> insertResult = db.ExecSQL("INSERT INTO stream_test (id, payload) VALUES (@p0, @p1);", insertParameters);
+            AssertEquals("OK", insertResult["status"], "SQLite test BLOB should be inserted.");
+
+            long lastProgress = 0;
+            long written = BinaryCellStreamingService.WriteFirstColumnToFile(
+                db,
+                "SELECT payload FROM stream_test WHERE id = @p0;",
+                new Dictionary<string, object> { { "p0", 1 } },
+                tempPath,
+                (done, total) =>
+                {
+                    lastProgress = done;
+                    Assert(total == payload.Length || total == -1, "Streaming progress should report total length or unknown length.");
+                },
+                4096);
+
+            byte[] exported = File.ReadAllBytes(tempPath);
+            Assert(written == payload.Length, "Streaming service should report exported byte count.");
+            Assert(exported.Length == payload.Length, "Streaming service should export the full BLOB.");
+            Assert(lastProgress == payload.Length, "Streaming progress should reach the final byte count.");
+            for (int i = 0; i < payload.Length; i += 4097)
+            {
+                Assert(exported[i] == payload[i], "Streaming output byte should match source payload.");
+            }
+        }
+        finally
+        {
+            db.Dispose();
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
     }
 
     private static void TestConnectionAndMetadataServices()
