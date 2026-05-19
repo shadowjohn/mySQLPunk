@@ -696,6 +696,19 @@ public static class SmokeTests
         AssertContains(exportCsv, "table,column,comment", "SQLite comment CSV export should include headers.");
         AssertContains(exportCsv, "users,NAME", "SQLite comment CSV export should include table and column.");
 
+        string yaml = "comments:\n- table: users\n  column: NOTE\n  comment: \"備註: 可含冒號\"\n- table: logs\n  column: MESSAGE\n  comment: 訊息\n";
+        SqliteColumnCommentImportPlan yamlPlan = SqliteColumnCommentExchangeService.BuildImportPlanFromYaml(yaml, "users");
+        string yamlSql = string.Join("\n", yamlPlan.Statements.ToArray());
+        Assert(yamlPlan.TableCount == 1 && yamlPlan.CommentCount == 1, "SQLite comment import should support YAML with table filters.");
+        AssertContains(yamlSql, "備註: 可含冒號", "SQLite comment YAML import should preserve quoted values.");
+        AssertNotContains(yamlSql, "MESSAGE", "SQLite comment YAML import should honor table filters.");
+
+        SqliteColumnCommentExportResult yamlExportResult;
+        string exportYaml = SqliteColumnCommentExchangeService.BuildExportYaml(db, "main", "users", out yamlExportResult);
+        Assert(yamlExportResult.TableCount == 1 && yamlExportResult.CommentCount == 2, "SQLite comment YAML export should count exported comments.");
+        AssertContains(exportYaml, "comments:", "SQLite comment YAML export should include comments root.");
+        AssertContains(exportYaml, "column: \"NAME\"", "SQLite comment YAML export should include column names.");
+
         string tempPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_" + Guid.NewGuid().ToString("N") + ".json");
         try
         {

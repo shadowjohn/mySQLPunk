@@ -160,7 +160,9 @@ namespace mySQLPunk.lib
             SqliteColumnCommentExportResult result;
             string content = IsCsvPath(targetPath)
                 ? BuildExportCsv(db, databaseName, tableName, out result)
-                : BuildExportJson(db, databaseName, tableName, out result);
+                : (IsYamlPath(targetPath)
+                    ? BuildExportYaml(db, databaseName, tableName, out result)
+                    : BuildExportJson(db, databaseName, tableName, out result));
             File.WriteAllText(targetPath, content, new UTF8Encoding(false));
             return result;
         }
@@ -254,13 +256,52 @@ namespace mySQLPunk.lib
             return builder.ToString();
         }
 
+        public static string BuildExportYaml(IDatabase db, string databaseName, string tableName, out SqliteColumnCommentExportResult result)
+        {
+            EnsureSqlite(db);
+
+            result = new SqliteColumnCommentExportResult();
+            List<string> tableNames = new List<string>();
+            if (!string.IsNullOrWhiteSpace(tableName))
+            {
+                tableNames.Add(tableName);
+            }
+            else
+            {
+                tableNames.AddRange(db.GetTables(databaseName) ?? new List<string>());
+            }
+
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("version: " + FormatVersion);
+            builder.AppendLine("provider: sqlite");
+            builder.AppendLine("comments:");
+            foreach (string currentTable in tableNames)
+            {
+                if (string.IsNullOrWhiteSpace(currentTable)) continue;
+                Dictionary<string, string> comments = ReadColumnComments(db, databaseName, currentTable);
+                if (comments.Count == 0) continue;
+
+                result.TableCount++;
+                foreach (var item in comments)
+                {
+                    builder.AppendLine("- table: " + YamlScalar(currentTable));
+                    builder.AppendLine("  column: " + YamlScalar(item.Key));
+                    builder.AppendLine("  comment: " + YamlScalar(item.Value));
+                    result.CommentCount++;
+                }
+            }
+            return builder.ToString();
+        }
+
         public static SqliteColumnCommentImportPlan BuildImportPlanFromFile(string sourcePath, string tableNameFilter = null)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
             string text = File.ReadAllText(sourcePath, Encoding.UTF8);
             return IsCsvPath(sourcePath)
                 ? BuildImportPlanFromCsv(text, tableNameFilter)
-                : BuildImportPlan(text, tableNameFilter);
+                : (IsYamlPath(sourcePath)
+                    ? BuildImportPlanFromYaml(text, tableNameFilter)
+                    : BuildImportPlan(text, tableNameFilter));
         }
 
         public static SqliteColumnCommentImportPlan BuildImportPlan(string json, string tableNameFilter = null)
@@ -272,6 +313,12 @@ namespace mySQLPunk.lib
         public static SqliteColumnCommentImportPlan BuildImportPlanFromCsv(string csv, string tableNameFilter = null)
         {
             Dictionary<string, Dictionary<string, string>> tables = ParseExchangeCsv(csv, tableNameFilter);
+            return BuildImportPlanFromTables(tables);
+        }
+
+        public static SqliteColumnCommentImportPlan BuildImportPlanFromYaml(string yaml, string tableNameFilter = null)
+        {
+            Dictionary<string, Dictionary<string, string>> tables = ParseExchangeYaml(yaml, tableNameFilter);
             return BuildImportPlanFromTables(tables);
         }
 
@@ -414,6 +461,55 @@ namespace mySQLPunk.lib
             return tables;
         }
 
+        public static Dictionary<string, Dictionary<string, string>> ParseExchangeYaml(string yaml, string tableNameFilter = null)
+        {
+            if (string.IsNullOrWhiteSpace(yaml)) throw new InvalidOperationException("SQLite column comment YAML is empty.");
+
+            Dictionary<string, Dictionary<string, string>> tables =
+                new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> current = null;
+            string[] lines = yaml.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            foreach (string rawLine in lines)
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+                if (string.Equals(line, "comments:", StringComparison.OrdinalIgnoreCase) ||
+                    line.StartsWith("version:", StringComparison.OrdinalIgnoreCase) ||
+                    line.StartsWith("provider:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (line.StartsWith("- ", StringComparison.Ordinal))
+                {
+                    AddYamlCommentRow(tables, current, tableNameFilter);
+                    current = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    line = line.Substring(2).Trim();
+                }
+
+                int colon = line.IndexOf(':');
+                if (colon < 0 || current == null) continue;
+                string key = NormalizeCsvHeader(line.Substring(0, colon));
+                string value = ParseYamlScalar(line.Substring(colon + 1).Trim());
+                if (key == "table" || key == "tablename" || key == "table_name")
+                {
+                    current["table"] = value;
+                }
+                else if (key == "column" || key == "columnname" || key == "column_name" || key == "name")
+                {
+                    current["column"] = value;
+                }
+                else if (key == "comment" || key == "description" || key == "remarks")
+                {
+                    current["comment"] = value;
+                }
+            }
+            AddYamlCommentRow(tables, current, tableNameFilter);
+
+            if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment YAML has no usable comments.");
+            return tables;
+        }
+
         public static string BuildEnsureSidecarTableSql()
         {
             return "CREATE TABLE IF NOT EXISTS " + QuoteSqliteIdentifier(my_sqlite.ColumnCommentTableName) + " (" +
@@ -546,6 +642,82 @@ namespace mySQLPunk.lib
         private static bool IsCsvPath(string path)
         {
             return string.Equals(Path.GetExtension(path), ".csv", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsYamlPath(string path)
+        {
+            string extension = Path.GetExtension(path);
+            return string.Equals(extension, ".yaml", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".yml", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void AddYamlCommentRow(
+            Dictionary<string, Dictionary<string, string>> tables,
+            Dictionary<string, string> row,
+            string tableNameFilter)
+        {
+            if (row == null) return;
+            string tableName = row.ContainsKey("table") ? row["table"] : "";
+            string columnName = row.ContainsKey("column") ? row["column"] : "";
+            string comment = row.ContainsKey("comment") ? row["comment"] : "";
+            if (string.IsNullOrWhiteSpace(tableName) ||
+                string.IsNullOrWhiteSpace(columnName) ||
+                string.IsNullOrWhiteSpace(comment))
+            {
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(tableNameFilter) &&
+                !string.Equals(tableName, tableNameFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            Dictionary<string, string> columns;
+            if (!tables.TryGetValue(tableName.Trim(), out columns))
+            {
+                columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                tables[tableName.Trim()] = columns;
+            }
+            columns[columnName.Trim()] = comment.Trim();
+        }
+
+        private static string YamlScalar(string value)
+        {
+            return "\"" + (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        }
+
+        private static string ParseYamlScalar(string value)
+        {
+            string text = value ?? string.Empty;
+            if (text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"')
+            {
+                text = text.Substring(1, text.Length - 2);
+                StringBuilder builder = new StringBuilder();
+                bool escaped = false;
+                foreach (char ch in text)
+                {
+                    if (escaped)
+                    {
+                        builder.Append(ch);
+                        escaped = false;
+                    }
+                    else if (ch == '\\')
+                    {
+                        escaped = true;
+                    }
+                    else
+                    {
+                        builder.Append(ch);
+                    }
+                }
+                if (escaped) builder.Append('\\');
+                return builder.ToString();
+            }
+            if (text.Length >= 2 && text[0] == '\'' && text[text.Length - 1] == '\'')
+            {
+                return text.Substring(1, text.Length - 2).Replace("''", "'");
+            }
+            return text;
         }
 
         private static string CsvField(string value)
