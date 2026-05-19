@@ -54,7 +54,7 @@ Smoke test harness：
 | SQL Dump | 可用 | 支援多 provider Table dump；SQLite 欄位註解 sidecar metadata 會隨結構匯出；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
 | 匯出 / Dump / Backup service | 可用 | 查詢結果多格式匯出、SQL dump 與邏輯 SQL 備份已抽出 service，Form UI 只負責觸發、檔案對話框與狀態呈現。 |
 | 連線與 metadata service | 可用 | 連線開啟、retry 判斷與 database metadata snapshot 已抽出 service，Form UI 保留 TreeView 呈現與錯誤提示。 |
-| 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、SQL 檔案位置、匯出位置、結果網格字型與診斷記錄。 |
+| 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、SQL 檔案位置、匯出位置、結果網格字型、診斷記錄與自動復原草稿。 |
 
 ## 未完成功能與已知限制
 
@@ -62,10 +62,10 @@ Smoke test harness：
 
 ### 優先待辦
 
-- **選項中心分類功能 ✅ 查詢視窗與診斷記錄設定套用已補齊**
+- **選項中心分類功能 ✅ 查詢視窗、診斷記錄與自動復原草稿已補齊**
   - 現況：選項視窗已具備一般、索引標籤、自動完成程式碼、編輯器、記錄、AI、自動復原、檔案位置、連線能力、環境與進階等分類。
-  - 完成內容：`ApplicationOptionSettings` 會將通用選項保存到 `application-options.json`；查詢視窗已讀取並套用記錄限制、編輯器字型大小、換行、自動完成啟用狀態、是否自動載入 metadata、匯出預設資料夾、SQL 開啟/儲存資料夾與結果網格字型大小；進階選項的「啟用診斷記錄」會把查詢歷程以 JSONL 寫入 `選項 > 檔案位置` 的記錄位置，內容保留 SQL 預覽與 SHA-256 指紋，不保存完整 SQL 原文。
-  - 後續方向：部分選項仍需逐步接到實際行為，例如索引標籤開啟位置、自動復原草稿、連線代理與進階註冊項目。
+  - 完成內容：`ApplicationOptionSettings` 會將通用選項保存到 `application-options.json`；查詢視窗已讀取並套用記錄限制、編輯器字型大小、換行、自動完成啟用狀態、是否自動載入 metadata、匯出預設資料夾、SQL 開啟/儲存資料夾與結果網格字型大小；進階選項的「啟用診斷記錄」會把查詢歷程以 JSONL 寫入 `選項 > 檔案位置` 的記錄位置，內容保留 SQL 預覽與 SHA-256 指紋，不保存完整 SQL 原文；自動復原的查詢開關與間隔會啟動查詢草稿定時保存，草稿寫入查詢資料夾下的 `auto-recovery`。
+  - 後續方向：部分選項仍需逐步接到實際行為，例如索引標籤開啟位置、連線代理與進階註冊項目。
 
 - **連線群組功能 ✅ 已完成**
   - 觸發位置：左側樹狀清單空白處右鍵選單的「新增群組」，以及連線/群組節點右鍵選單的群組操作項目。

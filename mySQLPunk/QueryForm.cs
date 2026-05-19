@@ -140,6 +140,8 @@ namespace mySQLPunk
         private ToolStripMenuItem resultsDeleteRowItem;
         private ToolStripMenuItem resultsSaveRowsItem;
         private bool _isClosing;
+        private System.Windows.Forms.Timer _autoRecoveryTimer;
+        private string _lastAutoRecoverySqlHash = string.Empty;
 
         private static readonly string[] Keywords =
         {
@@ -484,7 +486,43 @@ namespace mySQLPunk
             
             // 將 dataToolStrip 放到 split.Panel2 的底部 (跟著表格走)
             split.Panel2.Controls.Add(dataToolStrip);
+            InitializeAutoRecoveryTimer();
             ApplyTheme();
+        }
+
+        private void InitializeAutoRecoveryTimer()
+        {
+            if (!AutoRecoveryDraftService.IsQueryAutoRecoveryEnabled()) return;
+
+            _autoRecoveryTimer = new System.Windows.Forms.Timer();
+            _autoRecoveryTimer.Interval = AutoRecoveryDraftService.GetQueryAutoRecoveryIntervalMilliseconds();
+            _autoRecoveryTimer.Tick += (s, e) => SaveAutoRecoveryDraftIfNeeded();
+            _autoRecoveryTimer.Start();
+        }
+
+        private void SaveAutoRecoveryDraftIfNeeded()
+        {
+            if (!AutoRecoveryDraftService.IsQueryAutoRecoveryEnabled() || txtSql == null) return;
+
+            string sql = txtSql.Text;
+            if (string.IsNullOrWhiteSpace(sql)) return;
+
+            string hash = ComputeSqlHash(sql);
+            if (string.Equals(hash, _lastAutoRecoverySqlHash, StringComparison.Ordinal)) return;
+
+            string path = AutoRecoveryDraftService.WriteQueryDraft(_databaseName, connectionHost, Text, sql);
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                _lastAutoRecoverySqlHash = hash;
+            }
+        }
+
+        private static string ComputeSqlHash(string sql)
+        {
+            using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
+            {
+                return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(sql ?? string.Empty)));
+            }
         }
 
         private void LoadInitialQueryOptions()
@@ -3543,6 +3581,14 @@ namespace mySQLPunk
                 dgvResults.ContextMenuStrip = null;
             }
             resultsContextMenu = null;
+
+            if (_autoRecoveryTimer != null)
+            {
+                SaveAutoRecoveryDraftIfNeeded();
+                _autoRecoveryTimer.Stop();
+                _autoRecoveryTimer.Dispose();
+                _autoRecoveryTimer = null;
+            }
 
             CancellationTokenSource cts = _cts;
             _cts = null;

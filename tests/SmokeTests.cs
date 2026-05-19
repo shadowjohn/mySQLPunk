@@ -33,6 +33,7 @@ public static class SmokeTests
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
+        Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
@@ -742,6 +743,46 @@ public static class SmokeTests
         {
             ApplicationOptionSettings.SetBool("AdvancedEnableDiagnosticsLog", oldEnabled);
             ApplicationOptionSettings.SetString("FileLogDirectory", oldLogDirectory);
+            if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+        }
+    }
+
+    private static void TestAutoRecoveryDraftService()
+    {
+        bool oldEnabled = ApplicationOptionSettings.GetBool("AutoRecoveryQueryEnabled");
+        int oldInterval = ApplicationOptionSettings.GetInt("AutoRecoveryIntervalSeconds");
+        string oldQueryDirectory = ApplicationOptionSettings.GetString("FileQueryDirectory");
+        string tempDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk_autorecovery_" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            ApplicationOptionSettings.SetBool("AutoRecoveryQueryEnabled", true);
+            ApplicationOptionSettings.SetInt("AutoRecoveryIntervalSeconds", 2);
+            ApplicationOptionSettings.SetString("FileQueryDirectory", tempDirectory);
+
+            Assert(AutoRecoveryDraftService.GetQueryAutoRecoveryIntervalMilliseconds() == 5000, "Auto recovery interval should be clamped to 5 seconds.");
+
+            string sql = "SELECT * FROM users WHERE id = 1";
+            string json = AutoRecoveryDraftService.BuildQueryDraftJson("main", "host1", "Query - host1", sql);
+            JObject draft = JObject.Parse(json);
+            AssertEquals("main", draft.Value<string>("DatabaseName"), "Draft should include the database name.");
+            AssertEquals(sql, draft.Value<string>("Sql"), "Draft should preserve SQL text.");
+            Assert(draft.Value<string>("SqlSha256").Length == 64, "Draft should include a SQL fingerprint.");
+
+            string path = AutoRecoveryDraftService.WriteQueryDraft("main", "host1", "Query - host1", sql);
+            Assert(File.Exists(path), "Enabled auto recovery should write a draft file.");
+            AssertContains(path, "auto-recovery", "Draft should be stored under the auto-recovery folder.");
+
+            File.Delete(path);
+            ApplicationOptionSettings.SetBool("AutoRecoveryQueryEnabled", false);
+            string disabledPath = AutoRecoveryDraftService.WriteQueryDraft("main", "host1", "Query - host1", sql);
+            AssertEquals(string.Empty, disabledPath, "Disabled auto recovery should skip draft writing.");
+        }
+        finally
+        {
+            ApplicationOptionSettings.SetBool("AutoRecoveryQueryEnabled", oldEnabled);
+            ApplicationOptionSettings.SetInt("AutoRecoveryIntervalSeconds", oldInterval);
+            ApplicationOptionSettings.SetString("FileQueryDirectory", oldQueryDirectory);
             if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
         }
     }

@@ -166,6 +166,7 @@
     <Compile Include="lib\BackupRestoreService.cs" />
     <Compile Include="lib\BackupRestoreDiffService.cs" />
     <Compile Include="lib\BackupRemoteMirrorService.cs" />
+    <Compile Include="lib\AutoRecoveryDraftService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
     <Compile Include="lib\BinaryCellStreamingService.cs" />
     <Compile Include="lib\crypto.cs" />
