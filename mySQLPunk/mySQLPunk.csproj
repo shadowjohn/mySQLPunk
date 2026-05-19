@@ -161,10 +161,12 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="ThemeManager.cs" />
+    <Compile Include="lib\ConnectionOpenService.cs" />
     <Compile Include="lib\crypto.cs" />
     <Compile Include="lib\DatabaseCopyService.cs" />
     <Compile Include="lib\DatabaseDumpService.cs" />
     <Compile Include="lib\IDatabase.cs" />
+    <Compile Include="lib\MetadataLoadService.cs" />
     <Compile Include="lib\include.cs" />
     <Compile Include="lib\my_mssql.cs" />
     <Compile Include="lib\my_mysql.cs" />

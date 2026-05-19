@@ -22,6 +22,7 @@ public static class SmokeTests
         Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
+        Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
     }
@@ -319,6 +320,43 @@ public static class SmokeTests
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
     }
 
+    private static void TestConnectionAndMetadataServices()
+    {
+        FakeDumpDatabase openedDb = null;
+        ConnectionOpenResult openResult = ConnectionOpenService.Open(() =>
+        {
+            openedDb = new FakeDumpDatabase();
+            return openedDb;
+        }, "Host=localhost;Database=main");
+
+        Assert(ReferenceEquals(openedDb, openResult.Database), "ConnectionOpenService should return the opened database instance.");
+        Assert(openedDb.WasOpened, "ConnectionOpenService should open the database.");
+        AssertEquals("Host=localhost;Database=main", openedDb.ConnectionString, "ConnectionOpenService should set the connection string.");
+        Assert(openResult.Databases.Count == 1 && openResult.Databases[0] == "main", "ConnectionOpenService should return database names.");
+        Assert(ConnectionOpenService.ShouldOfferRetry(new TimeoutException("timeout")), "Timeout should be retryable.");
+        Assert(!ConnectionOpenService.ShouldOfferRetry(new Exception("password authentication failed")), "Credential failures should not be retryable.");
+
+        MetadataLoadService metadataService = new MetadataLoadService(
+            (db, name) => CreateNamedRowsTable("Name", "fn_ping"),
+            (db, name, connInfo) => CreateNamedRowsTable("Name", connInfo["user"].ToString()),
+            (db, name) => CreateNamedRowsTable("Name", "ev_daily"));
+        DatabaseMetadataSnapshot snapshot = metadataService.Load(openedDb, "main", new Dictionary<string, object> { { "user", "tester" } });
+
+        Assert(snapshot.Tables.Count == 1 && snapshot.Tables[0] == "public.users", "MetadataLoadService should load table names.");
+        Assert(snapshot.Views.Count == 1 && snapshot.Views[0] == "public.active_users", "MetadataLoadService should load view names.");
+        AssertEquals("fn_ping", snapshot.Functions.Rows[0]["Name"].ToString(), "MetadataLoadService should use the function loader.");
+        AssertEquals("tester", snapshot.Users.Rows[0]["Name"].ToString(), "MetadataLoadService should pass connection info to the user loader.");
+        AssertEquals("ev_daily", snapshot.Events.Rows[0]["Name"].ToString(), "MetadataLoadService should use the event loader.");
+    }
+
+    private static DataTable CreateNamedRowsTable(string columnName, string value)
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add(columnName);
+        table.Rows.Add(value);
+        return table;
+    }
+
     private static string BuildExistingAlterSql(IDatabase db, string databaseName, string tableName, DataTable originalColumns, DataTable currentColumns, string methodName)
     {
         TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
@@ -462,9 +500,11 @@ public static class SmokeTests
     {
         public ConnectionState State => ConnectionState.Open;
         public string ProviderName => "postgresql";
+        public string ConnectionString;
+        public bool WasOpened;
 
-        public void SetConn(string connectionString) { }
-        public void Open() { }
+        public void SetConn(string connectionString) { ConnectionString = connectionString; }
+        public void Open() { WasOpened = true; }
         public void Close() { }
         public void Dispose() { }
 

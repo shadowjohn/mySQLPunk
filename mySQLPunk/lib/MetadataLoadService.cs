@@ -1,0 +1,50 @@
+using System;
+using System.Collections.Generic;
+using System.Data;
+
+namespace mySQLPunk.lib
+{
+    public sealed class DatabaseMetadataSnapshot
+    {
+        public List<string> Tables { get; set; }
+        public List<string> Views { get; set; }
+        public DataTable Functions { get; set; }
+        public DataTable Users { get; set; }
+        public DataTable Events { get; set; }
+    }
+
+    public sealed class MetadataLoadService
+    {
+        private readonly Func<IDatabase, string, DataTable> _functionLoader;
+        private readonly Func<IDatabase, string, Dictionary<string, object>, DataTable> _userLoader;
+        private readonly Func<IDatabase, string, DataTable> _eventLoader;
+
+        public MetadataLoadService(
+            Func<IDatabase, string, DataTable> functionLoader,
+            Func<IDatabase, string, Dictionary<string, object>, DataTable> userLoader,
+            Func<IDatabase, string, DataTable> eventLoader)
+        {
+            _functionLoader = functionLoader ?? throw new ArgumentNullException(nameof(functionLoader));
+            _userLoader = userLoader ?? throw new ArgumentNullException(nameof(userLoader));
+            _eventLoader = eventLoader ?? throw new ArgumentNullException(nameof(eventLoader));
+        }
+
+        public DatabaseMetadataSnapshot Load(IDatabase db, string databaseName, Dictionary<string, object> connInfo)
+        {
+            if (db == null) throw new ArgumentNullException(nameof(db));
+
+            DatabaseMetadataSnapshot snapshot = new DatabaseMetadataSnapshot();
+            try { snapshot.Tables = db.GetTables(databaseName) ?? new List<string>(); }
+            catch (Exception ex) { throw new Exception("載入 Tables 失敗：" + ex.Message, ex); }
+            try { snapshot.Views = db.GetViews(databaseName) ?? new List<string>(); }
+            catch (Exception ex) { throw new Exception("載入 Views 失敗：" + ex.Message, ex); }
+            try { snapshot.Functions = _functionLoader(db, databaseName); }
+            catch (Exception ex) { throw new Exception("載入 Functions 失敗：" + ex.Message, ex); }
+            try { snapshot.Users = _userLoader(db, databaseName, connInfo); }
+            catch (Exception ex) { throw new Exception("載入 Users 失敗：" + ex.Message, ex); }
+            try { snapshot.Events = _eventLoader(db, databaseName); }
+            catch (Exception ex) { throw new Exception("載入 Events 失敗：" + ex.Message, ex); }
+            return snapshot;
+        }
+    }
+}

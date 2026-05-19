@@ -234,25 +234,7 @@ namespace mySQLPunk
 
         private static bool ShouldOfferRetryForConnectionOpen(Exception ex)
         {
-            if (ex is MySqlException mySqlEx)
-            {
-                // Access denied / credential mismatch: do not retry automatically.
-                if (mySqlEx.Number == 1045) return false;
-                return mySqlEx.IsTransient;
-            }
-
-            string message = ex?.Message ?? string.Empty;
-            if (message.IndexOf("28P01", StringComparison.OrdinalIgnoreCase) >= 0) return false; // PostgreSQL invalid_password
-            if (message.IndexOf("password authentication failed", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-            if (message.IndexOf("login failed for user", StringComparison.OrdinalIgnoreCase) >= 0) return false; // SQL Server credential failure
-            if (message.IndexOf("ORA-01017", StringComparison.OrdinalIgnoreCase) >= 0) return false; // Oracle invalid username/password
-            if (message.IndexOf("ORA-28000", StringComparison.OrdinalIgnoreCase) >= 0) return false; // Oracle account locked
-
-            if (ex is TimeoutException) return true;
-            if (ex is IOException) return true;
-            if (ex is System.Net.Sockets.SocketException) return true;
-            if (ex?.InnerException != null) return ShouldOfferRetryForConnectionOpen(ex.InnerException);
-            return false;
+            return ConnectionOpenService.ShouldOfferRetry(ex);
         }
 
         private static string BuildMySqlConnectionString(Dictionary<string, object> conn)
@@ -330,15 +312,11 @@ namespace mySQLPunk
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
-                    my_mysql db = new my_mysql();
                     try
                     {
-                        db.setConn(connString);
-                        List<string> databases = await Task.Run(() =>
-                        {
-                            db.open();
-                            return db.GetDatabases();
-                        });
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_mysql(), connString));
+                        IDatabase db = openResult.Database;
+                        List<string> databases = openResult.Databases;
 
                         myN.connections[index]["connString"] = connString;
                         myN.connections[index]["pdo"] = db;
@@ -353,7 +331,6 @@ namespace mySQLPunk
                     catch (Exception ex)
                     {
                         lastError = ex;
-                        try { db.Dispose(); } catch { }
 
                         bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
                         if (canRetry)
@@ -404,15 +381,11 @@ namespace mySQLPunk
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
-                    my_postgresql db = new my_postgresql();
                     try
                     {
-                        db.setConn(connString);
-                        List<string> databases = await Task.Run(() =>
-                        {
-                            db.open();
-                            return db.GetDatabases();
-                        });
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_postgresql(), connString));
+                        IDatabase db = openResult.Database;
+                        List<string> databases = openResult.Databases;
 
                         myN.connections[index]["connString"] = connString;
                         myN.connections[index]["pdo"] = db;
@@ -427,7 +400,6 @@ namespace mySQLPunk
                     catch (Exception ex)
                     {
                         lastError = ex;
-                        try { db.Dispose(); } catch { }
 
                         bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
                         if (canRetry)
@@ -478,15 +450,11 @@ namespace mySQLPunk
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
-                    my_sqlite db = new my_sqlite();
                     try
                     {
-                        db.setConn(connString);
-                        List<string> databases = await Task.Run(() =>
-                        {
-                            db.open();
-                            return db.GetDatabases();
-                        });
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_sqlite(), connString));
+                        my_sqlite db = openResult.Database as my_sqlite;
+                        List<string> databases = openResult.Databases;
 
                         myN.connections[index]["connString"] = connString;
                         myN.connections[index]["pdo"] = db;
@@ -504,7 +472,6 @@ namespace mySQLPunk
                     catch (Exception ex)
                     {
                         lastError = ex;
-                        try { db.Dispose(); } catch { }
 
                         bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
                         if (canRetry)
@@ -555,15 +522,11 @@ namespace mySQLPunk
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
-                    my_oracle db = new my_oracle();
                     try
                     {
-                        db.setConn(connString);
-                        List<string> databases = await Task.Run(() =>
-                        {
-                            db.open();
-                            return db.GetDatabases();
-                        });
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_oracle(), connString));
+                        IDatabase db = openResult.Database;
+                        List<string> databases = openResult.Databases;
 
                         myN.connections[index]["connString"] = connString;
                         myN.connections[index]["pdo"] = db;
@@ -578,7 +541,6 @@ namespace mySQLPunk
                     catch (Exception ex)
                     {
                         lastError = ex;
-                        try { db.Dispose(); } catch { }
 
                         bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
                         if (canRetry)
@@ -629,15 +591,11 @@ namespace mySQLPunk
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
-                    my_mssql db = new my_mssql();
                     try
                     {
-                        db.setConn(connString);
-                        List<string> databases = await Task.Run(() =>
-                        {
-                            db.open();
-                            return db.GetDatabases();
-                        });
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_mssql(), connString));
+                        IDatabase db = openResult.Database;
+                        List<string> databases = openResult.Databases;
 
                         myN.connections[index]["connString"] = connString;
                         myN.connections[index]["pdo"] = db;
@@ -652,7 +610,6 @@ namespace mySQLPunk
                     catch (Exception ex)
                     {
                         lastError = ex;
-                        try { db.Dispose(); } catch { }
 
                         bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
                         if (canRetry)
@@ -9607,31 +9564,9 @@ namespace mySQLPunk
             await LoadDatabaseMetadataAsync(father_index, databaseNode, db, databaseName);
         }
 
-        private sealed class DatabaseChildrenSnapshot
+        private MetadataLoadService CreateMetadataLoadService()
         {
-            public List<string> Tables;
-            public List<string> Views;
-            public DataTable Functions;
-            public DataTable Users;
-            public DataTable Events;
-        }
-
-        private DatabaseChildrenSnapshot BuildDatabaseChildrenSnapshot(IDatabase db, string databaseName, Dictionary<string, object> connInfo)
-        {
-            if (db == null) throw new ArgumentNullException(nameof(db));
-
-            var snapshot = new DatabaseChildrenSnapshot();
-            try { snapshot.Tables = db.GetTables(databaseName) ?? new List<string>(); }
-            catch (Exception ex) { throw new Exception("載入 Tables 失敗：" + ex.Message, ex); }
-            try { snapshot.Views = db.GetViews(databaseName) ?? new List<string>(); }
-            catch (Exception ex) { throw new Exception("載入 Views 失敗：" + ex.Message, ex); }
-            try { snapshot.Functions = GetDatabaseFunctions(db, databaseName); }
-            catch (Exception ex) { throw new Exception("載入 Functions 失敗：" + ex.Message, ex); }
-            try { snapshot.Users = GetDatabaseUsers(db, databaseName, connInfo); }
-            catch (Exception ex) { throw new Exception("載入 Users 失敗：" + ex.Message, ex); }
-            try { snapshot.Events = GetDatabaseEvents(db, databaseName); }
-            catch (Exception ex) { throw new Exception("載入 Events 失敗：" + ex.Message, ex); }
-            return snapshot;
+            return new MetadataLoadService(GetDatabaseFunctions, GetDatabaseUsers, GetDatabaseEvents);
         }
 
         private async Task LoadDatabaseMetadataAsync(int connectionIndex, TreeNode databaseNode, IDatabase db, string databaseName)
@@ -9673,7 +9608,8 @@ namespace mySQLPunk
                 }
 
                 Dictionary<string, object> connInfo = connectionIndex >= 0 && connectionIndex < myN.connections.Count ? myN.connections[connectionIndex] : null;
-                DatabaseChildrenSnapshot snapshot = await Task.Run(() => BuildDatabaseChildrenSnapshot(db, databaseName, connInfo));
+                MetadataLoadService metadataService = CreateMetadataLoadService();
+                DatabaseMetadataSnapshot snapshot = await Task.Run(() => metadataService.Load(db, databaseName, connInfo));
                 if (IsDisposed) return;
 
                 db_tree?.BeginUpdate();
@@ -9715,7 +9651,7 @@ namespace mySQLPunk
             }
         }
 
-        private void PopulateDatabaseChildren(TreeNode databaseNode, DatabaseChildrenSnapshot snapshot, string databaseName, Dictionary<string, object> connInfo)
+        private void PopulateDatabaseChildren(TreeNode databaseNode, DatabaseMetadataSnapshot snapshot, string databaseName, Dictionary<string, object> connInfo)
         {
             if (databaseNode == null || snapshot == null) return;
 
