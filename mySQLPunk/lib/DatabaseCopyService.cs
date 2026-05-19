@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Text.RegularExpressions;
 
@@ -427,6 +428,7 @@ namespace mySQLPunk.lib
 
             sql = RewriteDateFormatFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
+            sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
 
             return sql;
@@ -480,6 +482,28 @@ namespace mySQLPunk.lib
             return sql;
         }
 
+        private static string RewriteJsonValueFunctions(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bJSON_VALUE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<path>\$[^']*)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string path = m.Groups["path"].Value;
+                    string escapedPath = EscapeSqlString(path);
+                    if (targetProvider == "mysql") return "JSON_UNQUOTE(JSON_EXTRACT(" + expr + ", '" + escapedPath + "'))";
+                    if (targetProvider == "postgresql")
+                    {
+                        string pgPath = BuildPostgreSqlJsonTextPath(path);
+                        if (!string.IsNullOrWhiteSpace(pgPath)) return expr + " #>> " + pgPath;
+                    }
+                    if (targetProvider == "sqlite") return "json_extract(" + expr + ", '" + escapedPath + "')";
+                    return m.Value;
+                },
+                RegexOptions.IgnoreCase);
+        }
+
         private static string RewriteJsonExtractFunctions(string selectSql, string targetProvider)
         {
             return Regex.Replace(
@@ -488,12 +512,58 @@ namespace mySQLPunk.lib
                 m =>
                 {
                     string expr = m.Groups["expr"].Value.Trim();
-                    string path = EscapeSqlString(m.Groups["path"].Value);
-                    if (targetProvider == "mssql" || targetProvider == "oracle") return "JSON_VALUE(" + expr + ", '" + path + "')";
-                    if (targetProvider == "sqlite") return "json_extract(" + expr + ", '" + path + "')";
+                    string path = m.Groups["path"].Value;
+                    string escapedPath = EscapeSqlString(path);
+                    if (targetProvider == "mssql" || targetProvider == "oracle") return "JSON_VALUE(" + expr + ", '" + escapedPath + "')";
+                    if (targetProvider == "postgresql")
+                    {
+                        string pgPath = BuildPostgreSqlJsonTextPath(path);
+                        if (!string.IsNullOrWhiteSpace(pgPath)) return expr + " #>> " + pgPath;
+                    }
+                    if (targetProvider == "sqlite") return "json_extract(" + expr + ", '" + escapedPath + "')";
                     return m.Value;
                 },
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildPostgreSqlJsonTextPath(string jsonPath)
+        {
+            if (string.IsNullOrWhiteSpace(jsonPath) || !jsonPath.StartsWith("$.", StringComparison.Ordinal)) return "";
+
+            List<string> parts = new List<string>();
+            string body = jsonPath.Substring(2);
+            int index = 0;
+            while (index < body.Length)
+            {
+                if (body[index] == '.')
+                {
+                    index++;
+                    continue;
+                }
+
+                if (body[index] == '[')
+                {
+                    int end = body.IndexOf(']', index + 1);
+                    if (end <= index + 1) return "";
+                    string arrayIndex = body.Substring(index + 1, end - index - 1);
+                    if (!Regex.IsMatch(arrayIndex, @"^\d+$")) return "";
+                    parts.Add(arrayIndex);
+                    index = end + 1;
+                    continue;
+                }
+
+                int start = index;
+                while (index < body.Length && body[index] != '.' && body[index] != '[')
+                {
+                    index++;
+                }
+
+                string key = body.Substring(start, index - start);
+                if (string.IsNullOrWhiteSpace(key) || key.IndexOfAny(new[] { '{', '}', ',', '\'', '"' }) >= 0) return "";
+                parts.Add(key);
+            }
+
+            return parts.Count == 0 ? "" : "'{" + string.Join(",", parts.ToArray()) + "}'";
         }
 
         private static string BuildStringAggregate(string targetProvider, string expr, string separator)

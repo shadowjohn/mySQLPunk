@@ -133,6 +133,22 @@ public static class SmokeTests
         string jsonSql = (string)GetProperty(jsonPreview, "ConvertedSql");
         AssertContains(jsonSql, "JSON_VALUE(payload, '$.status')", "Converted Oracle SQL should use JSON_VALUE.");
 
+        object pgJsonPreview = BuildViewSqlPreview(
+            "SELECT JSON_EXTRACT(payload, '$.user.name') AS user_name FROM event_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonPreview, "CanConvert"), "MySQL JSON_EXTRACT should convert to PostgreSQL.");
+        string pgJsonSql = (string)GetProperty(pgJsonPreview, "ConvertedSql");
+        AssertContains(pgJsonSql, "payload #>> '{user,name}'", "Converted PostgreSQL SQL should use text JSON path extraction.");
+
+        object mysqlJsonValuePreview = BuildViewSqlPreview(
+            "SELECT JSON_VALUE(payload, '$.status') AS status_text FROM event_log",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlJsonValuePreview, "CanConvert"), "SQL Server JSON_VALUE should convert to MySQL.");
+        string mysqlJsonValueSql = (string)GetProperty(mysqlJsonValuePreview, "ConvertedSql");
+        AssertContains(mysqlJsonValueSql, "JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status'))", "Converted MySQL SQL should use JSON_EXTRACT with unquote.");
+
         object cteWindowPreview = BuildViewSqlPreview(
             "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
             "postgresql",
