@@ -1068,6 +1068,8 @@ public static class SmokeTests
         string markdown = QueryResultExportService.BuildText(table, QueryResultExportFormat.Markdown);
         AssertContains(markdown, "| Name | Amount | Payload |", "Markdown export should include headers.");
         Assert(QueryResultExportService.ResolveFormat("result.json", 2) == QueryResultExportFormat.Json, "Extension should determine query export format.");
+        Assert(QueryResultExportService.ResolveFormat("result", 1) == QueryResultExportFormat.Csv, "First export filter should default to CSV.");
+        Assert(QueryResultExportService.ResolveFormat("result", 2) == QueryResultExportFormat.Xlsx, "Second export filter should still support Excel.");
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
     }
 

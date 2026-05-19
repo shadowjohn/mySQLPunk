@@ -517,7 +517,7 @@ namespace mySQLPunk
             Add("Query.Delete", "刪除", "Delete");
             Add("Query.Refresh", "重新整理", "Refresh");
             Add("Query.Export", "匯出", "Export");
-            Add("Query.ExportFileFilter", "Excel 活頁簿 (*.xlsx)|*.xlsx|CSV UTF-8 (*.csv)|*.csv|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML 表格 (*.html)|*.html|Markdown (*.md)|*.md", "Excel Workbook (*.xlsx)|*.xlsx|CSV UTF-8 (*.csv)|*.csv|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML Table (*.html)|*.html|Markdown (*.md)|*.md");
+            Add("Query.ExportFileFilter", "CSV UTF-8 (*.csv)|*.csv|Excel 活頁簿 (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML 表格 (*.html)|*.html|Markdown (*.md)|*.md", "CSV UTF-8 (*.csv)|*.csv|Excel Workbook (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML Table (*.html)|*.html|Markdown (*.md)|*.md");
             Add("Query.ExportCompleted", "已匯出 {0} 筆資料到 {1}", "Exported {0} rows to {1}");
             Add("Query.ExportError", "匯出錯誤", "Export Error");
             Add("Query.Float", "浮動", "Float");

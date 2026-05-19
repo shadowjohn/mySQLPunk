@@ -3141,7 +3141,7 @@ namespace mySQLPunk
                 Filter = Localization.T("Query.ExportFileFilter"),
                 FileName = string.IsNullOrEmpty(_databaseName) ? "query" : _databaseName,
                 DefaultExt = "csv",
-                FilterIndex = 2,
+                FilterIndex = 1,
                 InitialDirectory = GetConfiguredDirectory("FileExportDirectory")
             })
             {
@@ -3181,8 +3181,8 @@ namespace mySQLPunk
 
             switch (filterIndex)
             {
-                case 1: return QueryExportFormat.Xlsx;
-                case 2: return QueryExportFormat.Csv;
+                case 1: return QueryExportFormat.Csv;
+                case 2: return QueryExportFormat.Xlsx;
                 case 3: return QueryExportFormat.Tsv;
                 case 4: return QueryExportFormat.Json;
                 case 5: return QueryExportFormat.Xml;

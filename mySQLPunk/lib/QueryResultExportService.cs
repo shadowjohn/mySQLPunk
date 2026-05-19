@@ -40,8 +40,8 @@ namespace mySQLPunk.lib
 
             switch (filterIndex)
             {
-                case 1: return QueryResultExportFormat.Xlsx;
-                case 2: return QueryResultExportFormat.Csv;
+                case 1: return QueryResultExportFormat.Csv;
+                case 2: return QueryResultExportFormat.Xlsx;
                 case 3: return QueryResultExportFormat.Tsv;
                 case 4: return QueryResultExportFormat.Json;
                 case 5: return QueryResultExportFormat.Xml;
