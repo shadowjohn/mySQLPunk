@@ -495,6 +495,8 @@ namespace mySQLPunk
             Add("Designer.OverwriteAutoComments", "覆蓋註解", "Overwrite Comments");
             Add("Designer.ImportAutoCommentsDictionary", "匯入註解字典...", "Import Comment Dictionary...");
             Add("Designer.ExportAutoCommentsDictionary", "匯出註解字典...", "Export Comment Dictionary...");
+            Add("Designer.SaveAutoCommentsDictionaryAs", "另存目前註解字典...", "Save Current Comment Dictionary As...");
+            Add("Designer.SwitchAutoCommentsDictionary", "切換註解字典...", "Switch Comment Dictionary...");
             Add("Designer.AddIndex", "加入索引", "Add Index");
             Add("Designer.DeleteIndex", "刪除索引", "Delete Index");
             Add("Designer.MoveUp", "上移", "Move Up");
@@ -533,6 +535,7 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsDictionaryRemote", "已載入遠端自動註解字典。", "Loaded the remote auto comment dictionary.");
             Add("Designer.AutoCommentsDictionaryCache", "已使用本機快取自動註解字典。", "Using the local cached auto comment dictionary.");
             Add("Designer.AutoCommentsDictionaryImport", "已使用匯入的自動註解字典。", "Using the imported auto comment dictionary.");
+            Add("Designer.AutoCommentsDictionaryNamed", "已使用「{0}」自動註解字典。", "Using the \"{0}\" auto comment dictionary.");
             Add("Designer.AutoCommentsDictionaryFileFilter", "自動註解字典 JSON (*.json)|*.json|所有檔案 (*.*)|*.*", "Auto Comment Dictionary JSON (*.json)|*.json|All Files (*.*)|*.*");
             Add("Designer.AutoCommentsImportSuccess", "已匯入 {0} 筆自動註解字典。", "Imported {0} auto comment dictionary entries.");
             Add("Designer.AutoCommentsImportFailed", "匯入自動註解字典失敗：{0}", "Import auto comment dictionary failed: {0}");
@@ -541,6 +544,15 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsImportDiffSummary", "即將匯入 {0} 筆自動註解字典。\n\n新增：{1}\n更新：{2}\n匯入後會移除：{3}\n不變：{4}\n\n按確定後會覆蓋目前本機字典。", "Import {0} auto comment dictionary entries.\n\nAdded: {1}\nUpdated: {2}\nRemoved after import: {3}\nUnchanged: {4}\n\nClick OK to replace the current local dictionary.");
             Add("Designer.AutoCommentsExportSuccess", "已匯出 {0} 筆自動註解字典。", "Exported {0} auto comment dictionary entries.");
             Add("Designer.AutoCommentsExportFailed", "匯出自動註解字典失敗：{0}", "Export auto comment dictionary failed: {0}");
+            Add("Designer.AutoCommentsDictionaryNameTitle", "註解字典名稱", "Comment Dictionary Name");
+            Add("Designer.AutoCommentsDictionaryNamePrompt", "請輸入要保存的註解字典名稱：", "Enter a name for the saved comment dictionary:");
+            Add("Designer.AutoCommentsDictionaryNameRequired", "註解字典名稱不可空白。", "Comment dictionary name cannot be blank.");
+            Add("Designer.AutoCommentsDictionarySaved", "已保存「{0}」註解字典，共 {1} 筆。", "Saved \"{0}\" comment dictionary with {1} entries.");
+            Add("Designer.AutoCommentsDictionarySaveFailed", "保存註解字典失敗：{0}", "Save comment dictionary failed: {0}");
+            Add("Designer.AutoCommentsNoSavedDictionaries", "目前沒有已保存的註解字典。", "There are no saved comment dictionaries.");
+            Add("Designer.AutoCommentsDictionarySwitched", "已切換到「{0}」註解字典，共 {1} 筆。", "Switched to \"{0}\" comment dictionary with {1} entries.");
+            Add("Designer.AutoCommentsDictionarySwitchFailed", "切換註解字典失敗：{0}", "Switch comment dictionary failed: {0}");
+            Add("Designer.AutoCommentsDictionaryNotFound", "找不到指定的註解字典。", "The specified comment dictionary was not found.");
             Add("Designer.AutoCommentsProgress", "補註解 {0}/{1}：{2}", "Filling comments {0}/{1}: {2}");
             Add("Designer.AutoCommentsDone", "補註解完成：{0}/{1}", "Fill comments done: {0}/{1}");
             Add("Designer.EnterTableNameInOptions", "請先在「選項」分頁輸入資料表名稱。", "Enter a table name on the Options tab first.");
