@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace mySQLPunk.lib
@@ -427,6 +428,7 @@ namespace mySQLPunk.lib
                 sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
 
             sql = RewriteDateFormatFunctions(sql, targetProvider);
+            sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
@@ -449,6 +451,22 @@ namespace mySQLPunk.lib
                     string translated = TranslateDateFormatPattern(format, targetProvider);
                     if (targetProvider == "mssql") return "FORMAT(" + expr + ", '" + EscapeSqlString(translated) + "')";
                     return "TO_CHAR(" + expr + ", '" + EscapeSqlString(translated) + "')";
+                },
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteConcatFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql" || targetProvider == "mssql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bCONCAT\s*\((?<args>[^()]*)\)",
+                m =>
+                {
+                    List<string> args = SplitFunctionArguments(m.Groups["args"].Value);
+                    if (args.Count < 2) return m.Value;
+                    return string.Join(" || ", args.ToArray());
                 },
                 RegexOptions.IgnoreCase);
         }
@@ -564,6 +582,50 @@ namespace mySQLPunk.lib
             }
 
             return parts.Count == 0 ? "" : "'{" + string.Join(",", parts.ToArray()) + "}'";
+        }
+
+        private static List<string> SplitFunctionArguments(string argsText)
+        {
+            List<string> args = new List<string>();
+            StringBuilder current = new StringBuilder();
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+
+            for (int i = 0; i < (argsText ?? string.Empty).Length; i++)
+            {
+                char ch = argsText[i];
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    current.Append(ch);
+                    if (inSingleQuote && i + 1 < argsText.Length && argsText[i + 1] == '\'')
+                    {
+                        current.Append(argsText[++i]);
+                    }
+                    else
+                    {
+                        inSingleQuote = !inSingleQuote;
+                    }
+                }
+                else if (ch == '"' && !inSingleQuote)
+                {
+                    current.Append(ch);
+                    inDoubleQuote = !inDoubleQuote;
+                }
+                else if (ch == ',' && !inSingleQuote && !inDoubleQuote)
+                {
+                    string item = current.ToString().Trim();
+                    if (item.Length > 0) args.Add(item);
+                    current.Length = 0;
+                }
+                else
+                {
+                    current.Append(ch);
+                }
+            }
+
+            string tail = current.ToString().Trim();
+            if (tail.Length > 0) args.Add(tail);
+            return args;
         }
 
         private static string BuildStringAggregate(string targetProvider, string expr, string separator)

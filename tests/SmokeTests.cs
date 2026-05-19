@@ -149,6 +149,22 @@ public static class SmokeTests
         string mysqlJsonValueSql = (string)GetProperty(mysqlJsonValuePreview, "ConvertedSql");
         AssertContains(mysqlJsonValueSql, "JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status'))", "Converted MySQL SQL should use JSON_EXTRACT with unquote.");
 
+        object oracleConcatPreview = BuildViewSqlPreview(
+            "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleConcatPreview, "CanConvert"), "MySQL CONCAT should convert to Oracle.");
+        string oracleConcatSql = (string)GetProperty(oracleConcatPreview, "ConvertedSql");
+        AssertContains(oracleConcatSql, "first_name || ' ' || last_name", "Converted Oracle SQL should use concatenation operator.");
+
+        object sqliteConcatPreview = BuildViewSqlPreview(
+            "SELECT CONCAT(code, '-', name) AS label FROM items",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteConcatPreview, "CanConvert"), "MySQL CONCAT should convert to SQLite.");
+        string sqliteConcatSql = (string)GetProperty(sqliteConcatPreview, "ConvertedSql");
+        AssertContains(sqliteConcatSql, "code || '-' || name", "Converted SQLite SQL should use concatenation operator.");
+
         object cteWindowPreview = BuildViewSqlPreview(
             "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
             "postgresql",
