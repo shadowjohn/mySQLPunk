@@ -4852,6 +4852,13 @@ namespace mySQLPunk
                 string[] directories = GetBackupIntegrityDirectories().ToArray();
                 BackupIntegrityScheduleReport report = await Task.Run(() =>
                     BackupIntegrityScheduleService.VerifyDirectories(directories, CountSqlScriptStatements));
+                BackupIntegrityQuarantineResult quarantineResult = null;
+                if (report.HasFailures && BackupMirrorSettings.IntegrityAutoQuarantineEnabled)
+                {
+                    quarantineResult = BackupIntegrityScheduleService.QuarantineFailedBackups(
+                        report,
+                        GetBackupIntegrityQuarantineDirectory());
+                }
                 string reportPath = BackupIntegrityScheduleService.WriteReport(report, GetBackupIntegrityReportDirectory());
 
                 BackupMirrorSettings.LastIntegrityVerifiedUtc = report.VerifiedAtUtc;
@@ -4859,6 +4866,9 @@ namespace mySQLPunk
                 BackupMirrorSettings.Save();
 
                 string reportNote = Localization.Format("Status.BackupIntegrityReportPath", reportPath);
+                string quarantineNote = quarantineResult != null && quarantineResult.MovedFiles > 0
+                    ? " " + Localization.Format("Status.BackupIntegrityQuarantined", quarantineResult.MovedFiles, quarantineResult.QuarantineDirectory)
+                    : string.Empty;
 
                 if (report.TotalFiles <= 0)
                 {
@@ -4866,7 +4876,7 @@ namespace mySQLPunk
                 }
                 else if (report.HasFailures)
                 {
-                    UpdateMainStatus(Localization.Format("Status.BackupIntegrityFailed", report.FailedFiles) + " " + reportNote);
+                    UpdateMainStatus(Localization.Format("Status.BackupIntegrityFailed", report.FailedFiles) + quarantineNote + " " + reportNote);
                 }
                 else
                 {
@@ -4910,6 +4920,16 @@ namespace mySQLPunk
                 documents = Application.UserAppDataPath;
             }
             return Path.Combine(documents, "mySQLPunk", "backup-integrity-reports");
+        }
+
+        private static string GetBackupIntegrityQuarantineDirectory()
+        {
+            string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (string.IsNullOrWhiteSpace(documents))
+            {
+                documents = Application.UserAppDataPath;
+            }
+            return Path.Combine(documents, "mySQLPunk", "backup-quarantine");
         }
 
         private void Form1_Resize(object sender, EventArgs e)

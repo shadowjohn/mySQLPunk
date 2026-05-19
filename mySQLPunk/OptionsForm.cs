@@ -19,6 +19,7 @@ namespace mySQLPunk
         private NumericUpDown remoteBackupRetainCountInput;
         private CheckBox backupIntegrityScheduleEnabledCheckBox;
         private NumericUpDown backupIntegrityIntervalInput;
+        private CheckBox backupIntegrityAutoQuarantineCheckBox;
         private ThemePreviewControl lightPreview;
         private ThemePreviewControl darkPreview;
         private readonly Button okButton;
@@ -278,6 +279,7 @@ namespace mySQLPunk
             remoteBackupRetainCountInput = null;
             backupIntegrityScheduleEnabledCheckBox = null;
             backupIntegrityIntervalInput = null;
+            backupIntegrityAutoQuarantineCheckBox = null;
 
             Label sectionTitle = new Label
             {
@@ -361,11 +363,21 @@ namespace mySQLPunk
                 Location = new Point(150, 234),
                 Width = 90
             };
+            backupIntegrityAutoQuarantineCheckBox = new CheckBox
+            {
+                Text = Localization.T("Options.BackupIntegrityAutoQuarantine"),
+                AutoSize = true,
+                Checked = BackupMirrorSettings.IntegrityAutoQuarantineEnabled,
+                Location = new Point(150, 278),
+                MaximumSize = new Size(560, 0)
+            };
             backupIntegrityScheduleEnabledCheckBox.CheckedChanged += (s, e) =>
             {
                 backupIntegrityIntervalInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
+                backupIntegrityAutoQuarantineCheckBox.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
             };
             backupIntegrityIntervalInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
+            backupIntegrityAutoQuarantineCheckBox.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
 
             contentPanel.Controls.Add(sectionTitle);
             contentPanel.Controls.Add(hintLabel);
@@ -377,6 +389,7 @@ namespace mySQLPunk
             contentPanel.Controls.Add(backupIntegrityScheduleEnabledCheckBox);
             contentPanel.Controls.Add(intervalLabel);
             contentPanel.Controls.Add(backupIntegrityIntervalInput);
+            contentPanel.Controls.Add(backupIntegrityAutoQuarantineCheckBox);
         }
 
         private void AddCliPathRow(string provider, string labelText, int top)
@@ -451,6 +464,10 @@ namespace mySQLPunk
             if (backupIntegrityIntervalInput != null)
             {
                 BackupMirrorSettings.IntegrityIntervalHours = (int)backupIntegrityIntervalInput.Value;
+            }
+            if (backupIntegrityAutoQuarantineCheckBox != null)
+            {
+                BackupMirrorSettings.IntegrityAutoQuarantineEnabled = backupIntegrityAutoQuarantineCheckBox.Checked;
             }
             BackupMirrorSettings.Save();
         }
@@ -738,6 +755,7 @@ namespace mySQLPunk
         private static string remoteDirectory = string.Empty;
         private static int retainCount = mySQLPunk.lib.BackupRemoteMirrorService.DefaultRetainCount;
         private static bool integrityScheduleEnabled = true;
+        private static bool integrityAutoQuarantineEnabled = false;
         private static int integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
         private static DateTime lastIntegrityVerifiedUtc = DateTime.MinValue;
         private static string lastIntegrityReportPath = string.Empty;
@@ -798,6 +816,20 @@ namespace mySQLPunk
             }
         }
 
+        public static bool IntegrityAutoQuarantineEnabled
+        {
+            get
+            {
+                EnsureLoaded();
+                return integrityAutoQuarantineEnabled;
+            }
+            set
+            {
+                EnsureLoaded();
+                integrityAutoQuarantineEnabled = value;
+            }
+        }
+
         public static DateTime LastIntegrityVerifiedUtc
         {
             get
@@ -838,6 +870,7 @@ namespace mySQLPunk
                     RemoteDirectory = remoteDirectory,
                     RetainCount = retainCount,
                     IntegrityScheduleEnabled = integrityScheduleEnabled,
+                    IntegrityAutoQuarantineEnabled = integrityAutoQuarantineEnabled,
                     IntegrityIntervalHours = integrityIntervalHours,
                     LastIntegrityVerifiedUtc = lastIntegrityVerifiedUtc,
                     LastIntegrityReportPath = lastIntegrityReportPath
@@ -868,6 +901,9 @@ namespace mySQLPunk
                     integrityScheduleEnabled = data.IntegrityScheduleEnabled.HasValue
                         ? data.IntegrityScheduleEnabled.Value
                         : true;
+                    integrityAutoQuarantineEnabled = data.IntegrityAutoQuarantineEnabled.HasValue
+                        ? data.IntegrityAutoQuarantineEnabled.Value
+                        : false;
                     integrityIntervalHours = data.IntegrityIntervalHours <= 0
                         ? mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours
                         : data.IntegrityIntervalHours;
@@ -882,6 +918,7 @@ namespace mySQLPunk
                 remoteDirectory = string.Empty;
                 retainCount = mySQLPunk.lib.BackupRemoteMirrorService.DefaultRetainCount;
                 integrityScheduleEnabled = true;
+                integrityAutoQuarantineEnabled = false;
                 integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
                 lastIntegrityVerifiedUtc = DateTime.MinValue;
                 lastIntegrityReportPath = string.Empty;
@@ -898,6 +935,7 @@ namespace mySQLPunk
             public string RemoteDirectory { get; set; }
             public int RetainCount { get; set; }
             public bool? IntegrityScheduleEnabled { get; set; }
+            public bool? IntegrityAutoQuarantineEnabled { get; set; }
             public int IntegrityIntervalHours { get; set; }
             public DateTime LastIntegrityVerifiedUtc { get; set; }
             public string LastIntegrityReportPath { get; set; }

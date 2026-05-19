@@ -178,6 +178,7 @@ namespace mySQLPunk
             Add("Status.BackupIntegrityFailed", "備份完整性定期驗證發現 {0} 個異常檔案。", "Scheduled backup integrity check found {0} invalid files.");
             Add("Status.BackupIntegritySkipped", "備份完整性定期驗證已略過：目前沒有備份檔。", "Scheduled backup integrity check skipped: no backup files found.");
             Add("Status.BackupIntegrityReportPath", "報表：{0}", "Report: {0}");
+            Add("Status.BackupIntegrityQuarantined", "已隔離 {0} 個異常備份到 {1}。", "{0} invalid backups quarantined to {1}.");
             Add("Status.ExportFailed", "匯出失敗：", "Export failed: ");
             Add("Status.ImportFailed", "匯入失敗：", "Import failed: ");
             Add("Status.ThemeChanged", "主題已切換。", "Theme changed.");
@@ -739,6 +740,7 @@ namespace mySQLPunk
             Add("Options.BackupMirrorRetainCount", "遠端保留份數:", "Remote copies to keep:");
             Add("Options.BackupIntegrityScheduleEnabled", "定期驗證備份完整性", "Run scheduled backup integrity checks");
             Add("Options.BackupIntegrityIntervalHours", "驗證間隔（小時）:", "Check interval (hours):");
+            Add("Options.BackupIntegrityAutoQuarantine", "驗證失敗時自動隔離異常備份", "Automatically quarantine invalid backups");
             Add("Options.ExecutableFilter", "執行檔 (*.exe)|*.exe|所有檔案 (*.*)|*.*", "Executable files (*.exe)|*.exe|All files (*.*)|*.*");
         }
 

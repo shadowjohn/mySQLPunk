@@ -439,12 +439,19 @@ public static class SmokeTests
             Assert(scheduleReport.TotalFiles >= 4, "Backup integrity schedule should scan supported backup files.");
             Assert(scheduleReport.VerifiedFiles >= 3, "Backup integrity schedule should verify readable SQL, ZIP, and SQLite backups.");
             Assert(scheduleReport.FailedFiles >= 1, "Backup integrity schedule should report invalid backups.");
+            string quarantineDirectory = Path.Combine(dir, "quarantine");
+            BackupIntegrityQuarantineResult quarantineResult = BackupIntegrityScheduleService.QuarantineFailedBackups(scheduleReport, quarantineDirectory);
+            Assert(quarantineResult.MovedFiles >= 1, "Backup integrity quarantine should move invalid backups.");
+            Assert(quarantineResult.MovedPaths.Count >= 1 && File.Exists(quarantineResult.MovedPaths[0]), "Quarantined backup file should exist in quarantine folder.");
+            Assert(File.Exists(quarantineResult.ManifestPath), "Backup integrity quarantine should write a manifest file.");
+            Assert(!File.Exists(emptySqlPath), "Invalid backup should be moved out of the original folder.");
             string reportDirectory = Path.Combine(dir, "reports");
             string reportPath = BackupIntegrityScheduleService.WriteReport(scheduleReport, reportDirectory);
             Assert(File.Exists(reportPath), "Backup integrity schedule should write a report file.");
             JObject reportJson = JObject.Parse(File.ReadAllText(reportPath, Encoding.UTF8));
             Assert((int)reportJson["FailedFiles"] >= 1, "Backup integrity report should include failed file count.");
             Assert(reportJson["FailedResults"] != null && reportJson["FailedResults"].HasValues, "Backup integrity report should include failed result details.");
+            Assert(reportJson["QuarantineResult"] != null && (int)reportJson["QuarantineResult"]["MovedFiles"] >= 1, "Backup integrity report should include quarantine result.");
 
             DatabaseRestoreSnapshot before = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", 2, 1, 0, 1);
             DatabaseRestoreSnapshot after = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", 3, 1, 1, 0);

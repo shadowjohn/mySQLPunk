@@ -12,6 +12,7 @@ namespace mySQLPunk.lib
         public bool IsValid { get; set; }
         public string Kind { get; set; }
         public string EntryName { get; set; }
+        public string SourcePath { get; set; }
         public string Message { get; set; }
         public int StatementCount { get; set; }
         public long SizeBytes { get; set; }
@@ -26,6 +27,7 @@ namespace mySQLPunk.lib
                 IsValid = false,
                 Kind = "",
                 EntryName = "",
+                SourcePath = sourcePath ?? "",
                 Message = "",
                 StatementCount = 0,
                 SizeBytes = 0

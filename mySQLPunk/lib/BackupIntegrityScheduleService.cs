@@ -13,6 +13,7 @@ namespace mySQLPunk.lib
         public int FailedFiles { get; set; }
         public int SkippedFiles { get; set; }
         public DateTime VerifiedAtUtc { get; set; }
+        public BackupIntegrityQuarantineResult QuarantineResult { get; set; }
         public List<BackupIntegrityResult> FailedResults { get; private set; }
 
         public BackupIntegrityScheduleReport()
@@ -24,6 +25,24 @@ namespace mySQLPunk.lib
         public bool HasFailures
         {
             get { return FailedFiles > 0; }
+        }
+    }
+
+    public sealed class BackupIntegrityQuarantineResult
+    {
+        public int TotalCandidates { get; set; }
+        public int MovedFiles { get; set; }
+        public int SkippedFiles { get; set; }
+        public int FailedMoves { get; set; }
+        public string QuarantineDirectory { get; set; }
+        public string ManifestPath { get; set; }
+        public List<string> MovedPaths { get; private set; }
+
+        public BackupIntegrityQuarantineResult()
+        {
+            QuarantineDirectory = "";
+            ManifestPath = "";
+            MovedPaths = new List<string>();
         }
     }
 
@@ -70,6 +89,7 @@ namespace mySQLPunk.lib
                     else
                     {
                         report.FailedFiles++;
+                        result.SourcePath = file.FullName;
                         if (string.IsNullOrWhiteSpace(result.EntryName)) result.EntryName = file.FullName;
                         report.FailedResults.Add(result);
                     }
@@ -82,6 +102,7 @@ namespace mySQLPunk.lib
                         IsValid = false,
                         Kind = Path.GetExtension(file.Name).TrimStart('.').ToLowerInvariant(),
                         EntryName = file.FullName,
+                        SourcePath = file.FullName,
                         Message = ex.Message,
                         SizeBytes = file.Exists ? file.Length : 0
                     });
@@ -89,6 +110,60 @@ namespace mySQLPunk.lib
             }
 
             return report;
+        }
+
+        public static BackupIntegrityQuarantineResult QuarantineFailedBackups(
+            BackupIntegrityScheduleReport report,
+            string quarantineDirectory)
+        {
+            if (report == null) throw new ArgumentNullException(nameof(report));
+            if (string.IsNullOrWhiteSpace(quarantineDirectory)) throw new ArgumentException("Quarantine directory is required.", nameof(quarantineDirectory));
+
+            BackupIntegrityQuarantineResult result = new BackupIntegrityQuarantineResult
+            {
+                QuarantineDirectory = quarantineDirectory
+            };
+            Directory.CreateDirectory(quarantineDirectory);
+
+            HashSet<string> handled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (BackupIntegrityResult failure in report.FailedResults)
+            {
+                string sourcePath = failure == null ? string.Empty : failure.SourcePath;
+                if (string.IsNullOrWhiteSpace(sourcePath) || !handled.Add(sourcePath))
+                {
+                    result.SkippedFiles++;
+                    continue;
+                }
+
+                result.TotalCandidates++;
+                try
+                {
+                    if (!File.Exists(sourcePath))
+                    {
+                        result.SkippedFiles++;
+                        continue;
+                    }
+
+                    string destinationPath = BuildUniqueQuarantinePath(quarantineDirectory, sourcePath);
+                    File.Move(sourcePath, destinationPath);
+                    result.MovedFiles++;
+                    result.MovedPaths.Add(destinationPath);
+                    failure.SourcePath = destinationPath;
+                    failure.Message = failure.Message + " Quarantined from: " + sourcePath;
+                }
+                catch
+                {
+                    result.FailedMoves++;
+                }
+            }
+
+            string manifestPath = Path.Combine(
+                quarantineDirectory,
+                "backup-quarantine_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss") + ".json");
+            result.ManifestPath = manifestPath;
+            File.WriteAllText(manifestPath, JsonConvert.SerializeObject(result, Formatting.Indented), Encoding.UTF8);
+            report.QuarantineResult = result;
+            return result;
         }
 
         public static string WriteReport(BackupIntegrityScheduleReport report, string reportDirectory)
@@ -101,6 +176,27 @@ namespace mySQLPunk.lib
             string path = Path.Combine(reportDirectory, fileName);
             File.WriteAllText(path, JsonConvert.SerializeObject(report, Formatting.Indented), Encoding.UTF8);
             return path;
+        }
+
+        private static string BuildUniqueQuarantinePath(string quarantineDirectory, string sourcePath)
+        {
+            string fileName = Path.GetFileName(sourcePath);
+            if (string.IsNullOrWhiteSpace(fileName)) fileName = "backup.bin";
+
+            string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+            string candidate = Path.Combine(quarantineDirectory, timestamp + "_" + fileName);
+            if (!File.Exists(candidate)) return candidate;
+
+            string name = Path.GetFileNameWithoutExtension(fileName);
+            string extension = Path.GetExtension(fileName);
+            int suffix = 2;
+            do
+            {
+                candidate = Path.Combine(quarantineDirectory, timestamp + "_" + name + "_" + suffix + extension);
+                suffix++;
+            }
+            while (File.Exists(candidate));
+            return candidate;
         }
 
         private static List<FileInfo> FindBackupFiles(IEnumerable<string> directories, int maxFiles, out int skippedFiles)
