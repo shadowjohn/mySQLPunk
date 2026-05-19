@@ -380,6 +380,14 @@ public static class SmokeTests
             AssertEquals("restore.sql", zipPackage.EntryName, "Zip restore package should expose selected SQL entry name.");
             Assert(zipPackage.StatementCount == 7, "Zip restore package should use provided statement counter.");
             AssertContains(zipPackage.Script, "INSERT INTO a", "Zip restore package should read SQL entry content.");
+
+            DatabaseRestoreSnapshot before = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", 2, 1, 0, 1);
+            DatabaseRestoreSnapshot after = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", 3, 1, 1, 0);
+            string summary = BackupRestoreDiffService.BuildSummary(before, after);
+            AssertContains(summary, "資料表：2 -> 3 (+1)", "Restore diff should show added tables.");
+            AssertContains(summary, "檢視：1 -> 1 (0)", "Restore diff should show unchanged views.");
+            AssertContains(summary, "函式/程序：0 -> 1 (+1)", "Restore diff should show added routines.");
+            AssertContains(summary, "事件/Trigger：1 -> 0 (-1)", "Restore diff should show removed events.");
         }
         finally
         {

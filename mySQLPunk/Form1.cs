@@ -4013,9 +4013,14 @@ namespace mySQLPunk
                         return;
                     }
 
+                    DatabaseRestoreSnapshot beforeSnapshot = CaptureDatabaseRestoreSnapshot(target);
                     string safetyBackupPath = CreatePreRestoreSafetyBackup(target);
                     int executed = ImportSqlScript(target, package.Script);
-                    string message = Localization.Format("Backup.RestoreSuccessWithSnapshot", executed, safetyBackupPath);
+                    DatabaseRestoreSnapshot afterSnapshot = CaptureDatabaseRestoreSnapshot(target);
+                    string diffSummary = BackupRestoreDiffService.BuildSummary(beforeSnapshot, afterSnapshot);
+                    string message = string.IsNullOrWhiteSpace(diffSummary)
+                        ? Localization.Format("Backup.RestoreSuccessWithSnapshot", executed, safetyBackupPath)
+                        : Localization.Format("Backup.RestoreSuccessWithSnapshotAndDiff", executed, safetyBackupPath, diffSummary);
                     MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     UpdateMainStatus(message);
                 }
@@ -4026,6 +4031,22 @@ namespace mySQLPunk
                     UpdateMainStatus(message);
                 }
             }
+        }
+
+        private DatabaseRestoreSnapshot CaptureDatabaseRestoreSnapshot(TreeDatabaseTarget target)
+        {
+            if (target == null || target.Database == null)
+            {
+                return BackupRestoreDiffService.CreateSnapshot("", "", 0, 0, 0, 0);
+            }
+
+            return BackupRestoreDiffService.CreateSnapshot(
+                target.DatabaseName,
+                target.Database.ProviderName,
+                GetTablesSafe(target.Database, target.DatabaseName).Count,
+                GetViewsSafe(target.Database, target.DatabaseName).Count,
+                GetDatabaseFunctions(target.Database, target.DatabaseName).Rows.Count,
+                GetDatabaseEvents(target.Database, target.DatabaseName).Rows.Count);
         }
 
         private string CreatePreRestoreSafetyBackup(TreeDatabaseTarget target)

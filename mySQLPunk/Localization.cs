@@ -319,6 +319,7 @@ namespace mySQLPunk
             Add("Backup.RestoreConfirm", "即將還原備份：\n{0}\n\nSQL 語句數：{1}\n大小：{2}\n目標資料庫：{3}\n\n還原會直接執行 SQL，可能覆蓋或刪除現有資料。是否繼續？", "Restore backup:\n{0}\n\nSQL statements: {1}\nSize: {2}\nTarget database: {3}\n\nRestore executes SQL directly and may overwrite or delete existing data. Continue?");
             Add("Backup.RestoreSuccess", "備份還原完成。執行語句數：{0}", "Backup restore completed. Statements executed: {0}");
             Add("Backup.RestoreSuccessWithSnapshot", "備份還原完成。執行語句數：{0}\n還原前快照：{1}", "Backup restore completed. Statements executed: {0}\nPre-restore snapshot: {1}");
+            Add("Backup.RestoreSuccessWithSnapshotAndDiff", "備份還原完成。執行語句數：{0}\n還原前快照：{1}\n\n還原後差異檢查：\n{2}", "Backup restore completed. Statements executed: {0}\nPre-restore snapshot: {1}\n\nPost-restore diff check:\n{2}");
             Add("Backup.RestoreFailed", "還原備份失敗：{0}", "Backup restore failed: {0}");
             Add("Backup.RestoreSafetyBackupCreated", "還原前快照已建立：{0}", "Pre-restore snapshot created: {0}");
             Add("Backup.RestoreSafetyBackupFailedCancelled", "建立還原前快照失敗，已取消還原：{0}", "Failed to create pre-restore snapshot; restore canceled: {0}");
