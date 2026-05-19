@@ -25,6 +25,14 @@ nuget restore .\mySQLPunk.sln
 msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 ```
 
+Smoke test harness：
+
+```powershell
+.\tests\Run-SmokeTests.ps1
+```
+
+目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例，以及 Table Designer 主要 DDL builder 的 MySQL / SQLite 建表輸出。
+
 ## 目前功能概況
 
 | 功能 | 狀態 | 說明 |
