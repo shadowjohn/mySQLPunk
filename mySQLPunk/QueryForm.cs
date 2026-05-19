@@ -2738,7 +2738,8 @@ namespace mySQLPunk
             }
             if (IsPostgreSqlProvider())
             {
-                return "public." + QuoteIdentifier(tableName);
+                PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
+                return QuoteIdentifier(target.Schema) + "." + QuoteIdentifier(target.Name);
             }
             if (IsOracleProvider())
             {
@@ -2748,6 +2749,12 @@ namespace mySQLPunk
         }
 
         private struct SqlServerObjectName
+        {
+            public string Schema;
+            public string Name;
+        }
+
+        private struct PostgreSqlObjectName
         {
             public string Schema;
             public string Name;
@@ -2767,6 +2774,22 @@ namespace mySQLPunk
             }
 
             return new SqlServerObjectName { Schema = "dbo", Name = value };
+        }
+
+        private static PostgreSqlObjectName ParsePostgreSqlObjectName(string objectName)
+        {
+            string value = (objectName ?? string.Empty).Trim();
+            int dotIndex = value.IndexOf('.');
+            if (dotIndex > 0 && dotIndex < value.Length - 1)
+            {
+                return new PostgreSqlObjectName
+                {
+                    Schema = value.Substring(0, dotIndex).Trim(),
+                    Name = value.Substring(dotIndex + 1).Trim()
+                };
+            }
+
+            return new PostgreSqlObjectName { Schema = "public", Name = value };
         }
 
         private string QuoteIdentifier(string name)
