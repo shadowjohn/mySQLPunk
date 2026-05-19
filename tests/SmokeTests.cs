@@ -174,6 +174,30 @@ public static class SmokeTests
         string mysqlCurrentDateSql = (string)GetProperty(mysqlCurrentDatePreview, "ConvertedSql");
         AssertContains(mysqlCurrentDateSql, "CURDATE()", "Converted MySQL SQL should use CURDATE().");
 
+        object pgIfPreview = BuildViewSqlPreview(
+            "SELECT IF(is_active = 1, 'Y', 'N') AS active_text FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgIfPreview, "CanConvert"), "MySQL IF should convert to PostgreSQL.");
+        string pgIfSql = (string)GetProperty(pgIfPreview, "ConvertedSql");
+        AssertContains(pgIfSql, "CASE WHEN is_active = 1 THEN 'Y' ELSE 'N' END", "Converted PostgreSQL SQL should use CASE.");
+
+        object mysqlIifPreview = BuildViewSqlPreview(
+            "SELECT IIF(score >= 60, 'pass', 'fail') AS status_text FROM exams",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlIifPreview, "CanConvert"), "SQL Server IIF should convert to MySQL.");
+        string mysqlIifSql = (string)GetProperty(mysqlIifPreview, "ConvertedSql");
+        AssertContains(mysqlIifSql, "IF(score >= 60, 'pass', 'fail')", "Converted MySQL SQL should use IF.");
+
+        object sqliteIifPreview = BuildViewSqlPreview(
+            "SELECT IIF(score >= 60, 'pass', 'fail') AS status_text FROM exams",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteIifPreview, "CanConvert"), "SQL Server IIF should convert to SQLite.");
+        string sqliteIifSql = (string)GetProperty(sqliteIifPreview, "ConvertedSql");
+        AssertContains(sqliteIifSql, "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END", "Converted SQLite SQL should use CASE.");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",

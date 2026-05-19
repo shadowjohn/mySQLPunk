@@ -425,6 +425,7 @@ namespace mySQLPunk.lib
 
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
+            sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
@@ -434,6 +435,36 @@ namespace mySQLPunk.lib
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
 
             return sql;
+        }
+
+        private static string RewriteConditionalFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bIIF\s*\((?<args>[^()]*)\)",
+                m => RewriteConditionalFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bIF\s*\((?<args>[^()]*)\)",
+                m => RewriteConditionalFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string RewriteConditionalFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 3) return match.Value;
+
+            string condition = args[0];
+            string whenTrue = args[1];
+            string whenFalse = args[2];
+            if (targetProvider == "mysql") return "IF(" + condition + ", " + whenTrue + ", " + whenFalse + ")";
+            if (targetProvider == "mssql") return "IIF(" + condition + ", " + whenTrue + ", " + whenFalse + ")";
+            return "CASE WHEN " + condition + " THEN " + whenTrue + " ELSE " + whenFalse + " END";
         }
 
         private static string RewriteCurrentDateTimeFunctions(string selectSql, string targetProvider)
