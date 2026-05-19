@@ -162,7 +162,11 @@ namespace mySQLPunk.lib
         public List<string> GetTables(string databaseName)
         {
             List<string> tables = new List<string>();
-            DataTable dt = SelectSQL("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';");
+            DataTable dt = SelectSQL(@"
+                SELECT CASE WHEN table_schema = 'public' THEN table_name ELSE table_schema || '.' || table_name END AS table_name
+                FROM information_schema.tables
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_type = 'BASE TABLE'
+                ORDER BY table_schema, table_name;");
             foreach (DataRow row in dt.Rows)
             {
                 tables.Add(row[0].ToString());
@@ -173,7 +177,11 @@ namespace mySQLPunk.lib
         public List<string> GetViews(string databaseName)
         {
             List<string> views = new List<string>();
-            DataTable dt = SelectSQL("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'VIEW';");
+            DataTable dt = SelectSQL(@"
+                SELECT CASE WHEN table_schema = 'public' THEN table_name ELSE table_schema || '.' || table_name END AS table_name
+                FROM information_schema.tables
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_type = 'VIEW'
+                ORDER BY table_schema, table_name;");
             foreach (DataRow row in dt.Rows)
             {
                 views.Add(row[0].ToString());
@@ -183,7 +191,8 @@ namespace mySQLPunk.lib
 
         public DataTable GetColumns(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "tableName", tableName } };
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schema", target.Schema }, { "tableName", target.Name } };
             return SelectSQL(@"
                 SELECT
                     c.column_name,
@@ -198,7 +207,7 @@ namespace mySQLPunk.lib
                 LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
                 LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
                 LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped
-                WHERE c.table_schema = 'public' AND c.table_name = :tableName
+                WHERE c.table_schema = :schema AND c.table_name = :tableName
                 ORDER BY c.ordinal_position", p);
         }
 
@@ -206,7 +215,7 @@ namespace mySQLPunk.lib
         {
             return SelectSQL(@"
                 SELECT
-                    c.relname AS ""Name"",
+                    CASE WHEN n.nspname = 'public' THEN c.relname ELSE n.nspname || '.' || c.relname END AS ""Name"",
                     NULL AS ""Auto_increment"",
                     NULL AS ""Update_time"",
                     NULL AS ""Create_time"",
@@ -224,13 +233,14 @@ namespace mySQLPunk.lib
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
-                WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
-                ORDER BY c.relname;");
+                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND c.relkind IN ('r', 'p')
+                ORDER BY n.nspname, c.relname;");
         }
 
         public DataTable GetIndexes(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "name", tableName } };
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
             return SelectSQL(@"
                 SELECT
                     CASE WHEN ix.indisprimary THEN 'PRIMARY' ELSE i.relname END AS ""Key_name"",
@@ -246,7 +256,7 @@ namespace mySQLPunk.lib
                 JOIN pg_am am ON i.relam = am.oid
                 JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-                WHERE n.nspname = 'public' AND t.relname = :name
+                WHERE n.nspname = :schema AND t.relname = :name
                 ORDER BY i.relname, k.ord;", p);
         }
 
@@ -279,44 +289,47 @@ namespace mySQLPunk.lib
                 definitions.Add("  " + QuotePg(row["Name"].ToString()) + " " + MapCopyTypeToPostgreSql(row) + " " + nullable);
             }
 
-            return "CREATE TABLE public." + QuotePg(tableName) + " (\r\n" +
+            return "CREATE TABLE " + QualifiedName(tableName) + " (\r\n" +
                    string.Join(",\r\n", definitions.ToArray()) +
                    "\r\n);";
         }
 
         public bool TableExists(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "name", tableName } };
-            DataTable dt = SelectSQL("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = :name AND table_type = 'BASE TABLE';", p);
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :schema AND table_name = :name AND table_type = 'BASE TABLE';", p);
             return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
         }
 
         public bool ViewExists(string databaseName, string viewName)
         {
-            var p = new Dictionary<string, object> { { "name", viewName } };
-            DataTable dt = SelectSQL("SELECT COUNT(*) FROM information_schema.views WHERE table_schema = 'public' AND table_name = :name;", p);
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(viewName);
+            var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM information_schema.views WHERE table_schema = :schema AND table_name = :name;", p);
             return dt.Rows.Count > 0 && Convert.ToInt64(dt.Rows[0][0]) > 0;
         }
 
         public void RenameTable(string databaseName, string oldTableName, string newTableName)
         {
-            ExecOrThrow("ALTER TABLE public." + QuotePg(oldTableName) + " RENAME TO " + QuotePg(newTableName) + ";");
+            ExecOrThrow("ALTER TABLE " + QualifiedName(oldTableName) + " RENAME TO " + QuotePg(ParsePostgreSqlObjectName(newTableName).Name) + ";");
         }
 
         public void RenameView(string databaseName, string oldViewName, string newViewName)
         {
-            ExecOrThrow("ALTER VIEW public." + QuotePg(oldViewName) + " RENAME TO " + QuotePg(newViewName) + ";");
+            ExecOrThrow("ALTER VIEW " + QualifiedName(oldViewName) + " RENAME TO " + QuotePg(ParsePostgreSqlObjectName(newViewName).Name) + ";");
         }
 
         public long CountRows(string databaseName, string tableName)
         {
-            DataTable dt = SelectSQL("SELECT COUNT(*) FROM public." + QuotePg(tableName) + ";");
+            DataTable dt = SelectSQL("SELECT COUNT(*) FROM " + QualifiedName(tableName) + ";");
             return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
         }
 
         public DataTable GetCopyColumns(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "name", tableName } };
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
             return SelectSQL(@"
                 SELECT
                     c.column_name AS ""Name"",
@@ -332,13 +345,14 @@ namespace mySQLPunk.lib
                 LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
                 LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
                 LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped
-                WHERE c.table_schema = 'public' AND c.table_name = :name
+                WHERE c.table_schema = :schema AND c.table_name = :name
                 ORDER BY c.ordinal_position;", p);
         }
 
         public DataTable GetCopyIndexes(string databaseName, string tableName)
         {
-            var p = new Dictionary<string, object> { { "name", tableName } };
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
             return SelectSQL(@"
                 SELECT
                     i.relname AS ""IndexName"",
@@ -347,12 +361,13 @@ namespace mySQLPunk.lib
                     k.ord AS ""SeqInIndex"",
                     am.amname AS ""IndexType""
                 FROM pg_class t
+                JOIN pg_namespace n ON n.oid = t.relnamespace
                 JOIN pg_index ix ON t.oid = ix.indrelid
                 JOIN pg_class i ON i.oid = ix.indexrelid
                 JOIN pg_am am ON i.relam = am.oid
                 JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-                WHERE t.relname = :name AND NOT ix.indisprimary
+                WHERE n.nspname = :schema AND t.relname = :name AND NOT ix.indisprimary
                 ORDER BY i.relname, k.ord;", p);
         }
 
@@ -381,13 +396,13 @@ namespace mySQLPunk.lib
                 defs.Add(definition);
             }
 
-            statements.Add("CREATE TABLE public." + QuotePg(tableName) + " (" + string.Join(", ", defs.ToArray()) + ");");
+            statements.Add("CREATE TABLE " + QualifiedName(tableName) + " (" + string.Join(", ", defs.ToArray()) + ");");
 
             foreach (DataRow row in sourceColumns.Rows)
             {
                 string comment = GetDataRowValue(row, "Comment", "COMMENT");
                 if (string.IsNullOrWhiteSpace(comment)) continue;
-                statements.Add("COMMENT ON COLUMN public." + QuotePg(tableName) + "." + QuotePg(row["Name"].ToString()) +
+                statements.Add("COMMENT ON COLUMN " + QualifiedName(tableName) + "." + QuotePg(row["Name"].ToString()) +
                                " IS '" + comment.Replace("'", "''") + "';");
             }
 
@@ -418,15 +433,15 @@ namespace mySQLPunk.lib
                 List<string> cols = new List<string>();
                 foreach (DataRow row in group.OrderBy(r => Convert.ToInt32(r["SeqInIndex"])))
                     cols.Add(QuotePg(row["ColumnName"].ToString()));
-                string targetIndexName = tableName + "_" + indexName;
-                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX " + QuotePg(targetIndexName) + " ON public." + QuotePg(tableName) + " (" + string.Join(",", cols.ToArray()) + ");";
+                string targetIndexName = ParsePostgreSqlObjectName(tableName).Name + "_" + indexName;
+                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX " + QuotePg(targetIndexName) + " ON " + QualifiedName(tableName) + " (" + string.Join(",", cols.ToArray()) + ");";
                 ExecOrThrow(sql);
             }
         }
 
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
         {
-            return SelectSQL("SELECT * FROM public." + QuotePg(tableName) + " LIMIT " + limit + " OFFSET " + offset + ";");
+            return SelectSQL("SELECT * FROM " + QualifiedName(tableName) + " LIMIT " + limit + " OFFSET " + offset + ";");
         }
 
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows)
@@ -447,14 +462,15 @@ namespace mySQLPunk.lib
                 }
                 valueGroups.Add("(" + string.Join(",", vals.ToArray()) + ")");
             }
-            string sql = "INSERT INTO public." + QuotePg(tableName) + " (" + string.Join(",", cols.ToArray()) + ") VALUES " + string.Join(",", valueGroups.ToArray()) + ";";
+            string sql = "INSERT INTO " + QualifiedName(tableName) + " (" + string.Join(",", cols.ToArray()) + ") VALUES " + string.Join(",", valueGroups.ToArray()) + ";";
             ExecOrThrow(sql, p);
         }
 
         public string GetViewCreateStatement(string databaseName, string viewName)
         {
-            var p = new Dictionary<string, object> { { "name", viewName } };
-            DataTable dt = SelectSQL("SELECT pg_get_viewdef(('public.' || quote_ident(:name))::regclass, true);", p);
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(viewName);
+            var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
+            DataTable dt = SelectSQL("SELECT pg_get_viewdef((quote_ident(:schema) || '.' || quote_ident(:name))::regclass, true);", p);
             return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
         }
 
@@ -466,7 +482,7 @@ namespace mySQLPunk.lib
                 throw new Exception("無法解析 PostgreSQL View DDL");
             }
 
-            ExecOrThrow("CREATE VIEW public." + QuotePg(viewName) + " AS " + selectSql.Trim().TrimEnd(';') + ";");
+            ExecOrThrow("CREATE VIEW " + QualifiedName(viewName) + " AS " + selectSql.Trim().TrimEnd(';') + ";");
         }
 
         private void ExecOrThrow(string sql, Dictionary<string, object> parameters = null)
@@ -476,7 +492,35 @@ namespace mySQLPunk.lib
                 throw new Exception(res.ContainsKey("reason") ? res["reason"] : "SQL 執行失敗");
         }
 
-        private static string QuotePg(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+        private struct PostgreSqlObjectName
+        {
+            public string Schema;
+            public string Name;
+        }
+
+        private static PostgreSqlObjectName ParsePostgreSqlObjectName(string objectName)
+        {
+            string value = (objectName ?? string.Empty).Trim();
+            int dotIndex = value.IndexOf('.');
+            if (dotIndex > 0 && dotIndex < value.Length - 1)
+            {
+                return new PostgreSqlObjectName
+                {
+                    Schema = value.Substring(0, dotIndex).Trim(),
+                    Name = value.Substring(dotIndex + 1).Trim()
+                };
+            }
+
+            return new PostgreSqlObjectName { Schema = "public", Name = value };
+        }
+
+        private static string QualifiedName(string objectName)
+        {
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(objectName);
+            return QuotePg(target.Schema) + "." + QuotePg(target.Name);
+        }
+
+        private static string QuotePg(string name) => "\"" + (name ?? "").Replace("\"", "\"\"") + "\"";
 
         private static bool IsCopyNullable(DataRow row)
         {
@@ -530,7 +574,7 @@ namespace mySQLPunk.lib
                     qa.Add(":" + key);
                 }
                 string SQL = @"
-                INSERT INTO """ + table + @"""" +
+                INSERT INTO " + QualifiedName(table) +
                     @"("""
                         + my.implode(@""",""", keys) +
                     @""")
@@ -567,7 +611,7 @@ namespace mySQLPunk.lib
                     fields.Add(@"""" + key + @"""=:" + key);
                 }
                 string SQL = @"
-                UPDATE """ + table + @""" SET " +
+                UPDATE " + QualifiedName(table) + @" SET " +
                      my.implode(",", fields) +
                 @"
                     WHERE 
