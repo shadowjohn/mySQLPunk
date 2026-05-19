@@ -123,6 +123,15 @@ namespace mySQLPunk
             public Dictionary<string, object> ConnectionInfo;
         }
 
+        private class ImportedConnectionPasswordTarget
+        {
+            public int Index;
+            public string ConnectionName;
+            public string DbKind;
+            public string Username;
+            public string Target;
+        }
+
         private static int GetConnectionIconIndex(string dbKind, bool isConnected)
         {
             switch ((dbKind ?? string.Empty).ToLowerInvariant())
@@ -1192,8 +1201,12 @@ namespace mySQLPunk
                 try
                 {
                     ImportConnectionsFromFile(dialog.FileName);
-                    UpdateMainStatus(Localization.T("Status.ConnectionsImported"));
-                    MessageBox.Show(Localization.T("Status.ConnectionsImported"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    int savedPasswords = PromptForImportedConnectionPasswords();
+                    string message = savedPasswords > 0
+                        ? Localization.Format("Status.ConnectionsImportedWithPasswords", savedPasswords)
+                        : Localization.T("Status.ConnectionsImported");
+                    UpdateMainStatus(message);
+                    MessageBox.Show(message, Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
@@ -1230,6 +1243,217 @@ namespace mySQLPunk
             myN.importConnections(sourcePath);
             drawLists();
             return myN.connections.Count;
+        }
+
+        private int PromptForImportedConnectionPasswords()
+        {
+            List<ImportedConnectionPasswordTarget> targets = BuildImportedConnectionPasswordTargets(myN.connections);
+            if (targets.Count == 0) return 0;
+
+            DialogResult answer = MessageBox.Show(
+                Localization.Format("Connection.ImportPasswordPrompt", targets.Count),
+                Localization.T("Connection.ImportPasswordTitle"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (answer != DialogResult.Yes) return 0;
+
+            Dictionary<int, string> passwords = ShowImportedConnectionPasswordDialog(targets);
+            if (passwords == null || passwords.Count == 0) return 0;
+
+            int saved = 0;
+            foreach (KeyValuePair<int, string> pair in passwords)
+            {
+                if (pair.Key < 0 || pair.Key >= myN.connections.Count) continue;
+                if (string.IsNullOrEmpty(pair.Value)) continue;
+                myN.connections[pair.Key]["pwd"] = pair.Value;
+                saved++;
+            }
+
+            if (saved > 0)
+            {
+                myN.setSettingINI();
+            }
+
+            return saved;
+        }
+
+        private static List<ImportedConnectionPasswordTarget> BuildImportedConnectionPasswordTargets(IEnumerable<Dictionary<string, object>> connections)
+        {
+            List<ImportedConnectionPasswordTarget> targets = new List<ImportedConnectionPasswordTarget>();
+            if (connections == null) return targets;
+
+            int index = 0;
+            foreach (Dictionary<string, object> conn in connections)
+            {
+                if (ConnectionNeedsPasswordAfterImport(conn))
+                {
+                    targets.Add(new ImportedConnectionPasswordTarget
+                    {
+                        Index = index,
+                        ConnectionName = GetConnectionValue(conn, "conn_name"),
+                        DbKind = GetConnectionValue(conn, "db_kind"),
+                        Username = GetConnectionValue(conn, "username"),
+                        Target = BuildImportedConnectionPasswordTargetText(conn)
+                    });
+                }
+                index++;
+            }
+
+            return targets;
+        }
+
+        private static bool ConnectionNeedsPasswordAfterImport(Dictionary<string, object> conn)
+        {
+            if (conn == null) return false;
+            if (!string.IsNullOrEmpty(GetConnectionValue(conn, "pwd"))) return false;
+
+            string kind = GetConnectionValue(conn, "db_kind").ToLowerInvariant();
+            if (kind == "sqlite") return false;
+            if ((kind == "mssql" || kind == "sqlserver") && GetConnectionValue(conn, "trusted_connection") == "T") return false;
+
+            switch (kind)
+            {
+                case "mysql":
+                case "postgresql":
+                case "oracle":
+                case "mssql":
+                case "sqlserver":
+                    return !string.IsNullOrWhiteSpace(GetConnectionValue(conn, "username"));
+                default:
+                    return false;
+            }
+        }
+
+        private static string BuildImportedConnectionPasswordTargetText(Dictionary<string, object> conn)
+        {
+            string kind = GetConnectionValue(conn, "db_kind").ToLowerInvariant();
+            if (kind == "sqlite") return GetConnectionValue(conn, "path");
+            if (kind == "oracle")
+            {
+                string tns = GetConnectionValue(conn, "tns_name");
+                if (!string.IsNullOrWhiteSpace(tns)) return tns;
+                string service = GetConnectionValue(conn, "service_name");
+                string sid = GetConnectionValue(conn, "sid");
+                string host = GetConnectionValue(conn, "host");
+                string port = GetConnectionValue(conn, "port");
+                string name = string.IsNullOrWhiteSpace(service) ? sid : service;
+                return host + (string.IsNullOrWhiteSpace(port) ? "" : ":" + port) +
+                       (string.IsNullOrWhiteSpace(name) ? "" : "/" + name);
+            }
+
+            string target = GetConnectionValue(conn, "host");
+            string targetPort = GetConnectionValue(conn, "port");
+            if (!string.IsNullOrWhiteSpace(targetPort)) target += ":" + targetPort;
+            return target;
+        }
+
+        private Dictionary<int, string> ShowImportedConnectionPasswordDialog(List<ImportedConnectionPasswordTarget> targets)
+        {
+            using (Form dialog = new Form())
+            using (Label label = new Label())
+            using (DataGridView grid = new DataGridView())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = Localization.T("Connection.ImportPasswordTitle");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.MinimizeBox = false;
+                dialog.ShowInTaskbar = false;
+                dialog.Size = new Size(820, 500);
+                dialog.MinimumSize = new Size(700, 420);
+
+                label.Dock = DockStyle.Top;
+                label.Height = 56;
+                label.Padding = new Padding(12, 10, 12, 8);
+                label.Text = Localization.T("Connection.ImportPasswordDescription");
+
+                DataTable table = BuildImportedConnectionPasswordTable(targets);
+                grid.Dock = DockStyle.Fill;
+                grid.AllowUserToAddRows = false;
+                grid.AllowUserToDeleteRows = false;
+                grid.RowHeadersVisible = false;
+                grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
+                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                grid.DataSource = table;
+                grid.DataBindingComplete += (s, e) =>
+                {
+                    if (grid.Columns.Contains("_index")) grid.Columns["_index"].Visible = false;
+                    if (grid.Columns.Contains("Password")) grid.Columns["Password"].HeaderText = Localization.T("Common.Password");
+                };
+                grid.CellFormatting += (s, e) =>
+                {
+                    if (grid.Columns[e.ColumnIndex].Name == "Password" && e.Value != null && !string.IsNullOrEmpty(e.Value.ToString()))
+                    {
+                        e.Value = new string('*', Math.Min(12, e.Value.ToString().Length));
+                        e.FormattingApplied = true;
+                    }
+                };
+
+                FlowLayoutPanel footer = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 48,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(8)
+                };
+                okButton.Text = Localization.T("Connection.ImportPasswordSave");
+                okButton.DialogResult = DialogResult.OK;
+                okButton.AutoSize = true;
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.AutoSize = true;
+                footer.Controls.Add(cancelButton);
+                footer.Controls.Add(okButton);
+
+                dialog.Controls.Add(grid);
+                dialog.Controls.Add(label);
+                dialog.Controls.Add(footer);
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = cancelButton;
+                ThemeManager.ApplyTo(dialog);
+
+                if (dialog.ShowDialog(this) != DialogResult.OK) return null;
+                return CollectImportedConnectionPasswords(table);
+            }
+        }
+
+        private static DataTable BuildImportedConnectionPasswordTable(List<ImportedConnectionPasswordTarget> targets)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("_index", typeof(int));
+            table.Columns.Add(Localization.T("Common.ConnectionName"));
+            table.Columns.Add(Localization.T("Common.ConnectionType"));
+            table.Columns.Add(Localization.T("Common.Username"));
+            table.Columns.Add(Localization.T("Common.Host"));
+            table.Columns.Add("Password");
+
+            foreach (ImportedConnectionPasswordTarget target in targets)
+            {
+                DataRow row = table.NewRow();
+                row[0] = target.Index;
+                row[1] = target.ConnectionName;
+                row[2] = target.DbKind;
+                row[3] = target.Username;
+                row[4] = target.Target;
+                row[5] = "";
+                table.Rows.Add(row);
+            }
+            return table;
+        }
+
+        private static Dictionary<int, string> CollectImportedConnectionPasswords(DataTable table)
+        {
+            Dictionary<int, string> passwords = new Dictionary<int, string>();
+            if (table == null) return passwords;
+
+            foreach (DataRow row in table.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                string password = row["Password"] == DBNull.Value ? "" : row["Password"].ToString();
+                if (string.IsNullOrEmpty(password)) continue;
+                passwords[Convert.ToInt32(row["_index"])] = password;
+            }
+            return passwords;
         }
 
         private void CloseAllConnectionsBeforeImport()

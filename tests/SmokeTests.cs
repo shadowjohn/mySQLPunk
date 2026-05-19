@@ -26,6 +26,7 @@ public static class SmokeTests
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
         Run("Windows credential service", TestWindowsCredentialService, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
@@ -460,6 +461,51 @@ public static class SmokeTests
         {
             Assert(WindowsCredentialService.TryDeletePassword(target), "Credential service should delete the test credential.");
         }
+    }
+
+    private static void TestConnectionImportPasswordHelpers()
+    {
+        MethodInfo needsPasswordMethod = typeof(Form1).GetMethod("ConnectionNeedsPasswordAfterImport", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo targetTextMethod = typeof(Form1).GetMethod("BuildImportedConnectionPasswordTargetText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo collectMethod = typeof(Form1).GetMethod("CollectImportedConnectionPasswords", BindingFlags.Static | BindingFlags.NonPublic);
+
+        Dictionary<string, object> mysqlConn = new Dictionary<string, object>
+        {
+            { "conn_name", "Main MySQL" },
+            { "db_kind", "mysql" },
+            { "host", "db.example.test" },
+            { "port", "3307" },
+            { "username", "tester" },
+            { "pwd", "" }
+        };
+        Assert((bool)needsPasswordMethod.Invoke(null, new object[] { mysqlConn }), "Imported MySQL connection without password should be prompted.");
+        AssertEquals("db.example.test:3307", (string)targetTextMethod.Invoke(null, new object[] { mysqlConn }), "Imported password target should include host and port.");
+
+        Dictionary<string, object> sqliteConn = new Dictionary<string, object>
+        {
+            { "db_kind", "sqlite" },
+            { "path", "D:\\data\\main.sqlite" },
+            { "pwd", "" }
+        };
+        Assert(!(bool)needsPasswordMethod.Invoke(null, new object[] { sqliteConn }), "SQLite imports should not prompt for a password.");
+
+        Dictionary<string, object> trustedSqlServer = new Dictionary<string, object>
+        {
+            { "db_kind", "mssql" },
+            { "trusted_connection", "T" },
+            { "username", "DOMAIN\\tester" },
+            { "pwd", "" }
+        };
+        Assert(!(bool)needsPasswordMethod.Invoke(null, new object[] { trustedSqlServer }), "Trusted SQL Server imports should not prompt for a password.");
+
+        DataTable passwordTable = new DataTable();
+        passwordTable.Columns.Add("_index", typeof(int));
+        passwordTable.Columns.Add("Password");
+        passwordTable.Rows.Add(0, "secret-a");
+        passwordTable.Rows.Add(1, "");
+        passwordTable.Rows.Add(2, "secret-c");
+        var collected = (Dictionary<int, string>)collectMethod.Invoke(null, new object[] { passwordTable });
+        Assert(collected.Count == 2 && collected[0] == "secret-a" && collected[2] == "secret-c", "Imported password collector should skip blank rows.");
     }
 
     private static DataTable CreateNamedRowsTable(string columnName, string value)

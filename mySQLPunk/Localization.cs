@@ -272,6 +272,11 @@ namespace mySQLPunk
             Add("Connection.ImportTitle", "匯入連線設定", "Import Connections");
             Add("Connection.JsonFilter", "JSON 檔案 (*.json)|*.json|所有檔案 (*.*)|*.*", "JSON files (*.json)|*.json|All files (*.*)|*.*");
             Add("Connection.ImportReplaceConfirm", "匯入會取代目前所有連線設定，是否繼續？", "Importing will replace all current connection settings. Continue?");
+            Add("Connection.ImportPasswordTitle", "補上匯入連線密碼", "Fill Imported Connection Passwords");
+            Add("Connection.ImportPasswordPrompt", "偵測到 {0} 筆匯入連線沒有儲存密碼。要現在批次補上並存入 Windows Credential Manager 嗎？", "Detected {0} imported connections without saved passwords. Fill them now and store them in Windows Credential Manager?");
+            Add("Connection.ImportPasswordDescription", "請在需要補密碼的連線列輸入密碼；留空的列會略過。密碼只會存入 Windows Credential Manager，不會寫入匯入檔。", "Enter passwords for the imported connections that need them; blank rows are skipped. Passwords are stored only in Windows Credential Manager, not in the import file.");
+            Add("Connection.ImportPasswordSave", "儲存密碼", "Save Passwords");
+            Add("Status.ConnectionsImportedWithPasswords", "連線設定已匯入，並已保存 {0} 筆密碼。", "Connections imported and {0} passwords saved.");
             Add("Backup.Title", "建立備份", "Create Backup");
             Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
             Add("Backup.Success", "備份已建立。", "Backup created.");
