@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Security.Cryptography;
 using mySQLPunk.entity;
 using utility;
 using System.Runtime.InteropServices;
@@ -150,6 +151,10 @@ namespace mySQLPunk
             public List<Dictionary<string, object>> ImportedConnections { get; } = new List<Dictionary<string, object>>();
             public List<string> ImportedGroups { get; } = new List<string>();
             public List<ConnectionImportPreviewEntry> Entries { get; } = new List<ConnectionImportPreviewEntry>();
+            public string SourceSignature { get; set; }
+            public bool SourceSignaturePresent { get; set; }
+            public bool SourceSignatureValid { get; set; }
+            public string SourceExportedAtUtc { get; set; }
             public int Added { get; set; }
             public int Updated { get; set; }
             public int Unchanged { get; set; }
@@ -1271,6 +1276,7 @@ namespace mySQLPunk
             }
 
             myN.exportConnections(targetPath);
+            SignConnectionExportFile(targetPath);
             return true;
         }
 
@@ -1347,14 +1353,9 @@ namespace mySQLPunk
                 dialog.MinimumSize = new Size(760, 440);
 
                 summaryLabel.Dock = DockStyle.Top;
-                summaryLabel.Height = 72;
+                summaryLabel.Height = 96;
                 summaryLabel.Padding = new Padding(12, 10, 12, 8);
-                summaryLabel.Text = Localization.Format(
-                    "Connection.ImportPreviewSummary",
-                    preview?.Added ?? 0,
-                    preview?.Updated ?? 0,
-                    preview?.Unchanged ?? 0,
-                    preview?.ExistingOnly ?? 0);
+                summaryLabel.Text = BuildConnectionImportPreviewSummary(preview);
 
                 DataTable table = BuildConnectionImportPreviewTable(preview);
                 grid.Dock = DockStyle.Fill;
@@ -1454,6 +1455,40 @@ namespace mySQLPunk
                 table.Rows.Add(row);
             }
             return table;
+        }
+
+        private static string BuildConnectionImportPreviewSummary(ConnectionImportPreviewReport preview)
+        {
+            string summary = Localization.Format(
+                "Connection.ImportPreviewSummary",
+                preview?.Added ?? 0,
+                preview?.Updated ?? 0,
+                preview?.Unchanged ?? 0,
+                preview?.ExistingOnly ?? 0);
+
+            if (preview == null) return summary;
+            return summary + Environment.NewLine + BuildConnectionImportSignatureSummary(preview);
+        }
+
+        private static string BuildConnectionImportSignatureSummary(ConnectionImportPreviewReport preview)
+        {
+            if (preview == null || !preview.SourceSignaturePresent)
+            {
+                return Localization.T("Connection.ImportSignatureMissing");
+            }
+
+            string shortSignature = preview.SourceSignature ?? "";
+            if (shortSignature.Length > 12) shortSignature = shortSignature.Substring(0, 12);
+            string status = preview.SourceSignatureValid
+                ? Localization.T("Connection.ImportSignatureValid")
+                : Localization.T("Connection.ImportSignatureInvalid");
+
+            if (string.IsNullOrWhiteSpace(preview.SourceExportedAtUtc))
+            {
+                return Localization.Format("Connection.ImportSignatureSummary", status, shortSignature);
+            }
+
+            return Localization.Format("Connection.ImportSignatureSummaryWithTime", status, shortSignature, preview.SourceExportedAtUtc);
         }
 
         private static ConnectionImportDecision CreateConnectionImportDecision(ConnectionImportMode mode, DataTable table)
@@ -8721,6 +8756,7 @@ namespace mySQLPunk
             }
 
             ConnectionImportPreviewReport report = new ConnectionImportPreviewReport();
+            ReadConnectionImportSignature(sourcePath, report);
             LoadConnectionImportFile(sourcePath, report.ImportedConnections, report.ImportedGroups);
 
             List<Dictionary<string, object>> existing = existingConnections == null
@@ -8824,6 +8860,86 @@ namespace mySQLPunk
                     if (!string.IsNullOrWhiteSpace(groupName) && !groups.Contains(groupName)) groups.Add(groupName);
                 }
             }
+        }
+
+        private static void SignConnectionExportFile(string targetPath)
+        {
+            if (string.IsNullOrWhiteSpace(targetPath) || !File.Exists(targetPath)) return;
+
+            JObject root = JToken.Parse(File.ReadAllText(targetPath, Encoding.UTF8)) as JObject;
+            if (root == null) return;
+
+            JObject metadata = root["exportMetadata"] as JObject ?? new JObject();
+            metadata["formatVersion"] = 1;
+            metadata["app"] = "mySQLPunk";
+            metadata["exportedAtUtc"] = DateTime.UtcNow.ToString("o");
+            metadata.Remove("signatureSha256");
+            root["exportMetadata"] = metadata;
+
+            metadata["signatureSha256"] = ComputeConnectionImportSignature(root);
+            File.WriteAllText(targetPath, root.ToString(Formatting.Indented), new UTF8Encoding(false));
+        }
+
+        private static void ReadConnectionImportSignature(string sourcePath, ConnectionImportPreviewReport report)
+        {
+            if (report == null || string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath)) return;
+
+            JObject root = JToken.Parse(File.ReadAllText(sourcePath, Encoding.UTF8)) as JObject;
+            JObject metadata = root?["exportMetadata"] as JObject;
+            if (metadata == null) return;
+
+            string signature = metadata.Value<string>("signatureSha256");
+            report.SourceExportedAtUtc = metadata.Value<string>("exportedAtUtc") ?? "";
+            report.SourceSignature = signature ?? "";
+            report.SourceSignaturePresent = !string.IsNullOrWhiteSpace(signature);
+            report.SourceSignatureValid = report.SourceSignaturePresent &&
+                                          string.Equals(signature, ComputeConnectionImportSignature(root), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ComputeConnectionImportSignature(JToken root)
+        {
+            if (root == null) return "";
+
+            JToken clone = root.DeepClone();
+            JObject obj = clone as JObject;
+            JObject metadata = obj?["exportMetadata"] as JObject;
+            metadata?.Remove("signatureSha256");
+
+            string canonical = CanonicalizeJsonToken(clone).ToString(Formatting.None);
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(canonical));
+                StringBuilder sb = new StringBuilder(bytes.Length * 2);
+                foreach (byte b in bytes) sb.Append(b.ToString("x2"));
+                return sb.ToString();
+            }
+        }
+
+        private static JToken CanonicalizeJsonToken(JToken token)
+        {
+            JObject obj = token as JObject;
+            if (obj != null)
+            {
+                JObject sorted = new JObject();
+                foreach (JProperty property in obj.Properties().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    sorted[property.Name] = CanonicalizeJsonToken(property.Value);
+                }
+                return sorted;
+            }
+
+            JArray array = token as JArray;
+            if (array != null)
+            {
+                JArray normalized = new JArray();
+                foreach (JToken item in array)
+                {
+                    normalized.Add(CanonicalizeJsonToken(item));
+                }
+                return normalized;
+            }
+
+            return token == null ? JValue.CreateNull() : token.DeepClone();
         }
 
         private static void AddImportedConnectionToken(JToken token, List<Dictionary<string, object>> connections)

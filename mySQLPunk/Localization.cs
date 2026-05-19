@@ -281,6 +281,11 @@ namespace mySQLPunk
             Add("Status.ConnectionsImportedWithPasswords", "連線設定已匯入，並已保存 {0} 筆密碼。", "Connections imported and {0} passwords saved.");
             Add("Connection.ImportPreviewTitle", "匯入連線差異預覽", "Connection Import Preview");
             Add("Connection.ImportPreviewSummary", "新增：{0}　更新：{1}　不變：{2}　只存在目前設定：{3}", "Added: {0}  Updated: {1}  Unchanged: {2}  Existing only: {3}");
+            Add("Connection.ImportSignatureMissing", "來源簽章：無簽章（舊版或外部 JSON）", "Source signature: missing (legacy or external JSON)");
+            Add("Connection.ImportSignatureValid", "有效", "valid");
+            Add("Connection.ImportSignatureInvalid", "無效，內容可能已被修改", "invalid, content may have been modified");
+            Add("Connection.ImportSignatureSummary", "來源簽章：{0}，SHA-256 {1}...", "Source signature: {0}, SHA-256 {1}...");
+            Add("Connection.ImportSignatureSummaryWithTime", "來源簽章：{0}，SHA-256 {1}...，匯出時間 {2}", "Source signature: {0}, SHA-256 {1}..., exported at {2}");
             Add("Connection.ImportPreviewInclude", "合併", "Merge");
             Add("Connection.ImportPreviewStatus", "狀態", "Status");
             Add("Connection.ImportPreviewAdded", "新增", "Added");

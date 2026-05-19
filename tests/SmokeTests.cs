@@ -8,6 +8,8 @@ using System.Text;
 using System.Windows.Forms;
 using mySQLPunk;
 using mySQLPunk.lib;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 public static class SmokeTests
 {
@@ -30,6 +32,7 @@ public static class SmokeTests
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
         Run("Windows credential service", TestWindowsCredentialService, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
@@ -583,6 +586,52 @@ public static class SmokeTests
         finally
         {
             Assert(WindowsCredentialService.TryDeletePassword(target), "Credential service should delete the test credential.");
+        }
+    }
+
+    private static void TestConnectionExportSignatureHelpers()
+    {
+        MethodInfo computeMethod = typeof(Form1).GetMethod("ComputeConnectionImportSignature", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo readMethod = typeof(Form1).GetMethod("ReadConnectionImportSignature", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo summaryMethod = typeof(Form1).GetMethod("BuildConnectionImportSignatureSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        Type reportType = typeof(Form1).GetNestedType("ConnectionImportPreviewReport", BindingFlags.NonPublic);
+
+        string importPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_import_signature_" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            JObject root = JObject.Parse(@"{
+  ""connections"": [
+    { ""conn_name"": ""signed"", ""db_kind"": ""mysql"", ""host"": ""localhost"", ""port"": ""3306"", ""username"": ""u"" }
+  ],
+  ""groups"": [""signed-group""],
+  ""exportMetadata"": {
+    ""formatVersion"": 1,
+    ""app"": ""mySQLPunk"",
+    ""exportedAtUtc"": ""2026-05-19T08:00:00.0000000Z""
+  }
+}");
+            string signature = (string)computeMethod.Invoke(null, new object[] { root });
+            ((JObject)root["exportMetadata"])["signatureSha256"] = signature;
+            File.WriteAllText(importPath, root.ToString(Formatting.Indented), Encoding.UTF8);
+
+            object report = Activator.CreateInstance(reportType, true);
+            readMethod.Invoke(null, new object[] { importPath, report });
+            Assert((bool)GetProperty(report, "SourceSignaturePresent"), "Signed import should report a source signature.");
+            Assert((bool)GetProperty(report, "SourceSignatureValid"), "Signed import should validate unchanged content.");
+            AssertEquals(signature, (string)GetProperty(report, "SourceSignature"), "Signed import should keep the source signature.");
+            string summary = (string)summaryMethod.Invoke(null, new object[] { report });
+            AssertContains(summary, "SHA-256", "Signature summary should show the hash algorithm.");
+
+            root["connections"][0]["host"] = "changed.example.test";
+            File.WriteAllText(importPath, root.ToString(Formatting.Indented), Encoding.UTF8);
+            object tamperedReport = Activator.CreateInstance(reportType, true);
+            readMethod.Invoke(null, new object[] { importPath, tamperedReport });
+            Assert((bool)GetProperty(tamperedReport, "SourceSignaturePresent"), "Tampered import should still report the stored signature.");
+            Assert(!(bool)GetProperty(tamperedReport, "SourceSignatureValid"), "Tampered import should fail signature validation.");
+        }
+        finally
+        {
+            if (File.Exists(importPath)) File.Delete(importPath);
         }
     }
 
