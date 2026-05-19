@@ -405,9 +405,11 @@ public static class SmokeTests
             Assert(zipPackage.StatementCount == 7, "Zip restore package should use provided statement counter.");
             AssertContains(zipPackage.Script, "INSERT INTO a", "Zip restore package should read SQL entry content.");
 
-            BackupIntegrityResult sqlIntegrity = BackupIntegrityService.VerifyBackup(sqlPath, script => (int)typeof(Form1)
+            Func<string, int> countSqlStatements = script => (int)typeof(Form1)
                 .GetMethod("CountSqlScriptStatements", BindingFlags.Static | BindingFlags.NonPublic)
-                .Invoke(null, new object[] { script }));
+                .Invoke(null, new object[] { script });
+
+            BackupIntegrityResult sqlIntegrity = BackupIntegrityService.VerifyBackup(sqlPath, countSqlStatements);
             Assert(sqlIntegrity.IsValid && sqlIntegrity.StatementCount == 2, "SQL backup integrity should validate executable statements.");
 
             BackupIntegrityResult zipIntegrity = BackupIntegrityService.VerifyBackup(zipPath, script => 2);
@@ -425,9 +427,18 @@ public static class SmokeTests
             Assert(sqliteIntegrity.IsValid && sqliteIntegrity.Kind == "sqlite", "SQLite backup integrity should run integrity_check.");
 
             string emptySqlPath = Path.Combine(dir, "empty.sql");
-            File.WriteAllText(emptySqlPath, "-- only comments", Encoding.UTF8);
-            BackupIntegrityResult emptyIntegrity = BackupIntegrityService.VerifyBackup(emptySqlPath, script => 0);
+            File.WriteAllText(emptySqlPath, string.Empty, Encoding.UTF8);
+            BackupIntegrityResult emptyIntegrity = BackupIntegrityService.VerifyBackup(emptySqlPath, countSqlStatements);
             Assert(!emptyIntegrity.IsValid, "Empty SQL backup should fail integrity verification.");
+
+            Assert(BackupIntegrityScheduleService.IsDue(true, DateTime.MinValue, 24, DateTime.UtcNow), "Backup integrity schedule should run when never verified.");
+            Assert(!BackupIntegrityScheduleService.IsDue(true, DateTime.UtcNow.AddHours(-2), 24, DateTime.UtcNow), "Backup integrity schedule should wait for the configured interval.");
+            Assert(!BackupIntegrityScheduleService.IsDue(false, DateTime.MinValue, 24, DateTime.UtcNow), "Disabled backup integrity schedule should not run.");
+
+            BackupIntegrityScheduleReport scheduleReport = BackupIntegrityScheduleService.VerifyDirectories(new[] { dir }, countSqlStatements, 10);
+            Assert(scheduleReport.TotalFiles >= 4, "Backup integrity schedule should scan supported backup files.");
+            Assert(scheduleReport.VerifiedFiles >= 3, "Backup integrity schedule should verify readable SQL, ZIP, and SQLite backups.");
+            Assert(scheduleReport.FailedFiles >= 1, "Backup integrity schedule should report invalid backups.");
 
             DatabaseRestoreSnapshot before = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", 2, 1, 0, 1);
             DatabaseRestoreSnapshot after = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", 3, 1, 1, 0);

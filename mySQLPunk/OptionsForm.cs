@@ -17,6 +17,8 @@ namespace mySQLPunk
         private CheckBox noPrimaryKeyReadOnlyCheckBox;
         private TextBox remoteBackupDirectoryInput;
         private NumericUpDown remoteBackupRetainCountInput;
+        private CheckBox backupIntegrityScheduleEnabledCheckBox;
+        private NumericUpDown backupIntegrityIntervalInput;
         private ThemePreviewControl lightPreview;
         private ThemePreviewControl darkPreview;
         private readonly Button okButton;
@@ -274,6 +276,8 @@ namespace mySQLPunk
             contentPanel.Controls.Clear();
             remoteBackupDirectoryInput = null;
             remoteBackupRetainCountInput = null;
+            backupIntegrityScheduleEnabledCheckBox = null;
+            backupIntegrityIntervalInput = null;
 
             Label sectionTitle = new Label
             {
@@ -335,6 +339,33 @@ namespace mySQLPunk
                 Location = new Point(150, 146),
                 Width = 90
             };
+            backupIntegrityScheduleEnabledCheckBox = new CheckBox
+            {
+                Text = Localization.T("Options.BackupIntegrityScheduleEnabled"),
+                AutoSize = true,
+                Checked = BackupMirrorSettings.IntegrityScheduleEnabled,
+                Location = new Point(150, 196),
+                MaximumSize = new Size(560, 0)
+            };
+            Label intervalLabel = new Label
+            {
+                Text = Localization.T("Options.BackupIntegrityIntervalHours"),
+                AutoSize = true,
+                Location = new Point(18, 238)
+            };
+            backupIntegrityIntervalInput = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 720,
+                Value = BackupMirrorSettings.IntegrityIntervalHours,
+                Location = new Point(150, 234),
+                Width = 90
+            };
+            backupIntegrityScheduleEnabledCheckBox.CheckedChanged += (s, e) =>
+            {
+                backupIntegrityIntervalInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
+            };
+            backupIntegrityIntervalInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
 
             contentPanel.Controls.Add(sectionTitle);
             contentPanel.Controls.Add(hintLabel);
@@ -343,6 +374,9 @@ namespace mySQLPunk
             contentPanel.Controls.Add(browseButton);
             contentPanel.Controls.Add(retainLabel);
             contentPanel.Controls.Add(remoteBackupRetainCountInput);
+            contentPanel.Controls.Add(backupIntegrityScheduleEnabledCheckBox);
+            contentPanel.Controls.Add(intervalLabel);
+            contentPanel.Controls.Add(backupIntegrityIntervalInput);
         }
 
         private void AddCliPathRow(string provider, string labelText, int top)
@@ -409,6 +443,14 @@ namespace mySQLPunk
             if (remoteBackupRetainCountInput != null)
             {
                 BackupMirrorSettings.RetainCount = (int)remoteBackupRetainCountInput.Value;
+            }
+            if (backupIntegrityScheduleEnabledCheckBox != null)
+            {
+                BackupMirrorSettings.IntegrityScheduleEnabled = backupIntegrityScheduleEnabledCheckBox.Checked;
+            }
+            if (backupIntegrityIntervalInput != null)
+            {
+                BackupMirrorSettings.IntegrityIntervalHours = (int)backupIntegrityIntervalInput.Value;
             }
             BackupMirrorSettings.Save();
         }
@@ -695,6 +737,9 @@ namespace mySQLPunk
         private static bool loaded;
         private static string remoteDirectory = string.Empty;
         private static int retainCount = mySQLPunk.lib.BackupRemoteMirrorService.DefaultRetainCount;
+        private static bool integrityScheduleEnabled = true;
+        private static int integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
+        private static DateTime lastIntegrityVerifiedUtc = DateTime.MinValue;
 
         public static string RemoteDirectory
         {
@@ -724,6 +769,48 @@ namespace mySQLPunk
             }
         }
 
+        public static bool IntegrityScheduleEnabled
+        {
+            get
+            {
+                EnsureLoaded();
+                return integrityScheduleEnabled;
+            }
+            set
+            {
+                EnsureLoaded();
+                integrityScheduleEnabled = value;
+            }
+        }
+
+        public static int IntegrityIntervalHours
+        {
+            get
+            {
+                EnsureLoaded();
+                return integrityIntervalHours;
+            }
+            set
+            {
+                EnsureLoaded();
+                integrityIntervalHours = Math.Max(1, value);
+            }
+        }
+
+        public static DateTime LastIntegrityVerifiedUtc
+        {
+            get
+            {
+                EnsureLoaded();
+                return lastIntegrityVerifiedUtc;
+            }
+            set
+            {
+                EnsureLoaded();
+                lastIntegrityVerifiedUtc = value == DateTime.MinValue ? DateTime.MinValue : value.ToUniversalTime();
+            }
+        }
+
         public static void Save()
         {
             EnsureLoaded();
@@ -734,7 +821,10 @@ namespace mySQLPunk
                 File.WriteAllText(path, JsonConvert.SerializeObject(new SettingsData
                 {
                     RemoteDirectory = remoteDirectory,
-                    RetainCount = retainCount
+                    RetainCount = retainCount,
+                    IntegrityScheduleEnabled = integrityScheduleEnabled,
+                    IntegrityIntervalHours = integrityIntervalHours,
+                    LastIntegrityVerifiedUtc = lastIntegrityVerifiedUtc
                 }, Formatting.Indented));
             }
             catch
@@ -759,12 +849,24 @@ namespace mySQLPunk
                     retainCount = data.RetainCount <= 0
                         ? mySQLPunk.lib.BackupRemoteMirrorService.DefaultRetainCount
                         : data.RetainCount;
+                    integrityScheduleEnabled = data.IntegrityScheduleEnabled.HasValue
+                        ? data.IntegrityScheduleEnabled.Value
+                        : true;
+                    integrityIntervalHours = data.IntegrityIntervalHours <= 0
+                        ? mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours
+                        : data.IntegrityIntervalHours;
+                    lastIntegrityVerifiedUtc = data.LastIntegrityVerifiedUtc == DateTime.MinValue
+                        ? DateTime.MinValue
+                        : data.LastIntegrityVerifiedUtc.ToUniversalTime();
                 }
             }
             catch
             {
                 remoteDirectory = string.Empty;
                 retainCount = mySQLPunk.lib.BackupRemoteMirrorService.DefaultRetainCount;
+                integrityScheduleEnabled = true;
+                integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
+                lastIntegrityVerifiedUtc = DateTime.MinValue;
             }
         }
 
@@ -777,6 +879,9 @@ namespace mySQLPunk
         {
             public string RemoteDirectory { get; set; }
             public int RetainCount { get; set; }
+            public bool? IntegrityScheduleEnabled { get; set; }
+            public int IntegrityIntervalHours { get; set; }
+            public DateTime LastIntegrityVerifiedUtc { get; set; }
         }
     }
 }

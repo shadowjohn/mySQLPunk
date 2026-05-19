@@ -162,6 +162,7 @@
     </Compile>
     <Compile Include="ThemeManager.cs" />
     <Compile Include="lib\BackupIntegrityService.cs" />
+    <Compile Include="lib\BackupIntegrityScheduleService.cs" />
     <Compile Include="lib\BackupRestoreService.cs" />
     <Compile Include="lib\BackupRestoreDiffService.cs" />
     <Compile Include="lib\BackupRemoteMirrorService.cs" />

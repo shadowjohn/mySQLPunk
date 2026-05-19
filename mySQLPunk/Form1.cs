@@ -110,6 +110,8 @@ namespace mySQLPunk
 	        private readonly List<string> _favoriteNodePaths = new List<string>();
 	        private readonly HashSet<int> _openingConnectionIndices = new HashSet<int>();
 	        private readonly HashSet<string> _loadingDatabaseMetadataKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Timer _backupIntegrityTimer = new Timer();
+        private bool _backupIntegrityScanRunning;
 
         // 群組功能：快速查詢連線節點（key = 連線索引）
         private TreeNode[] _connectionTreeNodes = new TreeNode[0];
@@ -785,6 +787,8 @@ namespace mySQLPunk
             Localization.Load();
             ThemeManager.Load();
             InitializeComponent();
+            _backupIntegrityTimer.Interval = 60 * 60 * 1000;
+            _backupIntegrityTimer.Tick += (s, e) => RunBackupIntegrityScheduleIfDue();
         }
         
         public static void ApplyModernTheme(Control parent)
@@ -4821,6 +4825,77 @@ namespace mySQLPunk
             myN.getSettingINI();
             drawLists();
             ArrangeMainLayout();
+            StartBackupIntegritySchedule();
+        }
+
+        private void StartBackupIntegritySchedule()
+        {
+            if (!_backupIntegrityTimer.Enabled) _backupIntegrityTimer.Start();
+            RunBackupIntegrityScheduleIfDue();
+        }
+
+        private async void RunBackupIntegrityScheduleIfDue()
+        {
+            if (_backupIntegrityScanRunning) return;
+            if (!BackupIntegrityScheduleService.IsDue(
+                BackupMirrorSettings.IntegrityScheduleEnabled,
+                BackupMirrorSettings.LastIntegrityVerifiedUtc,
+                BackupMirrorSettings.IntegrityIntervalHours,
+                DateTime.UtcNow))
+            {
+                return;
+            }
+
+            _backupIntegrityScanRunning = true;
+            try
+            {
+                string[] directories = GetBackupIntegrityDirectories().ToArray();
+                BackupIntegrityScheduleReport report = await Task.Run(() =>
+                    BackupIntegrityScheduleService.VerifyDirectories(directories, CountSqlScriptStatements));
+
+                BackupMirrorSettings.LastIntegrityVerifiedUtc = report.VerifiedAtUtc;
+                BackupMirrorSettings.Save();
+
+                if (report.TotalFiles <= 0)
+                {
+                    UpdateMainStatus(Localization.T("Status.BackupIntegritySkipped"));
+                }
+                else if (report.HasFailures)
+                {
+                    UpdateMainStatus(Localization.Format("Status.BackupIntegrityFailed", report.FailedFiles));
+                }
+                else
+                {
+                    UpdateMainStatus(Localization.Format("Status.BackupIntegrityPassed", report.VerifiedFiles));
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateMainStatus(Localization.Format("Status.BackupIntegrityFailed", 1) + " " + ex.Message);
+            }
+            finally
+            {
+                _backupIntegrityScanRunning = false;
+            }
+        }
+
+        private static IEnumerable<string> GetBackupIntegrityDirectories()
+        {
+            HashSet<string> directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (!string.IsNullOrWhiteSpace(documents))
+            {
+                directories.Add(Path.Combine(documents, "mySQLPunk", "pre-delete-backups"));
+                directories.Add(Path.Combine(documents, "mySQLPunk", "pre-restore-backups"));
+            }
+
+            string remoteDirectory = BackupMirrorSettings.RemoteDirectory;
+            if (!string.IsNullOrWhiteSpace(remoteDirectory))
+            {
+                directories.Add(remoteDirectory);
+            }
+
+            return directories;
         }
 
         private void Form1_Resize(object sender, EventArgs e)

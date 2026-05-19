@@ -174,6 +174,9 @@ namespace mySQLPunk
             Add("Status.ConnectionsExported", "連線設定已匯出。", "Connections exported.");
             Add("Status.ConnectionsImported", "連線設定已匯入。", "Connections imported.");
             Add("Status.ConnectionListRefreshed", "連線清單已重新整理。", "Connection list refreshed.");
+            Add("Status.BackupIntegrityPassed", "備份完整性定期驗證完成：{0} 個檔案通過。", "Scheduled backup integrity check completed: {0} files passed.");
+            Add("Status.BackupIntegrityFailed", "備份完整性定期驗證發現 {0} 個異常檔案。", "Scheduled backup integrity check found {0} invalid files.");
+            Add("Status.BackupIntegritySkipped", "備份完整性定期驗證已略過：目前沒有備份檔。", "Scheduled backup integrity check skipped: no backup files found.");
             Add("Status.ExportFailed", "匯出失敗：", "Export failed: ");
             Add("Status.ImportFailed", "匯入失敗：", "Import failed: ");
             Add("Status.ThemeChanged", "主題已切換。", "Theme changed.");
@@ -733,6 +736,8 @@ namespace mySQLPunk
             Add("Options.BackupMirrorHint", "可指定備份完成後要同步複製的遠端或共享資料夾，例如 NAS、雲端同步資料夾或團隊共享磁碟。留空時不會建立遠端副本。", "Set a remote or shared folder to copy backups after they are created, such as a NAS, cloud-synced folder, or team share. Leave blank to skip remote copies.");
             Add("Options.BackupMirrorDirectory", "遠端備份資料夾:", "Remote backup folder:");
             Add("Options.BackupMirrorRetainCount", "遠端保留份數:", "Remote copies to keep:");
+            Add("Options.BackupIntegrityScheduleEnabled", "定期驗證備份完整性", "Run scheduled backup integrity checks");
+            Add("Options.BackupIntegrityIntervalHours", "驗證間隔（小時）:", "Check interval (hours):");
             Add("Options.ExecutableFilter", "執行檔 (*.exe)|*.exe|所有檔案 (*.*)|*.*", "Executable files (*.exe)|*.exe|All files (*.*)|*.*");
         }
 
