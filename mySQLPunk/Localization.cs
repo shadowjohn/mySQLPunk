@@ -519,6 +519,8 @@ namespace mySQLPunk
             Add("Designer.SwitchAutoCommentsDictionary", "切換註解字典...", "Switch Comment Dictionary...");
             Add("Designer.RenameAutoCommentsDictionary", "重新命名註解字典...", "Rename Comment Dictionary...");
             Add("Designer.DeleteAutoCommentsDictionary", "刪除註解字典...", "Delete Comment Dictionary...");
+            Add("Designer.CompareAutoCommentsDictionaryVersion", "比較註解字典版本...", "Compare Comment Dictionary Version...");
+            Add("Designer.RestoreAutoCommentsDictionaryVersion", "回復註解字典版本...", "Restore Comment Dictionary Version...");
             Add("Designer.AddIndex", "加入索引", "Add Index");
             Add("Designer.DeleteIndex", "刪除索引", "Delete Index");
             Add("Designer.MoveUp", "上移", "Move Up");
@@ -591,6 +593,16 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsDictionaryDeleteFailed", "刪除註解字典失敗：{0}", "Delete comment dictionary failed: {0}");
             Add("Designer.AutoCommentsDictionaryAlreadyExists", "註解字典「{0}」已存在。", "Comment dictionary \"{0}\" already exists.");
             Add("Designer.AutoCommentsDictionaryNotFound", "找不到指定的註解字典。", "The specified comment dictionary was not found.");
+            Add("Designer.AutoCommentsDictionaryVersionRequired", "註解字典版本代號不可空白或包含特殊字元。", "Comment dictionary version id cannot be blank or contain special characters.");
+            Add("Designer.AutoCommentsDictionaryVersionNotFound", "找不到指定的註解字典版本。", "The specified comment dictionary version was not found.");
+            Add("Designer.AutoCommentsDictionaryNoVersions", "註解字典「{0}」目前沒有可比較或回復的歷史版本。", "Comment dictionary \"{0}\" does not have any saved versions to compare or restore.");
+            Add("Designer.AutoCommentsDictionaryVersionListItem", "{0}，{1} 筆，版本 {2}", "{0}, {1} entries, version {2}");
+            Add("Designer.AutoCommentsDictionaryVersionDiffTitle", "註解字典「{0}」版本差異", "Comment Dictionary \"{0}\" Version Diff");
+            Add("Designer.AutoCommentsDictionaryVersionRestoreTitle", "回復註解字典「{0}」版本", "Restore Comment Dictionary \"{0}\" Version");
+            Add("Designer.AutoCommentsDictionaryVersionRestoreApply", "回復版本", "Restore Version");
+            Add("Designer.AutoCommentsDictionaryVersionRestored", "已回復「{0}」註解字典，共 {1} 筆。", "Restored \"{0}\" comment dictionary with {1} entries.");
+            Add("Designer.AutoCommentsDictionaryVersionCompareFailed", "比較註解字典版本失敗：{0}", "Compare comment dictionary version failed: {0}");
+            Add("Designer.AutoCommentsDictionaryVersionRestoreFailed", "回復註解字典版本失敗：{0}", "Restore comment dictionary version failed: {0}");
             Add("Designer.AutoCommentsProgress", "補註解 {0}/{1}：{2}", "Filling comments {0}/{1}: {2}");
             Add("Designer.AutoCommentsDone", "補註解完成：{0}/{1}", "Fill comments done: {0}/{1}");
             Add("Designer.EnterTableNameInOptions", "請先在「選項」分頁輸入資料表名稱。", "Enter a table name on the Options tab first.");

@@ -22,6 +22,7 @@ public static class SmokeTests
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
         Run("Table Designer ALTER provider matrix", TestTableDesignerAlterProviderMatrix, ref passed);
         Run("Table Designer comment dictionary diff", TestTableDesignerCommentDictionaryDiff, ref passed);
+        Run("Table Designer comment dictionary versions", TestTableDesignerCommentDictionaryVersions, ref passed);
         Run("Pre-delete backup path builder", TestPreDeleteBackupPathBuilder, ref passed);
         Run("Pre-delete backup archive service", TestPreDeleteBackupArchiveService, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
@@ -362,6 +363,50 @@ public static class SmokeTests
         Assert(removed != null && removed.Key == "OLD_ONLY" && removed.ExistingValue == "舊欄位", "Removed entry should keep the current comment.");
     }
 
+    private static void TestTableDesignerCommentDictionaryVersions()
+    {
+        string dictionaryName = "codex_smoke_" + Guid.NewGuid().ToString("N");
+        try
+        {
+            Dictionary<string, string> first = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "NAME", "名稱" },
+                { "STATUS", "狀態" }
+            };
+            Dictionary<string, string> second = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "NAME", "姓名" },
+                { "NEW_ONLY", "新欄位" }
+            };
+
+            TableDesignerForm.SaveNamedAutoColumnCommentDictionaryFile(dictionaryName, first);
+            TableDesignerForm.SaveNamedAutoColumnCommentDictionaryFile(dictionaryName, second);
+
+            List<TableDesignerForm.AutoColumnCommentDictionaryVersionInfo> versions =
+                TableDesignerForm.ListNamedAutoColumnCommentDictionaryVersions(dictionaryName);
+            Assert(versions.Count >= 1, "Saving over a named dictionary should keep the previous version.");
+            Assert(versions[0].EntryCount == 2, "Dictionary version metadata should count entries.");
+
+            TableDesignerForm.AutoColumnCommentDictionaryDiffReport report =
+                TableDesignerForm.BuildNamedAutoColumnCommentDictionaryVersionDiffReport(dictionaryName, versions[0].VersionId);
+            Assert(report.Added == 1, "Version diff should report fields restored from the older version.");
+            Assert(report.Updated == 1, "Version diff should report changed comments.");
+            Assert(report.Removed == 1, "Version diff should report fields removed by restoring an older version.");
+
+            Dictionary<string, string> restored =
+                TableDesignerForm.RestoreNamedAutoColumnCommentDictionaryVersion(dictionaryName, versions[0].VersionId);
+            Assert(restored.ContainsKey("STATUS"), "Restore should bring back fields from the selected version.");
+            Assert(restored["NAME"] == "名稱", "Restore should apply the selected version content.");
+
+            Dictionary<string, string> loaded = TableDesignerForm.LoadNamedAutoColumnCommentDictionaryFile(dictionaryName);
+            Assert(loaded.ContainsKey("STATUS") && loaded["NAME"] == "名稱", "Restored named dictionary should be readable as the current dictionary.");
+        }
+        finally
+        {
+            CleanupNamedAutoColumnCommentDictionary(dictionaryName);
+        }
+    }
+
     private static void TestDatabaseDumpService()
     {
         FakeDumpDatabase db = new FakeDumpDatabase();
@@ -696,6 +741,40 @@ public static class SmokeTests
         FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         TextBox textBox = (TextBox)field.GetValue(target);
         textBox.Text = value;
+    }
+
+    private static void CleanupNamedAutoColumnCommentDictionary(string dictionaryName)
+    {
+        try
+        {
+            List<TableDesignerForm.AutoColumnCommentDictionaryVersionInfo> versions =
+                TableDesignerForm.ListNamedAutoColumnCommentDictionaryVersions(dictionaryName);
+            string versionDirectory = null;
+            foreach (TableDesignerForm.AutoColumnCommentDictionaryVersionInfo version in versions)
+            {
+                if (!string.IsNullOrWhiteSpace(version.FilePath) && File.Exists(version.FilePath))
+                {
+                    versionDirectory = Path.GetDirectoryName(version.FilePath);
+                    File.Delete(version.FilePath);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(versionDirectory) && Directory.Exists(versionDirectory))
+            {
+                Directory.Delete(versionDirectory, false);
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            TableDesignerForm.DeleteNamedAutoColumnCommentDictionaryFile(dictionaryName);
+        }
+        catch
+        {
+        }
     }
 
     private static void Assert(bool condition, string message)

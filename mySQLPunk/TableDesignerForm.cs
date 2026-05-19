@@ -75,6 +75,15 @@ namespace mySQLPunk
             public int ImportedCount { get; set; }
         }
 
+        public class AutoColumnCommentDictionaryVersionInfo
+        {
+            public string DictionaryName { get; set; }
+            public string VersionId { get; set; }
+            public string FilePath { get; set; }
+            public DateTime CreatedAtUtc { get; set; }
+            public int EntryCount { get; set; }
+        }
+
         public bool IsModified 
         { 
             get => _isModified; 
@@ -171,6 +180,10 @@ namespace mySQLPunk
             renameCommentsDictionaryItem.Click += (s, e) => RenameAutoColumnCommentsDictionaryWithDialog();
             ToolStripMenuItem deleteCommentsDictionaryItem = new ToolStripMenuItem(Localization.T("Designer.DeleteAutoCommentsDictionary"));
             deleteCommentsDictionaryItem.Click += (s, e) => DeleteAutoColumnCommentsDictionaryWithDialog();
+            ToolStripMenuItem compareCommentsDictionaryVersionItem = new ToolStripMenuItem(Localization.T("Designer.CompareAutoCommentsDictionaryVersion"));
+            compareCommentsDictionaryVersionItem.Click += (s, e) => CompareAutoColumnCommentsDictionaryVersionWithDialog();
+            ToolStripMenuItem restoreCommentsDictionaryVersionItem = new ToolStripMenuItem(Localization.T("Designer.RestoreAutoCommentsDictionaryVersion"));
+            restoreCommentsDictionaryVersionItem.Click += (s, e) => RestoreAutoColumnCommentsDictionaryVersionWithDialog();
             btnFillAutoComments.DropDownItems.Add(fillBlankCommentsItem);
             btnFillAutoComments.DropDownItems.Add(overwriteCommentsItem);
             btnFillAutoComments.DropDownItems.Add(new ToolStripSeparator());
@@ -181,6 +194,8 @@ namespace mySQLPunk
             btnFillAutoComments.DropDownItems.Add(switchCommentsDictionaryItem);
             btnFillAutoComments.DropDownItems.Add(renameCommentsDictionaryItem);
             btnFillAutoComments.DropDownItems.Add(deleteCommentsDictionaryItem);
+            btnFillAutoComments.DropDownItems.Add(compareCommentsDictionaryVersionItem);
+            btnFillAutoComments.DropDownItems.Add(restoreCommentsDictionaryVersionItem);
             btnFillAutoComments.ButtonClick += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.FillBlanks, true);
             ToolStripSeparator sepAutoComment = new ToolStripSeparator();
             ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), GetIcon(iconPath + "up.png"));
@@ -906,6 +921,34 @@ namespace mySQLPunk
             return Path.Combine(GetAutoColumnCommentDictionaryStorePath(), name + ".json");
         }
 
+        private static string GetNamedAutoColumnCommentDictionaryVersionDirectory(string dictionaryName)
+        {
+            string name = NormalizeAutoColumnCommentDictionaryName(dictionaryName);
+            return Path.Combine(GetAutoColumnCommentDictionaryStorePath(), ".versions", name);
+        }
+
+        private static string GetNamedAutoColumnCommentDictionaryVersionPath(string dictionaryName, string versionId)
+        {
+            string normalizedVersionId = NormalizeAutoColumnCommentDictionaryVersionId(versionId);
+            return Path.Combine(GetNamedAutoColumnCommentDictionaryVersionDirectory(dictionaryName), normalizedVersionId + ".json");
+        }
+
+        private static string NormalizeAutoColumnCommentDictionaryVersionId(string versionId)
+        {
+            string value = (versionId ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException(Localization.T("Designer.AutoCommentsDictionaryVersionRequired"));
+
+            foreach (char c in value)
+            {
+                if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-'))
+                {
+                    throw new ArgumentException(Localization.T("Designer.AutoCommentsDictionaryVersionRequired"));
+                }
+            }
+
+            return value;
+        }
+
         public static List<string> ListNamedAutoColumnCommentDictionaries()
         {
             List<string> names = new List<string>();
@@ -924,11 +967,125 @@ namespace mySQLPunk
 
         public static string SaveNamedAutoColumnCommentDictionaryFile(string dictionaryName, Dictionary<string, string> comments)
         {
+            string name = NormalizeAutoColumnCommentDictionaryName(dictionaryName);
             string path = GetNamedAutoColumnCommentDictionaryPath(dictionaryName);
             string dir = Path.GetDirectoryName(path);
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            CreateNamedAutoColumnCommentDictionaryVersionFile(name, path);
             ExportAutoColumnCommentDictionaryFile(path, comments);
             return path;
+        }
+
+        private static string CreateNamedAutoColumnCommentDictionaryVersionFile(string dictionaryName, string currentPath)
+        {
+            string name = NormalizeAutoColumnCommentDictionaryName(dictionaryName);
+            if (string.IsNullOrWhiteSpace(currentPath) || !File.Exists(currentPath)) return null;
+
+            string versionDirectory = GetNamedAutoColumnCommentDictionaryVersionDirectory(name);
+            if (!Directory.Exists(versionDirectory)) Directory.CreateDirectory(versionDirectory);
+
+            string versionId = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fff");
+            string versionPath = Path.Combine(versionDirectory, versionId + ".json");
+            int suffix = 2;
+            while (File.Exists(versionPath))
+            {
+                versionPath = Path.Combine(versionDirectory, versionId + "_" + suffix + ".json");
+                suffix++;
+            }
+
+            File.Copy(currentPath, versionPath);
+            return versionPath;
+        }
+
+        public static List<AutoColumnCommentDictionaryVersionInfo> ListNamedAutoColumnCommentDictionaryVersions(string dictionaryName)
+        {
+            string name = NormalizeAutoColumnCommentDictionaryName(dictionaryName);
+            string versionDirectory = GetNamedAutoColumnCommentDictionaryVersionDirectory(name);
+            List<AutoColumnCommentDictionaryVersionInfo> versions = new List<AutoColumnCommentDictionaryVersionInfo>();
+            if (!Directory.Exists(versionDirectory)) return versions;
+
+            foreach (string filePath in Directory.GetFiles(versionDirectory, "*.json"))
+            {
+                string versionId = Path.GetFileNameWithoutExtension(filePath);
+                DateTime createdAtUtc = File.GetLastWriteTimeUtc(filePath);
+                DateTime parsedCreatedAtUtc;
+                if (DateTime.TryParseExact(
+                    versionId.Length >= 19 ? versionId.Substring(0, 19) : versionId,
+                    "yyyyMMdd_HHmmss_fff",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out parsedCreatedAtUtc))
+                {
+                    createdAtUtc = parsedCreatedAtUtc;
+                }
+
+                int entryCount = 0;
+                try
+                {
+                    Dictionary<string, string> comments = PreviewAutoColumnCommentDictionaryFile(filePath);
+                    entryCount = comments.Count;
+                }
+                catch
+                {
+                }
+
+                versions.Add(new AutoColumnCommentDictionaryVersionInfo
+                {
+                    DictionaryName = name,
+                    VersionId = versionId,
+                    FilePath = filePath,
+                    CreatedAtUtc = createdAtUtc,
+                    EntryCount = entryCount
+                });
+            }
+
+            versions.Sort((left, right) =>
+            {
+                int dateCompare = right.CreatedAtUtc.CompareTo(left.CreatedAtUtc);
+                if (dateCompare != 0) return dateCompare;
+                return string.Compare(right.VersionId, left.VersionId, StringComparison.OrdinalIgnoreCase);
+            });
+            return versions;
+        }
+
+        public static AutoColumnCommentDictionaryDiffReport BuildNamedAutoColumnCommentDictionaryVersionDiffReport(string dictionaryName, string versionId)
+        {
+            Dictionary<string, string> current = LoadNamedAutoColumnCommentDictionaryContent(dictionaryName);
+            Dictionary<string, string> version = LoadNamedAutoColumnCommentDictionaryVersionContent(dictionaryName, versionId);
+            return BuildAutoColumnCommentDictionaryDiffReport(current, version);
+        }
+
+        public static Dictionary<string, string> RestoreNamedAutoColumnCommentDictionaryVersion(string dictionaryName, string versionId)
+        {
+            string name = NormalizeAutoColumnCommentDictionaryName(dictionaryName);
+            string currentPath = GetNamedAutoColumnCommentDictionaryPath(name);
+            string versionPath = GetNamedAutoColumnCommentDictionaryVersionPath(name, versionId);
+            if (!File.Exists(versionPath)) throw new FileNotFoundException(Localization.T("Designer.AutoCommentsDictionaryVersionNotFound"), versionPath);
+
+            Dictionary<string, string> comments = PreviewAutoColumnCommentDictionaryFile(versionPath);
+            if (File.Exists(currentPath)) CreateNamedAutoColumnCommentDictionaryVersionFile(name, currentPath);
+
+            string dir = Path.GetDirectoryName(currentPath);
+            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            ExportAutoColumnCommentDictionaryFile(currentPath, comments);
+            SaveAutoColumnCommentCache(comments);
+            SetAutoColumnCommentDictionary(comments, "named", name);
+            return comments;
+        }
+
+        private static Dictionary<string, string> LoadNamedAutoColumnCommentDictionaryContent(string dictionaryName)
+        {
+            string name = NormalizeAutoColumnCommentDictionaryName(dictionaryName);
+            string path = GetNamedAutoColumnCommentDictionaryPath(name);
+            if (!File.Exists(path)) throw new FileNotFoundException(Localization.T("Designer.AutoCommentsDictionaryNotFound"), path);
+            return PreviewAutoColumnCommentDictionaryFile(path);
+        }
+
+        private static Dictionary<string, string> LoadNamedAutoColumnCommentDictionaryVersionContent(string dictionaryName, string versionId)
+        {
+            string path = GetNamedAutoColumnCommentDictionaryVersionPath(dictionaryName, versionId);
+            if (!File.Exists(path)) throw new FileNotFoundException(Localization.T("Designer.AutoCommentsDictionaryVersionNotFound"), path);
+            return PreviewAutoColumnCommentDictionaryFile(path);
         }
 
         public static Dictionary<string, string> LoadNamedAutoColumnCommentDictionaryFile(string dictionaryName)
@@ -1261,13 +1418,23 @@ namespace mySQLPunk
 
         private static DialogResult ShowAutoColumnCommentDictionaryDiffDialog(Form owner, AutoColumnCommentDictionaryDiffReport report)
         {
+            return ShowAutoColumnCommentDictionaryDiffDialog(
+                owner,
+                report,
+                Localization.T("Designer.AutoCommentsImportDiffTitle"),
+                Localization.T("Designer.AutoCommentsImportApply"),
+                true);
+        }
+
+        private static DialogResult ShowAutoColumnCommentDictionaryDiffDialog(Form owner, AutoColumnCommentDictionaryDiffReport report, string title, string okText, bool showCancelButton)
+        {
             using (Form dialog = new Form())
             using (Label summaryLabel = new Label())
             using (DataGridView grid = new DataGridView())
             using (Button okButton = new Button())
             using (Button cancelButton = new Button())
             {
-                dialog.Text = Localization.T("Designer.AutoCommentsImportDiffTitle");
+                dialog.Text = title;
                 dialog.StartPosition = FormStartPosition.CenterParent;
                 dialog.MinimizeBox = false;
                 dialog.ShowInTaskbar = false;
@@ -1296,20 +1463,20 @@ namespace mySQLPunk
                     Padding = new Padding(8)
                 };
 
-                okButton.Text = Localization.T("Designer.AutoCommentsImportApply");
+                okButton.Text = okText;
                 okButton.DialogResult = DialogResult.OK;
                 okButton.AutoSize = true;
                 cancelButton.Text = Localization.T("Common.Cancel");
                 cancelButton.DialogResult = DialogResult.Cancel;
                 cancelButton.AutoSize = true;
 
-                footer.Controls.Add(cancelButton);
+                if (showCancelButton) footer.Controls.Add(cancelButton);
                 footer.Controls.Add(okButton);
                 dialog.Controls.Add(grid);
                 dialog.Controls.Add(summaryLabel);
                 dialog.Controls.Add(footer);
                 dialog.AcceptButton = okButton;
-                dialog.CancelButton = cancelButton;
+                if (showCancelButton) dialog.CancelButton = cancelButton;
                 ThemeManager.ApplyTo(dialog);
                 return dialog.ShowDialog(owner);
             }
@@ -1486,6 +1653,110 @@ namespace mySQLPunk
             }
         }
 
+        private void CompareAutoColumnCommentsDictionaryVersionWithDialog()
+        {
+            try
+            {
+                string dictionaryName = SelectNamedAutoColumnCommentDictionaryForVersionTool(Localization.T("Designer.CompareAutoCommentsDictionaryVersion"));
+                if (dictionaryName == null) return;
+
+                AutoColumnCommentDictionaryVersionInfo version = SelectAutoColumnCommentDictionaryVersion(
+                    this,
+                    ListNamedAutoColumnCommentDictionaryVersions(dictionaryName),
+                    Localization.T("Designer.CompareAutoCommentsDictionaryVersion"));
+                if (version == null) return;
+
+                AutoColumnCommentDictionaryDiffReport report =
+                    BuildNamedAutoColumnCommentDictionaryVersionDiffReport(dictionaryName, version.VersionId);
+                ShowAutoColumnCommentDictionaryDiffDialog(
+                    this,
+                    report,
+                    Localization.Format("Designer.AutoCommentsDictionaryVersionDiffTitle", dictionaryName),
+                    Localization.T("Common.OK"),
+                    false);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    Localization.Format("Designer.AutoCommentsDictionaryVersionCompareFailed", ex.Message),
+                    Localization.T("Designer.CompareAutoCommentsDictionaryVersion"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        private void RestoreAutoColumnCommentsDictionaryVersionWithDialog()
+        {
+            try
+            {
+                string dictionaryName = SelectNamedAutoColumnCommentDictionaryForVersionTool(Localization.T("Designer.RestoreAutoCommentsDictionaryVersion"));
+                if (dictionaryName == null) return;
+
+                AutoColumnCommentDictionaryVersionInfo version = SelectAutoColumnCommentDictionaryVersion(
+                    this,
+                    ListNamedAutoColumnCommentDictionaryVersions(dictionaryName),
+                    Localization.T("Designer.RestoreAutoCommentsDictionaryVersion"));
+                if (version == null) return;
+
+                AutoColumnCommentDictionaryDiffReport report =
+                    BuildNamedAutoColumnCommentDictionaryVersionDiffReport(dictionaryName, version.VersionId);
+                if (ShowAutoColumnCommentDictionaryDiffDialog(
+                    this,
+                    report,
+                    Localization.Format("Designer.AutoCommentsDictionaryVersionRestoreTitle", dictionaryName),
+                    Localization.T("Designer.AutoCommentsDictionaryVersionRestoreApply"),
+                    true) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                Dictionary<string, string> comments = RestoreNamedAutoColumnCommentDictionaryVersion(dictionaryName, version.VersionId);
+                ApplyAutoColumnCommentsToEmptyRows();
+                MessageBox.Show(
+                    Localization.Format("Designer.AutoCommentsDictionaryVersionRestored", dictionaryName, comments.Count),
+                    Localization.T("Designer.RestoreAutoCommentsDictionaryVersion"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    Localization.Format("Designer.AutoCommentsDictionaryVersionRestoreFailed", ex.Message),
+                    Localization.T("Designer.RestoreAutoCommentsDictionaryVersion"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        private string SelectNamedAutoColumnCommentDictionaryForVersionTool(string title)
+        {
+            List<string> dictionaries = ListNamedAutoColumnCommentDictionaries();
+            if (dictionaries.Count == 0)
+            {
+                MessageBox.Show(
+                    Localization.T("Designer.AutoCommentsNoSavedDictionaries"),
+                    title,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return null;
+            }
+
+            string dictionaryName = SelectAutoColumnCommentDictionary(this, dictionaries, title);
+            if (dictionaryName == null) return null;
+
+            if (ListNamedAutoColumnCommentDictionaryVersions(dictionaryName).Count == 0)
+            {
+                MessageBox.Show(
+                    Localization.Format("Designer.AutoCommentsDictionaryNoVersions", dictionaryName),
+                    title,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return null;
+            }
+
+            return dictionaryName;
+        }
+
         private static string PromptForAutoColumnCommentDictionaryName(Form owner, string defaultName)
         {
             using (Form dialog = new Form())
@@ -1575,6 +1846,69 @@ namespace mySQLPunk
                     ? listBox.SelectedItem.ToString()
                     : null;
             }
+        }
+
+        private static AutoColumnCommentDictionaryVersionInfo SelectAutoColumnCommentDictionaryVersion(Form owner, List<AutoColumnCommentDictionaryVersionInfo> versions, string title)
+        {
+            if (versions == null || versions.Count == 0) return null;
+
+            using (Form dialog = new Form())
+            using (ListBox listBox = new ListBox())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = title;
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ClientSize = new Size(520, 300);
+
+                listBox.Location = new Point(12, 12);
+                listBox.Size = new Size(496, 238);
+                foreach (AutoColumnCommentDictionaryVersionInfo version in versions)
+                {
+                    listBox.Items.Add(FormatAutoColumnCommentDictionaryVersion(version));
+                }
+                if (listBox.Items.Count > 0) listBox.SelectedIndex = 0;
+                listBox.DoubleClick += (s, e) =>
+                {
+                    if (listBox.SelectedItem != null) dialog.DialogResult = DialogResult.OK;
+                };
+
+                okButton.Text = Localization.T("Common.OK");
+                okButton.DialogResult = DialogResult.OK;
+                okButton.Location = new Point(352, 260);
+                okButton.Size = new Size(75, 28);
+
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.Location = new Point(433, 260);
+                cancelButton.Size = new Size(75, 28);
+
+                dialog.Controls.Add(listBox);
+                dialog.Controls.Add(okButton);
+                dialog.Controls.Add(cancelButton);
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = cancelButton;
+
+                return dialog.ShowDialog(owner) == DialogResult.OK && listBox.SelectedIndex >= 0
+                    ? versions[listBox.SelectedIndex]
+                    : null;
+            }
+        }
+
+        private static string FormatAutoColumnCommentDictionaryVersion(AutoColumnCommentDictionaryVersionInfo version)
+        {
+            if (version == null) return "";
+            DateTime localTime = version.CreatedAtUtc.Kind == DateTimeKind.Utc
+                ? version.CreatedAtUtc.ToLocalTime()
+                : DateTime.SpecifyKind(version.CreatedAtUtc, DateTimeKind.Utc).ToLocalTime();
+            return Localization.Format(
+                "Designer.AutoCommentsDictionaryVersionListItem",
+                localTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                version.EntryCount,
+                version.VersionId);
         }
 
         private void ApplyAutoColumnCommentForGridRow(int rowIndex)
