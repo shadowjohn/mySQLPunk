@@ -4857,7 +4857,8 @@ namespace mySQLPunk
                 {
                     quarantineResult = BackupIntegrityScheduleService.QuarantineFailedBackups(
                         report,
-                        GetBackupIntegrityQuarantineDirectory());
+                        GetBackupIntegrityQuarantineDirectory(),
+                        BackupMirrorSettings.IntegrityQuarantineRetainCount);
                 }
                 string reportPath = BackupIntegrityScheduleService.WriteReport(report, GetBackupIntegrityReportDirectory());
 

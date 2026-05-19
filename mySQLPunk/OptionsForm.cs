@@ -20,6 +20,7 @@ namespace mySQLPunk
         private CheckBox backupIntegrityScheduleEnabledCheckBox;
         private NumericUpDown backupIntegrityIntervalInput;
         private CheckBox backupIntegrityAutoQuarantineCheckBox;
+        private NumericUpDown backupIntegrityQuarantineRetainCountInput;
         private ThemePreviewControl lightPreview;
         private ThemePreviewControl darkPreview;
         private readonly Button okButton;
@@ -280,6 +281,7 @@ namespace mySQLPunk
             backupIntegrityScheduleEnabledCheckBox = null;
             backupIntegrityIntervalInput = null;
             backupIntegrityAutoQuarantineCheckBox = null;
+            backupIntegrityQuarantineRetainCountInput = null;
 
             Label sectionTitle = new Label
             {
@@ -371,13 +373,33 @@ namespace mySQLPunk
                 Location = new Point(150, 278),
                 MaximumSize = new Size(560, 0)
             };
+            Label quarantineRetainLabel = new Label
+            {
+                Text = Localization.T("Options.BackupIntegrityQuarantineRetainCount"),
+                AutoSize = true,
+                Location = new Point(18, 320)
+            };
+            backupIntegrityQuarantineRetainCountInput = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 999,
+                Value = BackupMirrorSettings.IntegrityQuarantineRetainCount,
+                Location = new Point(150, 316),
+                Width = 90
+            };
             backupIntegrityScheduleEnabledCheckBox.CheckedChanged += (s, e) =>
             {
                 backupIntegrityIntervalInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
                 backupIntegrityAutoQuarantineCheckBox.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
+                backupIntegrityQuarantineRetainCountInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked && backupIntegrityAutoQuarantineCheckBox.Checked;
+            };
+            backupIntegrityAutoQuarantineCheckBox.CheckedChanged += (s, e) =>
+            {
+                backupIntegrityQuarantineRetainCountInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked && backupIntegrityAutoQuarantineCheckBox.Checked;
             };
             backupIntegrityIntervalInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
             backupIntegrityAutoQuarantineCheckBox.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
+            backupIntegrityQuarantineRetainCountInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked && backupIntegrityAutoQuarantineCheckBox.Checked;
 
             contentPanel.Controls.Add(sectionTitle);
             contentPanel.Controls.Add(hintLabel);
@@ -390,6 +412,8 @@ namespace mySQLPunk
             contentPanel.Controls.Add(intervalLabel);
             contentPanel.Controls.Add(backupIntegrityIntervalInput);
             contentPanel.Controls.Add(backupIntegrityAutoQuarantineCheckBox);
+            contentPanel.Controls.Add(quarantineRetainLabel);
+            contentPanel.Controls.Add(backupIntegrityQuarantineRetainCountInput);
         }
 
         private void AddCliPathRow(string provider, string labelText, int top)
@@ -468,6 +492,10 @@ namespace mySQLPunk
             if (backupIntegrityAutoQuarantineCheckBox != null)
             {
                 BackupMirrorSettings.IntegrityAutoQuarantineEnabled = backupIntegrityAutoQuarantineCheckBox.Checked;
+            }
+            if (backupIntegrityQuarantineRetainCountInput != null)
+            {
+                BackupMirrorSettings.IntegrityQuarantineRetainCount = (int)backupIntegrityQuarantineRetainCountInput.Value;
             }
             BackupMirrorSettings.Save();
         }
@@ -757,6 +785,7 @@ namespace mySQLPunk
         private static bool integrityScheduleEnabled = true;
         private static bool integrityAutoQuarantineEnabled = false;
         private static int integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
+        private static int integrityQuarantineRetainCount = 50;
         private static DateTime lastIntegrityVerifiedUtc = DateTime.MinValue;
         private static string lastIntegrityReportPath = string.Empty;
 
@@ -830,6 +859,20 @@ namespace mySQLPunk
             }
         }
 
+        public static int IntegrityQuarantineRetainCount
+        {
+            get
+            {
+                EnsureLoaded();
+                return integrityQuarantineRetainCount;
+            }
+            set
+            {
+                EnsureLoaded();
+                integrityQuarantineRetainCount = Math.Max(1, value);
+            }
+        }
+
         public static DateTime LastIntegrityVerifiedUtc
         {
             get
@@ -872,6 +915,7 @@ namespace mySQLPunk
                     IntegrityScheduleEnabled = integrityScheduleEnabled,
                     IntegrityAutoQuarantineEnabled = integrityAutoQuarantineEnabled,
                     IntegrityIntervalHours = integrityIntervalHours,
+                    IntegrityQuarantineRetainCount = integrityQuarantineRetainCount,
                     LastIntegrityVerifiedUtc = lastIntegrityVerifiedUtc,
                     LastIntegrityReportPath = lastIntegrityReportPath
                 }, Formatting.Indented));
@@ -907,6 +951,9 @@ namespace mySQLPunk
                     integrityIntervalHours = data.IntegrityIntervalHours <= 0
                         ? mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours
                         : data.IntegrityIntervalHours;
+                    integrityQuarantineRetainCount = data.IntegrityQuarantineRetainCount <= 0
+                        ? 50
+                        : data.IntegrityQuarantineRetainCount;
                     lastIntegrityVerifiedUtc = data.LastIntegrityVerifiedUtc == DateTime.MinValue
                         ? DateTime.MinValue
                         : data.LastIntegrityVerifiedUtc.ToUniversalTime();
@@ -920,6 +967,7 @@ namespace mySQLPunk
                 integrityScheduleEnabled = true;
                 integrityAutoQuarantineEnabled = false;
                 integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
+                integrityQuarantineRetainCount = 50;
                 lastIntegrityVerifiedUtc = DateTime.MinValue;
                 lastIntegrityReportPath = string.Empty;
             }
@@ -937,6 +985,7 @@ namespace mySQLPunk
             public bool? IntegrityScheduleEnabled { get; set; }
             public bool? IntegrityAutoQuarantineEnabled { get; set; }
             public int IntegrityIntervalHours { get; set; }
+            public int IntegrityQuarantineRetainCount { get; set; }
             public DateTime LastIntegrityVerifiedUtc { get; set; }
             public string LastIntegrityReportPath { get; set; }
         }

@@ -741,6 +741,7 @@ namespace mySQLPunk
             Add("Options.BackupIntegrityScheduleEnabled", "定期驗證備份完整性", "Run scheduled backup integrity checks");
             Add("Options.BackupIntegrityIntervalHours", "驗證間隔（小時）:", "Check interval (hours):");
             Add("Options.BackupIntegrityAutoQuarantine", "驗證失敗時自動隔離異常備份", "Automatically quarantine invalid backups");
+            Add("Options.BackupIntegrityQuarantineRetainCount", "隔離區保留份數:", "Quarantine files to keep:");
             Add("Options.ExecutableFilter", "執行檔 (*.exe)|*.exe|所有檔案 (*.*)|*.*", "Executable files (*.exe)|*.exe|All files (*.*)|*.*");
         }
 

@@ -445,6 +445,14 @@ public static class SmokeTests
             Assert(quarantineResult.MovedPaths.Count >= 1 && File.Exists(quarantineResult.MovedPaths[0]), "Quarantined backup file should exist in quarantine folder.");
             Assert(File.Exists(quarantineResult.ManifestPath), "Backup integrity quarantine should write a manifest file.");
             Assert(!File.Exists(emptySqlPath), "Invalid backup should be moved out of the original folder.");
+            for (int i = 0; i < 5; i++)
+            {
+                string oldQuarantine = Path.Combine(quarantineDirectory, "2024010" + (i + 1) + "_120000_old_" + i + ".sql");
+                File.WriteAllText(oldQuarantine, "SELECT " + i + ";", Encoding.UTF8);
+                File.SetLastWriteTimeUtc(oldQuarantine, DateTime.UtcNow.AddDays(-10 - i));
+            }
+            int prunedQuarantine = BackupIntegrityScheduleService.PruneQuarantine(quarantineDirectory, 2);
+            Assert(prunedQuarantine >= 4, "Backup integrity quarantine prune should remove old managed files beyond retention.");
             string reportDirectory = Path.Combine(dir, "reports");
             string reportPath = BackupIntegrityScheduleService.WriteReport(scheduleReport, reportDirectory);
             Assert(File.Exists(reportPath), "Backup integrity schedule should write a report file.");

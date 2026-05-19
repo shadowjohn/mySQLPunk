@@ -34,6 +34,7 @@ namespace mySQLPunk.lib
         public int MovedFiles { get; set; }
         public int SkippedFiles { get; set; }
         public int FailedMoves { get; set; }
+        public int DeletedOldFiles { get; set; }
         public string QuarantineDirectory { get; set; }
         public string ManifestPath { get; set; }
         public List<string> MovedPaths { get; private set; }
@@ -116,6 +117,14 @@ namespace mySQLPunk.lib
             BackupIntegrityScheduleReport report,
             string quarantineDirectory)
         {
+            return QuarantineFailedBackups(report, quarantineDirectory, 0);
+        }
+
+        public static BackupIntegrityQuarantineResult QuarantineFailedBackups(
+            BackupIntegrityScheduleReport report,
+            string quarantineDirectory,
+            int retainCount)
+        {
             if (report == null) throw new ArgumentNullException(nameof(report));
             if (string.IsNullOrWhiteSpace(quarantineDirectory)) throw new ArgumentException("Quarantine directory is required.", nameof(quarantineDirectory));
 
@@ -162,8 +171,46 @@ namespace mySQLPunk.lib
                 "backup-quarantine_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss") + ".json");
             result.ManifestPath = manifestPath;
             File.WriteAllText(manifestPath, JsonConvert.SerializeObject(result, Formatting.Indented), Encoding.UTF8);
+            if (retainCount > 0)
+            {
+                result.DeletedOldFiles = PruneQuarantine(quarantineDirectory, retainCount);
+                File.WriteAllText(manifestPath, JsonConvert.SerializeObject(result, Formatting.Indented), Encoding.UTF8);
+            }
             report.QuarantineResult = result;
             return result;
+        }
+
+        public static int PruneQuarantine(string quarantineDirectory, int retainCount)
+        {
+            if (string.IsNullOrWhiteSpace(quarantineDirectory) || !Directory.Exists(quarantineDirectory)) return 0;
+            if (retainCount <= 0) return 0;
+
+            FileInfo[] files = new DirectoryInfo(quarantineDirectory).GetFiles();
+            List<FileInfo> managedFiles = new List<FileInfo>();
+            foreach (FileInfo file in files)
+            {
+                if (IsManagedQuarantineFile(file.Name))
+                {
+                    managedFiles.Add(file);
+                }
+            }
+
+            managedFiles.Sort((left, right) => right.LastWriteTimeUtc.CompareTo(left.LastWriteTimeUtc));
+
+            int deleted = 0;
+            for (int i = retainCount; i < managedFiles.Count; i++)
+            {
+                try
+                {
+                    managedFiles[i].Delete();
+                    deleted++;
+                }
+                catch
+                {
+                }
+            }
+
+            return deleted;
         }
 
         public static string WriteReport(BackupIntegrityScheduleReport report, string reportDirectory)
@@ -197,6 +244,27 @@ namespace mySQLPunk.lib
             }
             while (File.Exists(candidate));
             return candidate;
+        }
+
+        private static bool IsManagedQuarantineFile(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName)) return false;
+            if (fileName.StartsWith("backup-quarantine_", StringComparison.OrdinalIgnoreCase)) return true;
+            if (fileName.Length < 16 || fileName[15] != '_') return false;
+
+            for (int i = 0; i < 15; i++)
+            {
+                if (i == 8)
+                {
+                    if (fileName[i] != '_') return false;
+                }
+                else if (!char.IsDigit(fileName[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static List<FileInfo> FindBackupFiles(IEnumerable<string> directories, int maxFiles, out int skippedFiles)
