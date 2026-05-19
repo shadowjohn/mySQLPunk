@@ -526,6 +526,8 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsNoMatches", "沒有可補的空白欄位註解。", "There are no blank column comments to fill.");
             Add("Designer.AutoCommentsNoUpdates", "沒有可更新的欄位註解。", "There are no column comments to update.");
             Add("Designer.AutoCommentsLoading", "正在載入自動註解字典...", "Loading the auto comment dictionary...");
+            Add("Designer.AutoCommentsDictionaryRemote", "已載入遠端自動註解字典。", "Loaded the remote auto comment dictionary.");
+            Add("Designer.AutoCommentsDictionaryCache", "已使用本機快取自動註解字典。", "Using the local cached auto comment dictionary.");
             Add("Designer.AutoCommentsProgress", "補註解 {0}/{1}：{2}", "Filling comments {0}/{1}: {2}");
             Add("Designer.AutoCommentsDone", "補註解完成：{0}/{1}", "Fill comments done: {0}/{1}");
             Add("Designer.EnterTableNameInOptions", "請先在「選項」分頁輸入資料表名稱。", "Enter a table name on the Options tab first.");

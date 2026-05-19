@@ -24,6 +24,7 @@ namespace mySQLPunk
 	        private static Task<Dictionary<string, string>> AutoColumnCommentTask;
 	        private static string AutoColumnCommentLastError;
 	        private static DateTime? AutoColumnCommentLastErrorUtc;
+	        private static string AutoColumnCommentLastSource;
 
         private IDatabase _db;
         private string _databaseName;
@@ -637,6 +638,28 @@ namespace mySQLPunk
             }
         }
 
+        public static string GetAutoColumnCommentLastSource()
+        {
+            lock (AutoColumnCommentSync)
+            {
+                return AutoColumnCommentLastSource;
+            }
+        }
+
+        public static string GetAutoColumnCommentSourceMessage()
+        {
+            string source = GetAutoColumnCommentLastSource();
+            if (string.Equals(source, "cache", StringComparison.OrdinalIgnoreCase))
+            {
+                return Localization.T("Designer.AutoCommentsDictionaryCache");
+            }
+            if (string.Equals(source, "remote", StringComparison.OrdinalIgnoreCase))
+            {
+                return Localization.T("Designer.AutoCommentsDictionaryRemote");
+            }
+            return Localization.T("Designer.AutoCommentsLoading");
+        }
+
         private sealed class AutoColumnCommentWebClient : WebClient
         {
             private readonly int _timeoutMs;
@@ -685,6 +708,7 @@ namespace mySQLPunk
                     {
                         AutoColumnCommentLastError = null;
                         AutoColumnCommentLastErrorUtc = null;
+                        AutoColumnCommentLastSource = "remote";
                     }
 
                     return comments;
@@ -696,6 +720,7 @@ namespace mySQLPunk
                     {
                         AutoColumnCommentLastError = ex.Message;
                         AutoColumnCommentLastErrorUtc = DateTime.UtcNow;
+                        AutoColumnCommentLastSource = null;
                     }
 
                     if (attempt < AutoColumnCommentRetryCount)
@@ -714,6 +739,7 @@ namespace mySQLPunk
                     {
                         AutoColumnCommentLastError = "遠端自動註解字典載入失敗，已改用本機快取：" + (lastException?.Message ?? "未知錯誤");
                         AutoColumnCommentLastErrorUtc = DateTime.UtcNow;
+                        AutoColumnCommentLastSource = "cache";
                     }
 
                     return cachedComments;
@@ -896,6 +922,7 @@ namespace mySQLPunk
                     int applied = 0;
                     int processed = 0;
                     int total = CountFillableColumnRows(currentDt);
+                    ShowAutoCommentProgress(GetAutoColumnCommentSourceMessage(), 0, Math.Max(total, 1));
                     foreach (DataRow row in currentDt.Rows)
                     {
                         if (row.RowState == DataRowState.Deleted) continue;

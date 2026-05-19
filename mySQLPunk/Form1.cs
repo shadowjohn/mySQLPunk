@@ -7572,6 +7572,7 @@ namespace mySQLPunk
                         return;
                     }
 
+                    progressOverlay.SetProgress(0, 1, TableDesignerForm.GetAutoColumnCommentSourceMessage());
                     progressOverlay.SetProgress(0, 1, Localization.T("Database.AutoCommentsScanning"));
                     List<AutoCommentColumnUpdate> updates = await Task.Run(() => BuildDatabaseAutoCommentUpdates(target.Database, target.DatabaseName, comments, mode));
                     if (updates.Count == 0)
