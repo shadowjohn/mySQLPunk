@@ -2731,9 +2731,7 @@ namespace mySQLPunk
                 return;
             }
 
-            string initialSql = "CREATE VIEW " + QuoteDumpIdentifier(target.Database, "new_view") + " AS" + Environment.NewLine +
-                                "SELECT *" + Environment.NewLine +
-                                "FROM " + QuoteDumpIdentifier(target.Database, "table_name") + ";";
+            string initialSql = BuildNewViewTemplate(target.Database, target.DatabaseName, GetSelectedSchemaSeedObjectName(target.Database));
             OpenQuery(target.Database, target.DatabaseName, string.Empty, initialSql, true);
             UpdateMainStatus(Localization.T("Object.NewViewTemplateOpened"));
         }
@@ -2747,7 +2745,7 @@ namespace mySQLPunk
                 return;
             }
 
-            OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), BuildFunctionTemplate(target.Database, target.DatabaseName), true);
+            OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), BuildFunctionTemplate(target.Database, target.DatabaseName, GetSelectedSchemaSeedObjectName(target.Database)), true);
             UpdateMainStatus(Localization.T("Object.NewFunctionTemplateOpened"));
         }
 
@@ -3821,7 +3819,62 @@ namespace mySQLPunk
             return db != null && string.Equals(db.ProviderName, providerName, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string BuildFunctionTemplate(IDatabase db, string databaseName)
+        private string GetSelectedSchemaSeedObjectName(IDatabase db)
+        {
+            if (!(db is my_postgresql) && !(db is my_mssql)) return string.Empty;
+
+            string[] pathParts = GetTreePathParts(db_tree.SelectedNode);
+            if (pathParts.Length < 4) return string.Empty;
+
+            string groupName = pathParts[2];
+            if (groupName != "Tables" && groupName != "Views" && groupName != "Functions" && groupName != "Triggers")
+            {
+                return string.Empty;
+            }
+
+            return pathParts[3];
+        }
+
+        private static string BuildSiblingObjectName(IDatabase db, string schemaSeedObjectName, string objectName)
+        {
+            if (string.IsNullOrWhiteSpace(schemaSeedObjectName)) return objectName;
+
+            if (db is my_postgresql)
+            {
+                PostgreSqlObjectName target = ParsePostgreSqlObjectName(schemaSeedObjectName);
+                return target.Schema + "." + objectName;
+            }
+
+            if (db is my_mssql)
+            {
+                SqlServerObjectName target = ParseSqlServerObjectName(schemaSeedObjectName);
+                return target.Schema + "." + objectName;
+            }
+
+            return objectName;
+        }
+
+        private static string BuildObjectDefinitionName(IDatabase db, string databaseName, string objectName)
+        {
+            if (IsDumpProvider(db, "mssql") || IsDumpProvider(db, "sqlserver"))
+            {
+                SqlServerObjectName target = ParseSqlServerObjectName(objectName);
+                return QuoteDumpIdentifier(db, target.Schema) + "." + QuoteDumpIdentifier(db, target.Name);
+            }
+
+            return BuildQualifiedObjectName(db, databaseName, objectName);
+        }
+
+        private static string BuildNewViewTemplate(IDatabase db, string databaseName, string schemaSeedObjectName)
+        {
+            string newViewName = BuildSiblingObjectName(db, schemaSeedObjectName, "new_view");
+            string sourceTableName = BuildSiblingObjectName(db, schemaSeedObjectName, "table_name");
+            return "CREATE VIEW " + BuildObjectDefinitionName(db, databaseName, newViewName) + " AS" + Environment.NewLine +
+                   "SELECT *" + Environment.NewLine +
+                   "FROM " + BuildQualifiedObjectName(db, databaseName, sourceTableName) + ";";
+        }
+
+        private static string BuildFunctionTemplate(IDatabase db, string databaseName, string schemaSeedObjectName)
         {
             if (db is my_sqlite)
             {
@@ -3844,7 +3897,7 @@ namespace mySQLPunk
 
             if (db is my_postgresql)
             {
-                return "CREATE OR REPLACE FUNCTION \"public\"." + QuoteDumpIdentifier(db, "new_function") + "()" + Environment.NewLine +
+                return "CREATE OR REPLACE FUNCTION " + BuildQualifiedObjectName(db, databaseName, BuildSiblingObjectName(db, schemaSeedObjectName, "new_function")) + "()" + Environment.NewLine +
                        "RETURNS integer" + Environment.NewLine +
                        "LANGUAGE sql" + Environment.NewLine +
                        "AS $$" + Environment.NewLine +
@@ -3854,7 +3907,7 @@ namespace mySQLPunk
 
             if (db is my_mssql)
             {
-                return "CREATE FUNCTION [dbo]." + QuoteDumpIdentifier(db, "new_function") + "()" + Environment.NewLine +
+                return "CREATE FUNCTION " + BuildObjectDefinitionName(db, databaseName, BuildSiblingObjectName(db, schemaSeedObjectName, "new_function")) + "()" + Environment.NewLine +
                        "RETURNS INT" + Environment.NewLine +
                        "AS" + Environment.NewLine +
                        "BEGIN" + Environment.NewLine +
