@@ -427,6 +427,7 @@ namespace mySQLPunk.lib
             sql = RewriteDateFormatFunctions(sql, targetProvider);
             sql = RewriteDateDiffFunctions(sql, targetProvider);
             sql = RewriteDateAddFunctions(sql, targetProvider);
+            sql = RewriteDatePartFunctions(sql, targetProvider);
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
@@ -438,6 +439,60 @@ namespace mySQLPunk.lib
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
 
             return sql;
+        }
+
+        private static string RewriteDatePartFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bDATEPART\s*\(\s*(?<part>year|yy|yyyy|month|mm|m|day|dd|d)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bEXTRACT\s*\(\s*(?<part>YEAR|MONTH|DAY)\s+FROM\s+(?<expr>[^()]+?)\s*\)",
+                m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\b(?<func>YEAR|MONTH|DAY)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["func"].Value), m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string BuildDatePartExpression(string targetProvider, string part, string expr)
+        {
+            if (targetProvider == "mssql" || targetProvider == "mysql")
+            {
+                return part.ToUpperInvariant() + "(" + expr + ")";
+            }
+
+            if (targetProvider == "sqlite")
+            {
+                return "CAST(strftime('" + GetSqliteDatePartFormat(part) + "', " + expr + ") AS INTEGER)";
+            }
+
+            return "EXTRACT(" + part.ToUpperInvariant() + " FROM " + expr + ")";
+        }
+
+        private static string NormalizeDatePart(string part)
+        {
+            string text = (part ?? string.Empty).Trim().Trim('\'', '"', '[', ']').ToLowerInvariant();
+            if (text == "yy" || text == "yyyy") return "year";
+            if (text == "mm" || text == "m") return "month";
+            if (text == "dd" || text == "d") return "day";
+            return text;
+        }
+
+        private static string GetSqliteDatePartFormat(string part)
+        {
+            if (part == "year") return "%Y";
+            if (part == "month") return "%m";
+            return "%d";
         }
 
         private static string RewriteConditionalFunctions(string selectSql, string targetProvider)

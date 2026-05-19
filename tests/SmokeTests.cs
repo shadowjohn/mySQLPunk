@@ -238,6 +238,30 @@ public static class SmokeTests
         string sqliteDateSubSql = (string)GetProperty(sqliteDateSubPreview, "ConvertedSql");
         AssertContains(sqliteDateSubSql, "date(expires_at, '-7 day')", "Converted SQLite SQL should use a negative date modifier.");
 
+        object pgYearPreview = BuildViewSqlPreview(
+            "SELECT YEAR(created_at) AS created_year FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgYearPreview, "CanConvert"), "MySQL YEAR should convert to PostgreSQL.");
+        string pgYearSql = (string)GetProperty(pgYearPreview, "ConvertedSql");
+        AssertContains(pgYearSql, "EXTRACT(YEAR FROM created_at)", "Converted PostgreSQL SQL should use EXTRACT.");
+
+        object sqliteDatePartPreview = BuildViewSqlPreview(
+            "SELECT DATEPART(month, created_at) AS created_month FROM orders",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDatePartPreview, "CanConvert"), "SQL Server DATEPART should convert to SQLite.");
+        string sqliteDatePartSql = (string)GetProperty(sqliteDatePartPreview, "ConvertedSql");
+        AssertContains(sqliteDatePartSql, "CAST(strftime('%m', created_at) AS INTEGER)", "Converted SQLite SQL should use strftime.");
+
+        object mysqlExtractPreview = BuildViewSqlPreview(
+            "SELECT EXTRACT(DAY FROM created_at) AS created_day FROM orders",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlExtractPreview, "CanConvert"), "PostgreSQL EXTRACT should convert to MySQL.");
+        string mysqlExtractSql = (string)GetProperty(mysqlExtractPreview, "ConvertedSql");
+        AssertContains(mysqlExtractSql, "DAY(created_at)", "Converted MySQL SQL should use DAY().");
+
         object pgIfPreview = BuildViewSqlPreview(
             "SELECT IF(is_active = 1, 'Y', 'N') AS active_text FROM users",
             "mysql",
