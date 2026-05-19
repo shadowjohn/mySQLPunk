@@ -13,6 +13,7 @@ public static class SmokeTests
         int passed = 0;
         Run("Geometry WKB 轉 WKT", TestGeometryWktConverter, ref passed);
         Run("View SQL 跨 provider 轉換", TestViewSqlConversion, ref passed);
+        Run("View SQL 進階轉換案例", TestAdvancedViewSqlConversion, ref passed);
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
@@ -73,6 +74,51 @@ public static class SmokeTests
         string mssqlSql = (string)GetProperty(mssqlPreview, "ConvertedSql");
         AssertContains(mssqlSql, "TOP (10)", "Converted SQL Server SQL should contain TOP.");
         AssertContains(mssqlSql, "FORMAT(", "Converted SQL Server SQL should rewrite DATE_FORMAT.");
+    }
+
+    private static void TestAdvancedViewSqlConversion()
+    {
+        object pgPreview = BuildViewSqlPreview(
+            "SELECT id, name FROM accounts WHERE is_active = 1 AND ROWNUM <= 3",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgPreview, "CanConvert"), "Simple Oracle ROWNUM predicate should convert to PostgreSQL.");
+        string pgSql = (string)GetProperty(pgPreview, "ConvertedSql");
+        AssertContains(pgSql, "LIMIT 3", "Converted PostgreSQL SQL should contain LIMIT from ROWNUM.");
+        AssertNotContains(pgSql, "ROWNUM", "Converted PostgreSQL SQL should remove simple ROWNUM predicate.");
+
+        object aggregatePreview = BuildViewSqlPreview(
+            "SELECT project_id, GROUP_CONCAT(user_name SEPARATOR '|') AS members FROM project_users GROUP BY project_id",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(aggregatePreview, "CanConvert"), "MySQL GROUP_CONCAT should convert to SQL Server.");
+        string aggregateSql = (string)GetProperty(aggregatePreview, "ConvertedSql");
+        AssertContains(aggregateSql, "STRING_AGG(user_name, '|')", "Converted SQL Server SQL should use STRING_AGG.");
+
+        object jsonPreview = BuildViewSqlPreview(
+            "SELECT JSON_EXTRACT(payload, '$.status') AS status_text FROM event_log",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(jsonPreview, "CanConvert"), "MySQL JSON_EXTRACT should convert to Oracle.");
+        string jsonSql = (string)GetProperty(jsonPreview, "ConvertedSql");
+        AssertContains(jsonSql, "JSON_VALUE(payload, '$.status')", "Converted Oracle SQL should use JSON_VALUE.");
+
+        object cteWindowPreview = BuildViewSqlPreview(
+            "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(cteWindowPreview, "CanConvert"), "Portable CTE/window SQL should be preserved for SQL Server.");
+        string cteWindowSql = (string)GetProperty(cteWindowPreview, "ConvertedSql");
+        AssertContains(cteWindowSql, "WITH ranked AS", "Converted SQL should preserve CTE.");
+        AssertContains(cteWindowSql, "ROW_NUMBER() OVER", "Converted SQL should preserve window function.");
+
+        object unsupportedPreview = BuildViewSqlPreview(
+            "CREATE VIEW v AS SELECT id FROM employee START WITH manager_id IS NULL CONNECT BY PRIOR id = manager_id",
+            "oracle",
+            "mysql");
+        Assert(!(bool)GetProperty(unsupportedPreview, "CanConvert"), "Oracle hierarchical query should be rejected instead of converted silently.");
+        string reason = (string)GetProperty(unsupportedPreview, "Reason");
+        Assert(!string.IsNullOrWhiteSpace(reason), "Unsupported conversion should return a readable reason.");
     }
 
     private static object BuildViewSqlPreview(string sql, string sourceProvider, string targetProvider)
@@ -147,6 +193,14 @@ public static class SmokeTests
         if (value == null || value.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
         {
             throw new Exception(message + " Expected fragment: " + expected + " Actual: " + value);
+        }
+    }
+
+    private static void AssertNotContains(string value, string unexpected, string message)
+    {
+        if (value != null && value.IndexOf(unexpected, StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            throw new Exception(message + " Unexpected fragment: " + unexpected + " Actual: " + value);
         }
     }
 }

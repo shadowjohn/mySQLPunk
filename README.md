@@ -31,7 +31,7 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例，以及 Table Designer 主要 DDL builder 的 MySQL / SQLite 建表輸出。
+目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例，以及 Table Designer 主要 DDL builder 的 MySQL / SQLite 建表輸出。
 
 ## 目前功能概況
 
@@ -171,7 +171,8 @@ Smoke test harness：
   - 方言轉換：已支援 SQL Server `TOP (n)` 轉 MySQL/PostgreSQL/SQLite `LIMIT n` 或 Oracle `FETCH FIRST`、MySQL/PostgreSQL/SQLite `LIMIT` 轉 SQL Server `TOP (n)` 或 Oracle `FETCH/OFFSET`、簡單 Oracle `ROWNUM <= n` 轉目標 provider row limit，以及 `NVL` / `IFNULL` / `ISNULL` / `GETDATE()` / `NOW()` 的常見函式轉換。
   - 進階轉換：已補上簡單 `DATE_FORMAT`、`GROUP_CONCAT` / `group_concat` / `STRING_AGG` / `LISTAGG`、`JSON_EXTRACT` 的跨 provider 轉換，讓常見日期格式、字串聚合與 JSON 純量讀取可以保留 View SQL。
   - 已知情境：Oracle 階層查詢、MySQL 專用 View 語法、帶 OFFSET 且缺少穩定排序的 SQL Server 轉換、無法解析的 SELECT SQL 仍會改用 table snapshot。
-  - 後續方向：若需要更高相容性，可再逐 provider 擴充 window function、CTE 遞迴、JSON table 與 provider 專用內建函式等更複雜 SQL 方言轉換規則。
+  - 測試覆蓋：`tests/SmokeTests.cs` 已加入 TOP / LIMIT / ROWNUM、日期函式、字串聚合、JSON 純量讀取、CTE/window 保留與不支援轉換原因的可重跑案例。
+  - 後續方向：若需要更高相容性，可再逐 provider 擴充 CTE 遞迴、JSON table 與 provider 專用內建函式等更複雜 SQL 方言轉換規則。
 
 ## 專案檔案導覽
 
