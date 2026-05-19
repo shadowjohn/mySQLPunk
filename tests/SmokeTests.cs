@@ -104,6 +104,22 @@ public static class SmokeTests
         string mssqlSql = (string)GetProperty(mssqlPreview, "ConvertedSql");
         AssertContains(mssqlSql, "TOP (10)", "Converted SQL Server SQL should contain TOP.");
         AssertContains(mssqlSql, "FORMAT(", "Converted SQL Server SQL should rewrite DATE_FORMAT.");
+
+        object mssqlOffsetPreview = BuildViewSqlPreview(
+            "SELECT id, created_at FROM logs ORDER BY created_at DESC LIMIT 10 OFFSET 20",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlOffsetPreview, "CanConvert"), "Ordered MySQL LIMIT OFFSET query should convert to SQL Server.");
+        string mssqlOffsetSql = (string)GetProperty(mssqlOffsetPreview, "ConvertedSql");
+        AssertContains(mssqlOffsetSql, "ORDER BY created_at DESC OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY", "Converted SQL Server SQL should use OFFSET FETCH.");
+
+        object mssqlUnsafeOffsetPreview = BuildViewSqlPreview(
+            "SELECT id, created_at FROM logs LIMIT 10 OFFSET 20",
+            "mysql",
+            "mssql");
+        Assert(!(bool)GetProperty(mssqlUnsafeOffsetPreview, "CanConvert"), "Unordered MySQL LIMIT OFFSET query should still be rejected for SQL Server.");
+        string unsafeOffsetReason = (string)GetProperty(mssqlUnsafeOffsetPreview, "Reason");
+        AssertContains(unsafeOffsetReason, "ORDER BY", "Unsafe offset rejection should explain the missing ORDER BY.");
     }
 
     private static void TestAdvancedViewSqlConversion()

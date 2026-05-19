@@ -367,8 +367,14 @@ namespace mySQLPunk.lib
             {
                 if (!string.IsNullOrWhiteSpace(offset) && offset != "0")
                 {
-                    reason = "LIMIT OFFSET 轉 SQL Server 需要穩定 ORDER BY，無法安全自動轉換";
-                    return false;
+                    if (!HasOrderByClause(body))
+                    {
+                        reason = "LIMIT OFFSET 轉 SQL Server 需要穩定 ORDER BY，無法安全自動轉換";
+                        return false;
+                    }
+
+                    rewrittenSql = body + " OFFSET " + offset + " ROWS FETCH NEXT " + limit + " ROWS ONLY";
+                    return true;
                 }
 
                 rewrittenSql = InsertSqlServerTop(body, limit);
@@ -385,6 +391,11 @@ namespace mySQLPunk.lib
 
             rewrittenSql = selectSql;
             return true;
+        }
+
+        private static bool HasOrderByClause(string selectSql)
+        {
+            return Regex.IsMatch(selectSql ?? string.Empty, @"\bORDER\s+BY\b", RegexOptions.IgnoreCase);
         }
 
         private static bool TryRewriteRownumPredicate(string selectSql, string targetProvider, out string rewrittenSql, out string reason)
