@@ -4146,6 +4146,40 @@ namespace mySQLPunk
             }
         }
 
+        private void BatchRestoreQuarantinedBackupsWithDialog()
+        {
+            string quarantineDirectory = GetBackupIntegrityQuarantineDirectory();
+            List<BackupQuarantineRestoreCandidate> candidates = BackupQuarantineRestoreService.FindCandidates(quarantineDirectory);
+            if (candidates.Count == 0)
+            {
+                MessageBox.Show(Localization.T("Backup.QuarantineRestoreEmpty"), Localization.T("Backup.QuarantineRestoreTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            int withOriginalPath = 0;
+            foreach (BackupQuarantineRestoreCandidate candidate in candidates)
+            {
+                if (candidate != null && candidate.HasOriginalPath) withOriginalPath++;
+            }
+
+            string confirmMessage = Localization.Format("Backup.QuarantineBatchRestoreConfirm", candidates.Count, withOriginalPath);
+            if (MessageBox.Show(confirmMessage, Localization.T("Backup.QuarantineRestoreTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            BackupQuarantineBatchRestoreResult result =
+                BackupQuarantineRestoreService.RestoreAllToOriginalPaths(candidates, false);
+            string message = Localization.Format(
+                "Backup.QuarantineBatchRestoreResult",
+                result.RestoredFiles,
+                result.SkippedNoOriginalPath,
+                result.SkippedExistingDestination,
+                result.FailedFiles);
+            MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            UpdateMainStatus(message);
+        }
+
         private DatabaseRestoreSnapshot CaptureDatabaseRestoreSnapshot(TreeDatabaseTarget target)
         {
             if (target == null || target.Database == null)
@@ -5376,6 +5410,10 @@ namespace mySQLPunk
                 var itemRestoreQuarantine = new ToolStripMenuItem(Localization.T("Tool.RestoreQuarantinedBackup"));
                 itemRestoreQuarantine.Click += (s, ev) => RestoreQuarantinedBackupWithDialog();
                 cms.Items.Add(itemRestoreQuarantine);
+
+                var itemBatchRestoreQuarantine = new ToolStripMenuItem(Localization.T("Tool.BatchRestoreQuarantinedBackups"));
+                itemBatchRestoreQuarantine.Click += (s, ev) => BatchRestoreQuarantinedBackupsWithDialog();
+                cms.Items.Add(itemBatchRestoreQuarantine);
             }
             else if (groupName == "Functions")
             {
@@ -7916,6 +7954,10 @@ namespace mySQLPunk
                     ToolStripMenuItem restoreQuarantinedBackupItem = new ToolStripMenuItem(Localization.T("Tool.RestoreQuarantinedBackup"));
                     restoreQuarantinedBackupItem.Click += (s, ev) => RestoreQuarantinedBackupWithDialog();
                     menu.Items.Add(restoreQuarantinedBackupItem);
+
+                    ToolStripMenuItem batchRestoreQuarantinedBackupItem = new ToolStripMenuItem(Localization.T("Tool.BatchRestoreQuarantinedBackups"));
+                    batchRestoreQuarantinedBackupItem.Click += (s, ev) => BatchRestoreQuarantinedBackupsWithDialog();
+                    menu.Items.Add(batchRestoreQuarantinedBackupItem);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                 {
@@ -8607,6 +8649,10 @@ namespace mySQLPunk
             ToolStripMenuItem restoreQuarantinedBackupItem = new ToolStripMenuItem(Localization.T("Tool.RestoreQuarantinedBackup"));
             restoreQuarantinedBackupItem.Click += (s, ev) => RestoreQuarantinedBackupWithDialog();
             menu.Items.Add(restoreQuarantinedBackupItem);
+
+            ToolStripMenuItem batchRestoreQuarantinedBackupItem = new ToolStripMenuItem(Localization.T("Tool.BatchRestoreQuarantinedBackups"));
+            batchRestoreQuarantinedBackupItem.Click += (s, ev) => BatchRestoreQuarantinedBackupsWithDialog();
+            menu.Items.Add(batchRestoreQuarantinedBackupItem);
 
             ToolStripMenuItem dictionaryItem = new ToolStripMenuItem(Localization.T("Tool.DataDictionary"));
             dictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();

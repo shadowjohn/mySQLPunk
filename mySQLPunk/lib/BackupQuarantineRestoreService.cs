@@ -38,6 +38,23 @@ namespace mySQLPunk.lib
         }
     }
 
+    public sealed class BackupQuarantineBatchRestoreResult
+    {
+        public int TotalCandidates { get; set; }
+        public int RestoredFiles { get; set; }
+        public int SkippedNoOriginalPath { get; set; }
+        public int SkippedExistingDestination { get; set; }
+        public int FailedFiles { get; set; }
+        public List<BackupQuarantineRestoreResult> RestoredResults { get; private set; }
+        public List<string> Messages { get; private set; }
+
+        public BackupQuarantineBatchRestoreResult()
+        {
+            RestoredResults = new List<BackupQuarantineRestoreResult>();
+            Messages = new List<string>();
+        }
+    }
+
     public static class BackupQuarantineRestoreService
     {
         public static List<BackupQuarantineRestoreCandidate> FindCandidates(string quarantineDirectory)
@@ -163,6 +180,56 @@ namespace mySQLPunk.lib
                 RestoredPath = destinationPath,
                 SizeBytes = sizeBytes
             };
+        }
+
+        public static BackupQuarantineBatchRestoreResult RestoreAllToOriginalPaths(
+            IEnumerable<BackupQuarantineRestoreCandidate> candidates,
+            bool overwrite)
+        {
+            BackupQuarantineBatchRestoreResult result = new BackupQuarantineBatchRestoreResult();
+            if (candidates == null) return result;
+
+            HashSet<string> handled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (BackupQuarantineRestoreCandidate candidate in candidates)
+            {
+                if (candidate == null) continue;
+                result.TotalCandidates++;
+
+                string sourcePath = candidate.QuarantinedPath ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(sourcePath) || !handled.Add(Path.GetFullPath(sourcePath)))
+                {
+                    result.FailedFiles++;
+                    continue;
+                }
+
+                if (!candidate.HasOriginalPath)
+                {
+                    result.SkippedNoOriginalPath++;
+                    continue;
+                }
+
+                if (File.Exists(candidate.OriginalPath) && !overwrite)
+                {
+                    result.SkippedExistingDestination++;
+                    result.Messages.Add("Skipped existing destination: " + candidate.OriginalPath);
+                    continue;
+                }
+
+                try
+                {
+                    BackupQuarantineRestoreResult restored =
+                        RestoreQuarantinedFile(candidate.QuarantinedPath, candidate.OriginalPath, overwrite);
+                    result.RestoredFiles++;
+                    result.RestoredResults.Add(restored);
+                }
+                catch (Exception ex)
+                {
+                    result.FailedFiles++;
+                    result.Messages.Add(candidate.QuarantinedPath + ": " + ex.Message);
+                }
+            }
+
+            return result;
         }
 
         private static void AddManifestCandidates(

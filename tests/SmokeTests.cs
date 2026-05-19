@@ -455,6 +455,8 @@ public static class SmokeTests
             File.WriteAllText(emptySqlPath, string.Empty, Encoding.UTF8);
             BackupIntegrityResult emptyIntegrity = BackupIntegrityService.VerifyBackup(emptySqlPath, countSqlStatements);
             Assert(!emptyIntegrity.IsValid, "Empty SQL backup should fail integrity verification.");
+            string batchEmptySqlPath = Path.Combine(dir, "batch-empty.sql");
+            File.WriteAllText(batchEmptySqlPath, string.Empty, Encoding.UTF8);
 
             Assert(BackupIntegrityScheduleService.IsDue(true, DateTime.MinValue, 24, DateTime.UtcNow), "Backup integrity schedule should run when never verified.");
             Assert(!BackupIntegrityScheduleService.IsDue(true, DateTime.UtcNow.AddHours(-2), 24, DateTime.UtcNow), "Backup integrity schedule should wait for the configured interval.");
@@ -466,12 +468,20 @@ public static class SmokeTests
             Assert(scheduleReport.FailedFiles >= 1, "Backup integrity schedule should report invalid backups.");
             string quarantineDirectory = Path.Combine(dir, "quarantine");
             BackupIntegrityQuarantineResult quarantineResult = BackupIntegrityScheduleService.QuarantineFailedBackups(scheduleReport, quarantineDirectory);
-            Assert(quarantineResult.MovedFiles >= 1, "Backup integrity quarantine should move invalid backups.");
+            Assert(quarantineResult.MovedFiles >= 2, "Backup integrity quarantine should move invalid backups.");
             Assert(quarantineResult.MovedPaths.Count >= 1 && File.Exists(quarantineResult.MovedPaths[0]), "Quarantined backup file should exist in quarantine folder.");
             Assert(quarantineResult.Entries.Count >= 1, "Backup integrity quarantine should remember original paths.");
             Assert(File.Exists(quarantineResult.ManifestPath), "Backup integrity quarantine should write a manifest file.");
             Assert(!File.Exists(emptySqlPath), "Invalid backup should be moved out of the original folder.");
-            BackupQuarantineRestoreCandidate candidate = BackupQuarantineRestoreService.FindCandidate(quarantineResult.MovedPaths[0], quarantineDirectory);
+            BackupQuarantineRestoreCandidate candidate = null;
+            foreach (BackupQuarantineRestoreCandidate item in BackupQuarantineRestoreService.FindCandidates(quarantineDirectory))
+            {
+                if (string.Equals(item.OriginalPath, emptySqlPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    candidate = item;
+                    break;
+                }
+            }
             Assert(candidate != null && candidate.HasOriginalPath, "Quarantine restore should find the original path from the manifest.");
             AssertEquals(emptySqlPath, candidate.OriginalPath, "Quarantine restore candidate should keep the original backup path.");
             BackupQuarantineRestorePreview preview = BackupQuarantineRestoreService.BuildPreview(candidate, countSqlStatements);
@@ -480,6 +490,14 @@ public static class SmokeTests
             BackupQuarantineRestoreResult restoreResult = BackupQuarantineRestoreService.RestoreQuarantinedFile(candidate.QuarantinedPath, candidate.OriginalPath, false);
             Assert(File.Exists(restoreResult.RestoredPath), "Quarantined backup should be restored to the original folder.");
             Assert(!File.Exists(candidate.QuarantinedPath), "Quarantined backup should be moved out of quarantine after restore.");
+            string orphanQuarantinePath = Path.Combine(quarantineDirectory, "20240201_120000_orphan.sql");
+            File.WriteAllText(orphanQuarantinePath, "SELECT 1;", Encoding.UTF8);
+            BackupQuarantineBatchRestoreResult batchRestore = BackupQuarantineRestoreService.RestoreAllToOriginalPaths(
+                BackupQuarantineRestoreService.FindCandidates(quarantineDirectory),
+                false);
+            Assert(batchRestore.RestoredFiles >= 1, "Batch quarantine restore should move remaining files with original paths.");
+            Assert(batchRestore.SkippedNoOriginalPath >= 1, "Batch quarantine restore should skip quarantined files without original paths.");
+            Assert(File.Exists(batchEmptySqlPath), "Batch quarantine restore should restore files to their original paths.");
             for (int i = 0; i < 5; i++)
             {
                 string oldQuarantine = Path.Combine(quarantineDirectory, "2024010" + (i + 1) + "_120000_old_" + i + ".sql");

@@ -147,6 +147,7 @@ namespace mySQLPunk
             Add("Tool.CreateBackup", "建立備份", "Create Backup");
             Add("Tool.RestoreBackup", "還原備份...", "Restore Backup...");
             Add("Tool.RestoreQuarantinedBackup", "還原隔離備份...", "Restore Quarantined Backup...");
+            Add("Tool.BatchRestoreQuarantinedBackups", "批次還原隔離備份...", "Batch Restore Quarantined Backups...");
             Add("Tool.StructureAndData", "結構與資料", "Structure and Data");
             Add("Tool.DataOnly", "僅資料", "Data Only");
             Add("Tool.OpenQuery", "開啟查詢", "Open Query");
@@ -342,6 +343,8 @@ namespace mySQLPunk
             Add("Backup.QuarantineRestoreOverwrite", "目標檔案已存在：\n{0}\n\n是否覆蓋？", "The destination file already exists:\n{0}\n\nOverwrite it?");
             Add("Backup.QuarantineRestoreSuccess", "隔離備份已還原：\n{0}", "Quarantined backup restored:\n{0}");
             Add("Backup.QuarantineRestoreFailed", "還原隔離備份失敗：{0}", "Failed to restore quarantined backup: {0}");
+            Add("Backup.QuarantineBatchRestoreConfirm", "找到 {0} 個隔離備份，其中 {1} 個有原始路徑。\n\n將批次移回原始路徑；若目標檔案已存在會略過，不會覆蓋。是否繼續？", "{0} quarantined backups found; {1} have original paths.\n\nThey will be moved back to their original paths. Existing destination files will be skipped and not overwritten. Continue?");
+            Add("Backup.QuarantineBatchRestoreResult", "批次還原隔離備份完成。\n已還原：{0}\n缺少原始路徑略過：{1}\n目標已存在略過：{2}\n失敗：{3}", "Batch quarantine restore completed.\nRestored: {0}\nSkipped without original path: {1}\nSkipped existing destination: {2}\nFailed: {3}");
             Add("Database.NewTitle", "新增資料庫", "New Database");
             Add("Database.NewPrompt", "資料庫名稱:", "Database name:");
             Add("Database.NameRequired", "請輸入資料庫名稱。", "Enter a database name.");
