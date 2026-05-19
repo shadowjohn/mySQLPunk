@@ -2637,7 +2637,7 @@ namespace mySQLPunk
                 return;
             }
 
-            string initialSql = "SELECT * FROM " + QuoteDumpIdentifier(selection.Database, selection.ObjectName) + ";";
+            string initialSql = "SELECT * FROM " + BuildQualifiedObjectName(selection.Database, selection.DatabaseName, selection.ObjectName) + ";";
             OpenQuery(selection.Database, selection.DatabaseName, selection.Host, initialSql, true);
         }
 
@@ -3758,7 +3758,8 @@ namespace mySQLPunk
             }
             if (IsDumpProvider(db, "postgresql"))
             {
-                return "\"public\"." + QuoteDumpIdentifier(db, objectName);
+                PostgreSqlObjectName target = ParsePostgreSqlObjectName(objectName);
+                return QuoteDumpIdentifier(db, target.Schema) + "." + QuoteDumpIdentifier(db, target.Name);
             }
             if (IsDumpProvider(db, "sqlite"))
             {
@@ -3772,6 +3773,12 @@ namespace mySQLPunk
         }
 
         private struct SqlServerObjectName
+        {
+            public string Schema;
+            public string Name;
+        }
+
+        private struct PostgreSqlObjectName
         {
             public string Schema;
             public string Name;
@@ -3791,6 +3798,22 @@ namespace mySQLPunk
             }
 
             return new SqlServerObjectName { Schema = "dbo", Name = value };
+        }
+
+        private static PostgreSqlObjectName ParsePostgreSqlObjectName(string objectName)
+        {
+            string value = (objectName ?? string.Empty).Trim();
+            int dotIndex = value.IndexOf('.');
+            if (dotIndex > 0 && dotIndex < value.Length - 1)
+            {
+                return new PostgreSqlObjectName
+                {
+                    Schema = value.Substring(0, dotIndex).Trim(),
+                    Name = value.Substring(dotIndex + 1).Trim()
+                };
+            }
+
+            return new PostgreSqlObjectName { Schema = "public", Name = value };
         }
 
         private static bool IsDumpProvider(IDatabase db, string providerName)
