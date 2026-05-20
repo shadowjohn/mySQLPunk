@@ -527,6 +527,7 @@ namespace mySQLPunk.lib
             sql = RewriteTrimFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
+            sql = RewritePaddingFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
@@ -2260,6 +2261,39 @@ namespace mySQLPunk.lib
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
             if (args.Count != 2) return match.Value;
             return "SUBSTR(" + args[0] + ", -" + args[1] + ")";
+        }
+
+        private static string RewritePaddingFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider != "mssql") return selectSql;
+
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bLPAD\s*\((?<args>[^()]*)\)",
+                m => RewritePadFunction(m, true),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bRPAD\s*\((?<args>[^()]*)\)",
+                m => RewritePadFunction(m, false),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewritePadFunction(Match match, bool leftPad)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 3) return match.Value;
+
+            string value = "CAST(" + args[0] + " AS varchar(max))";
+            string length = args[1];
+            string pad = args[2];
+            if (leftPad)
+            {
+                return "RIGHT(REPLICATE(" + pad + ", " + length + ") + " + value + ", " + length + ")";
+            }
+
+            return "LEFT(" + value + " + REPLICATE(" + pad + ", " + length + "), " + length + ")";
         }
 
         private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)
