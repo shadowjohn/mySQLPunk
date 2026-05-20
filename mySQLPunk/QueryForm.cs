@@ -465,8 +465,7 @@ namespace mySQLPunk
             dgvResults.DataBindingComplete += DgvResults_DataBindingComplete;
             dgvResults.DataError += DgvResults_DataError;
             Font configuredGridFont = BuildConfiguredFont("RecordGridFontName", "Microsoft JhengHei UI", "RecordGridFontSize", 9);
-            dgvResults.DefaultCellStyle.Font = configuredGridFont;
-            dgvResults.ColumnHeadersDefaultCellStyle.Font = configuredGridFont;
+            ApplyConfiguredResultGridAppearance(dgvResults, configuredGridFont);
             RefreshResultsContextMenu();
             tabData.Controls.Add(dgvResults);
             CreateLoadingOverlay(tabData);
@@ -1622,8 +1621,7 @@ namespace mySQLPunk
                 dgvResults.BackgroundColor = ThemeManager.WindowBackColor;
                 dgvResults.GridColor = ThemeManager.GridColor;
                 Font configuredGridFont = BuildConfiguredFont("RecordGridFontName", "Microsoft JhengHei UI", "RecordGridFontSize", 9);
-                dgvResults.DefaultCellStyle.Font = configuredGridFont;
-                dgvResults.ColumnHeadersDefaultCellStyle.Font = configuredGridFont;
+                ApplyConfiguredResultGridAppearance(dgvResults, configuredGridFont);
                 if (dgvResults.ContextMenuStrip != null) ThemeManager.ApplyToolStrip(dgvResults.ContextMenuStrip);
             }
             if (loadingOverlay != null)
@@ -2254,6 +2252,7 @@ namespace mySQLPunk
         private void DgvResults_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
         {
             ConfigureBinaryResultColumns();
+            ApplyConfiguredResultGridAppearance(dgvResults, dgvResults.DefaultCellStyle.Font);
         }
 
         private void DgvResults_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
@@ -2477,6 +2476,31 @@ namespace mySQLPunk
 
             IFormattable formattable = value as IFormattable;
             return formattable == null ? Convert.ToString(value, culture) : formattable.ToString(format, culture);
+        }
+
+        private static void ApplyConfiguredResultGridAppearance(DataGridView grid, Font configuredGridFont)
+        {
+            if (grid == null) return;
+            Font font = configuredGridFont ?? grid.DefaultCellStyle.Font ?? new Font("Microsoft JhengHei UI", 9);
+            grid.DefaultCellStyle.Font = font;
+            grid.ColumnHeadersDefaultCellStyle.Font = font;
+            grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+
+            int rowHeight = GetConfiguredResultGridRowHeight(font);
+            grid.RowTemplate.Height = rowHeight;
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row != null && !row.IsNewRow) row.Height = rowHeight;
+            }
+        }
+
+        private static int GetConfiguredResultGridRowHeight(Font font)
+        {
+            int fontHeight = font == null ? 17 : font.Height;
+            string mode = ApplicationOptionSettings.GetString("RecordRowHeightMode");
+            if (string.Equals(mode, "compact", StringComparison.OrdinalIgnoreCase)) return Math.Max(20, fontHeight + 4);
+            if (string.Equals(mode, "comfortable", StringComparison.OrdinalIgnoreCase)) return Math.Max(32, fontHeight + 14);
+            return Math.Max(24, fontHeight + 8);
         }
 
         private static bool IsIntegerValue(object value)

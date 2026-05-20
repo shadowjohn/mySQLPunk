@@ -2275,6 +2275,7 @@ public static class SmokeTests
         string oldDateTimeFormat = ApplicationOptionSettings.GetString("RecordDateTimeFormat");
         bool oldShowThousands = ApplicationOptionSettings.GetBool("RecordShowThousandsSeparator");
         bool oldUseSystemNumberFormat = ApplicationOptionSettings.GetBool("RecordUseSystemNumberFormat");
+        string oldRowHeightMode = ApplicationOptionSettings.GetString("RecordRowHeightMode");
 
         try
         {
@@ -2291,6 +2292,7 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString("RecordDateTimeFormat", "yyyy/MM/dd HH:mm:ss");
             ApplicationOptionSettings.SetBool("RecordShowThousandsSeparator", true);
             ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", false);
+            ApplicationOptionSettings.SetString("RecordRowHeightMode", "comfortable");
 
             using (QueryForm form = new QueryForm(new FakeDumpDatabase(), "main"))
             {
@@ -2303,7 +2305,18 @@ public static class SmokeTests
                 Assert(!editor.WordWrap, "Query editor should honor the configured word wrap setting.");
                 Assert(Math.Abs(editor.Font.SizeInPoints - 13f) < 0.1f, "Query editor should honor the configured font size.");
                 Assert(Math.Abs(grid.DefaultCellStyle.Font.SizeInPoints - 12f) < 0.1f, "Result grid should honor the configured font size.");
+                Assert(grid.AutoSizeRowsMode == DataGridViewAutoSizeRowsMode.None, "Result grid should disable automatic row resizing when row height is configured.");
+                Assert(grid.RowTemplate.Height >= 32, "Result grid should honor the comfortable row height setting.");
                 Assert(completionTables.Count == 0, "Disabled auto-complete should skip metadata loading.");
+            }
+
+            ApplicationOptionSettings.SetString("RecordRowHeightMode", "compact");
+            using (Font rowHeightFont = new Font("Consolas", 12))
+            {
+                int compactHeight = GetConfiguredQueryResultRowHeight(rowHeightFont);
+                ApplicationOptionSettings.SetString("RecordRowHeightMode", "comfortable");
+                int comfortableHeight = GetConfiguredQueryResultRowHeight(rowHeightFont);
+                Assert(compactHeight < comfortableHeight, "Compact row height should be smaller than comfortable row height.");
             }
 
             AssertEquals("2026/05/20", FormatQueryResultValue(new DateTime(2026, 5, 20)), "Query result date formatting should honor RecordDateFormat.");
@@ -2327,7 +2340,14 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString("RecordDateTimeFormat", oldDateTimeFormat);
             ApplicationOptionSettings.SetBool("RecordShowThousandsSeparator", oldShowThousands);
             ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", oldUseSystemNumberFormat);
+            ApplicationOptionSettings.SetString("RecordRowHeightMode", oldRowHeightMode);
         }
+    }
+
+    private static int GetConfiguredQueryResultRowHeight(Font font)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("GetConfiguredResultGridRowHeight", BindingFlags.Static | BindingFlags.NonPublic);
+        return (int)method.Invoke(null, new object[] { font });
     }
 
     private static string FormatQueryResultValue(object value)
