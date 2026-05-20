@@ -199,6 +199,30 @@ public static class SmokeTests
         string sqliteToCharSql = (string)GetProperty(sqliteToCharPreview, "ConvertedSql");
         AssertContains(sqliteToCharSql, "strftime('%Y-%m-%d', created_at)", "Converted SQLite SQL should use strftime.");
 
+        object mssqlDateOnlyPreview = BuildViewSqlPreview(
+            "SELECT DATE(created_at) AS created_date FROM orders",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDateOnlyPreview, "CanConvert"), "MySQL DATE should convert to SQL Server.");
+        string mssqlDateOnlySql = (string)GetProperty(mssqlDateOnlyPreview, "ConvertedSql");
+        AssertContains(mssqlDateOnlySql, "CAST(created_at AS date)", "Converted SQL Server SQL should cast to date.");
+
+        object pgOracleTruncPreview = BuildViewSqlPreview(
+            "SELECT TRUNC(created_at) AS created_date FROM orders",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgOracleTruncPreview, "CanConvert"), "Oracle TRUNC date should convert to PostgreSQL.");
+        string pgOracleTruncSql = (string)GetProperty(pgOracleTruncPreview, "ConvertedSql");
+        AssertContains(pgOracleTruncSql, "CAST(created_at AS date)", "Converted PostgreSQL SQL should cast to date.");
+
+        object oracleDateOnlyPreview = BuildViewSqlPreview(
+            "SELECT DATE(created_at) AS created_date FROM orders",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleDateOnlyPreview, "CanConvert"), "MySQL DATE should convert to Oracle.");
+        string oracleDateOnlySql = (string)GetProperty(oracleDateOnlyPreview, "ConvertedSql");
+        AssertContains(oracleDateOnlySql, "TRUNC(created_at)", "Converted Oracle SQL should use TRUNC for date-only value.");
+
         object mysqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURRENT_DATE AS today FROM users",
             "postgresql",

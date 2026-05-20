@@ -447,6 +447,7 @@ namespace mySQLPunk.lib
                 sql = Regex.Replace(sql, @"\bISNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
 
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
+            sql = RewriteDateOnlyFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
             sql = RewriteDateDiffFunctions(sql, targetProvider);
             sql = RewriteDateAddFunctions(sql, targetProvider);
@@ -462,6 +463,33 @@ namespace mySQLPunk.lib
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
 
             return sql;
+        }
+
+        private static string RewriteDateOnlyFunctions(string selectSql, string sourceProvider, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bDATE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildDateOnlyExpression(targetProvider, m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+
+            if (sourceProvider == "oracle")
+            {
+                sql = Regex.Replace(
+                    sql,
+                    @"\bTRUNC\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                    m => BuildDateOnlyExpression(targetProvider, m.Groups["expr"].Value.Trim()),
+                    RegexOptions.IgnoreCase);
+            }
+
+            return sql;
+        }
+
+        private static string BuildDateOnlyExpression(string targetProvider, string expr)
+        {
+            if (targetProvider == "mssql" || targetProvider == "postgresql") return "CAST(" + expr + " AS date)";
+            if (targetProvider == "oracle") return "TRUNC(" + expr + ")";
+            return "DATE(" + expr + ")";
         }
 
         private static string RewriteDatePartFunctions(string selectSql, string targetProvider)
