@@ -535,6 +535,39 @@ public static class SmokeTests
         string mysqlCurrentDateSql = (string)GetProperty(mysqlCurrentDatePreview, "ConvertedSql");
         AssertContains(mysqlCurrentDateSql, "CURDATE()", "Converted MySQL SQL should use CURDATE().");
 
+        object mysqlEndOfMonthPreview = BuildViewSqlPreview(
+            "SELECT EOMONTH(created_at) AS month_end FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlEndOfMonthPreview, "CanConvert"), "SQL Server EOMONTH should convert to MySQL.");
+        string mysqlEndOfMonthSql = (string)GetProperty(mysqlEndOfMonthPreview, "ConvertedSql");
+        AssertContains(mysqlEndOfMonthSql, "LAST_DAY(created_at)", "Converted MySQL SQL should use LAST_DAY.");
+
+        object pgEndOfMonthOffsetPreview = BuildViewSqlPreview(
+            "SELECT EOMONTH(created_at, billing_offset) AS billing_month_end FROM invoices",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgEndOfMonthOffsetPreview, "CanConvert"), "SQL Server EOMONTH with offset should convert to PostgreSQL.");
+        string pgEndOfMonthOffsetSql = (string)GetProperty(pgEndOfMonthOffsetPreview, "ConvertedSql");
+        AssertContains(pgEndOfMonthOffsetSql, "(DATE_TRUNC('month', (created_at + (billing_offset * INTERVAL '1 month'))) + INTERVAL '1 month - 1 day')::date", "Converted PostgreSQL SQL should build month end with offset.");
+        AssertNotContains(pgEndOfMonthOffsetSql, "EOMONTH", "Converted PostgreSQL SQL should remove EOMONTH.");
+
+        object sqliteEndOfMonthOffsetPreview = BuildViewSqlPreview(
+            "SELECT EOMONTH(created_at, -1) AS previous_month_end FROM invoices",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteEndOfMonthOffsetPreview, "CanConvert"), "SQL Server EOMONTH with offset should convert to SQLite.");
+        string sqliteEndOfMonthOffsetSql = (string)GetProperty(sqliteEndOfMonthOffsetPreview, "ConvertedSql");
+        AssertContains(sqliteEndOfMonthOffsetSql, "date(created_at, printf('%+d month', -1), 'start of month', '+1 month', '-1 day')", "Converted SQLite SQL should use date modifiers with offset.");
+
+        object oracleEndOfMonthOffsetPreview = BuildViewSqlPreview(
+            "SELECT EOMONTH(created_at, 2) AS future_month_end FROM invoices",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleEndOfMonthOffsetPreview, "CanConvert"), "SQL Server EOMONTH with offset should convert to Oracle.");
+        string oracleEndOfMonthOffsetSql = (string)GetProperty(oracleEndOfMonthOffsetPreview, "ConvertedSql");
+        AssertContains(oracleEndOfMonthOffsetSql, "LAST_DAY(ADD_MONTHS(created_at, 2))", "Converted Oracle SQL should use LAST_DAY with ADD_MONTHS.");
+
         object pgDateFromPartsPreview = BuildViewSqlPreview(
             "SELECT DATEFROMPARTS(order_year, order_month, 1) AS month_start FROM orders",
             "mssql",

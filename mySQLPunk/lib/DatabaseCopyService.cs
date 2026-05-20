@@ -503,6 +503,7 @@ namespace mySQLPunk.lib
             sql = RewriteDateParseFunctions(sql, targetProvider);
             sql = RewriteDateDiffFunctions(sql, targetProvider);
             sql = RewriteDateAddFunctions(sql, targetProvider);
+            sql = RewriteEndOfMonthFunctions(sql, targetProvider);
             sql = RewriteDatePartFunctions(sql, targetProvider);
             sql = RewriteDateFromPartsFunctions(sql, targetProvider);
             sql = RewriteConditionalFunctions(sql, targetProvider);
@@ -869,6 +870,54 @@ namespace mySQLPunk.lib
             }
 
             return "DATE_TRUNC('" + part + "', " + expr + ")";
+        }
+
+        private static string RewriteEndOfMonthFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mssql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bEOMONTH\s*\((?<args>[^()]*)\)",
+                m => RewriteEndOfMonthFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteEndOfMonthFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 1 || args.Count > 2) return match.Value;
+
+            string expr = args[0];
+            string offset = args.Count == 2 ? args[1] : null;
+
+            if (targetProvider == "mysql")
+            {
+                if (offset == null) return "LAST_DAY(" + expr + ")";
+                return "LAST_DAY(DATE_ADD(" + expr + ", INTERVAL " + offset + " MONTH))";
+            }
+
+            if (targetProvider == "postgresql")
+            {
+                string adjustedExpr = offset == null
+                    ? expr
+                    : "(" + expr + " + (" + offset + " * INTERVAL '1 month'))";
+                return "(DATE_TRUNC('month', " + adjustedExpr + ") + INTERVAL '1 month - 1 day')::date";
+            }
+
+            if (targetProvider == "sqlite")
+            {
+                if (offset == null) return "date(" + expr + ", 'start of month', '+1 month', '-1 day')";
+                return "date(" + expr + ", printf('%+d month', " + offset + "), 'start of month', '+1 month', '-1 day')";
+            }
+
+            if (targetProvider == "oracle")
+            {
+                if (offset == null) return "LAST_DAY(" + expr + ")";
+                return "LAST_DAY(ADD_MONTHS(" + expr + ", " + offset + "))";
+            }
+
+            return match.Value;
         }
 
         private static string RewriteDatePartFunctions(string selectSql, string targetProvider)
