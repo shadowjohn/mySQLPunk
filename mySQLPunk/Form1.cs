@@ -2285,7 +2285,7 @@ namespace mySQLPunk
             ToolStripMenuItem showHiddenItemsItem = CreateCheckedViewMenuItem(
                 Localization.T("View.ShowHiddenItems"),
                 ApplicationOptionSettings.GetBool("ViewShowHiddenItems"),
-                value => SaveViewBoolOption("ViewShowHiddenItems", value, "View.HiddenItemsChanged"));
+                value => SetShowHiddenItems(value));
             ToolStripMenuItem showTableSettingsItem = CreateCheckedViewMenuItem(
                 Localization.T("View.ShowTableSettingsProfile"),
                 ApplicationOptionSettings.GetBool("RememberTableSettings"),
@@ -2424,6 +2424,32 @@ namespace mySQLPunk
             ApplicationOptionSettings.Save();
             ConfigureMainMenu();
             UpdateMainStatus(Localization.T(statusKey));
+        }
+
+        private void SetShowHiddenItems(bool value)
+        {
+            ApplicationOptionSettings.SetBool("ViewShowHiddenItems", value);
+            ApplicationOptionSettings.Save();
+            RefreshCurrentObjectView();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("View.HiddenItemsChanged"));
+        }
+
+        private void RefreshCurrentObjectView()
+        {
+            TreeNode selected = db_tree == null ? null : db_tree.SelectedNode;
+            TreeDatabaseTarget target = BuildTargetFromNode(selected);
+            if (target != null && target.DatabaseNode != null)
+            {
+                RefreshDatabaseObjectNodes(target.DatabaseNode);
+                return;
+            }
+
+            TreeNode databaseNode = GetSelectedDatabaseNode();
+            if (databaseNode != null)
+            {
+                RefreshDatabaseObjectNodes(databaseNode);
+            }
         }
 
         private void SetObjectListMode(string mode, bool save = true)
@@ -6488,10 +6514,14 @@ namespace mySQLPunk
                 displayDt.Columns.Add("列");
                 displayDt.Columns.Add("註解");
 
+                bool includeHiddenObjects = ApplicationOptionSettings.GetBool("ViewShowHiddenItems");
                 foreach (DataRow row in dt.Rows)
                 {
+                    string objectName = FirstColumnValue(row, "Name", "NAME", "TABLE_NAME");
+                    if (!ObjectVisibilityService.IsVisibleName(db.ProviderName, "table", objectName, includeHiddenObjects)) continue;
+
                     DataRow newRow = displayDt.NewRow();
-                    newRow["名稱"] = FirstColumnValue(row, "Name", "NAME", "TABLE_NAME");
+                    newRow["名稱"] = objectName;
                     newRow["自動遞增值"] = FirstColumnValue(row, "Auto_increment", "AUTO_INCREMENT");
                     newRow["修改日期"] = FirstColumnValue(row, "Update_time", "UPDATE_TIME");
                     newRow["資料長度"] = FormatBytesValue(FirstColumnValue(row, "Data_length", "DATA_LENGTH"));
@@ -6524,7 +6554,7 @@ namespace mySQLPunk
 
             if (string.Equals(groupName, "Views", StringComparison.OrdinalIgnoreCase))
             {
-                foreach (string viewName in db.GetViews(dbName))
+                foreach (string viewName in GetViewsSafe(db, dbName))
                 {
                     DataRow row = displayDt.NewRow();
                     row["名稱"] = viewName;
@@ -6918,13 +6948,21 @@ namespace mySQLPunk
 
         private static List<string> GetTablesSafe(IDatabase db, string dbName)
         {
-            try { return db.GetTables(dbName) ?? new List<string>(); }
+            try
+            {
+                bool includeHiddenObjects = ApplicationOptionSettings.GetBool("ViewShowHiddenItems");
+                return ObjectVisibilityService.FilterNames(db.GetTables(dbName), db.ProviderName, "table", includeHiddenObjects);
+            }
             catch { return new List<string>(); }
         }
 
         private static List<string> GetViewsSafe(IDatabase db, string dbName)
         {
-            try { return db.GetViews(dbName) ?? new List<string>(); }
+            try
+            {
+                bool includeHiddenObjects = ApplicationOptionSettings.GetBool("ViewShowHiddenItems");
+                return ObjectVisibilityService.FilterNames(db.GetViews(dbName), db.ProviderName, "view", includeHiddenObjects);
+            }
             catch { return new List<string>(); }
         }
 
@@ -8866,13 +8904,13 @@ namespace mySQLPunk
             results.Columns.Add("欄位");
             results.Columns.Add("位置");
 
-            foreach (string tableName in db.GetTables(databaseName))
+            foreach (string tableName in GetTablesSafe(db, databaseName))
             {
                 AddSearchResultIfMatches(results, "Table", tableName, "", "Tables", keyword);
                 AddColumnSearchResults(results, db, databaseName, tableName, "Table", keyword);
             }
 
-            foreach (string viewName in db.GetViews(databaseName))
+            foreach (string viewName in GetViewsSafe(db, databaseName))
             {
                 AddSearchResultIfMatches(results, "View", viewName, "", "Views", keyword);
                 AddColumnSearchResults(results, db, databaseName, viewName, "View", keyword);
@@ -9106,7 +9144,7 @@ namespace mySQLPunk
         {
             List<AutoCommentColumnUpdate> updates = new List<AutoCommentColumnUpdate>();
             HashSet<string> viewNames = GetDatabaseViewNameSet(db, databaseName);
-            foreach (string tableName in db.GetTables(databaseName))
+            foreach (string tableName in GetTablesSafe(db, databaseName))
             {
                 if (viewNames.Contains(tableName)) continue;
 
@@ -9144,7 +9182,7 @@ namespace mySQLPunk
             HashSet<string> viewNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                List<string> views = db.GetViews(databaseName);
+                List<string> views = GetViewsSafe(db, databaseName);
                 if (views == null) return viewNames;
                 foreach (string viewName in views)
                 {
@@ -11525,7 +11563,8 @@ namespace mySQLPunk
 
                 Dictionary<string, object> connInfo = connectionIndex >= 0 && connectionIndex < myN.connections.Count ? myN.connections[connectionIndex] : null;
                 MetadataLoadService metadataService = CreateMetadataLoadService();
-                DatabaseMetadataSnapshot snapshot = await Task.Run(() => metadataService.Load(db, databaseName, connInfo));
+                bool includeHiddenObjects = ApplicationOptionSettings.GetBool("ViewShowHiddenItems");
+                DatabaseMetadataSnapshot snapshot = await Task.Run(() => metadataService.Load(db, databaseName, connInfo, includeHiddenObjects));
                 if (IsDisposed) return;
 
                 db_tree?.BeginUpdate();
@@ -11691,7 +11730,7 @@ namespace mySQLPunk
             TreeNode tablesNode = CreateTreeGroupNode("Tables", 12);
             databaseNode.Nodes.Add(tablesNode);
 
-            foreach (string tableName in db.GetTables(databaseName))
+            foreach (string tableName in GetTablesSafe(db, databaseName))
             {
                 TreeNode tN = new TreeNode(tableName);
                 tN.SelectedImageIndex = 12;
@@ -11702,7 +11741,7 @@ namespace mySQLPunk
             TreeNode viewsNode = CreateTreeGroupNode("Views", 13);
             databaseNode.Nodes.Add(viewsNode);
 
-            foreach (string viewName in db.GetViews(databaseName))
+            foreach (string viewName in GetViewsSafe(db, databaseName))
             {
                 TreeNode vN = new TreeNode(viewName);
                 vN.SelectedImageIndex = 13;

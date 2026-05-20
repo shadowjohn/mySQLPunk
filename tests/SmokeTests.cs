@@ -1816,6 +1816,20 @@ public static class SmokeTests
         AssertEquals("fn_ping", snapshot.Functions.Rows[0]["Name"].ToString(), "MetadataLoadService should use the function loader.");
         AssertEquals("tester", snapshot.Users.Rows[0]["Name"].ToString(), "MetadataLoadService should pass connection info to the user loader.");
         AssertEquals("ev_daily", snapshot.Events.Rows[0]["Name"].ToString(), "MetadataLoadService should use the event loader.");
+
+        FakeDumpDatabase sqliteMetadataDb = new FakeDumpDatabase
+        {
+            Provider = "sqlite",
+            Tables = new List<string> { "users", "sqlite_sequence", "geometry_columns", "__mysqlpunk_column_comments", "idx_users_geometry_node" },
+            Views = new List<string> { "active_users", "views_geometry_columns" }
+        };
+        DatabaseMetadataSnapshot visibleSnapshot = metadataService.Load(sqliteMetadataDb, "main", new Dictionary<string, object> { { "user", "tester" } }, false);
+        Assert(visibleSnapshot.Tables.Count == 1 && visibleSnapshot.Tables[0] == "users", "MetadataLoadService should hide SQLite system tables by default.");
+        Assert(visibleSnapshot.Views.Count == 1 && visibleSnapshot.Views[0] == "active_users", "MetadataLoadService should hide SQLite system views by default.");
+
+        DatabaseMetadataSnapshot hiddenSnapshot = metadataService.Load(sqliteMetadataDb, "main", new Dictionary<string, object> { { "user", "tester" } }, true);
+        Assert(hiddenSnapshot.Tables.Contains("sqlite_sequence") && hiddenSnapshot.Tables.Contains("__mysqlpunk_column_comments"), "MetadataLoadService should keep hidden objects when requested.");
+        Assert(ObjectVisibilityService.FilterNames(new[] { "pg_class", "public.users" }, "postgresql", "table", false).SequenceEqual(new[] { "public.users" }), "Object visibility should hide PostgreSQL pg_* objects.");
     }
 
     private static void TestConnectionProxySettingsService()
@@ -2357,7 +2371,10 @@ public static class SmokeTests
     private sealed class FakeDumpDatabase : IDatabase
     {
         public ConnectionState State => ConnectionState.Open;
-        public string ProviderName => "postgresql";
+        public string Provider = "postgresql";
+        public List<string> Tables = new List<string> { "public.users" };
+        public List<string> Views = new List<string> { "public.active_users" };
+        public string ProviderName => Provider;
         public string ConnectionString;
         public bool WasOpened;
 
@@ -2371,8 +2388,8 @@ public static class SmokeTests
         public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
         public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
         public List<string> GetDatabases() { return new List<string> { "main" }; }
-        public List<string> GetTables(string databaseName) { return new List<string> { "public.users" }; }
-        public List<string> GetViews(string databaseName) { return new List<string> { "public.active_users" }; }
+        public List<string> GetTables(string databaseName) { return Tables; }
+        public List<string> GetViews(string databaseName) { return Views; }
         public DataTable GetColumns(string databaseName, string tableName) { return new DataTable(); }
         public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
         public DataTable GetTableStatus(string databaseName) { return new DataTable(); }

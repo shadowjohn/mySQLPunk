@@ -183,6 +183,7 @@
     <Compile Include="lib\IDatabase.cs" />
     <Compile Include="lib\MetadataLoadService.cs" />
     <Compile Include="lib\include.cs" />
+    <Compile Include="lib\ObjectVisibilityService.cs" />
     <Compile Include="lib\my_mssql.cs" />
     <Compile Include="lib\my_mysql.cs" />
     <Compile Include="lib\my_oracle.cs" />

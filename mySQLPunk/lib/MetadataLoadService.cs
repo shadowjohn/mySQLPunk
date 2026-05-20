@@ -31,12 +31,17 @@ namespace mySQLPunk.lib
 
         public DatabaseMetadataSnapshot Load(IDatabase db, string databaseName, Dictionary<string, object> connInfo)
         {
+            return Load(db, databaseName, connInfo, false);
+        }
+
+        public DatabaseMetadataSnapshot Load(IDatabase db, string databaseName, Dictionary<string, object> connInfo, bool includeHiddenObjects)
+        {
             if (db == null) throw new ArgumentNullException(nameof(db));
 
             DatabaseMetadataSnapshot snapshot = new DatabaseMetadataSnapshot();
-            try { snapshot.Tables = db.GetTables(databaseName) ?? new List<string>(); }
+            try { snapshot.Tables = ObjectVisibilityService.FilterNames(db.GetTables(databaseName), db.ProviderName, "table", includeHiddenObjects); }
             catch (Exception ex) { throw new Exception("載入 Tables 失敗：" + ex.Message, ex); }
-            try { snapshot.Views = db.GetViews(databaseName) ?? new List<string>(); }
+            try { snapshot.Views = ObjectVisibilityService.FilterNames(db.GetViews(databaseName), db.ProviderName, "view", includeHiddenObjects); }
             catch (Exception ex) { throw new Exception("載入 Views 失敗：" + ex.Message, ex); }
             try { snapshot.Functions = _functionLoader(db, databaseName); }
             catch (Exception ex) { throw new Exception("載入 Functions 失敗：" + ex.Message, ex); }
