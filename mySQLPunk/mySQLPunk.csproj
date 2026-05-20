@@ -178,6 +178,7 @@
     <Compile Include="lib\crypto.cs" />
     <Compile Include="lib\DataViewFilterService.cs" />
     <Compile Include="lib\DataViewSortService.cs" />
+    <Compile Include="lib\DatabaseGroupVisibilityService.cs" />
     <Compile Include="lib\DatabaseCopyService.cs" />
     <Compile Include="lib\DatabaseDumpService.cs" />
     <Compile Include="lib\DiagnosticLogService.cs" />

@@ -2219,7 +2219,7 @@ namespace mySQLPunk
             ToolStripMenuItem activeObjectsOnlyItem = CreateCheckedViewMenuItem(
                 Localization.T("View.ActiveObjectsOnly") + "\tF12",
                 ApplicationOptionSettings.GetBool("ViewActiveObjectsOnly"),
-                value => SaveViewBoolOption("ViewActiveObjectsOnly", value, "View.ActiveObjectsOnlyChanged"));
+                value => SetActiveObjectsOnly(value));
             ToolStripMenuItem showTopFilterItem = CreateCheckedViewMenuItem(
                 Localization.T("View.ShowTopFilter"),
                 ApplicationOptionSettings.GetBool("ViewShowTopFilter"),
@@ -2489,6 +2489,15 @@ namespace mySQLPunk
             RefreshCurrentObjectView();
             ConfigureMainMenu();
             UpdateMainStatus(Localization.T("View.HiddenItemsChanged"));
+        }
+
+        private void SetActiveObjectsOnly(bool value)
+        {
+            ApplicationOptionSettings.SetBool("ViewActiveObjectsOnly", value);
+            ApplicationOptionSettings.Save();
+            RefreshCurrentObjectView();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("View.ActiveObjectsOnlyChanged"));
         }
 
         private void RefreshCurrentObjectView()
@@ -3027,6 +3036,16 @@ namespace mySQLPunk
                 ImageIndex = imageIndex,
                 SelectedImageIndex = imageIndex
             };
+        }
+
+        private void AddTreeGroupNodeIfVisible(TreeNode databaseNode, TreeNode groupNode)
+        {
+            if (databaseNode == null || groupNode == null) return;
+            bool activeObjectsOnly = ApplicationOptionSettings.GetBool("ViewActiveObjectsOnly");
+            if (DatabaseGroupVisibilityService.ShouldShowGroup(GetTreeGroupKey(groupNode), groupNode.Nodes.Count, activeObjectsOnly))
+            {
+                databaseNode.Nodes.Add(groupNode);
+            }
         }
 
         private void LocalizeTreeGroupNodes()
@@ -11721,7 +11740,6 @@ namespace mySQLPunk
             if (databaseNode == null || snapshot == null) return;
 
             TreeNode tablesNode = CreateTreeGroupNode("Tables", 12);
-            databaseNode.Nodes.Add(tablesNode);
 
             foreach (string tableName in snapshot.Tables ?? new List<string>())
             {
@@ -11730,9 +11748,9 @@ namespace mySQLPunk
                 tN.ImageIndex = 12;
                 tablesNode.Nodes.Add(tN);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, tablesNode);
 
             TreeNode viewsNode = CreateTreeGroupNode("Views", 13);
-            databaseNode.Nodes.Add(viewsNode);
 
             foreach (string viewName in snapshot.Views ?? new List<string>())
             {
@@ -11741,9 +11759,9 @@ namespace mySQLPunk
                 vN.ImageIndex = 13;
                 viewsNode.Nodes.Add(vN);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
             TreeNode newNode = CreateTreeGroupNode("Functions", 14);
-            databaseNode.Nodes.Add(newNode);
 
             if (snapshot.Functions != null)
             {
@@ -11755,9 +11773,9 @@ namespace mySQLPunk
                     newNode.Nodes.Add(functionNode);
                 }
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Users", 19);
-            databaseNode.Nodes.Add(newNode);
 
             if (snapshot.Users != null)
             {
@@ -11769,9 +11787,9 @@ namespace mySQLPunk
                     newNode.Nodes.Add(userNode);
                 }
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Models", 20);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (string modelName in DatabaseModelNames)
             {
@@ -11780,9 +11798,9 @@ namespace mySQLPunk
                 modelNode.SelectedImageIndex = 20;
                 newNode.Nodes.Add(modelNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("BI", 21);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (string biName in DatabaseBIReportNames)
             {
@@ -11791,9 +11809,9 @@ namespace mySQLPunk
                 biNode.SelectedImageIndex = 21;
                 newNode.Nodes.Add(biNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Other", 22);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (string toolName in DatabaseOtherToolNames)
             {
@@ -11802,9 +11820,9 @@ namespace mySQLPunk
                 toolNode.SelectedImageIndex = 22;
                 newNode.Nodes.Add(toolNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Events", 15);
-            databaseNode.Nodes.Add(newNode);
 
             if (snapshot.Events != null)
             {
@@ -11816,12 +11834,12 @@ namespace mySQLPunk
                     newNode.Nodes.Add(eventNode);
                 }
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Queries", 16);
-            databaseNode.Nodes.Add(newNode);
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Reports", 17);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (string reportName in DatabaseReportNames)
             {
@@ -11830,15 +11848,15 @@ namespace mySQLPunk
                 reportNode.SelectedImageIndex = 17;
                 newNode.Nodes.Add(reportNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Backups", 18);
-            databaseNode.Nodes.Add(newNode);
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
         }
 
         private void PopulateDatabaseChildren(TreeNode databaseNode, IDatabase db, string databaseName)
         {
             TreeNode tablesNode = CreateTreeGroupNode("Tables", 12);
-            databaseNode.Nodes.Add(tablesNode);
 
             foreach (string tableName in GetTablesSafe(db, databaseName))
             {
@@ -11847,9 +11865,9 @@ namespace mySQLPunk
                 tN.ImageIndex = 12;
                 tablesNode.Nodes.Add(tN);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, tablesNode);
 
             TreeNode viewsNode = CreateTreeGroupNode("Views", 13);
-            databaseNode.Nodes.Add(viewsNode);
 
             foreach (string viewName in GetViewsSafe(db, databaseName))
             {
@@ -11858,9 +11876,9 @@ namespace mySQLPunk
                 vN.ImageIndex = 13;
                 viewsNode.Nodes.Add(vN);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
             TreeNode newNode = CreateTreeGroupNode("Functions", 14);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (DataRow functionRow in GetDatabaseFunctions(db, databaseName).Rows)
             {
@@ -11869,9 +11887,9 @@ namespace mySQLPunk
                 functionNode.SelectedImageIndex = 14;
                 newNode.Nodes.Add(functionNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Users", 19);
-            databaseNode.Nodes.Add(newNode);
 
             TreeNode root = databaseNode;
             while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
@@ -11884,9 +11902,9 @@ namespace mySQLPunk
                 userNode.SelectedImageIndex = 19;
                 newNode.Nodes.Add(userNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Models", 20);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (string modelName in DatabaseModelNames)
             {
@@ -11895,9 +11913,9 @@ namespace mySQLPunk
                 modelNode.SelectedImageIndex = 20;
                 newNode.Nodes.Add(modelNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("BI", 21);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (string biName in DatabaseBIReportNames)
             {
@@ -11906,9 +11924,9 @@ namespace mySQLPunk
                 biNode.SelectedImageIndex = 21;
                 newNode.Nodes.Add(biNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Other", 22);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (string toolName in DatabaseOtherToolNames)
             {
@@ -11917,9 +11935,9 @@ namespace mySQLPunk
                 toolNode.SelectedImageIndex = 22;
                 newNode.Nodes.Add(toolNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Events", 15);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (DataRow eventRow in GetDatabaseEvents(db, databaseName).Rows)
             {
@@ -11928,12 +11946,12 @@ namespace mySQLPunk
                 eventNode.SelectedImageIndex = 15;
                 newNode.Nodes.Add(eventNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Queries", 16);
-            databaseNode.Nodes.Add(newNode);
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Reports", 17);
-            databaseNode.Nodes.Add(newNode);
 
             foreach (string reportName in DatabaseReportNames)
             {
@@ -11942,9 +11960,10 @@ namespace mySQLPunk
                 reportNode.SelectedImageIndex = 17;
                 newNode.Nodes.Add(reportNode);
             }
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
             newNode = CreateTreeGroupNode("Backups", 18);
-            databaseNode.Nodes.Add(newNode);
+            AddTreeGroupNodeIfVisible(databaseNode, newNode);
         }
         private void db_tree_third_click(int father_index, int index, string databaseName, string name)
         {

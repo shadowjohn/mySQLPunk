@@ -41,6 +41,7 @@ public static class SmokeTests
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
         Run("Data view filter service", TestDataViewFilterService, ref passed);
         Run("Data view sort service", TestDataViewSortService, ref passed);
+        Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
@@ -2013,6 +2014,15 @@ public static class SmokeTests
         AssertEquals("logs", table.DefaultView[0]["名稱"].ToString(), "Descending object list sort should put the largest value first.");
 
         AssertEquals("", DataViewSortService.BuildSortExpression(table, "不存在", true), "Missing sort column should clear sort expression safely.");
+    }
+
+    private static void TestDatabaseGroupVisibilityService()
+    {
+        Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Functions", 0, false), "Inactive-only off should show empty function group.");
+        Assert(!DatabaseGroupVisibilityService.ShouldShowGroup("Functions", 0, true), "Active-only should hide empty function group.");
+        Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Functions", 2, true), "Active-only should keep non-empty function group.");
+        Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Backups", 0, true), "Active-only should keep action backup group.");
+        Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Models", 0, true), "Active-only should keep synthetic model group.");
     }
 
     private static void TestWindowsCredentialService()
