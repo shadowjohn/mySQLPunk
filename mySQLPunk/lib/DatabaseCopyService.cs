@@ -517,6 +517,7 @@ namespace mySQLPunk.lib
             sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteComparisonFunctions(sql, targetProvider);
             sql = RewriteBooleanLiterals(sql, targetProvider);
+            sql = RewriteSqlServerConvertCastFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteSqlServerTryCastFunctions(sql, sourceProvider, targetProvider);
             sql = RewritePostgreSqlCastOperators(sql, sourceProvider, targetProvider);
             sql = RewriteNullOrderingClauses(sql, targetProvider);
@@ -672,6 +673,29 @@ namespace mySQLPunk.lib
         private static string RewritePostgreSqlCastOperator(Match match, string targetProvider)
         {
             string targetType = MapPostgreSqlCastType(
+                match.Groups["type"].Value,
+                match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
+                match.Groups["scale"].Success ? match.Groups["scale"].Value : "",
+                targetProvider);
+            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+
+            return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
+        }
+
+        private static string RewriteSqlServerConvertCastFunctions(string selectSql, string sourceProvider, string targetProvider)
+        {
+            if (sourceProvider != "mssql" || targetProvider == "mssql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bCONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => RewriteSqlServerConvertCastFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteSqlServerConvertCastFunction(Match match, string targetProvider)
+        {
+            string targetType = MapSqlServerCastType(
                 match.Groups["type"].Value,
                 match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
                 match.Groups["scale"].Success ? match.Groups["scale"].Value : "",

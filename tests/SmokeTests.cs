@@ -1201,6 +1201,25 @@ public static class SmokeTests
         AssertContains(mssqlPgCastSql, "CAST(created_at AS datetime2)", "Converted SQL Server SQL should cast timestamp.");
         AssertContains(mssqlPgCastSql, "'amount::numeric'", "Converted SQL Server SQL should preserve cast text in string literals.");
 
+        object pgSqlServerConvertPreview = BuildViewSqlPreview(
+            "SELECT CONVERT(int, user_id_text) AS user_id, CONVERT(decimal(10,2), amount_text) AS amount FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSqlServerConvertPreview, "CanConvert"), "SQL Server CONVERT casts should convert to PostgreSQL.");
+        string pgSqlServerConvertSql = (string)GetProperty(pgSqlServerConvertPreview, "ConvertedSql");
+        AssertContains(pgSqlServerConvertSql, "CAST(user_id_text AS INTEGER)", "Converted PostgreSQL SQL should cast SQL Server int CONVERT.");
+        AssertContains(pgSqlServerConvertSql, "CAST(amount_text AS decimal(10,2))", "Converted PostgreSQL SQL should cast SQL Server decimal CONVERT.");
+        AssertNotContains(pgSqlServerConvertSql, "CONVERT(int", "Converted PostgreSQL SQL should remove SQL Server int CONVERT.");
+
+        object oracleSqlServerConvertPreview = BuildViewSqlPreview(
+            "SELECT CONVERT(bigint, user_id_text) AS user_id, CONVERT(bit, enabled_text) AS enabled FROM users",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleSqlServerConvertPreview, "CanConvert"), "SQL Server CONVERT casts should convert to Oracle.");
+        string oracleSqlServerConvertSql = (string)GetProperty(oracleSqlServerConvertPreview, "ConvertedSql");
+        AssertContains(oracleSqlServerConvertSql, "CAST(user_id_text AS NUMBER(19))", "Converted Oracle SQL should map bigint CONVERT to NUMBER(19).");
+        AssertContains(oracleSqlServerConvertSql, "CAST(enabled_text AS NUMBER(1))", "Converted Oracle SQL should map bit CONVERT to NUMBER(1).");
+
         object mysqlPgCastPreview = BuildViewSqlPreview(
             "SELECT user_id::bigint AS user_id, display_name::text AS display_name FROM users",
             "postgresql",
