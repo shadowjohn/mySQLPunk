@@ -7601,7 +7601,15 @@ namespace mySQLPunk
             AddOtherToolRow(dt, "SpatiaLite DLL", File.Exists(dllPath) ? "Ready" : "Warning", dllPath);
             AddOtherToolRow(dt, "SpatiaLite Loaded", sqlite.SpatiaLiteEnabled ? "Ready" : "Warning", sqlite.SpatiaLiteEnabled ? "Extension loaded" : sqlite.SpatiaLiteLoadError);
 
-            if (!sqlite.SpatiaLiteEnabled) return;
+            if (!sqlite.SpatiaLiteEnabled)
+            {
+                string repositoryRoot = SpatiaLiteRuntimeDiagnosticService.FindRepositoryRoot(AppDomain.CurrentDomain.BaseDirectory);
+                foreach (SpatiaLiteDiagnosticRow row in SpatiaLiteRuntimeDiagnosticService.BuildRows(runtimeDir, sqlite.SpatiaLiteLoadError, repositoryRoot))
+                {
+                    AddOtherToolRow(dt, row.Item, row.Status, row.Detail);
+                }
+                return;
+            }
 
             try
             {

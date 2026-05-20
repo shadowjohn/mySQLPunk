@@ -126,12 +126,12 @@ Smoke test harness：
   - 匯出支援：SQL Dump 的結構匯出會附帶 sidecar table 建立語句與目前資料表的欄位註解 `INSERT OR REPLACE`，跨環境還原後可保留 mySQLPunk 欄位註解；SQLite 資料庫、Tables 節點與單一資料表右鍵可匯出 / 匯入專用欄位註解 JSON、XLSX、CSV、YAML，匯入時會建立 sidecar table 並覆蓋匯入範圍內資料表的註解；XLSX 匯出模板會包含 `provider`、`database`、`table`、`column`、`type`、`not_null`、`default_value`、`comment` 欄位，方便人工審核或交給外部工具補註解；CLI 可用 `--sqlite-comments-export --database <sqlite> --output <json|xlsx|csv|yaml> [--table <name>]` 與 `--sqlite-comments-import --database <sqlite> --input <json|xlsx|csv|yaml> [--table <name>]` 進行自動化交換；匯入也支援第三方扁平陣列 JSON（`table` / `column` / `comment`）、table 內 columns 陣列格式、`table,column,comment` CSV、含額外輔助欄位的 XLSX 工作表與簡化 YAML comments 清單，並接受 `object_name` / `field_name` / `comment_text`、`entity` / `attribute` / `note` 等常見第三方模板別名，方便外部工具轉接。
   - 後續方向：若需要和其它 SQLite 工具深度整合，可再加入審核流程。
 
-- **SpatiaLite extension 可能載入失敗 ✅ 診斷資訊已補齊**
+- **SpatiaLite extension 可能載入失敗 ✅ 診斷資訊與修復指引已補齊**
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。
   - 完成內容：
     - 載入失敗訊息已改用語系化字串（`Connection.SpatiaLiteLoadFailed`），並同步更新狀態列，降級行為更清楚。
-    - `其它 > 連線診斷` 會顯示 SpatiaLite runtime 目錄、`mod_spatialite.dll` 路徑、載入狀態與版本資訊。
-  - 後續方向：若需要更完整的環境修復流程，可再加入一鍵重建 runtime 或下載指引。
+    - `其它 > 連線診斷` 會顯示 SpatiaLite runtime 目錄、`mod_spatialite.dll` 路徑、載入狀態與版本資訊；若 extension 未載入，也會顯示 runtime manifest、建置腳本路徑、可直接執行的 PowerShell 修復命令、缺少 DLL 與目前載入錯誤，方便依 `tools/spatialite/Build-SpatiaLiteRuntime.ps1` 從 Gaia-SINS 官方 `libspatialite-5.1.0.zip` 來源重建 runtime。
+  - 後續方向：若需要更完整的環境修復流程，可再加入 UI 按鈕直接啟動建置腳本並串接進度輸出。
 
 ### Table Designer 限制
 

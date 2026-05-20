@@ -33,6 +33,7 @@ public static class SmokeTests
         Run("Backup restore service", TestBackupRestoreService, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
+        Run("SpatiaLite runtime diagnostics", TestSpatiaLiteRuntimeDiagnostics, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
@@ -2337,6 +2338,34 @@ public static class SmokeTests
     {
         MethodInfo method = typeof(SqliteColumnCommentExchangeService).GetMethod("ReadXlsxRows", BindingFlags.Static | BindingFlags.NonPublic);
         return (List<List<string>>)method.Invoke(null, new object[] { xlsxPath });
+    }
+
+    private static void TestSpatiaLiteRuntimeDiagnostics()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "mysqlpunk_spatialite_" + Guid.NewGuid().ToString("N"));
+        string toolsDir = Path.Combine(root, "tools", "spatialite");
+        string runtimeDir = Path.Combine(root, "runtime");
+        Directory.CreateDirectory(toolsDir);
+        Directory.CreateDirectory(runtimeDir);
+        File.WriteAllText(Path.Combine(toolsDir, "Build-SpatiaLiteRuntime.ps1"), "# test", Encoding.UTF8);
+
+        try
+        {
+            string foundRoot = SpatiaLiteRuntimeDiagnosticService.FindRepositoryRoot(Path.Combine(root, "tools"));
+            AssertEquals(root, foundRoot, "SpatiaLite diagnostics should locate the repository root from a child directory.");
+
+            List<SpatiaLiteDiagnosticRow> rows = SpatiaLiteRuntimeDiagnosticService.BuildRows(runtimeDir, "missing mod_spatialite", root);
+            string details = string.Join("\n", rows.Select(r => r.Item + "|" + r.Status + "|" + r.Detail).ToArray());
+            AssertContains(details, "SpatiaLite Repair Script|Ready", "SpatiaLite diagnostics should detect the rebuild script.");
+            AssertContains(details, "Build-SpatiaLiteRuntime.ps1", "SpatiaLite diagnostics should show the rebuild script path.");
+            AssertContains(details, "powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should show a runnable repair command.");
+            AssertContains(details, "SpatiaLite Missing DLL|Warning", "SpatiaLite diagnostics should warn when mod_spatialite.dll is missing.");
+            AssertContains(details, "missing mod_spatialite", "SpatiaLite diagnostics should keep the load error.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
     }
 
     private static void TestQueryResultExportService()

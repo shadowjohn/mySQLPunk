@@ -196,6 +196,7 @@
     <Compile Include="lib\QueryResultExportService.cs" />
     <Compile Include="lib\SqliteColumnCommentExchangeService.cs" />
     <Compile Include="lib\SqliteSpecialObjectSqlBuilder.cs" />
+    <Compile Include="lib\SpatiaLiteRuntimeDiagnosticService.cs" />
     <Compile Include="lib\ViewColumnPreferenceService.cs" />
     <Compile Include="lib\WindowsCredentialService.cs" />
     <Compile Include="Program.cs" />
