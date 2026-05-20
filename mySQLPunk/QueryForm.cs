@@ -890,6 +890,7 @@ namespace mySQLPunk
                 ApplyPlainEditorFormatting();
                 return;
             }
+            if (!ShouldUseEditorHelpers(txtSql == null ? "" : txtSql.Text)) return;
 
             txtSql.TextChanged -= TxtSql_TextChanged;
 
@@ -1002,7 +1003,7 @@ namespace mySQLPunk
         // ── 自動補完 ──
         private void ShowCompletion()
         {
-            if (!ApplicationOptionSettings.GetBool("AutoCompleteEnabled"))
+            if (!ApplicationOptionSettings.GetBool("AutoCompleteEnabled") || !ShouldUseEditorHelpers(txtSql == null ? "" : txtSql.Text))
             {
                 lstCompletion.Visible = false;
                 return;
@@ -1077,10 +1078,17 @@ namespace mySQLPunk
         // ── 事件處理 ──
         private void TxtSql_TextChanged(object sender, EventArgs e)
         {
-            if (ApplicationOptionSettings.GetBool("EditorSyntaxHighlight")) ApplySyntaxHighlight();
+            bool helperEnabledForSize = ShouldUseEditorHelpers(txtSql == null ? "" : txtSql.Text);
+            if (!helperEnabledForSize)
+            {
+                if (lstCompletion != null) lstCompletion.Visible = false;
+                return;
+            }
+
+            if (ApplicationOptionSettings.GetBool("EditorSyntaxHighlight") && helperEnabledForSize) ApplySyntaxHighlight();
             else ApplyPlainEditorFormatting();
 
-            if (ApplicationOptionSettings.GetBool("AutoCompleteEnabled")) ShowCompletion();
+            if (ApplicationOptionSettings.GetBool("AutoCompleteEnabled") && helperEnabledForSize) ShowCompletion();
             else if (lstCompletion != null) lstCompletion.Visible = false;
         }
 
@@ -1608,8 +1616,9 @@ namespace mySQLPunk
                 txtSql.BackColor = ThemeManager.TextBoxBackColor;
                 txtSql.ForeColor = ThemeManager.TextColor;
                 txtSql.WordWrap = ApplicationOptionSettings.GetBool("EditorWordWrap");
-                if (ApplicationOptionSettings.GetBool("EditorSyntaxHighlight")) ApplySyntaxHighlight();
-                else ApplyPlainEditorFormatting();
+                bool helperEnabledForSize = ShouldUseEditorHelpers(txtSql.Text);
+                if (ApplicationOptionSettings.GetBool("EditorSyntaxHighlight") && helperEnabledForSize) ApplySyntaxHighlight();
+                else if (helperEnabledForSize) ApplyPlainEditorFormatting();
             }
             if (lstCompletion != null)
             {
@@ -2515,6 +2524,17 @@ namespace mySQLPunk
                    type == typeof(uint) ||
                    type == typeof(long) ||
                    type == typeof(ulong);
+        }
+
+        private static bool ShouldUseEditorHelpers(string sql)
+        {
+            if (string.IsNullOrEmpty(sql)) return true;
+
+            int limitMb = ApplicationOptionSettings.GetInt("EditorLargeFileLimitMb");
+            if (limitMb <= 0) limitMb = 10;
+
+            long limitBytes = (long)Math.Max(1, limitMb) * 1024L * 1024L;
+            return Encoding.UTF8.GetByteCount(sql) <= limitBytes;
         }
 
         private bool ResultsHaveDataRows()

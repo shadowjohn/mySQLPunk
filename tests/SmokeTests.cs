@@ -2267,6 +2267,7 @@ public static class SmokeTests
         string oldEditorFontName = ApplicationOptionSettings.GetString("EditorFontName");
         int oldEditorFontSize = ApplicationOptionSettings.GetInt("EditorFontSize");
         bool oldEditorWordWrap = ApplicationOptionSettings.GetBool("EditorWordWrap");
+        int oldEditorLargeFileLimitMb = ApplicationOptionSettings.GetInt("EditorLargeFileLimitMb");
         bool oldAutoCompleteEnabled = ApplicationOptionSettings.GetBool("AutoCompleteEnabled");
         string oldGridFontName = ApplicationOptionSettings.GetString("RecordGridFontName");
         int oldGridFontSize = ApplicationOptionSettings.GetInt("RecordGridFontSize");
@@ -2284,6 +2285,7 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString("EditorFontName", "Consolas");
             ApplicationOptionSettings.SetInt("EditorFontSize", 13);
             ApplicationOptionSettings.SetBool("EditorWordWrap", false);
+            ApplicationOptionSettings.SetInt("EditorLargeFileLimitMb", 1);
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", false);
             ApplicationOptionSettings.SetString("RecordGridFontName", "Consolas");
             ApplicationOptionSettings.SetInt("RecordGridFontSize", 12);
@@ -2324,6 +2326,8 @@ public static class SmokeTests
             AssertEquals("03:04:05", FormatQueryResultValue(new TimeSpan(3, 4, 5)), "Query result time formatting should honor RecordTimeFormat.");
             AssertEquals("1,234.56", FormatQueryResultValue(1234.56m), "Query result numeric formatting should honor thousands and invariant number options.");
             AssertEquals("9,876", FormatQueryResultValue(9876), "Query result integer formatting should honor thousands option.");
+            Assert(QueryEditorHelpersEnabled("SELECT 1"), "Editor helpers should remain enabled below the large SQL limit.");
+            Assert(!QueryEditorHelpersEnabled(new string('x', 1024 * 1024 + 1)), "Editor helpers should be disabled above the configured large SQL limit.");
         }
         finally
         {
@@ -2332,6 +2336,7 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString("EditorFontName", oldEditorFontName);
             ApplicationOptionSettings.SetInt("EditorFontSize", oldEditorFontSize);
             ApplicationOptionSettings.SetBool("EditorWordWrap", oldEditorWordWrap);
+            ApplicationOptionSettings.SetInt("EditorLargeFileLimitMb", oldEditorLargeFileLimitMb);
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", oldAutoCompleteEnabled);
             ApplicationOptionSettings.SetString("RecordGridFontName", oldGridFontName);
             ApplicationOptionSettings.SetInt("RecordGridFontSize", oldGridFontSize);
@@ -2342,6 +2347,12 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", oldUseSystemNumberFormat);
             ApplicationOptionSettings.SetString("RecordRowHeightMode", oldRowHeightMode);
         }
+    }
+
+    private static bool QueryEditorHelpersEnabled(string sql)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("ShouldUseEditorHelpers", BindingFlags.Static | BindingFlags.NonPublic);
+        return (bool)method.Invoke(null, new object[] { sql });
     }
 
     private static int GetConfiguredQueryResultRowHeight(Font font)
