@@ -789,6 +789,30 @@ public static class SmokeTests
         string mssqlIlikeSql = (string)GetProperty(mssqlIlikePreview, "ConvertedSql");
         AssertContains(mssqlIlikeSql, "LOWER(name) LIKE LOWER('O''Reilly%')", "Converted SQL Server SQL should preserve escaped quote patterns.");
 
+        object pgRegexpLikePreview = BuildViewSqlPreview(
+            "SELECT id FROM users WHERE REGEXP_LIKE(email, '^[^@]+@example\\.com$')",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgRegexpLikePreview, "CanConvert"), "Oracle REGEXP_LIKE should convert to PostgreSQL.");
+        string pgRegexpLikeSql = (string)GetProperty(pgRegexpLikePreview, "ConvertedSql");
+        AssertContains(pgRegexpLikeSql, "email ~ '^[^@]+@example\\.com$'", "Converted PostgreSQL SQL should use regex match operator.");
+
+        object mysqlPgRegexPreview = BuildViewSqlPreview(
+            "SELECT id FROM users WHERE email ~ '^[^@]+@example\\.com$'",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlPgRegexPreview, "CanConvert"), "PostgreSQL regex operator should convert to MySQL.");
+        string mysqlPgRegexSql = (string)GetProperty(mysqlPgRegexPreview, "ConvertedSql");
+        AssertContains(mysqlPgRegexSql, "REGEXP_LIKE(email, '^[^@]+@example\\.com$')", "Converted MySQL SQL should use REGEXP_LIKE.");
+
+        object mssqlRegexpLikePreview = BuildViewSqlPreview(
+            "SELECT id FROM users WHERE REGEXP_LIKE(email, '^[^@]+@example\\.com$')",
+            "oracle",
+            "mssql");
+        Assert(!(bool)GetProperty(mssqlRegexpLikePreview, "CanConvert"), "REGEXP_LIKE should be rejected for SQL Server.");
+        string regexpReason = (string)GetProperty(mssqlRegexpLikePreview, "Reason");
+        AssertContains(regexpReason, "正規表示式", "Regex rejection should explain unsupported regex conversion.");
+
         object cteWindowPreview = BuildViewSqlPreview(
             "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
             "postgresql",

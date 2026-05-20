@@ -1222,13 +1222,32 @@ namespace mySQLPunk.lib
 
         private static string RewritePatternMatchOperators(string selectSql, string targetProvider)
         {
-            if (targetProvider == "postgresql") return selectSql;
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bREGEXP_LIKE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*(?<pattern>'(?:''|[^'])*')\s*\)",
+                m => BuildRegexMatchExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["pattern"].Value, m.Value),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b)\s+~\s+(?<pattern>'(?:''|[^'])*')",
+                m => BuildRegexMatchExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["pattern"].Value, m.Value),
+                RegexOptions.IgnoreCase);
+
+            if (targetProvider == "postgresql") return sql;
 
             return Regex.Replace(
-                selectSql,
+                sql,
                 @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b)\s+ILIKE\s+(?<pattern>'(?:''|[^'])*')",
                 m => "LOWER(" + m.Groups["expr"].Value.Trim() + ") LIKE LOWER(" + m.Groups["pattern"].Value + ")",
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildRegexMatchExpression(string targetProvider, string expr, string pattern, string original)
+        {
+            if (targetProvider == "postgresql") return expr + " ~ " + pattern;
+            if (targetProvider == "mysql" || targetProvider == "oracle") return "REGEXP_LIKE(" + expr + ", " + pattern + ")";
+            return original;
         }
 
         private static string RewriteJsonValueFunctions(string selectSql, string targetProvider)
@@ -1629,6 +1648,14 @@ namespace mySQLPunk.lib
                 Regex.IsMatch(featureSql, @"\bSQL\s+SECURITY\b|@", RegexOptions.IgnoreCase))
             {
                 reason = "MySQL 專用 View 語法無法自動轉換";
+                return true;
+            }
+
+            if ((provider.Equals("mssql", StringComparison.OrdinalIgnoreCase) ||
+                 provider.Equals("sqlite", StringComparison.OrdinalIgnoreCase)) &&
+                Regex.IsMatch(featureSql, @"\bREGEXP_LIKE\s*\(|\b[A-Za-z_][A-Za-z0-9_\.]*\s+~\s+", RegexOptions.IgnoreCase))
+            {
+                reason = "目標資料庫沒有通用內建正規表示式比對語法，無法安全自動轉換";
                 return true;
             }
 
