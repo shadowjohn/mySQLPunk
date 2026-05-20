@@ -2270,6 +2270,7 @@ public static class SmokeTests
         int oldEditorLargeFileLimitMb = ApplicationOptionSettings.GetInt("EditorLargeFileLimitMb");
         bool oldAutoCompleteEnabled = ApplicationOptionSettings.GetBool("AutoCompleteEnabled");
         bool oldShowObjectTooltips = ApplicationOptionSettings.GetBool("ShowObjectTooltips");
+        bool oldRecordAutoBeginTransaction = ApplicationOptionSettings.GetBool("RecordAutoBeginTransaction");
         string oldGridFontName = ApplicationOptionSettings.GetString("RecordGridFontName");
         int oldGridFontSize = ApplicationOptionSettings.GetInt("RecordGridFontSize");
         string oldDateFormat = ApplicationOptionSettings.GetString("RecordDateFormat");
@@ -2289,6 +2290,7 @@ public static class SmokeTests
             ApplicationOptionSettings.SetInt("EditorLargeFileLimitMb", 1);
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", false);
             ApplicationOptionSettings.SetBool("ShowObjectTooltips", true);
+            ApplicationOptionSettings.SetBool("RecordAutoBeginTransaction", true);
             ApplicationOptionSettings.SetString("RecordGridFontName", "Consolas");
             ApplicationOptionSettings.SetInt("RecordGridFontSize", 12);
             ApplicationOptionSettings.SetString("RecordDateFormat", "yyyy/MM/dd");
@@ -2339,6 +2341,14 @@ public static class SmokeTests
                 ApplyObjectTooltipForTest(tooltipButton, "Demo tooltip");
                 AssertEquals("", tooltipButton.ToolTipText, "Object tooltips should be cleared when the option is disabled.");
             }
+
+            AssertEquals("START TRANSACTION;", GetTableSaveTransactionSql("mysql", "BeginSql"), "MySQL table saves should use START TRANSACTION.");
+            AssertEquals("BEGIN;", GetTableSaveTransactionSql("postgres", "BeginSql"), "PostgreSQL alias should use BEGIN.");
+            AssertEquals("BEGIN TRANSACTION;", GetTableSaveTransactionSql("sqlite", "BeginSql"), "SQLite table saves should use BEGIN TRANSACTION.");
+            AssertEquals("COMMIT TRANSACTION;", GetTableSaveTransactionSql("sqlserver", "CommitSql"), "SQL Server alias should use COMMIT TRANSACTION.");
+            AssertEquals("ROLLBACK", GetTableSaveTransactionSql("oracle", "RollbackSql"), "Oracle table saves should use ROLLBACK without an explicit BEGIN.");
+            ApplicationOptionSettings.SetBool("RecordAutoBeginTransaction", false);
+            AssertEquals("", GetTableSaveTransactionSql("mysql", "BeginSql"), "Transaction statements should be disabled when the option is off.");
         }
         finally
         {
@@ -2350,6 +2360,7 @@ public static class SmokeTests
             ApplicationOptionSettings.SetInt("EditorLargeFileLimitMb", oldEditorLargeFileLimitMb);
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", oldAutoCompleteEnabled);
             ApplicationOptionSettings.SetBool("ShowObjectTooltips", oldShowObjectTooltips);
+            ApplicationOptionSettings.SetBool("RecordAutoBeginTransaction", oldRecordAutoBeginTransaction);
             ApplicationOptionSettings.SetString("RecordGridFontName", oldGridFontName);
             ApplicationOptionSettings.SetInt("RecordGridFontSize", oldGridFontSize);
             ApplicationOptionSettings.SetString("RecordDateFormat", oldDateFormat);
@@ -2359,6 +2370,14 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", oldUseSystemNumberFormat);
             ApplicationOptionSettings.SetString("RecordRowHeightMode", oldRowHeightMode);
         }
+    }
+
+    private static string GetTableSaveTransactionSql(string providerName, string propertyName)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("BuildTableSaveTransactionStatements", BindingFlags.Static | BindingFlags.NonPublic);
+        object statements = method.Invoke(null, new object[] { new FakeExecDatabase(providerName, "1") });
+        if (statements == null) return "";
+        return Convert.ToString(statements.GetType().GetProperty(propertyName).GetValue(statements, null));
     }
 
     private static void ApplyObjectTooltipForTest(ToolStripItem item, string text)

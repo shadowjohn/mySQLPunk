@@ -60,6 +60,13 @@ namespace mySQLPunk
             public int Deleted { get; set; }
         }
 
+        private sealed class TableSaveTransactionStatements
+        {
+            public string BeginSql { get; set; }
+            public string CommitSql { get; set; }
+            public string RollbackSql { get; set; }
+        }
+
         private class TablePageLoadResult
         {
             public DataTable Rows { get; set; }
@@ -2895,37 +2902,136 @@ namespace mySQLPunk
             List<TableColumnInfo> columns = GetTableColumns(tableName);
             List<string> primaryKeys = columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
             DataSaveResult result = new DataSaveResult();
+            TableSaveTransactionStatements transaction = BuildTableSaveTransactionStatements(_db);
+            bool transactionActive = false;
 
-            foreach (DataRow row in dt.Rows)
+            try
             {
-                if (row.RowState == DataRowState.Unchanged || row.RowState == DataRowState.Detached)
+                if (transaction != null)
                 {
-                    continue;
+                    ExecuteTransactionSql(transaction.BeginSql);
+                    transactionActive = true;
                 }
 
-                if (row.RowState == DataRowState.Added)
+                foreach (DataRow row in dt.Rows)
                 {
-                    if (IsAddedRowEmpty(row, columns))
+                    if (row.RowState == DataRowState.Unchanged || row.RowState == DataRowState.Detached)
                     {
                         continue;
                     }
 
-                    ExecuteInsert(tableName, columns, row);
-                    result.Inserted++;
+                    if (row.RowState == DataRowState.Added)
+                    {
+                        if (IsAddedRowEmpty(row, columns))
+                        {
+                            continue;
+                        }
+
+                        ExecuteInsert(tableName, columns, row);
+                        result.Inserted++;
+                    }
+                    else if (row.RowState == DataRowState.Modified)
+                    {
+                        ExecuteUpdate(tableName, columns, primaryKeys, row);
+                        result.Updated++;
+                    }
+                    else if (row.RowState == DataRowState.Deleted)
+                    {
+                        ExecuteDelete(tableName, columns, primaryKeys, row);
+                        result.Deleted++;
+                    }
                 }
-                else if (row.RowState == DataRowState.Modified)
+
+                if (transactionActive)
                 {
-                    ExecuteUpdate(tableName, columns, primaryKeys, row);
-                    result.Updated++;
+                    ExecuteTransactionSql(transaction.CommitSql);
+                    transactionActive = false;
                 }
-                else if (row.RowState == DataRowState.Deleted)
+
+                return result;
+            }
+            catch
+            {
+                if (transactionActive)
                 {
-                    ExecuteDelete(tableName, columns, primaryKeys, row);
-                    result.Deleted++;
+                    try
+                    {
+                        ExecuteTransactionSql(transaction.RollbackSql);
+                    }
+                    catch
+                    {
+                    }
                 }
+                throw;
+            }
+        }
+
+        private void ExecuteTransactionSql(string sql)
+        {
+            if (string.IsNullOrWhiteSpace(sql)) return;
+            ExecOrThrow(sql, new Dictionary<string, object>(), false);
+        }
+
+        private static TableSaveTransactionStatements BuildTableSaveTransactionStatements(IDatabase db)
+        {
+            if (db == null || !ApplicationOptionSettings.GetBool("RecordAutoBeginTransaction")) return null;
+
+            string provider = NormalizeTransactionProvider(db.ProviderName);
+            if (provider == "mysql")
+            {
+                return new TableSaveTransactionStatements
+                {
+                    BeginSql = "START TRANSACTION;",
+                    CommitSql = "COMMIT;",
+                    RollbackSql = "ROLLBACK;"
+                };
+            }
+            if (provider == "postgresql")
+            {
+                return new TableSaveTransactionStatements
+                {
+                    BeginSql = "BEGIN;",
+                    CommitSql = "COMMIT;",
+                    RollbackSql = "ROLLBACK;"
+                };
+            }
+            if (provider == "sqlite")
+            {
+                return new TableSaveTransactionStatements
+                {
+                    BeginSql = "BEGIN TRANSACTION;",
+                    CommitSql = "COMMIT;",
+                    RollbackSql = "ROLLBACK;"
+                };
+            }
+            if (provider == "mssql")
+            {
+                return new TableSaveTransactionStatements
+                {
+                    BeginSql = "BEGIN TRANSACTION;",
+                    CommitSql = "COMMIT TRANSACTION;",
+                    RollbackSql = "ROLLBACK TRANSACTION;"
+                };
+            }
+            if (provider == "oracle")
+            {
+                return new TableSaveTransactionStatements
+                {
+                    BeginSql = "",
+                    CommitSql = "COMMIT",
+                    RollbackSql = "ROLLBACK"
+                };
             }
 
-            return result;
+            return null;
+        }
+
+        private static string NormalizeTransactionProvider(string providerName)
+        {
+            string provider = (providerName ?? "").Trim().ToLowerInvariant();
+            if (provider == "postgres" || provider == "pgsql") return "postgresql";
+            if (provider == "sqlserver" || provider == "sql server") return "mssql";
+            return provider;
         }
 
         private List<TableColumnInfo> GetTableColumns(string tableName)
