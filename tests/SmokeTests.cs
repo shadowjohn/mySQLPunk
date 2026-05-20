@@ -126,6 +126,30 @@ public static class SmokeTests
         Assert(!(bool)GetProperty(mssqlUnsafeOffsetPreview, "CanConvert"), "Unordered MySQL LIMIT OFFSET query should still be rejected for SQL Server.");
         string unsafeOffsetReason = (string)GetProperty(mssqlUnsafeOffsetPreview, "Reason");
         AssertContains(unsafeOffsetReason, "ORDER BY", "Unsafe offset rejection should explain the missing ORDER BY.");
+
+        object mysqlOffsetFetchPreview = BuildViewSqlPreview(
+            "SELECT id, created_at FROM logs ORDER BY created_at DESC OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlOffsetFetchPreview, "CanConvert"), "SQL Server OFFSET FETCH should convert to MySQL.");
+        string mysqlOffsetFetchSql = (string)GetProperty(mysqlOffsetFetchPreview, "ConvertedSql");
+        AssertContains(mysqlOffsetFetchSql, "ORDER BY created_at DESC LIMIT 10 OFFSET 20", "Converted MySQL SQL should use LIMIT OFFSET.");
+
+        object pgOracleOffsetFetchPreview = BuildViewSqlPreview(
+            "SELECT id, created_at FROM logs ORDER BY created_at DESC OFFSET 5 ROWS FETCH FIRST 15 ROWS ONLY",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgOracleOffsetFetchPreview, "CanConvert"), "Oracle OFFSET FETCH should convert to PostgreSQL.");
+        string pgOracleOffsetFetchSql = (string)GetProperty(pgOracleOffsetFetchPreview, "ConvertedSql");
+        AssertContains(pgOracleOffsetFetchSql, "ORDER BY created_at DESC LIMIT 15 OFFSET 5", "Converted PostgreSQL SQL should use LIMIT OFFSET.");
+
+        object mssqlOffsetFetchPreview = BuildViewSqlPreview(
+            "SELECT id, created_at FROM logs ORDER BY created_at DESC OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlOffsetFetchPreview, "CanConvert"), "SQL Server target should keep OFFSET FETCH syntax.");
+        string mssqlOffsetFetchSql = (string)GetProperty(mssqlOffsetFetchPreview, "ConvertedSql");
+        AssertContains(mssqlOffsetFetchSql, "OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY", "Converted SQL Server SQL should keep OFFSET FETCH.");
     }
 
     private static void TestAdvancedViewSqlConversion()
