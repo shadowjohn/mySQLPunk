@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -711,37 +712,58 @@ namespace mySQLPunk.lib
         {
             string sql = Regex.Replace(
                 selectSql,
-                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+DAY\s*\)",
-                m => BuildDateAddDaysExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value),
+                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|MONTH|MM|M|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+DAY\s*\)",
-                m => BuildDateAddDaysExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value)),
+                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|MONTH|MM|M|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value), NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bDATEADD\s*\(\s*(?<part>day|dd|d)\s*,\s*(?<amount>-?\d+)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => BuildDateAddDaysExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value),
+                @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|month|mm|m|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>-?\d+)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
             return sql;
         }
 
-        private static string BuildDateAddDaysExpression(string targetProvider, string expr, string amount)
+        private static string BuildDateAddExpression(string targetProvider, string expr, string amount, string part)
         {
-            if (targetProvider == "mssql") return "DATEADD(day, " + amount + ", " + expr + ")";
-            if (targetProvider == "mysql") return "DATE_ADD(" + expr + ", INTERVAL " + amount + " DAY)";
-            if (targetProvider == "sqlite") return "date(" + expr + ", '" + BuildSqliteDayModifier(amount) + " day')";
-            if (targetProvider == "oracle") return expr + " + " + amount;
-            return expr + " + INTERVAL '" + amount + " day'";
+            if (targetProvider == "mssql") return "DATEADD(" + part + ", " + amount + ", " + expr + ")";
+            if (targetProvider == "mysql") return "DATE_ADD(" + expr + ", INTERVAL " + amount + " " + part.ToUpperInvariant() + ")";
+            if (targetProvider == "sqlite") return BuildSqliteDateAddExpression(expr, amount, part);
+            if (targetProvider == "oracle") return BuildOracleDateAddExpression(expr, amount, part);
+            return expr + " + INTERVAL '" + amount + " " + part + "'";
         }
 
-        private static string BuildSqliteDayModifier(string amount)
+        private static string BuildSqliteDateAddExpression(string expr, string amount, string part)
         {
-            return amount.StartsWith("-", StringComparison.Ordinal) ? amount : "+" + amount;
+            string functionName = (part == "hour" || part == "minute" || part == "second") ? "datetime" : "date";
+            string modifier = amount.StartsWith("-", StringComparison.Ordinal) ? amount : "+" + amount;
+            return functionName + "(" + expr + ", '" + modifier + " " + part + "')";
+        }
+
+        private static string BuildOracleDateAddExpression(string expr, string amount, string part)
+        {
+            if (part == "day") return expr + " + " + amount;
+            if (part == "month") return "ADD_MONTHS(" + expr + ", " + amount + ")";
+            if (part == "year") return "ADD_MONTHS(" + expr + ", " + MultiplyIntegerString(amount, 12) + ")";
+            return expr + " + NUMTODSINTERVAL(" + amount + ", '" + part.ToUpperInvariant() + "')";
+        }
+
+        private static string MultiplyIntegerString(string value, int multiplier)
+        {
+            int parsed;
+            if (int.TryParse((value ?? string.Empty).Trim(), out parsed))
+            {
+                return (parsed * multiplier).ToString(CultureInfo.InvariantCulture);
+            }
+
+            return "(" + value + " * " + multiplier.ToString(CultureInfo.InvariantCulture) + ")";
         }
 
         private static string NegateIntegerString(string amount)

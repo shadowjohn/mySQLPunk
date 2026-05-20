@@ -279,6 +279,30 @@ public static class SmokeTests
         string pgDateAddSql = (string)GetProperty(pgDateAddPreview, "ConvertedSql");
         AssertContains(pgDateAddSql, "created_at + INTERVAL '14 day'", "Converted PostgreSQL SQL should use interval addition.");
 
+        object mssqlMonthAddPreview = BuildViewSqlPreview(
+            "SELECT DATE_ADD(created_at, INTERVAL 2 MONTH) AS expires_at FROM sessions",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlMonthAddPreview, "CanConvert"), "MySQL DATE_ADD month should convert to SQL Server.");
+        string mssqlMonthAddSql = (string)GetProperty(mssqlMonthAddPreview, "ConvertedSql");
+        AssertContains(mssqlMonthAddSql, "DATEADD(month, 2, created_at)", "Converted SQL Server SQL should use DATEADD month.");
+
+        object sqliteHourAddPreview = BuildViewSqlPreview(
+            "SELECT DATEADD(hour, 6, started_at) AS reminder_at FROM jobs",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteHourAddPreview, "CanConvert"), "SQL Server DATEADD hour should convert to SQLite.");
+        string sqliteHourAddSql = (string)GetProperty(sqliteHourAddPreview, "ConvertedSql");
+        AssertContains(sqliteHourAddSql, "datetime(started_at, '+6 hour')", "Converted SQLite SQL should use datetime hour modifier.");
+
+        object oracleYearAddPreview = BuildViewSqlPreview(
+            "SELECT DATE_ADD(created_at, INTERVAL 1 YEAR) AS renew_at FROM contracts",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleYearAddPreview, "CanConvert"), "MySQL DATE_ADD year should convert to Oracle.");
+        string oracleYearAddSql = (string)GetProperty(oracleYearAddPreview, "ConvertedSql");
+        AssertContains(oracleYearAddSql, "ADD_MONTHS(created_at, 12)", "Converted Oracle SQL should use ADD_MONTHS for year addition.");
+
         object mssqlDateSubPreview = BuildViewSqlPreview(
             "SELECT DATE_SUB(expires_at, INTERVAL 7 DAY) AS warning_at FROM sessions",
             "mysql",
