@@ -916,18 +916,30 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mssql")
             {
-                return Regex.Replace(
+                string sql = Regex.Replace(
                     selectSql,
-                    @"\bLENGTH\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                    @"\b(?:LENGTH|CHAR_LENGTH|CHARACTER_LENGTH)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                     m => "LEN(" + m.Groups["expr"].Value.Trim() + ")",
                     RegexOptions.IgnoreCase);
+                return sql;
             }
 
-            return Regex.Replace(
+            string rewrittenSql = Regex.Replace(
                 selectSql,
                 @"\bLEN\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => "LENGTH(" + m.Groups["expr"].Value.Trim() + ")",
                 RegexOptions.IgnoreCase);
+
+            if (targetProvider != "mysql")
+            {
+                rewrittenSql = Regex.Replace(
+                    rewrittenSql,
+                    @"\b(?:CHAR_LENGTH|CHARACTER_LENGTH)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                    m => "LENGTH(" + m.Groups["expr"].Value.Trim() + ")",
+                    RegexOptions.IgnoreCase);
+            }
+
+            return rewrittenSql;
         }
 
         private static string RewriteTrimFunctions(string selectSql, string targetProvider)

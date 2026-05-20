@@ -535,6 +535,22 @@ public static class SmokeTests
         string pgLengthSql = (string)GetProperty(pgLengthPreview, "ConvertedSql");
         AssertContains(pgLengthSql, "LENGTH(display_name)", "Converted PostgreSQL SQL should use LENGTH.");
 
+        object mssqlCharLengthPreview = BuildViewSqlPreview(
+            "SELECT CHAR_LENGTH(display_name) AS name_length FROM users",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCharLengthPreview, "CanConvert"), "MySQL CHAR_LENGTH should convert to SQL Server.");
+        string mssqlCharLengthSql = (string)GetProperty(mssqlCharLengthPreview, "ConvertedSql");
+        AssertContains(mssqlCharLengthSql, "LEN(display_name)", "Converted SQL Server SQL should use LEN for CHAR_LENGTH.");
+
+        object sqliteCharacterLengthPreview = BuildViewSqlPreview(
+            "SELECT CHARACTER_LENGTH(display_name) AS name_length FROM users",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteCharacterLengthPreview, "CanConvert"), "PostgreSQL CHARACTER_LENGTH should convert to SQLite.");
+        string sqliteCharacterLengthSql = (string)GetProperty(sqliteCharacterLengthPreview, "ConvertedSql");
+        AssertContains(sqliteCharacterLengthSql, "LENGTH(display_name)", "Converted SQLite SQL should use LENGTH for CHARACTER_LENGTH.");
+
         object pgTrimPreview = BuildViewSqlPreview(
             "SELECT LTRIM(RTRIM(display_name)) AS clean_name FROM users",
             "mssql",
