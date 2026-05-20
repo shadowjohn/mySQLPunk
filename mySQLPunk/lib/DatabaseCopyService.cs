@@ -1467,6 +1467,12 @@ namespace mySQLPunk.lib
                 return "TIMESTAMPDIFF(" + part.ToUpperInvariant() + ", " + startDate + ", " + endDate + ")";
             }
 
+            if (part == "year" || part == "month")
+            {
+                string expression = BuildCalendarDateDiffExpression(targetProvider, part, endDate, startDate);
+                if (!string.IsNullOrWhiteSpace(expression)) return expression;
+            }
+
             int seconds = GetDateDiffSeconds(part);
             if (seconds <= 0) return "";
 
@@ -1481,6 +1487,26 @@ namespace mySQLPunk.lib
             }
 
             return "CAST(EXTRACT(EPOCH FROM (" + endDate + " - " + startDate + ")) / " + seconds + " AS INTEGER)";
+        }
+
+        private static string BuildCalendarDateDiffExpression(string targetProvider, string part, string endDate, string startDate)
+        {
+            if (targetProvider == "sqlite")
+            {
+                string yearDiff = "(CAST(strftime('%Y', " + endDate + ") AS INTEGER) - CAST(strftime('%Y', " + startDate + ") AS INTEGER))";
+                if (part == "year") return yearDiff;
+                return "(" + yearDiff + " * 12 + (CAST(strftime('%m', " + endDate + ") AS INTEGER) - CAST(strftime('%m', " + startDate + ") AS INTEGER)))";
+            }
+
+            if (targetProvider == "oracle")
+            {
+                if (part == "year") return "FLOOR(MONTHS_BETWEEN(" + endDate + ", " + startDate + ") / 12)";
+                return "FLOOR(MONTHS_BETWEEN(" + endDate + ", " + startDate + "))";
+            }
+
+            string age = "AGE(" + endDate + ", " + startDate + ")";
+            if (part == "year") return "CAST(EXTRACT(YEAR FROM " + age + ") AS INTEGER)";
+            return "CAST((EXTRACT(YEAR FROM " + age + ") * 12) + EXTRACT(MONTH FROM " + age + ") AS INTEGER)";
         }
 
         private static int GetDateDiffSeconds(string part)

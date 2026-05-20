@@ -757,6 +757,39 @@ public static class SmokeTests
         string mysqlDateDiffHourSql = (string)GetProperty(mysqlDateDiffHourPreview, "ConvertedSql");
         AssertContains(mysqlDateDiffHourSql, "TIMESTAMPDIFF(HOUR, start_time, end_time)", "Converted MySQL SQL should use TIMESTAMPDIFF for hour difference.");
 
+        object pgTimestampDiffMonthPreview = BuildViewSqlPreview(
+            "SELECT TIMESTAMPDIFF(MONTH, start_date, end_date) AS months_open FROM tickets",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTimestampDiffMonthPreview, "CanConvert"), "MySQL TIMESTAMPDIFF month should convert to PostgreSQL.");
+        string pgTimestampDiffMonthSql = (string)GetProperty(pgTimestampDiffMonthPreview, "ConvertedSql");
+        AssertContains(pgTimestampDiffMonthSql, "CAST((EXTRACT(YEAR FROM AGE(end_date, start_date)) * 12) + EXTRACT(MONTH FROM AGE(end_date, start_date)) AS INTEGER)", "Converted PostgreSQL SQL should use AGE for month difference.");
+        AssertNotContains(pgTimestampDiffMonthSql, "TIMESTAMPDIFF", "Converted PostgreSQL SQL should remove TIMESTAMPDIFF month.");
+
+        object sqliteDateDiffYearPreview = BuildViewSqlPreview(
+            "SELECT DATEDIFF(year, hired_at, ended_at) AS years_worked FROM employees",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDateDiffYearPreview, "CanConvert"), "SQL Server DATEDIFF year should convert to SQLite.");
+        string sqliteDateDiffYearSql = (string)GetProperty(sqliteDateDiffYearPreview, "ConvertedSql");
+        AssertContains(sqliteDateDiffYearSql, "(CAST(strftime('%Y', ended_at) AS INTEGER) - CAST(strftime('%Y', hired_at) AS INTEGER))", "Converted SQLite SQL should calculate year difference from strftime.");
+
+        object oracleTimestampDiffMonthPreview = BuildViewSqlPreview(
+            "SELECT TIMESTAMPDIFF(MONTH, start_date, end_date) AS months_open FROM tickets",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleTimestampDiffMonthPreview, "CanConvert"), "MySQL TIMESTAMPDIFF month should convert to Oracle.");
+        string oracleTimestampDiffMonthSql = (string)GetProperty(oracleTimestampDiffMonthPreview, "ConvertedSql");
+        AssertContains(oracleTimestampDiffMonthSql, "FLOOR(MONTHS_BETWEEN(end_date, start_date))", "Converted Oracle SQL should use MONTHS_BETWEEN for month difference.");
+
+        object oracleTimestampDiffYearPreview = BuildViewSqlPreview(
+            "SELECT TIMESTAMPDIFF(YEAR, hired_at, ended_at) AS years_worked FROM employees",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleTimestampDiffYearPreview, "CanConvert"), "MySQL TIMESTAMPDIFF year should convert to Oracle.");
+        string oracleTimestampDiffYearSql = (string)GetProperty(oracleTimestampDiffYearPreview, "ConvertedSql");
+        AssertContains(oracleTimestampDiffYearSql, "FLOOR(MONTHS_BETWEEN(ended_at, hired_at) / 12)", "Converted Oracle SQL should divide MONTHS_BETWEEN by 12 for year difference.");
+
         object mssqlDateAddPreview = BuildViewSqlPreview(
             "SELECT DATE_ADD(created_at, INTERVAL 7 DAY) AS expires_at FROM sessions",
             "mysql",
