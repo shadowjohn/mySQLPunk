@@ -580,6 +580,30 @@ public static class SmokeTests
         string mssqlModSql = (string)GetProperty(mssqlModPreview, "ConvertedSql");
         AssertContains(mssqlModSql, "(order_no % 10)", "Converted SQL Server SQL should use modulo operator.");
 
+        object mssqlGreatestPreview = BuildViewSqlPreview(
+            "SELECT GREATEST(score, passing_score) AS effective_score FROM exams",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlGreatestPreview, "CanConvert"), "GREATEST should convert to SQL Server CASE expression.");
+        string mssqlGreatestSql = (string)GetProperty(mssqlGreatestPreview, "ConvertedSql");
+        AssertContains(mssqlGreatestSql, "(CASE WHEN score >= passing_score THEN score ELSE passing_score END)", "Converted SQL Server SQL should use CASE for GREATEST.");
+
+        object mssqlLeastPreview = BuildViewSqlPreview(
+            "SELECT LEAST(quantity, stock_limit) AS capped_quantity FROM inventory",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlLeastPreview, "CanConvert"), "LEAST should convert to SQL Server CASE expression.");
+        string mssqlLeastSql = (string)GetProperty(mssqlLeastPreview, "ConvertedSql");
+        AssertContains(mssqlLeastSql, "(CASE WHEN quantity <= stock_limit THEN quantity ELSE stock_limit END)", "Converted SQL Server SQL should use CASE for LEAST.");
+
+        object pgGreatestPreview = BuildViewSqlPreview(
+            "SELECT GREATEST(score, passing_score) AS effective_score FROM exams",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgGreatestPreview, "CanConvert"), "GREATEST should stay portable for PostgreSQL.");
+        string pgGreatestSql = (string)GetProperty(pgGreatestPreview, "ConvertedSql");
+        AssertContains(pgGreatestSql, "GREATEST(score, passing_score)", "Converted PostgreSQL SQL should keep native GREATEST.");
+
         object pgPowPreview = BuildViewSqlPreview(
             "SELECT POW(score, 2) AS score_squared FROM exams",
             "mysql",

@@ -457,6 +457,7 @@ namespace mySQLPunk.lib
             sql = RewriteDatePartFunctions(sql, targetProvider);
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteNumericFunctions(sql, targetProvider);
+            sql = RewriteComparisonFunctions(sql, targetProvider);
             sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
@@ -507,6 +508,32 @@ namespace mySQLPunk.lib
                 @"\bPOW\s*\(",
                 "POWER(",
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteComparisonFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider != "mssql") return selectSql;
+
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bGREATEST\s*\((?<args>[^()]*)\)",
+                m => RewriteGreatestLeastFunction(m, true),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bLEAST\s*\((?<args>[^()]*)\)",
+                m => RewriteGreatestLeastFunction(m, false),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteGreatestLeastFunction(Match match, bool greatest)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+
+            string comparison = greatest ? ">=" : "<=";
+            return "(CASE WHEN " + args[0] + " " + comparison + " " + args[1] + " THEN " + args[0] + " ELSE " + args[1] + " END)";
         }
 
         private static string RewriteRandomFunctions(string selectSql, string sourceProvider, string targetProvider)
