@@ -446,6 +446,7 @@ namespace mySQLPunk.lib
             if (targetProvider != "mssql")
                 sql = Regex.Replace(sql, @"\bISNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
 
+            sql = RewriteNullHandlingFunctions(sql, targetProvider);
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
             sql = RewriteDateOnlyFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
@@ -463,6 +464,29 @@ namespace mySQLPunk.lib
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
 
             return sql;
+        }
+
+        private static string RewriteNullHandlingFunctions(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bNVL2\s*\((?<args>[^()]*)\)",
+                m => RewriteNvl2Function(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteNvl2Function(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 3) return match.Value;
+
+            string expr = args[0];
+            string whenNotNull = args[1];
+            string whenNull = args[2];
+            if (targetProvider == "oracle") return "NVL2(" + expr + ", " + whenNotNull + ", " + whenNull + ")";
+            if (targetProvider == "mysql") return "IF(" + expr + " IS NOT NULL, " + whenNotNull + ", " + whenNull + ")";
+            if (targetProvider == "mssql") return "IIF(" + expr + " IS NOT NULL, " + whenNotNull + ", " + whenNull + ")";
+            return "CASE WHEN " + expr + " IS NOT NULL THEN " + whenNotNull + " ELSE " + whenNull + " END";
         }
 
         private static string RewriteDateOnlyFunctions(string selectSql, string sourceProvider, string targetProvider)

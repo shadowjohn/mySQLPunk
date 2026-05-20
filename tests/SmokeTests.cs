@@ -367,6 +367,30 @@ public static class SmokeTests
         string sqliteIifSql = (string)GetProperty(sqliteIifPreview, "ConvertedSql");
         AssertContains(sqliteIifSql, "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END", "Converted SQLite SQL should use CASE.");
 
+        object mysqlNvl2Preview = BuildViewSqlPreview(
+            "SELECT NVL2(closed_at, 'closed', 'open') AS state_text FROM tickets",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlNvl2Preview, "CanConvert"), "Oracle NVL2 should convert to MySQL.");
+        string mysqlNvl2Sql = (string)GetProperty(mysqlNvl2Preview, "ConvertedSql");
+        AssertContains(mysqlNvl2Sql, "IF(closed_at IS NOT NULL, 'closed', 'open')", "Converted MySQL SQL should use IF for NVL2.");
+
+        object mssqlNvl2Preview = BuildViewSqlPreview(
+            "SELECT NVL2(closed_at, 'closed', 'open') AS state_text FROM tickets",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNvl2Preview, "CanConvert"), "Oracle NVL2 should convert to SQL Server.");
+        string mssqlNvl2Sql = (string)GetProperty(mssqlNvl2Preview, "ConvertedSql");
+        AssertContains(mssqlNvl2Sql, "IIF(closed_at IS NOT NULL, 'closed', 'open')", "Converted SQL Server SQL should use IIF for NVL2.");
+
+        object pgNvl2Preview = BuildViewSqlPreview(
+            "SELECT NVL2(closed_at, 'closed', 'open') AS state_text FROM tickets",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgNvl2Preview, "CanConvert"), "Oracle NVL2 should convert to PostgreSQL.");
+        string pgNvl2Sql = (string)GetProperty(pgNvl2Preview, "ConvertedSql");
+        AssertContains(pgNvl2Sql, "CASE WHEN closed_at IS NOT NULL THEN 'closed' ELSE 'open' END", "Converted PostgreSQL SQL should use CASE for NVL2.");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",
