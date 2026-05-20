@@ -4672,13 +4672,23 @@ namespace mySQLPunk
 
             DataTable functions = GetDatabaseFunctions(target.Database, target.DatabaseName);
             DataTable events = GetDatabaseEvents(target.Database, target.DatabaseName);
-            return BackupRestoreDiffService.CreateSnapshot(
+            DatabaseRestoreSnapshot snapshot = BackupRestoreDiffService.CreateSnapshot(
                 target.DatabaseName,
                 target.Database.ProviderName,
                 GetTablesSafe(target.Database, target.DatabaseName),
                 GetViewsSafe(target.Database, target.DatabaseName),
                 ExtractNameColumn(functions),
                 ExtractNameColumn(events));
+
+            foreach (string tableName in snapshot.Tables)
+            {
+                BackupRestoreDiffService.AddTableColumns(
+                    snapshot,
+                    tableName,
+                    BackupRestoreDiffService.CreateColumnSnapshots(tableName, GetColumnsSafe(target.Database, target.DatabaseName, tableName)));
+            }
+
+            return snapshot;
         }
 
         private static List<string> ExtractNameColumn(DataTable table)

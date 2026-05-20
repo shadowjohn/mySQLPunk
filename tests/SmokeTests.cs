@@ -1961,11 +1961,63 @@ public static class SmokeTests
             AssertContains(namedSummary, "檢視：1 -> 2 (+1)，新增：order_view", "Named restore diff should show added views.");
             AssertContains(namedSummary, "函式/程序：0 -> 1 (+1)，新增：fn_refresh", "Named restore diff should show added routines.");
             AssertContains(namedSummary, "事件/Trigger：1 -> 0 (-1)，移除：ev_old", "Named restore diff should show removed events.");
+
+            DatabaseRestoreSnapshot schemaBefore = BackupRestoreDiffService.CreateSnapshot(
+                "main",
+                "sqlite",
+                new[] { "users" },
+                new string[0],
+                new string[0],
+                new string[0]);
+            DatabaseRestoreSnapshot schemaAfter = BackupRestoreDiffService.CreateSnapshot(
+                "main",
+                "sqlite",
+                new[] { "users" },
+                new string[0],
+                new string[0],
+                new string[0]);
+            BackupRestoreDiffService.AddTableColumns(schemaBefore, "users", BackupRestoreDiffService.CreateColumnSnapshots("users", BuildRestoreColumnMetadata(new[]
+            {
+                new[] { "id", "INTEGER", "NO", "", "識別碼", "1" },
+                new[] { "name", "varchar(50)", "NO", "''", "姓名", "2" },
+                new[] { "legacy_code", "text", "YES", "", "", "3" }
+            })));
+            BackupRestoreDiffService.AddTableColumns(schemaAfter, "users", BackupRestoreDiffService.CreateColumnSnapshots("users", BuildRestoreColumnMetadata(new[]
+            {
+                new[] { "id", "INTEGER", "NO", "", "識別碼", "1" },
+                new[] { "name", "varchar(100)", "YES", "NULL", "顯示名稱", "2" },
+                new[] { "email", "text", "YES", "", "Email", "3" }
+            })));
+            string schemaSummary = BackupRestoreDiffService.BuildSummary(schemaBefore, schemaAfter);
+            AssertContains(schemaSummary, "欄位差異：", "Restore diff should include schema column details.");
+            AssertContains(schemaSummary, "新增 users.email", "Restore diff should include added columns.");
+            AssertContains(schemaSummary, "移除 users.legacy_code", "Restore diff should include removed columns.");
+            AssertContains(schemaSummary, "變更 users.name", "Restore diff should include changed columns.");
+            AssertContains(schemaSummary, "型別：varchar(50) -> varchar(100)", "Restore diff should include type changes.");
+            AssertContains(schemaSummary, "NULL：NO -> YES", "Restore diff should include nullability changes.");
+            AssertContains(schemaSummary, "預設：'' -> NULL", "Restore diff should include default changes.");
+            AssertContains(schemaSummary, "註解：姓名 -> 顯示名稱", "Restore diff should include comment changes.");
         }
         finally
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
+    }
+
+    private static DataTable BuildRestoreColumnMetadata(IEnumerable<string[]> rows)
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("Name");
+        table.Columns.Add("DataType");
+        table.Columns.Add("IsNullable");
+        table.Columns.Add("Default");
+        table.Columns.Add("Comment");
+        table.Columns.Add("OrdinalPosition");
+        foreach (string[] row in rows)
+        {
+            table.Rows.Add(row);
+        }
+        return table;
     }
 
     private static void TestTableDesignerCommentDictionaryDiff()

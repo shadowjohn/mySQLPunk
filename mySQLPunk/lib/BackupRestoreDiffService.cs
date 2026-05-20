@@ -1,9 +1,21 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 
 namespace mySQLPunk.lib
 {
+    public sealed class DatabaseRestoreColumnSnapshot
+    {
+        public string TableName { get; set; }
+        public string Name { get; set; }
+        public string DataType { get; set; }
+        public string IsNullable { get; set; }
+        public string DefaultValue { get; set; }
+        public string Comment { get; set; }
+        public int OrdinalPosition { get; set; }
+    }
+
     public sealed class DatabaseRestoreSnapshot
     {
         public string DatabaseName { get; set; }
@@ -16,6 +28,7 @@ namespace mySQLPunk.lib
         public List<string> Views { get; private set; }
         public List<string> Functions { get; private set; }
         public List<string> Events { get; private set; }
+        public Dictionary<string, List<DatabaseRestoreColumnSnapshot>> TableColumns { get; private set; }
 
         public DatabaseRestoreSnapshot()
         {
@@ -23,6 +36,7 @@ namespace mySQLPunk.lib
             Views = new List<string>();
             Functions = new List<string>();
             Events = new List<string>();
+            TableColumns = new Dictionary<string, List<DatabaseRestoreColumnSnapshot>>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -72,6 +86,48 @@ namespace mySQLPunk.lib
             return snapshot;
         }
 
+        public static void AddTableColumns(
+            DatabaseRestoreSnapshot snapshot,
+            string tableName,
+            IEnumerable<DatabaseRestoreColumnSnapshot> columns)
+        {
+            if (snapshot == null || string.IsNullOrWhiteSpace(tableName)) return;
+
+            List<DatabaseRestoreColumnSnapshot> normalized = NormalizeColumns(tableName, columns);
+            if (normalized.Count == 0)
+            {
+                snapshot.TableColumns.Remove(tableName.Trim());
+                return;
+            }
+
+            snapshot.TableColumns[tableName.Trim()] = normalized;
+        }
+
+        public static List<DatabaseRestoreColumnSnapshot> CreateColumnSnapshots(string tableName, DataTable columns)
+        {
+            List<DatabaseRestoreColumnSnapshot> output = new List<DatabaseRestoreColumnSnapshot>();
+            if (columns == null) return output;
+
+            foreach (DataRow row in columns.Rows)
+            {
+                string name = FirstColumnValue(row, "Name", "name", "COLUMN_NAME", "column_name", "Field");
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                output.Add(new DatabaseRestoreColumnSnapshot
+                {
+                    TableName = tableName ?? string.Empty,
+                    Name = name,
+                    DataType = FirstColumnValue(row, "DataType", "Type", "type", "DATA_TYPE", "data_type"),
+                    IsNullable = FirstColumnValue(row, "IsNullable", "Nullable", "IS_NULLABLE", "nullable", "NotNull", "not_null"),
+                    DefaultValue = FirstColumnValue(row, "Default", "default", "DefaultValue", "default_value", "COLUMN_DEFAULT", "column_default", "dflt_value"),
+                    Comment = FirstColumnValue(row, "Comment", "comment", "description", "remarks"),
+                    OrdinalPosition = ParseInt(FirstColumnValue(row, "OrdinalPosition", "ORDINAL_POSITION", "ordinal_position", "cid", "Seq"))
+                });
+            }
+
+            return NormalizeColumns(tableName, output);
+        }
+
         public static string BuildSummary(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after)
         {
             if (before == null || after == null) return string.Empty;
@@ -83,6 +139,11 @@ namespace mySQLPunk.lib
                 BuildLine("函式/程序", before.FunctionCount, after.FunctionCount, before.Functions, after.Functions),
                 BuildLine("事件/Trigger", before.EventCount, after.EventCount, before.Events, after.Events)
             };
+            string columnDiff = BuildColumnDiffSummary(before, after);
+            if (!string.IsNullOrWhiteSpace(columnDiff))
+            {
+                lines.Add("欄位差異：" + columnDiff);
+            }
             return string.Join(Environment.NewLine, lines);
         }
 
@@ -109,6 +170,68 @@ namespace mySQLPunk.lib
             return string.Join("；", parts);
         }
 
+        private static string BuildColumnDiffSummary(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after)
+        {
+            if ((before.TableColumns == null || before.TableColumns.Count == 0) &&
+                (after.TableColumns == null || after.TableColumns.Count == 0))
+            {
+                return string.Empty;
+            }
+
+            List<string> details = new List<string>();
+            List<string> tableNames = new List<string>();
+            if (before.TableColumns != null) tableNames.AddRange(before.TableColumns.Keys);
+            if (after.TableColumns != null) tableNames.AddRange(after.TableColumns.Keys);
+
+            foreach (string tableName in NormalizeNames(tableNames))
+            {
+                List<DatabaseRestoreColumnSnapshot> beforeColumns = GetColumnsForTable(before, tableName);
+                List<DatabaseRestoreColumnSnapshot> afterColumns = GetColumnsForTable(after, tableName);
+                Dictionary<string, DatabaseRestoreColumnSnapshot> beforeMap = beforeColumns.ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
+                Dictionary<string, DatabaseRestoreColumnSnapshot> afterMap = afterColumns.ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
+
+                List<string> added = afterMap.Keys.Except(beforeMap.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
+                List<string> removed = beforeMap.Keys.Except(afterMap.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
+                foreach (string column in added) details.Add("新增 " + tableName + "." + column);
+                foreach (string column in removed) details.Add("移除 " + tableName + "." + column);
+
+                List<string> common = beforeMap.Keys.Intersect(afterMap.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
+                foreach (string column in common)
+                {
+                    string change = BuildColumnChangeDetail(beforeMap[column], afterMap[column]);
+                    if (!string.IsNullOrWhiteSpace(change)) details.Add("變更 " + tableName + "." + column + "（" + change + "）");
+                }
+            }
+
+            if (details.Count == 0) return string.Empty;
+            return FormatNameList(details);
+        }
+
+        private static string BuildColumnChangeDetail(DatabaseRestoreColumnSnapshot before, DatabaseRestoreColumnSnapshot after)
+        {
+            List<string> parts = new List<string>();
+            AddChangedPart(parts, "型別", before.DataType, after.DataType);
+            AddChangedPart(parts, "NULL", before.IsNullable, after.IsNullable);
+            AddChangedPart(parts, "預設", before.DefaultValue, after.DefaultValue);
+            AddChangedPart(parts, "註解", before.Comment, after.Comment);
+            return string.Join("；", parts);
+        }
+
+        private static void AddChangedPart(List<string> parts, string label, string before, string after)
+        {
+            string oldValue = NormalizeText(before);
+            string newValue = NormalizeText(after);
+            if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase)) return;
+            parts.Add(label + "：" + FormatValue(oldValue) + " -> " + FormatValue(newValue));
+        }
+
+        private static List<DatabaseRestoreColumnSnapshot> GetColumnsForTable(DatabaseRestoreSnapshot snapshot, string tableName)
+        {
+            List<DatabaseRestoreColumnSnapshot> columns;
+            if (snapshot == null || snapshot.TableColumns == null || string.IsNullOrWhiteSpace(tableName)) return new List<DatabaseRestoreColumnSnapshot>();
+            return snapshot.TableColumns.TryGetValue(tableName, out columns) ? columns : new List<DatabaseRestoreColumnSnapshot>();
+        }
+
         private static List<string> NormalizeNames(IEnumerable<string> names)
         {
             if (names == null) return new List<string>();
@@ -118,6 +241,62 @@ namespace mySQLPunk.lib
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private static List<DatabaseRestoreColumnSnapshot> NormalizeColumns(string tableName, IEnumerable<DatabaseRestoreColumnSnapshot> columns)
+        {
+            if (columns == null) return new List<DatabaseRestoreColumnSnapshot>();
+
+            return columns
+                .Where(column => column != null && !string.IsNullOrWhiteSpace(column.Name))
+                .GroupBy(column => column.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    DatabaseRestoreColumnSnapshot column = group.OrderBy(c => c.OrdinalPosition <= 0 ? int.MaxValue : c.OrdinalPosition).First();
+                    return new DatabaseRestoreColumnSnapshot
+                    {
+                        TableName = string.IsNullOrWhiteSpace(column.TableName) ? (tableName ?? string.Empty).Trim() : column.TableName.Trim(),
+                        Name = column.Name.Trim(),
+                        DataType = NormalizeText(column.DataType),
+                        IsNullable = NormalizeText(column.IsNullable),
+                        DefaultValue = NormalizeText(column.DefaultValue),
+                        Comment = NormalizeText(column.Comment),
+                        OrdinalPosition = column.OrdinalPosition
+                    };
+                })
+                .OrderBy(column => column.OrdinalPosition <= 0 ? int.MaxValue : column.OrdinalPosition)
+                .ThenBy(column => column.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string FirstColumnValue(DataRow row, params string[] names)
+        {
+            if (row == null || row.Table == null) return string.Empty;
+            foreach (string name in names)
+            {
+                if (row.Table.Columns.Contains(name) && row[name] != DBNull.Value)
+                {
+                    return Convert.ToString(row[name]);
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static int ParseInt(string value)
+        {
+            int output;
+            return int.TryParse((value ?? string.Empty).Trim(), out output) ? output : 0;
+        }
+
+        private static string NormalizeText(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+        }
+
+        private static string FormatValue(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "空白" : value;
         }
 
         private static string FormatNameList(List<string> names)
