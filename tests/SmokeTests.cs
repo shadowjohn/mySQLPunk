@@ -150,6 +150,23 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlOffsetFetchPreview, "CanConvert"), "SQL Server target should keep OFFSET FETCH syntax.");
         string mssqlOffsetFetchSql = (string)GetProperty(mssqlOffsetFetchPreview, "ConvertedSql");
         AssertContains(mssqlOffsetFetchSql, "OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY", "Converted SQL Server SQL should keep OFFSET FETCH.");
+
+        object mysqlFetchFirstPreview = BuildViewSqlPreview(
+            "SELECT id, created_at FROM logs ORDER BY created_at DESC FETCH FIRST 12 ROWS ONLY",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlFetchFirstPreview, "CanConvert"), "Oracle FETCH FIRST should convert to MySQL.");
+        string mysqlFetchFirstSql = (string)GetProperty(mysqlFetchFirstPreview, "ConvertedSql");
+        AssertContains(mysqlFetchFirstSql, "ORDER BY created_at DESC LIMIT 12", "Converted MySQL SQL should use LIMIT for FETCH FIRST.");
+        AssertNotContains(mysqlFetchFirstSql, "FETCH FIRST", "Converted MySQL SQL should remove FETCH FIRST.");
+
+        object mssqlFetchFirstPreview = BuildViewSqlPreview(
+            "SELECT id, created_at FROM logs FETCH FIRST 7 ROWS ONLY",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlFetchFirstPreview, "CanConvert"), "PostgreSQL FETCH FIRST should convert to SQL Server.");
+        string mssqlFetchFirstSql = (string)GetProperty(mssqlFetchFirstPreview, "ConvertedSql");
+        AssertContains(mssqlFetchFirstSql, "SELECT TOP (7) id, created_at FROM logs", "Converted SQL Server SQL should use TOP for FETCH FIRST.");
     }
 
     private static void TestAdvancedViewSqlConversion()

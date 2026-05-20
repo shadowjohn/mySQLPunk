@@ -323,6 +323,8 @@ namespace mySQLPunk.lib
                 return false;
             if (!TryRewriteOffsetFetchClause(rewrittenSql, provider, out rewrittenSql, out reason))
                 return false;
+            if (!TryRewriteFetchFirstClause(rewrittenSql, provider, out rewrittenSql, out reason))
+                return false;
             if (!TryRewriteRownumPredicate(rewrittenSql, provider, out rewrittenSql, out reason))
                 return false;
 
@@ -424,6 +426,31 @@ namespace mySQLPunk.lib
             string offset = match.Groups["offset"].Value;
             string limit = match.Groups["limit"].Value;
             rewrittenSql = body + " LIMIT " + limit + " OFFSET " + offset;
+            return true;
+        }
+
+        private static bool TryRewriteFetchFirstClause(string selectSql, string targetProvider, out string rewrittenSql, out string reason)
+        {
+            rewrittenSql = selectSql;
+            reason = "";
+            if (Regex.IsMatch(
+                selectSql,
+                @"\bOFFSET\s+\d+\s+ROWS\s+FETCH\s+(?:NEXT|FIRST)\s+\d+\s+ROWS\s+ONLY\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline))
+            {
+                return true;
+            }
+
+            Match match = Regex.Match(
+                selectSql,
+                @"\s+FETCH\s+(?:FIRST|NEXT)\s+(?<limit>\d+)\s+ROWS\s+ONLY\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!match.Success) return true;
+            if (targetProvider == "oracle") return true;
+
+            string body = selectSql.Substring(0, match.Index).Trim();
+            string limit = match.Groups["limit"].Value;
+            rewrittenSql = AppendRowLimit(body, targetProvider, limit);
             return true;
         }
 
