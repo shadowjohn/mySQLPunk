@@ -1097,6 +1097,25 @@ public static class SmokeTests
         string mssqlCeilSql = (string)GetProperty(mssqlCeilPreview, "ConvertedSql");
         AssertContains(mssqlCeilSql, "CEILING(total_amount / 100.0)", "Converted SQL Server SQL should use CEILING.");
 
+        object mssqlToNumberPreview = BuildViewSqlPreview(
+            "SELECT TO_NUMBER(total_text) AS total_value, TO_NUMBER(rate_text, '999D99') AS rate_value FROM orders",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlToNumberPreview, "CanConvert"), "Oracle TO_NUMBER should convert to SQL Server.");
+        string mssqlToNumberSql = (string)GetProperty(mssqlToNumberPreview, "ConvertedSql");
+        AssertContains(mssqlToNumberSql, "CAST(total_text AS decimal(18,4))", "Converted SQL Server SQL should cast TO_NUMBER value.");
+        AssertContains(mssqlToNumberSql, "CAST(rate_text AS decimal(18,4))", "Converted SQL Server SQL should cast formatted TO_NUMBER value.");
+        AssertNotContains(mssqlToNumberSql, "TO_NUMBER", "Converted SQL Server SQL should remove TO_NUMBER.");
+
+        object sqliteToNumberPreview = BuildViewSqlPreview(
+            "SELECT TO_NUMBER(total_text) AS total_value FROM orders",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteToNumberPreview, "CanConvert"), "Oracle TO_NUMBER should convert to SQLite.");
+        string sqliteToNumberSql = (string)GetProperty(sqliteToNumberPreview, "ConvertedSql");
+        AssertContains(sqliteToNumberSql, "CAST(total_text AS NUMERIC)", "Converted SQLite SQL should cast TO_NUMBER value.");
+        AssertNotContains(sqliteToNumberSql, "TO_NUMBER", "Converted SQLite SQL should remove TO_NUMBER.");
+
         object oracleCeilingPreview = BuildViewSqlPreview(
             "SELECT CEILING(total_amount / 100.0) AS bill_units FROM orders",
             "mssql",

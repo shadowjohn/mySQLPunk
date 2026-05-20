@@ -544,7 +544,8 @@ namespace mySQLPunk.lib
 
         private static string RewriteNumericFunctions(string selectSql, string targetProvider)
         {
-            string sql = RewritePowerFunctions(selectSql, targetProvider);
+            string sql = RewriteOracleToNumberFunctions(selectSql, targetProvider);
+            sql = RewritePowerFunctions(sql, targetProvider);
             if (targetProvider == "mssql")
             {
                 sql = Regex.Replace(
@@ -564,6 +565,37 @@ namespace mySQLPunk.lib
                 @"\bCEILING\s*\(",
                 "CEIL(",
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteOracleToNumberFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "oracle") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bTO_NUMBER\s*\((?<args>[^()]*)\)",
+                m => RewriteOracleToNumberFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteOracleToNumberFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count == 0 || args.Count > 2) return match.Value;
+
+            string targetType = GetGenericNumericCastType(targetProvider);
+            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+
+            return "CAST(" + args[0] + " AS " + targetType + ")";
+        }
+
+        private static string GetGenericNumericCastType(string targetProvider)
+        {
+            if (targetProvider == "sqlite") return "NUMERIC";
+            if (targetProvider == "postgresql") return "numeric";
+            if (targetProvider == "mysql") return "DECIMAL(18,4)";
+            if (targetProvider == "mssql") return "decimal(18,4)";
+            return "";
         }
 
         private static string RewritePowerFunctions(string selectSql, string targetProvider)
