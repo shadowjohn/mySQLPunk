@@ -1519,6 +1519,22 @@ public static class SmokeTests
         string sqlitePositionSql = (string)GetProperty(sqlitePositionPreview, "ConvertedSql");
         AssertContains(sqlitePositionSql, "INSTR(email, '@')", "Converted SQLite SQL should use INSTR.");
 
+        object mysqlPositionStartPreview = BuildViewSqlPreview(
+            "SELECT CHARINDEX('@', email, 3) AS at_pos FROM users",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlPositionStartPreview, "CanConvert"), "SQL Server CHARINDEX with start should convert to MySQL.");
+        string mysqlPositionStartSql = (string)GetProperty(mysqlPositionStartPreview, "ConvertedSql");
+        AssertContains(mysqlPositionStartSql, "LOCATE('@', email, 3)", "Converted MySQL SQL should preserve CHARINDEX start position.");
+
+        object sqlitePositionStartPreview = BuildViewSqlPreview(
+            "SELECT INSTR(email, '@', 3) AS at_pos FROM users",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqlitePositionStartPreview, "CanConvert"), "Oracle INSTR with start should convert to SQLite.");
+        string sqlitePositionStartSql = (string)GetProperty(sqlitePositionStartPreview, "ConvertedSql");
+        AssertContains(sqlitePositionStartSql, "CASE WHEN INSTR(SUBSTR(email, 3), '@') = 0 THEN 0 ELSE INSTR(SUBSTR(email, 3), '@') + 3 - 1 END", "Converted SQLite SQL should preserve INSTR start position.");
+
         object mysqlIlikePreview = BuildViewSqlPreview(
             "SELECT id FROM users WHERE email ILIKE '%@example.com'",
             "postgresql",

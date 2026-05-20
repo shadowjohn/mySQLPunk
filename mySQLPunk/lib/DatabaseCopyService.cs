@@ -2370,14 +2370,18 @@ namespace mySQLPunk.lib
         {
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
             if (args.Count < 2) return match.Value;
-            return BuildStringPositionFunction(targetProvider, args[0], args[1]);
+            return args.Count >= 3
+                ? BuildStringPositionFunction(targetProvider, args[0], args[1], args[2])
+                : BuildStringPositionFunction(targetProvider, args[0], args[1]);
         }
 
         private static string RewriteStringPositionFromHaystackNeedle(Match match, string targetProvider)
         {
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
             if (args.Count < 2) return match.Value;
-            return BuildStringPositionFunction(targetProvider, args[1], args[0]);
+            return args.Count >= 3
+                ? BuildStringPositionFunction(targetProvider, args[1], args[0], args[2])
+                : BuildStringPositionFunction(targetProvider, args[1], args[0]);
         }
 
         private static string BuildStringPositionFunction(string targetProvider, string needle, string haystack)
@@ -2386,6 +2390,23 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql") return "CHARINDEX(" + needle + ", " + haystack + ")";
             if (targetProvider == "postgresql") return "POSITION(" + needle + " IN " + haystack + ")";
             return "INSTR(" + haystack + ", " + needle + ")";
+        }
+
+        private static string BuildStringPositionFunction(string targetProvider, string needle, string haystack, string start)
+        {
+            if (string.IsNullOrWhiteSpace(start)) return BuildStringPositionFunction(targetProvider, needle, haystack);
+            if (targetProvider == "mysql") return "LOCATE(" + needle + ", " + haystack + ", " + start + ")";
+            if (targetProvider == "mssql") return "CHARINDEX(" + needle + ", " + haystack + ", " + start + ")";
+            if (targetProvider == "oracle") return "INSTR(" + haystack + ", " + needle + ", " + start + ")";
+
+            if (targetProvider == "postgresql")
+            {
+                string scopedPosition = "POSITION(" + needle + " IN SUBSTRING(" + haystack + " FROM " + start + "))";
+                return "(CASE WHEN " + scopedPosition + " = 0 THEN 0 ELSE " + scopedPosition + " + " + start + " - 1 END)";
+            }
+
+            string sqlitePosition = "INSTR(SUBSTR(" + haystack + ", " + start + "), " + needle + ")";
+            return "(CASE WHEN " + sqlitePosition + " = 0 THEN 0 ELSE " + sqlitePosition + " + " + start + " - 1 END)";
         }
 
         private static string RewriteStringAggregateFunctions(string selectSql, string targetProvider)
