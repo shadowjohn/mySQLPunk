@@ -256,6 +256,13 @@ namespace mySQLPunk.lib
 
     internal static class ViewSqlDialectConverter
     {
+        private sealed class JsonTableColumn
+        {
+            public string Name { get; set; }
+            public string SqlType { get; set; }
+            public string JsonPath { get; set; }
+        }
+
         public static ViewSqlConversionPreview BuildPreview(string sourceViewSql, string sourceProvider, string targetProvider)
         {
             string convertedSql;
@@ -523,6 +530,7 @@ namespace mySQLPunk.lib
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
+            sql = RewriteJsonTableExpressions(sql, targetProvider);
             sql = RewritePostgreSqlJsonOperators(sql, targetProvider);
             sql = RewriteJsonExistsFunctions(sql, targetProvider);
             sql = RewriteJsonLengthFunctions(sql, targetProvider);
@@ -2599,6 +2607,337 @@ namespace mySQLPunk.lib
             return match.Value;
         }
 
+        private static string RewriteJsonTableExpressions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql" || targetProvider == "oracle") return selectSql;
+            if (targetProvider != "postgresql" && targetProvider != "mssql") return selectSql;
+
+            string sql = selectSql ?? string.Empty;
+            int searchIndex = 0;
+            while (searchIndex < sql.Length)
+            {
+                int jsonTableIndex = IndexOfKeyword(sql, "JSON_TABLE", searchIndex);
+                if (jsonTableIndex < 0) break;
+
+                int openParen = SkipWhitespaceRight(sql, jsonTableIndex + "JSON_TABLE".Length);
+                if (openParen >= sql.Length || sql[openParen] != '(')
+                {
+                    searchIndex = jsonTableIndex + "JSON_TABLE".Length;
+                    continue;
+                }
+
+                int closeParen = FindMatchingCloseParen(sql, openParen);
+                if (closeParen < 0) break;
+
+                string inner = sql.Substring(openParen + 1, closeParen - openParen - 1);
+                string sourceExpr;
+                string arrayPath;
+                List<JsonTableColumn> columns;
+                if (!TryParseJsonTableArguments(inner, out sourceExpr, out arrayPath, out columns))
+                {
+                    searchIndex = closeParen + 1;
+                    continue;
+                }
+
+                int replacementEnd = closeParen + 1;
+                string alias = ReadJsonTableAlias(sql, closeParen + 1, out replacementEnd);
+                if (string.IsNullOrWhiteSpace(alias)) alias = "json_rows";
+
+                string replacement = targetProvider == "postgresql"
+                    ? BuildPostgreSqlJsonTableExpression(sourceExpr, arrayPath, columns, alias)
+                    : BuildSqlServerJsonTableExpression(sourceExpr, arrayPath, columns, alias);
+
+                if (string.IsNullOrWhiteSpace(replacement))
+                {
+                    searchIndex = closeParen + 1;
+                    continue;
+                }
+
+                sql = sql.Substring(0, jsonTableIndex) + replacement + sql.Substring(replacementEnd);
+                searchIndex = jsonTableIndex + replacement.Length;
+            }
+
+            return sql;
+        }
+
+        private static bool TryParseJsonTableArguments(string inner, out string sourceExpr, out string arrayPath, out List<JsonTableColumn> columns)
+        {
+            sourceExpr = "";
+            arrayPath = "";
+            columns = new List<JsonTableColumn>();
+
+            List<string> args = SplitTopLevelSqlList(inner);
+            if (args.Count != 2) return false;
+
+            Match match = Regex.Match(
+                args[1],
+                @"^\s*'(?<path>(?:''|[^'])*)'\s+COLUMNS\s*\((?<columns>.*)\)\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!match.Success) return false;
+
+            sourceExpr = args[0].Trim();
+            arrayPath = TrimSqlStringLiteral("'" + match.Groups["path"].Value + "'");
+            List<string> columnTexts = SplitTopLevelSqlList(match.Groups["columns"].Value);
+            if (columnTexts.Count == 0) return false;
+
+            foreach (string columnText in columnTexts)
+            {
+                JsonTableColumn column;
+                if (!TryParseJsonTableColumn(columnText, out column)) return false;
+                columns.Add(column);
+            }
+
+            return !string.IsNullOrWhiteSpace(sourceExpr) &&
+                   !string.IsNullOrWhiteSpace(arrayPath) &&
+                   columns.Count > 0;
+        }
+
+        private static bool TryParseJsonTableColumn(string columnText, out JsonTableColumn column)
+        {
+            column = null;
+            Match match = Regex.Match(
+                columnText ?? "",
+                @"^\s*(?<name>[A-Za-z_][A-Za-z0-9_]*|""[^""]+""|`[^`]+`|\[[^\]]+\])\s+(?<type>[A-Za-z][A-Za-z0-9_]*(?:\s*\([^)]*\))?)\s+PATH\s+'(?<path>(?:''|[^'])*)'\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!match.Success) return false;
+
+            string name = NormalizeJsonTableIdentifier(match.Groups["name"].Value);
+            string path = TrimSqlStringLiteral("'" + match.Groups["path"].Value + "'");
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(path) || !path.StartsWith("$", StringComparison.Ordinal)) return false;
+
+            column = new JsonTableColumn
+            {
+                Name = name,
+                SqlType = match.Groups["type"].Value.Trim(),
+                JsonPath = path
+            };
+            return true;
+        }
+
+        private static string BuildPostgreSqlJsonTableExpression(string sourceExpr, string arrayPath, List<JsonTableColumn> columns, string alias)
+        {
+            string rowSource = BuildPostgreSqlJsonTableRowSource(sourceExpr, arrayPath);
+            if (string.IsNullOrWhiteSpace(rowSource)) return "";
+
+            List<string> definitions = new List<string>();
+            foreach (JsonTableColumn column in columns)
+            {
+                definitions.Add(column.Name + " " + MapJsonTableTypeForPostgreSql(column.SqlType));
+            }
+
+            return "jsonb_to_recordset(" + rowSource + ") AS " + alias + "(" + string.Join(", ", definitions.ToArray()) + ")";
+        }
+
+        private static string BuildPostgreSqlJsonTableRowSource(string sourceExpr, string arrayPath)
+        {
+            string path = NormalizeJsonTableArrayPath(arrayPath);
+            if (string.IsNullOrWhiteSpace(path)) return "";
+            if (path == "$") return sourceExpr + "::jsonb";
+
+            string pgPath = BuildPostgreSqlJsonPath(path);
+            if (string.IsNullOrWhiteSpace(pgPath)) return "";
+            return sourceExpr + "::jsonb #> " + pgPath;
+        }
+
+        private static string BuildSqlServerJsonTableExpression(string sourceExpr, string arrayPath, List<JsonTableColumn> columns, string alias)
+        {
+            string path = NormalizeJsonTableArrayPath(arrayPath);
+            if (string.IsNullOrWhiteSpace(path)) return "";
+
+            List<string> definitions = new List<string>();
+            foreach (JsonTableColumn column in columns)
+            {
+                definitions.Add(column.Name + " " + MapJsonTableTypeForSqlServer(column.SqlType) + " '" + EscapeSqlString(column.JsonPath) + "'");
+            }
+
+            string openJson = path == "$"
+                ? "OPENJSON(" + sourceExpr + ")"
+                : "OPENJSON(" + sourceExpr + ", '" + EscapeSqlString(path) + "')";
+            return openJson + " WITH (" + string.Join(", ", definitions.ToArray()) + ") AS " + alias;
+        }
+
+        private static string NormalizeJsonTableArrayPath(string arrayPath)
+        {
+            string path = (arrayPath ?? "").Trim();
+            if (path == "$[*]") return "$";
+            if (path.EndsWith("[*]", StringComparison.Ordinal)) return path.Substring(0, path.Length - 3);
+            return path;
+        }
+
+        private static string MapJsonTableTypeForPostgreSql(string sqlType)
+        {
+            string type = (sqlType ?? "").Trim().ToLowerInvariant();
+            if (Regex.IsMatch(type, @"^(int|integer)$")) return "integer";
+            if (Regex.IsMatch(type, @"^bigint$")) return "bigint";
+            if (Regex.IsMatch(type, @"^(decimal|numeric)(\s*\([^)]*\))?$")) return Regex.Replace(type, @"^decimal", "numeric");
+            if (Regex.IsMatch(type, @"^(double|float|real)(\s*\([^)]*\))?$")) return "double precision";
+            if (Regex.IsMatch(type, @"^(bool|boolean|bit)$")) return "boolean";
+            if (Regex.IsMatch(type, @"^date$")) return "date";
+            if (Regex.IsMatch(type, @"^(datetime|datetime2|timestamp)$")) return "timestamp";
+            return "text";
+        }
+
+        private static string MapJsonTableTypeForSqlServer(string sqlType)
+        {
+            string type = (sqlType ?? "").Trim().ToLowerInvariant();
+            if (Regex.IsMatch(type, @"^(int|integer)$")) return "int";
+            if (Regex.IsMatch(type, @"^bigint$")) return "bigint";
+            if (Regex.IsMatch(type, @"^(decimal|numeric)(\s*\([^)]*\))?$")) return type;
+            if (Regex.IsMatch(type, @"^(double|float|real)(\s*\([^)]*\))?$")) return "float";
+            if (Regex.IsMatch(type, @"^(bool|boolean|bit)$")) return "bit";
+            if (Regex.IsMatch(type, @"^date$")) return "date";
+            if (Regex.IsMatch(type, @"^(datetime|datetime2|timestamp)$")) return "datetime2";
+
+            Match length = Regex.Match(type, @"^(?:varchar|nvarchar|char|nchar)\s*\((?<length>max|\d+)\)$", RegexOptions.IgnoreCase);
+            if (length.Success) return "nvarchar(" + length.Groups["length"].Value + ")";
+            return "nvarchar(max)";
+        }
+
+        private static string NormalizeJsonTableIdentifier(string identifier)
+        {
+            string text = (identifier ?? "").Trim();
+            if (text.Length >= 2 && ((text[0] == '"' && text[text.Length - 1] == '"') ||
+                                     (text[0] == '`' && text[text.Length - 1] == '`') ||
+                                     (text[0] == '[' && text[text.Length - 1] == ']')))
+            {
+                text = text.Substring(1, text.Length - 2);
+            }
+
+            return Regex.IsMatch(text, @"^[A-Za-z_][A-Za-z0-9_]*$") ? text : "";
+        }
+
+        private static string ReadJsonTableAlias(string sql, int startIndex, out int aliasEnd)
+        {
+            int index = SkipWhitespaceRight(sql, startIndex);
+            aliasEnd = startIndex;
+            if (index >= sql.Length) return "";
+
+            if (StartsWithKeywordAt(sql, index, "AS"))
+            {
+                index = SkipWhitespaceRight(sql, index + 2);
+            }
+
+            if (index >= sql.Length || !IsIdentifierStartChar(sql[index])) return "";
+            int end = index + 1;
+            while (end < sql.Length && IsSimpleIdentifierChar(sql[end])) end++;
+
+            aliasEnd = end;
+            return sql.Substring(index, end - index);
+        }
+
+        private static int IndexOfKeyword(string text, string keyword, int startIndex)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(keyword)) return -1;
+
+            int index = Math.Max(0, startIndex);
+            while (index < text.Length)
+            {
+                int found = text.IndexOf(keyword, index, StringComparison.OrdinalIgnoreCase);
+                if (found < 0) return -1;
+                int before = found - 1;
+                int after = found + keyword.Length;
+                bool hasLeftBoundary = before < 0 || !IsSimpleIdentifierChar(text[before]);
+                bool hasRightBoundary = after >= text.Length || !IsSimpleIdentifierChar(text[after]);
+                if (hasLeftBoundary && hasRightBoundary) return found;
+                index = found + keyword.Length;
+            }
+
+            return -1;
+        }
+
+        private static bool StartsWithKeywordAt(string text, int index, string keyword)
+        {
+            if (index < 0 || string.IsNullOrEmpty(text) || string.IsNullOrEmpty(keyword)) return false;
+            if (index + keyword.Length > text.Length) return false;
+            if (!string.Equals(text.Substring(index, keyword.Length), keyword, StringComparison.OrdinalIgnoreCase)) return false;
+
+            int before = index - 1;
+            int after = index + keyword.Length;
+            return (before < 0 || !IsSimpleIdentifierChar(text[before])) &&
+                   (after >= text.Length || !IsSimpleIdentifierChar(text[after]));
+        }
+
+        private static bool IsIdentifierStartChar(char ch)
+        {
+            return char.IsLetter(ch) || ch == '_';
+        }
+
+        private static bool IsSimpleIdentifierChar(char ch)
+        {
+            return char.IsLetterOrDigit(ch) || ch == '_';
+        }
+
+        private static List<string> SplitTopLevelSqlList(string text)
+        {
+            List<string> items = new List<string>();
+            StringBuilder current = new StringBuilder();
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            bool inBracketQuote = false;
+            bool inBacktickQuote = false;
+            int depth = 0;
+
+            for (int i = 0; i < (text ?? string.Empty).Length; i++)
+            {
+                char ch = text[i];
+                if (inSingleQuote)
+                {
+                    current.Append(ch);
+                    if (ch == '\'' && i + 1 < text.Length && text[i + 1] == '\'')
+                    {
+                        current.Append(text[++i]);
+                    }
+                    else if (ch == '\'')
+                    {
+                        inSingleQuote = false;
+                    }
+                    continue;
+                }
+
+                if (inDoubleQuote)
+                {
+                    current.Append(ch);
+                    if (ch == '"') inDoubleQuote = false;
+                    continue;
+                }
+
+                if (inBracketQuote)
+                {
+                    current.Append(ch);
+                    if (ch == ']') inBracketQuote = false;
+                    continue;
+                }
+
+                if (inBacktickQuote)
+                {
+                    current.Append(ch);
+                    if (ch == '`') inBacktickQuote = false;
+                    continue;
+                }
+
+                if (ch == '\'') { inSingleQuote = true; current.Append(ch); continue; }
+                if (ch == '"') { inDoubleQuote = true; current.Append(ch); continue; }
+                if (ch == '[') { inBracketQuote = true; current.Append(ch); continue; }
+                if (ch == '`') { inBacktickQuote = true; current.Append(ch); continue; }
+                if (ch == '(') { depth++; current.Append(ch); continue; }
+                if (ch == ')') { if (depth > 0) depth--; current.Append(ch); continue; }
+
+                if (ch == ',' && depth == 0)
+                {
+                    string item = current.ToString().Trim();
+                    if (item.Length > 0) items.Add(item);
+                    current.Length = 0;
+                    continue;
+                }
+
+                current.Append(ch);
+            }
+
+            string tail = current.ToString().Trim();
+            if (tail.Length > 0) items.Add(tail);
+            return items;
+        }
+
         private static string TrimSqlStringLiteral(string value)
         {
             string text = (value ?? string.Empty).Trim();
@@ -2950,6 +3289,14 @@ namespace mySQLPunk.lib
                 Regex.IsMatch(featureSql, @"\bREGEXP_LIKE\s*\(|\b[A-Za-z_][A-Za-z0-9_\.]*\s+~\s+", RegexOptions.IgnoreCase))
             {
                 reason = "目標資料庫沒有通用內建正規表示式比對語法，無法安全自動轉換";
+                return true;
+            }
+
+            if (!provider.Equals("mysql", StringComparison.OrdinalIgnoreCase) &&
+                !provider.Equals("oracle", StringComparison.OrdinalIgnoreCase) &&
+                Regex.IsMatch(featureSql, @"\bJSON_TABLE\s*\(", RegexOptions.IgnoreCase))
+            {
+                reason = "JSON_TABLE 語法無法安全自動轉換為目標資料庫";
                 return true;
             }
 

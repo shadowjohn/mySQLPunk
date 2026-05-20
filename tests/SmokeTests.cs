@@ -342,6 +342,31 @@ public static class SmokeTests
         string sqliteJsonLengthSql = (string)GetProperty(sqliteJsonLengthPreview, "ConvertedSql");
         AssertContains(sqliteJsonLengthSql, "json_array_length(payload, '$.items')", "Converted SQLite SQL should use json_array_length.");
 
+        object pgJsonTablePreview = BuildViewSqlPreview(
+            "SELECT jt.item_id, jt.item_name FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (item_id INT PATH '$.id', item_name VARCHAR(80) PATH '$.name')) AS jt",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonTablePreview, "CanConvert"), "MySQL JSON_TABLE should convert to PostgreSQL.");
+        string pgJsonTableSql = (string)GetProperty(pgJsonTablePreview, "ConvertedSql");
+        AssertContains(pgJsonTableSql, "jsonb_to_recordset(o.payload::jsonb #> '{items}') AS jt(item_id integer, item_name text)", "Converted PostgreSQL SQL should use jsonb_to_recordset with column definitions.");
+        AssertNotContains(pgJsonTableSql, "JSON_TABLE", "Converted PostgreSQL SQL should remove JSON_TABLE.");
+
+        object mssqlJsonTablePreview = BuildViewSqlPreview(
+            "SELECT jt.item_id, jt.qty FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (item_id INTEGER PATH '$.id', qty DECIMAL(10,2) PATH '$.qty')) jt",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlJsonTablePreview, "CanConvert"), "Oracle JSON_TABLE should convert to SQL Server.");
+        string mssqlJsonTableSql = (string)GetProperty(mssqlJsonTablePreview, "ConvertedSql");
+        AssertContains(mssqlJsonTableSql, "OPENJSON(o.payload, '$.items') WITH (item_id int '$.id', qty decimal(10,2) '$.qty') AS jt", "Converted SQL Server SQL should use OPENJSON WITH.");
+        AssertNotContains(mssqlJsonTableSql, "JSON_TABLE", "Converted SQL Server SQL should remove JSON_TABLE.");
+
+        object sqliteJsonTablePreview = BuildViewSqlPreview(
+            "SELECT jt.item_id FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (item_id INT PATH '$.id')) AS jt",
+            "mysql",
+            "sqlite");
+        Assert(!(bool)GetProperty(sqliteJsonTablePreview, "CanConvert"), "JSON_TABLE should be rejected for SQLite until references can be rewritten safely.");
+        AssertContains((string)GetProperty(sqliteJsonTablePreview, "Reason"), "JSON_TABLE", "SQLite JSON_TABLE rejection should explain the unsupported syntax.");
+
         object sqliteNowPreview = BuildViewSqlPreview(
             "SELECT NOW() AS created_at FROM users",
             "mysql",
