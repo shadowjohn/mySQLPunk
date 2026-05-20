@@ -646,6 +646,19 @@ namespace mySQLPunk.lib
         {
             string sql = Regex.Replace(
                 selectSql,
+                @"\bCONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR)\s*(?:\(\s*\d+\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*(?<style>23|120)\s*\)",
+                m =>
+                {
+                    if (targetProvider == "mssql") return m.Value;
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string format = GetSqlServerConvertDateFormat(m.Groups["style"].Value);
+                    if (string.IsNullOrWhiteSpace(format)) return m.Value;
+                    return BuildDateFormatExpression(targetProvider, expr, TranslateDotNetDateFormatPattern(format, targetProvider));
+                },
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
                 @"\bDATE_FORMAT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
                 m =>
                 {
@@ -681,6 +694,13 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
 
             return sql;
+        }
+
+        private static string GetSqlServerConvertDateFormat(string style)
+        {
+            if (style == "23") return "yyyy-MM-dd";
+            if (style == "120") return "yyyy-MM-dd HH:mm:ss";
+            return "";
         }
 
         private static string RewriteDateDiffFunctions(string selectSql, string targetProvider)

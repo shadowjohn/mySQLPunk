@@ -199,6 +199,30 @@ public static class SmokeTests
         string sqliteToCharSql = (string)GetProperty(sqliteToCharPreview, "ConvertedSql");
         AssertContains(sqliteToCharSql, "strftime('%Y-%m-%d', created_at)", "Converted SQLite SQL should use strftime.");
 
+        object mysqlConvertDatePreview = BuildViewSqlPreview(
+            "SELECT CONVERT(varchar(10), created_at, 23) AS created_text FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlConvertDatePreview, "CanConvert"), "SQL Server CONVERT style 23 should convert to MySQL.");
+        string mysqlConvertDateSql = (string)GetProperty(mysqlConvertDatePreview, "ConvertedSql");
+        AssertContains(mysqlConvertDateSql, "DATE_FORMAT(created_at, '%Y-%m-%d')", "Converted MySQL SQL should use DATE_FORMAT for CONVERT style 23.");
+
+        object oracleConvertDateTimePreview = BuildViewSqlPreview(
+            "SELECT CONVERT(varchar(19), created_at, 120) AS created_text FROM orders",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleConvertDateTimePreview, "CanConvert"), "SQL Server CONVERT style 120 should convert to Oracle.");
+        string oracleConvertDateTimeSql = (string)GetProperty(oracleConvertDateTimePreview, "ConvertedSql");
+        AssertContains(oracleConvertDateTimeSql, "TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS')", "Converted Oracle SQL should use TO_CHAR for CONVERT style 120.");
+
+        object sqliteConvertDatePreview = BuildViewSqlPreview(
+            "SELECT CONVERT(char(10), created_at, 23) AS created_text FROM orders",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteConvertDatePreview, "CanConvert"), "SQL Server CONVERT style 23 should convert to SQLite.");
+        string sqliteConvertDateSql = (string)GetProperty(sqliteConvertDatePreview, "ConvertedSql");
+        AssertContains(sqliteConvertDateSql, "strftime('%Y-%m-%d', created_at)", "Converted SQLite SQL should use strftime for CONVERT style 23.");
+
         object mssqlDateOnlyPreview = BuildViewSqlPreview(
             "SELECT DATE(created_at) AS created_date FROM orders",
             "mysql",
