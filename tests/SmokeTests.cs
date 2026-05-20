@@ -631,6 +631,42 @@ public static class SmokeTests
         AssertContains(mysqlBooleanSql, "TRUE AS is_active", "Converted MySQL SQL should keep TRUE.");
         AssertContains(mysqlBooleanSql, "deleted = FALSE", "Converted MySQL SQL should keep FALSE.");
 
+        object mssqlPgCastPreview = BuildViewSqlPreview(
+            "SELECT amount::numeric(10,2) AS amount_value, created_at::timestamp AS created_at, 'amount::numeric' AS sample FROM orders",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlPgCastPreview, "CanConvert"), "PostgreSQL cast operators should convert to SQL Server CAST.");
+        string mssqlPgCastSql = (string)GetProperty(mssqlPgCastPreview, "ConvertedSql");
+        AssertContains(mssqlPgCastSql, "CAST(amount AS decimal(10,2))", "Converted SQL Server SQL should cast numeric precision.");
+        AssertContains(mssqlPgCastSql, "CAST(created_at AS datetime2)", "Converted SQL Server SQL should cast timestamp.");
+        AssertContains(mssqlPgCastSql, "'amount::numeric'", "Converted SQL Server SQL should preserve cast text in string literals.");
+
+        object mysqlPgCastPreview = BuildViewSqlPreview(
+            "SELECT user_id::bigint AS user_id, display_name::text AS display_name FROM users",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlPgCastPreview, "CanConvert"), "PostgreSQL cast operators should convert to MySQL CAST.");
+        string mysqlPgCastSql = (string)GetProperty(mysqlPgCastPreview, "ConvertedSql");
+        AssertContains(mysqlPgCastSql, "CAST(user_id AS SIGNED)", "Converted MySQL SQL should cast bigint to SIGNED.");
+        AssertContains(mysqlPgCastSql, "CAST(display_name AS CHAR)", "Converted MySQL SQL should cast text to CHAR.");
+
+        object oraclePgCastPreview = BuildViewSqlPreview(
+            "SELECT enabled::boolean AS enabled_flag, started_at::timestamptz AS started_at FROM flags",
+            "postgresql",
+            "oracle");
+        Assert((bool)GetProperty(oraclePgCastPreview, "CanConvert"), "PostgreSQL cast operators should convert to Oracle CAST.");
+        string oraclePgCastSql = (string)GetProperty(oraclePgCastPreview, "ConvertedSql");
+        AssertContains(oraclePgCastSql, "CAST(enabled AS NUMBER(1))", "Converted Oracle SQL should cast boolean to NUMBER(1).");
+        AssertContains(oraclePgCastSql, "CAST(started_at AS TIMESTAMP)", "Converted Oracle SQL should cast timestamp to TIMESTAMP.");
+
+        object pgCastPreview = BuildViewSqlPreview(
+            "SELECT amount::numeric(10,2) AS amount_value FROM orders",
+            "postgresql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCastPreview, "CanConvert"), "PostgreSQL target should keep native PostgreSQL cast operators.");
+        string pgCastSql = (string)GetProperty(pgCastPreview, "ConvertedSql");
+        AssertContains(pgCastSql, "amount::numeric(10,2)", "Converted PostgreSQL SQL should keep native cast syntax.");
+
         object pgPowPreview = BuildViewSqlPreview(
             "SELECT POW(score, 2) AS score_squared FROM exams",
             "mysql",

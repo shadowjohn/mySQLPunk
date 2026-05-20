@@ -459,6 +459,7 @@ namespace mySQLPunk.lib
             sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteComparisonFunctions(sql, targetProvider);
             sql = RewriteBooleanLiterals(sql, targetProvider);
+            sql = RewritePostgreSqlCastOperators(sql, sourceProvider, targetProvider);
             sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
@@ -555,6 +556,92 @@ namespace mySQLPunk.lib
                     "0",
                     RegexOptions.IgnoreCase);
             });
+        }
+
+        private static string RewritePostgreSqlCastOperators(string selectSql, string sourceProvider, string targetProvider)
+        {
+            if (sourceProvider != "postgresql" || targetProvider == "postgresql") return selectSql;
+
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                return Regex.Replace(
+                    segment,
+                    @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b|\([^)]+\))\s*::\s*(?<type>character\s+varying|varchar|char|text|integer|int|bigint|numeric|decimal|date|timestamptz|timestamp|datetime|boolean|bool)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?",
+                    m => RewritePostgreSqlCastOperator(m, targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string RewritePostgreSqlCastOperator(Match match, string targetProvider)
+        {
+            string targetType = MapPostgreSqlCastType(
+                match.Groups["type"].Value,
+                match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
+                match.Groups["scale"].Success ? match.Groups["scale"].Value : "",
+                targetProvider);
+            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+
+            return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
+        }
+
+        private static string MapPostgreSqlCastType(string pgType, string precision, string scale, string targetProvider)
+        {
+            string type = Regex.Replace((pgType ?? "").Trim().ToLowerInvariant(), @"\s+", " ");
+            bool hasPrecision = !string.IsNullOrWhiteSpace(precision);
+            string numericSuffix = hasPrecision ? "(" + precision + (string.IsNullOrWhiteSpace(scale) ? "" : "," + scale) + ")" : "";
+
+            if (type == "text" || type == "varchar" || type == "character varying" || type == "char")
+            {
+                if (targetProvider == "mssql") return hasPrecision ? "nvarchar(" + precision + ")" : "nvarchar(max)";
+                if (targetProvider == "mysql") return hasPrecision ? "CHAR(" + precision + ")" : "CHAR";
+                if (targetProvider == "oracle") return hasPrecision ? "VARCHAR2(" + precision + ")" : "VARCHAR2(4000)";
+                return "TEXT";
+            }
+
+            if (type == "integer" || type == "int")
+            {
+                if (targetProvider == "mysql") return "SIGNED";
+                if (targetProvider == "oracle") return "NUMBER(10)";
+                return "INTEGER";
+            }
+
+            if (type == "bigint")
+            {
+                if (targetProvider == "mysql") return "SIGNED";
+                if (targetProvider == "oracle") return "NUMBER(19)";
+                return "BIGINT";
+            }
+
+            if (type == "numeric" || type == "decimal")
+            {
+                if (targetProvider == "oracle") return hasPrecision ? "NUMBER" + numericSuffix : "NUMBER";
+                if (targetProvider == "sqlite") return "NUMERIC";
+                return hasPrecision ? "decimal" + numericSuffix : "decimal(18,4)";
+            }
+
+            if (type == "date")
+            {
+                if (targetProvider == "sqlite") return "TEXT";
+                return "date";
+            }
+
+            if (type == "timestamp" || type == "timestamptz" || type == "datetime")
+            {
+                if (targetProvider == "mssql") return "datetime2";
+                if (targetProvider == "mysql") return "DATETIME";
+                if (targetProvider == "oracle") return "TIMESTAMP";
+                return "TEXT";
+            }
+
+            if (type == "boolean" || type == "bool")
+            {
+                if (targetProvider == "mssql") return "bit";
+                if (targetProvider == "mysql") return "UNSIGNED";
+                if (targetProvider == "oracle") return "NUMBER(1)";
+                return "INTEGER";
+            }
+
+            return "";
         }
 
         private static string RewriteRandomFunctions(string selectSql, string sourceProvider, string targetProvider)
