@@ -2880,7 +2880,10 @@ namespace mySQLPunk
         {
             List<string> targetColumns = primaryKeys.Count > 0
                 ? primaryKeys
-                : columns.Where(c => row.Table.Columns.Contains(c.Name)).Select(c => c.Name).ToList();
+                : columns
+                    .Where(c => row.Table.Columns.Contains(c.Name) && IsOptimisticWhereComparableValue(row[c.Name, DataRowVersion.Original]))
+                    .Select(c => c.Name)
+                    .ToList();
             List<string> clauses = new List<string>();
 
             foreach (string columnName in targetColumns)
@@ -2905,6 +2908,12 @@ namespace mySQLPunk
             }
 
             return string.Join(" AND ", clauses);
+        }
+
+        private static bool IsOptimisticWhereComparableValue(object value)
+        {
+            if (IsDbNull(value)) return true;
+            return !(value is byte[]);
         }
 
         private void ExecOrThrow(string sql, Dictionary<string, object> parameters)

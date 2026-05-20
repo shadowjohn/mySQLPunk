@@ -34,6 +34,7 @@ public static class SmokeTests
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
+        Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
@@ -1166,6 +1167,121 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString("RecordGridFontName", oldGridFontName);
             ApplicationOptionSettings.SetInt("RecordGridFontSize", oldGridFontSize);
         }
+    }
+
+    private static void TestQueryTableEditOptimisticWhere()
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("id", typeof(int));
+        table.Columns.Add("name", typeof(string));
+        table.Columns.Add("note", typeof(string));
+        table.Columns.Add("payload", typeof(byte[]));
+        table.Rows.Add(7, "old name", DBNull.Value, new byte[] { 0x01, 0x02 });
+        table.AcceptChanges();
+        DataRow row = table.Rows[0];
+        row["name"] = "new name";
+
+        QueryForm form = (QueryForm)FormatterServices.GetUninitializedObject(typeof(QueryForm));
+        SetPrivateField(form, "_db", new FakeDumpDatabase());
+
+        Dictionary<string, object> primaryParameters = new Dictionary<string, object>();
+        int primaryIndex = 0;
+        string primaryWhere = BuildQueryFormWhereClause(
+            form,
+            row,
+            new[]
+            {
+                CreateQueryFormColumnInfo("id", true),
+                CreateQueryFormColumnInfo("name", false),
+                CreateQueryFormColumnInfo("payload", false)
+            },
+            new List<string> { "id" },
+            primaryParameters,
+            ref primaryIndex);
+        AssertEquals("\"id\" = :p0", primaryWhere, "Primary-key edit WHERE should only target the primary key.");
+        Assert(primaryParameters.Count == 1 && object.Equals(primaryParameters["p0"], 7), "Primary-key edit WHERE should bind the original key value.");
+
+        Dictionary<string, object> optimisticParameters = new Dictionary<string, object>();
+        int optimisticIndex = 0;
+        string optimisticWhere = BuildQueryFormWhereClause(
+            form,
+            row,
+            new[]
+            {
+                CreateQueryFormColumnInfo("id", false),
+                CreateQueryFormColumnInfo("name", false),
+                CreateQueryFormColumnInfo("note", false),
+                CreateQueryFormColumnInfo("payload", false)
+            },
+            new List<string>(),
+            optimisticParameters,
+            ref optimisticIndex);
+        AssertContains(optimisticWhere, "\"id\" = :p0", "No-primary-key edit WHERE should include comparable original values.");
+        AssertContains(optimisticWhere, "\"name\" = :p1", "No-primary-key edit WHERE should bind the original text value.");
+        AssertContains(optimisticWhere, "\"note\" IS NULL", "No-primary-key edit WHERE should keep NULL comparison semantics.");
+        AssertNotContains(optimisticWhere, "payload", "No-primary-key edit WHERE should skip BLOB values.");
+        AssertEquals("old name", (string)optimisticParameters["p1"], "No-primary-key edit WHERE should use the original value for optimistic locking.");
+
+        DataTable blobOnly = new DataTable();
+        blobOnly.Columns.Add("payload", typeof(byte[]));
+        blobOnly.Rows.Add(new byte[] { 0x01 });
+        blobOnly.AcceptChanges();
+        DataRow blobRow = blobOnly.Rows[0];
+        blobRow["payload"] = new byte[] { 0x02 };
+
+        bool rejectedUnsafeWhere = false;
+        try
+        {
+            Dictionary<string, object> blobParameters = new Dictionary<string, object>();
+            int blobIndex = 0;
+            BuildQueryFormWhereClause(
+                form,
+                blobRow,
+                new[] { CreateQueryFormColumnInfo("payload", false) },
+                new List<string>(),
+                blobParameters,
+                ref blobIndex);
+        }
+        catch (TargetInvocationException ex)
+        {
+            rejectedUnsafeWhere = ex.InnerException != null &&
+                ex.InnerException.Message.IndexOf("WHERE", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        Assert(rejectedUnsafeWhere, "No-primary-key edit WHERE should reject BLOB-only optimistic matching.");
+    }
+
+    private static string BuildQueryFormWhereClause(
+        QueryForm form,
+        DataRow row,
+        object[] columns,
+        List<string> primaryKeys,
+        Dictionary<string, object> parameters,
+        ref int index)
+    {
+        Type columnType = typeof(QueryForm).GetNestedType("TableColumnInfo", BindingFlags.NonPublic);
+        Type listType = typeof(List<>).MakeGenericType(columnType);
+        System.Collections.IList typedColumns = (System.Collections.IList)Activator.CreateInstance(listType);
+        foreach (object column in columns)
+        {
+            typedColumns.Add(column);
+        }
+
+        MethodInfo method = typeof(QueryForm).GetMethod("BuildWhereClause", BindingFlags.Instance | BindingFlags.NonPublic);
+        object[] args = { row, typedColumns, primaryKeys, parameters, index };
+        string where = (string)method.Invoke(form, args);
+        index = (int)args[4];
+        return where;
+    }
+
+    private static object CreateQueryFormColumnInfo(string name, bool isPrimaryKey)
+    {
+        Type columnType = typeof(QueryForm).GetNestedType("TableColumnInfo", BindingFlags.NonPublic);
+        object column = Activator.CreateInstance(columnType, true);
+        columnType.GetProperty("Name").SetValue(column, name, null);
+        columnType.GetProperty("IsPrimaryKey").SetValue(column, isPrimaryKey, null);
+        columnType.GetProperty("IsAutoIncrement").SetValue(column, false, null);
+        return column;
     }
 
     private static void TestDockableTabOptionService()
