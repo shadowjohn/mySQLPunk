@@ -140,11 +140,11 @@ Smoke test harness：
   - 完成內容：若網路/站台/SSL 等因素導致遠端載入失敗，會在重試後改用上次成功的本機快取，避免補註解功能完全不可用；補註解進度視窗會標示目前使用的是遠端字典、本機快取、匯入字典或已命名字典；Table Designer 的補註解下拉選單可手動匯入 / 匯出 JSON 字典檔，方便離線環境或團隊共用欄位註解對照；匯出的字典會包含 `version`、`exportedAtUtc`、`source`、`entryCount` 與 `signatureSha256`，匯入仍相容舊版純 key/value JSON；匯入前會顯示新增、更新、移除與不變項目的摘要與逐項表格，也會顯示字典來源簽章是否有效，使用者可檢查每個欄位的目前註解與匯入註解，確認後才覆蓋本機字典；也可以將目前字典另存為命名字典，之後直接從下拉選單切換、重新命名或刪除；同名命名字典被覆蓋前會自動保留上一版，使用者可從下拉選單比較歷史版本差異，確認後回復指定版本。
   - 後續方向：若需要更完整的字典協作，可再加入審核流程或團隊共享來源。
 
-- **既有資料表修改仍有不支援情境 ✅ provider ALTER smoke test 已補齊**
-  - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」；PostgreSQL Table Designer 已支援 `schema.table` 形式的既有資料表 SQL 產生，不再固定套用 `public` schema。
+- **既有資料表修改仍有不支援情境 ✅ provider ALTER 與進階索引 smoke test 已補齊**
+  - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」；PostgreSQL Table Designer 已支援 `schema.table` 形式的既有資料表 SQL 產生，不再固定套用 `public` schema；PostgreSQL / SQL Server / Oracle 的 FULLTEXT、SPATIAL 索引 SQL 產生已納入可重跑 smoke test。
   - 本輪補齊：PostgreSQL provider 會列出非 `public` schema 的 Table/View、Function 與 Trigger，並讓欄位、索引、資料瀏覽、列數、複製建表、View DDL 與批次寫入等主要操作依 `schema.table` 產生正確 SQL；QueryForm 資料表新增/更新/刪除與 Form1 共用物件 SQL（開啟查詢、Drop、Dump/DDL、資料產生、補註解）也會依 `schema.table` 寫入正確 schema；Table Designer 欄位修改、註解、Primary Key 變更與索引刪除的 SQL 預覽也會依目前資料表 schema 產生正確物件名稱；新增 View / Function 範本會沿用目前選取物件的 schema，避免在非預設 schema 工作時又產生 `public` / `dbo` 範本。
   - 本輪驗證：新增 MySQL / PostgreSQL / SQL Server / Oracle / SQLite 既有資料表 ALTER smoke test，覆蓋欄位改名、型別變更、NULL / DEFAULT、註解、新增欄位、MySQL 刪欄位，以及 SQLite 受限 ALTER 的重建表策略。
-  - 後續方向：進階索引、Primary Key 與 constraint 變更仍需依 provider 增加更多實機測試資料庫案例。
+  - 後續方向：Primary Key 與 constraint 變更仍需依 provider 增加更多實機測試資料庫案例；進階索引已先以 SQL builder smoke test 固定語法輸出，後續仍可補實機建立/刪除案例。
 
 - **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法 ✅ 主要 provider 與 SQLite 專用精靈已補齊**
   - 現況：Table Designer 支援 MySQL FULLTEXT/SPATIAL、PostgreSQL FULLTEXT GIN 與 SPATIAL GiST、SQL Server Full-Text / Spatial、Oracle CTXSYS/MDSYS 索引 SQL 產生；SQLite FTS virtual table、RTree 與 SpatiaLite spatial index 不混入一般索引 UI，改由 database 右鍵選單的專用精靈產生 SQL。

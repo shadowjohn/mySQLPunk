@@ -481,6 +481,36 @@ public static class SmokeTests
         AssertContains(sqliteSql, "CREATE TABLE", "SQLite create table SQL should be generated.");
         AssertContains(sqliteSql, "codex_smoke_sqlite", "SQLite create table SQL should include table name.");
         AssertContains(sqliteSql, "__mysqlpunk_column_comments", "SQLite create table SQL should include sidecar comments when comments exist.");
+
+        DataTable advancedIndexes = CreateDesignerIndexesTable();
+        AddDesignerIndex(advancedIndexes, "idx_docs_body_ft", "body, title", "FULLTEXT", "GIN", "");
+        AddDesignerIndex(advancedIndexes, "idx_docs_geom", "geom", "SPATIAL", "GIST", "");
+
+        string postgresqlIndexSql = BuildGenericCreateIndexSql(
+            CreateProvider<my_postgresql>(),
+            "main",
+            "public.docs",
+            advancedIndexes);
+        AssertContains(postgresqlIndexSql, "USING GIN", "PostgreSQL FULLTEXT index should use GIN.");
+        AssertContains(postgresqlIndexSql, "to_tsvector('simple'", "PostgreSQL FULLTEXT index should build a tsvector expression.");
+        AssertContains(postgresqlIndexSql, "USING GIST", "PostgreSQL SPATIAL index should use GIST.");
+
+        string sqlServerIndexSql = BuildGenericCreateIndexSql(
+            CreateProvider<my_mssql>(),
+            "main",
+            "dbo.docs",
+            advancedIndexes);
+        AssertContains(sqlServerIndexSql, "CREATE FULLTEXT INDEX ON [dbo].[docs]", "SQL Server FULLTEXT index should create a full-text index statement.");
+        AssertContains(sqlServerIndexSql, "[body] LANGUAGE 0x0", "SQL Server FULLTEXT index should include language-neutral columns.");
+        AssertContains(sqlServerIndexSql, "CREATE SPATIAL INDEX [idx_docs_geom]", "SQL Server SPATIAL index should create a spatial index.");
+
+        string oracleIndexSql = BuildGenericCreateIndexSql(
+            CreateProvider<my_oracle>(),
+            "MAIN",
+            "DOCS",
+            advancedIndexes);
+        AssertContains(oracleIndexSql, "INDEXTYPE IS CTXSYS.CONTEXT", "Oracle FULLTEXT index should use CTXSYS.CONTEXT.");
+        AssertContains(oracleIndexSql, "INDEXTYPE IS MDSYS.SPATIAL_INDEX", "Oracle SPATIAL index should use MDSYS.SPATIAL_INDEX.");
     }
 
     private static string BuildCreateTableSql(IDatabase db, string tableName)
@@ -1604,6 +1634,35 @@ public static class SmokeTests
         }
     }
 
+    private static string BuildGenericCreateIndexSql(IDatabase db, string databaseName, string tableName, DataTable indexes)
+    {
+        TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
+        DataGridView indexesGrid = new DataGridView();
+        indexesGrid.DataSource = indexes;
+
+        SetPrivateField(form, "_db", db);
+        SetPrivateField(form, "_databaseName", databaseName);
+        SetPrivateField(form, "_tableName", tableName);
+        SetPrivateField(form, "dgvIndexes", indexesGrid);
+
+        try
+        {
+            MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod("BuildGenericCreateIndexStatements", BindingFlags.Instance | BindingFlags.NonPublic);
+            System.Collections.IEnumerable statements = (System.Collections.IEnumerable)buildMethod.Invoke(form, new object[] { tableName });
+            StringBuilder builder = new StringBuilder();
+            foreach (object statement in statements)
+            {
+                if (builder.Length > 0) builder.AppendLine();
+                builder.Append(statement);
+            }
+            return builder.ToString();
+        }
+        finally
+        {
+            indexesGrid.Dispose();
+        }
+    }
+
     private static T CreateProvider<T>() where T : class, IDatabase
     {
         return (T)FormatterServices.GetUninitializedObject(typeof(T));
@@ -1667,13 +1726,25 @@ public static class SmokeTests
     private static DataTable CreateDesignerIndexesTable()
     {
         DataTable indexes = new DataTable();
-        indexes.Columns.Add("?迂");
-        indexes.Columns.Add("甈?");
-        indexes.Columns.Add("蝝Ｗ?憿?");
-        indexes.Columns.Add("蝝Ｗ??寞?");
-        indexes.Columns.Add("閮餉圾");
+        indexes.Columns.Add("名稱");
+        indexes.Columns.Add("欄位");
+        indexes.Columns.Add("索引類型");
+        indexes.Columns.Add("索引方法");
+        indexes.Columns.Add("註解");
         indexes.Columns.Add("_OldName");
         return indexes;
+    }
+
+    private static void AddDesignerIndex(DataTable table, string name, string columns, string indexType, string indexMethod, string comment)
+    {
+        DataRow row = table.NewRow();
+        row["名稱"] = name;
+        row["欄位"] = columns;
+        row["索引類型"] = indexType;
+        row["索引方法"] = indexMethod;
+        row["註解"] = comment;
+        row["_OldName"] = name;
+        table.Rows.Add(row);
     }
 
     private static void SetPrivateField(object target, string fieldName, object value)
