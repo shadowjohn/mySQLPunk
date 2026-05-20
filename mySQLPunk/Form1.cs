@@ -2280,7 +2280,11 @@ namespace mySQLPunk
             AddSortMenuItem(sortMenu, "註解");
             sortMenu.DropDownItems.Add(new ToolStripSeparator());
             sortMenu.DropDownItems.Add(new ToolStripMenuItem(Localization.T("View.AdvancedSort")) { Enabled = false });
-            sortMenu.DropDownItems.Add(new ToolStripMenuItem(Localization.T("View.ReverseSort")) { Enabled = false });
+            ToolStripMenuItem reverseSortItem = CreateCheckedViewMenuItem(
+                Localization.T("View.ReverseSort"),
+                ApplicationOptionSettings.GetBool("ViewSortDescending"),
+                value => SetSortDescending(value));
+            sortMenu.DropDownItems.Add(reverseSortItem);
 
             ToolStripMenuItem chooseColumnsItem = new ToolStripMenuItem(Localization.T("View.ChooseColumns"));
             chooseColumnsItem.Click += (s, e) => OpenViewColumnChooser();
@@ -2534,6 +2538,15 @@ namespace mySQLPunk
             UpdateMainStatus(Localization.Format("View.SortApplied", columnName));
         }
 
+        private void SetSortDescending(bool descending)
+        {
+            ApplicationOptionSettings.SetBool("ViewSortDescending", descending);
+            ApplicationOptionSettings.Save();
+            ApplyGridSortPreference();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T(descending ? "View.DescendingSortApplied" : "View.AscendingSortApplied"));
+        }
+
         private void ApplyGridSortPreference()
         {
             if (table_top == null) return;
@@ -2541,10 +2554,8 @@ namespace mySQLPunk
             if (table == null) return;
 
             string columnName = ApplicationOptionSettings.GetString("ViewSortColumn");
-            if (!string.IsNullOrWhiteSpace(columnName) && table.Columns.Contains(columnName))
-            {
-                table.DefaultView.Sort = "[" + columnName.Replace("]", "]]") + "] ASC";
-            }
+            string sortExpression = DataViewSortService.BuildSortExpression(table, columnName, ApplicationOptionSettings.GetBool("ViewSortDescending"));
+            table.DefaultView.Sort = sortExpression;
             ApplyObjectListFilter();
         }
 

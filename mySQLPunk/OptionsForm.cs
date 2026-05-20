@@ -1144,6 +1144,7 @@ namespace mySQLPunk
             BoolValues["ViewInfoPaneAiMode"] = false;
             BoolValues["ViewHideObjectGroups"] = false;
             BoolValues["ViewShowHiddenItems"] = false;
+            BoolValues["ViewSortDescending"] = false;
             BoolValues["SingleClickExpandsTree"] = false;
             BoolValues["AutoCompleteEnabled"] = true;
             BoolValues["AutoCompleteAutoRefresh"] = true;

@@ -40,6 +40,7 @@ public static class SmokeTests
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
         Run("Data view filter service", TestDataViewFilterService, ref passed);
+        Run("Data view sort service", TestDataViewSortService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
@@ -1994,6 +1995,24 @@ public static class SmokeTests
         AssertEquals("users", table.DefaultView[0]["名稱"].ToString(), "Top object filter should match literal percent content.");
 
         AssertEquals("", DataViewFilterService.BuildContainsFilter(table, ""), "Empty top object filter should clear row filter.");
+    }
+
+    private static void TestDataViewSortService()
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("名稱");
+        table.Columns.Add("列", typeof(int));
+        table.Rows.Add("users", 3);
+        table.Rows.Add("logs", 8);
+        table.Rows.Add("orders", 1);
+
+        table.DefaultView.Sort = DataViewSortService.BuildSortExpression(table, "列", false);
+        AssertEquals("orders", table.DefaultView[0]["名稱"].ToString(), "Ascending object list sort should put the smallest value first.");
+
+        table.DefaultView.Sort = DataViewSortService.BuildSortExpression(table, "列", true);
+        AssertEquals("logs", table.DefaultView[0]["名稱"].ToString(), "Descending object list sort should put the largest value first.");
+
+        AssertEquals("", DataViewSortService.BuildSortExpression(table, "不存在", true), "Missing sort column should clear sort expression safely.");
     }
 
     private static void TestWindowsCredentialService()

@@ -119,6 +119,8 @@ namespace mySQLPunk
             Add("View.ListModeApplied", "清單模式已套用。", "List mode applied.");
             Add("View.DetailModeApplied", "詳細資料模式已套用。", "Details mode applied.");
             Add("View.SortApplied", "排序已套用：{0}", "Sort applied: {0}");
+            Add("View.AscendingSortApplied", "遞增排序已套用。", "Ascending sort applied.");
+            Add("View.DescendingSortApplied", "遞減排序已套用。", "Descending sort applied.");
             Add("View.ColumnPreferencesApplied", "欄位顯示設定已套用。", "Column display preferences applied.");
             Add("View.AiPaneHint", "AI 助理資訊窗格已啟用。", "AI assistant info pane is enabled.");
 
