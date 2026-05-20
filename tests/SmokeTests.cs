@@ -373,6 +373,38 @@ public static class SmokeTests
         string mysqlStrToDateSql = (string)GetProperty(mysqlStrToDatePreview, "ConvertedSql");
         AssertContains(mysqlStrToDateSql, "STR_TO_DATE(created_text, '%Y-%m-%d')", "Converted MySQL SQL should keep STR_TO_DATE.");
 
+        object mssqlToTimestampPreview = BuildViewSqlPreview(
+            "SELECT TO_TIMESTAMP(created_text, 'YYYY-MM-DD HH24:MI:SS') AS created_at FROM orders",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlToTimestampPreview, "CanConvert"), "Oracle TO_TIMESTAMP should convert to SQL Server.");
+        string mssqlToTimestampSql = (string)GetProperty(mssqlToTimestampPreview, "ConvertedSql");
+        AssertContains(mssqlToTimestampSql, "CONVERT(datetime, created_text, 120)", "Converted SQL Server SQL should use CONVERT datetime style 120.");
+
+        object mysqlToTimestampPreview = BuildViewSqlPreview(
+            "SELECT TO_TIMESTAMP(created_text, 'YYYY-MM-DD HH24:MI:SS') AS created_at FROM orders",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlToTimestampPreview, "CanConvert"), "Oracle TO_TIMESTAMP should convert to MySQL.");
+        string mysqlToTimestampSql = (string)GetProperty(mysqlToTimestampPreview, "ConvertedSql");
+        AssertContains(mysqlToTimestampSql, "STR_TO_DATE(created_text, '%Y-%m-%d %H:%i:%s')", "Converted MySQL SQL should use STR_TO_DATE for timestamp parsing.");
+
+        object sqliteToTimestampPreview = BuildViewSqlPreview(
+            "SELECT TO_TIMESTAMP(created_text, 'YYYY-MM-DD') AS created_at FROM orders",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteToTimestampPreview, "CanConvert"), "Oracle TO_TIMESTAMP should convert to SQLite.");
+        string sqliteToTimestampSql = (string)GetProperty(sqliteToTimestampPreview, "ConvertedSql");
+        AssertContains(sqliteToTimestampSql, "datetime(created_text)", "Converted SQLite SQL should use datetime() for TO_TIMESTAMP even with date-only pattern.");
+
+        object pgToTimestampPreview = BuildViewSqlPreview(
+            "SELECT TO_TIMESTAMP(created_text, 'YYYY-MM-DD HH24:MI:SS') AS created_at FROM orders",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgToTimestampPreview, "CanConvert"), "PostgreSQL target should keep TO_TIMESTAMP.");
+        string pgToTimestampSql = (string)GetProperty(pgToTimestampPreview, "ConvertedSql");
+        AssertContains(pgToTimestampSql, "TO_TIMESTAMP(created_text, 'YYYY-MM-DD HH24:MI:SS')", "Converted PostgreSQL SQL should keep TO_TIMESTAMP.");
+
         object mssqlDateOnlyPreview = BuildViewSqlPreview(
             "SELECT DATE(created_at) AS created_date FROM orders",
             "mysql",

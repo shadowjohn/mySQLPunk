@@ -1078,13 +1078,25 @@ namespace mySQLPunk.lib
         {
             string sql = Regex.Replace(
                 selectSql,
+                @"\bTO_TIMESTAMP\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string format = m.Groups["format"].Value;
+                    if (targetProvider == "oracle" || targetProvider == "postgresql") return m.Value;
+                    return BuildDateParseExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider), true);
+                },
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
                 @"\bTO_DATE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
                 m =>
                 {
                     string expr = m.Groups["expr"].Value.Trim();
                     string format = m.Groups["format"].Value;
                     if (targetProvider == "oracle") return m.Value;
-                    return BuildDateParseExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider));
+                    return BuildDateParseExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider), false);
                 },
                 RegexOptions.IgnoreCase);
 
@@ -1096,7 +1108,7 @@ namespace mySQLPunk.lib
                     string expr = m.Groups["expr"].Value.Trim();
                     string format = m.Groups["format"].Value;
                     if (targetProvider == "mysql") return m.Value;
-                    return BuildDateParseExpression(targetProvider, expr, TranslateMySqlDateFormatPattern(format, targetProvider));
+                    return BuildDateParseExpression(targetProvider, expr, TranslateMySqlDateFormatPattern(format, targetProvider), false);
                 },
                 RegexOptions.IgnoreCase);
         }
@@ -1736,19 +1748,19 @@ namespace mySQLPunk.lib
             return "TO_CHAR(" + expr + ", '" + escapedPattern + "')";
         }
 
-        private static string BuildDateParseExpression(string targetProvider, string expr, string translatedPattern)
+        private static string BuildDateParseExpression(string targetProvider, string expr, string translatedPattern, bool forceDateTime)
         {
             string escapedPattern = EscapeSqlString(translatedPattern);
             if (targetProvider == "mysql") return "STR_TO_DATE(" + expr + ", '" + escapedPattern + "')";
-            if (targetProvider == "sqlite") return IsDateTimePattern(translatedPattern) ? "datetime(" + expr + ")" : "date(" + expr + ")";
+            if (targetProvider == "sqlite") return forceDateTime || IsDateTimePattern(translatedPattern) ? "datetime(" + expr + ")" : "date(" + expr + ")";
             if (targetProvider == "mssql")
             {
                 string style = GetSqlServerParseStyle(translatedPattern);
                 return string.IsNullOrWhiteSpace(style)
                     ? "CONVERT(datetime, " + expr + ")"
-                    : "CONVERT(" + (style == "23" ? "date" : "datetime") + ", " + expr + ", " + style + ")";
+                    : "CONVERT(" + (forceDateTime || style != "23" ? "datetime" : "date") + ", " + expr + ", " + style + ")";
             }
-            if (targetProvider == "postgresql" && IsDateTimePattern(translatedPattern))
+            if (targetProvider == "postgresql" && (forceDateTime || IsDateTimePattern(translatedPattern)))
             {
                 return "TO_TIMESTAMP(" + expr + ", '" + escapedPattern + "')";
             }
