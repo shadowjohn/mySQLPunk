@@ -348,7 +348,9 @@ public static class SmokeTests
             "postgresql");
         Assert((bool)GetProperty(pgJsonTablePreview, "CanConvert"), "MySQL JSON_TABLE should convert to PostgreSQL.");
         string pgJsonTableSql = (string)GetProperty(pgJsonTablePreview, "ConvertedSql");
-        AssertContains(pgJsonTableSql, "jsonb_to_recordset(o.payload::jsonb #> '{items}') AS jt(item_id integer, item_name text)", "Converted PostgreSQL SQL should use jsonb_to_recordset with column definitions.");
+        AssertContains(pgJsonTableSql, "jsonb_array_elements(o.payload::jsonb #> '{items}') AS json_item(value)", "Converted PostgreSQL SQL should expand JSON arrays with jsonb_array_elements.");
+        AssertContains(pgJsonTableSql, "CAST(json_item.value #>> '{id}' AS integer) AS item_id", "Converted PostgreSQL SQL should honor JSON_TABLE column PATH for numeric aliases.");
+        AssertContains(pgJsonTableSql, "json_item.value #>> '{name}' AS item_name", "Converted PostgreSQL SQL should honor JSON_TABLE column PATH for text aliases.");
         AssertNotContains(pgJsonTableSql, "JSON_TABLE", "Converted PostgreSQL SQL should remove JSON_TABLE.");
 
         object mssqlJsonTablePreview = BuildViewSqlPreview(

@@ -2719,13 +2719,16 @@ namespace mySQLPunk.lib
             string rowSource = BuildPostgreSqlJsonTableRowSource(sourceExpr, arrayPath);
             if (string.IsNullOrWhiteSpace(rowSource)) return "";
 
-            List<string> definitions = new List<string>();
+            List<string> projections = new List<string>();
             foreach (JsonTableColumn column in columns)
             {
-                definitions.Add(column.Name + " " + MapJsonTableTypeForPostgreSql(column.SqlType));
+                string expression = BuildPostgreSqlJsonTableColumnExpression("json_item.value", column);
+                if (string.IsNullOrWhiteSpace(expression)) return "";
+                projections.Add(expression + " AS " + column.Name);
             }
 
-            return "jsonb_to_recordset(" + rowSource + ") AS " + alias + "(" + string.Join(", ", definitions.ToArray()) + ")";
+            return "LATERAL (SELECT " + string.Join(", ", projections.ToArray()) +
+                   " FROM jsonb_array_elements(" + rowSource + ") AS json_item(value)) AS " + alias;
         }
 
         private static string BuildPostgreSqlJsonTableRowSource(string sourceExpr, string arrayPath)
@@ -2737,6 +2740,21 @@ namespace mySQLPunk.lib
             string pgPath = BuildPostgreSqlJsonPath(path);
             if (string.IsNullOrWhiteSpace(pgPath)) return "";
             return sourceExpr + "::jsonb #> " + pgPath;
+        }
+
+        private static string BuildPostgreSqlJsonTableColumnExpression(string rowExpr, JsonTableColumn column)
+        {
+            string textPath = BuildPostgreSqlJsonPath(column.JsonPath);
+            if (string.IsNullOrWhiteSpace(textPath)) return "";
+
+            string type = MapJsonTableTypeForPostgreSql(column.SqlType);
+            string textExpression = rowExpr + " #>> " + textPath;
+            if (type == "text") return textExpression;
+            if (type == "boolean") return "CAST(" + textExpression + " AS boolean)";
+            if (type == "date") return "CAST(" + textExpression + " AS date)";
+            if (type == "timestamp") return "CAST(" + textExpression + " AS timestamp)";
+            if (type == "double precision") return "CAST(" + textExpression + " AS double precision)";
+            return "CAST(" + textExpression + " AS " + type + ")";
         }
 
         private static string BuildSqlServerJsonTableExpression(string sourceExpr, string arrayPath, List<JsonTableColumn> columns, string alias)
