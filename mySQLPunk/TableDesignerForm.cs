@@ -4464,6 +4464,11 @@ namespace mySQLPunk
             {
                 lines.Add("-- - " + hint);
             }
+            lines.Add("-- - " + Localization.T("Designer.OraclePreviewPrivilegeQueryHint"));
+            foreach (string queryLine in BuildOraclePrivilegeDiagnosticSql(databaseName, tableName))
+            {
+                lines.Add("--   " + queryLine);
+            }
             lines.Add("");
             lines.Add((sql ?? "").TrimStart());
             return string.Join("\r\n", lines.ToArray());
@@ -4476,6 +4481,22 @@ namespace mySQLPunk
             yield return Localization.Format("Designer.OraclePreviewObjectHint", owner, objectName);
             yield return Localization.T("Designer.OraclePreviewPrivilegeHint");
             yield return Localization.T("Designer.OraclePreviewStepHint");
+        }
+
+        private static IEnumerable<string> BuildOraclePrivilegeDiagnosticSql(string databaseName, string tableName)
+        {
+            string owner = string.IsNullOrWhiteSpace(databaseName) ? "USER" : "UPPER(" + EscapeSqlStringLiteral(databaseName) + ")";
+            string objectName = string.IsNullOrWhiteSpace(tableName) ? "UPPER(USER)" : "UPPER(" + EscapeSqlStringLiteral(tableName) + ")";
+            yield return "SELECT owner, table_name, privilege, grantor";
+            yield return "FROM all_tab_privs";
+            yield return "WHERE UPPER(owner) = " + owner;
+            yield return "  AND UPPER(table_name) = " + objectName;
+            yield return "  AND privilege IN ('ALTER', 'INDEX', 'SELECT', 'INSERT', 'UPDATE', 'DELETE')";
+            yield return "ORDER BY owner, table_name, privilege;";
+            yield return "SELECT privilege";
+            yield return "FROM session_privs";
+            yield return "WHERE privilege IN ('ALTER ANY TABLE', 'CREATE ANY INDEX', 'CREATE ANY TABLE', 'COMMENT ANY TABLE', 'DROP ANY TABLE')";
+            yield return "ORDER BY privilege;";
         }
 
         private Dictionary<string, string> ExecuteDesignerSql(string sql)

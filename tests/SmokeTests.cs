@@ -1706,6 +1706,11 @@ public static class SmokeTests
         AssertContains(oracleSql, "RENAME COLUMN \"legacy_name\" TO \"display_name\"", "Oracle ALTER should rename columns.");
         AssertContains(oracleSql, "MODIFY (\"display_name\" VARCHAR2(120)", "Oracle ALTER should modify column definitions.");
         AssertContains(oracleSql, "COMMENT ON COLUMN \"MAIN\".\"DEMO_TABLE\".\"display_name\"", "Oracle ALTER should update comments.");
+        string oraclePreview = BuildOraclePreviewNotice(oracleSql, "MAIN", "DEMO_TABLE");
+        AssertContains(oraclePreview, "權限診斷 SQL", "Oracle preview should include privilege diagnostic guidance.");
+        AssertContains(oraclePreview, "FROM all_tab_privs", "Oracle preview should include object privilege diagnostic query.");
+        AssertContains(oraclePreview, "FROM session_privs", "Oracle preview should include system privilege diagnostic query.");
+        AssertContains(oraclePreview, "UPPER(owner) = UPPER('MAIN')", "Oracle privilege diagnostic should target the selected schema.");
 
         string sqliteSql = BuildExistingAlterSql(
             new my_sqlite(),
@@ -3252,6 +3257,12 @@ public static class SmokeTests
         {
             indexesGrid.Dispose();
         }
+    }
+
+    private static string BuildOraclePreviewNotice(string sql, string databaseName, string tableName)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("AddOraclePreviewNotice", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { sql, databaseName, tableName });
     }
 
     private static string BuildGenericCreateIndexSql(IDatabase db, string databaseName, string tableName, DataTable indexes)
