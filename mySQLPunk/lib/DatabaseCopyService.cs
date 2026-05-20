@@ -934,10 +934,16 @@ namespace mySQLPunk.lib
 
         private static string RewriteSubstringFunctions(string selectSql, string targetProvider)
         {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bSUBSTRING\s*\(\s*(?<expr>[^()]+?)\s+FROM\s+(?<start>[^()]+?)\s+FOR\s+(?<length>[^()]+?)\s*\)",
+                m => BuildSubstringExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["start"].Value.Trim(), m.Groups["length"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+
             if (targetProvider == "mssql")
             {
                 return Regex.Replace(
-                    selectSql,
+                    sql,
                     @"\bSUBSTR\s*\((?<args>[^()]*)\)",
                     m => RewriteFunctionName(m, "SUBSTRING"),
                     RegexOptions.IgnoreCase);
@@ -946,13 +952,19 @@ namespace mySQLPunk.lib
             if (targetProvider == "oracle" || targetProvider == "sqlite")
             {
                 return Regex.Replace(
-                    selectSql,
+                    sql,
                     @"\bSUBSTRING\s*\((?<args>[^()]*)\)",
                     m => RewriteFunctionName(m, "SUBSTR"),
                     RegexOptions.IgnoreCase);
             }
 
-            return selectSql;
+            return sql;
+        }
+
+        private static string BuildSubstringExpression(string targetProvider, string expr, string start, string length)
+        {
+            string functionName = (targetProvider == "oracle" || targetProvider == "sqlite") ? "SUBSTR" : "SUBSTRING";
+            return functionName + "(" + expr + ", " + start + ", " + length + ")";
         }
 
         private static string RewriteFunctionName(Match match, string functionName)

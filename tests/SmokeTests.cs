@@ -559,6 +559,30 @@ public static class SmokeTests
         string mssqlSubstringSql = (string)GetProperty(mssqlSubstringPreview, "ConvertedSql");
         AssertContains(mssqlSubstringSql, "SUBSTRING(code, 1, 3)", "Converted SQL Server SQL should use SUBSTRING.");
 
+        object mysqlStandardSubstringPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING(code FROM 2 FOR 4) AS middle_code FROM items",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlStandardSubstringPreview, "CanConvert"), "Standard SUBSTRING syntax should convert to MySQL.");
+        string mysqlStandardSubstringSql = (string)GetProperty(mysqlStandardSubstringPreview, "ConvertedSql");
+        AssertContains(mysqlStandardSubstringSql, "SUBSTRING(code, 2, 4)", "Converted MySQL SQL should use comma SUBSTRING arguments.");
+
+        object oracleStandardSubstringPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING(code FROM 2 FOR 4) AS middle_code FROM items",
+            "postgresql",
+            "oracle");
+        Assert((bool)GetProperty(oracleStandardSubstringPreview, "CanConvert"), "Standard SUBSTRING syntax should convert to Oracle.");
+        string oracleStandardSubstringSql = (string)GetProperty(oracleStandardSubstringPreview, "ConvertedSql");
+        AssertContains(oracleStandardSubstringSql, "SUBSTR(code, 2, 4)", "Converted Oracle SQL should use SUBSTR arguments.");
+
+        object mssqlStandardSubstringPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING(code FROM 2 FOR 4) AS middle_code FROM items",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlStandardSubstringPreview, "CanConvert"), "Standard SUBSTRING syntax should convert to SQL Server.");
+        string mssqlStandardSubstringSql = (string)GetProperty(mssqlStandardSubstringPreview, "ConvertedSql");
+        AssertContains(mssqlStandardSubstringSql, "SUBSTRING(code, 2, 4)", "Converted SQL Server SQL should use comma SUBSTRING arguments.");
+
         object oracleLeftPreview = BuildViewSqlPreview(
             "SELECT LEFT(code, 3) AS prefix FROM items",
             "mysql",
