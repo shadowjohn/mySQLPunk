@@ -260,6 +260,39 @@ public static class SmokeTests
         string mssqlCurrentDateSql = (string)GetProperty(mssqlCurrentDatePreview, "ConvertedSql");
         AssertContains(mssqlCurrentDateSql, "CAST(GETDATE() AS date)", "Converted SQL Server SQL should use a date expression.");
 
+        object mssqlSysdatePreview = BuildViewSqlPreview(
+            "SELECT SYSDATE AS checked_at, 'SYSDATE' AS literal_value FROM dual",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlSysdatePreview, "CanConvert"), "Oracle SYSDATE should convert to SQL Server.");
+        string mssqlSysdateSql = (string)GetProperty(mssqlSysdatePreview, "ConvertedSql");
+        AssertContains(mssqlSysdateSql, "GETDATE() AS checked_at", "Converted SQL Server SQL should use GETDATE for SYSDATE.");
+        AssertContains(mssqlSysdateSql, "'SYSDATE' AS literal_value", "Converted SQL Server SQL should preserve SYSDATE inside string literals.");
+
+        object mysqlSystimestampPreview = BuildViewSqlPreview(
+            "SELECT SYSTIMESTAMP AS checked_at FROM audit_log",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlSystimestampPreview, "CanConvert"), "Oracle SYSTIMESTAMP should convert to MySQL.");
+        string mysqlSystimestampSql = (string)GetProperty(mysqlSystimestampPreview, "ConvertedSql");
+        AssertContains(mysqlSystimestampSql, "NOW() AS checked_at", "Converted MySQL SQL should use NOW for SYSTIMESTAMP.");
+
+        object sqliteSysdatePreview = BuildViewSqlPreview(
+            "SELECT SYSDATE AS checked_at FROM audit_log",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSysdatePreview, "CanConvert"), "Oracle SYSDATE should convert to SQLite.");
+        string sqliteSysdateSql = (string)GetProperty(sqliteSysdatePreview, "ConvertedSql");
+        AssertContains(sqliteSysdateSql, "CURRENT_TIMESTAMP AS checked_at", "Converted SQLite SQL should use CURRENT_TIMESTAMP for SYSDATE.");
+
+        object oracleSysdatePreview = BuildViewSqlPreview(
+            "SELECT SYSDATE AS checked_at FROM dual",
+            "oracle",
+            "oracle");
+        Assert((bool)GetProperty(oracleSysdatePreview, "CanConvert"), "Oracle target should keep SYSDATE.");
+        string oracleSysdateSql = (string)GetProperty(oracleSysdatePreview, "ConvertedSql");
+        AssertContains(oracleSysdateSql, "SYSDATE AS checked_at", "Converted Oracle SQL should keep SYSDATE.");
+
         object mysqlFormatPreview = BuildViewSqlPreview(
             "SELECT FORMAT(created_at, 'yyyy-MM-dd HH:mm:ss') AS created_text FROM orders",
             "mssql",

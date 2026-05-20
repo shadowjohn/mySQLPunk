@@ -967,30 +967,42 @@ namespace mySQLPunk.lib
 
         private static string RewriteCurrentDateTimeFunctions(string selectSql, string targetProvider)
         {
-            string sql = selectSql;
-            if (targetProvider != "mssql")
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
             {
-                sql = Regex.Replace(sql, @"\bGETDATE\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
-            }
+                string sql = segment;
+                if (targetProvider != "mssql")
+                {
+                    sql = Regex.Replace(sql, @"\bGETDATE\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
+                }
 
-            if (targetProvider != "mysql")
-            {
-                sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
-            }
+                if (targetProvider != "mysql")
+                {
+                    sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
+                }
 
-            sql = Regex.Replace(
-                sql,
-                @"\bCURDATE\s*\(\s*\)",
-                m => BuildCurrentDateExpression(targetProvider),
-                RegexOptions.IgnoreCase);
+                if (targetProvider != "oracle")
+                {
+                    sql = Regex.Replace(
+                        sql,
+                        @"\b(?:SYSDATE|SYSTIMESTAMP)(?:\s*\(\s*\))?",
+                        m => BuildCurrentTimestampExpression(targetProvider),
+                        RegexOptions.IgnoreCase);
+                }
 
-            sql = Regex.Replace(
-                sql,
-                @"\bCURRENT_DATE\s*(?:\(\s*\))?",
-                m => BuildCurrentDateExpression(targetProvider),
-                RegexOptions.IgnoreCase);
+                sql = Regex.Replace(
+                    sql,
+                    @"\bCURDATE\s*\(\s*\)",
+                    m => BuildCurrentDateExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
 
-            return sql;
+                sql = Regex.Replace(
+                    sql,
+                    @"\bCURRENT_DATE\s*(?:\(\s*\))?",
+                    m => BuildCurrentDateExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                return sql;
+            });
         }
 
         private static string BuildCurrentDateExpression(string targetProvider)
@@ -998,6 +1010,13 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql") return "CAST(GETDATE() AS date)";
             if (targetProvider == "mysql") return "CURDATE()";
             return "CURRENT_DATE";
+        }
+
+        private static string BuildCurrentTimestampExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "GETDATE()";
+            if (targetProvider == "mysql") return "NOW()";
+            return "CURRENT_TIMESTAMP";
         }
 
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)
