@@ -2265,35 +2265,44 @@ namespace mySQLPunk.lib
 
         private static string RewritePaddingFunctions(string selectSql, string targetProvider)
         {
-            if (targetProvider != "mssql") return selectSql;
+            if (targetProvider != "mssql" && targetProvider != "sqlite") return selectSql;
 
             string sql = Regex.Replace(
                 selectSql,
                 @"\bLPAD\s*\((?<args>[^()]*)\)",
-                m => RewritePadFunction(m, true),
+                m => RewritePadFunction(m, targetProvider, true),
                 RegexOptions.IgnoreCase);
 
             return Regex.Replace(
                 sql,
                 @"\bRPAD\s*\((?<args>[^()]*)\)",
-                m => RewritePadFunction(m, false),
+                m => RewritePadFunction(m, targetProvider, false),
                 RegexOptions.IgnoreCase);
         }
 
-        private static string RewritePadFunction(Match match, bool leftPad)
+        private static string RewritePadFunction(Match match, string targetProvider, bool leftPad)
         {
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
             if (args.Count != 3) return match.Value;
 
-            string value = "CAST(" + args[0] + " AS varchar(max))";
             string length = args[1];
             string pad = args[2];
-            if (leftPad)
+            if (targetProvider == "sqlite")
             {
-                return "RIGHT(REPLICATE(" + pad + ", " + length + ") + " + value + ", " + length + ")";
+                string value = "CAST(" + args[0] + " AS TEXT)";
+                string repeatedPad = "REPLACE(HEX(ZEROBLOB(" + length + ")), '00', " + pad + ")";
+                return leftPad
+                    ? "SUBSTR(" + repeatedPad + " || " + value + ", -" + length + ", " + length + ")"
+                    : "SUBSTR(" + value + " || " + repeatedPad + ", 1, " + length + ")";
             }
 
-            return "LEFT(" + value + " + REPLICATE(" + pad + ", " + length + "), " + length + ")";
+            string mssqlValue = "CAST(" + args[0] + " AS varchar(max))";
+            if (leftPad)
+            {
+                return "RIGHT(REPLICATE(" + pad + ", " + length + ") + " + mssqlValue + ", " + length + ")";
+            }
+
+            return "LEFT(" + mssqlValue + " + REPLICATE(" + pad + ", " + length + "), " + length + ")";
         }
 
         private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)

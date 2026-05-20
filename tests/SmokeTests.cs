@@ -1465,6 +1465,17 @@ public static class SmokeTests
         AssertNotContains(mssqlPadSql, "LPAD", "Converted SQL Server SQL should remove LPAD.");
         AssertNotContains(mssqlPadSql, "RPAD", "Converted SQL Server SQL should remove RPAD.");
 
+        object sqlitePadPreview = BuildViewSqlPreview(
+            "SELECT LPAD(account_no, 10, '0') AS padded_account, RPAD(code, 8, ' ') AS padded_code FROM accounts",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqlitePadPreview, "CanConvert"), "MySQL LPAD/RPAD should convert to SQLite.");
+        string sqlitePadSql = (string)GetProperty(sqlitePadPreview, "ConvertedSql");
+        AssertContains(sqlitePadSql, "SUBSTR(REPLACE(HEX(ZEROBLOB(10)), '00', '0') || CAST(account_no AS TEXT), -10, 10)", "Converted SQLite SQL should emulate LPAD.");
+        AssertContains(sqlitePadSql, "SUBSTR(CAST(code AS TEXT) || REPLACE(HEX(ZEROBLOB(8)), '00', ' '), 1, 8)", "Converted SQLite SQL should emulate RPAD.");
+        AssertNotContains(sqlitePadSql, "LPAD", "Converted SQLite SQL should remove LPAD.");
+        AssertNotContains(sqlitePadSql, "RPAD", "Converted SQLite SQL should remove RPAD.");
+
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
             "mysql",
