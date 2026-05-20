@@ -1418,12 +1418,25 @@ public static class SmokeTests
         SqliteColumnCommentImportPlan tableColumnArrayPlan = SqliteColumnCommentExchangeService.BuildImportPlan(tableColumnArrayJson);
         Assert(tableColumnArrayPlan.TableCount == 1 && tableColumnArrayPlan.CommentCount == 1, "SQLite comment import should support table column-array JSON.");
 
+        string aliasArrayJson = "[{\"object_name\":\"users\",\"field_name\":\"NICKNAME\",\"comment_text\":\"暱稱\"},{\"object_name\":\"logs\",\"field_name\":\"MESSAGE\",\"comment_text\":\"訊息\"}]";
+        SqliteColumnCommentImportPlan aliasArrayPlan = SqliteColumnCommentExchangeService.BuildImportPlan(aliasArrayJson, "users");
+        string aliasArraySql = string.Join("\n", aliasArrayPlan.Statements.ToArray());
+        Assert(aliasArrayPlan.TableCount == 1 && aliasArrayPlan.CommentCount == 1, "SQLite comment import should support object/field/comment aliases.");
+        AssertContains(aliasArraySql, "'NICKNAME'", "SQLite comment alias import should include selected aliased column.");
+        AssertNotContains(aliasArraySql, "MESSAGE", "SQLite comment alias import should honor table filters.");
+
         string csv = "table,column,comment\r\nusers,ADDRESS,\"地址, 含逗號\"\r\nlogs,MESSAGE,訊息\r\n";
         SqliteColumnCommentImportPlan csvPlan = SqliteColumnCommentExchangeService.BuildImportPlanFromCsv(csv, "users");
         string csvSql = string.Join("\n", csvPlan.Statements.ToArray());
         Assert(csvPlan.TableCount == 1 && csvPlan.CommentCount == 1, "SQLite comment import should support CSV with table filters.");
         AssertContains(csvSql, "地址, 含逗號", "SQLite comment CSV import should preserve quoted commas.");
         AssertNotContains(csvSql, "MESSAGE", "SQLite comment CSV import should honor table filters.");
+
+        string aliasCsv = "object_name,field_name,comment_text\r\nusers,ALIAS,別名\r\nlogs,MESSAGE,訊息\r\n";
+        SqliteColumnCommentImportPlan aliasCsvPlan = SqliteColumnCommentExchangeService.BuildImportPlanFromCsv(aliasCsv, "users");
+        string aliasCsvSql = string.Join("\n", aliasCsvPlan.Statements.ToArray());
+        Assert(aliasCsvPlan.TableCount == 1 && aliasCsvPlan.CommentCount == 1, "SQLite comment CSV import should support third-party alias headers.");
+        AssertContains(aliasCsvSql, "'ALIAS'", "SQLite comment CSV alias import should include selected column.");
 
         SqliteColumnCommentExportResult csvExportResult;
         string exportCsv = SqliteColumnCommentExchangeService.BuildExportCsv(db, "main", "users", out csvExportResult);
@@ -1437,6 +1450,13 @@ public static class SmokeTests
         Assert(yamlPlan.TableCount == 1 && yamlPlan.CommentCount == 1, "SQLite comment import should support YAML with table filters.");
         AssertContains(yamlSql, "備註: 可含冒號", "SQLite comment YAML import should preserve quoted values.");
         AssertNotContains(yamlSql, "MESSAGE", "SQLite comment YAML import should honor table filters.");
+
+        string aliasYaml = "comments:\n- entity: users\n  attribute: BIO\n  note: 個人簡介\n- entity: logs\n  attribute: MESSAGE\n  note: 訊息\n";
+        SqliteColumnCommentImportPlan aliasYamlPlan = SqliteColumnCommentExchangeService.BuildImportPlanFromYaml(aliasYaml, "users");
+        string aliasYamlSql = string.Join("\n", aliasYamlPlan.Statements.ToArray());
+        Assert(aliasYamlPlan.TableCount == 1 && aliasYamlPlan.CommentCount == 1, "SQLite comment YAML import should support entity/attribute/note aliases.");
+        AssertContains(aliasYamlSql, "'BIO'", "SQLite comment YAML alias import should include selected column.");
+        AssertNotContains(aliasYamlSql, "MESSAGE", "SQLite comment YAML alias import should honor table filters.");
 
         SqliteColumnCommentExportResult yamlExportResult;
         string exportYaml = SqliteColumnCommentExchangeService.BuildExportYaml(db, "main", "users", out yamlExportResult);

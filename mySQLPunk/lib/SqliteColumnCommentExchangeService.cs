@@ -443,9 +443,9 @@ namespace mySQLPunk.lib
         {
             if (rows == null || rows.Count == 0) throw new InvalidOperationException("SQLite column comment " + sourceName + " has no rows.");
             Dictionary<string, int> header = BuildCsvHeaderMap(rows[0]);
-            int tableIndex = FindCsvIndex(header, "table", "tablename", "table_name");
-            int columnIndex = FindCsvIndex(header, "column", "columnname", "column_name", "name");
-            int commentIndex = FindCsvIndex(header, "comment", "description", "remarks");
+            int tableIndex = FindCsvIndex(header, "table", "tablename", "table_name", "object", "objectname", "object_name", "entity", "entityname");
+            int columnIndex = FindCsvIndex(header, "column", "columnname", "column_name", "field", "fieldname", "field_name", "attribute", "attributename", "name");
+            int commentIndex = FindCsvIndex(header, "comment", "commenttext", "comment_text", "description", "column_description", "columndescription", "remarks", "remark", "memo", "note");
             if (tableIndex < 0 || columnIndex < 0 || commentIndex < 0)
             {
                 throw new InvalidOperationException("SQLite column comment " + sourceName + " requires table, column and comment headers.");
@@ -514,15 +514,21 @@ namespace mySQLPunk.lib
                 if (colon < 0 || current == null) continue;
                 string key = NormalizeCsvHeader(line.Substring(0, colon));
                 string value = ParseYamlScalar(line.Substring(colon + 1).Trim());
-                if (key == "table" || key == "tablename" || key == "table_name")
+                if (key == "table" || key == "tablename" || key == "table_name" ||
+                    key == "object" || key == "objectname" || key == "object_name" ||
+                    key == "entity" || key == "entityname")
                 {
                     current["table"] = value;
                 }
-                else if (key == "column" || key == "columnname" || key == "column_name" || key == "name")
+                else if (key == "column" || key == "columnname" || key == "column_name" ||
+                         key == "field" || key == "fieldname" || key == "field_name" ||
+                         key == "attribute" || key == "attributename" || key == "name")
                 {
                     current["column"] = value;
                 }
-                else if (key == "comment" || key == "description" || key == "remarks")
+                else if (key == "comment" || key == "commenttext" || key == "comment_text" ||
+                         key == "description" || key == "column_description" || key == "columndescription" ||
+                         key == "remarks" || key == "remark" || key == "memo" || key == "note")
                 {
                     current["comment"] = value;
                 }
@@ -602,10 +608,10 @@ namespace mySQLPunk.lib
             foreach (JObject row in rows)
             {
                 if (row == null) continue;
-                string tableName = FirstJsonValue(row, "table", "tableName", "table_name", "TABLE_NAME");
+                string tableName = FirstJsonValue(row, "table", "tableName", "table_name", "TABLE_NAME", "object", "objectName", "object_name", "entity", "entityName");
                 if (string.IsNullOrWhiteSpace(tableName)) tableName = fallbackTableName;
-                string columnName = FirstJsonValue(row, "column", "columnName", "column_name", "COLUMN_NAME", "name", "Name");
-                string comment = FirstJsonValue(row, "comment", "Comment", "description", "Description", "remarks", "Remarks");
+                string columnName = FirstJsonValue(row, "column", "columnName", "column_name", "COLUMN_NAME", "field", "fieldName", "field_name", "attribute", "attributeName", "name", "Name");
+                string comment = FirstJsonValue(row, "comment", "Comment", "commentText", "comment_text", "description", "Description", "columnDescription", "column_description", "remarks", "Remarks", "remark", "memo", "note");
 
                 if (string.IsNullOrWhiteSpace(tableName) ||
                     string.IsNullOrWhiteSpace(columnName) ||
