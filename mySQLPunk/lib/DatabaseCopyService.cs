@@ -510,6 +510,7 @@ namespace mySQLPunk.lib
             sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteComparisonFunctions(sql, targetProvider);
             sql = RewriteBooleanLiterals(sql, targetProvider);
+            sql = RewriteSqlServerTryCastFunctions(sql, sourceProvider, targetProvider);
             sql = RewritePostgreSqlCastOperators(sql, sourceProvider, targetProvider);
             sql = RewriteNullOrderingClauses(sql, targetProvider);
             sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
@@ -637,6 +638,121 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
 
             return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
+        }
+
+        private static string RewriteSqlServerTryCastFunctions(string selectSql, string sourceProvider, string targetProvider)
+        {
+            if (sourceProvider != "mssql" || targetProvider == "mssql") return selectSql;
+
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bTRY_CAST\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s+AS\s+(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*\)",
+                m => RewriteSqlServerTryCastFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bTRY_CONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)(?:\s*,\s*(?<style>23|120))?\s*\)",
+                m => RewriteSqlServerTryConvertFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteSqlServerTryCastFunction(Match match, string targetProvider)
+        {
+            string targetType = MapSqlServerCastType(
+                match.Groups["type"].Value,
+                match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
+                match.Groups["scale"].Success ? match.Groups["scale"].Value : "",
+                targetProvider);
+            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+
+            return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
+        }
+
+        private static string RewriteSqlServerTryConvertFunction(Match match, string targetProvider)
+        {
+            string sqlType = match.Groups["type"].Value;
+            string expr = match.Groups["expr"].Value.Trim();
+            string style = match.Groups["style"].Success ? match.Groups["style"].Value : "";
+            string normalizedType = Regex.Replace((sqlType ?? "").Trim().ToLowerInvariant(), @"\s+", "");
+
+            if ((normalizedType == "date" || normalizedType == "datetime" || normalizedType == "datetime2" || normalizedType == "smalldatetime") &&
+                (style == "23" || style == "120"))
+            {
+                string pattern = GetSqlServerConvertDateFormat(style);
+                if (!string.IsNullOrWhiteSpace(pattern))
+                {
+                    return BuildDateParseExpression(targetProvider, expr, TranslateDotNetDateFormatPattern(pattern, targetProvider), normalizedType != "date");
+                }
+            }
+
+            string targetType = MapSqlServerCastType(
+                sqlType,
+                match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
+                match.Groups["scale"].Success ? match.Groups["scale"].Value : "",
+                targetProvider);
+            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+
+            return "CAST(" + expr + " AS " + targetType + ")";
+        }
+
+        private static string MapSqlServerCastType(string sqlType, string precision, string scale, string targetProvider)
+        {
+            string type = Regex.Replace((sqlType ?? "").Trim().ToLowerInvariant(), @"\s+", "");
+            if (type == "nvarchar" || type == "varchar" || type == "nchar" || type == "char" || type == "text")
+            {
+                if (targetProvider == "mysql") return string.IsNullOrWhiteSpace(precision) ? "CHAR" : "CHAR(" + precision + ")";
+                if (targetProvider == "oracle") return string.IsNullOrWhiteSpace(precision) ? "VARCHAR2(4000)" : "VARCHAR2(" + precision + ")";
+                if (targetProvider == "postgresql" || targetProvider == "sqlite") return "TEXT";
+            }
+
+            if (type == "int" || type == "integer")
+            {
+                if (targetProvider == "mysql") return "SIGNED";
+                if (targetProvider == "oracle") return "NUMBER(10)";
+                return "INTEGER";
+            }
+
+            if (type == "bigint")
+            {
+                if (targetProvider == "mysql") return "SIGNED";
+                if (targetProvider == "oracle") return "NUMBER(19)";
+                return "BIGINT";
+            }
+
+            if (type == "bit")
+            {
+                if (targetProvider == "mysql") return "UNSIGNED";
+                if (targetProvider == "oracle") return "NUMBER(1)";
+                return "INTEGER";
+            }
+
+            if (type == "numeric" || type == "decimal")
+            {
+                bool hasPrecision = !string.IsNullOrWhiteSpace(precision);
+                string suffix = hasPrecision ? "(" + precision + (string.IsNullOrWhiteSpace(scale) ? "" : "," + scale) + ")" : "";
+                if (targetProvider == "oracle") return hasPrecision ? "NUMBER" + suffix : "NUMBER";
+                if (targetProvider == "sqlite") return "NUMERIC";
+                return hasPrecision ? "decimal" + suffix : "decimal(18,4)";
+            }
+
+            if (type == "float" || type == "real")
+            {
+                if (targetProvider == "oracle") return "BINARY_DOUBLE";
+                if (targetProvider == "sqlite") return "REAL";
+                if (targetProvider == "postgresql") return "double precision";
+                return "DOUBLE";
+            }
+
+            if (type == "date") return targetProvider == "sqlite" ? "TEXT" : "date";
+            if (type == "datetime" || type == "datetime2" || type == "smalldatetime")
+            {
+                if (targetProvider == "mysql") return "DATETIME";
+                if (targetProvider == "oracle") return "TIMESTAMP";
+                return targetProvider == "sqlite" ? "TEXT" : "timestamp";
+            }
+
+            return "";
         }
 
         private static string MapPostgreSqlCastType(string pgType, string precision, string scale, string targetProvider)

@@ -1168,6 +1168,40 @@ public static class SmokeTests
         AssertContains(oraclePgCastSql, "CAST(enabled AS NUMBER(1))", "Converted Oracle SQL should cast boolean to NUMBER(1).");
         AssertContains(oraclePgCastSql, "CAST(started_at AS TIMESTAMP)", "Converted Oracle SQL should cast timestamp to TIMESTAMP.");
 
+        object mysqlTryCastPreview = BuildViewSqlPreview(
+            "SELECT TRY_CAST(amount_text AS decimal(10,2)) AS amount_value FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlTryCastPreview, "CanConvert"), "SQL Server TRY_CAST should convert to MySQL.");
+        string mysqlTryCastSql = (string)GetProperty(mysqlTryCastPreview, "ConvertedSql");
+        AssertContains(mysqlTryCastSql, "CAST(amount_text AS decimal(10,2))", "Converted MySQL SQL should use CAST for TRY_CAST.");
+        AssertNotContains(mysqlTryCastSql, "TRY_CAST", "Converted MySQL SQL should remove TRY_CAST.");
+
+        object pgTryConvertDatePreview = BuildViewSqlPreview(
+            "SELECT TRY_CONVERT(date, order_date_text, 23) AS order_date FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTryConvertDatePreview, "CanConvert"), "SQL Server TRY_CONVERT date should convert to PostgreSQL.");
+        string pgTryConvertDateSql = (string)GetProperty(pgTryConvertDatePreview, "ConvertedSql");
+        AssertContains(pgTryConvertDateSql, "TO_DATE(order_date_text, 'YYYY-MM-DD')", "Converted PostgreSQL SQL should parse date style 23.");
+        AssertNotContains(pgTryConvertDateSql, "TRY_CONVERT", "Converted PostgreSQL SQL should remove TRY_CONVERT.");
+
+        object oracleTryConvertDateTimePreview = BuildViewSqlPreview(
+            "SELECT TRY_CONVERT(datetime, created_text, 120) AS created_at FROM orders",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleTryConvertDateTimePreview, "CanConvert"), "SQL Server TRY_CONVERT datetime should convert to Oracle.");
+        string oracleTryConvertDateTimeSql = (string)GetProperty(oracleTryConvertDateTimePreview, "ConvertedSql");
+        AssertContains(oracleTryConvertDateTimeSql, "TO_DATE(created_text, 'YYYY-MM-DD HH24:MI:SS')", "Converted Oracle SQL should parse datetime style 120.");
+
+        object sqliteTryCastPreview = BuildViewSqlPreview(
+            "SELECT TRY_CAST(user_id_text AS int) AS user_id FROM users",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteTryCastPreview, "CanConvert"), "SQL Server TRY_CAST int should convert to SQLite.");
+        string sqliteTryCastSql = (string)GetProperty(sqliteTryCastPreview, "ConvertedSql");
+        AssertContains(sqliteTryCastSql, "CAST(user_id_text AS INTEGER)", "Converted SQLite SQL should use CAST INTEGER.");
+
         object pgCastPreview = BuildViewSqlPreview(
             "SELECT amount::numeric(10,2) AS amount_value FROM orders",
             "postgresql",
