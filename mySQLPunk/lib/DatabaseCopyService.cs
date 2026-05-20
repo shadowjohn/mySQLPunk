@@ -455,6 +455,7 @@ namespace mySQLPunk.lib
             sql = RewriteDateAddFunctions(sql, targetProvider);
             sql = RewriteDatePartFunctions(sql, targetProvider);
             sql = RewriteConditionalFunctions(sql, targetProvider);
+            sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
@@ -465,6 +466,25 @@ namespace mySQLPunk.lib
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
 
             return sql;
+        }
+
+        private static string RewriteNumericFunctions(string selectSql, string targetProvider)
+        {
+            string sql = selectSql;
+            if (targetProvider == "mssql")
+            {
+                return Regex.Replace(
+                    sql,
+                    @"\bCEIL\s*\(",
+                    "CEILING(",
+                    RegexOptions.IgnoreCase);
+            }
+
+            return Regex.Replace(
+                sql,
+                @"\bCEILING\s*\(",
+                "CEIL(",
+                RegexOptions.IgnoreCase);
         }
 
         private static string RewriteNullHandlingFunctions(string selectSql, string targetProvider)

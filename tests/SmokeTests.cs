@@ -439,6 +439,30 @@ public static class SmokeTests
         string pgNvl2Sql = (string)GetProperty(pgNvl2Preview, "ConvertedSql");
         AssertContains(pgNvl2Sql, "CASE WHEN closed_at IS NOT NULL THEN 'closed' ELSE 'open' END", "Converted PostgreSQL SQL should use CASE for NVL2.");
 
+        object mssqlCeilPreview = BuildViewSqlPreview(
+            "SELECT CEIL(total_amount / 100.0) AS bill_units FROM orders",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCeilPreview, "CanConvert"), "Oracle CEIL should convert to SQL Server.");
+        string mssqlCeilSql = (string)GetProperty(mssqlCeilPreview, "ConvertedSql");
+        AssertContains(mssqlCeilSql, "CEILING(total_amount / 100.0)", "Converted SQL Server SQL should use CEILING.");
+
+        object oracleCeilingPreview = BuildViewSqlPreview(
+            "SELECT CEILING(total_amount / 100.0) AS bill_units FROM orders",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleCeilingPreview, "CanConvert"), "SQL Server CEILING should convert to Oracle.");
+        string oracleCeilingSql = (string)GetProperty(oracleCeilingPreview, "ConvertedSql");
+        AssertContains(oracleCeilingSql, "CEIL(total_amount / 100.0)", "Converted Oracle SQL should use CEIL.");
+
+        object pgCeilingPreview = BuildViewSqlPreview(
+            "SELECT CEILING(total_amount / 100.0) AS bill_units FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCeilingPreview, "CanConvert"), "SQL Server CEILING should convert to PostgreSQL.");
+        string pgCeilingSql = (string)GetProperty(pgCeilingPreview, "ConvertedSql");
+        AssertContains(pgCeilingSql, "CEIL(total_amount / 100.0)", "Converted PostgreSQL SQL should use CEIL.");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",
