@@ -1128,25 +1128,25 @@ namespace mySQLPunk.lib
         {
             string sql = Regex.Replace(
                 selectSql,
-                @"\bDATEPART\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|dayofyear|dy|y|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\bDATEPART\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|dayofyear|dy|y|weekday|dw|w|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bDATE_PART\s*\(\s*'(?<part>year|quarter|month|dayofyear|doy|day|hour|minute|second)'\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\bDATE_PART\s*\(\s*'(?<part>year|quarter|month|week|dayofyear|doy|weekday|dow|day|hour|minute|second)'\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bEXTRACT\s*\(\s*(?<part>YEAR|QUARTER|MONTH|DOY|DAYOFYEAR|DAY|HOUR|MINUTE|SECOND)\s+FROM\s+(?<expr>[^()]+?)\s*\)",
+                @"\bEXTRACT\s*\(\s*(?<part>YEAR|QUARTER|MONTH|WEEK|DOY|DAYOFYEAR|DOW|WEEKDAY|DAY|HOUR|MINUTE|SECOND)\s+FROM\s+(?<expr>[^()]+?)\s*\)",
                 m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\b(?<func>YEAR|QUARTER|MONTH|DAYOFYEAR|DAY|HOUR|MINUTE|SECOND)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\b(?<func>YEAR|QUARTER|MONTH|WEEK|DAYOFWEEK|DAYOFYEAR|DAY|HOUR|MINUTE|SECOND)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["func"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
 
@@ -1168,6 +1168,7 @@ namespace mySQLPunk.lib
             if (targetProvider == "mysql")
             {
                 if (part == "dayofyear") return "DAYOFYEAR(" + expr + ")";
+                if (part == "weekday") return "DAYOFWEEK(" + expr + ")";
                 return part.ToUpperInvariant() + "(" + expr + ")";
             }
 
@@ -1178,7 +1179,30 @@ namespace mySQLPunk.lib
                     return "CAST(((CAST(strftime('%m', " + expr + ") AS INTEGER) + 2) / 3) AS INTEGER)";
                 }
 
+                if (part == "week")
+                {
+                    return "(CAST(strftime('%W', " + expr + ") AS INTEGER) + 1)";
+                }
+
+                if (part == "weekday")
+                {
+                    return "(CAST(strftime('%w', " + expr + ") AS INTEGER) + 1)";
+                }
+
                 return "CAST(strftime('" + GetSqliteDatePartFormat(part) + "', " + expr + ") AS INTEGER)";
+            }
+
+            if (targetProvider == "oracle")
+            {
+                if (part == "quarter") return "TO_NUMBER(TO_CHAR(" + expr + ", 'Q'))";
+                if (part == "dayofyear") return "TO_NUMBER(TO_CHAR(" + expr + ", 'DDD'))";
+                if (part == "week") return "TO_NUMBER(TO_CHAR(" + expr + ", 'WW'))";
+                if (part == "weekday") return "TO_NUMBER(TO_CHAR(" + expr + ", 'D'))";
+            }
+
+            if (targetProvider == "postgresql" && part == "weekday")
+            {
+                return "(EXTRACT(DOW FROM " + expr + ") + 1)";
             }
 
             string extractPart = part == "dayofyear" ? "DOY" : part.ToUpperInvariant();
@@ -1234,7 +1258,9 @@ namespace mySQLPunk.lib
             if (text == "yy" || text == "yyyy") return "year";
             if (text == "qq" || text == "q") return "quarter";
             if (text == "mm" || text == "m") return "month";
+            if (text == "wk" || text == "ww") return "week";
             if (text == "dy" || text == "y" || text == "doy") return "dayofyear";
+            if (text == "dw" || text == "w" || text == "dow" || text == "dayofweek") return "weekday";
             if (text == "dd" || text == "d") return "day";
             if (text == "hh") return "hour";
             if (text == "mi" || text == "n") return "minute";

@@ -1008,6 +1008,38 @@ public static class SmokeTests
         string sqliteDayOfYearSql = (string)GetProperty(sqliteDayOfYearPreview, "ConvertedSql");
         AssertContains(sqliteDayOfYearSql, "CAST(strftime('%j', created_at) AS INTEGER)", "Converted SQLite SQL should use day-of-year strftime.");
 
+        object oracleQuarterPreview = BuildViewSqlPreview(
+            "SELECT QUARTER(created_at) AS created_quarter FROM orders",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleQuarterPreview, "CanConvert"), "MySQL QUARTER should convert to Oracle.");
+        string oracleQuarterSql = (string)GetProperty(oracleQuarterPreview, "ConvertedSql");
+        AssertContains(oracleQuarterSql, "TO_NUMBER(TO_CHAR(created_at, 'Q'))", "Converted Oracle SQL should calculate quarter with TO_CHAR.");
+
+        object pgWeekPreview = BuildViewSqlPreview(
+            "SELECT DATEPART(week, created_at) AS created_week FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgWeekPreview, "CanConvert"), "SQL Server DATEPART week should convert to PostgreSQL.");
+        string pgWeekSql = (string)GetProperty(pgWeekPreview, "ConvertedSql");
+        AssertContains(pgWeekSql, "EXTRACT(WEEK FROM created_at)", "Converted PostgreSQL SQL should use EXTRACT WEEK.");
+
+        object sqliteWeekdayPreview = BuildViewSqlPreview(
+            "SELECT DAYOFWEEK(created_at) AS created_weekday FROM orders",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteWeekdayPreview, "CanConvert"), "MySQL DAYOFWEEK should convert to SQLite.");
+        string sqliteWeekdaySql = (string)GetProperty(sqliteWeekdayPreview, "ConvertedSql");
+        AssertContains(sqliteWeekdaySql, "(CAST(strftime('%w', created_at) AS INTEGER) + 1)", "Converted SQLite SQL should preserve Sunday-based weekday numbering.");
+
+        object oracleWeekPreview = BuildViewSqlPreview(
+            "SELECT DATE_PART('week', created_at) AS created_week FROM orders",
+            "postgresql",
+            "oracle");
+        Assert((bool)GetProperty(oracleWeekPreview, "CanConvert"), "PostgreSQL DATE_PART week should convert to Oracle.");
+        string oracleWeekSql = (string)GetProperty(oracleWeekPreview, "ConvertedSql");
+        AssertContains(oracleWeekSql, "TO_NUMBER(TO_CHAR(created_at, 'WW'))", "Converted Oracle SQL should calculate week with TO_CHAR.");
+
         object mssqlDatePartFunctionPreview = BuildViewSqlPreview(
             "SELECT DATE_PART('hour', created_at) AS created_hour FROM orders",
             "postgresql",
