@@ -300,6 +300,38 @@ public static class SmokeTests
         string oracleDateOnlySql = (string)GetProperty(oracleDateOnlyPreview, "ConvertedSql");
         AssertContains(oracleDateOnlySql, "TRUNC(created_at)", "Converted Oracle SQL should use TRUNC for date-only value.");
 
+        object mssqlDateTruncMonthPreview = BuildViewSqlPreview(
+            "SELECT DATE_TRUNC('month', created_at) AS month_start FROM orders",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDateTruncMonthPreview, "CanConvert"), "PostgreSQL DATE_TRUNC month should convert to SQL Server.");
+        string mssqlDateTruncMonthSql = (string)GetProperty(mssqlDateTruncMonthPreview, "ConvertedSql");
+        AssertContains(mssqlDateTruncMonthSql, "DATEFROMPARTS(YEAR(created_at), MONTH(created_at), 1)", "Converted SQL Server SQL should build month start.");
+
+        object oracleDateTruncHourPreview = BuildViewSqlPreview(
+            "SELECT DATE_TRUNC('hour', created_at) AS hour_start FROM orders",
+            "postgresql",
+            "oracle");
+        Assert((bool)GetProperty(oracleDateTruncHourPreview, "CanConvert"), "PostgreSQL DATE_TRUNC hour should convert to Oracle.");
+        string oracleDateTruncHourSql = (string)GetProperty(oracleDateTruncHourPreview, "ConvertedSql");
+        AssertContains(oracleDateTruncHourSql, "TRUNC(created_at, 'HH24')", "Converted Oracle SQL should truncate to the hour.");
+
+        object mysqlOracleTruncMonthPreview = BuildViewSqlPreview(
+            "SELECT TRUNC(created_at, 'MM') AS month_start FROM orders",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlOracleTruncMonthPreview, "CanConvert"), "Oracle TRUNC month should convert to MySQL.");
+        string mysqlOracleTruncMonthSql = (string)GetProperty(mysqlOracleTruncMonthPreview, "ConvertedSql");
+        AssertContains(mysqlOracleTruncMonthSql, "STR_TO_DATE(DATE_FORMAT(created_at, '%Y-%m-01'), '%Y-%m-%d')", "Converted MySQL SQL should build month start.");
+
+        object sqliteDateTruncYearPreview = BuildViewSqlPreview(
+            "SELECT DATE_TRUNC('year', created_at) AS year_start FROM orders",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDateTruncYearPreview, "CanConvert"), "PostgreSQL DATE_TRUNC year should convert to SQLite.");
+        string sqliteDateTruncYearSql = (string)GetProperty(sqliteDateTruncYearPreview, "ConvertedSql");
+        AssertContains(sqliteDateTruncYearSql, "strftime('%Y-01-01', created_at)", "Converted SQLite SQL should build year start.");
+
         object mysqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURRENT_DATE AS today FROM users",
             "postgresql",

@@ -450,6 +450,7 @@ namespace mySQLPunk.lib
             sql = RewriteNullHandlingFunctions(sql, targetProvider);
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
             sql = RewriteDateOnlyFunctions(sql, sourceProvider, targetProvider);
+            sql = RewriteDateTruncFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
             sql = RewriteDateDiffFunctions(sql, targetProvider);
             sql = RewriteDateAddFunctions(sql, targetProvider);
@@ -595,6 +596,58 @@ namespace mySQLPunk.lib
             return "DATE(" + expr + ")";
         }
 
+        private static string RewriteDateTruncFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bDATE_TRUNC\s*\(\s*'(?<part>year|month|day|hour)'\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildDateTruncExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bTRUNC\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<part>YYYY|YEAR|MM|MONTH|DD|DAY|HH24|HH)'\s*\)",
+                m => BuildDateTruncExpression(targetProvider, NormalizeDateTruncPart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildDateTruncExpression(string targetProvider, string part, string expr)
+        {
+            if (part == "day") return BuildDateOnlyExpression(targetProvider, expr);
+
+            if (targetProvider == "postgresql") return "DATE_TRUNC('" + part + "', " + expr + ")";
+
+            if (targetProvider == "oracle")
+            {
+                if (part == "year") return "TRUNC(" + expr + ", 'YYYY')";
+                if (part == "month") return "TRUNC(" + expr + ", 'MM')";
+                if (part == "hour") return "TRUNC(" + expr + ", 'HH24')";
+            }
+
+            if (targetProvider == "mssql")
+            {
+                if (part == "year") return "DATEFROMPARTS(YEAR(" + expr + "), 1, 1)";
+                if (part == "month") return "DATEFROMPARTS(YEAR(" + expr + "), MONTH(" + expr + "), 1)";
+                if (part == "hour") return "DATEADD(hour, DATEDIFF(hour, 0, " + expr + "), 0)";
+            }
+
+            if (targetProvider == "mysql")
+            {
+                if (part == "year") return "STR_TO_DATE(DATE_FORMAT(" + expr + ", '%Y-01-01'), '%Y-%m-%d')";
+                if (part == "month") return "STR_TO_DATE(DATE_FORMAT(" + expr + ", '%Y-%m-01'), '%Y-%m-%d')";
+                if (part == "hour") return "STR_TO_DATE(DATE_FORMAT(" + expr + ", '%Y-%m-%d %H:00:00'), '%Y-%m-%d %H:%i:%s')";
+            }
+
+            if (targetProvider == "sqlite")
+            {
+                if (part == "year") return "strftime('%Y-01-01', " + expr + ")";
+                if (part == "month") return "strftime('%Y-%m-01', " + expr + ")";
+                if (part == "hour") return "strftime('%Y-%m-%d %H:00:00', " + expr + ")";
+            }
+
+            return "DATE_TRUNC('" + part + "', " + expr + ")";
+        }
+
         private static string RewriteDatePartFunctions(string selectSql, string targetProvider)
         {
             string sql = Regex.Replace(
@@ -643,6 +696,16 @@ namespace mySQLPunk.lib
             if (text == "mi" || text == "n") return "minute";
             if (text == "ss" || text == "s") return "second";
             return text;
+        }
+
+        private static string NormalizeDateTruncPart(string part)
+        {
+            string text = (part ?? string.Empty).Trim().Trim('\'', '"').ToLowerInvariant();
+            if (text == "yyyy") return "year";
+            if (text == "mm") return "month";
+            if (text == "dd") return "day";
+            if (text == "hh24" || text == "hh") return "hour";
+            return NormalizeDatePart(text);
         }
 
         private static string GetSqliteDatePartFormat(string part)
