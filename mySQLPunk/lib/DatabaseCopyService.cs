@@ -456,6 +456,7 @@ namespace mySQLPunk.lib
             sql = RewriteDatePartFunctions(sql, targetProvider);
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteNumericFunctions(sql, targetProvider);
+            sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
             sql = RewriteTrimFunctions(sql, targetProvider);
@@ -502,6 +503,37 @@ namespace mySQLPunk.lib
                 @"\bPOW\s*\(",
                 "POWER(",
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteRandomFunctions(string selectSql, string sourceProvider, string targetProvider)
+        {
+            if (string.Equals(sourceProvider, targetProvider, StringComparison.OrdinalIgnoreCase)) return selectSql;
+
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bDBMS_RANDOM\s*\.\s*VALUE\s*(?:\(\s*\))?",
+                m => BuildRandomExpression(targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bRAND\s*\(\s*\)",
+                m => BuildRandomExpression(targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bRANDOM\s*\(\s*\)",
+                m => BuildRandomExpression(targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildRandomExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql" || targetProvider == "mysql") return "RAND()";
+            if (targetProvider == "oracle") return "DBMS_RANDOM.VALUE";
+            if (targetProvider == "sqlite") return "((RANDOM() + 9223372036854775808.0) / 18446744073709551616.0)";
+            return "RANDOM()";
         }
 
         private static string RewriteModFunction(Match match)

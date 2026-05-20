@@ -511,6 +511,30 @@ public static class SmokeTests
         string mssqlPowSql = (string)GetProperty(mssqlPowPreview, "ConvertedSql");
         AssertContains(mssqlPowSql, "POWER(score, 2)", "Converted SQL Server SQL should use POWER.");
 
+        object pgRandPreview = BuildViewSqlPreview(
+            "SELECT RAND() AS sample_value FROM metrics",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgRandPreview, "CanConvert"), "MySQL RAND should convert to PostgreSQL.");
+        string pgRandSql = (string)GetProperty(pgRandPreview, "ConvertedSql");
+        AssertContains(pgRandSql, "RANDOM()", "Converted PostgreSQL SQL should use RANDOM.");
+
+        object mssqlRandomPreview = BuildViewSqlPreview(
+            "SELECT RANDOM() AS sample_value FROM metrics",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlRandomPreview, "CanConvert"), "PostgreSQL RANDOM should convert to SQL Server.");
+        string mssqlRandomSql = (string)GetProperty(mssqlRandomPreview, "ConvertedSql");
+        AssertContains(mssqlRandomSql, "RAND()", "Converted SQL Server SQL should use RAND.");
+
+        object sqliteOracleRandomPreview = BuildViewSqlPreview(
+            "SELECT DBMS_RANDOM.VALUE AS sample_value FROM metrics",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteOracleRandomPreview, "CanConvert"), "Oracle DBMS_RANDOM.VALUE should convert to SQLite.");
+        string sqliteOracleRandomSql = (string)GetProperty(sqliteOracleRandomPreview, "ConvertedSql");
+        AssertContains(sqliteOracleRandomSql, "(RANDOM() + 9223372036854775808.0) / 18446744073709551616.0", "Converted SQLite SQL should normalize RANDOM to 0-1 range.");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",
