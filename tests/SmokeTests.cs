@@ -805,6 +805,39 @@ public static class SmokeTests
         string oracleYearAddSql = (string)GetProperty(oracleYearAddPreview, "ConvertedSql");
         AssertContains(oracleYearAddSql, "ADD_MONTHS(created_at, 12)", "Converted Oracle SQL should use ADD_MONTHS for year addition.");
 
+        object mssqlAddMonthsPreview = BuildViewSqlPreview(
+            "SELECT ADD_MONTHS(created_at, 3) AS renew_at FROM contracts",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlAddMonthsPreview, "CanConvert"), "Oracle ADD_MONTHS should convert to SQL Server.");
+        string mssqlAddMonthsSql = (string)GetProperty(mssqlAddMonthsPreview, "ConvertedSql");
+        AssertContains(mssqlAddMonthsSql, "DATEADD(month, 3, created_at)", "Converted SQL Server SQL should use DATEADD month.");
+
+        object mysqlAddMonthsPreview = BuildViewSqlPreview(
+            "SELECT ADD_MONTHS(created_at, -2) AS reminder_at FROM contracts",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlAddMonthsPreview, "CanConvert"), "Oracle ADD_MONTHS should convert to MySQL.");
+        string mysqlAddMonthsSql = (string)GetProperty(mysqlAddMonthsPreview, "ConvertedSql");
+        AssertContains(mysqlAddMonthsSql, "DATE_ADD(created_at, INTERVAL -2 MONTH)", "Converted MySQL SQL should use DATE_ADD month.");
+
+        object sqliteAddMonthsPreview = BuildViewSqlPreview(
+            "SELECT ADD_MONTHS(created_at, 1) AS next_month_at FROM contracts",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteAddMonthsPreview, "CanConvert"), "Oracle ADD_MONTHS should convert to SQLite.");
+        string sqliteAddMonthsSql = (string)GetProperty(sqliteAddMonthsPreview, "ConvertedSql");
+        AssertContains(sqliteAddMonthsSql, "date(created_at, '+1 month')", "Converted SQLite SQL should use date month modifier.");
+
+        object pgAddMonthsPreview = BuildViewSqlPreview(
+            "SELECT ADD_MONTHS(created_at, billing_offset) AS billing_at FROM contracts",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgAddMonthsPreview, "CanConvert"), "Oracle ADD_MONTHS with expression offset should convert to PostgreSQL.");
+        string pgAddMonthsSql = (string)GetProperty(pgAddMonthsPreview, "ConvertedSql");
+        AssertContains(pgAddMonthsSql, "created_at + (billing_offset * INTERVAL '1 month')", "Converted PostgreSQL SQL should multiply the offset by a month interval.");
+        AssertNotContains(pgAddMonthsSql, "ADD_MONTHS", "Converted PostgreSQL SQL should remove ADD_MONTHS.");
+
         object mssqlDateSubPreview = BuildViewSqlPreview(
             "SELECT DATE_SUB(expires_at, INTERVAL 7 DAY) AS warning_at FROM sessions",
             "mysql",

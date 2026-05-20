@@ -1375,7 +1375,18 @@ namespace mySQLPunk.lib
                 m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
-            return sql;
+            return Regex.Replace(
+                sql,
+                @"\bADD_MONTHS\s*\((?<args>[^()]*)\)",
+                m => RewriteAddMonthsFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteAddMonthsFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+            return BuildDateAddExpression(targetProvider, args[0], args[1], "month");
         }
 
         private static string BuildDateAddExpression(string targetProvider, string expr, string amount, string part)
@@ -1384,6 +1395,7 @@ namespace mySQLPunk.lib
             if (targetProvider == "mysql") return "DATE_ADD(" + expr + ", INTERVAL " + amount + " " + part.ToUpperInvariant() + ")";
             if (targetProvider == "sqlite") return BuildSqliteDateAddExpression(expr, amount, part);
             if (targetProvider == "oracle") return BuildOracleDateAddExpression(expr, amount, part);
+            if (!IsIntegerString(amount)) return expr + " + (" + amount + " * INTERVAL '1 " + part + "')";
             return expr + " + INTERVAL '" + amount + " " + part + "'";
         }
 
@@ -1477,6 +1489,11 @@ namespace mySQLPunk.lib
             if (part == "minute") return 60;
             if (part == "second") return 1;
             return 0;
+        }
+
+        private static bool IsIntegerString(string value)
+        {
+            return Regex.IsMatch((value ?? string.Empty).Trim(), @"^-?\d+$");
         }
 
         private static bool IsDayDatePart(string value)
