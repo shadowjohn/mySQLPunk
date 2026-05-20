@@ -1158,8 +1158,14 @@ namespace mySQLPunk.lib
 
         private static string RewriteDateDiffFunctions(string selectSql, string targetProvider)
         {
-            return Regex.Replace(
+            string sql = Regex.Replace(
                 selectSql,
+                @"\bTIMESTAMPDIFF\s*\(\s*(?<part>YEAR|YY|YYYY|MONTH|MM|M|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*,\s*(?<start>[^,()]+(?:\([^)]*\))?)\s*,\s*(?<end>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => RewriteTimestampDiffFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
                 @"\bDATEDIFF\s*\((?<args>[^()]*)\)",
                 m => RewriteDateDiffFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
@@ -1178,7 +1184,23 @@ namespace mySQLPunk.lib
                 return BuildDateDiffDaysExpression(targetProvider, args[2], args[1]);
             }
 
+            if (args.Count == 3)
+            {
+                string expression = BuildDateDiffExpression(targetProvider, NormalizeDatePart(args[0]), args[2], args[1]);
+                if (!string.IsNullOrWhiteSpace(expression)) return expression;
+            }
+
             return match.Value;
+        }
+
+        private static string RewriteTimestampDiffFunction(Match match, string targetProvider)
+        {
+            string expression = BuildDateDiffExpression(
+                targetProvider,
+                NormalizeDatePart(match.Groups["part"].Value),
+                match.Groups["end"].Value.Trim(),
+                match.Groups["start"].Value.Trim());
+            return string.IsNullOrWhiteSpace(expression) ? match.Value : expression;
         }
 
         private static string RewriteDateAddFunctions(string selectSql, string targetProvider)
@@ -1265,6 +1287,44 @@ namespace mySQLPunk.lib
             if (targetProvider == "sqlite") return "CAST(julianday(" + endDate + ") - julianday(" + startDate + ") AS INTEGER)";
             if (targetProvider == "oracle") return "TRUNC(" + endDate + ") - TRUNC(" + startDate + ")";
             return "(" + endDate + "::date - " + startDate + "::date)";
+        }
+
+        private static string BuildDateDiffExpression(string targetProvider, string part, string endDate, string startDate)
+        {
+            if (part == "day") return BuildDateDiffDaysExpression(targetProvider, endDate, startDate);
+
+            if (targetProvider == "mssql")
+            {
+                return "DATEDIFF(" + part + ", " + startDate + ", " + endDate + ")";
+            }
+
+            if (targetProvider == "mysql")
+            {
+                return "TIMESTAMPDIFF(" + part.ToUpperInvariant() + ", " + startDate + ", " + endDate + ")";
+            }
+
+            int seconds = GetDateDiffSeconds(part);
+            if (seconds <= 0) return "";
+
+            if (targetProvider == "sqlite")
+            {
+                return "CAST(((julianday(" + endDate + ") - julianday(" + startDate + ")) * 86400) / " + seconds + " AS INTEGER)";
+            }
+
+            if (targetProvider == "oracle")
+            {
+                return "FLOOR(((" + endDate + ") - (" + startDate + ")) * " + (86400 / seconds).ToString(CultureInfo.InvariantCulture) + ")";
+            }
+
+            return "CAST(EXTRACT(EPOCH FROM (" + endDate + " - " + startDate + ")) / " + seconds + " AS INTEGER)";
+        }
+
+        private static int GetDateDiffSeconds(string part)
+        {
+            if (part == "hour") return 3600;
+            if (part == "minute") return 60;
+            if (part == "second") return 1;
+            return 0;
         }
 
         private static bool IsDayDatePart(string value)

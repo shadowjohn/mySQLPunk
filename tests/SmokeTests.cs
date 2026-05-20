@@ -518,6 +518,31 @@ public static class SmokeTests
         string sqliteDateDiffSql = (string)GetProperty(sqliteDateDiffPreview, "ConvertedSql");
         AssertContains(sqliteDateDiffSql, "CAST(julianday(end_date) - julianday(start_date) AS INTEGER)", "Converted SQLite SQL should use julianday day difference.");
 
+        object pgTimestampDiffPreview = BuildViewSqlPreview(
+            "SELECT TIMESTAMPDIFF(HOUR, start_time, end_time) AS hours_open FROM tickets",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTimestampDiffPreview, "CanConvert"), "MySQL TIMESTAMPDIFF hour should convert to PostgreSQL.");
+        string pgTimestampDiffSql = (string)GetProperty(pgTimestampDiffPreview, "ConvertedSql");
+        AssertContains(pgTimestampDiffSql, "CAST(EXTRACT(EPOCH FROM (end_time - start_time)) / 3600 AS INTEGER)", "Converted PostgreSQL SQL should use EXTRACT(EPOCH) for hour difference.");
+        AssertNotContains(pgTimestampDiffSql, "TIMESTAMPDIFF", "Converted PostgreSQL SQL should remove TIMESTAMPDIFF.");
+
+        object sqliteTimestampDiffPreview = BuildViewSqlPreview(
+            "SELECT TIMESTAMPDIFF(MINUTE, start_time, end_time) AS minutes_open FROM tickets",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteTimestampDiffPreview, "CanConvert"), "MySQL TIMESTAMPDIFF minute should convert to SQLite.");
+        string sqliteTimestampDiffSql = (string)GetProperty(sqliteTimestampDiffPreview, "ConvertedSql");
+        AssertContains(sqliteTimestampDiffSql, "CAST(((julianday(end_time) - julianday(start_time)) * 86400) / 60 AS INTEGER)", "Converted SQLite SQL should use julianday seconds for minute difference.");
+
+        object mysqlDateDiffHourPreview = BuildViewSqlPreview(
+            "SELECT DATEDIFF(hour, start_time, end_time) AS hours_open FROM tickets",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlDateDiffHourPreview, "CanConvert"), "SQL Server DATEDIFF hour should convert to MySQL.");
+        string mysqlDateDiffHourSql = (string)GetProperty(mysqlDateDiffHourPreview, "ConvertedSql");
+        AssertContains(mysqlDateDiffHourSql, "TIMESTAMPDIFF(HOUR, start_time, end_time)", "Converted MySQL SQL should use TIMESTAMPDIFF for hour difference.");
+
         object mssqlDateAddPreview = BuildViewSqlPreview(
             "SELECT DATE_ADD(created_at, INTERVAL 7 DAY) AS expires_at FROM sessions",
             "mysql",
