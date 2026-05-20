@@ -2359,8 +2359,15 @@ public static class SmokeTests
             AssertContains(details, "SpatiaLite Repair Script|Ready", "SpatiaLite diagnostics should detect the rebuild script.");
             AssertContains(details, "Build-SpatiaLiteRuntime.ps1", "SpatiaLite diagnostics should show the rebuild script path.");
             AssertContains(details, "powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should show a runnable repair command.");
+            AssertContains(details, "SpatiaLite Repair Log|Info", "SpatiaLite diagnostics should show the repair log path.");
             AssertContains(details, "SpatiaLite Missing DLL|Warning", "SpatiaLite diagnostics should warn when mod_spatialite.dll is missing.");
             AssertContains(details, "missing mod_spatialite", "SpatiaLite diagnostics should keep the load error.");
+
+            System.Diagnostics.ProcessStartInfo startInfo = SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(root);
+            AssertEquals("powershell.exe", startInfo.FileName, "SpatiaLite repair should launch PowerShell.");
+            AssertContains(startInfo.Arguments, "Tee-Object", "SpatiaLite repair should tee progress output to a log.");
+            AssertContains(startInfo.Arguments, "Build-SpatiaLiteRuntime.ps1", "SpatiaLite repair should invoke the rebuild script.");
+            Assert(startInfo.UseShellExecute, "SpatiaLite repair should open an interactive PowerShell window.");
         }
         finally
         {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 
 namespace mySQLPunk.lib
@@ -27,6 +28,7 @@ namespace mySQLPunk.lib
             rows.Add(CreateRow("SpatiaLite Runtime Manifest", File.Exists(manifestPath) ? "Ready" : "Warning", manifestPath));
             rows.Add(CreateRow("SpatiaLite Repair Script", File.Exists(scriptPath) ? "Ready" : "Warning", scriptPath));
             rows.Add(CreateRow("SpatiaLite Repair Command", File.Exists(scriptPath) ? "Info" : "Warning", BuildRepairCommand(repositoryRoot)));
+            rows.Add(CreateRow("SpatiaLite Repair Log", "Info", BuildRepairLogPath()));
             rows.Add(CreateRow("SpatiaLite Repair Guide", "Info", "執行修復命令會從 Gaia-SINS 官方 libspatialite 5.1.0 原始碼重建 runtime，並輸出到 " + safeRuntimeDir));
 
             if (!File.Exists(dllPath))
@@ -73,10 +75,46 @@ namespace mySQLPunk.lib
             return "powershell -ExecutionPolicy Bypass -File \"" + scriptPath + "\"";
         }
 
+        public static ProcessStartInfo BuildRepairProcessStartInfo(string repositoryRoot)
+        {
+            string scriptPath = GetBuildScriptPath(repositoryRoot);
+            if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath))
+            {
+                throw new FileNotFoundException("SpatiaLite rebuild script not found.", scriptPath);
+            }
+
+            string logPath = BuildRepairLogPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath));
+            string command = "& '" + EscapePowerShellSingleQuoted(scriptPath) + "' 2>&1 | Tee-Object -FilePath '" +
+                EscapePowerShellSingleQuoted(logPath) + "'";
+
+            return new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoExit -ExecutionPolicy Bypass -Command \"" + command.Replace("\"", "`\"") + "\"",
+                WorkingDirectory = repositoryRoot,
+                UseShellExecute = true
+            };
+        }
+
+        public static string BuildRepairLogPath()
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "mySQLPunk",
+                "spatialite-repair-logs");
+            return Path.Combine(dir, "spatialite-repair-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log");
+        }
+
         private static string GetBuildScriptPath(string repositoryRoot)
         {
             if (string.IsNullOrWhiteSpace(repositoryRoot)) return string.Empty;
             return Path.Combine(repositoryRoot, BuildScriptRelativePath);
+        }
+
+        private static string EscapePowerShellSingleQuoted(string value)
+        {
+            return (value ?? string.Empty).Replace("'", "''");
         }
 
         private static SpatiaLiteDiagnosticRow CreateRow(string item, string status, string detail)

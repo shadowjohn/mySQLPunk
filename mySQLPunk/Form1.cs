@@ -5991,6 +5991,8 @@ namespace mySQLPunk
         private void table_top_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0) return;
+            if (TryRunOtherToolGridAction(e.RowIndex)) return;
+
             string groupName = GetCurrentGridGroupName(e.RowIndex);
             if (groupName == "Queries")
             {
@@ -5999,6 +6001,38 @@ namespace mySQLPunk
             }
 
             ActivateDatabaseObjectFromGridRow(e.RowIndex, groupName);
+        }
+
+        private bool TryRunOtherToolGridAction(int rowIndex)
+        {
+            if (table_top == null || rowIndex < 0 || rowIndex >= table_top.Rows.Count) return false;
+            if (!table_top.Columns.Contains("項目") || !table_top.Columns.Contains("說明")) return false;
+
+            string item = Convert.ToString(table_top.Rows[rowIndex].Cells["項目"].Value);
+            if (!string.Equals(item, "SpatiaLite Repair Command", StringComparison.OrdinalIgnoreCase)) return false;
+
+            string repositoryRoot = SpatiaLiteRuntimeDiagnosticService.FindRepositoryRoot(AppDomain.CurrentDomain.BaseDirectory);
+            if (string.IsNullOrWhiteSpace(repositoryRoot))
+            {
+                MessageBox.Show(
+                    "找不到 tools\\spatialite\\Build-SpatiaLiteRuntime.ps1，請確認目前執行目錄仍在完整 source tree 內。",
+                    Localization.T("Common.Error"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return true;
+            }
+
+            try
+            {
+                Process.Start(SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(repositoryRoot));
+                UpdateMainStatus("SpatiaLite runtime 修復腳本已啟動。");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
+            return true;
         }
 
         private bool ActivateDatabaseObjectFromGridRow(int rowIndex, string groupName)
