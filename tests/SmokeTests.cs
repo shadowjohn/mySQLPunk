@@ -39,6 +39,7 @@ public static class SmokeTests
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
+        Run("Data view filter service", TestDataViewFilterService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
@@ -1967,6 +1968,32 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString(key, oldValue);
             ApplicationOptionSettings.Save();
         }
+    }
+
+    private static void TestDataViewFilterService()
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("名稱");
+        table.Columns.Add("註解");
+        table.Columns.Add("大小%");
+        table.Rows.Add("users", "主要使用者資料", "100%");
+        table.Rows.Add("logs", "audit trail", "20%");
+        table.Rows.Add("orders", "O'Reilly sample", "35%");
+
+        string filter = DataViewFilterService.BuildContainsFilter(table, "使用者");
+        table.DefaultView.RowFilter = filter;
+        AssertEquals("1", table.DefaultView.Count.ToString(), "Top object filter should match Traditional Chinese text.");
+        AssertEquals("users", table.DefaultView[0]["名稱"].ToString(), "Top object filter should keep matching row.");
+
+        table.DefaultView.RowFilter = DataViewFilterService.BuildContainsFilter(table, "O'Reilly");
+        AssertEquals("1", table.DefaultView.Count.ToString(), "Top object filter should escape single quotes.");
+        AssertEquals("orders", table.DefaultView[0]["名稱"].ToString(), "Top object filter should match escaped quote content.");
+
+        table.DefaultView.RowFilter = DataViewFilterService.BuildContainsFilter(table, "100%");
+        AssertEquals("1", table.DefaultView.Count.ToString(), "Top object filter should escape LIKE wildcards.");
+        AssertEquals("users", table.DefaultView[0]["名稱"].ToString(), "Top object filter should match literal percent content.");
+
+        AssertEquals("", DataViewFilterService.BuildContainsFilter(table, ""), "Empty top object filter should clear row filter.");
     }
 
     private static void TestWindowsCredentialService()

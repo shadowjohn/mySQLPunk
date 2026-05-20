@@ -97,6 +97,8 @@ namespace mySQLPunk
 
         // 側邊欄組件
         private Panel pnlSidebar;
+        private Panel pnlObjectFilter;
+        private TextBox txtObjectFilter;
         private ToolStrip tsSidebar;
         private RichTextBox rtbDDL;
         private DataGridView dgvDetails;
@@ -1919,6 +1921,7 @@ namespace mySQLPunk
             table_top.BackgroundColor = Color.White;
             table_top.GridColor = Color.FromArgb(240, 240, 240);
             table_top.BorderStyle = BorderStyle.None;
+            InitObjectFilterPanel();
 
             queryTabs = new TabControl();
             queryTabs.Dock = DockStyle.Fill;
@@ -2220,7 +2223,7 @@ namespace mySQLPunk
             ToolStripMenuItem showTopFilterItem = CreateCheckedViewMenuItem(
                 Localization.T("View.ShowTopFilter"),
                 ApplicationOptionSettings.GetBool("ViewShowTopFilter"),
-                value => SaveViewBoolOption("ViewShowTopFilter", value, "View.TopFilterChanged"));
+                value => SetObjectFilterVisible(value));
             navigationPaneMenu.DropDownItems.AddRange(new ToolStripItem[]
             {
                 showNavigationPaneItem,
@@ -2347,6 +2350,7 @@ namespace mySQLPunk
             SetNavigationPaneVisible(ApplicationOptionSettings.GetBool("ViewShowNavigationPane"), false);
             SetInfoPaneVisible(ApplicationOptionSettings.GetBool("ViewShowInfoPane"), false);
             SetObjectListMode(ApplicationOptionSettings.GetString("ViewObjectListMode"), false);
+            SetObjectFilterVisible(ApplicationOptionSettings.GetBool("ViewShowTopFilter"), false);
             SetInfoPaneMode(ApplicationOptionSettings.GetBool("ViewInfoPaneAiMode"), false);
         }
 
@@ -2426,6 +2430,54 @@ namespace mySQLPunk
             UpdateMainStatus(Localization.T(statusKey));
         }
 
+        private void SetObjectFilterVisible(bool visible, bool save = true)
+        {
+            if (pnlObjectFilter != null)
+            {
+                pnlObjectFilter.Visible = visible && table_top != null && table_top.Visible;
+                pnlObjectFilter.BringToFront();
+            }
+
+            if (!visible && txtObjectFilter != null && txtObjectFilter.TextLength > 0)
+            {
+                txtObjectFilter.Clear();
+            }
+            else
+            {
+                ApplyObjectListFilter();
+            }
+
+            if (save)
+            {
+                ApplicationOptionSettings.SetBool("ViewShowTopFilter", visible);
+                ApplicationOptionSettings.Save();
+                ConfigureMainMenu();
+                UpdateMainStatus(Localization.T("View.TopFilterChanged"));
+            }
+        }
+
+        private void UpdateObjectFilterVisibility()
+        {
+            SetObjectFilterVisible(ApplicationOptionSettings.GetBool("ViewShowTopFilter"), false);
+        }
+
+        private void ApplyObjectListFilter()
+        {
+            if (table_top == null) return;
+            DataTable table = table_top.DataSource as DataTable;
+            if (table == null) return;
+
+            string filter = DataViewFilterService.BuildContainsFilter(table, txtObjectFilter == null ? "" : txtObjectFilter.Text);
+            try
+            {
+                table.DefaultView.RowFilter = filter;
+            }
+            catch
+            {
+                table.DefaultView.RowFilter = string.Empty;
+            }
+        }
+
         private void SetShowHiddenItems(bool value)
         {
             ApplicationOptionSettings.SetBool("ViewShowHiddenItems", value);
@@ -2489,8 +2541,11 @@ namespace mySQLPunk
             if (table == null) return;
 
             string columnName = ApplicationOptionSettings.GetString("ViewSortColumn");
-            if (string.IsNullOrWhiteSpace(columnName) || !table.Columns.Contains(columnName)) return;
-            table.DefaultView.Sort = "[" + columnName.Replace("]", "]]") + "] ASC";
+            if (!string.IsNullOrWhiteSpace(columnName) && table.Columns.Contains(columnName))
+            {
+                table.DefaultView.Sort = "[" + columnName.Replace("]", "]]") + "] ASC";
+            }
+            ApplyObjectListFilter();
         }
 
         private void OpenViewColumnChooser()
@@ -3025,6 +3080,10 @@ namespace mySQLPunk
             ConfigureMainToolbar(Path.Combine(Application.StartupPath, "image"));
             label1.Text = Localization.T("Sidebar.Connections");
             if (lblSidebarTitle != null) lblSidebarTitle.Text = Localization.T("Sidebar.ObjectDetails");
+            if (pnlObjectFilter != null && pnlObjectFilter.Controls.OfType<Label>().Any())
+            {
+                pnlObjectFilter.Controls.OfType<Label>().First().Text = Localization.T("View.TopFilterLabel");
+            }
             if (lblMainStatus != null && (lblMainStatus.Text == "Ready" || lblMainStatus.Text == "就緒" || string.IsNullOrWhiteSpace(lblMainStatus.Text)))
             {
                 lblMainStatus.Text = Localization.T("Status.Ready");
@@ -3235,6 +3294,39 @@ namespace mySQLPunk
 
             splitContainer5.Panel2.Controls.Add(pnlSidebar);
             pnlSidebar.BringToFront();
+        }
+
+        private void InitObjectFilterPanel()
+        {
+            if (pnlObjectFilter != null) return;
+
+            pnlObjectFilter = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 34,
+                Padding = new Padding(8, 5, 8, 4),
+                Visible = false
+            };
+
+            Label label = new Label
+            {
+                Text = Localization.T("View.TopFilterLabel"),
+                AutoSize = true,
+                Dock = DockStyle.Left,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(0, 6, 8, 0)
+            };
+
+            txtObjectFilter = new TextBox
+            {
+                Dock = DockStyle.Fill
+            };
+            txtObjectFilter.TextChanged += (s, e) => ApplyObjectListFilter();
+
+            pnlObjectFilter.Controls.Add(txtObjectFilter);
+            pnlObjectFilter.Controls.Add(label);
+            splitContainer5.Panel1.Controls.Add(pnlObjectFilter);
+            pnlObjectFilter.BringToFront();
         }
 
         private void ConfigureMainToolbar(string imgPath)
@@ -3797,6 +3889,7 @@ namespace mySQLPunk
             table_top.Visible = false;
             queryTabs.Visible = true;
             queryTabs.BringToFront();
+            UpdateObjectFilterVisibility();
 
             dockable.SetMainHost(this);
             dockable.PrepareForDocking();
@@ -3839,6 +3932,7 @@ namespace mySQLPunk
             {
                 queryTabs.Visible = false;
                 table_top.Visible = true;
+                UpdateObjectFilterVisibility();
             }
         }
 
@@ -3907,6 +4001,7 @@ namespace mySQLPunk
                 queryTabs.Visible = false;
                 table_top.Visible = true;
                 table_top.BringToFront();
+                UpdateObjectFilterVisibility();
             }
             RefreshQueriesGroupIfSelected();
         }
@@ -5508,6 +5603,7 @@ namespace mySQLPunk
                 table_top.Visible = true;
                 queryTabs.Visible = false;
                 table_top.BringToFront();
+                UpdateObjectFilterVisibility();
 
                 string dbName = pathParts[1];
                 
@@ -5905,6 +6001,7 @@ namespace mySQLPunk
             queryTabs.Visible = true;
             queryTabs.SelectedIndex = tabIndex;
             queryTabs.BringToFront();
+            UpdateObjectFilterVisibility();
             UpdateMainStatus("Query tab opened: " + queryTabs.TabPages[tabIndex].Text);
             return true;
         }
@@ -6440,6 +6537,7 @@ namespace mySQLPunk
                 table_top.DataSource = null;
                 table_top.Visible = true;
                 queryTabs.Visible = false;
+                UpdateObjectFilterVisibility();
                 lblSidebarTitle.Text = Localization.T("Sidebar.ObjectDetails");
                 dgvDetails.DataSource = null;
                 rtbDDL.Clear();
@@ -8888,6 +8986,7 @@ namespace mySQLPunk
             table_top.Visible = true;
             queryTabs.Visible = false;
             table_top.BringToFront();
+            UpdateObjectFilterVisibility();
             table_top.DataSource = results;
             lblSidebarTitle.Text = Localization.T("Database.SearchTitle") + ": " + target.DatabaseName;
             dgvDetails.DataSource = null;

@@ -87,6 +87,7 @@ namespace mySQLPunk
             Add("View.HideConnectionGroups", "隱藏連線群組", "Hide Connection Groups");
             Add("View.ActiveObjectsOnly", "僅顯示活躍物件", "Show Active Objects Only");
             Add("View.ShowTopFilter", "在頂部顯示篩選", "Show Filter at Top");
+            Add("View.TopFilterLabel", "篩選：", "Filter:");
             Add("View.InfoPane", "資訊窗格", "Info Pane");
             Add("View.ShowInfoPane", "顯示資訊窗格", "Show Info Pane");
             Add("View.ListMode", "清單", "List");

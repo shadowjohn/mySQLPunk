@@ -176,6 +176,7 @@
     <Compile Include="lib\ConnectionProxySettingsService.cs" />
     <Compile Include="lib\BinaryCellStreamingService.cs" />
     <Compile Include="lib\crypto.cs" />
+    <Compile Include="lib\DataViewFilterService.cs" />
     <Compile Include="lib\DatabaseCopyService.cs" />
     <Compile Include="lib\DatabaseDumpService.cs" />
     <Compile Include="lib\DiagnosticLogService.cs" />
