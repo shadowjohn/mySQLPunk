@@ -3242,14 +3242,14 @@ namespace mySQLPunk
                 int rowsAffected;
                 if (int.TryParse(result["rowsAffected"], out rowsAffected) && rowsAffected == 0)
                 {
-                    throw new Exception(BuildRowsAffectedConflictMessage(sql));
+                    throw new Exception(BuildRowsAffectedConflictMessage(sql, parameters));
                 }
             }
         }
 
-        private static string BuildRowsAffectedConflictMessage(string sql)
+        private static string BuildRowsAffectedConflictMessage(string sql, Dictionary<string, object> parameters)
         {
-            string detail = BuildRowsAffectedConflictDetail(sql);
+            string detail = BuildRowsAffectedConflictDetail(sql, parameters);
             if (string.IsNullOrWhiteSpace(detail))
             {
                 return Localization.T("Query.NoRowsAffectedConflict");
@@ -3258,11 +3258,12 @@ namespace mySQLPunk
             return Localization.T("Query.NoRowsAffectedConflict") + Environment.NewLine + detail;
         }
 
-        private static string BuildRowsAffectedConflictDetail(string sql)
+        private static string BuildRowsAffectedConflictDetail(string sql, Dictionary<string, object> parameters)
         {
             List<string> parts = new List<string>();
             string operation = ExtractSqlOperation(sql);
             string where = ExtractWhereSummary(sql);
+            string values = BuildSqlParameterSummary(sql, parameters);
 
             if (!string.IsNullOrWhiteSpace(operation))
             {
@@ -3274,7 +3275,52 @@ namespace mySQLPunk
                 parts.Add(Localization.Format("Query.ConflictWhere", where));
             }
 
+            if (!string.IsNullOrWhiteSpace(values))
+            {
+                parts.Add(Localization.Format("Query.ConflictValues", values));
+            }
+
             return string.Join(Environment.NewLine, parts.ToArray());
+        }
+
+        private static string BuildSqlParameterSummary(string sql, Dictionary<string, object> parameters)
+        {
+            if (parameters == null || parameters.Count == 0 || string.IsNullOrWhiteSpace(sql)) return string.Empty;
+
+            List<string> names = new List<string>();
+            foreach (Match match in Regex.Matches(sql, @"(?:[:@?])(?<name>p\d+)\b", RegexOptions.IgnoreCase))
+            {
+                string name = match.Groups["name"].Value;
+                if (!names.Any(v => string.Equals(v, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    names.Add(name);
+                }
+            }
+
+            List<string> parts = new List<string>();
+            foreach (string name in names)
+            {
+                KeyValuePair<string, object> pair = parameters.FirstOrDefault(p => string.Equals(p.Key, name, StringComparison.OrdinalIgnoreCase));
+                if (string.IsNullOrEmpty(pair.Key)) continue;
+                parts.Add(pair.Key + "=" + FormatConflictParameterValue(pair.Value));
+            }
+
+            return parts.Count == 0 ? string.Empty : TruncateConflictDetail(string.Join("；", parts.ToArray()), 360);
+        }
+
+        private static string FormatConflictParameterValue(object value)
+        {
+            if (IsDbNull(value)) return "NULL";
+            byte[] bytes = value as byte[];
+            if (bytes != null) return "[BLOB " + bytes.Length.ToString(CultureInfo.InvariantCulture) + " bytes]";
+            if (value is DateTime)
+            {
+                return ((DateTime)value).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+            }
+
+            string text = Convert.ToString(value, CultureInfo.InvariantCulture);
+            text = Regex.Replace(text ?? "", @"\s+", " ").Trim();
+            return TruncateConflictDetail(text, 120);
         }
 
         private static string ExtractSqlOperation(string sql)

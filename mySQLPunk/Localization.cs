@@ -479,6 +479,7 @@ namespace mySQLPunk
             Add("Object.UnknownError", "unknown error", "unknown error");
             Add("Query.ConflictOperation", "操作類型：{0}", "Operation: {0}");
             Add("Query.ConflictWhere", "比對條件：{0}", "Match condition: {0}");
+            Add("Query.ConflictValues", "比對/異動值：{0}", "Matched/changed values: {0}");
             Add("Object.ConfirmDeleteTable", "確定要刪除資料表「{0}」嗎？此操作不可還原！", "Delete table \"{0}\"? This action cannot be undone.");
             Add("Object.ConfirmDeleteView", "確定要刪除檢視「{0}」嗎？此操作不可還原！", "Delete view \"{0}\"? This action cannot be undone.");
             Add("Object.ConfirmDeleteFunction", "確定要刪除函式或程序「{0}」嗎？此操作不可還原！", "Delete function or procedure \"{0}\"? This action cannot be undone.");

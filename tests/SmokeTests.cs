@@ -2585,7 +2585,11 @@ public static class SmokeTests
         string conflictMessage = "";
         try
         {
-            InvokeQueryFormExecOrThrow(form, "UPDATE public.users SET name = :p0 WHERE id = :p1;", new Dictionary<string, object>(), true);
+            InvokeQueryFormExecOrThrow(
+                form,
+                "UPDATE public.users SET name = :p0 WHERE id = :p1;",
+                new Dictionary<string, object> { { "p0", "new name" }, { "p1", 7 } },
+                true);
         }
         catch (TargetInvocationException ex)
         {
@@ -2593,8 +2597,10 @@ public static class SmokeTests
         }
         rejectedConflict =
             conflictMessage.IndexOf("UPDATE", StringComparison.OrdinalIgnoreCase) >= 0 &&
-            conflictMessage.IndexOf("WHERE id = :p1", StringComparison.OrdinalIgnoreCase) >= 0;
-        Assert(rejectedConflict, "Update/delete zero affected rows conflict should include operation and WHERE detail.");
+            conflictMessage.IndexOf("WHERE id = :p1", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            conflictMessage.IndexOf("p0=new name", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            conflictMessage.IndexOf("p1=7", StringComparison.OrdinalIgnoreCase) >= 0;
+        Assert(rejectedConflict, "Update/delete zero affected rows conflict should include operation, WHERE detail, and parameter values.");
 
         FakeExecDatabase insertDb = new FakeExecDatabase("postgresql", "0");
         SetPrivateField(form, "_db", insertDb);
