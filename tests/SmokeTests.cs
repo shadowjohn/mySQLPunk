@@ -495,6 +495,22 @@ public static class SmokeTests
         string mssqlModSql = (string)GetProperty(mssqlModPreview, "ConvertedSql");
         AssertContains(mssqlModSql, "(order_no % 10)", "Converted SQL Server SQL should use modulo operator.");
 
+        object pgPowPreview = BuildViewSqlPreview(
+            "SELECT POW(score, 2) AS score_squared FROM exams",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgPowPreview, "CanConvert"), "MySQL POW should convert to PostgreSQL.");
+        string pgPowSql = (string)GetProperty(pgPowPreview, "ConvertedSql");
+        AssertContains(pgPowSql, "POWER(score, 2)", "Converted PostgreSQL SQL should use POWER.");
+
+        object mssqlPowPreview = BuildViewSqlPreview(
+            "SELECT POW(score, 2) AS score_squared FROM exams",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlPowPreview, "CanConvert"), "MySQL POW should convert to SQL Server.");
+        string mssqlPowSql = (string)GetProperty(mssqlPowPreview, "ConvertedSql");
+        AssertContains(mssqlPowSql, "POWER(score, 2)", "Converted SQL Server SQL should use POWER.");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",

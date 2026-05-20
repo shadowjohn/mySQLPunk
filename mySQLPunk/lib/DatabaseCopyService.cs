@@ -471,7 +471,7 @@ namespace mySQLPunk.lib
 
         private static string RewriteNumericFunctions(string selectSql, string targetProvider)
         {
-            string sql = selectSql;
+            string sql = RewritePowerFunctions(selectSql, targetProvider);
             if (targetProvider == "mssql")
             {
                 sql = Regex.Replace(
@@ -490,6 +490,17 @@ namespace mySQLPunk.lib
                 sql,
                 @"\bCEILING\s*\(",
                 "CEIL(",
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewritePowerFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql" || targetProvider == "sqlite") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bPOW\s*\(",
+                "POWER(",
                 RegexOptions.IgnoreCase);
         }
 
