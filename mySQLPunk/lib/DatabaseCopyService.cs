@@ -465,6 +465,7 @@ namespace mySQLPunk.lib
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
+            sql = RewritePatternMatchOperators(sql, targetProvider);
             sql = RewritePostgreSqlJsonOperators(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonQueryFunctions(sql, targetProvider);
@@ -1217,6 +1218,17 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
 
             return sql;
+        }
+
+        private static string RewritePatternMatchOperators(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "postgresql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b)\s+ILIKE\s+(?<pattern>'(?:''|[^'])*')",
+                m => "LOWER(" + m.Groups["expr"].Value.Trim() + ") LIKE LOWER(" + m.Groups["pattern"].Value + ")",
+                RegexOptions.IgnoreCase);
         }
 
         private static string RewriteJsonValueFunctions(string selectSql, string targetProvider)

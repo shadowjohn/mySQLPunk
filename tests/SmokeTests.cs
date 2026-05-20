@@ -772,6 +772,23 @@ public static class SmokeTests
         string sqlitePositionSql = (string)GetProperty(sqlitePositionPreview, "ConvertedSql");
         AssertContains(sqlitePositionSql, "INSTR(email, '@')", "Converted SQLite SQL should use INSTR.");
 
+        object mysqlIlikePreview = BuildViewSqlPreview(
+            "SELECT id FROM users WHERE email ILIKE '%@example.com'",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlIlikePreview, "CanConvert"), "PostgreSQL ILIKE should convert to MySQL.");
+        string mysqlIlikeSql = (string)GetProperty(mysqlIlikePreview, "ConvertedSql");
+        AssertContains(mysqlIlikeSql, "LOWER(email) LIKE LOWER('%@example.com')", "Converted MySQL SQL should use case-insensitive LIKE fallback.");
+        AssertNotContains(mysqlIlikeSql, "ILIKE", "Converted MySQL SQL should remove ILIKE.");
+
+        object mssqlIlikePreview = BuildViewSqlPreview(
+            "SELECT id FROM users WHERE name ILIKE 'O''Reilly%'",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlIlikePreview, "CanConvert"), "PostgreSQL ILIKE should convert to SQL Server.");
+        string mssqlIlikeSql = (string)GetProperty(mssqlIlikePreview, "ConvertedSql");
+        AssertContains(mssqlIlikeSql, "LOWER(name) LIKE LOWER('O''Reilly%')", "Converted SQL Server SQL should preserve escaped quote patterns.");
+
         object cteWindowPreview = BuildViewSqlPreview(
             "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
             "postgresql",
