@@ -1028,6 +1028,7 @@ namespace mySQLPunk
 
             db_tree.ShowRootLines = false;
             db_tree.ShowLines = true;
+            db_tree.ShowNodeToolTips = ShouldShowObjectTooltips();
 
             db_tree.ShowPlusMinus = true;
             db_tree.Nodes.Clear();
@@ -2652,7 +2653,7 @@ namespace mySQLPunk
                 {
                     string capturedPath = path;
                     ToolStripMenuItem item = new ToolStripMenuItem(GetFavoriteDisplayText(path));
-                    item.ToolTipText = path;
+                    ApplyObjectTooltip(item, path);
                     item.Click += (s, e) => OpenFavoriteNodePath(capturedPath);
                     favoriteMenu.DropDownItems.Add(item);
                 }
@@ -3441,15 +3442,27 @@ namespace mySQLPunk
 
         private void ConfigureConnectionToolbarButton()
         {
-            connection_btn.ToolTipText = Localization.T("Menu.NewConnection");
+            ApplyObjectTooltip(connection_btn, Localization.T("Menu.NewConnection"));
         }
 
         private static void ConfigureToolbarItem(ToolStripItem item, string text)
         {
             item.Text = text;
-            item.AutoToolTip = false;
+            ApplyObjectTooltip(item, text);
             item.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
             item.ImageScaling = ToolStripItemImageScaling.None;
+        }
+
+        private static void ApplyObjectTooltip(ToolStripItem item, string text)
+        {
+            if (item == null) return;
+            item.AutoToolTip = false;
+            item.ToolTipText = ShouldShowObjectTooltips() ? (text ?? string.Empty) : string.Empty;
+        }
+
+        private static bool ShouldShowObjectTooltips()
+        {
+            return ApplicationOptionSettings.GetBool("ShowObjectTooltips");
         }
 
         private void LoadIcon(ToolStripItem btn, string path, Image defaultImg)

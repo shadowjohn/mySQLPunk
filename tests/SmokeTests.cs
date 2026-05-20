@@ -2269,6 +2269,7 @@ public static class SmokeTests
         bool oldEditorWordWrap = ApplicationOptionSettings.GetBool("EditorWordWrap");
         int oldEditorLargeFileLimitMb = ApplicationOptionSettings.GetInt("EditorLargeFileLimitMb");
         bool oldAutoCompleteEnabled = ApplicationOptionSettings.GetBool("AutoCompleteEnabled");
+        bool oldShowObjectTooltips = ApplicationOptionSettings.GetBool("ShowObjectTooltips");
         string oldGridFontName = ApplicationOptionSettings.GetString("RecordGridFontName");
         int oldGridFontSize = ApplicationOptionSettings.GetInt("RecordGridFontSize");
         string oldDateFormat = ApplicationOptionSettings.GetString("RecordDateFormat");
@@ -2287,6 +2288,7 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("EditorWordWrap", false);
             ApplicationOptionSettings.SetInt("EditorLargeFileLimitMb", 1);
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", false);
+            ApplicationOptionSettings.SetBool("ShowObjectTooltips", true);
             ApplicationOptionSettings.SetString("RecordGridFontName", "Consolas");
             ApplicationOptionSettings.SetInt("RecordGridFontSize", 12);
             ApplicationOptionSettings.SetString("RecordDateFormat", "yyyy/MM/dd");
@@ -2328,6 +2330,15 @@ public static class SmokeTests
             AssertEquals("9,876", FormatQueryResultValue(9876), "Query result integer formatting should honor thousands option.");
             Assert(QueryEditorHelpersEnabled("SELECT 1"), "Editor helpers should remain enabled below the large SQL limit.");
             Assert(!QueryEditorHelpersEnabled(new string('x', 1024 * 1024 + 1)), "Editor helpers should be disabled above the configured large SQL limit.");
+
+            using (ToolStripButton tooltipButton = new ToolStripButton("Demo"))
+            {
+                ApplyObjectTooltipForTest(tooltipButton, "Demo tooltip");
+                AssertEquals("Demo tooltip", tooltipButton.ToolTipText, "Object tooltips should be applied when the option is enabled.");
+                ApplicationOptionSettings.SetBool("ShowObjectTooltips", false);
+                ApplyObjectTooltipForTest(tooltipButton, "Demo tooltip");
+                AssertEquals("", tooltipButton.ToolTipText, "Object tooltips should be cleared when the option is disabled.");
+            }
         }
         finally
         {
@@ -2338,6 +2349,7 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("EditorWordWrap", oldEditorWordWrap);
             ApplicationOptionSettings.SetInt("EditorLargeFileLimitMb", oldEditorLargeFileLimitMb);
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", oldAutoCompleteEnabled);
+            ApplicationOptionSettings.SetBool("ShowObjectTooltips", oldShowObjectTooltips);
             ApplicationOptionSettings.SetString("RecordGridFontName", oldGridFontName);
             ApplicationOptionSettings.SetInt("RecordGridFontSize", oldGridFontSize);
             ApplicationOptionSettings.SetString("RecordDateFormat", oldDateFormat);
@@ -2347,6 +2359,12 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", oldUseSystemNumberFormat);
             ApplicationOptionSettings.SetString("RecordRowHeightMode", oldRowHeightMode);
         }
+    }
+
+    private static void ApplyObjectTooltipForTest(ToolStripItem item, string text)
+    {
+        MethodInfo method = typeof(Form1).GetMethod("ApplyObjectTooltip", BindingFlags.Static | BindingFlags.NonPublic);
+        method.Invoke(null, new object[] { item, text });
     }
 
     private static bool QueryEditorHelpersEnabled(string sql)
