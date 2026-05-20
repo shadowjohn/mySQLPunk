@@ -974,6 +974,16 @@ namespace mySQLPunk.lib
                 string sql = segment;
                 if (targetProvider != "mssql")
                 {
+                    sql = Regex.Replace(sql, @"\bGETUTCDATE\s*\(\s*\)", m => BuildUtcTimestampExpression(targetProvider), RegexOptions.IgnoreCase);
+                }
+
+                if (targetProvider != "mysql")
+                {
+                    sql = Regex.Replace(sql, @"\bUTC_TIMESTAMP\s*\(\s*\)", m => BuildUtcTimestampExpression(targetProvider), RegexOptions.IgnoreCase);
+                }
+
+                if (targetProvider != "mssql")
+                {
                     sql = Regex.Replace(sql, @"\bGETDATE\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
                 }
 
@@ -1019,6 +1029,15 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql") return "GETDATE()";
             if (targetProvider == "mysql") return "NOW()";
             return "CURRENT_TIMESTAMP";
+        }
+
+        private static string BuildUtcTimestampExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "GETUTCDATE()";
+            if (targetProvider == "mysql") return "UTC_TIMESTAMP()";
+            if (targetProvider == "oracle") return "SYS_EXTRACT_UTC(SYSTIMESTAMP)";
+            if (targetProvider == "sqlite") return "datetime('now')";
+            return "CURRENT_TIMESTAMP AT TIME ZONE 'UTC'";
         }
 
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)

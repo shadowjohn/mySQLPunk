@@ -252,6 +252,31 @@ public static class SmokeTests
         AssertContains(sqliteNowSql, "CURRENT_TIMESTAMP", "Converted SQLite SQL should use CURRENT_TIMESTAMP.");
         AssertNotContains(sqliteNowSql, "NOW()", "Converted SQLite SQL should remove NOW().");
 
+        object mysqlUtcTimestampPreview = BuildViewSqlPreview(
+            "SELECT GETUTCDATE() AS synced_at FROM audit_log",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlUtcTimestampPreview, "CanConvert"), "SQL Server GETUTCDATE should convert to MySQL.");
+        string mysqlUtcTimestampSql = (string)GetProperty(mysqlUtcTimestampPreview, "ConvertedSql");
+        AssertContains(mysqlUtcTimestampSql, "UTC_TIMESTAMP() AS synced_at", "Converted MySQL SQL should use UTC_TIMESTAMP.");
+        AssertNotContains(mysqlUtcTimestampSql, "GETUTCDATE()", "Converted MySQL SQL should remove GETUTCDATE.");
+
+        object oracleUtcTimestampPreview = BuildViewSqlPreview(
+            "SELECT UTC_TIMESTAMP() AS synced_at FROM audit_log",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleUtcTimestampPreview, "CanConvert"), "MySQL UTC_TIMESTAMP should convert to Oracle.");
+        string oracleUtcTimestampSql = (string)GetProperty(oracleUtcTimestampPreview, "ConvertedSql");
+        AssertContains(oracleUtcTimestampSql, "SYS_EXTRACT_UTC(SYSTIMESTAMP) AS synced_at", "Converted Oracle SQL should extract UTC from SYSTIMESTAMP.");
+
+        object pgUtcTimestampPreview = BuildViewSqlPreview(
+            "SELECT GETUTCDATE() AS synced_at FROM audit_log",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgUtcTimestampPreview, "CanConvert"), "SQL Server GETUTCDATE should convert to PostgreSQL.");
+        string pgUtcTimestampSql = (string)GetProperty(pgUtcTimestampPreview, "ConvertedSql");
+        AssertContains(pgUtcTimestampSql, "CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AS synced_at", "Converted PostgreSQL SQL should use UTC timestamp expression.");
+
         object mssqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURDATE() AS today FROM users",
             "mysql",
