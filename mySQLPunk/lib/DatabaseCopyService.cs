@@ -460,6 +460,7 @@ namespace mySQLPunk.lib
             sql = RewriteComparisonFunctions(sql, targetProvider);
             sql = RewriteBooleanLiterals(sql, targetProvider);
             sql = RewritePostgreSqlCastOperators(sql, sourceProvider, targetProvider);
+            sql = RewriteNullOrderingClauses(sql, targetProvider);
             sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
@@ -642,6 +643,33 @@ namespace mySQLPunk.lib
             }
 
             return "";
+        }
+
+        private static string RewriteNullOrderingClauses(string selectSql, string targetProvider)
+        {
+            if (targetProvider != "mssql" && targetProvider != "mysql") return selectSql;
+
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                return Regex.Replace(
+                    segment,
+                    @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b|`[^`]+`|\[[^\]]+\]|""[^""]+"")\s*(?<direction>ASC|DESC)?\s+NULLS\s+(?<placement>FIRST|LAST)",
+                    m => RewriteNullOrderingClause(m),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string RewriteNullOrderingClause(Match match)
+        {
+            string expr = match.Groups["expr"].Value.Trim();
+            string direction = match.Groups["direction"].Success
+                ? match.Groups["direction"].Value.ToUpperInvariant()
+                : "ASC";
+            bool nullsFirst = string.Equals(match.Groups["placement"].Value, "FIRST", StringComparison.OrdinalIgnoreCase);
+            string nullRank = nullsFirst ? "0" : "1";
+            string valueRank = nullsFirst ? "1" : "0";
+
+            return "CASE WHEN " + expr + " IS NULL THEN " + nullRank + " ELSE " + valueRank + " END, " + expr + " " + direction;
         }
 
         private static string RewriteRandomFunctions(string selectSql, string sourceProvider, string targetProvider)

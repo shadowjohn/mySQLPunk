@@ -667,6 +667,32 @@ public static class SmokeTests
         string pgCastSql = (string)GetProperty(pgCastPreview, "ConvertedSql");
         AssertContains(pgCastSql, "amount::numeric(10,2)", "Converted PostgreSQL SQL should keep native cast syntax.");
 
+        object mssqlNullsLastPreview = BuildViewSqlPreview(
+            "SELECT id, due_at FROM tasks ORDER BY due_at DESC NULLS LAST",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNullsLastPreview, "CanConvert"), "PostgreSQL NULLS LAST should convert to SQL Server ORDER BY fallback.");
+        string mssqlNullsLastSql = (string)GetProperty(mssqlNullsLastPreview, "ConvertedSql");
+        AssertContains(mssqlNullsLastSql, "ORDER BY CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at DESC", "Converted SQL Server SQL should emulate NULLS LAST.");
+        AssertNotContains(mssqlNullsLastSql, "NULLS LAST", "Converted SQL Server SQL should remove NULLS LAST.");
+
+        object mysqlNullsFirstPreview = BuildViewSqlPreview(
+            "SELECT id, priority FROM tasks ORDER BY priority ASC NULLS FIRST",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlNullsFirstPreview, "CanConvert"), "Oracle NULLS FIRST should convert to MySQL ORDER BY fallback.");
+        string mysqlNullsFirstSql = (string)GetProperty(mysqlNullsFirstPreview, "ConvertedSql");
+        AssertContains(mysqlNullsFirstSql, "ORDER BY CASE WHEN priority IS NULL THEN 0 ELSE 1 END, priority ASC", "Converted MySQL SQL should emulate NULLS FIRST.");
+        AssertNotContains(mysqlNullsFirstSql, "NULLS FIRST", "Converted MySQL SQL should remove NULLS FIRST.");
+
+        object oracleNullsLastPreview = BuildViewSqlPreview(
+            "SELECT id, due_at FROM tasks ORDER BY due_at DESC NULLS LAST",
+            "postgresql",
+            "oracle");
+        Assert((bool)GetProperty(oracleNullsLastPreview, "CanConvert"), "Oracle target should keep native NULLS LAST.");
+        string oracleNullsLastSql = (string)GetProperty(oracleNullsLastPreview, "ConvertedSql");
+        AssertContains(oracleNullsLastSql, "due_at DESC NULLS LAST", "Converted Oracle SQL should keep NULLS LAST.");
+
         object pgPowPreview = BuildViewSqlPreview(
             "SELECT POW(score, 2) AS score_squared FROM exams",
             "mysql",
