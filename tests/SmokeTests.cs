@@ -295,6 +295,30 @@ public static class SmokeTests
         string mysqlExtractSql = (string)GetProperty(mysqlExtractPreview, "ConvertedSql");
         AssertContains(mysqlExtractSql, "DAY(created_at)", "Converted MySQL SQL should use DAY().");
 
+        object pgHourPreview = BuildViewSqlPreview(
+            "SELECT HOUR(created_at) AS created_hour FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgHourPreview, "CanConvert"), "MySQL HOUR should convert to PostgreSQL.");
+        string pgHourSql = (string)GetProperty(pgHourPreview, "ConvertedSql");
+        AssertContains(pgHourSql, "EXTRACT(HOUR FROM created_at)", "Converted PostgreSQL SQL should use EXTRACT HOUR.");
+
+        object sqliteMinutePreview = BuildViewSqlPreview(
+            "SELECT DATEPART(minute, created_at) AS created_minute FROM orders",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteMinutePreview, "CanConvert"), "SQL Server DATEPART minute should convert to SQLite.");
+        string sqliteMinuteSql = (string)GetProperty(sqliteMinutePreview, "ConvertedSql");
+        AssertContains(sqliteMinuteSql, "CAST(strftime('%M', created_at) AS INTEGER)", "Converted SQLite SQL should use minute strftime.");
+
+        object mysqlSecondPreview = BuildViewSqlPreview(
+            "SELECT EXTRACT(SECOND FROM created_at) AS created_second FROM orders",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlSecondPreview, "CanConvert"), "PostgreSQL EXTRACT SECOND should convert to MySQL.");
+        string mysqlSecondSql = (string)GetProperty(mysqlSecondPreview, "ConvertedSql");
+        AssertContains(mysqlSecondSql, "SECOND(created_at)", "Converted MySQL SQL should use SECOND().");
+
         object pgIfPreview = BuildViewSqlPreview(
             "SELECT IF(is_active = 1, 'Y', 'N') AS active_text FROM users",
             "mysql",

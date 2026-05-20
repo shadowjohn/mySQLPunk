@@ -468,19 +468,19 @@ namespace mySQLPunk.lib
         {
             string sql = Regex.Replace(
                 selectSql,
-                @"\bDATEPART\s*\(\s*(?<part>year|yy|yyyy|month|mm|m|day|dd|d)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\bDATEPART\s*\(\s*(?<part>year|yy|yyyy|month|mm|m|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bEXTRACT\s*\(\s*(?<part>YEAR|MONTH|DAY)\s+FROM\s+(?<expr>[^()]+?)\s*\)",
+                @"\bEXTRACT\s*\(\s*(?<part>YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)\s+FROM\s+(?<expr>[^()]+?)\s*\)",
                 m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\b(?<func>YEAR|MONTH|DAY)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\b(?<func>YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["func"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
 
@@ -508,6 +508,9 @@ namespace mySQLPunk.lib
             if (text == "yy" || text == "yyyy") return "year";
             if (text == "mm" || text == "m") return "month";
             if (text == "dd" || text == "d") return "day";
+            if (text == "hh") return "hour";
+            if (text == "mi" || text == "n") return "minute";
+            if (text == "ss" || text == "s") return "second";
             return text;
         }
 
@@ -515,6 +518,9 @@ namespace mySQLPunk.lib
         {
             if (part == "year") return "%Y";
             if (part == "month") return "%m";
+            if (part == "hour") return "%H";
+            if (part == "minute") return "%M";
+            if (part == "second") return "%S";
             return "%d";
         }
 
