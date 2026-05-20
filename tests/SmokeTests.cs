@@ -415,6 +415,30 @@ public static class SmokeTests
         string sqliteIifSql = (string)GetProperty(sqliteIifPreview, "ConvertedSql");
         AssertContains(sqliteIifSql, "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END", "Converted SQLite SQL should use CASE.");
 
+        object pgDecodePreview = BuildViewSqlPreview(
+            "SELECT DECODE(status, 'A', 'active', 'I', 'inactive', 'other') AS status_text FROM users",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgDecodePreview, "CanConvert"), "Oracle DECODE should convert to PostgreSQL.");
+        string pgDecodeSql = (string)GetProperty(pgDecodePreview, "ConvertedSql");
+        AssertContains(pgDecodeSql, "CASE status WHEN 'A' THEN 'active' WHEN 'I' THEN 'inactive' ELSE 'other' END", "Converted PostgreSQL SQL should use CASE for DECODE.");
+
+        object mssqlDecodePreview = BuildViewSqlPreview(
+            "SELECT DECODE(status, 'A', 'active', 'I', 'inactive') AS status_text FROM users",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDecodePreview, "CanConvert"), "Oracle DECODE should convert to SQL Server.");
+        string mssqlDecodeSql = (string)GetProperty(mssqlDecodePreview, "ConvertedSql");
+        AssertContains(mssqlDecodeSql, "CASE status WHEN 'A' THEN 'active' WHEN 'I' THEN 'inactive' END", "Converted SQL Server SQL should use CASE for DECODE without default.");
+
+        object mysqlDecodePreview = BuildViewSqlPreview(
+            "SELECT DECODE(status, 'A', 'active', 'I', 'inactive', 'other') AS status_text FROM users",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlDecodePreview, "CanConvert"), "Oracle DECODE should convert to MySQL.");
+        string mysqlDecodeSql = (string)GetProperty(mysqlDecodePreview, "ConvertedSql");
+        AssertContains(mysqlDecodeSql, "CASE status WHEN 'A' THEN 'active' WHEN 'I' THEN 'inactive' ELSE 'other' END", "Converted MySQL SQL should use CASE for DECODE.");
+
         object mysqlNvl2Preview = BuildViewSqlPreview(
             "SELECT NVL2(closed_at, 'closed', 'open') AS state_text FROM tickets",
             "oracle",

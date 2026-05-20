@@ -612,6 +612,12 @@ namespace mySQLPunk.lib
                 m => RewriteConditionalFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
 
+            sql = Regex.Replace(
+                sql,
+                @"\bDECODE\s*\((?<args>[^()]*)\)",
+                m => RewriteDecodeFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
             return sql;
         }
 
@@ -626,6 +632,32 @@ namespace mySQLPunk.lib
             if (targetProvider == "mysql") return "IF(" + condition + ", " + whenTrue + ", " + whenFalse + ")";
             if (targetProvider == "mssql") return "IIF(" + condition + ", " + whenTrue + ", " + whenFalse + ")";
             return "CASE WHEN " + condition + " THEN " + whenTrue + " ELSE " + whenFalse + " END";
+        }
+
+        private static string RewriteDecodeFunction(Match match, string targetProvider)
+        {
+            if (targetProvider == "oracle") return match.Value;
+
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 3) return match.Value;
+
+            string expr = args[0];
+            int pairCount = (args.Count - 1) / 2;
+            bool hasDefault = args.Count % 2 == 0;
+            StringBuilder builder = new StringBuilder();
+            builder.Append("CASE ").Append(expr);
+            for (int i = 0; i < pairCount; i++)
+            {
+                builder.Append(" WHEN ").Append(args[1 + (i * 2)]).Append(" THEN ").Append(args[2 + (i * 2)]);
+            }
+
+            if (hasDefault)
+            {
+                builder.Append(" ELSE ").Append(args[args.Count - 1]);
+            }
+
+            builder.Append(" END");
+            return builder.ToString();
         }
 
         private static string RewriteCurrentDateTimeFunctions(string selectSql, string targetProvider)
