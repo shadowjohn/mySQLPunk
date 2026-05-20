@@ -323,8 +323,20 @@ namespace mySQLPunk.lib
             if (!TryRewriteRownumPredicate(rewrittenSql, provider, out rewrittenSql, out reason))
                 return false;
 
+            rewrittenSql = RewriteRecursiveCteKeyword(rewrittenSql, provider);
             rewrittenSql = RewriteCommonFunctions(rewrittenSql, NormalizeProvider(sourceProvider), provider);
             return true;
+        }
+
+        private static string RewriteRecursiveCteKeyword(string selectSql, string targetProvider)
+        {
+            if (targetProvider != "mssql" && targetProvider != "oracle") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"^\s*WITH\s+RECURSIVE\b",
+                "WITH",
+                RegexOptions.IgnoreCase);
         }
 
         private static bool TryRewriteTopClause(string selectSql, string targetProvider, out string rewrittenSql, out string reason)

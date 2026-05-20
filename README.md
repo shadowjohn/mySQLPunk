@@ -190,10 +190,10 @@ Smoke test harness：
     - 取消複製
     - 可在同一個對話框檢查來源 View SQL 與轉換後 SQL 預覽；若無法安全轉換，會顯示原因。
   - 方言轉換：已支援 SQL Server `TOP (n)` 轉 MySQL/PostgreSQL/SQLite `LIMIT n` 或 Oracle `FETCH FIRST`、MySQL/PostgreSQL/SQLite `LIMIT` 轉 SQL Server `TOP (n)` 或 Oracle `FETCH/OFFSET`，帶穩定 `ORDER BY` 的 MySQL/PostgreSQL/SQLite `LIMIT ... OFFSET` 可轉 SQL Server `OFFSET ... FETCH NEXT`，簡單 Oracle `ROWNUM <= n` 轉目標 provider row limit，以及 `NVL` / `IFNULL` / `ISNULL` / `GETDATE()` / `NOW()` / `CURDATE()` / `CURRENT_DATE` / `DATEDIFF` / `DATEADD` / `DATE_ADD` / `DATE_SUB` / `YEAR` / `MONTH` / `DAY` / `DATEPART` / `EXTRACT` 的常見函式轉換。
-  - 進階轉換：已補上簡單 `DATE_FORMAT` / `FORMAT` / `TO_CHAR` 日期格式函式、`IF` / `IIF` 條件函式、`GROUP_CONCAT` / `group_concat` / `STRING_AGG` / `LISTAGG`、`JSON_EXTRACT` 的跨 provider 轉換，讓常見日期格式、條件欄位、字串聚合與 JSON 純量讀取可以保留 View SQL。
+  - 進階轉換：已補上簡單 `DATE_FORMAT` / `FORMAT` / `TO_CHAR` 日期格式函式、`IF` / `IIF` 條件函式、`GROUP_CONCAT` / `group_concat` / `STRING_AGG` / `LISTAGG`、`JSON_EXTRACT` 的跨 provider 轉換，並可在目標為 SQL Server / Oracle 時將 `WITH RECURSIVE` 轉成 `WITH`，讓常見日期格式、條件欄位、字串聚合、JSON 純量讀取與遞迴 CTE 關鍵字差異可以保留 View SQL。
   - 已知情境：Oracle 階層查詢、MySQL 專用 View 語法、帶 OFFSET 且缺少穩定排序的 SQL Server 轉換、無法解析的 SELECT SQL 仍會改用 table snapshot。
-  - 測試覆蓋：`tests/SmokeTests.cs` 已加入 TOP / LIMIT / LIMIT OFFSET / ROWNUM、日期格式、目前日期/時間、`DATEDIFF` 天數差、`DATEADD` / `DATE_ADD` / `DATE_SUB` 天數加減與 `YEAR` / `MONTH` / `DAY` / `DATEPART` / `EXTRACT` 日期部分函式、`IF` / `IIF` 條件函式、字串聚合、`CONCAT` 字串串接、`LEN` / `LENGTH` 字串長度、`SUBSTR` / `SUBSTRING` / `LEFT` / `RIGHT` 擷取字串、`LOCATE` / `CHARINDEX` / `INSTR` / `POSITION` 字串位置、JSON 純量讀取（含 `JSON_EXTRACT` / `JSON_VALUE` 轉 PostgreSQL / MySQL）、CTE/window 保留與不支援轉換原因的可重跑案例。
-  - 後續方向：若需要更高相容性，可再逐 provider 擴充 CTE 遞迴、JSON table 與更多 provider 專用內建函式等更複雜 SQL 方言轉換規則。
+  - 測試覆蓋：`tests/SmokeTests.cs` 已加入 TOP / LIMIT / LIMIT OFFSET / ROWNUM、日期格式、目前日期/時間、`DATEDIFF` 天數差、`DATEADD` / `DATE_ADD` / `DATE_SUB` 天數加減與 `YEAR` / `MONTH` / `DAY` / `DATEPART` / `EXTRACT` 日期部分函式、`IF` / `IIF` 條件函式、字串聚合、`CONCAT` 字串串接、`LEN` / `LENGTH` 字串長度、`SUBSTR` / `SUBSTRING` / `LEFT` / `RIGHT` 擷取字串、`LOCATE` / `CHARINDEX` / `INSTR` / `POSITION` 字串位置、JSON 純量讀取（含 `JSON_EXTRACT` / `JSON_VALUE` 轉 PostgreSQL / MySQL）、CTE/window 保留、`WITH RECURSIVE` 關鍵字轉換與不支援轉換原因的可重跑案例。
+  - 後續方向：若需要更高相容性，可再逐 provider 擴充 JSON table 與更多 provider 專用內建函式等更複雜 SQL 方言轉換規則。
 
 ## 專案檔案導覽
 

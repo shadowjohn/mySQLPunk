@@ -416,6 +416,15 @@ public static class SmokeTests
         AssertContains(cteWindowSql, "WITH ranked AS", "Converted SQL should preserve CTE.");
         AssertContains(cteWindowSql, "ROW_NUMBER() OVER", "Converted SQL should preserve window function.");
 
+        object recursiveCtePreview = BuildViewSqlPreview(
+            "WITH RECURSIVE tree AS (SELECT id, parent_id FROM nodes WHERE parent_id IS NULL UNION ALL SELECT n.id, n.parent_id FROM nodes n JOIN tree t ON n.parent_id = t.id) SELECT id FROM tree",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(recursiveCtePreview, "CanConvert"), "Recursive CTE keyword should convert for SQL Server.");
+        string recursiveCteSql = (string)GetProperty(recursiveCtePreview, "ConvertedSql");
+        AssertContains(recursiveCteSql, "WITH tree AS", "Converted SQL Server SQL should remove unsupported RECURSIVE keyword.");
+        AssertNotContains(recursiveCteSql, "WITH RECURSIVE", "Converted SQL Server SQL should not keep WITH RECURSIVE.");
+
         object unsupportedPreview = BuildViewSqlPreview(
             "CREATE VIEW v AS SELECT id FROM employee START WITH manager_id IS NULL CONNECT BY PRIOR id = manager_id",
             "oracle",
