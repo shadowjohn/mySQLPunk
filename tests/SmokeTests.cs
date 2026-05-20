@@ -260,6 +260,47 @@ public static class SmokeTests
         string sqlitePgJsonArraySql = (string)GetProperty(sqlitePgJsonArrayPreview, "ConvertedSql");
         AssertContains(sqlitePgJsonArraySql, "json_extract(payload, '$.items[0]')", "Converted SQLite SQL should use json_extract for #> array paths.");
 
+        object mysqlJsonExistsPreview = BuildViewSqlPreview(
+            "SELECT JSON_EXISTS(payload, '$.items') AS has_items FROM event_log",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlJsonExistsPreview, "CanConvert"), "Oracle JSON_EXISTS should convert to MySQL.");
+        string mysqlJsonExistsSql = (string)GetProperty(mysqlJsonExistsPreview, "ConvertedSql");
+        AssertContains(mysqlJsonExistsSql, "JSON_CONTAINS_PATH(payload, 'one', '$.items')", "Converted MySQL SQL should use JSON_CONTAINS_PATH.");
+
+        object pgJsonContainsPathPreview = BuildViewSqlPreview(
+            "SELECT JSON_CONTAINS_PATH(payload, 'one', '$.items') AS has_items FROM event_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonContainsPathPreview, "CanConvert"), "MySQL JSON_CONTAINS_PATH should convert to PostgreSQL.");
+        string pgJsonContainsPathSql = (string)GetProperty(pgJsonContainsPathPreview, "ConvertedSql");
+        AssertContains(pgJsonContainsPathSql, "(payload::jsonb #> '{items}') IS NOT NULL", "Converted PostgreSQL SQL should test JSON path presence.");
+        AssertNotContains(pgJsonContainsPathSql, "JSON_CONTAINS_PATH", "Converted PostgreSQL SQL should remove JSON_CONTAINS_PATH.");
+
+        object sqliteJsonExistsPreview = BuildViewSqlPreview(
+            "SELECT JSON_EXISTS(payload, '$.items[0]') AS has_first_item FROM event_log",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteJsonExistsPreview, "CanConvert"), "Oracle JSON_EXISTS should convert to SQLite.");
+        string sqliteJsonExistsSql = (string)GetProperty(sqliteJsonExistsPreview, "ConvertedSql");
+        AssertContains(sqliteJsonExistsSql, "json_type(payload, '$.items[0]') IS NOT NULL", "Converted SQLite SQL should use json_type for path presence.");
+
+        object mssqlJsonExistsPreview = BuildViewSqlPreview(
+            "SELECT JSON_EXISTS(payload, '$.items') AS has_items FROM event_log",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlJsonExistsPreview, "CanConvert"), "Oracle JSON_EXISTS should convert to SQL Server.");
+        string mssqlJsonExistsSql = (string)GetProperty(mssqlJsonExistsPreview, "ConvertedSql");
+        AssertContains(mssqlJsonExistsSql, "(JSON_VALUE(payload, '$.items') IS NOT NULL OR JSON_QUERY(payload, '$.items') IS NOT NULL)", "Converted SQL Server SQL should test scalar or fragment JSON path presence.");
+
+        object oracleJsonContainsPathPreview = BuildViewSqlPreview(
+            "SELECT JSON_CONTAINS_PATH(payload, 'one', '$.items') AS has_items FROM event_log",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleJsonContainsPathPreview, "CanConvert"), "MySQL JSON_CONTAINS_PATH should convert to Oracle.");
+        string oracleJsonContainsPathSql = (string)GetProperty(oracleJsonContainsPathPreview, "ConvertedSql");
+        AssertContains(oracleJsonContainsPathSql, "JSON_EXISTS(payload, '$.items')", "Converted Oracle SQL should use JSON_EXISTS.");
+
         object mysqlJsonArrayLengthPreview = BuildViewSqlPreview(
             "SELECT JSON_ARRAY_LENGTH(payload, '$.items') AS item_count FROM event_log",
             "postgresql",

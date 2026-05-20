@@ -523,6 +523,7 @@ namespace mySQLPunk.lib
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
             sql = RewritePostgreSqlJsonOperators(sql, targetProvider);
+            sql = RewriteJsonExistsFunctions(sql, targetProvider);
             sql = RewriteJsonLengthFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonQueryFunctions(sql, targetProvider);
@@ -2269,6 +2270,72 @@ namespace mySQLPunk.lib
             if (Regex.IsMatch(part, @"^\d+$")) return "[" + part + "]";
             if (!Regex.IsMatch(part, @"^[A-Za-z_][A-Za-z0-9_]*$")) return "";
             return "." + part;
+        }
+
+        private static string RewriteJsonExistsFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bJSON_EXISTS\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<path>\$[^']*)'\s*\)",
+                m => RewriteJsonExistsExpression(
+                    targetProvider,
+                    m.Groups["expr"].Value.Trim(),
+                    m.Groups["path"].Value,
+                    m.Value),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bJSON_CONTAINS_PATH\s*\((?<args>[^()]*)\)",
+                m => RewriteJsonContainsPathExpression(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteJsonContainsPathExpression(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 3) return match.Value;
+
+            string mode = TrimSqlStringLiteral(args[1]).ToLowerInvariant();
+            if (mode != "one") return match.Value;
+
+            string path = TrimSqlStringLiteral(args[2]);
+            return RewriteJsonExistsExpression(targetProvider, args[0], path, match.Value);
+        }
+
+        private static string RewriteJsonExistsExpression(string targetProvider, string expr, string jsonPath, string original)
+        {
+            if (string.IsNullOrWhiteSpace(jsonPath) || !jsonPath.StartsWith("$", StringComparison.Ordinal)) return original;
+
+            string escapedPath = EscapeSqlString(jsonPath);
+            if (targetProvider == "mysql")
+            {
+                return "JSON_CONTAINS_PATH(" + expr + ", 'one', '" + escapedPath + "')";
+            }
+
+            if (targetProvider == "postgresql")
+            {
+                string pgPath = BuildPostgreSqlJsonPath(jsonPath);
+                if (jsonPath == "$") return expr + " IS NOT NULL";
+                if (!string.IsNullOrWhiteSpace(pgPath)) return "(" + expr + "::jsonb #> " + pgPath + ") IS NOT NULL";
+            }
+
+            if (targetProvider == "sqlite")
+            {
+                return "json_type(" + expr + ", '" + escapedPath + "') IS NOT NULL";
+            }
+
+            if (targetProvider == "mssql")
+            {
+                return "(JSON_VALUE(" + expr + ", '" + escapedPath + "') IS NOT NULL OR JSON_QUERY(" + expr + ", '" + escapedPath + "') IS NOT NULL)";
+            }
+
+            if (targetProvider == "oracle")
+            {
+                return "JSON_EXISTS(" + expr + ", '" + escapedPath + "')";
+            }
+
+            return original;
         }
 
         private static string RewriteJsonLengthFunctions(string selectSql, string targetProvider)
