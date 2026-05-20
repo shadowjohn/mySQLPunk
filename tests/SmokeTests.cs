@@ -182,6 +182,22 @@ public static class SmokeTests
         string mssqlCurrentDateSql = (string)GetProperty(mssqlCurrentDatePreview, "ConvertedSql");
         AssertContains(mssqlCurrentDateSql, "CAST(GETDATE() AS date)", "Converted SQL Server SQL should use a date expression.");
 
+        object mysqlFormatPreview = BuildViewSqlPreview(
+            "SELECT FORMAT(created_at, 'yyyy-MM-dd HH:mm:ss') AS created_text FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlFormatPreview, "CanConvert"), "SQL Server FORMAT should convert to MySQL.");
+        string mysqlFormatSql = (string)GetProperty(mysqlFormatPreview, "ConvertedSql");
+        AssertContains(mysqlFormatSql, "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s')", "Converted MySQL SQL should use DATE_FORMAT.");
+
+        object sqliteToCharPreview = BuildViewSqlPreview(
+            "SELECT TO_CHAR(created_at, 'YYYY-MM-DD') AS created_text FROM orders",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteToCharPreview, "CanConvert"), "Oracle TO_CHAR should convert to SQLite.");
+        string sqliteToCharSql = (string)GetProperty(sqliteToCharPreview, "ConvertedSql");
+        AssertContains(sqliteToCharSql, "strftime('%Y-%m-%d', created_at)", "Converted SQLite SQL should use strftime.");
+
         object mysqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURRENT_DATE AS today FROM users",
             "postgresql",

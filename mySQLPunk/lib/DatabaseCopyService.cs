@@ -573,7 +573,7 @@ namespace mySQLPunk.lib
 
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)
         {
-            return Regex.Replace(
+            string sql = Regex.Replace(
                 selectSql,
                 @"\bDATE_FORMAT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
                 m =>
@@ -581,13 +581,35 @@ namespace mySQLPunk.lib
                     string expr = m.Groups["expr"].Value.Trim();
                     string format = m.Groups["format"].Value;
                     if (targetProvider == "mysql") return m.Value;
-                    if (targetProvider == "sqlite") return "strftime('" + EscapeSqlString(format) + "', " + expr + ")";
-
-                    string translated = TranslateDateFormatPattern(format, targetProvider);
-                    if (targetProvider == "mssql") return "FORMAT(" + expr + ", '" + EscapeSqlString(translated) + "')";
-                    return "TO_CHAR(" + expr + ", '" + EscapeSqlString(translated) + "')";
+                    return BuildDateFormatExpression(targetProvider, expr, TranslateMySqlDateFormatPattern(format, targetProvider));
                 },
                 RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bFORMAT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string format = m.Groups["format"].Value;
+                    if (targetProvider == "mssql") return m.Value;
+                    return BuildDateFormatExpression(targetProvider, expr, TranslateDotNetDateFormatPattern(format, targetProvider));
+                },
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bTO_CHAR\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string format = m.Groups["format"].Value;
+                    if (targetProvider == "oracle" || targetProvider == "postgresql") return m.Value;
+                    return BuildDateFormatExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider));
+                },
+                RegexOptions.IgnoreCase);
+
+            return sql;
         }
 
         private static string RewriteDateDiffFunctions(string selectSql, string targetProvider)
@@ -1000,35 +1022,102 @@ namespace mySQLPunk.lib
             return "STRING_AGG(" + expr + ", '" + sep + "')";
         }
 
-        private static string TranslateDateFormatPattern(string format, string targetProvider)
+        private static string BuildDateFormatExpression(string targetProvider, string expr, string translatedPattern)
+        {
+            string escapedPattern = EscapeSqlString(translatedPattern);
+            if (targetProvider == "mysql") return "DATE_FORMAT(" + expr + ", '" + escapedPattern + "')";
+            if (targetProvider == "sqlite") return "strftime('" + escapedPattern + "', " + expr + ")";
+            if (targetProvider == "mssql") return "FORMAT(" + expr + ", '" + escapedPattern + "')";
+            return "TO_CHAR(" + expr + ", '" + escapedPattern + "')";
+        }
+
+        private static string TranslateMySqlDateFormatPattern(string format, string targetProvider)
         {
             string translated = format ?? "";
             if (targetProvider == "mssql")
             {
-                translated = translated.Replace("%Y", "yyyy")
-                                       .Replace("%y", "yy")
-                                       .Replace("%m", "MM")
-                                       .Replace("%c", "M")
-                                       .Replace("%d", "dd")
-                                       .Replace("%e", "d")
-                                       .Replace("%H", "HH")
-                                       .Replace("%h", "hh")
-                                       .Replace("%i", "mm")
-                                       .Replace("%s", "ss");
-                return translated;
+                return ReplaceDateFormatTokens(
+                    translated,
+                    new[] { "%Y", "%y", "%m", "%c", "%d", "%e", "%H", "%h", "%i", "%s" },
+                    new[] { "yyyy", "yy", "MM", "M", "dd", "d", "HH", "hh", "mm", "ss" });
             }
 
-            translated = translated.Replace("%Y", "YYYY")
-                                   .Replace("%y", "YY")
-                                   .Replace("%m", "MM")
-                                   .Replace("%c", "MM")
-                                   .Replace("%d", "DD")
-                                   .Replace("%e", "DD")
-                                   .Replace("%H", "HH24")
-                                   .Replace("%h", "HH12")
-                                   .Replace("%i", "MI")
-                                   .Replace("%s", "SS");
-            return translated;
+            if (targetProvider == "mysql" || targetProvider == "sqlite") return translated;
+
+            return ReplaceDateFormatTokens(
+                translated,
+                new[] { "%Y", "%y", "%m", "%c", "%d", "%e", "%H", "%h", "%i", "%s" },
+                new[] { "YYYY", "YY", "MM", "MM", "DD", "DD", "HH24", "HH12", "MI", "SS" });
+        }
+
+        private static string TranslateDotNetDateFormatPattern(string format, string targetProvider)
+        {
+            string translated = format ?? "";
+            if (targetProvider == "mssql") return translated;
+
+            if (targetProvider == "mysql" || targetProvider == "sqlite")
+            {
+                return ReplaceDateFormatTokens(
+                    translated,
+                    new[] { "yyyy", "yy", "MM", "M", "dd", "d", "HH", "hh", "mm", "ss" },
+                    new[] { "%Y", "%y", "%m", "%c", "%d", "%e", "%H", "%h", "%i", "%s" });
+            }
+
+            return ReplaceDateFormatTokens(
+                translated,
+                new[] { "yyyy", "yy", "MM", "M", "dd", "d", "HH", "hh", "mm", "ss" },
+                new[] { "YYYY", "YY", "MM", "MM", "DD", "DD", "HH24", "HH12", "MI", "SS" });
+        }
+
+        private static string TranslateOracleDateFormatPattern(string format, string targetProvider)
+        {
+            string translated = format ?? "";
+            if (targetProvider == "oracle" || targetProvider == "postgresql") return translated;
+
+            if (targetProvider == "mysql" || targetProvider == "sqlite")
+            {
+                return ReplaceDateFormatTokens(
+                    translated,
+                    new[] { "YYYY", "HH24", "HH12", "YY", "MM", "DD", "MI", "SS" },
+                    new[] { "%Y", "%H", "%h", "%y", "%m", "%d", "%i", "%s" });
+            }
+
+            return ReplaceDateFormatTokens(
+                translated,
+                new[] { "YYYY", "HH24", "HH12", "YY", "MM", "DD", "MI", "SS" },
+                new[] { "yyyy", "HH", "hh", "yy", "MM", "dd", "mm", "ss" });
+        }
+
+        private static string ReplaceDateFormatTokens(string pattern, string[] sourceTokens, string[] targetTokens)
+        {
+            if (string.IsNullOrEmpty(pattern)) return "";
+
+            StringBuilder builder = new StringBuilder(pattern.Length);
+            int index = 0;
+            while (index < pattern.Length)
+            {
+                bool matched = false;
+                for (int i = 0; i < sourceTokens.Length; i++)
+                {
+                    string sourceToken = sourceTokens[i];
+                    if (index + sourceToken.Length <= pattern.Length &&
+                        string.CompareOrdinal(pattern, index, sourceToken, 0, sourceToken.Length) == 0)
+                    {
+                        builder.Append(targetTokens[i]);
+                        index += sourceToken.Length;
+                        matched = true;
+                        break;
+                    }
+                }
+
+                if (!matched)
+                {
+                    builder.Append(pattern[index]);
+                    index++;
+                }
+            }
+
+            return builder.ToString();
         }
 
         private static string EscapeSqlString(string value)
