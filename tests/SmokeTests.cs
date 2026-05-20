@@ -2695,6 +2695,30 @@ public static class SmokeTests
         };
         Assert(ConnectionProxySettingsService.CreateWebProxy(socks) == null, "SOCKS5 should be stored but not applied to WebRequest.");
         AssertContains(ConnectionProxySettingsService.BuildStatusText(socks), "not supported", "SOCKS5 status should explain WebRequest limitation.");
+
+        ConnectionProxyTestResult directPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(disabled, new Uri("https://example.test/"));
+        Assert(directPreflight.Success, "Disabled proxy should allow direct connectivity preflight.");
+        Assert(!directPreflight.UsedProxy, "Disabled proxy preflight should not use proxy.");
+
+        ConnectionProxySettings emptyHost = new ConnectionProxySettings
+        {
+            Enabled = true,
+            Type = "http",
+            Host = "",
+            Port = 8080
+        };
+        ConnectionProxyTestResult emptyHostPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(emptyHost, new Uri("https://example.test/"));
+        Assert(!emptyHostPreflight.Success, "Empty proxy host should fail connectivity preflight.");
+        Assert(!emptyHostPreflight.AttemptedRequest, "Invalid proxy settings should not attempt a request.");
+
+        ConnectionProxyTestResult socksPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(socks, new Uri("https://example.test/"));
+        Assert(!socksPreflight.Success, "SOCKS5 should fail WebRequest connectivity preflight.");
+        AssertContains(socksPreflight.Message, "SOCKS5", "SOCKS5 preflight should explain limitation.");
+
+        HttpWebRequest request = ConnectionProxySettingsService.CreateConnectivityTestRequest(http, new Uri("https://example.test/"), 5000);
+        AssertEquals("HEAD", request.Method, "Connectivity test should use HEAD.");
+        Assert(request.Proxy != null, "Connectivity request should include HTTP proxy.");
+        AssertEquals("http://proxy.local:3128/", request.Proxy.GetProxy(new Uri("https://example.test/")).ToString(), "Connectivity request proxy URI should match settings.");
     }
 
     private static void TestAdvancedRegistrationService()

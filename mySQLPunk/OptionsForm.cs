@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Newtonsoft.Json;
 
@@ -428,8 +429,69 @@ namespace mySQLPunk
                 Location = new Point(430, 348),
                 Size = new Size(150, 30)
             };
-            testButton.Click += (s, e) => MessageBox.Show(T("連線能力測試入口已就緒。", "Connectivity test entry point is ready."), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            testButton.Click += async (s, e) =>
+            {
+                testButton.Enabled = false;
+                testButton.Text = T("測試中...", "Testing...");
+                try
+                {
+                    mySQLPunk.lib.ConnectionProxySettings settings = mySQLPunk.lib.ConnectionProxySettingsService.Load();
+                    mySQLPunk.lib.ConnectionProxyTestResult result = await Task.Run(() =>
+                        mySQLPunk.lib.ConnectionProxySettingsService.TestConnectivity(
+                            settings,
+                            mySQLPunk.lib.ConnectionProxySettingsService.DefaultConnectivityTestUri,
+                            8000));
+                    MessageBoxIcon icon = result.Success ? MessageBoxIcon.Information : MessageBoxIcon.Warning;
+                    string message = BuildConnectivityTestMessage(result);
+                    MessageBox.Show(message, Localization.T("Options.Connection"), MessageBoxButtons.OK, icon);
+                }
+                finally
+                {
+                    testButton.Text = T("測試連線能力", "Test connectivity");
+                    testButton.Enabled = true;
+                }
+            };
             contentPanel.Controls.Add(testButton);
+        }
+
+        private string BuildConnectivityTestMessage(mySQLPunk.lib.ConnectionProxyTestResult result)
+        {
+            if (result == null) return T("連線能力測試沒有回傳結果。", "Connectivity test returned no result.");
+
+            string mode = result.UsedProxy ? T("HTTP 代理", "HTTP proxy") : T("直接連線", "direct connection");
+            string status = result.Success ? T("成功", "Succeeded") : T("失敗", "Failed");
+            string target = string.IsNullOrWhiteSpace(result.TargetUrl) ? "" : "\n" + T("目標：", "Target: ") + result.TargetUrl;
+            string detailText = BuildConnectivityTestDetail(result);
+            string detail = string.IsNullOrWhiteSpace(detailText) ? "" : "\n" + T("詳細：", "Detail: ") + detailText;
+            return T("連線能力測試", "Connectivity test") + " " + status + "\n" +
+                T("模式：", "Mode: ") + mode + target + detail;
+        }
+
+        private string BuildConnectivityTestDetail(mySQLPunk.lib.ConnectionProxyTestResult result)
+        {
+            if (result == null) return string.Empty;
+            if (result.Success && result.AttemptedRequest)
+            {
+                string suffix = result.StatusCode > 0 ? " HTTP " + result.StatusCode : string.Empty;
+                return T("HTTP 探測成功。", "HTTP probe succeeded.") + suffix;
+            }
+            if (result.Success && !result.AttemptedRequest)
+            {
+                return T("代理未啟用，測試會使用直接連線。", "Proxy is disabled; the test will use direct connection.");
+            }
+            if (!result.AttemptedRequest && result.Message != null && result.Message.IndexOf("SOCKS5", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return T("SOCKS5 設定會保存，但目前 WebRequest 連線測試只支援 HTTP/HTTPS 代理。", "SOCKS5 settings are saved, but the WebRequest connectivity test currently supports HTTP/HTTPS proxies only.");
+            }
+            if (!result.AttemptedRequest && result.Message != null && result.Message.IndexOf("host", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return T("代理主機不可空白。", "Proxy host cannot be empty.");
+            }
+            if (result.AttemptedRequest && result.StatusCode > 0)
+            {
+                return T("HTTP 探測失敗。", "HTTP probe failed.") + " HTTP " + result.StatusCode;
+            }
+            return result.Message ?? string.Empty;
         }
 
         private void RenderAdvancedPage()
