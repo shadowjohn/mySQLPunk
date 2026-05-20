@@ -1988,7 +1988,10 @@ public static class SmokeTests
                 new[] { "name", "varchar(100)", "YES", "NULL", "顯示名稱", "2" },
                 new[] { "email", "text", "YES", "", "Email", "3" }
             })));
+            BackupRestoreDiffService.SetTableRowCount(schemaBefore, "users", 2);
+            BackupRestoreDiffService.SetTableRowCount(schemaAfter, "users", 5);
             string schemaSummary = BackupRestoreDiffService.BuildSummary(schemaBefore, schemaAfter);
+            AssertContains(schemaSummary, "資料列差異：users：2 -> 5 (+3)", "Restore diff should include row count changes.");
             AssertContains(schemaSummary, "欄位差異：", "Restore diff should include schema column details.");
             AssertContains(schemaSummary, "新增 users.email", "Restore diff should include added columns.");
             AssertContains(schemaSummary, "移除 users.legacy_code", "Restore diff should include removed columns.");

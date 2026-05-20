@@ -28,6 +28,7 @@ namespace mySQLPunk.lib
         public List<string> Views { get; private set; }
         public List<string> Functions { get; private set; }
         public List<string> Events { get; private set; }
+        public Dictionary<string, long> TableRowCounts { get; private set; }
         public Dictionary<string, List<DatabaseRestoreColumnSnapshot>> TableColumns { get; private set; }
 
         public DatabaseRestoreSnapshot()
@@ -36,6 +37,7 @@ namespace mySQLPunk.lib
             Views = new List<string>();
             Functions = new List<string>();
             Events = new List<string>();
+            TableRowCounts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             TableColumns = new Dictionary<string, List<DatabaseRestoreColumnSnapshot>>(StringComparer.OrdinalIgnoreCase);
         }
     }
@@ -103,6 +105,12 @@ namespace mySQLPunk.lib
             snapshot.TableColumns[tableName.Trim()] = normalized;
         }
 
+        public static void SetTableRowCount(DatabaseRestoreSnapshot snapshot, string tableName, long rowCount)
+        {
+            if (snapshot == null || string.IsNullOrWhiteSpace(tableName)) return;
+            snapshot.TableRowCounts[tableName.Trim()] = Math.Max(0, rowCount);
+        }
+
         public static List<DatabaseRestoreColumnSnapshot> CreateColumnSnapshots(string tableName, DataTable columns)
         {
             List<DatabaseRestoreColumnSnapshot> output = new List<DatabaseRestoreColumnSnapshot>();
@@ -139,6 +147,12 @@ namespace mySQLPunk.lib
                 BuildLine("函式/程序", before.FunctionCount, after.FunctionCount, before.Functions, after.Functions),
                 BuildLine("事件/Trigger", before.EventCount, after.EventCount, before.Events, after.Events)
             };
+            string rowCountDiff = BuildRowCountDiffSummary(before, after);
+            if (!string.IsNullOrWhiteSpace(rowCountDiff))
+            {
+                lines.Add("資料列差異：" + rowCountDiff);
+            }
+
             string columnDiff = BuildColumnDiffSummary(before, after);
             if (!string.IsNullOrWhiteSpace(columnDiff))
             {
@@ -168,6 +182,47 @@ namespace mySQLPunk.lib
             if (added.Count > 0) parts.Add("新增：" + FormatNameList(added));
             if (removed.Count > 0) parts.Add("移除：" + FormatNameList(removed));
             return string.Join("；", parts);
+        }
+
+        private static string BuildRowCountDiffSummary(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after)
+        {
+            if ((before.TableRowCounts == null || before.TableRowCounts.Count == 0) &&
+                (after.TableRowCounts == null || after.TableRowCounts.Count == 0))
+            {
+                return string.Empty;
+            }
+
+            List<string> tableNames = new List<string>();
+            if (before.TableRowCounts != null) tableNames.AddRange(before.TableRowCounts.Keys);
+            if (after.TableRowCounts != null) tableNames.AddRange(after.TableRowCounts.Keys);
+
+            List<string> details = new List<string>();
+            foreach (string tableName in NormalizeNames(tableNames))
+            {
+                bool hasBefore = before.TableRowCounts != null && before.TableRowCounts.ContainsKey(tableName);
+                bool hasAfter = after.TableRowCounts != null && after.TableRowCounts.ContainsKey(tableName);
+                long beforeCount = hasBefore ? before.TableRowCounts[tableName] : 0;
+                long afterCount = hasAfter ? after.TableRowCounts[tableName] : 0;
+                if (hasBefore && hasAfter && beforeCount == afterCount) continue;
+
+                details.Add(tableName + "：" + FormatRowCountValue(hasBefore, beforeCount) + " -> " +
+                    FormatRowCountValue(hasAfter, afterCount) + FormatRowCountDelta(hasBefore, hasAfter, beforeCount, afterCount));
+            }
+
+            return details.Count == 0 ? string.Empty : FormatNameList(details);
+        }
+
+        private static string FormatRowCountValue(bool hasValue, long value)
+        {
+            return hasValue ? value.ToString() : "未取得";
+        }
+
+        private static string FormatRowCountDelta(bool hasBefore, bool hasAfter, long before, long after)
+        {
+            if (!hasBefore || !hasAfter) return string.Empty;
+            long delta = after - before;
+            string deltaText = delta == 0 ? "0" : (delta > 0 ? "+" : "") + delta.ToString();
+            return " (" + deltaText + ")";
         }
 
         private static string BuildColumnDiffSummary(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after)

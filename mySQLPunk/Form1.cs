@@ -4686,6 +4686,16 @@ namespace mySQLPunk
                     snapshot,
                     tableName,
                     BackupRestoreDiffService.CreateColumnSnapshots(tableName, GetColumnsSafe(target.Database, target.DatabaseName, tableName)));
+                try
+                {
+                    BackupRestoreDiffService.SetTableRowCount(
+                        snapshot,
+                        tableName,
+                        target.Database.CountRows(target.DatabaseName, tableName));
+                }
+                catch
+                {
+                }
             }
 
             return snapshot;
