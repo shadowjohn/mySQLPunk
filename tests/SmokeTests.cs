@@ -470,6 +470,30 @@ public static class SmokeTests
         string oracleDateTruncHourSql = (string)GetProperty(oracleDateTruncHourPreview, "ConvertedSql");
         AssertContains(oracleDateTruncHourSql, "TRUNC(created_at, 'HH24')", "Converted Oracle SQL should truncate to the hour.");
 
+        object mssqlDateTruncMinutePreview = BuildViewSqlPreview(
+            "SELECT DATE_TRUNC('minute', created_at) AS minute_start FROM orders",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDateTruncMinutePreview, "CanConvert"), "PostgreSQL DATE_TRUNC minute should convert to SQL Server.");
+        string mssqlDateTruncMinuteSql = (string)GetProperty(mssqlDateTruncMinutePreview, "ConvertedSql");
+        AssertContains(mssqlDateTruncMinuteSql, "DATEADD(minute, DATEDIFF(minute, 0, created_at), 0)", "Converted SQL Server SQL should truncate to the minute.");
+
+        object mysqlDateTruncSecondPreview = BuildViewSqlPreview(
+            "SELECT DATE_TRUNC('second', created_at) AS second_start FROM orders",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlDateTruncSecondPreview, "CanConvert"), "PostgreSQL DATE_TRUNC second should convert to MySQL.");
+        string mysqlDateTruncSecondSql = (string)GetProperty(mysqlDateTruncSecondPreview, "ConvertedSql");
+        AssertContains(mysqlDateTruncSecondSql, "STR_TO_DATE(DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s'), '%Y-%m-%d %H:%i:%s')", "Converted MySQL SQL should truncate to second precision.");
+
+        object sqliteOracleTruncMinutePreview = BuildViewSqlPreview(
+            "SELECT TRUNC(created_at, 'MI') AS minute_start FROM orders",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteOracleTruncMinutePreview, "CanConvert"), "Oracle TRUNC minute should convert to SQLite.");
+        string sqliteOracleTruncMinuteSql = (string)GetProperty(sqliteOracleTruncMinutePreview, "ConvertedSql");
+        AssertContains(sqliteOracleTruncMinuteSql, "strftime('%Y-%m-%d %H:%M:00', created_at)", "Converted SQLite SQL should truncate to the minute.");
+
         object mysqlOracleTruncMonthPreview = BuildViewSqlPreview(
             "SELECT TRUNC(created_at, 'MM') AS month_start FROM orders",
             "oracle",

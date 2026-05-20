@@ -787,13 +787,13 @@ namespace mySQLPunk.lib
         {
             string sql = Regex.Replace(
                 selectSql,
-                @"\bDATE_TRUNC\s*\(\s*'(?<part>year|month|day|hour)'\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\bDATE_TRUNC\s*\(\s*'(?<part>year|month|day|hour|minute|second)'\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDateTruncExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
 
             return Regex.Replace(
                 sql,
-                @"\bTRUNC\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<part>YYYY|YEAR|MM|MONTH|DD|DAY|HH24|HH)'\s*\)",
+                @"\bTRUNC\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<part>YYYY|YEAR|MM|MONTH|DD|DAY|HH24|HH|MI|MINUTE)'\s*\)",
                 m => BuildDateTruncExpression(targetProvider, NormalizeDateTruncPart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
         }
@@ -809,6 +809,8 @@ namespace mySQLPunk.lib
                 if (part == "year") return "TRUNC(" + expr + ", 'YYYY')";
                 if (part == "month") return "TRUNC(" + expr + ", 'MM')";
                 if (part == "hour") return "TRUNC(" + expr + ", 'HH24')";
+                if (part == "minute") return "TRUNC(" + expr + ", 'MI')";
+                if (part == "second") return "CAST(" + expr + " AS TIMESTAMP(0))";
             }
 
             if (targetProvider == "mssql")
@@ -816,6 +818,8 @@ namespace mySQLPunk.lib
                 if (part == "year") return "DATEFROMPARTS(YEAR(" + expr + "), 1, 1)";
                 if (part == "month") return "DATEFROMPARTS(YEAR(" + expr + "), MONTH(" + expr + "), 1)";
                 if (part == "hour") return "DATEADD(hour, DATEDIFF(hour, 0, " + expr + "), 0)";
+                if (part == "minute") return "DATEADD(minute, DATEDIFF(minute, 0, " + expr + "), 0)";
+                if (part == "second") return "DATEADD(second, DATEDIFF(second, 0, " + expr + "), 0)";
             }
 
             if (targetProvider == "mysql")
@@ -823,6 +827,8 @@ namespace mySQLPunk.lib
                 if (part == "year") return "STR_TO_DATE(DATE_FORMAT(" + expr + ", '%Y-01-01'), '%Y-%m-%d')";
                 if (part == "month") return "STR_TO_DATE(DATE_FORMAT(" + expr + ", '%Y-%m-01'), '%Y-%m-%d')";
                 if (part == "hour") return "STR_TO_DATE(DATE_FORMAT(" + expr + ", '%Y-%m-%d %H:00:00'), '%Y-%m-%d %H:%i:%s')";
+                if (part == "minute") return "STR_TO_DATE(DATE_FORMAT(" + expr + ", '%Y-%m-%d %H:%i:00'), '%Y-%m-%d %H:%i:%s')";
+                if (part == "second") return "STR_TO_DATE(DATE_FORMAT(" + expr + ", '%Y-%m-%d %H:%i:%s'), '%Y-%m-%d %H:%i:%s')";
             }
 
             if (targetProvider == "sqlite")
@@ -830,6 +836,8 @@ namespace mySQLPunk.lib
                 if (part == "year") return "strftime('%Y-01-01', " + expr + ")";
                 if (part == "month") return "strftime('%Y-%m-01', " + expr + ")";
                 if (part == "hour") return "strftime('%Y-%m-%d %H:00:00', " + expr + ")";
+                if (part == "minute") return "strftime('%Y-%m-%d %H:%M:00', " + expr + ")";
+                if (part == "second") return "strftime('%Y-%m-%d %H:%M:%S', " + expr + ")";
             }
 
             return "DATE_TRUNC('" + part + "', " + expr + ")";
@@ -908,6 +916,7 @@ namespace mySQLPunk.lib
             if (text == "mm") return "month";
             if (text == "dd") return "day";
             if (text == "hh24" || text == "hh") return "hour";
+            if (text == "mi") return "minute";
             return NormalizeDatePart(text);
         }
 
