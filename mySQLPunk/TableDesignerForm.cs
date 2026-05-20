@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -4464,6 +4465,15 @@ namespace mySQLPunk
             {
                 lines.Add("-- - " + hint);
             }
+            List<string> actionChecklist = BuildOraclePreviewActionChecklist(sql).ToList();
+            if (actionChecklist.Count > 0)
+            {
+                lines.Add("-- - " + Localization.T("Designer.OraclePreviewActionChecklist"));
+                foreach (string item in actionChecklist)
+                {
+                    lines.Add("--   [ ] " + item);
+                }
+            }
             lines.Add("-- - " + Localization.T("Designer.OraclePreviewPrivilegeQueryHint"));
             foreach (string queryLine in BuildOraclePrivilegeDiagnosticSql(databaseName, tableName))
             {
@@ -4481,6 +4491,28 @@ namespace mySQLPunk
             yield return Localization.Format("Designer.OraclePreviewObjectHint", owner, objectName);
             yield return Localization.T("Designer.OraclePreviewPrivilegeHint");
             yield return Localization.T("Designer.OraclePreviewStepHint");
+        }
+
+        private static IEnumerable<string> BuildOraclePreviewActionChecklist(string sql)
+        {
+            List<string> items = new List<string>();
+            AddOraclePreviewChecklistItem(items, sql, @"\bCREATE\s+TABLE\b", "Designer.OraclePreviewCheckCreateTable");
+            AddOraclePreviewChecklistItem(items, sql, @"\bALTER\s+TABLE\b[\s\S]*\bRENAME\s+COLUMN\b", "Designer.OraclePreviewCheckRenameColumn");
+            AddOraclePreviewChecklistItem(items, sql, @"\bALTER\s+TABLE\b[\s\S]*\bMODIFY\s*\(", "Designer.OraclePreviewCheckModifyColumn");
+            AddOraclePreviewChecklistItem(items, sql, @"\bALTER\s+TABLE\b[\s\S]*\bADD\s*\(", "Designer.OraclePreviewCheckAddColumn");
+            AddOraclePreviewChecklistItem(items, sql, @"\bALTER\s+TABLE\b[\s\S]*\bDROP\s+COLUMN\b", "Designer.OraclePreviewCheckDropColumn");
+            AddOraclePreviewChecklistItem(items, sql, @"\bCOMMENT\s+ON\s+COLUMN\b", "Designer.OraclePreviewCheckCommentColumn");
+            AddOraclePreviewChecklistItem(items, sql, @"\bCREATE\s+(UNIQUE\s+)?INDEX\b|\bCREATE\s+FULLTEXT\s+INDEX\b", "Designer.OraclePreviewCheckCreateIndex");
+            AddOraclePreviewChecklistItem(items, sql, @"\bDROP\s+INDEX\b", "Designer.OraclePreviewCheckDropIndex");
+            AddOraclePreviewChecklistItem(items, sql, @"\bADD\s+CONSTRAINT\b|\bDROP\s+CONSTRAINT\b|\bPRIMARY\s+KEY\b", "Designer.OraclePreviewCheckConstraint");
+            return items;
+        }
+
+        private static void AddOraclePreviewChecklistItem(List<string> items, string sql, string pattern, string localizationKey)
+        {
+            if (!Regex.IsMatch(sql ?? string.Empty, pattern, RegexOptions.IgnoreCase)) return;
+            string text = Localization.T(localizationKey);
+            if (!items.Contains(text)) items.Add(text);
         }
 
         private static IEnumerable<string> BuildOraclePrivilegeDiagnosticSql(string databaseName, string tableName)

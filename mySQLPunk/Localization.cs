@@ -758,6 +758,16 @@ namespace mySQLPunk
             Add("Designer.OraclePreviewObjectHint", "目標物件：{0}.{1}；若其他人剛修改、刪除或重新命名，請先重新整理左側資料庫樹後再執行。", "Target object: {0}.{1}; if someone just changed, deleted, or renamed it, refresh the database tree before executing.");
             Add("Designer.OraclePreviewPrivilegeHint", "請確認目前帳號具備 ALTER、CREATE INDEX、DROP、COMMENT 等直接授權；Oracle 的 role 權限在部分 DDL 情境可能不會生效。", "Confirm that the current account has direct grants for ALTER, CREATE INDEX, DROP, COMMENT, and other required DDL; Oracle role privileges may not apply in some DDL contexts.");
             Add("Designer.OraclePreviewStepHint", "儲存時會依 SQL 預覽分段執行；PL/SQL block 會維持為單一段落，方便定位失敗步驟。", "Saving executes the SQL preview in separate steps; PL/SQL blocks stay grouped as a single step so failures are easier to locate.");
+            Add("Designer.OraclePreviewActionChecklist", "執行前逐步確認清單：", "Pre-execution checklist:");
+            Add("Designer.OraclePreviewCheckCreateTable", "確認新資料表名稱、schema 與 tablespace/預設儲存設定符合預期。", "Confirm the new table name, schema, and tablespace/default storage settings.");
+            Add("Designer.OraclePreviewCheckRenameColumn", "確認欄位重新命名不會影響既有程式、View、Trigger 或報表查詢。", "Confirm column renames will not break existing code, views, triggers, or reports.");
+            Add("Designer.OraclePreviewCheckModifyColumn", "確認欄位型別、長度、NULL/NOT NULL 與 DEFAULT 變更不會截斷資料或違反既有資料。", "Confirm type, length, NULL/NOT NULL, and DEFAULT changes will not truncate data or violate existing rows.");
+            Add("Designer.OraclePreviewCheckAddColumn", "確認新增欄位的 DEFAULT 與 NULL 設定不會造成大型資料表長時間鎖定。", "Confirm new column DEFAULT and NULL settings will not lock large tables for too long.");
+            Add("Designer.OraclePreviewCheckDropColumn", "確認欄位刪除前已備份，且沒有依賴物件仍需要此欄位。", "Confirm removed columns are backed up and no dependent objects still need them.");
+            Add("Designer.OraclePreviewCheckCommentColumn", "確認欄位註解內容符合目前團隊文件與資料字典規則。", "Confirm column comments match the team's documentation and data dictionary rules.");
+            Add("Designer.OraclePreviewCheckCreateIndex", "確認索引名稱未衝突，且建立索引對大型資料表的鎖定與執行時間可接受。", "Confirm index names do not conflict and index build time/locking is acceptable for large tables.");
+            Add("Designer.OraclePreviewCheckDropIndex", "確認刪除索引不會移除主鍵/唯一約束依賴，也不會影響重要查詢效能。", "Confirm dropping indexes will not remove primary/unique constraint dependencies or hurt important query performance.");
+            Add("Designer.OraclePreviewCheckConstraint", "確認 constraint / Primary Key 變更順序正確，且既有資料符合新約束。", "Confirm constraint/primary key changes are ordered correctly and existing rows satisfy the new constraints.");
             Add("Designer.OraclePreviewPrivilegeQueryHint", "可先執行下列權限診斷 SQL，確認目前帳號對目標物件的直接授權與系統權限。", "You can run the following privilege diagnostic SQL first to confirm direct grants and system privileges for the target object.");
             Add("Designer.CurrentSchema", "目前 schema", "current schema");
             Add("Designer.CurrentTable", "目前資料表", "current table");

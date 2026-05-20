@@ -1707,6 +1707,10 @@ public static class SmokeTests
         AssertContains(oracleSql, "MODIFY (\"display_name\" VARCHAR2(120)", "Oracle ALTER should modify column definitions.");
         AssertContains(oracleSql, "COMMENT ON COLUMN \"MAIN\".\"DEMO_TABLE\".\"display_name\"", "Oracle ALTER should update comments.");
         string oraclePreview = BuildOraclePreviewNotice(oracleSql, "MAIN", "DEMO_TABLE");
+        AssertContains(oraclePreview, "執行前逐步確認清單", "Oracle preview should include an action checklist.");
+        AssertContains(oraclePreview, "欄位重新命名", "Oracle preview checklist should include rename column checks.");
+        AssertContains(oraclePreview, "欄位型別", "Oracle preview checklist should include modify column checks.");
+        AssertContains(oraclePreview, "欄位註解內容", "Oracle preview checklist should include comment checks.");
         AssertContains(oraclePreview, "權限診斷 SQL", "Oracle preview should include privilege diagnostic guidance.");
         AssertContains(oraclePreview, "FROM all_tab_privs", "Oracle preview should include object privilege diagnostic query.");
         AssertContains(oraclePreview, "FROM session_privs", "Oracle preview should include system privilege diagnostic query.");
