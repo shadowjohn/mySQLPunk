@@ -1961,16 +1961,19 @@ public static class SmokeTests
         FakeExecDatabase conflictDb = new FakeExecDatabase("postgresql", "0");
         SetPrivateField(form, "_db", conflictDb);
         bool rejectedConflict = false;
+        string conflictMessage = "";
         try
         {
             InvokeQueryFormExecOrThrow(form, "UPDATE public.users SET name = :p0 WHERE id = :p1;", new Dictionary<string, object>(), true);
         }
         catch (TargetInvocationException ex)
         {
-            rejectedConflict = ex.InnerException != null &&
-                ex.InnerException.Message.IndexOf("重新整理", StringComparison.OrdinalIgnoreCase) >= 0;
+            conflictMessage = ex.InnerException != null ? ex.InnerException.Message : "";
         }
-        Assert(rejectedConflict, "Update/delete should reject zero affected rows as an optimistic locking conflict.");
+        rejectedConflict =
+            conflictMessage.IndexOf("UPDATE", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            conflictMessage.IndexOf("WHERE id = :p1", StringComparison.OrdinalIgnoreCase) >= 0;
+        Assert(rejectedConflict, "Update/delete zero affected rows conflict should include operation and WHERE detail.");
 
         FakeExecDatabase insertDb = new FakeExecDatabase("postgresql", "0");
         SetPrivateField(form, "_db", insertDb);

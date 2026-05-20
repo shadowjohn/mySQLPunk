@@ -477,6 +477,8 @@ namespace mySQLPunk
             Add("Object.ViewCopyPreviewUnavailable", "無法產生安全轉換預覽：{0}", "Cannot generate a safe conversion preview: {0}");
             Add("Object.DeleteFailed", "刪除失敗：{0}", "Delete failed: {0}");
             Add("Object.UnknownError", "unknown error", "unknown error");
+            Add("Query.ConflictOperation", "操作類型：{0}", "Operation: {0}");
+            Add("Query.ConflictWhere", "比對條件：{0}", "Match condition: {0}");
             Add("Object.ConfirmDeleteTable", "確定要刪除資料表「{0}」嗎？此操作不可還原！", "Delete table \"{0}\"? This action cannot be undone.");
             Add("Object.ConfirmDeleteView", "確定要刪除檢視「{0}」嗎？此操作不可還原！", "Delete view \"{0}\"? This action cannot be undone.");
             Add("Object.ConfirmDeleteFunction", "確定要刪除函式或程序「{0}」嗎？此操作不可還原！", "Delete function or procedure \"{0}\"? This action cannot be undone.");

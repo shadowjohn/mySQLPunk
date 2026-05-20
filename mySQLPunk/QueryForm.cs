@@ -2930,9 +2930,72 @@ namespace mySQLPunk
                 int rowsAffected;
                 if (int.TryParse(result["rowsAffected"], out rowsAffected) && rowsAffected == 0)
                 {
-                    throw new Exception(Localization.T("Query.NoRowsAffectedConflict"));
+                    throw new Exception(BuildRowsAffectedConflictMessage(sql));
                 }
             }
+        }
+
+        private static string BuildRowsAffectedConflictMessage(string sql)
+        {
+            string detail = BuildRowsAffectedConflictDetail(sql);
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                return Localization.T("Query.NoRowsAffectedConflict");
+            }
+
+            return Localization.T("Query.NoRowsAffectedConflict") + Environment.NewLine + detail;
+        }
+
+        private static string BuildRowsAffectedConflictDetail(string sql)
+        {
+            List<string> parts = new List<string>();
+            string operation = ExtractSqlOperation(sql);
+            string where = ExtractWhereSummary(sql);
+
+            if (!string.IsNullOrWhiteSpace(operation))
+            {
+                parts.Add(Localization.Format("Query.ConflictOperation", operation));
+            }
+
+            if (!string.IsNullOrWhiteSpace(where))
+            {
+                parts.Add(Localization.Format("Query.ConflictWhere", where));
+            }
+
+            return string.Join(Environment.NewLine, parts.ToArray());
+        }
+
+        private static string ExtractSqlOperation(string sql)
+        {
+            Match match = Regex.Match(sql ?? "", @"^\s*(UPDATE|DELETE)\b", RegexOptions.IgnoreCase);
+            if (!match.Success)
+            {
+                return "";
+            }
+
+            return match.Groups[1].Value.ToUpperInvariant();
+        }
+
+        private static string ExtractWhereSummary(string sql)
+        {
+            Match match = Regex.Match(sql ?? "", @"\bWHERE\b\s+(?<where>.+?)\s*;?\s*$", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!match.Success)
+            {
+                return "";
+            }
+
+            string where = Regex.Replace(match.Groups["where"].Value, @"\s+", " ").Trim();
+            return TruncateConflictDetail("WHERE " + where, 240);
+        }
+
+        private static string TruncateConflictDetail(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            {
+                return value ?? "";
+            }
+
+            return value.Substring(0, Math.Max(0, maxLength - 3)) + "...";
         }
 
         private static bool IsAddedRowEmpty(DataRow row, List<TableColumnInfo> columns)
