@@ -879,7 +879,7 @@ namespace mySQLPunk.lib
         private static List<List<string>> BuildExportRows(IDatabase db, string databaseName, string tableName, SqliteColumnCommentExportResult result)
         {
             List<List<string>> rows = new List<List<string>>();
-            rows.Add(new List<string> { "table", "column", "comment" });
+            rows.Add(new List<string> { "provider", "database", "table", "column", "type", "not_null", "default_value", "comment" });
 
             List<string> tableNames = new List<string>();
             if (!string.IsNullOrWhiteSpace(tableName))
@@ -894,13 +894,33 @@ namespace mySQLPunk.lib
             foreach (string currentTable in tableNames)
             {
                 if (string.IsNullOrWhiteSpace(currentTable)) continue;
-                Dictionary<string, string> comments = ReadColumnComments(db, databaseName, currentTable);
-                if (comments.Count == 0) continue;
+                DataTable columns = db.GetColumns(databaseName, currentTable);
+                if (columns == null) continue;
 
-                result.TableCount++;
-                foreach (var item in comments)
+                bool countedTable = false;
+                foreach (DataRow row in columns.Rows)
                 {
-                    rows.Add(new List<string> { currentTable, item.Key, item.Value });
+                    string columnName = FirstColumnValue(row, "name", "Name", "COLUMN_NAME", "column_name", "Field");
+                    string comment = FirstColumnValue(row, "Comment", "comment", "description", "remarks");
+                    if (string.IsNullOrWhiteSpace(columnName) || string.IsNullOrWhiteSpace(comment)) continue;
+
+                    if (!countedTable)
+                    {
+                        result.TableCount++;
+                        countedTable = true;
+                    }
+
+                    rows.Add(new List<string>
+                    {
+                        "sqlite",
+                        databaseName ?? string.Empty,
+                        currentTable,
+                        columnName,
+                        FirstColumnValue(row, "Type", "type", "DATA_TYPE", "data_type"),
+                        FirstColumnValue(row, "NotNull", "not_null", "IS_NULLABLE", "Nullable"),
+                        FirstColumnValue(row, "Default", "default", "DEFAULT", "COLUMN_DEFAULT", "dflt_value"),
+                        comment
+                    });
                     result.CommentCount++;
                 }
             }

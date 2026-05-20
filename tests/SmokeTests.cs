@@ -1424,9 +1424,13 @@ public static class SmokeTests
         try
         {
             SqliteColumnCommentExportResult xlsxExportResult =
-                SqliteColumnCommentExchangeService.WriteExportFile(db, "main", "users", xlsxPath);
+            SqliteColumnCommentExchangeService.WriteExportFile(db, "main", "users", xlsxPath);
             Assert(xlsxExportResult.TableCount == 1 && xlsxExportResult.CommentCount == 2, "SQLite comment XLSX export should count exported comments.");
             Assert(File.Exists(xlsxPath), "SQLite comment XLSX export should write a workbook.");
+            string xlsxRowsText = string.Join("\n", ReadXlsxRowsForTest(xlsxPath).Select(row => string.Join("|", row)).ToArray());
+            AssertContains(xlsxRowsText, "provider|database|table|column|type|not_null|default_value|comment", "SQLite comment XLSX export should include richer template columns.");
+            AssertContains(xlsxRowsText, "varchar", "SQLite comment XLSX export should include column type metadata.");
+            AssertContains(xlsxRowsText, "CURRENT_TIMESTAMP", "SQLite comment XLSX export should include default value metadata.");
 
             SqliteColumnCommentImportPlan xlsxPlan =
                 SqliteColumnCommentExchangeService.BuildImportPlanFromFile(xlsxPath, "users");
@@ -1507,6 +1511,12 @@ public static class SmokeTests
             if (File.Exists(exportPath)) File.Delete(exportPath);
             if (File.Exists(sqlitePath)) File.Delete(sqlitePath);
         }
+    }
+
+    private static List<List<string>> ReadXlsxRowsForTest(string xlsxPath)
+    {
+        MethodInfo method = typeof(SqliteColumnCommentExchangeService).GetMethod("ReadXlsxRows", BindingFlags.Static | BindingFlags.NonPublic);
+        return (List<List<string>>)method.Invoke(null, new object[] { xlsxPath });
     }
 
     private static void TestQueryResultExportService()
@@ -2644,16 +2654,19 @@ public static class SmokeTests
         {
             DataTable table = new DataTable();
             table.Columns.Add("Name");
+            table.Columns.Add("Type");
+            table.Columns.Add("NotNull");
+            table.Columns.Add("Default");
             table.Columns.Add("Comment");
             if (tableName == "users")
             {
-                table.Rows.Add("ID", "識別碼");
-                table.Rows.Add("NAME", "姓名");
-                table.Rows.Add("IGNORED", "");
+                table.Rows.Add("ID", "integer", "1", "", "識別碼");
+                table.Rows.Add("NAME", "varchar", "0", "CURRENT_TIMESTAMP", "姓名");
+                table.Rows.Add("IGNORED", "text", "0", "", "");
             }
             else
             {
-                table.Rows.Add("ID", "");
+                table.Rows.Add("ID", "integer", "1", "", "");
             }
             return table;
         }
