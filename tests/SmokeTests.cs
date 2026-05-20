@@ -487,6 +487,30 @@ public static class SmokeTests
         string pgLengthSql = (string)GetProperty(pgLengthPreview, "ConvertedSql");
         AssertContains(pgLengthSql, "LENGTH(display_name)", "Converted PostgreSQL SQL should use LENGTH.");
 
+        object pgTrimPreview = BuildViewSqlPreview(
+            "SELECT LTRIM(RTRIM(display_name)) AS clean_name FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTrimPreview, "CanConvert"), "SQL Server LTRIM/RTRIM should convert to PostgreSQL.");
+        string pgTrimSql = (string)GetProperty(pgTrimPreview, "ConvertedSql");
+        AssertContains(pgTrimSql, "TRIM(display_name)", "Converted PostgreSQL SQL should use TRIM.");
+
+        object mysqlTrimPreview = BuildViewSqlPreview(
+            "SELECT RTRIM(LTRIM(display_name)) AS clean_name FROM users",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlTrimPreview, "CanConvert"), "SQL Server RTRIM/LTRIM should convert to MySQL.");
+        string mysqlTrimSql = (string)GetProperty(mysqlTrimPreview, "ConvertedSql");
+        AssertContains(mysqlTrimSql, "TRIM(display_name)", "Converted MySQL SQL should use TRIM.");
+
+        object mssqlTrimPreview = BuildViewSqlPreview(
+            "SELECT TRIM(display_name) AS clean_name FROM users",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlTrimPreview, "CanConvert"), "PostgreSQL TRIM should convert to SQL Server.");
+        string mssqlTrimSql = (string)GetProperty(mssqlTrimPreview, "ConvertedSql");
+        AssertContains(mssqlTrimSql, "LTRIM(RTRIM(display_name))", "Converted SQL Server SQL should use LTRIM/RTRIM.");
+
         object mssqlLengthPreview = BuildViewSqlPreview(
             "SELECT LENGTH(display_name) AS name_length FROM users",
             "postgresql",

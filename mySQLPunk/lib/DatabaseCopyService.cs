@@ -458,6 +458,7 @@ namespace mySQLPunk.lib
             sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
+            sql = RewriteTrimFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
@@ -871,6 +872,31 @@ namespace mySQLPunk.lib
                 selectSql,
                 @"\bLEN\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => "LENGTH(" + m.Groups["expr"].Value.Trim() + ")",
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteTrimFunctions(string selectSql, string targetProvider)
+        {
+            string sql = selectSql;
+            if (targetProvider == "mssql")
+            {
+                return Regex.Replace(
+                    sql,
+                    @"\bTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                    m => "LTRIM(RTRIM(" + m.Groups["expr"].Value.Trim() + "))",
+                    RegexOptions.IgnoreCase);
+            }
+
+            sql = Regex.Replace(
+                sql,
+                @"\bLTRIM\s*\(\s*RTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)\s*\)",
+                m => "TRIM(" + m.Groups["expr"].Value.Trim() + ")",
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bRTRIM\s*\(\s*LTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)\s*\)",
+                m => "TRIM(" + m.Groups["expr"].Value.Trim() + ")",
                 RegexOptions.IgnoreCase);
         }
 
