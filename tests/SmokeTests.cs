@@ -976,6 +976,38 @@ public static class SmokeTests
         string mysqlExtractSql = (string)GetProperty(mysqlExtractPreview, "ConvertedSql");
         AssertContains(mysqlExtractSql, "DAY(created_at)", "Converted MySQL SQL should use DAY().");
 
+        object mysqlQuarterPreview = BuildViewSqlPreview(
+            "SELECT DATE_PART('quarter', created_at) AS created_quarter FROM orders",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlQuarterPreview, "CanConvert"), "PostgreSQL DATE_PART quarter should convert to MySQL.");
+        string mysqlQuarterSql = (string)GetProperty(mysqlQuarterPreview, "ConvertedSql");
+        AssertContains(mysqlQuarterSql, "QUARTER(created_at)", "Converted MySQL SQL should use QUARTER().");
+
+        object sqliteQuarterPreview = BuildViewSqlPreview(
+            "SELECT DATEPART(quarter, created_at) AS created_quarter FROM orders",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteQuarterPreview, "CanConvert"), "SQL Server DATEPART quarter should convert to SQLite.");
+        string sqliteQuarterSql = (string)GetProperty(sqliteQuarterPreview, "ConvertedSql");
+        AssertContains(sqliteQuarterSql, "CAST(((CAST(strftime('%m', created_at) AS INTEGER) + 2) / 3) AS INTEGER)", "Converted SQLite SQL should calculate quarter from month.");
+
+        object pgDayOfYearPreview = BuildViewSqlPreview(
+            "SELECT DAYOFYEAR(created_at) AS created_doy FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgDayOfYearPreview, "CanConvert"), "MySQL DAYOFYEAR should convert to PostgreSQL.");
+        string pgDayOfYearSql = (string)GetProperty(pgDayOfYearPreview, "ConvertedSql");
+        AssertContains(pgDayOfYearSql, "EXTRACT(DOY FROM created_at)", "Converted PostgreSQL SQL should use EXTRACT DOY.");
+
+        object sqliteDayOfYearPreview = BuildViewSqlPreview(
+            "SELECT EXTRACT(DOY FROM created_at) AS created_doy FROM orders",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDayOfYearPreview, "CanConvert"), "PostgreSQL EXTRACT DOY should convert to SQLite.");
+        string sqliteDayOfYearSql = (string)GetProperty(sqliteDayOfYearPreview, "ConvertedSql");
+        AssertContains(sqliteDayOfYearSql, "CAST(strftime('%j', created_at) AS INTEGER)", "Converted SQLite SQL should use day-of-year strftime.");
+
         object mssqlDatePartFunctionPreview = BuildViewSqlPreview(
             "SELECT DATE_PART('hour', created_at) AS created_hour FROM orders",
             "postgresql",
