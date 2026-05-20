@@ -650,6 +650,31 @@ public static class SmokeTests
         string oracleEndOfMonthOffsetSql = (string)GetProperty(oracleEndOfMonthOffsetPreview, "ConvertedSql");
         AssertContains(oracleEndOfMonthOffsetSql, "LAST_DAY(ADD_MONTHS(created_at, 2))", "Converted Oracle SQL should use LAST_DAY with ADD_MONTHS.");
 
+        object mssqlLastDayPreview = BuildViewSqlPreview(
+            "SELECT LAST_DAY(created_at) AS month_end FROM orders",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlLastDayPreview, "CanConvert"), "MySQL LAST_DAY should convert to SQL Server.");
+        string mssqlLastDaySql = (string)GetProperty(mssqlLastDayPreview, "ConvertedSql");
+        AssertContains(mssqlLastDaySql, "EOMONTH(created_at)", "Converted SQL Server SQL should use EOMONTH.");
+
+        object pgLastDayPreview = BuildViewSqlPreview(
+            "SELECT LAST_DAY(created_at) AS month_end FROM orders",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgLastDayPreview, "CanConvert"), "Oracle LAST_DAY should convert to PostgreSQL.");
+        string pgLastDaySql = (string)GetProperty(pgLastDayPreview, "ConvertedSql");
+        AssertContains(pgLastDaySql, "(DATE_TRUNC('month', created_at) + INTERVAL '1 month - 1 day')::date", "Converted PostgreSQL SQL should build month end.");
+        AssertNotContains(pgLastDaySql, "LAST_DAY", "Converted PostgreSQL SQL should remove LAST_DAY.");
+
+        object sqliteLastDayPreview = BuildViewSqlPreview(
+            "SELECT LAST_DAY(created_at) AS month_end FROM orders",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteLastDayPreview, "CanConvert"), "MySQL LAST_DAY should convert to SQLite.");
+        string sqliteLastDaySql = (string)GetProperty(sqliteLastDayPreview, "ConvertedSql");
+        AssertContains(sqliteLastDaySql, "date(created_at, 'start of month', '+1 month', '-1 day')", "Converted SQLite SQL should use date modifiers for month end.");
+
         object pgDateFromPartsPreview = BuildViewSqlPreview(
             "SELECT DATEFROMPARTS(order_year, order_month, 1) AS month_start FROM orders",
             "mssql",

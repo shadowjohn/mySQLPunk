@@ -876,13 +876,26 @@ namespace mySQLPunk.lib
 
         private static string RewriteEndOfMonthFunctions(string selectSql, string targetProvider)
         {
-            if (targetProvider == "mssql") return selectSql;
+            string sql = selectSql;
+            if (targetProvider != "mssql")
+            {
+                sql = Regex.Replace(
+                    sql,
+                    @"\bEOMONTH\s*\((?<args>[^()]*)\)",
+                    m => RewriteEndOfMonthFunction(m, targetProvider),
+                    RegexOptions.IgnoreCase);
+            }
 
-            return Regex.Replace(
-                selectSql,
-                @"\bEOMONTH\s*\((?<args>[^()]*)\)",
-                m => RewriteEndOfMonthFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+            if (targetProvider != "mysql" && targetProvider != "oracle")
+            {
+                sql = Regex.Replace(
+                    sql,
+                    @"\bLAST_DAY\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                    m => BuildLastDayExpression(targetProvider, m.Groups["expr"].Value.Trim()),
+                    RegexOptions.IgnoreCase);
+            }
+
+            return sql;
         }
 
         private static string RewriteEndOfMonthFunction(Match match, string targetProvider)
@@ -920,6 +933,14 @@ namespace mySQLPunk.lib
             }
 
             return match.Value;
+        }
+
+        private static string BuildLastDayExpression(string targetProvider, string expr)
+        {
+            if (targetProvider == "mssql") return "EOMONTH(" + expr + ")";
+            if (targetProvider == "postgresql") return "(DATE_TRUNC('month', " + expr + ") + INTERVAL '1 month - 1 day')::date";
+            if (targetProvider == "sqlite") return "date(" + expr + ", 'start of month', '+1 month', '-1 day')";
+            return "LAST_DAY(" + expr + ")";
         }
 
         private static string RewriteDatePartFunctions(string selectSql, string targetProvider)
