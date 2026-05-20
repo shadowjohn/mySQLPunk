@@ -1316,6 +1316,12 @@ namespace mySQLPunk.lib
                 m => RewriteTimestampDiffFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
 
+            sql = Regex.Replace(
+                sql,
+                @"\bMONTHS_BETWEEN\s*\((?<args>[^()]*)\)",
+                m => RewriteMonthsBetweenFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
             return Regex.Replace(
                 sql,
                 @"\bDATEDIFF\s*\((?<args>[^()]*)\)",
@@ -1353,6 +1359,16 @@ namespace mySQLPunk.lib
                 match.Groups["end"].Value.Trim(),
                 match.Groups["start"].Value.Trim());
             return string.IsNullOrWhiteSpace(expression) ? match.Value : expression;
+        }
+
+        private static string RewriteMonthsBetweenFunction(Match match, string targetProvider)
+        {
+            if (targetProvider == "oracle") return match.Value;
+
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+
+            return BuildDateDiffExpression(targetProvider, "month", args[0], args[1]);
         }
 
         private static string RewriteDateAddFunctions(string selectSql, string targetProvider)

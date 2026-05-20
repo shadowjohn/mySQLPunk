@@ -790,6 +790,39 @@ public static class SmokeTests
         string oracleTimestampDiffYearSql = (string)GetProperty(oracleTimestampDiffYearPreview, "ConvertedSql");
         AssertContains(oracleTimestampDiffYearSql, "FLOOR(MONTHS_BETWEEN(ended_at, hired_at) / 12)", "Converted Oracle SQL should divide MONTHS_BETWEEN by 12 for year difference.");
 
+        object mssqlMonthsBetweenPreview = BuildViewSqlPreview(
+            "SELECT MONTHS_BETWEEN(end_date, start_date) AS months_open FROM tickets",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlMonthsBetweenPreview, "CanConvert"), "Oracle MONTHS_BETWEEN should convert to SQL Server.");
+        string mssqlMonthsBetweenSql = (string)GetProperty(mssqlMonthsBetweenPreview, "ConvertedSql");
+        AssertContains(mssqlMonthsBetweenSql, "DATEDIFF(month, start_date, end_date)", "Converted SQL Server SQL should use DATEDIFF month.");
+
+        object mysqlMonthsBetweenPreview = BuildViewSqlPreview(
+            "SELECT MONTHS_BETWEEN(end_date, start_date) AS months_open FROM tickets",
+            "oracle",
+            "mysql");
+        Assert((bool)GetProperty(mysqlMonthsBetweenPreview, "CanConvert"), "Oracle MONTHS_BETWEEN should convert to MySQL.");
+        string mysqlMonthsBetweenSql = (string)GetProperty(mysqlMonthsBetweenPreview, "ConvertedSql");
+        AssertContains(mysqlMonthsBetweenSql, "TIMESTAMPDIFF(MONTH, start_date, end_date)", "Converted MySQL SQL should use TIMESTAMPDIFF month.");
+
+        object sqliteMonthsBetweenPreview = BuildViewSqlPreview(
+            "SELECT MONTHS_BETWEEN(end_date, start_date) AS months_open FROM tickets",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteMonthsBetweenPreview, "CanConvert"), "Oracle MONTHS_BETWEEN should convert to SQLite.");
+        string sqliteMonthsBetweenSql = (string)GetProperty(sqliteMonthsBetweenPreview, "ConvertedSql");
+        AssertContains(sqliteMonthsBetweenSql, "((CAST(strftime('%Y', end_date) AS INTEGER) - CAST(strftime('%Y', start_date) AS INTEGER)) * 12 + (CAST(strftime('%m', end_date) AS INTEGER) - CAST(strftime('%m', start_date) AS INTEGER)))", "Converted SQLite SQL should calculate month difference from year and month parts.");
+
+        object pgMonthsBetweenPreview = BuildViewSqlPreview(
+            "SELECT MONTHS_BETWEEN(end_date, start_date) AS months_open FROM tickets",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgMonthsBetweenPreview, "CanConvert"), "Oracle MONTHS_BETWEEN should convert to PostgreSQL.");
+        string pgMonthsBetweenSql = (string)GetProperty(pgMonthsBetweenPreview, "ConvertedSql");
+        AssertContains(pgMonthsBetweenSql, "CAST((EXTRACT(YEAR FROM AGE(end_date, start_date)) * 12) + EXTRACT(MONTH FROM AGE(end_date, start_date)) AS INTEGER)", "Converted PostgreSQL SQL should use AGE for month difference.");
+        AssertNotContains(pgMonthsBetweenSql, "MONTHS_BETWEEN", "Converted PostgreSQL SQL should remove MONTHS_BETWEEN.");
+
         object mssqlDateAddPreview = BuildViewSqlPreview(
             "SELECT DATE_ADD(created_at, INTERVAL 7 DAY) AS expires_at FROM sessions",
             "mysql",
