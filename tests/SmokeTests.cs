@@ -333,6 +333,46 @@ public static class SmokeTests
         string sqliteConvertDateSql = (string)GetProperty(sqliteConvertDatePreview, "ConvertedSql");
         AssertContains(sqliteConvertDateSql, "strftime('%Y-%m-%d', created_at)", "Converted SQLite SQL should use strftime for CONVERT style 23.");
 
+        object mssqlToDatePreview = BuildViewSqlPreview(
+            "SELECT TO_DATE(order_date_text, 'YYYY-MM-DD') AS order_date FROM orders",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlToDatePreview, "CanConvert"), "Oracle TO_DATE should convert to SQL Server.");
+        string mssqlToDateSql = (string)GetProperty(mssqlToDatePreview, "ConvertedSql");
+        AssertContains(mssqlToDateSql, "CONVERT(date, order_date_text, 23)", "Converted SQL Server SQL should use CONVERT date style 23.");
+
+        object sqliteToDatePreview = BuildViewSqlPreview(
+            "SELECT TO_DATE(order_date_text, 'YYYY-MM-DD') AS order_date FROM orders",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteToDatePreview, "CanConvert"), "Oracle TO_DATE should convert to SQLite.");
+        string sqliteToDateSql = (string)GetProperty(sqliteToDatePreview, "ConvertedSql");
+        AssertContains(sqliteToDateSql, "date(order_date_text)", "Converted SQLite SQL should use date().");
+
+        object oracleStrToDatePreview = BuildViewSqlPreview(
+            "SELECT STR_TO_DATE(created_text, '%Y-%m-%d %H:%i:%s') AS created_at FROM orders",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleStrToDatePreview, "CanConvert"), "MySQL STR_TO_DATE should convert to Oracle.");
+        string oracleStrToDateSql = (string)GetProperty(oracleStrToDatePreview, "ConvertedSql");
+        AssertContains(oracleStrToDateSql, "TO_DATE(created_text, 'YYYY-MM-DD HH24:MI:SS')", "Converted Oracle SQL should use TO_DATE.");
+
+        object pgStrToDatePreview = BuildViewSqlPreview(
+            "SELECT STR_TO_DATE(created_text, '%Y-%m-%d %H:%i:%s') AS created_at FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgStrToDatePreview, "CanConvert"), "MySQL STR_TO_DATE should convert to PostgreSQL.");
+        string pgStrToDateSql = (string)GetProperty(pgStrToDatePreview, "ConvertedSql");
+        AssertContains(pgStrToDateSql, "TO_TIMESTAMP(created_text, 'YYYY-MM-DD HH24:MI:SS')", "Converted PostgreSQL SQL should use TO_TIMESTAMP.");
+
+        object mysqlStrToDatePreview = BuildViewSqlPreview(
+            "SELECT STR_TO_DATE(created_text, '%Y-%m-%d') AS created_at FROM orders",
+            "mysql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlStrToDatePreview, "CanConvert"), "MySQL target should keep STR_TO_DATE.");
+        string mysqlStrToDateSql = (string)GetProperty(mysqlStrToDatePreview, "ConvertedSql");
+        AssertContains(mysqlStrToDateSql, "STR_TO_DATE(created_text, '%Y-%m-%d')", "Converted MySQL SQL should keep STR_TO_DATE.");
+
         object mssqlDateOnlyPreview = BuildViewSqlPreview(
             "SELECT DATE(created_at) AS created_date FROM orders",
             "mysql",

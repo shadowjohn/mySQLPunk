@@ -473,6 +473,7 @@ namespace mySQLPunk.lib
             sql = RewriteDateOnlyFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteDateTruncFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
+            sql = RewriteDateParseFunctions(sql, targetProvider);
             sql = RewriteDateDiffFunctions(sql, targetProvider);
             sql = RewriteDateAddFunctions(sql, targetProvider);
             sql = RewriteDatePartFunctions(sql, targetProvider);
@@ -1071,6 +1072,33 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
 
             return sql;
+        }
+
+        private static string RewriteDateParseFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bTO_DATE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string format = m.Groups["format"].Value;
+                    if (targetProvider == "oracle") return m.Value;
+                    return BuildDateParseExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider));
+                },
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bSTR_TO_DATE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string format = m.Groups["format"].Value;
+                    if (targetProvider == "mysql") return m.Value;
+                    return BuildDateParseExpression(targetProvider, expr, TranslateMySqlDateFormatPattern(format, targetProvider));
+                },
+                RegexOptions.IgnoreCase);
         }
 
         private static string GetSqlServerConvertDateFormat(string style)
@@ -1706,6 +1734,38 @@ namespace mySQLPunk.lib
             if (targetProvider == "sqlite") return "strftime('" + escapedPattern + "', " + expr + ")";
             if (targetProvider == "mssql") return "FORMAT(" + expr + ", '" + escapedPattern + "')";
             return "TO_CHAR(" + expr + ", '" + escapedPattern + "')";
+        }
+
+        private static string BuildDateParseExpression(string targetProvider, string expr, string translatedPattern)
+        {
+            string escapedPattern = EscapeSqlString(translatedPattern);
+            if (targetProvider == "mysql") return "STR_TO_DATE(" + expr + ", '" + escapedPattern + "')";
+            if (targetProvider == "sqlite") return IsDateTimePattern(translatedPattern) ? "datetime(" + expr + ")" : "date(" + expr + ")";
+            if (targetProvider == "mssql")
+            {
+                string style = GetSqlServerParseStyle(translatedPattern);
+                return string.IsNullOrWhiteSpace(style)
+                    ? "CONVERT(datetime, " + expr + ")"
+                    : "CONVERT(" + (style == "23" ? "date" : "datetime") + ", " + expr + ", " + style + ")";
+            }
+            if (targetProvider == "postgresql" && IsDateTimePattern(translatedPattern))
+            {
+                return "TO_TIMESTAMP(" + expr + ", '" + escapedPattern + "')";
+            }
+            return "TO_DATE(" + expr + ", '" + escapedPattern + "')";
+        }
+
+        private static string GetSqlServerParseStyle(string translatedPattern)
+        {
+            string pattern = (translatedPattern ?? "").Trim();
+            if (string.Equals(pattern, "yyyy-MM-dd", StringComparison.OrdinalIgnoreCase)) return "23";
+            if (string.Equals(pattern, "yyyy-MM-dd HH:mm:ss", StringComparison.OrdinalIgnoreCase)) return "120";
+            return "";
+        }
+
+        private static bool IsDateTimePattern(string translatedPattern)
+        {
+            return Regex.IsMatch(translatedPattern ?? "", @"(HH|hh|%H|%h|HH24|HH12)", RegexOptions.IgnoreCase);
         }
 
         private static string TranslateMySqlDateFormatPattern(string format, string targetProvider)
