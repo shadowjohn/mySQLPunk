@@ -504,6 +504,7 @@ namespace mySQLPunk.lib
             sql = RewriteDateDiffFunctions(sql, targetProvider);
             sql = RewriteDateAddFunctions(sql, targetProvider);
             sql = RewriteDatePartFunctions(sql, targetProvider);
+            sql = RewriteDateFromPartsFunctions(sql, targetProvider);
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteComparisonFunctions(sql, targetProvider);
@@ -922,6 +923,49 @@ namespace mySQLPunk.lib
             }
 
             return "EXTRACT(" + part.ToUpperInvariant() + " FROM " + expr + ")";
+        }
+
+        private static string RewriteDateFromPartsFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mssql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bDATEFROMPARTS\s*\((?<args>[^()]*)\)",
+                m => RewriteDateFromPartsFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteDateFromPartsFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 3) return match.Value;
+
+            string year = args[0];
+            string month = args[1];
+            string day = args[2];
+
+            if (targetProvider == "mysql")
+            {
+                return "STR_TO_DATE(CONCAT(" + year + ", '-', " + month + ", '-', " + day + "), '%Y-%m-%d')";
+            }
+
+            if (targetProvider == "postgresql")
+            {
+                return "MAKE_DATE(" + year + ", " + month + ", " + day + ")";
+            }
+
+            if (targetProvider == "sqlite")
+            {
+                return "printf('%04d-%02d-%02d', " + year + ", " + month + ", " + day + ")";
+            }
+
+            if (targetProvider == "oracle")
+            {
+                return "TO_DATE(" + year + " || '-' || " + month + " || '-' || " + day + ", 'YYYY-MM-DD')";
+            }
+
+            return match.Value;
         }
 
         private static string NormalizeDatePart(string part)

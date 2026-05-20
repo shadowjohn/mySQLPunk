@@ -535,6 +535,39 @@ public static class SmokeTests
         string mysqlCurrentDateSql = (string)GetProperty(mysqlCurrentDatePreview, "ConvertedSql");
         AssertContains(mysqlCurrentDateSql, "CURDATE()", "Converted MySQL SQL should use CURDATE().");
 
+        object pgDateFromPartsPreview = BuildViewSqlPreview(
+            "SELECT DATEFROMPARTS(order_year, order_month, 1) AS month_start FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgDateFromPartsPreview, "CanConvert"), "SQL Server DATEFROMPARTS should convert to PostgreSQL.");
+        string pgDateFromPartsSql = (string)GetProperty(pgDateFromPartsPreview, "ConvertedSql");
+        AssertContains(pgDateFromPartsSql, "MAKE_DATE(order_year, order_month, 1)", "Converted PostgreSQL SQL should use MAKE_DATE.");
+        AssertNotContains(pgDateFromPartsSql, "DATEFROMPARTS", "Converted PostgreSQL SQL should remove DATEFROMPARTS.");
+
+        object mysqlDateFromPartsPreview = BuildViewSqlPreview(
+            "SELECT DATEFROMPARTS(order_year, order_month, order_day) AS order_date FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlDateFromPartsPreview, "CanConvert"), "SQL Server DATEFROMPARTS should convert to MySQL.");
+        string mysqlDateFromPartsSql = (string)GetProperty(mysqlDateFromPartsPreview, "ConvertedSql");
+        AssertContains(mysqlDateFromPartsSql, "STR_TO_DATE(CONCAT(order_year, '-', order_month, '-', order_day), '%Y-%m-%d')", "Converted MySQL SQL should build a date from parts.");
+
+        object sqliteDateFromPartsPreview = BuildViewSqlPreview(
+            "SELECT DATEFROMPARTS(order_year, order_month, order_day) AS order_date FROM orders",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDateFromPartsPreview, "CanConvert"), "SQL Server DATEFROMPARTS should convert to SQLite.");
+        string sqliteDateFromPartsSql = (string)GetProperty(sqliteDateFromPartsPreview, "ConvertedSql");
+        AssertContains(sqliteDateFromPartsSql, "printf('%04d-%02d-%02d', order_year, order_month, order_day)", "Converted SQLite SQL should build an ISO date string.");
+
+        object oracleDateFromPartsPreview = BuildViewSqlPreview(
+            "SELECT DATEFROMPARTS(order_year, order_month, order_day) AS order_date FROM orders",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleDateFromPartsPreview, "CanConvert"), "SQL Server DATEFROMPARTS should convert to Oracle.");
+        string oracleDateFromPartsSql = (string)GetProperty(oracleDateFromPartsPreview, "ConvertedSql");
+        AssertContains(oracleDateFromPartsSql, "TO_DATE(order_year || '-' || order_month || '-' || order_day, 'YYYY-MM-DD')", "Converted Oracle SQL should build a date from concatenated parts.");
+
         object mssqlDateDiffPreview = BuildViewSqlPreview(
             "SELECT DATEDIFF(end_date, start_date) AS days_open FROM tickets",
             "mysql",
