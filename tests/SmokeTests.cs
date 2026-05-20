@@ -1715,6 +1715,13 @@ public static class SmokeTests
         AssertContains(oraclePreview, "FROM all_tab_privs", "Oracle preview should include object privilege diagnostic query.");
         AssertContains(oraclePreview, "FROM session_privs", "Oracle preview should include system privilege diagnostic query.");
         AssertContains(oraclePreview, "UPPER(owner) = UPPER('MAIN')", "Oracle privilege diagnostic should target the selected schema.");
+        string highRiskOracleMessage = BuildOracleHighRiskConfirmationMessage(
+            "ALTER TABLE \"MAIN\".\"DEMO_TABLE\" DROP COLUMN \"legacy_code\";\nDROP INDEX \"MAIN\".\"IX_DEMO\";");
+        AssertContains(highRiskOracleMessage, "高風險 Oracle DDL", "Oracle high-risk confirmation should explain the second confirmation.");
+        AssertContains(highRiskOracleMessage, "會刪除欄位", "Oracle high-risk confirmation should include drop column warnings.");
+        AssertContains(highRiskOracleMessage, "會刪除索引", "Oracle high-risk confirmation should include drop index warnings.");
+        string normalOracleMessage = BuildOracleHighRiskConfirmationMessage("COMMENT ON COLUMN \"MAIN\".\"DEMO_TABLE\".\"name\" IS '姓名';");
+        AssertEquals("", normalOracleMessage, "Oracle high-risk confirmation should stay empty for non-destructive comments.");
 
         string sqliteSql = BuildExistingAlterSql(
             new my_sqlite(),
@@ -3273,6 +3280,12 @@ public static class SmokeTests
     {
         MethodInfo method = typeof(TableDesignerForm).GetMethod("AddOraclePreviewNotice", BindingFlags.Static | BindingFlags.NonPublic);
         return (string)method.Invoke(null, new object[] { sql, databaseName, tableName });
+    }
+
+    private static string BuildOracleHighRiskConfirmationMessage(string sql)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOracleHighRiskConfirmationMessage", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { sql });
     }
 
     private static string BuildGenericCreateIndexSql(IDatabase db, string databaseName, string tableName, DataTable indexes)

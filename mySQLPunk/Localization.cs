@@ -768,6 +768,12 @@ namespace mySQLPunk
             Add("Designer.OraclePreviewCheckCreateIndex", "確認索引名稱未衝突，且建立索引對大型資料表的鎖定與執行時間可接受。", "Confirm index names do not conflict and index build time/locking is acceptable for large tables.");
             Add("Designer.OraclePreviewCheckDropIndex", "確認刪除索引不會移除主鍵/唯一約束依賴，也不會影響重要查詢效能。", "Confirm dropping indexes will not remove primary/unique constraint dependencies or hurt important query performance.");
             Add("Designer.OraclePreviewCheckConstraint", "確認 constraint / Primary Key 變更順序正確，且既有資料符合新約束。", "Confirm constraint/primary key changes are ordered correctly and existing rows satisfy the new constraints.");
+            Add("Designer.OracleHighRiskConfirmTitle", "Oracle 高風險 DDL 確認", "Oracle High-risk DDL Confirmation");
+            Add("Designer.OracleHighRiskConfirmIntro", "偵測到下列高風險 Oracle DDL，執行前請再次確認：", "The following high-risk Oracle DDL actions were detected. Confirm before executing:");
+            Add("Designer.OracleHighRiskDropColumn", "會刪除欄位；請確認備份、依賴物件與資料保留需求。", "Columns will be dropped; confirm backups, dependent objects, and data retention needs.");
+            Add("Designer.OracleHighRiskDropIndex", "會刪除索引；請確認沒有 constraint 依賴，且重要查詢效能可接受。", "Indexes will be dropped; confirm no constraint dependencies and acceptable query performance.");
+            Add("Designer.OracleHighRiskDropConstraint", "會刪除 constraint；請確認資料完整性規則與應用程式依賴。", "Constraints will be dropped; confirm integrity rules and application dependencies.");
+            Add("Designer.OracleHighRiskConfirmContinue", "確定仍要執行嗎？", "Continue anyway?");
             Add("Designer.OraclePreviewPrivilegeQueryHint", "可先執行下列權限診斷 SQL，確認目前帳號對目標物件的直接授權與系統權限。", "You can run the following privilege diagnostic SQL first to confirm direct grants and system privileges for the target object.");
             Add("Designer.CurrentSchema", "目前 schema", "current schema");
             Add("Designer.CurrentTable", "目前資料表", "current table");

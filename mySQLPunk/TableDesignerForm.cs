@@ -4366,6 +4366,13 @@ namespace mySQLPunk
 
             if (MessageBox.Show(Localization.Format("Designer.ConfirmExecuteSql", sql), Localization.T("Designer.ConfirmSaveTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             {
+                string highRiskConfirmation = _db is my_oracle ? BuildOracleHighRiskConfirmationMessage(sql) : string.Empty;
+                if (!string.IsNullOrWhiteSpace(highRiskConfirmation) &&
+                    MessageBox.Show(highRiskConfirmation, Localization.T("Designer.OracleHighRiskConfirmTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                {
+                    return;
+                }
+
                 var res = ExecuteDesignerSql(sql);
                 if (res["status"] == "OK")
                 {
@@ -4482,6 +4489,31 @@ namespace mySQLPunk
             lines.Add("");
             lines.Add((sql ?? "").TrimStart());
             return string.Join("\r\n", lines.ToArray());
+        }
+
+        private static string BuildOracleHighRiskConfirmationMessage(string sql)
+        {
+            List<string> items = BuildOracleHighRiskActionWarnings(sql).ToList();
+            if (items.Count == 0) return string.Empty;
+
+            List<string> lines = new List<string>();
+            lines.Add(Localization.T("Designer.OracleHighRiskConfirmIntro"));
+            foreach (string item in items)
+            {
+                lines.Add("- " + item);
+            }
+            lines.Add("");
+            lines.Add(Localization.T("Designer.OracleHighRiskConfirmContinue"));
+            return string.Join(Environment.NewLine, lines.ToArray());
+        }
+
+        private static IEnumerable<string> BuildOracleHighRiskActionWarnings(string sql)
+        {
+            List<string> items = new List<string>();
+            AddOraclePreviewChecklistItem(items, sql, @"\bALTER\s+TABLE\b[\s\S]*\bDROP\s+COLUMN\b", "Designer.OracleHighRiskDropColumn");
+            AddOraclePreviewChecklistItem(items, sql, @"\bDROP\s+INDEX\b", "Designer.OracleHighRiskDropIndex");
+            AddOraclePreviewChecklistItem(items, sql, @"\bDROP\s+CONSTRAINT\b", "Designer.OracleHighRiskDropConstraint");
+            return items;
         }
 
         private static IEnumerable<string> GetOracleDesignerPreviewHints(string databaseName, string tableName)

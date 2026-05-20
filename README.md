@@ -156,10 +156,10 @@ Smoke test harness：
   - 完成內容：Table Designer 修改欄位 DEFAULT 時會先查 `sys.default_constraints` 找到實際 constraint name 後 drop，再以 `DF_<table>_<column>` 規則建立具名 DEFAULT constraint；SQL Server 預覽 SQL 分段執行時也會保留 `DECLARE` batch，避免變數 scope 被切壞。
   - Schema 支援：SQL Server provider 會列出所有 schema 的 Table/View；`dbo` 維持原表名顯示，非 `dbo` 會顯示為 `schema.table`。資料瀏覽、資料編輯、DDL/Dump、Table/View 複製、補註解與 Table Designer SQL 產生都會解析 schema，不再硬套 `dbo`。
 
-- **Oracle Table Designer 對權限與物件狀態較敏感 ✅ 預覽提示、權限診斷 SQL 與逐步確認清單已補齊**
+- **Oracle Table Designer 對權限與物件狀態較敏感 ✅ 預覽提示、權限診斷 SQL、逐步確認清單與高風險二次確認已補齊**
   - 現況：已有多種診斷提示，例如權限不足、物件不存在、跨 schema 權限、語法不符。
-  - 完成內容：Oracle SQL 預覽會在可執行 SQL 前加入註解提示，標示目標物件、直接授權需求（ALTER / CREATE INDEX / DROP / COMMENT 等）與分段執行方式；預覽註解也會依 SQL 變更類型產生逐步確認清單，提醒欄位改名、型別/NULL/DEFAULT 變更、欄位註解、索引與 constraint / Primary Key 等執行前檢查；同時附上 `all_tab_privs` 與 `session_privs` 權限診斷 SQL，方便使用者在套用 DDL 前先確認目前帳號對目標物件的直接授權與系統權限；儲存判斷也改成檢查是否存在真正可執行 SQL，避免預覽註解誤擋操作。
-  - 後續方向：若需要更完整的 Oracle 風險控管，可再加入實機權限查詢結果解析與高風險步驟二次確認。
+  - 完成內容：Oracle SQL 預覽會在可執行 SQL 前加入註解提示，標示目標物件、直接授權需求（ALTER / CREATE INDEX / DROP / COMMENT 等）與分段執行方式；預覽註解也會依 SQL 變更類型產生逐步確認清單，提醒欄位改名、型別/NULL/DEFAULT 變更、欄位註解、索引與 constraint / Primary Key 等執行前檢查；同時附上 `all_tab_privs` 與 `session_privs` 權限診斷 SQL，方便使用者在套用 DDL 前先確認目前帳號對目標物件的直接授權與系統權限；若儲存 SQL 偵測到 Oracle `DROP COLUMN`、`DROP INDEX` 或 `DROP CONSTRAINT`，會在一般 SQL 確認後再顯示一次高風險 DDL 確認；儲存判斷也改成檢查是否存在真正可執行 SQL，避免預覽註解誤擋操作。
+  - 後續方向：若需要更完整的 Oracle 風險控管，可再加入實機權限查詢結果解析。
 
 ### 資料瀏覽與儲存限制
 
