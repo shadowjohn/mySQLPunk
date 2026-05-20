@@ -363,11 +363,15 @@ public static class SmokeTests
         AssertNotContains(mssqlJsonTableSql, "JSON_TABLE", "Converted SQL Server SQL should remove JSON_TABLE.");
 
         object sqliteJsonTablePreview = BuildViewSqlPreview(
-            "SELECT jt.item_id FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (item_id INT PATH '$.id')) AS jt",
+            "SELECT jt.item_id, 'jt.item_id' AS literal_name FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (item_id INT PATH '$.id')) AS jt WHERE jt.item_id > 0",
             "mysql",
             "sqlite");
-        Assert(!(bool)GetProperty(sqliteJsonTablePreview, "CanConvert"), "JSON_TABLE should be rejected for SQLite until references can be rewritten safely.");
-        AssertContains((string)GetProperty(sqliteJsonTablePreview, "Reason"), "JSON_TABLE", "SQLite JSON_TABLE rejection should explain the unsupported syntax.");
+        Assert((bool)GetProperty(sqliteJsonTablePreview, "CanConvert"), "MySQL JSON_TABLE should convert to SQLite.");
+        string sqliteJsonTableSql = (string)GetProperty(sqliteJsonTablePreview, "ConvertedSql");
+        AssertContains(sqliteJsonTableSql, "json_each(o.payload, '$.items') AS jt", "Converted SQLite SQL should use json_each for JSON array rows.");
+        AssertContains(sqliteJsonTableSql, "CAST(json_extract(jt.value, '$.id') AS INTEGER)", "Converted SQLite SQL should rewrite JSON_TABLE column references to json_extract.");
+        AssertContains(sqliteJsonTableSql, "'jt.item_id' AS literal_name", "Converted SQLite SQL should not rewrite string literals that look like JSON_TABLE references.");
+        AssertNotContains(sqliteJsonTableSql, "JSON_TABLE", "Converted SQLite SQL should remove JSON_TABLE.");
 
         object sqliteNowPreview = BuildViewSqlPreview(
             "SELECT NOW() AS created_at FROM users",

@@ -2610,9 +2610,12 @@ namespace mySQLPunk.lib
         private static string RewriteJsonTableExpressions(string selectSql, string targetProvider)
         {
             if (targetProvider == "mysql" || targetProvider == "oracle") return selectSql;
-            if (targetProvider != "postgresql" && targetProvider != "mssql") return selectSql;
+            if (targetProvider != "postgresql" && targetProvider != "mssql" && targetProvider != "sqlite") return selectSql;
 
             string sql = selectSql ?? string.Empty;
+            Dictionary<string, List<JsonTableColumn>> sqliteColumnMappings = targetProvider == "sqlite"
+                ? new Dictionary<string, List<JsonTableColumn>>(StringComparer.OrdinalIgnoreCase)
+                : null;
             int searchIndex = 0;
             while (searchIndex < sql.Length)
             {
@@ -2645,7 +2648,9 @@ namespace mySQLPunk.lib
 
                 string replacement = targetProvider == "postgresql"
                     ? BuildPostgreSqlJsonTableExpression(sourceExpr, arrayPath, columns, alias)
-                    : BuildSqlServerJsonTableExpression(sourceExpr, arrayPath, columns, alias);
+                    : (targetProvider == "mssql"
+                        ? BuildSqlServerJsonTableExpression(sourceExpr, arrayPath, columns, alias)
+                        : BuildSqliteJsonTableExpression(sourceExpr, arrayPath, alias));
 
                 if (string.IsNullOrWhiteSpace(replacement))
                 {
@@ -2653,8 +2658,18 @@ namespace mySQLPunk.lib
                     continue;
                 }
 
+                if (targetProvider == "sqlite")
+                {
+                    sqliteColumnMappings[alias] = columns;
+                }
+
                 sql = sql.Substring(0, jsonTableIndex) + replacement + sql.Substring(replacementEnd);
                 searchIndex = jsonTableIndex + replacement.Length;
+            }
+
+            if (sqliteColumnMappings != null && sqliteColumnMappings.Count > 0)
+            {
+                sql = RewriteSqliteJsonTableColumnReferences(sql, sqliteColumnMappings);
             }
 
             return sql;
@@ -2772,6 +2787,135 @@ namespace mySQLPunk.lib
                 ? "OPENJSON(" + sourceExpr + ")"
                 : "OPENJSON(" + sourceExpr + ", '" + EscapeSqlString(path) + "')";
             return openJson + " WITH (" + string.Join(", ", definitions.ToArray()) + ") AS " + alias;
+        }
+
+        private static string BuildSqliteJsonTableExpression(string sourceExpr, string arrayPath, string alias)
+        {
+            string path = NormalizeJsonTableArrayPath(arrayPath);
+            if (string.IsNullOrWhiteSpace(path)) return "";
+
+            string jsonEach = path == "$"
+                ? "json_each(" + sourceExpr + ")"
+                : "json_each(" + sourceExpr + ", '" + EscapeSqlString(path) + "')";
+            return jsonEach + " AS " + alias;
+        }
+
+        private static string RewriteSqliteJsonTableColumnReferences(string sql, Dictionary<string, List<JsonTableColumn>> mappings)
+        {
+            string output = sql ?? string.Empty;
+            foreach (KeyValuePair<string, List<JsonTableColumn>> mapping in mappings)
+            {
+                string alias = mapping.Key;
+                foreach (JsonTableColumn column in mapping.Value)
+                {
+                    string expression = BuildSqliteJsonTableColumnExpression(alias, column);
+                    if (string.IsNullOrWhiteSpace(expression)) continue;
+                    output = ReplaceQualifiedIdentifierOutsideStrings(output, alias, column.Name, expression);
+                }
+            }
+
+            return output;
+        }
+
+        private static string BuildSqliteJsonTableColumnExpression(string alias, JsonTableColumn column)
+        {
+            string expression = "json_extract(" + alias + ".value, '" + EscapeSqlString(column.JsonPath) + "')";
+            string type = MapJsonTableTypeForSqlite(column.SqlType);
+            if (string.IsNullOrWhiteSpace(type)) return expression;
+            return "CAST(" + expression + " AS " + type + ")";
+        }
+
+        private static string MapJsonTableTypeForSqlite(string sqlType)
+        {
+            string type = (sqlType ?? "").Trim().ToLowerInvariant();
+            if (Regex.IsMatch(type, @"^(int|integer|bigint|bool|boolean|bit)$")) return "INTEGER";
+            if (Regex.IsMatch(type, @"^(decimal|numeric|double|float|real)(\s*\([^)]*\))?$")) return "REAL";
+            return "";
+        }
+
+        private static string ReplaceQualifiedIdentifierOutsideStrings(string sql, string alias, string column, string replacement)
+        {
+            if (string.IsNullOrEmpty(sql) || string.IsNullOrWhiteSpace(alias) || string.IsNullOrWhiteSpace(column)) return sql;
+
+            StringBuilder output = new StringBuilder(sql.Length + Math.Max(0, replacement.Length - alias.Length - column.Length - 1));
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            bool inBracketQuote = false;
+            bool inBacktickQuote = false;
+
+            for (int i = 0; i < sql.Length;)
+            {
+                char ch = sql[i];
+                if (inSingleQuote)
+                {
+                    output.Append(ch);
+                    if (ch == '\'' && i + 1 < sql.Length && sql[i + 1] == '\'')
+                    {
+                        output.Append(sql[++i]);
+                    }
+                    else if (ch == '\'')
+                    {
+                        inSingleQuote = false;
+                    }
+                    i++;
+                    continue;
+                }
+
+                if (inDoubleQuote)
+                {
+                    output.Append(ch);
+                    if (ch == '"') inDoubleQuote = false;
+                    i++;
+                    continue;
+                }
+
+                if (inBracketQuote)
+                {
+                    output.Append(ch);
+                    if (ch == ']') inBracketQuote = false;
+                    i++;
+                    continue;
+                }
+
+                if (inBacktickQuote)
+                {
+                    output.Append(ch);
+                    if (ch == '`') inBacktickQuote = false;
+                    i++;
+                    continue;
+                }
+
+                if (ch == '\'') { inSingleQuote = true; output.Append(ch); i++; continue; }
+                if (ch == '"') { inDoubleQuote = true; output.Append(ch); i++; continue; }
+                if (ch == '[') { inBracketQuote = true; output.Append(ch); i++; continue; }
+                if (ch == '`') { inBacktickQuote = true; output.Append(ch); i++; continue; }
+
+                if (MatchesQualifiedIdentifierAt(sql, i, alias, column))
+                {
+                    output.Append(replacement);
+                    i += alias.Length + 1 + column.Length;
+                    continue;
+                }
+
+                output.Append(ch);
+                i++;
+            }
+
+            return output.ToString();
+        }
+
+        private static bool MatchesQualifiedIdentifierAt(string sql, int index, string alias, string column)
+        {
+            int length = alias.Length + 1 + column.Length;
+            if (index < 0 || index + length > sql.Length) return false;
+            if (!string.Equals(sql.Substring(index, alias.Length), alias, StringComparison.OrdinalIgnoreCase)) return false;
+            if (sql[index + alias.Length] != '.') return false;
+            if (!string.Equals(sql.Substring(index + alias.Length + 1, column.Length), column, StringComparison.OrdinalIgnoreCase)) return false;
+
+            int before = index - 1;
+            int after = index + length;
+            return (before < 0 || !IsSimpleIdentifierChar(sql[before])) &&
+                   (after >= sql.Length || !IsSimpleIdentifierChar(sql[after]));
         }
 
         private static string NormalizeJsonTableArrayPath(string arrayPath)
