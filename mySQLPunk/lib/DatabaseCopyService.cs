@@ -1592,19 +1592,19 @@ namespace mySQLPunk.lib
         {
             string sql = Regex.Replace(
                 selectSql,
-                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|MONTH|MM|M|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
                 m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|MONTH|MM|M|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
                 m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value), NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|month|mm|m|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>-?\d+)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>-?\d+)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
@@ -1634,6 +1634,9 @@ namespace mySQLPunk.lib
 
         private static string BuildSqliteDateAddExpression(string expr, string amount, string part)
         {
+            if (part == "quarter") return BuildSqliteDateAddExpression(expr, MultiplyIntegerString(amount, 3), "month");
+            if (part == "week") return BuildSqliteDateAddExpression(expr, MultiplyIntegerString(amount, 7), "day");
+
             string functionName = (part == "hour" || part == "minute" || part == "second") ? "datetime" : "date";
             string modifier = amount.StartsWith("-", StringComparison.Ordinal) ? amount : "+" + amount;
             return functionName + "(" + expr + ", '" + modifier + " " + part + "')";
@@ -1643,7 +1646,9 @@ namespace mySQLPunk.lib
         {
             if (part == "day") return expr + " + " + amount;
             if (part == "month") return "ADD_MONTHS(" + expr + ", " + amount + ")";
+            if (part == "quarter") return "ADD_MONTHS(" + expr + ", " + MultiplyIntegerString(amount, 3) + ")";
             if (part == "year") return "ADD_MONTHS(" + expr + ", " + MultiplyIntegerString(amount, 12) + ")";
+            if (part == "week") return expr + " + " + MultiplyIntegerString(amount, 7);
             return expr + " + NUMTODSINTERVAL(" + amount + ", '" + part.ToUpperInvariant() + "')";
         }
 

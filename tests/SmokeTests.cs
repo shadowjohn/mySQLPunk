@@ -887,6 +887,30 @@ public static class SmokeTests
         string mssqlMonthAddSql = (string)GetProperty(mssqlMonthAddPreview, "ConvertedSql");
         AssertContains(mssqlMonthAddSql, "DATEADD(month, 2, created_at)", "Converted SQL Server SQL should use DATEADD month.");
 
+        object mssqlQuarterAddPreview = BuildViewSqlPreview(
+            "SELECT DATE_ADD(created_at, INTERVAL 1 QUARTER) AS next_quarter_at FROM sessions",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlQuarterAddPreview, "CanConvert"), "MySQL DATE_ADD quarter should convert to SQL Server.");
+        string mssqlQuarterAddSql = (string)GetProperty(mssqlQuarterAddPreview, "ConvertedSql");
+        AssertContains(mssqlQuarterAddSql, "DATEADD(quarter, 1, created_at)", "Converted SQL Server SQL should use DATEADD quarter.");
+
+        object sqliteQuarterAddPreview = BuildViewSqlPreview(
+            "SELECT DATEADD(quarter, 2, created_at) AS next_half_at FROM sessions",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteQuarterAddPreview, "CanConvert"), "SQL Server DATEADD quarter should convert to SQLite.");
+        string sqliteQuarterAddSql = (string)GetProperty(sqliteQuarterAddPreview, "ConvertedSql");
+        AssertContains(sqliteQuarterAddSql, "date(created_at, '+6 month')", "Converted SQLite SQL should convert quarter to months.");
+
+        object oracleWeekAddPreview = BuildViewSqlPreview(
+            "SELECT DATE_ADD(created_at, INTERVAL 2 WEEK) AS review_at FROM sessions",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleWeekAddPreview, "CanConvert"), "MySQL DATE_ADD week should convert to Oracle.");
+        string oracleWeekAddSql = (string)GetProperty(oracleWeekAddPreview, "ConvertedSql");
+        AssertContains(oracleWeekAddSql, "created_at + 14", "Converted Oracle SQL should convert weeks to days.");
+
         object sqliteHourAddPreview = BuildViewSqlPreview(
             "SELECT DATEADD(hour, 6, started_at) AS reminder_at FROM jobs",
             "mssql",
