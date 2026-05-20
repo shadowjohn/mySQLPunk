@@ -484,6 +484,7 @@ namespace mySQLPunk.lib
             sql = RewritePostgreSqlCastOperators(sql, sourceProvider, targetProvider);
             sql = RewriteNullOrderingClauses(sql, targetProvider);
             sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
+            sql = RewriteConcatOperators(sql, sourceProvider, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
             sql = RewriteTrimFunctions(sql, targetProvider);
@@ -1251,6 +1252,454 @@ namespace mySQLPunk.lib
                     return string.Join(" || ", args.ToArray());
                 },
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteConcatOperators(string selectSql, string sourceProvider, string targetProvider)
+        {
+            if (targetProvider != "mysql" && targetProvider != "mssql") return selectSql;
+            if (sourceProvider == "mysql" || sourceProvider == "mssql") return selectSql;
+            if (string.IsNullOrEmpty(selectSql) || selectSql.IndexOf("||", StringComparison.Ordinal) < 0) return selectSql;
+
+            StringBuilder output = new StringBuilder(selectSql.Length);
+            int index = 0;
+            while (index < selectSql.Length)
+            {
+                int operatorIndex = FindNextConcatOperator(selectSql, index);
+                if (operatorIndex < 0)
+                {
+                    output.Append(selectSql.Substring(index));
+                    break;
+                }
+
+                int start = FindConcatOperandStart(selectSql, operatorIndex - 1);
+                int end = FindConcatChainEnd(selectSql, operatorIndex + 2);
+                if (start < index || end <= operatorIndex + 2)
+                {
+                    output.Append(selectSql.Substring(index, operatorIndex + 2 - index));
+                    index = operatorIndex + 2;
+                    continue;
+                }
+
+                string chain = selectSql.Substring(start, end - start);
+                List<string> operands = SplitConcatOperatorOperands(chain);
+                if (operands.Count < 2)
+                {
+                    output.Append(selectSql.Substring(index, end - index));
+                }
+                else
+                {
+                    output.Append(selectSql.Substring(index, start - index));
+                    output.Append(BuildConcatOperatorExpression(operands, targetProvider));
+                }
+
+                index = end;
+            }
+
+            return output.ToString();
+        }
+
+        private static string BuildConcatOperatorExpression(List<string> operands, string targetProvider)
+        {
+            if (targetProvider == "mssql")
+            {
+                return string.Join(" + ", operands.ToArray());
+            }
+
+            return "CONCAT(" + string.Join(", ", operands.ToArray()) + ")";
+        }
+
+        private static int FindNextConcatOperator(string sql, int startIndex)
+        {
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            bool inBracketQuote = false;
+            bool inBacktickQuote = false;
+
+            for (int i = Math.Max(0, startIndex); i < sql.Length - 1; i++)
+            {
+                char ch = sql[i];
+                if (inSingleQuote)
+                {
+                    if (ch == '\'' && i + 1 < sql.Length && sql[i + 1] == '\'')
+                    {
+                        i++;
+                    }
+                    else if (ch == '\'')
+                    {
+                        inSingleQuote = false;
+                    }
+                    continue;
+                }
+
+                if (inDoubleQuote)
+                {
+                    if (ch == '"') inDoubleQuote = false;
+                    continue;
+                }
+
+                if (inBracketQuote)
+                {
+                    if (ch == ']') inBracketQuote = false;
+                    continue;
+                }
+
+                if (inBacktickQuote)
+                {
+                    if (ch == '`') inBacktickQuote = false;
+                    continue;
+                }
+
+                if (ch == '\'') { inSingleQuote = true; continue; }
+                if (ch == '"') { inDoubleQuote = true; continue; }
+                if (ch == '[') { inBracketQuote = true; continue; }
+                if (ch == '`') { inBacktickQuote = true; continue; }
+
+                if (ch == '|' && sql[i + 1] == '|') return i;
+            }
+
+            return -1;
+        }
+
+        private static int FindConcatOperandStart(string sql, int endIndex)
+        {
+            int index = SkipWhitespaceLeft(sql, endIndex);
+            if (index < 0) return 0;
+
+            char ch = sql[index];
+            if (ch == '\'') return FindSingleQuotedStringStart(sql, index);
+            if (ch == '"') return FindDoubleQuotedIdentifierStart(sql, index);
+            if (ch == '`') return FindBacktickIdentifierStart(sql, index);
+            if (ch == ']') return FindBracketIdentifierStart(sql, index);
+
+            if (ch == ')')
+            {
+                int openParen = FindMatchingOpenParen(sql, index);
+                if (openParen < 0) return index;
+                int functionNameEnd = SkipWhitespaceLeft(sql, openParen - 1);
+                int functionNameStart = FindIdentifierStart(sql, functionNameEnd);
+                return functionNameStart >= 0 ? functionNameStart : openParen;
+            }
+
+            int start = FindIdentifierStart(sql, index);
+            return start >= 0 ? start : index;
+        }
+
+        private static int FindConcatChainEnd(string sql, int afterOperatorIndex)
+        {
+            int end = FindConcatOperandEnd(sql, afterOperatorIndex);
+            if (end <= afterOperatorIndex) return afterOperatorIndex;
+
+            while (true)
+            {
+                int next = SkipWhitespaceRight(sql, end);
+                if (next + 1 >= sql.Length || sql[next] != '|' || sql[next + 1] != '|') break;
+
+                int nextEnd = FindConcatOperandEnd(sql, next + 2);
+                if (nextEnd <= next + 2) break;
+                end = nextEnd;
+            }
+
+            return end;
+        }
+
+        private static int FindConcatOperandEnd(string sql, int startIndex)
+        {
+            int index = SkipWhitespaceRight(sql, startIndex);
+            if (index >= sql.Length) return startIndex;
+
+            char ch = sql[index];
+            if (ch == '\'') return FindSingleQuotedStringEnd(sql, index) + 1;
+            if (ch == '(')
+            {
+                int closeParen = FindMatchingCloseParen(sql, index);
+                return closeParen >= 0 ? closeParen + 1 : index + 1;
+            }
+
+            int end = FindIdentifierChainEnd(sql, index);
+            if (end <= index) return index + 1;
+
+            int afterIdentifier = SkipWhitespaceRight(sql, end);
+            if (afterIdentifier < sql.Length && sql[afterIdentifier] == '(')
+            {
+                int closeParen = FindMatchingCloseParen(sql, afterIdentifier);
+                if (closeParen >= 0) return closeParen + 1;
+            }
+
+            return end;
+        }
+
+        private static List<string> SplitConcatOperatorOperands(string chain)
+        {
+            List<string> operands = new List<string>();
+            StringBuilder current = new StringBuilder();
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            bool inBracketQuote = false;
+            bool inBacktickQuote = false;
+            int depth = 0;
+
+            for (int i = 0; i < (chain ?? "").Length; i++)
+            {
+                char ch = chain[i];
+                if (inSingleQuote)
+                {
+                    current.Append(ch);
+                    if (ch == '\'' && i + 1 < chain.Length && chain[i + 1] == '\'')
+                    {
+                        current.Append(chain[++i]);
+                    }
+                    else if (ch == '\'')
+                    {
+                        inSingleQuote = false;
+                    }
+                    continue;
+                }
+
+                if (inDoubleQuote)
+                {
+                    current.Append(ch);
+                    if (ch == '"') inDoubleQuote = false;
+                    continue;
+                }
+
+                if (inBracketQuote)
+                {
+                    current.Append(ch);
+                    if (ch == ']') inBracketQuote = false;
+                    continue;
+                }
+
+                if (inBacktickQuote)
+                {
+                    current.Append(ch);
+                    if (ch == '`') inBacktickQuote = false;
+                    continue;
+                }
+
+                if (ch == '\'') { inSingleQuote = true; current.Append(ch); continue; }
+                if (ch == '"') { inDoubleQuote = true; current.Append(ch); continue; }
+                if (ch == '[') { inBracketQuote = true; current.Append(ch); continue; }
+                if (ch == '`') { inBacktickQuote = true; current.Append(ch); continue; }
+                if (ch == '(') { depth++; current.Append(ch); continue; }
+                if (ch == ')') { if (depth > 0) depth--; current.Append(ch); continue; }
+
+                if (ch == '|' && i + 1 < chain.Length && chain[i + 1] == '|' && depth == 0)
+                {
+                    string item = current.ToString().Trim();
+                    if (item.Length > 0) operands.Add(item);
+                    current.Length = 0;
+                    i++;
+                    continue;
+                }
+
+                current.Append(ch);
+            }
+
+            string tail = current.ToString().Trim();
+            if (tail.Length > 0) operands.Add(tail);
+            return operands;
+        }
+
+        private static int SkipWhitespaceLeft(string text, int index)
+        {
+            int current = Math.Min(index, (text ?? "").Length - 1);
+            while (current >= 0 && char.IsWhiteSpace(text[current])) current--;
+            return current;
+        }
+
+        private static int SkipWhitespaceRight(string text, int index)
+        {
+            int current = Math.Max(0, index);
+            while (current < (text ?? "").Length && char.IsWhiteSpace(text[current])) current++;
+            return current;
+        }
+
+        private static int FindSingleQuotedStringStart(string text, int endQuoteIndex)
+        {
+            bool inSingleQuote = false;
+            int start = endQuoteIndex;
+            for (int i = 0; i <= endQuoteIndex && i < text.Length; i++)
+            {
+                if (text[i] != '\'') continue;
+                if (!inSingleQuote)
+                {
+                    start = i;
+                    inSingleQuote = true;
+                    continue;
+                }
+
+                if (i + 1 < text.Length && text[i + 1] == '\'')
+                {
+                    i++;
+                    continue;
+                }
+
+                if (i == endQuoteIndex) return start;
+                inSingleQuote = false;
+            }
+
+            return start;
+        }
+
+        private static int FindSingleQuotedStringEnd(string text, int startQuoteIndex)
+        {
+            for (int i = startQuoteIndex + 1; i < text.Length; i++)
+            {
+                if (text[i] != '\'') continue;
+                if (i + 1 < text.Length && text[i + 1] == '\'')
+                {
+                    i++;
+                    continue;
+                }
+
+                return i;
+            }
+
+            return startQuoteIndex;
+        }
+
+        private static int FindDoubleQuotedIdentifierStart(string text, int endQuoteIndex)
+        {
+            int start = text.LastIndexOf('"', Math.Max(0, endQuoteIndex - 1));
+            return start >= 0 ? start : endQuoteIndex;
+        }
+
+        private static int FindBacktickIdentifierStart(string text, int endQuoteIndex)
+        {
+            int start = text.LastIndexOf('`', Math.Max(0, endQuoteIndex - 1));
+            return start >= 0 ? start : endQuoteIndex;
+        }
+
+        private static int FindBracketIdentifierStart(string text, int endQuoteIndex)
+        {
+            int start = text.LastIndexOf('[', Math.Max(0, endQuoteIndex - 1));
+            return start >= 0 ? start : endQuoteIndex;
+        }
+
+        private static int FindMatchingOpenParen(string text, int closeParenIndex)
+        {
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            int depth = 0;
+            for (int i = closeParenIndex; i >= 0; i--)
+            {
+                char ch = text[i];
+                if (inSingleQuote)
+                {
+                    if (ch == '\'') inSingleQuote = false;
+                    continue;
+                }
+
+                if (inDoubleQuote)
+                {
+                    if (ch == '"') inDoubleQuote = false;
+                    continue;
+                }
+
+                if (ch == '\'') { inSingleQuote = true; continue; }
+                if (ch == '"') { inDoubleQuote = true; continue; }
+                if (ch == ')') { depth++; continue; }
+                if (ch == '(')
+                {
+                    depth--;
+                    if (depth == 0) return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static int FindMatchingCloseParen(string text, int openParenIndex)
+        {
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            int depth = 0;
+            for (int i = openParenIndex; i < text.Length; i++)
+            {
+                char ch = text[i];
+                if (inSingleQuote)
+                {
+                    if (ch == '\'' && i + 1 < text.Length && text[i + 1] == '\'')
+                    {
+                        i++;
+                    }
+                    else if (ch == '\'')
+                    {
+                        inSingleQuote = false;
+                    }
+                    continue;
+                }
+
+                if (inDoubleQuote)
+                {
+                    if (ch == '"') inDoubleQuote = false;
+                    continue;
+                }
+
+                if (ch == '\'') { inSingleQuote = true; continue; }
+                if (ch == '"') { inDoubleQuote = true; continue; }
+                if (ch == '(') { depth++; continue; }
+                if (ch == ')')
+                {
+                    depth--;
+                    if (depth == 0) return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static int FindIdentifierStart(string text, int endIndex)
+        {
+            if (string.IsNullOrEmpty(text) || endIndex < 0) return -1;
+            int index = Math.Min(endIndex, text.Length - 1);
+            while (index >= 0 && IsIdentifierChainChar(text[index])) index--;
+            return index + 1 <= endIndex ? index + 1 : -1;
+        }
+
+        private static int FindIdentifierChainEnd(string text, int startIndex)
+        {
+            if (string.IsNullOrEmpty(text) || startIndex >= text.Length) return startIndex;
+
+            int index = startIndex;
+            while (index < text.Length)
+            {
+                char ch = text[index];
+                if (ch == '"')
+                {
+                    index = FindQuotedIdentifierEnd(text, index, '"') + 1;
+                }
+                else if (ch == '`')
+                {
+                    index = FindQuotedIdentifierEnd(text, index, '`') + 1;
+                }
+                else if (ch == '[')
+                {
+                    int end = text.IndexOf(']', index + 1);
+                    index = end >= 0 ? end + 1 : index + 1;
+                }
+                else if (IsIdentifierChainChar(ch))
+                {
+                    index++;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            return index;
+        }
+
+        private static int FindQuotedIdentifierEnd(string text, int startIndex, char quote)
+        {
+            int end = text.IndexOf(quote, startIndex + 1);
+            return end >= 0 ? end : startIndex;
+        }
+
+        private static bool IsIdentifierChainChar(char ch)
+        {
+            return char.IsLetterOrDigit(ch) || ch == '_' || ch == '.' || ch == '$';
         }
 
         private static string RewriteStringLengthFunctions(string selectSql, string targetProvider)

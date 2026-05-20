@@ -878,6 +878,24 @@ public static class SmokeTests
         string sqliteConcatSql = (string)GetProperty(sqliteConcatPreview, "ConvertedSql");
         AssertContains(sqliteConcatSql, "code || '-' || name", "Converted SQLite SQL should use concatenation operator.");
 
+        object mysqlConcatOperatorPreview = BuildViewSqlPreview(
+            "SELECT first_name || ' ' || last_name AS full_name FROM users",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlConcatOperatorPreview, "CanConvert"), "PostgreSQL concat operator should convert to MySQL.");
+        string mysqlConcatOperatorSql = (string)GetProperty(mysqlConcatOperatorPreview, "ConvertedSql");
+        AssertContains(mysqlConcatOperatorSql, "CONCAT(first_name, ' ', last_name)", "Converted MySQL SQL should use CONCAT for ||.");
+        AssertNotContains(mysqlConcatOperatorSql, "||", "Converted MySQL SQL should remove concat operators.");
+
+        object mssqlConcatOperatorPreview = BuildViewSqlPreview(
+            "SELECT first_name || ' ' || last_name AS full_name FROM users",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlConcatOperatorPreview, "CanConvert"), "Oracle concat operator should convert to SQL Server.");
+        string mssqlConcatOperatorSql = (string)GetProperty(mssqlConcatOperatorPreview, "ConvertedSql");
+        AssertContains(mssqlConcatOperatorSql, "first_name + ' ' + last_name", "Converted SQL Server SQL should use + for ||.");
+        AssertNotContains(mssqlConcatOperatorSql, "||", "Converted SQL Server SQL should remove concat operators.");
+
         object pgLengthPreview = BuildViewSqlPreview(
             "SELECT LEN(display_name) AS name_length FROM users",
             "mssql",
