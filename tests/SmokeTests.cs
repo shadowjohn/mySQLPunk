@@ -604,6 +604,33 @@ public static class SmokeTests
         string pgGreatestSql = (string)GetProperty(pgGreatestPreview, "ConvertedSql");
         AssertContains(pgGreatestSql, "GREATEST(score, passing_score)", "Converted PostgreSQL SQL should keep native GREATEST.");
 
+        object mssqlBooleanPreview = BuildViewSqlPreview(
+            "SELECT id FROM feature_flags WHERE enabled = TRUE AND archived = FALSE AND label = 'TRUE'",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlBooleanPreview, "CanConvert"), "Boolean literals should convert to SQL Server numeric literals.");
+        string mssqlBooleanSql = (string)GetProperty(mssqlBooleanPreview, "ConvertedSql");
+        AssertContains(mssqlBooleanSql, "enabled = 1", "Converted SQL Server SQL should use 1 for TRUE.");
+        AssertContains(mssqlBooleanSql, "archived = 0", "Converted SQL Server SQL should use 0 for FALSE.");
+        AssertContains(mssqlBooleanSql, "label = 'TRUE'", "Converted SQL Server SQL should preserve string literals.");
+
+        object oracleBooleanPreview = BuildViewSqlPreview(
+            "SELECT FALSE AS is_deleted, TRUE AS is_active FROM users",
+            "sqlite",
+            "oracle");
+        Assert((bool)GetProperty(oracleBooleanPreview, "CanConvert"), "Boolean literals should convert to Oracle numeric literals.");
+        string oracleBooleanSql = (string)GetProperty(oracleBooleanPreview, "ConvertedSql");
+        AssertContains(oracleBooleanSql, "SELECT 0 AS is_deleted, 1 AS is_active", "Converted Oracle SQL should use numeric boolean literals.");
+
+        object mysqlBooleanPreview = BuildViewSqlPreview(
+            "SELECT TRUE AS is_active FROM users WHERE deleted = FALSE",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlBooleanPreview, "CanConvert"), "Boolean literals should stay native for MySQL.");
+        string mysqlBooleanSql = (string)GetProperty(mysqlBooleanPreview, "ConvertedSql");
+        AssertContains(mysqlBooleanSql, "TRUE AS is_active", "Converted MySQL SQL should keep TRUE.");
+        AssertContains(mysqlBooleanSql, "deleted = FALSE", "Converted MySQL SQL should keep FALSE.");
+
         object pgPowPreview = BuildViewSqlPreview(
             "SELECT POW(score, 2) AS score_squared FROM exams",
             "mysql",

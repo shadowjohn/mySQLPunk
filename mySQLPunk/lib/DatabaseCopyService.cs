@@ -458,6 +458,7 @@ namespace mySQLPunk.lib
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteComparisonFunctions(sql, targetProvider);
+            sql = RewriteBooleanLiterals(sql, targetProvider);
             sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
@@ -534,6 +535,26 @@ namespace mySQLPunk.lib
 
             string comparison = greatest ? ">=" : "<=";
             return "(CASE WHEN " + args[0] + " " + comparison + " " + args[1] + " THEN " + args[0] + " ELSE " + args[1] + " END)";
+        }
+
+        private static string RewriteBooleanLiterals(string selectSql, string targetProvider)
+        {
+            if (targetProvider != "mssql" && targetProvider != "oracle") return selectSql;
+
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"(?<![""`\[])\bTRUE\b(?![""`\]])",
+                    "1",
+                    RegexOptions.IgnoreCase);
+
+                return Regex.Replace(
+                    sql,
+                    @"(?<![""`\[])\bFALSE\b(?![""`\]])",
+                    "0",
+                    RegexOptions.IgnoreCase);
+            });
         }
 
         private static string RewriteRandomFunctions(string selectSql, string sourceProvider, string targetProvider)
