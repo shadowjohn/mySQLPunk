@@ -523,6 +523,7 @@ namespace mySQLPunk.lib
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
             sql = RewritePostgreSqlJsonOperators(sql, targetProvider);
+            sql = RewriteJsonLengthFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonQueryFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
@@ -2268,6 +2269,88 @@ namespace mySQLPunk.lib
             if (Regex.IsMatch(part, @"^\d+$")) return "[" + part + "]";
             if (!Regex.IsMatch(part, @"^[A-Za-z_][A-Za-z0-9_]*$")) return "";
             return "." + part;
+        }
+
+        private static string RewriteJsonLengthFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bJSON_ARRAY_LENGTH\s*\((?<args>[^()]*)\)",
+                m => RewriteJsonLengthFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bJSON_LENGTH\s*\((?<args>[^()]*)\)",
+                m => RewriteJsonLengthFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteJsonLengthFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 1 || args.Count > 2) return match.Value;
+
+            string expr = args[0];
+            string path = args.Count == 2 ? TrimSqlStringLiteral(args[1]) : "$";
+            if (string.IsNullOrWhiteSpace(path) || !path.StartsWith("$", StringComparison.Ordinal)) return match.Value;
+
+            string escapedPath = EscapeSqlString(path);
+            if (targetProvider == "mysql")
+            {
+                return path == "$"
+                    ? "JSON_LENGTH(" + expr + ")"
+                    : "JSON_LENGTH(" + expr + ", '" + escapedPath + "')";
+            }
+
+            if (targetProvider == "postgresql")
+            {
+                string pgPath = BuildPostgreSqlJsonPath(path);
+                if (path == "$") return "jsonb_array_length(" + expr + "::jsonb)";
+                if (!string.IsNullOrWhiteSpace(pgPath)) return "jsonb_array_length(" + expr + "::jsonb #> " + pgPath + ")";
+            }
+
+            if (targetProvider == "sqlite")
+            {
+                return path == "$"
+                    ? "json_array_length(" + expr + ")"
+                    : "json_array_length(" + expr + ", '" + escapedPath + "')";
+            }
+
+            if (targetProvider == "mssql")
+            {
+                return path == "$"
+                    ? "(SELECT COUNT(*) FROM OPENJSON(" + expr + "))"
+                    : "(SELECT COUNT(*) FROM OPENJSON(" + expr + ", '" + escapedPath + "'))";
+            }
+
+            if (targetProvider == "oracle")
+            {
+                string lengthPath = BuildOracleJsonLengthPath(path);
+                if (!string.IsNullOrWhiteSpace(lengthPath))
+                {
+                    return "JSON_VALUE(" + expr + ", '" + EscapeSqlString(lengthPath) + "' RETURNING NUMBER)";
+                }
+            }
+
+            return match.Value;
+        }
+
+        private static string TrimSqlStringLiteral(string value)
+        {
+            string text = (value ?? string.Empty).Trim();
+            if (text.Length >= 2 && text[0] == '\'' && text[text.Length - 1] == '\'')
+            {
+                return text.Substring(1, text.Length - 2).Replace("''", "'");
+            }
+
+            return text;
+        }
+
+        private static string BuildOracleJsonLengthPath(string jsonPath)
+        {
+            if (string.IsNullOrWhiteSpace(jsonPath) || !jsonPath.StartsWith("$", StringComparison.Ordinal)) return "";
+            return jsonPath + ".size()";
         }
 
         private static string RewriteJsonExtractFunctions(string selectSql, string targetProvider)

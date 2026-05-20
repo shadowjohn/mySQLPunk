@@ -260,6 +260,47 @@ public static class SmokeTests
         string sqlitePgJsonArraySql = (string)GetProperty(sqlitePgJsonArrayPreview, "ConvertedSql");
         AssertContains(sqlitePgJsonArraySql, "json_extract(payload, '$.items[0]')", "Converted SQLite SQL should use json_extract for #> array paths.");
 
+        object mysqlJsonArrayLengthPreview = BuildViewSqlPreview(
+            "SELECT JSON_ARRAY_LENGTH(payload, '$.items') AS item_count FROM event_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlJsonArrayLengthPreview, "CanConvert"), "PostgreSQL JSON_ARRAY_LENGTH should convert to MySQL.");
+        string mysqlJsonArrayLengthSql = (string)GetProperty(mysqlJsonArrayLengthPreview, "ConvertedSql");
+        AssertContains(mysqlJsonArrayLengthSql, "JSON_LENGTH(payload, '$.items')", "Converted MySQL SQL should use JSON_LENGTH.");
+
+        object pgJsonLengthPreview = BuildViewSqlPreview(
+            "SELECT JSON_LENGTH(payload, '$.items') AS item_count FROM event_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonLengthPreview, "CanConvert"), "MySQL JSON_LENGTH should convert to PostgreSQL.");
+        string pgJsonLengthSql = (string)GetProperty(pgJsonLengthPreview, "ConvertedSql");
+        AssertContains(pgJsonLengthSql, "jsonb_array_length(payload::jsonb #> '{items}')", "Converted PostgreSQL SQL should use jsonb_array_length.");
+        AssertNotContains(pgJsonLengthSql, "JSON_LENGTH", "Converted PostgreSQL SQL should remove JSON_LENGTH.");
+
+        object mssqlJsonLengthPreview = BuildViewSqlPreview(
+            "SELECT JSON_ARRAY_LENGTH(payload, '$.items') AS item_count FROM event_log",
+            "sqlite",
+            "mssql");
+        Assert((bool)GetProperty(mssqlJsonLengthPreview, "CanConvert"), "SQLite JSON_ARRAY_LENGTH should convert to SQL Server.");
+        string mssqlJsonLengthSql = (string)GetProperty(mssqlJsonLengthPreview, "ConvertedSql");
+        AssertContains(mssqlJsonLengthSql, "(SELECT COUNT(*) FROM OPENJSON(payload, '$.items'))", "Converted SQL Server SQL should count OPENJSON rows.");
+
+        object oracleJsonLengthPreview = BuildViewSqlPreview(
+            "SELECT JSON_LENGTH(payload, '$.items') AS item_count FROM event_log",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleJsonLengthPreview, "CanConvert"), "MySQL JSON_LENGTH should convert to Oracle.");
+        string oracleJsonLengthSql = (string)GetProperty(oracleJsonLengthPreview, "ConvertedSql");
+        AssertContains(oracleJsonLengthSql, "JSON_VALUE(payload, '$.items.size()' RETURNING NUMBER)", "Converted Oracle SQL should use JSON path size().");
+
+        object sqliteJsonLengthPreview = BuildViewSqlPreview(
+            "SELECT JSON_LENGTH(payload, '$.items') AS item_count FROM event_log",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteJsonLengthPreview, "CanConvert"), "MySQL JSON_LENGTH should convert to SQLite.");
+        string sqliteJsonLengthSql = (string)GetProperty(sqliteJsonLengthPreview, "ConvertedSql");
+        AssertContains(sqliteJsonLengthSql, "json_array_length(payload, '$.items')", "Converted SQLite SQL should use json_array_length.");
+
         object sqliteNowPreview = BuildViewSqlPreview(
             "SELECT NOW() AS created_at FROM users",
             "mysql",
