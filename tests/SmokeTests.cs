@@ -606,6 +606,23 @@ public static class SmokeTests
         string mysqlExtractSql = (string)GetProperty(mysqlExtractPreview, "ConvertedSql");
         AssertContains(mysqlExtractSql, "DAY(created_at)", "Converted MySQL SQL should use DAY().");
 
+        object mssqlDatePartFunctionPreview = BuildViewSqlPreview(
+            "SELECT DATE_PART('hour', created_at) AS created_hour FROM orders",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDatePartFunctionPreview, "CanConvert"), "PostgreSQL DATE_PART should convert to SQL Server.");
+        string mssqlDatePartFunctionSql = (string)GetProperty(mssqlDatePartFunctionPreview, "ConvertedSql");
+        AssertContains(mssqlDatePartFunctionSql, "DATEPART(hour, created_at)", "Converted SQL Server SQL should use DATEPART for time parts.");
+        AssertNotContains(mssqlDatePartFunctionSql, "DATE_PART", "Converted SQL Server SQL should remove DATE_PART.");
+
+        object sqliteDatePartFunctionPreview = BuildViewSqlPreview(
+            "SELECT DATE_PART('second', created_at) AS created_second FROM orders",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDatePartFunctionPreview, "CanConvert"), "PostgreSQL DATE_PART should convert to SQLite.");
+        string sqliteDatePartFunctionSql = (string)GetProperty(sqliteDatePartFunctionPreview, "ConvertedSql");
+        AssertContains(sqliteDatePartFunctionSql, "CAST(strftime('%S', created_at) AS INTEGER)", "Converted SQLite SQL should use second strftime.");
+
         object pgHourPreview = BuildViewSqlPreview(
             "SELECT HOUR(created_at) AS created_hour FROM orders",
             "mysql",

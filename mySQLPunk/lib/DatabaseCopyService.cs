@@ -845,6 +845,12 @@ namespace mySQLPunk.lib
 
             sql = Regex.Replace(
                 sql,
+                @"\bDATE_PART\s*\(\s*'(?<part>year|month|day|hour|minute|second)'\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
                 @"\bEXTRACT\s*\(\s*(?<part>YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)\s+FROM\s+(?<expr>[^()]+?)\s*\)",
                 m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
                 RegexOptions.IgnoreCase);
@@ -860,7 +866,17 @@ namespace mySQLPunk.lib
 
         private static string BuildDatePartExpression(string targetProvider, string part, string expr)
         {
-            if (targetProvider == "mssql" || targetProvider == "mysql")
+            if (targetProvider == "mssql")
+            {
+                if (part == "year" || part == "month" || part == "day")
+                {
+                    return part.ToUpperInvariant() + "(" + expr + ")";
+                }
+
+                return "DATEPART(" + part + ", " + expr + ")";
+            }
+
+            if (targetProvider == "mysql")
             {
                 return part.ToUpperInvariant() + "(" + expr + ")";
             }
