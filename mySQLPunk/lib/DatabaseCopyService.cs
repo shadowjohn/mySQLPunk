@@ -474,10 +474,15 @@ namespace mySQLPunk.lib
             string sql = selectSql;
             if (targetProvider == "mssql")
             {
-                return Regex.Replace(
+                sql = Regex.Replace(
                     sql,
                     @"\bCEIL\s*\(",
                     "CEILING(",
+                    RegexOptions.IgnoreCase);
+                return Regex.Replace(
+                    sql,
+                    @"\bMOD\s*\((?<args>[^()]*)\)",
+                    m => RewriteModFunction(m),
                     RegexOptions.IgnoreCase);
             }
 
@@ -486,6 +491,13 @@ namespace mySQLPunk.lib
                 @"\bCEILING\s*\(",
                 "CEIL(",
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteModFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+            return "(" + args[0] + " % " + args[1] + ")";
         }
 
         private static string RewriteNullHandlingFunctions(string selectSql, string targetProvider)

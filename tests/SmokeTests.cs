@@ -487,6 +487,14 @@ public static class SmokeTests
         string pgCeilingSql = (string)GetProperty(pgCeilingPreview, "ConvertedSql");
         AssertContains(pgCeilingSql, "CEIL(total_amount / 100.0)", "Converted PostgreSQL SQL should use CEIL.");
 
+        object mssqlModPreview = BuildViewSqlPreview(
+            "SELECT MOD(order_no, 10) AS shard_no FROM orders",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlModPreview, "CanConvert"), "MOD should convert to SQL Server modulo operator.");
+        string mssqlModSql = (string)GetProperty(mssqlModPreview, "ConvertedSql");
+        AssertContains(mssqlModSql, "(order_no % 10)", "Converted SQL Server SQL should use modulo operator.");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",
