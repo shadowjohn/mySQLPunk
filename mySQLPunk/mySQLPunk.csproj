@@ -160,6 +160,9 @@
     <Compile Include="OptionsForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="ViewColumnChooserForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ThemeManager.cs" />
     <Compile Include="lib\BackupIntegrityService.cs" />
     <Compile Include="lib\BackupIntegrityScheduleService.cs" />
@@ -189,6 +192,7 @@
     <Compile Include="lib\QueryResultExportService.cs" />
     <Compile Include="lib\SqliteColumnCommentExchangeService.cs" />
     <Compile Include="lib\SqliteSpecialObjectSqlBuilder.cs" />
+    <Compile Include="lib\ViewColumnPreferenceService.cs" />
     <Compile Include="lib\WindowsCredentialService.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="QueryForm.cs">

@@ -1136,6 +1136,14 @@ namespace mySQLPunk
             BoolValues["AutoCheckUpdates"] = true;
             BoolValues["ShowStructureInNavigation"] = true;
             BoolValues["ShowTablesUnderGroups"] = true;
+            BoolValues["ViewShowNavigationPane"] = true;
+            BoolValues["ViewHideConnectionGroups"] = false;
+            BoolValues["ViewActiveObjectsOnly"] = false;
+            BoolValues["ViewShowTopFilter"] = false;
+            BoolValues["ViewShowInfoPane"] = true;
+            BoolValues["ViewInfoPaneAiMode"] = false;
+            BoolValues["ViewHideObjectGroups"] = false;
+            BoolValues["ViewShowHiddenItems"] = false;
             BoolValues["SingleClickExpandsTree"] = false;
             BoolValues["AutoCompleteEnabled"] = true;
             BoolValues["AutoCompleteAutoRefresh"] = true;
@@ -1171,6 +1179,8 @@ namespace mySQLPunk
 
             StringValues["IndexOpenTarget"] = "main";
             StringValues["StartupView"] = "connections";
+            StringValues["ViewObjectListMode"] = "details";
+            StringValues["ViewSortColumn"] = "名稱";
             StringValues["EditorFontName"] = "Consolas";
             StringValues["RecordGridFontName"] = "Microsoft JhengHei UI";
             StringValues["RecordRowHeightMode"] = "single";

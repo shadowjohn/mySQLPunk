@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Net;
@@ -38,6 +39,7 @@ public static class SmokeTests
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
+        Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
@@ -1910,6 +1912,46 @@ public static class SmokeTests
         finally
         {
             ThemeManager.SetTheme(originalTheme, false);
+        }
+    }
+
+    private static void TestViewColumnPreferenceService()
+    {
+        string provider = "mysql";
+        string group = "Tables";
+        string key = "ViewColumns.mysql.Tables";
+        string oldValue = ApplicationOptionSettings.GetString(key);
+
+        try
+        {
+            ApplicationOptionSettings.SetString(key, "");
+            List<ViewColumnPreference> defaults = ViewColumnPreferenceService.Load(provider, group);
+            Assert(defaults.Count >= 10, "Table column chooser should provide a rich default column list.");
+            Assert(defaults.Any(p => p.Name == "名稱") == false, "Table column chooser defaults should match the object metadata columns, not inject grid-only names.");
+            Assert(defaults.Any(p => p.Name == "註解" && p.Visible), "Table column chooser should show comments by default.");
+            AssertEquals("mssql", ViewColumnPreferenceService.NormalizeProvider("SQL Server"), "SQL Server provider alias should normalize to mssql.");
+            AssertEquals("Views", ViewColumnPreferenceService.NormalizeGroup("View"), "Singular view group should normalize to Views.");
+
+            ViewColumnPreferenceService.Save(provider, group, new[]
+            {
+                new ViewColumnPreference { Name = "註解", Visible = true },
+                new ViewColumnPreference { Name = "資料長度", Visible = false },
+                new ViewColumnPreference { Name = "引擎", Visible = true }
+            });
+
+            List<ViewColumnPreference> saved = ViewColumnPreferenceService.Load(provider, group);
+            AssertEquals("註解", saved[0].Name, "Saved column order should be preserved.");
+            Assert(saved.First(p => p.Name == "資料長度").Visible == false, "Saved column visibility should be preserved.");
+            Assert(saved.Any(p => p.Name == "修改日期"), "Saved preferences should merge newly supported default columns.");
+
+            ViewColumnPreferenceService.Reset(provider, group);
+            List<ViewColumnPreference> reset = ViewColumnPreferenceService.Load(provider, group);
+            Assert(reset.First(p => p.Name == "資料長度").Visible, "Reset should restore default visible columns.");
+        }
+        finally
+        {
+            ApplicationOptionSettings.SetString(key, oldValue);
+            ApplicationOptionSettings.Save();
         }
     }
 

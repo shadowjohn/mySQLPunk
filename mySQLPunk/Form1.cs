@@ -1031,12 +1031,15 @@ namespace mySQLPunk
             db_tree.Nodes.Clear();
 
             // 收集所有群組名稱：myN.groups（含空群組）＋連線衍生的群組，去重後排序
-            var groupNames = myN.groups
-                .Concat(myN.connections.Select(c => GetConnectionValue(c, "conn_group")))
-                .Where(g => !string.IsNullOrWhiteSpace(g))
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(g => g)
-                .ToList();
+            bool hideConnectionGroups = ApplicationOptionSettings.GetBool("ViewHideConnectionGroups");
+            var groupNames = hideConnectionGroups
+                ? new List<string>()
+                : myN.groups
+                    .Concat(myN.connections.Select(c => GetConnectionValue(c, "conn_group")))
+                    .Where(g => !string.IsNullOrWhiteSpace(g))
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(g => g)
+                    .ToList();
 
             // 建立群組節點
             var groupNodeMap = new Dictionary<string, TreeNode>(StringComparer.Ordinal);
@@ -1067,7 +1070,7 @@ namespace mySQLPunk
                 TryPopulateOpenConnectionDatabases(newNode, i);
 
                 string connGroup = GetConnectionValue(myN.connections[i], "conn_group");
-                if (!string.IsNullOrWhiteSpace(connGroup) && groupNodeMap.ContainsKey(connGroup))
+                if (!hideConnectionGroups && !string.IsNullOrWhiteSpace(connGroup) && groupNodeMap.ContainsKey(connGroup))
                 {
                     groupNodeMap[connGroup].Nodes.Add(newNode);
                 }
@@ -1968,6 +1971,7 @@ namespace mySQLPunk
 
             // 初始化側邊欄 (Sidebar) 在 Panel2
             InitSidebar();
+            ApplyViewPaneSettings();
             List<object> d = new List<object>();
             d.Add(OpenTable);
             d.Add(DesignTable);
@@ -2094,16 +2098,7 @@ namespace mySQLPunk
             editPasteMenu.Click += (s, e) => PasteInternalClipboardToSelectedDatabase();
             editRenameMenu.Click += (s, e) => BeginRenameSelectedDatabaseObject();
             editMenu.DropDownItems.AddRange(new ToolStripItem[] { editCopyMenu, editPasteMenu, editRenameMenu });
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Table"), "Tables");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.View"), "Views");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Function"), "Functions");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.User"), "Users");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Other"), "Other");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Query"), "Queries");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Backup"), "Backups");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.AutoRun"), "Events");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.Model"), "Models");
-            AddViewGroupMenuItem(viewMenu, Localization.T("Toolbar.BI"), "BI");
+            BuildViewMenuItems(viewMenu);
             ConfigureFavoritesMenu(favoriteMenu);
             windowCloseMenu.Click += (s, e) => CloseSelectedTab();
             ttToolStripMenuItem.DropDownItems.Clear();
@@ -2205,11 +2200,334 @@ namespace mySQLPunk
             UpdateMainStatus("Query history loaded: " + target.DatabaseName);
         }
 
+        private void BuildViewMenuItems(ToolStripMenuItem viewMenu)
+        {
+            viewMenu.DropDownItems.Clear();
+
+            ToolStripMenuItem navigationPaneMenu = new ToolStripMenuItem(Localization.T("View.NavigationPane"));
+            ToolStripMenuItem showNavigationPaneItem = CreateCheckedViewMenuItem(
+                Localization.T("View.ShowNavigationPane"),
+                ApplicationOptionSettings.GetBool("ViewShowNavigationPane"),
+                value => SetNavigationPaneVisible(value));
+            ToolStripMenuItem hideConnectionGroupsItem = CreateCheckedViewMenuItem(
+                Localization.T("View.HideConnectionGroups"),
+                ApplicationOptionSettings.GetBool("ViewHideConnectionGroups"),
+                value => SetHideConnectionGroups(value));
+            ToolStripMenuItem activeObjectsOnlyItem = CreateCheckedViewMenuItem(
+                Localization.T("View.ActiveObjectsOnly") + "\tF12",
+                ApplicationOptionSettings.GetBool("ViewActiveObjectsOnly"),
+                value => SaveViewBoolOption("ViewActiveObjectsOnly", value, "View.ActiveObjectsOnlyChanged"));
+            ToolStripMenuItem showTopFilterItem = CreateCheckedViewMenuItem(
+                Localization.T("View.ShowTopFilter"),
+                ApplicationOptionSettings.GetBool("ViewShowTopFilter"),
+                value => SaveViewBoolOption("ViewShowTopFilter", value, "View.TopFilterChanged"));
+            navigationPaneMenu.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                showNavigationPaneItem,
+                hideConnectionGroupsItem,
+                activeObjectsOnlyItem,
+                showTopFilterItem
+            });
+
+            ToolStripMenuItem infoPaneMenu = new ToolStripMenuItem(Localization.T("View.InfoPane"));
+            ToolStripMenuItem showInfoPaneItem = CreateCheckedViewMenuItem(
+                Localization.T("View.ShowInfoPane"),
+                ApplicationOptionSettings.GetBool("ViewShowInfoPane"),
+                value => SetInfoPaneVisible(value));
+            ToolStripMenuItem generalInfoItem = CreateCheckedViewMenuItem(
+                Localization.T("Common.General"),
+                !ApplicationOptionSettings.GetBool("ViewInfoPaneAiMode"),
+                value => SetInfoPaneMode(false));
+            ToolStripMenuItem aiInfoItem = CreateCheckedViewMenuItem(
+                Localization.T("Options.AI"),
+                ApplicationOptionSettings.GetBool("ViewInfoPaneAiMode"),
+                value => SetInfoPaneMode(true));
+            infoPaneMenu.DropDownItems.AddRange(new ToolStripItem[] { showInfoPaneItem, new ToolStripSeparator(), generalInfoItem, aiInfoItem });
+
+            ToolStripMenuItem listModeItem = CreateCheckedViewMenuItem(
+                Localization.T("View.ListMode"),
+                string.Equals(ApplicationOptionSettings.GetString("ViewObjectListMode"), "list", StringComparison.OrdinalIgnoreCase),
+                value => SetObjectListMode("list"));
+            ToolStripMenuItem detailModeItem = CreateCheckedViewMenuItem(
+                Localization.T("View.DetailMode"),
+                !string.Equals(ApplicationOptionSettings.GetString("ViewObjectListMode"), "list", StringComparison.OrdinalIgnoreCase),
+                value => SetObjectListMode("details"));
+            ToolStripMenuItem erDiagramItem = new ToolStripMenuItem(Localization.T("View.ERDiagram")) { Enabled = false };
+            ToolStripMenuItem hideObjectGroupsItem = CreateCheckedViewMenuItem(
+                Localization.T("View.HideObjectGroups"),
+                ApplicationOptionSettings.GetBool("ViewHideObjectGroups"),
+                value => SaveViewBoolOption("ViewHideObjectGroups", value, "View.ObjectGroupsChanged"));
+
+            ToolStripMenuItem sortMenu = new ToolStripMenuItem(Localization.T("Menu.Sort"));
+            AddSortMenuItem(sortMenu, "名稱");
+            AddSortMenuItem(sortMenu, "群組");
+            AddSortMenuItem(sortMenu, "自動遞增值");
+            AddSortMenuItem(sortMenu, "列格式");
+            AddSortMenuItem(sortMenu, "修改日期");
+            AddSortMenuItem(sortMenu, "建立日期");
+            AddSortMenuItem(sortMenu, "索引長度");
+            AddSortMenuItem(sortMenu, "資料長度");
+            AddSortMenuItem(sortMenu, "引擎");
+            AddSortMenuItem(sortMenu, "列");
+            AddSortMenuItem(sortMenu, "最大資料長度");
+            AddSortMenuItem(sortMenu, "資料可用空間");
+            AddSortMenuItem(sortMenu, "檢查時間");
+            AddSortMenuItem(sortMenu, "定序");
+            AddSortMenuItem(sortMenu, "建立選項");
+            AddSortMenuItem(sortMenu, "註解");
+            sortMenu.DropDownItems.Add(new ToolStripSeparator());
+            sortMenu.DropDownItems.Add(new ToolStripMenuItem(Localization.T("View.AdvancedSort")) { Enabled = false });
+            sortMenu.DropDownItems.Add(new ToolStripMenuItem(Localization.T("View.ReverseSort")) { Enabled = false });
+
+            ToolStripMenuItem chooseColumnsItem = new ToolStripMenuItem(Localization.T("View.ChooseColumns"));
+            chooseColumnsItem.Click += (s, e) => OpenViewColumnChooser();
+
+            ToolStripMenuItem showHiddenItemsItem = CreateCheckedViewMenuItem(
+                Localization.T("View.ShowHiddenItems"),
+                ApplicationOptionSettings.GetBool("ViewShowHiddenItems"),
+                value => SaveViewBoolOption("ViewShowHiddenItems", value, "View.HiddenItemsChanged"));
+            ToolStripMenuItem showTableSettingsItem = CreateCheckedViewMenuItem(
+                Localization.T("View.ShowTableSettingsProfile"),
+                ApplicationOptionSettings.GetBool("RememberTableSettings"),
+                value =>
+                {
+                    ApplicationOptionSettings.SetBool("RememberTableSettings", value);
+                    ApplicationOptionSettings.Save();
+                    UpdateMainStatus(Localization.T("View.TableSettingsProfileChanged"));
+                });
+
+            viewMenu.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                navigationPaneMenu,
+                infoPaneMenu,
+                new ToolStripSeparator(),
+                listModeItem,
+                detailModeItem,
+                erDiagramItem,
+                new ToolStripSeparator(),
+                hideObjectGroupsItem,
+                sortMenu,
+                chooseColumnsItem,
+                new ToolStripSeparator(),
+                showHiddenItemsItem,
+                showTableSettingsItem
+            });
+        }
+
+        private ToolStripMenuItem CreateCheckedViewMenuItem(string text, bool isChecked, Action<bool> onChanged)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(text)
+            {
+                Checked = isChecked,
+                CheckOnClick = true
+            };
+            item.Click += (s, e) => onChanged?.Invoke(item.Checked);
+            return item;
+        }
+
+        private void AddSortMenuItem(ToolStripMenuItem sortMenu, string columnName)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(columnName)
+            {
+                Checked = string.Equals(ApplicationOptionSettings.GetString("ViewSortColumn"), columnName, StringComparison.OrdinalIgnoreCase)
+            };
+            item.Click += (s, e) => ApplySortColumn(columnName);
+            sortMenu.DropDownItems.Add(item);
+        }
+
         private void AddViewGroupMenuItem(ToolStripMenuItem viewMenu, string text, string groupName)
         {
             ToolStripMenuItem item = new ToolStripMenuItem(text);
             item.Click += (s, e) => SelectDatabaseGroupNode(groupName);
             viewMenu.DropDownItems.Add(item);
+        }
+
+        private void ApplyViewPaneSettings()
+        {
+            SetNavigationPaneVisible(ApplicationOptionSettings.GetBool("ViewShowNavigationPane"), false);
+            SetInfoPaneVisible(ApplicationOptionSettings.GetBool("ViewShowInfoPane"), false);
+            SetObjectListMode(ApplicationOptionSettings.GetString("ViewObjectListMode"), false);
+            SetInfoPaneMode(ApplicationOptionSettings.GetBool("ViewInfoPaneAiMode"), false);
+        }
+
+        private void SetNavigationPaneVisible(bool visible, bool save = true)
+        {
+            if (splitContainer3 != null)
+            {
+                splitContainer3.Panel1Collapsed = !visible;
+            }
+
+            if (splitContainer4 != null)
+            {
+                splitContainer4.Panel1Collapsed = !visible;
+            }
+
+            if (save)
+            {
+                ApplicationOptionSettings.SetBool("ViewShowNavigationPane", visible);
+                ApplicationOptionSettings.Save();
+                ConfigureMainMenu();
+                UpdateMainStatus(Localization.T(visible ? "View.NavigationPaneShown" : "View.NavigationPaneHidden"));
+            }
+        }
+
+        private void SetInfoPaneVisible(bool visible, bool save = true)
+        {
+            if (splitContainer5 != null)
+            {
+                splitContainer5.Panel2Collapsed = !visible;
+            }
+
+            if (save)
+            {
+                ApplicationOptionSettings.SetBool("ViewShowInfoPane", visible);
+                ApplicationOptionSettings.Save();
+                ConfigureMainMenu();
+                UpdateMainStatus(Localization.T(visible ? "View.InfoPaneShown" : "View.InfoPaneHidden"));
+            }
+        }
+
+        private void SetInfoPaneMode(bool aiMode, bool save = true)
+        {
+            if (save)
+            {
+                ApplicationOptionSettings.SetBool("ViewInfoPaneAiMode", aiMode);
+                ApplicationOptionSettings.Save();
+                ConfigureMainMenu();
+            }
+
+            if (aiMode && dgvDetails != null && rtbDDL != null && btnInfo != null && btnDDL != null)
+            {
+                dgvDetails.Visible = false;
+                rtbDDL.Visible = true;
+                btnInfo.Checked = false;
+                btnDDL.Checked = true;
+                if (string.IsNullOrWhiteSpace(rtbDDL.Text))
+                {
+                    rtbDDL.Text = Localization.T("View.AiPaneHint");
+                }
+            }
+        }
+
+        private void SetHideConnectionGroups(bool value)
+        {
+            ApplicationOptionSettings.SetBool("ViewHideConnectionGroups", value);
+            ApplicationOptionSettings.Save();
+            RefreshConnectionList();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("View.ConnectionGroupsChanged"));
+        }
+
+        private void SaveViewBoolOption(string key, bool value, string statusKey)
+        {
+            ApplicationOptionSettings.SetBool(key, value);
+            ApplicationOptionSettings.Save();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T(statusKey));
+        }
+
+        private void SetObjectListMode(string mode, bool save = true)
+        {
+            string normalized = string.Equals(mode, "list", StringComparison.OrdinalIgnoreCase) ? "list" : "details";
+            if (table_top != null)
+            {
+                table_top.RowHeadersVisible = false;
+                table_top.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+                table_top.AutoSizeColumnsMode = normalized == "list"
+                    ? DataGridViewAutoSizeColumnsMode.DisplayedCells
+                    : DataGridViewAutoSizeColumnsMode.Fill;
+            }
+
+            if (save)
+            {
+                ApplicationOptionSettings.SetString("ViewObjectListMode", normalized);
+                ApplicationOptionSettings.Save();
+                ConfigureMainMenu();
+                UpdateMainStatus(Localization.T(normalized == "list" ? "View.ListModeApplied" : "View.DetailModeApplied"));
+            }
+        }
+
+        private void ApplySortColumn(string columnName)
+        {
+            ApplicationOptionSettings.SetString("ViewSortColumn", columnName);
+            ApplicationOptionSettings.Save();
+            ApplyGridSortPreference();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.Format("View.SortApplied", columnName));
+        }
+
+        private void ApplyGridSortPreference()
+        {
+            if (table_top == null) return;
+            DataTable table = table_top.DataSource as DataTable;
+            if (table == null) return;
+
+            string columnName = ApplicationOptionSettings.GetString("ViewSortColumn");
+            if (string.IsNullOrWhiteSpace(columnName) || !table.Columns.Contains(columnName)) return;
+            table.DefaultView.Sort = "[" + columnName.Replace("]", "]]") + "] ASC";
+        }
+
+        private void OpenViewColumnChooser()
+        {
+            string provider = GetCurrentViewProvider();
+            string group = GetCurrentViewGroup();
+            using (ViewColumnChooserForm form = new ViewColumnChooserForm(provider, group))
+            {
+                if (form.ShowDialog(this) == DialogResult.OK)
+                {
+                    ApplyCurrentColumnPreferences(form.SelectedGroup);
+                    ConfigureMainMenu();
+                    UpdateMainStatus(Localization.T("View.ColumnPreferencesApplied"));
+                }
+            }
+        }
+
+        private string GetCurrentViewProvider()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target != null && !string.IsNullOrWhiteSpace(target.ProviderName)) return target.ProviderName;
+
+            TreeNode root = GetSelectedConnectionRoot();
+            int index = GetConnectionIndex(root);
+            if (index >= 0 && index < myN.connections.Count) return GetConnectionValue(myN.connections[index], "db_kind");
+
+            return "mysql";
+        }
+
+        private string GetCurrentViewGroup()
+        {
+            TreeNode node = db_tree == null ? null : db_tree.SelectedNode;
+            string[] parts = GetTreePathParts(node);
+            if (parts.Length >= 3) return parts[2];
+            return "Tables";
+        }
+
+        private void ApplyCurrentColumnPreferences(string groupName = null)
+        {
+            if (table_top == null || table_top.Columns.Count == 0) return;
+
+            string provider = GetCurrentViewProvider();
+            string group = string.IsNullOrWhiteSpace(groupName) ? GetCurrentViewGroup() : groupName;
+            List<ViewColumnPreference> prefs = ViewColumnPreferenceService.Load(provider, group);
+            Dictionary<string, ViewColumnPreference> prefMap = prefs.ToDictionary(p => p.Name, p => p, StringComparer.OrdinalIgnoreCase);
+
+            int displayIndex = 0;
+            foreach (DataGridViewColumn column in table_top.Columns)
+            {
+                if (!prefMap.ContainsKey(column.Name))
+                {
+                    column.Visible = true;
+                    column.DisplayIndex = displayIndex++;
+                }
+            }
+
+            foreach (ViewColumnPreference pref in prefs)
+            {
+                if (!table_top.Columns.Contains(pref.Name)) continue;
+                DataGridViewColumn column = table_top.Columns[pref.Name];
+                column.Visible = pref.Visible;
+                column.DisplayIndex = displayIndex++;
+            }
         }
 
         private void ConfigureFavoritesMenu(ToolStripMenuItem favoriteMenu)
@@ -6185,6 +6503,8 @@ namespace mySQLPunk
                 }
 
                 table_top.DataSource = displayDt;
+                ApplyCurrentColumnPreferences("Tables");
+                ApplyGridSortPreference();
             }
             catch { }
         }
@@ -6343,7 +6663,8 @@ namespace mySQLPunk
                 displayDt.Rows.Add(row);
             }
 
-            table_top.DataSource = displayDt;
+            ApplyCurrentColumnPreferences(groupName);
+            ApplyGridSortPreference();
             if (table_top.Columns.Contains("分頁索引"))
             {
                 table_top.Columns["分頁索引"].Visible = false;
