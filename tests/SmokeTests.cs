@@ -195,6 +195,30 @@ public static class SmokeTests
         string sqliteJsonQuerySql = (string)GetProperty(sqliteJsonQueryPreview, "ConvertedSql");
         AssertContains(sqliteJsonQuerySql, "json_extract(payload, '$.items')", "Converted SQLite SQL should use json_extract for JSON fragments.");
 
+        object mysqlPgJsonTextPreview = BuildViewSqlPreview(
+            "SELECT payload ->> 'status' AS status_text FROM event_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlPgJsonTextPreview, "CanConvert"), "PostgreSQL JSON text operator should convert to MySQL.");
+        string mysqlPgJsonTextSql = (string)GetProperty(mysqlPgJsonTextPreview, "ConvertedSql");
+        AssertContains(mysqlPgJsonTextSql, "JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status'))", "Converted MySQL SQL should use JSON_EXTRACT with unquote for ->>.");
+
+        object oraclePgJsonPathPreview = BuildViewSqlPreview(
+            "SELECT payload #>> '{user,name}' AS user_name FROM event_log",
+            "postgresql",
+            "oracle");
+        Assert((bool)GetProperty(oraclePgJsonPathPreview, "CanConvert"), "PostgreSQL JSON path text operator should convert to Oracle.");
+        string oraclePgJsonPathSql = (string)GetProperty(oraclePgJsonPathPreview, "ConvertedSql");
+        AssertContains(oraclePgJsonPathSql, "JSON_VALUE(payload, '$.user.name')", "Converted Oracle SQL should use JSON_VALUE for #>>.");
+
+        object sqlitePgJsonArrayPreview = BuildViewSqlPreview(
+            "SELECT payload #> '{items,0}' AS first_item FROM event_log",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqlitePgJsonArrayPreview, "CanConvert"), "PostgreSQL JSON path fragment operator should convert to SQLite.");
+        string sqlitePgJsonArraySql = (string)GetProperty(sqlitePgJsonArrayPreview, "ConvertedSql");
+        AssertContains(sqlitePgJsonArraySql, "json_extract(payload, '$.items[0]')", "Converted SQLite SQL should use json_extract for #> array paths.");
+
         object sqliteNowPreview = BuildViewSqlPreview(
             "SELECT NOW() AS created_at FROM users",
             "mysql",

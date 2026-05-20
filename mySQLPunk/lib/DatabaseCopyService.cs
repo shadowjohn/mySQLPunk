@@ -464,6 +464,7 @@ namespace mySQLPunk.lib
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
+            sql = RewritePostgreSqlJsonOperators(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonQueryFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
@@ -1177,6 +1178,88 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
         }
 
+        private static string RewritePostgreSqlJsonOperators(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "postgresql") return selectSql;
+
+            string sql = Regex.Replace(
+                selectSql,
+                @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b|\([^)]+\))\s*(?<op>#>>|#>)\s*'(?<path>\{[^']+\})'",
+                m =>
+                {
+                    string jsonPath = BuildJsonPathFromPostgreSqlArrayPath(m.Groups["path"].Value);
+                    if (string.IsNullOrWhiteSpace(jsonPath)) return m.Value;
+                    bool textValue = m.Groups["op"].Value == "#>>";
+                    return BuildJsonExtractionForTarget(targetProvider, m.Groups["expr"].Value.Trim(), jsonPath, textValue, m.Value);
+                },
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b|\([^)]+\))\s*(?<op>->>|->)\s*(?:'(?<key>[^']+)'|(?<index>\d+))",
+                m =>
+                {
+                    string pathPart = m.Groups["key"].Success
+                        ? BuildJsonPathPart(m.Groups["key"].Value)
+                        : "[" + m.Groups["index"].Value + "]";
+                    if (string.IsNullOrWhiteSpace(pathPart)) return m.Value;
+                    bool textValue = m.Groups["op"].Value == "->>";
+                    return BuildJsonExtractionForTarget(targetProvider, m.Groups["expr"].Value.Trim(), "$" + pathPart, textValue, m.Value);
+                },
+                RegexOptions.IgnoreCase);
+
+            return sql;
+        }
+
+        private static string BuildJsonExtractionForTarget(string targetProvider, string expr, string jsonPath, bool textValue, string original)
+        {
+            string escapedPath = EscapeSqlString(jsonPath);
+            if (targetProvider == "mysql")
+            {
+                string extract = "JSON_EXTRACT(" + expr + ", '" + escapedPath + "')";
+                return textValue ? "JSON_UNQUOTE(" + extract + ")" : extract;
+            }
+            if (targetProvider == "mssql" || targetProvider == "oracle")
+            {
+                return (textValue ? "JSON_VALUE" : "JSON_QUERY") + "(" + expr + ", '" + escapedPath + "')";
+            }
+            if (targetProvider == "sqlite")
+            {
+                return "json_extract(" + expr + ", '" + escapedPath + "')";
+            }
+            return original;
+        }
+
+        private static string BuildJsonPathFromPostgreSqlArrayPath(string pgPath)
+        {
+            if (string.IsNullOrWhiteSpace(pgPath) || pgPath.Length < 2 || pgPath[0] != '{' || pgPath[pgPath.Length - 1] != '}')
+            {
+                return "";
+            }
+
+            string body = pgPath.Substring(1, pgPath.Length - 2);
+            if (string.IsNullOrWhiteSpace(body)) return "";
+            string[] parts = body.Split(',');
+            StringBuilder builder = new StringBuilder("$");
+            foreach (string rawPart in parts)
+            {
+                string part = rawPart.Trim().Trim('"');
+                string pathPart = BuildJsonPathPart(part);
+                if (string.IsNullOrWhiteSpace(pathPart)) return "";
+                builder.Append(pathPart);
+            }
+            return builder.ToString();
+        }
+
+        private static string BuildJsonPathPart(string part)
+        {
+            if (string.IsNullOrWhiteSpace(part)) return "";
+            part = part.Trim();
+            if (Regex.IsMatch(part, @"^\d+$")) return "[" + part + "]";
+            if (!Regex.IsMatch(part, @"^[A-Za-z_][A-Za-z0-9_]*$")) return "";
+            return "." + part;
+        }
+
         private static string RewriteJsonExtractFunctions(string selectSql, string targetProvider)
         {
             return Regex.Replace(
@@ -1532,27 +1615,75 @@ namespace mySQLPunk.lib
                 closeQuote = "]";
             }
 
-            string sql = Regex.Replace(selectSql, @"`([^`]+)`", m => QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
-            sql = Regex.Replace(sql, @"\[([^\]]+)\]", m => QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
-
-            if (provider == "mysql" || provider == "mssql")
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
             {
-                sql = Regex.Replace(sql, @"""([^""]+)""", m => QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
+                string sql = Regex.Replace(segment, @"`([^`]+)`", m => QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
+                sql = Regex.Replace(sql, @"\[([^\]]+)\]", m => QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
+
+                if (provider == "mysql" || provider == "mssql")
+                {
+                    sql = Regex.Replace(sql, @"""([^""]+)""", m => QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
+                }
+
+                if (provider != "postgresql")
+                {
+                    sql = Regex.Replace(sql, @"\bpublic\.", "", RegexOptions.IgnoreCase);
+                    sql = Regex.Replace(sql, @"(""public""|`public`|\[public\])\.", "", RegexOptions.IgnoreCase);
+                }
+
+                if (provider != "mssql")
+                {
+                    sql = Regex.Replace(sql, @"\bdbo\.", "", RegexOptions.IgnoreCase);
+                    sql = Regex.Replace(sql, @"(""dbo""|`dbo`|\[dbo\])\.", "", RegexOptions.IgnoreCase);
+                }
+
+                return sql;
+            });
+        }
+
+        private static string ReplaceOutsideSingleQuotedStrings(string sql, Func<string, string> replaceSegment)
+        {
+            if (string.IsNullOrEmpty(sql)) return "";
+            if (replaceSegment == null) return sql;
+
+            StringBuilder output = new StringBuilder(sql.Length);
+            StringBuilder segment = new StringBuilder();
+            for (int i = 0; i < sql.Length; i++)
+            {
+                char ch = sql[i];
+                if (ch != '\'')
+                {
+                    segment.Append(ch);
+                    continue;
+                }
+
+                if (segment.Length > 0)
+                {
+                    output.Append(replaceSegment(segment.ToString()));
+                    segment.Length = 0;
+                }
+
+                output.Append(ch);
+                i++;
+                while (i < sql.Length)
+                {
+                    output.Append(sql[i]);
+                    if (sql[i] == '\'')
+                    {
+                        if (i + 1 < sql.Length && sql[i + 1] == '\'')
+                        {
+                            output.Append(sql[i + 1]);
+                            i += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    i++;
+                }
             }
 
-            if (provider != "postgresql")
-            {
-                sql = Regex.Replace(sql, @"\bpublic\.", "", RegexOptions.IgnoreCase);
-                sql = Regex.Replace(sql, @"(""public""|`public`|\[public\])\.", "", RegexOptions.IgnoreCase);
-            }
-
-            if (provider != "mssql")
-            {
-                sql = Regex.Replace(sql, @"\bdbo\.", "", RegexOptions.IgnoreCase);
-                sql = Regex.Replace(sql, @"(""dbo""|`dbo`|\[dbo\])\.", "", RegexOptions.IgnoreCase);
-            }
-
-            return sql;
+            if (segment.Length > 0) output.Append(replaceSegment(segment.ToString()));
+            return output.ToString();
         }
 
         private static string QuoteIdentifier(string name, string openQuote, string closeQuote)
