@@ -1249,6 +1249,46 @@ public static class SmokeTests
         }
 
         Assert(rejectedUnsafeWhere, "No-primary-key edit WHERE should reject BLOB-only optimistic matching.");
+
+        FakeExecDatabase conflictDb = new FakeExecDatabase("postgresql", "0");
+        SetPrivateField(form, "_db", conflictDb);
+        bool rejectedConflict = false;
+        try
+        {
+            InvokeQueryFormExecOrThrow(form, "UPDATE public.users SET name = :p0 WHERE id = :p1;", new Dictionary<string, object>(), true);
+        }
+        catch (TargetInvocationException ex)
+        {
+            rejectedConflict = ex.InnerException != null &&
+                ex.InnerException.Message.IndexOf("重新整理", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        Assert(rejectedConflict, "Update/delete should reject zero affected rows as an optimistic locking conflict.");
+
+        FakeExecDatabase insertDb = new FakeExecDatabase("postgresql", "0");
+        SetPrivateField(form, "_db", insertDb);
+        InvokeQueryFormExecOrThrow(form, "INSERT INTO public.users (name) VALUES (:p0);", new Dictionary<string, object>(), false);
+        Assert(insertDb.ExecutedSql.Count == 1, "Insert should not require affected row validation.");
+
+        string sqlitePath = Path.Combine(Path.GetTempPath(), "mysqlpunk_rows_affected_" + Guid.NewGuid().ToString("N") + ".sqlite");
+        try
+        {
+            using (my_sqlite sqliteDb = new my_sqlite())
+            {
+                sqliteDb.SetConn("Data Source=" + sqlitePath + ";Version=3;New=True;");
+                sqliteDb.Open();
+                sqliteDb.ExecSQL("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);");
+                Dictionary<string, string> insertResult = sqliteDb.ExecSQL("INSERT INTO users (id, name) VALUES (@p0, @p1);",
+                    new Dictionary<string, object> { { "p0", 1 }, { "p1", "Alice" } });
+                AssertEquals("1", insertResult["rowsAffected"], "SQLite insert should report affected row count.");
+                Dictionary<string, string> updateMissResult = sqliteDb.ExecSQL("UPDATE users SET name = @p0 WHERE id = @p1;",
+                    new Dictionary<string, object> { { "p0", "Bob" }, { "p1", 404 } });
+                AssertEquals("0", updateMissResult["rowsAffected"], "SQLite update miss should report zero affected rows.");
+            }
+        }
+        finally
+        {
+            if (File.Exists(sqlitePath)) File.Delete(sqlitePath);
+        }
     }
 
     private static string BuildQueryFormWhereClause(
@@ -1282,6 +1322,12 @@ public static class SmokeTests
         columnType.GetProperty("IsPrimaryKey").SetValue(column, isPrimaryKey, null);
         columnType.GetProperty("IsAutoIncrement").SetValue(column, false, null);
         return column;
+    }
+
+    private static void InvokeQueryFormExecOrThrow(QueryForm form, string sql, Dictionary<string, object> parameters, bool requireAffectedRow)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("ExecOrThrow", BindingFlags.Instance | BindingFlags.NonPublic);
+        method.Invoke(form, new object[] { sql, parameters, requireAffectedRow });
     }
 
     private static void TestDockableTabOptionService()
@@ -1997,6 +2043,57 @@ public static class SmokeTests
         }
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
         public string GetViewCreateStatement(string databaseName, string viewName) { return "CREATE VIEW \"public\".\"active_users\" AS SELECT * FROM \"public\".\"users\""; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
+    }
+
+    private sealed class FakeExecDatabase : IDatabase
+    {
+        private readonly string providerName;
+        private readonly string rowsAffected;
+        public List<string> ExecutedSql = new List<string>();
+
+        public FakeExecDatabase(string providerName, string rowsAffected)
+        {
+            this.providerName = providerName;
+            this.rowsAffected = rowsAffected;
+        }
+
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => providerName;
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            ExecutedSql.Add(sql);
+            Dictionary<string, string> result = new Dictionary<string, string> { { "status", "OK" } };
+            if (rowsAffected != null) result["rowsAffected"] = rowsAffected;
+            return result;
+        }
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public List<string> GetDatabases() { return new List<string>(); }
+        public List<string> GetTables(string databaseName) { return new List<string>(); }
+        public List<string> GetViews(string databaseName) { return new List<string>(); }
+        public DataTable GetColumns(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return ""; }
+        public bool TableExists(string databaseName, string tableName) { return false; }
+        public bool ViewExists(string databaseName, string viewName) { return false; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 0; }
+        public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return ""; }
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
     }
 

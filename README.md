@@ -164,10 +164,10 @@ Smoke test harness：
 ### 資料瀏覽與儲存限制
 
 - **沒有 Primary Key 的資料表儲存風險較高 ✅ 唯讀選項與 optimistic WHERE 已補齊**
-  - 現況：儲存更新/刪除時，若沒有 Primary Key，會先顯示風險警告；繼續儲存時會用可比對欄位的原始值建立 optimistic WHERE 條件，並避開 BLOB/geometry 這類大型二進位欄位；若沒有可安全比對欄位，會拒絕產生不安全 WHERE。
+  - 現況：儲存更新/刪除時，若沒有 Primary Key，會先顯示風險警告；繼續儲存時會用可比對欄位的原始值建立 optimistic WHERE 條件，並避開 BLOB/geometry 這類大型二進位欄位；若沒有可安全比對欄位，會拒絕產生不安全 WHERE。各 provider 的 `ExecSQL` 會回傳影響列數，更新/刪除若影響 0 列會提示資料可能已被他人修改或刪除。
   - 完成內容：`選項 > 一般` 新增「沒有 Primary Key 的資料表以唯讀模式開啟」。啟用後，開啟無 Primary Key 的資料表會自動停用新增、刪除與儲存操作，並在狀態列提示原因。
   - 風險：資料列被其他人改過，或欄位包含浮點/大文字時，WHERE 仍可能因 provider 比對規則而不穩定。
-  - 後續方向：若仍需要編輯無 Primary Key 資料表，可再補 provider 實機案例與影響列數檢查，讓衝突提示更精準。
+  - 後續方向：若仍需要編輯無 Primary Key 資料表，可再補 provider 實機案例與更細緻的衝突差異提示。
 
 - **BLOB/geometry 欄位操作 ✅ 分頁檢視與資料表模式串流匯出已補齊**
   - 現況：`byte[]` 欄位在結果表格中會先嘗試顯示為 `[Geometry] WKT`，無法解析時才顯示 `[BLOB n bytes] 0x...`；右鍵可檢視十六進位、複製 Hex、匯出檔案，在資料表資料模式可匯入檔案寫回目前 BLOB 欄位，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。

@@ -2831,7 +2831,7 @@ namespace mySQLPunk
 
             string sql = "INSERT INTO " + GetQualifiedTableName(tableName) +
                          " (" + string.Join(", ", fieldSql) + ") VALUES (" + string.Join(", ", valueSql) + ");";
-            ExecOrThrow(sql, parameters);
+            ExecOrThrow(sql, parameters, false);
         }
 
         private void ExecuteUpdate(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
@@ -2858,7 +2858,7 @@ namespace mySQLPunk
             string sql = "UPDATE " + GetQualifiedTableName(tableName) +
                          " SET " + string.Join(", ", setSql) +
                          " WHERE " + whereSql + ";";
-            ExecOrThrow(sql, parameters);
+            ExecOrThrow(sql, parameters, true);
         }
 
         private void ExecuteDelete(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
@@ -2868,7 +2868,7 @@ namespace mySQLPunk
             string whereSql = BuildWhereClause(row, columns, primaryKeys, parameters, ref index);
             string sql = "DELETE FROM " + GetQualifiedTableName(tableName) +
                          " WHERE " + whereSql + ";";
-            ExecOrThrow(sql, parameters);
+            ExecOrThrow(sql, parameters, true);
         }
 
         private string BuildWhereClause(
@@ -2916,13 +2916,22 @@ namespace mySQLPunk
             return !(value is byte[]);
         }
 
-        private void ExecOrThrow(string sql, Dictionary<string, object> parameters)
+        private void ExecOrThrow(string sql, Dictionary<string, object> parameters, bool requireAffectedRow)
         {
             Dictionary<string, string> result = _db.ExecSQL(sql, parameters);
             if (!result.ContainsKey("status") || result["status"] != "OK")
             {
                 string reason = result.ContainsKey("reason") ? result["reason"] : Localization.T("Query.UnknownError");
                 throw new Exception(reason);
+            }
+
+            if (requireAffectedRow && result.ContainsKey("rowsAffected"))
+            {
+                int rowsAffected;
+                if (int.TryParse(result["rowsAffected"], out rowsAffected) && rowsAffected == 0)
+                {
+                    throw new Exception(Localization.T("Query.NoRowsAffectedConflict"));
+                }
             }
         }
 

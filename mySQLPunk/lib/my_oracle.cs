@@ -64,7 +64,7 @@ namespace mySQLPunk.lib
                 {
                     cmd.BindByName = true;
                     AddParameters(cmd, parameters);
-                    cmd.ExecuteNonQuery();
+                    output["rowsAffected"] = cmd.ExecuteNonQuery().ToString();
                 }
                 output["status"] = "OK";
             }
@@ -100,7 +100,7 @@ namespace mySQLPunk.lib
                 {
                     cmd.BindByName = true;
                     AddParameters(cmd, parameters);
-                    await cmd.ExecuteNonQueryAsync();
+                    output["rowsAffected"] = (await cmd.ExecuteNonQueryAsync()).ToString();
                 }
                 output["status"] = "OK";
             }

@@ -178,7 +178,7 @@ namespace mySQLPunk.lib
                     {
                         cmd.Parameters.Add(new SQLiteParameter("@" + key, m[key]));
                     }
-                    cmd.ExecuteNonQuery();
+                    output["rowsAffected"] = cmd.ExecuteNonQuery().ToString();
                 }
                 output["status"] = "OK";
                 return output;
@@ -225,7 +225,7 @@ namespace mySQLPunk.lib
                             cmd.Parameters.Add(new SQLiteParameter("@" + key, parameters[key]));
                         }
                     }
-                    await cmd.ExecuteNonQueryAsync();
+                    output["rowsAffected"] = (await cmd.ExecuteNonQueryAsync()).ToString();
                 }
                 output["status"] = "OK";
                 return output;

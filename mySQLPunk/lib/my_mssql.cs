@@ -84,7 +84,7 @@ namespace mySQLPunk.lib
                     {
                         cmd.Parameters.Add(new SqlParameter("@" + key, m[key]));
                     }
-                    cmd.ExecuteNonQuery();
+                    output["rowsAffected"] = cmd.ExecuteNonQuery().ToString();
                 }
                 output["status"] = "OK";
                 return output;
@@ -131,7 +131,7 @@ namespace mySQLPunk.lib
                             cmd.Parameters.Add(new SqlParameter("@" + key, parameters[key]));
                         }
                     }
-                    await cmd.ExecuteNonQueryAsync();
+                    output["rowsAffected"] = (await cmd.ExecuteNonQueryAsync()).ToString();
                 }
                 output["status"] = "OK";
                 return output;

@@ -562,6 +562,7 @@ namespace mySQLPunk
             Add("Query.CannotDetermineSaveTable", "無法判斷要儲存的資料表。", "Cannot determine which table to save.");
             Add("Query.NoWritableInsertColumns", "新增資料列沒有可寫入的欄位。", "The inserted row has no writable columns.");
             Add("Query.UnsafeWhereClause", "無法建立安全的 WHERE 條件。", "Cannot build a safe WHERE condition.");
+            Add("Query.NoRowsAffectedConflict", "儲存沒有影響任何資料列。資料可能已被其他人修改或刪除，請重新整理後再試。", "Saving did not affect any rows. The data may have been changed or deleted by someone else. Refresh and try again.");
             Add("Query.UnknownError", "未知錯誤", "Unknown error");
 
             Add("Designer.DesignTable", "設計資料表", "Design Table");
