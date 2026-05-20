@@ -798,6 +798,22 @@ public static class SmokeTests
         AssertContains(pgTimestampDiffMonthSql, "CAST((EXTRACT(YEAR FROM AGE(end_date, start_date)) * 12) + EXTRACT(MONTH FROM AGE(end_date, start_date)) AS INTEGER)", "Converted PostgreSQL SQL should use AGE for month difference.");
         AssertNotContains(pgTimestampDiffMonthSql, "TIMESTAMPDIFF", "Converted PostgreSQL SQL should remove TIMESTAMPDIFF month.");
 
+        object pgTimestampDiffQuarterPreview = BuildViewSqlPreview(
+            "SELECT TIMESTAMPDIFF(QUARTER, start_date, end_date) AS quarters_open FROM tickets",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTimestampDiffQuarterPreview, "CanConvert"), "MySQL TIMESTAMPDIFF quarter should convert to PostgreSQL.");
+        string pgTimestampDiffQuarterSql = (string)GetProperty(pgTimestampDiffQuarterPreview, "ConvertedSql");
+        AssertContains(pgTimestampDiffQuarterSql, "CAST(((EXTRACT(YEAR FROM AGE(end_date, start_date)) * 12) + EXTRACT(MONTH FROM AGE(end_date, start_date))) / 3 AS INTEGER)", "Converted PostgreSQL SQL should calculate quarter difference from AGE months.");
+
+        object sqliteTimestampDiffWeekPreview = BuildViewSqlPreview(
+            "SELECT TIMESTAMPDIFF(WEEK, start_date, end_date) AS weeks_open FROM tickets",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteTimestampDiffWeekPreview, "CanConvert"), "MySQL TIMESTAMPDIFF week should convert to SQLite.");
+        string sqliteTimestampDiffWeekSql = (string)GetProperty(sqliteTimestampDiffWeekPreview, "ConvertedSql");
+        AssertContains(sqliteTimestampDiffWeekSql, "CAST(((julianday(end_date) - julianday(start_date)) * 86400) / 604800 AS INTEGER)", "Converted SQLite SQL should calculate week difference from julianday.");
+
         object sqliteDateDiffYearPreview = BuildViewSqlPreview(
             "SELECT DATEDIFF(year, hired_at, ended_at) AS years_worked FROM employees",
             "mssql",
@@ -821,6 +837,14 @@ public static class SmokeTests
         Assert((bool)GetProperty(oracleTimestampDiffYearPreview, "CanConvert"), "MySQL TIMESTAMPDIFF year should convert to Oracle.");
         string oracleTimestampDiffYearSql = (string)GetProperty(oracleTimestampDiffYearPreview, "ConvertedSql");
         AssertContains(oracleTimestampDiffYearSql, "FLOOR(MONTHS_BETWEEN(ended_at, hired_at) / 12)", "Converted Oracle SQL should divide MONTHS_BETWEEN by 12 for year difference.");
+
+        object oracleDateDiffWeekPreview = BuildViewSqlPreview(
+            "SELECT DATEDIFF(week, start_date, end_date) AS weeks_open FROM tickets",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleDateDiffWeekPreview, "CanConvert"), "SQL Server DATEDIFF week should convert to Oracle.");
+        string oracleDateDiffWeekSql = (string)GetProperty(oracleDateDiffWeekPreview, "ConvertedSql");
+        AssertContains(oracleDateDiffWeekSql, "FLOOR(((end_date) - (start_date)) / 7)", "Converted Oracle SQL should calculate week difference from day delta.");
 
         object mssqlMonthsBetweenPreview = BuildViewSqlPreview(
             "SELECT MONTHS_BETWEEN(end_date, start_date) AS months_open FROM tickets",

@@ -1529,7 +1529,7 @@ namespace mySQLPunk.lib
         {
             string sql = Regex.Replace(
                 selectSql,
-                @"\bTIMESTAMPDIFF\s*\(\s*(?<part>YEAR|YY|YYYY|MONTH|MM|M|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*,\s*(?<start>[^,()]+(?:\([^)]*\))?)\s*,\s*(?<end>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\bTIMESTAMPDIFF\s*\(\s*(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*,\s*(?<start>[^,()]+(?:\([^)]*\))?)\s*,\s*(?<end>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => RewriteTimestampDiffFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
 
@@ -1705,7 +1705,7 @@ namespace mySQLPunk.lib
                 return "TIMESTAMPDIFF(" + part.ToUpperInvariant() + ", " + startDate + ", " + endDate + ")";
             }
 
-            if (part == "year" || part == "month")
+            if (part == "year" || part == "quarter" || part == "month")
             {
                 string expression = BuildCalendarDateDiffExpression(targetProvider, part, endDate, startDate);
                 if (!string.IsNullOrWhiteSpace(expression)) return expression;
@@ -1721,6 +1721,7 @@ namespace mySQLPunk.lib
 
             if (targetProvider == "oracle")
             {
+                if (part == "week") return "FLOOR(((" + endDate + ") - (" + startDate + ")) / 7)";
                 return "FLOOR(((" + endDate + ") - (" + startDate + ")) * " + (86400 / seconds).ToString(CultureInfo.InvariantCulture) + ")";
             }
 
@@ -1733,18 +1734,23 @@ namespace mySQLPunk.lib
             {
                 string yearDiff = "(CAST(strftime('%Y', " + endDate + ") AS INTEGER) - CAST(strftime('%Y', " + startDate + ") AS INTEGER))";
                 if (part == "year") return yearDiff;
-                return "(" + yearDiff + " * 12 + (CAST(strftime('%m', " + endDate + ") AS INTEGER) - CAST(strftime('%m', " + startDate + ") AS INTEGER)))";
+                string monthDiff = "(" + yearDiff + " * 12 + (CAST(strftime('%m', " + endDate + ") AS INTEGER) - CAST(strftime('%m', " + startDate + ") AS INTEGER)))";
+                if (part == "quarter") return "CAST(" + monthDiff + " / 3 AS INTEGER)";
+                return monthDiff;
             }
 
             if (targetProvider == "oracle")
             {
                 if (part == "year") return "FLOOR(MONTHS_BETWEEN(" + endDate + ", " + startDate + ") / 12)";
+                if (part == "quarter") return "FLOOR(MONTHS_BETWEEN(" + endDate + ", " + startDate + ") / 3)";
                 return "FLOOR(MONTHS_BETWEEN(" + endDate + ", " + startDate + "))";
             }
 
             string age = "AGE(" + endDate + ", " + startDate + ")";
             if (part == "year") return "CAST(EXTRACT(YEAR FROM " + age + ") AS INTEGER)";
-            return "CAST((EXTRACT(YEAR FROM " + age + ") * 12) + EXTRACT(MONTH FROM " + age + ") AS INTEGER)";
+            string pgMonthDiff = "(EXTRACT(YEAR FROM " + age + ") * 12) + EXTRACT(MONTH FROM " + age + ")";
+            if (part == "quarter") return "CAST((" + pgMonthDiff + ") / 3 AS INTEGER)";
+            return "CAST(" + pgMonthDiff + " AS INTEGER)";
         }
 
         private static int GetDateDiffSeconds(string part)
@@ -1752,6 +1758,7 @@ namespace mySQLPunk.lib
             if (part == "hour") return 3600;
             if (part == "minute") return 60;
             if (part == "second") return 1;
+            if (part == "week") return 604800;
             return 0;
         }
 
