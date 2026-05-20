@@ -2270,6 +2270,11 @@ public static class SmokeTests
         bool oldAutoCompleteEnabled = ApplicationOptionSettings.GetBool("AutoCompleteEnabled");
         string oldGridFontName = ApplicationOptionSettings.GetString("RecordGridFontName");
         int oldGridFontSize = ApplicationOptionSettings.GetInt("RecordGridFontSize");
+        string oldDateFormat = ApplicationOptionSettings.GetString("RecordDateFormat");
+        string oldTimeFormat = ApplicationOptionSettings.GetString("RecordTimeFormat");
+        string oldDateTimeFormat = ApplicationOptionSettings.GetString("RecordDateTimeFormat");
+        bool oldShowThousands = ApplicationOptionSettings.GetBool("RecordShowThousandsSeparator");
+        bool oldUseSystemNumberFormat = ApplicationOptionSettings.GetBool("RecordUseSystemNumberFormat");
 
         try
         {
@@ -2281,6 +2286,11 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", false);
             ApplicationOptionSettings.SetString("RecordGridFontName", "Consolas");
             ApplicationOptionSettings.SetInt("RecordGridFontSize", 12);
+            ApplicationOptionSettings.SetString("RecordDateFormat", "yyyy/MM/dd");
+            ApplicationOptionSettings.SetString("RecordTimeFormat", "HH:mm:ss");
+            ApplicationOptionSettings.SetString("RecordDateTimeFormat", "yyyy/MM/dd HH:mm:ss");
+            ApplicationOptionSettings.SetBool("RecordShowThousandsSeparator", true);
+            ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", false);
 
             using (QueryForm form = new QueryForm(new FakeDumpDatabase(), "main"))
             {
@@ -2295,6 +2305,12 @@ public static class SmokeTests
                 Assert(Math.Abs(grid.DefaultCellStyle.Font.SizeInPoints - 12f) < 0.1f, "Result grid should honor the configured font size.");
                 Assert(completionTables.Count == 0, "Disabled auto-complete should skip metadata loading.");
             }
+
+            AssertEquals("2026/05/20", FormatQueryResultValue(new DateTime(2026, 5, 20)), "Query result date formatting should honor RecordDateFormat.");
+            AssertEquals("2026/05/20 13:45:06", FormatQueryResultValue(new DateTime(2026, 5, 20, 13, 45, 6)), "Query result datetime formatting should honor RecordDateTimeFormat.");
+            AssertEquals("03:04:05", FormatQueryResultValue(new TimeSpan(3, 4, 5)), "Query result time formatting should honor RecordTimeFormat.");
+            AssertEquals("1,234.56", FormatQueryResultValue(1234.56m), "Query result numeric formatting should honor thousands and invariant number options.");
+            AssertEquals("9,876", FormatQueryResultValue(9876), "Query result integer formatting should honor thousands option.");
         }
         finally
         {
@@ -2306,7 +2322,21 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("AutoCompleteEnabled", oldAutoCompleteEnabled);
             ApplicationOptionSettings.SetString("RecordGridFontName", oldGridFontName);
             ApplicationOptionSettings.SetInt("RecordGridFontSize", oldGridFontSize);
+            ApplicationOptionSettings.SetString("RecordDateFormat", oldDateFormat);
+            ApplicationOptionSettings.SetString("RecordTimeFormat", oldTimeFormat);
+            ApplicationOptionSettings.SetString("RecordDateTimeFormat", oldDateTimeFormat);
+            ApplicationOptionSettings.SetBool("RecordShowThousandsSeparator", oldShowThousands);
+            ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", oldUseSystemNumberFormat);
         }
+    }
+
+    private static string FormatQueryResultValue(object value)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("TryFormatConfiguredResultCellValue", BindingFlags.Static | BindingFlags.NonPublic);
+        object[] args = new object[] { value, null };
+        bool applied = (bool)method.Invoke(null, args);
+        Assert(applied, "Query result value should be formatted.");
+        return Convert.ToString(args[1]);
     }
 
     private static void TestQueryTableEditOptimisticWhere()

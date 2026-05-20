@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
@@ -2257,9 +2258,10 @@ namespace mySQLPunk
 
         private void DgvResults_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
         {
-            if (e.Value is byte[] bytes)
+            object formattedValue;
+            if (TryFormatConfiguredResultCellValue(e.Value, out formattedValue))
             {
-                e.Value = FormatBinaryCellValue(bytes);
+                e.Value = formattedValue;
                 e.FormattingApplied = true;
             }
         }
@@ -2329,6 +2331,166 @@ namespace mySQLPunk
             if (bytes.Length > previewLength) preview.Append("...");
 
             return "[BLOB " + bytes.Length + " bytes] 0x" + preview;
+        }
+
+        private static bool TryFormatConfiguredResultCellValue(object value, out object formattedValue)
+        {
+            formattedValue = value;
+            if (value == null || value == DBNull.Value) return false;
+
+            byte[] bytes = value as byte[];
+            if (bytes != null)
+            {
+                formattedValue = FormatBinaryCellValue(bytes);
+                return true;
+            }
+
+            DateTime dateTime;
+            if (TryGetDateTimeValue(value, out dateTime))
+            {
+                string format = GetConfiguredDateTimeFormat(dateTime);
+                if (string.IsNullOrWhiteSpace(format)) return false;
+
+                string text;
+                if (TryFormatDateTime(dateTime, format, out text))
+                {
+                    formattedValue = text;
+                    return true;
+                }
+                return false;
+            }
+
+            TimeSpan timeSpan;
+            if (TryGetTimeSpanValue(value, out timeSpan))
+            {
+                string format = ApplicationOptionSettings.GetString("RecordTimeFormat");
+                if (string.IsNullOrWhiteSpace(format)) return false;
+
+                string text;
+                if (TryFormatTimeSpan(timeSpan, format, out text))
+                {
+                    formattedValue = text;
+                    return true;
+                }
+                return false;
+            }
+
+            if (IsNumericValue(value))
+            {
+                formattedValue = FormatConfiguredNumber(value);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetDateTimeValue(object value, out DateTime dateTime)
+        {
+            if (value is DateTime)
+            {
+                dateTime = (DateTime)value;
+                return true;
+            }
+
+            dateTime = DateTime.MinValue;
+            return false;
+        }
+
+        private static bool TryGetTimeSpanValue(object value, out TimeSpan timeSpan)
+        {
+            if (value is TimeSpan)
+            {
+                timeSpan = (TimeSpan)value;
+                return true;
+            }
+
+            timeSpan = TimeSpan.Zero;
+            return false;
+        }
+
+        private static string GetConfiguredDateTimeFormat(DateTime value)
+        {
+            string dateTimeFormat = ApplicationOptionSettings.GetString("RecordDateTimeFormat");
+            string dateFormat = ApplicationOptionSettings.GetString("RecordDateFormat");
+
+            if (value.TimeOfDay == TimeSpan.Zero && !string.IsNullOrWhiteSpace(dateFormat)) return dateFormat;
+            if (!string.IsNullOrWhiteSpace(dateTimeFormat)) return dateTimeFormat;
+            return value.TimeOfDay == TimeSpan.Zero ? dateFormat : string.Empty;
+        }
+
+        private static bool TryFormatDateTime(DateTime value, string format, out string text)
+        {
+            try
+            {
+                text = value.ToString(format, CultureInfo.CurrentCulture);
+                return true;
+            }
+            catch
+            {
+                text = string.Empty;
+                return false;
+            }
+        }
+
+        private static bool TryFormatTimeSpan(TimeSpan value, string format, out string text)
+        {
+            try
+            {
+                DateTime display = DateTime.Today.Add(value);
+                text = display.ToString(format, CultureInfo.CurrentCulture);
+                return true;
+            }
+            catch
+            {
+                text = string.Empty;
+                return false;
+            }
+        }
+
+        private static bool IsNumericValue(object value)
+        {
+            if (value == null) return false;
+            Type type = value.GetType();
+            return type == typeof(byte) ||
+                   type == typeof(sbyte) ||
+                   type == typeof(short) ||
+                   type == typeof(ushort) ||
+                   type == typeof(int) ||
+                   type == typeof(uint) ||
+                   type == typeof(long) ||
+                   type == typeof(ulong) ||
+                   type == typeof(float) ||
+                   type == typeof(double) ||
+                   type == typeof(decimal);
+        }
+
+        private static string FormatConfiguredNumber(object value)
+        {
+            bool showThousands = ApplicationOptionSettings.GetBool("RecordShowThousandsSeparator");
+            CultureInfo culture = ApplicationOptionSettings.GetBool("RecordUseSystemNumberFormat")
+                ? CultureInfo.CurrentCulture
+                : CultureInfo.InvariantCulture;
+
+            string format = IsIntegerValue(value)
+                ? (showThousands ? "#,0" : "0")
+                : (showThousands ? "#,0.#############################" : "0.#############################");
+
+            IFormattable formattable = value as IFormattable;
+            return formattable == null ? Convert.ToString(value, culture) : formattable.ToString(format, culture);
+        }
+
+        private static bool IsIntegerValue(object value)
+        {
+            if (value == null) return false;
+            Type type = value.GetType();
+            return type == typeof(byte) ||
+                   type == typeof(sbyte) ||
+                   type == typeof(short) ||
+                   type == typeof(ushort) ||
+                   type == typeof(int) ||
+                   type == typeof(uint) ||
+                   type == typeof(long) ||
+                   type == typeof(ulong);
         }
 
         private bool ResultsHaveDataRows()
