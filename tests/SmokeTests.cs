@@ -166,6 +166,30 @@ public static class SmokeTests
         string mysqlJsonValueSql = (string)GetProperty(mysqlJsonValuePreview, "ConvertedSql");
         AssertContains(mysqlJsonValueSql, "JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status'))", "Converted MySQL SQL should use JSON_EXTRACT with unquote.");
 
+        object mysqlJsonQueryPreview = BuildViewSqlPreview(
+            "SELECT JSON_QUERY(payload, '$.items') AS items_json FROM event_log",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlJsonQueryPreview, "CanConvert"), "SQL Server JSON_QUERY should convert to MySQL.");
+        string mysqlJsonQuerySql = (string)GetProperty(mysqlJsonQueryPreview, "ConvertedSql");
+        AssertContains(mysqlJsonQuerySql, "JSON_EXTRACT(payload, '$.items')", "Converted MySQL SQL should use JSON_EXTRACT for JSON fragments.");
+
+        object pgJsonQueryPreview = BuildViewSqlPreview(
+            "SELECT JSON_QUERY(payload, '$.items[0]') AS first_item_json FROM event_log",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonQueryPreview, "CanConvert"), "SQL Server JSON_QUERY should convert to PostgreSQL.");
+        string pgJsonQuerySql = (string)GetProperty(pgJsonQueryPreview, "ConvertedSql");
+        AssertContains(pgJsonQuerySql, "payload #> '{items,0}'", "Converted PostgreSQL SQL should use JSON path extraction for JSON fragments.");
+
+        object sqliteJsonQueryPreview = BuildViewSqlPreview(
+            "SELECT JSON_QUERY(payload, '$.items') AS items_json FROM event_log",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteJsonQueryPreview, "CanConvert"), "Oracle JSON_QUERY should convert to SQLite.");
+        string sqliteJsonQuerySql = (string)GetProperty(sqliteJsonQueryPreview, "ConvertedSql");
+        AssertContains(sqliteJsonQuerySql, "json_extract(payload, '$.items')", "Converted SQLite SQL should use json_extract for JSON fragments.");
+
         object sqliteNowPreview = BuildViewSqlPreview(
             "SELECT NOW() AS created_at FROM users",
             "mysql",

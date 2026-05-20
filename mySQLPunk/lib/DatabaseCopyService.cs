@@ -465,6 +465,7 @@ namespace mySQLPunk.lib
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
+            sql = RewriteJsonQueryFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
 
             return sql;
@@ -1198,7 +1199,34 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
         }
 
+        private static string RewriteJsonQueryFunctions(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bJSON_QUERY\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<path>\$[^']*)'\s*\)",
+                m =>
+                {
+                    string expr = m.Groups["expr"].Value.Trim();
+                    string path = m.Groups["path"].Value;
+                    string escapedPath = EscapeSqlString(path);
+                    if (targetProvider == "mysql") return "JSON_EXTRACT(" + expr + ", '" + escapedPath + "')";
+                    if (targetProvider == "postgresql")
+                    {
+                        string pgPath = BuildPostgreSqlJsonPath(path);
+                        if (!string.IsNullOrWhiteSpace(pgPath)) return expr + " #> " + pgPath;
+                    }
+                    if (targetProvider == "sqlite") return "json_extract(" + expr + ", '" + escapedPath + "')";
+                    return m.Value;
+                },
+                RegexOptions.IgnoreCase);
+        }
+
         private static string BuildPostgreSqlJsonTextPath(string jsonPath)
+        {
+            return BuildPostgreSqlJsonPath(jsonPath);
+        }
+
+        private static string BuildPostgreSqlJsonPath(string jsonPath)
         {
             if (string.IsNullOrWhiteSpace(jsonPath) || !jsonPath.StartsWith("$.", StringComparison.Ordinal)) return "";
 
