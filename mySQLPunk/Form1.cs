@@ -4657,13 +4657,27 @@ namespace mySQLPunk
                 return BackupRestoreDiffService.CreateSnapshot("", "", 0, 0, 0, 0);
             }
 
+            DataTable functions = GetDatabaseFunctions(target.Database, target.DatabaseName);
+            DataTable events = GetDatabaseEvents(target.Database, target.DatabaseName);
             return BackupRestoreDiffService.CreateSnapshot(
                 target.DatabaseName,
                 target.Database.ProviderName,
-                GetTablesSafe(target.Database, target.DatabaseName).Count,
-                GetViewsSafe(target.Database, target.DatabaseName).Count,
-                GetDatabaseFunctions(target.Database, target.DatabaseName).Rows.Count,
-                GetDatabaseEvents(target.Database, target.DatabaseName).Rows.Count);
+                GetTablesSafe(target.Database, target.DatabaseName),
+                GetViewsSafe(target.Database, target.DatabaseName),
+                ExtractNameColumn(functions),
+                ExtractNameColumn(events));
+        }
+
+        private static List<string> ExtractNameColumn(DataTable table)
+        {
+            List<string> names = new List<string>();
+            if (table == null || !table.Columns.Contains("Name")) return names;
+            foreach (DataRow row in table.Rows)
+            {
+                string name = row["Name"] == null ? string.Empty : row["Name"].ToString();
+                if (!string.IsNullOrWhiteSpace(name)) names.Add(name);
+            }
+            return names;
         }
 
         private string CreatePreRestoreSafetyBackup(TreeDatabaseTarget target)

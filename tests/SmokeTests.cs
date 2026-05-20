@@ -1138,6 +1138,27 @@ public static class SmokeTests
             AssertContains(summary, "檢視：1 -> 1 (0)", "Restore diff should show unchanged views.");
             AssertContains(summary, "函式/程序：0 -> 1 (+1)", "Restore diff should show added routines.");
             AssertContains(summary, "事件/Trigger：1 -> 0 (-1)", "Restore diff should show removed events.");
+            DatabaseRestoreSnapshot namedBefore = BackupRestoreDiffService.CreateSnapshot(
+                "main",
+                "sqlite",
+                new[] { "users", "old_logs" },
+                new[] { "active_users" },
+                new string[0],
+                new[] { "ev_old" });
+            DatabaseRestoreSnapshot namedAfter = BackupRestoreDiffService.CreateSnapshot(
+                "main",
+                "sqlite",
+                new[] { "users", "orders", "audit_log", "archive_2026", "daily_stats", "monthly_stats", "yearly_stats" },
+                new[] { "active_users", "order_view" },
+                new[] { "fn_refresh" },
+                new string[0]);
+            string namedSummary = BackupRestoreDiffService.BuildSummary(namedBefore, namedAfter);
+            AssertContains(namedSummary, "資料表：2 -> 7 (+5)", "Named restore diff should still show table count delta.");
+            AssertContains(namedSummary, "新增：archive_2026, audit_log, daily_stats, monthly_stats, orders ... 等 6 個", "Named restore diff should summarize long added table lists.");
+            AssertContains(namedSummary, "移除：old_logs", "Named restore diff should show removed table names.");
+            AssertContains(namedSummary, "檢視：1 -> 2 (+1)，新增：order_view", "Named restore diff should show added views.");
+            AssertContains(namedSummary, "函式/程序：0 -> 1 (+1)，新增：fn_refresh", "Named restore diff should show added routines.");
+            AssertContains(namedSummary, "事件/Trigger：1 -> 0 (-1)，移除：ev_old", "Named restore diff should show removed events.");
         }
         finally
         {
