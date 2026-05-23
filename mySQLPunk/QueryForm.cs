@@ -13,6 +13,8 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using mySQLPunk.lib;
 using Newtonsoft.Json;
 
@@ -39,6 +41,9 @@ namespace mySQLPunk
         private bool _isTableDataMode; 
         private bool _isNoPrimaryKeyReadOnlyMode;
         private bool _recordLimitEnabled = true;
+        private const int GridFullAutoResizeRowLimit = 200;
+        private const int GridRowHeightApplyLimit = 500;
+        private const int WM_SETREDRAW = 0x000B;
 
         // 分頁相關
         private int _pageSize = 1000;
@@ -73,6 +78,28 @@ namespace mySQLPunk
             public long TotalRows { get; set; }
             public int CurrentPage { get; set; }
             public string ErrorMessage { get; set; }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, bool wParam, IntPtr lParam);
+
+        private sealed class GridRedrawScope : IDisposable
+        {
+            private readonly DataGridView _grid;
+
+            public GridRedrawScope(DataGridView grid)
+            {
+                _grid = grid;
+                SetGridRedraw(_grid, false);
+            }
+
+            public void Dispose()
+            {
+                SetGridRedraw(_grid, true);
+                if (_grid == null || _grid.IsDisposed || _grid.Disposing) return;
+                _grid.Invalidate();
+                _grid.Update();
+            }
         }
 
         // 工具列與狀態列
@@ -464,9 +491,10 @@ namespace mySQLPunk
                 BackgroundColor = Color.White,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
                 ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
             };
+            EnableGridDoubleBuffer(dgvResults);
             dgvResults.CellMouseDown += DgvResults_CellMouseDown;
             dgvResults.CellFormatting += DgvResults_CellFormatting;
             dgvResults.DataBindingComplete += DgvResults_DataBindingComplete;
@@ -1217,11 +1245,13 @@ namespace mySQLPunk
                 PrepareTableDataForEditing(dt);
 
                 sw.Stop();
-                dgvResults.DataSource = dt;
-                AutoResizeColumns(dgvResults);
-                tsBtnExport.Enabled = dt.Rows.Count > 0;
+                using (new GridRedrawScope(dgvResults))
+                {
+                    BindResultsTable(dt);
+                    tsBtnExport.Enabled = dt.Rows.Count > 0;
+                    ApplyTableDataEditability();
+                }
                 UpdateStatus(BuildQueryStatus(dt.Rows.Count, sw.ElapsedMilliseconds));
-                ApplyTableDataEditability();
                 UpdatePaginationUI();
             }
             catch (OperationCanceledException)
@@ -1402,20 +1432,22 @@ namespace mySQLPunk
                     }
                     else
                     {
-                        dgvResults.DataSource = dt;
-                        AutoResizeColumns(dgvResults);
-                        tsBtnExport.Enabled = dt.Rows.Count > 0;
+                        using (new GridRedrawScope(dgvResults))
+                        {
+                            BindResultsTable(dt);
+                            tsBtnExport.Enabled = dt.Rows.Count > 0;
+                            if (_isTableDataMode)
+                            {
+                                ApplyTableDataEditability();
+                            }
+                            else
+                            {
+                                dgvResults.ReadOnly = true;
+                                dgvResults.AllowUserToAddRows = false;
+                                dgvResults.AllowUserToDeleteRows = false;
+                            }
+                        }
                         UpdateStatus(status);
-                        if (_isTableDataMode)
-                        {
-                            ApplyTableDataEditability();
-                        }
-                        else
-                        {
-                            dgvResults.ReadOnly = true;
-                            dgvResults.AllowUserToAddRows = false;
-                            dgvResults.AllowUserToDeleteRows = false;
-                        }
                     }
                     _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, dt.Rows.Count, true);
                 }
@@ -1551,9 +1583,11 @@ namespace mySQLPunk
             feedback.Rows.Add(row);
             feedback.AcceptChanges();
 
-            dgvResults.ReadOnly = true;
-            dgvResults.DataSource = feedback;
-            AutoResizeColumns(dgvResults);
+            using (new GridRedrawScope(dgvResults))
+            {
+                dgvResults.ReadOnly = true;
+                BindResultsTable(feedback);
+            }
             if (tsBtnExport != null) tsBtnExport.Enabled = false;
         }
 
@@ -2287,6 +2321,37 @@ namespace mySQLPunk
             e.Cancel = false;
         }
 
+        private void BindResultsTable(DataTable table)
+        {
+            if (dgvResults == null) return;
+            dgvResults.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            dgvResults.DataSource = table;
+            AutoResizeColumns(dgvResults);
+        }
+
+        private static void SetGridRedraw(DataGridView grid, bool enabled)
+        {
+            if (grid == null || grid.IsDisposed || grid.Disposing || !grid.IsHandleCreated) return;
+            SendMessage(grid.Handle, WM_SETREDRAW, enabled, IntPtr.Zero);
+        }
+
+        private static void EnableGridDoubleBuffer(DataGridView grid)
+        {
+            if (grid == null) return;
+
+            try
+            {
+                PropertyInfo property = typeof(DataGridView).GetProperty(
+                    "DoubleBuffered",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                property?.SetValue(grid, true, null);
+            }
+            catch
+            {
+                // 非關鍵最佳化，避免反射失敗影響查詢結果顯示。
+            }
+        }
+
         private void ConfigureBinaryResultColumns()
         {
             if (dgvResults == null || dgvResults.Columns.Count == 0) return;
@@ -2504,6 +2569,8 @@ namespace mySQLPunk
 
             int rowHeight = GetConfiguredResultGridRowHeight(font);
             grid.RowTemplate.Height = rowHeight;
+            if (grid.Rows.Count > GridRowHeightApplyLimit) return;
+
             foreach (DataGridViewRow row in grid.Rows)
             {
                 if (row != null && !row.IsNewRow) row.Height = rowHeight;
@@ -2699,11 +2766,13 @@ namespace mySQLPunk
         private static void AutoResizeColumns(DataGridView dgv)
         {
             if (dgv == null || dgv.IsDisposed || dgv.Disposing || !dgv.IsHandleCreated || dgv.Columns.Count == 0) return;
-            // ── 資料編輯功能 (Stubs) ──
-            // 限制最大欄寬避免超寬欄位讓畫面難以閱讀
+            DataGridViewAutoSizeColumnsMode mode = dgv.Rows.Count <= GridFullAutoResizeRowLimit
+                ? DataGridViewAutoSizeColumnsMode.DisplayedCells
+                : DataGridViewAutoSizeColumnsMode.ColumnHeader;
+
             try
             {
-                dgv.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.DisplayedCells);
+                dgv.AutoResizeColumns(mode);
             }
             catch (InvalidOperationException)
             {
@@ -2712,6 +2781,7 @@ namespace mySQLPunk
             }
             foreach (DataGridViewColumn col in dgv.Columns)
             {
+                if (col.Width < 80) col.Width = 80;
                 if (col.Width > 300) col.Width = 300;
             }
         }
