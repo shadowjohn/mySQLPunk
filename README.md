@@ -25,6 +25,10 @@ nuget restore .\mySQLPunk.sln
 msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 ```
 
+備註：
+
+- Repo 根目錄有提供 `NuGet.Config`，會強制將 NuGet 還原目錄固定在本專案的 `packages/`，避免受使用者全域 NuGet 設定影響導致 `..\packages\...` 找不到。
+
 Smoke test harness：
 
 ```powershell
