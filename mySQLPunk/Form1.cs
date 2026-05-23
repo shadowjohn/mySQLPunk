@@ -2025,6 +2025,11 @@ namespace mySQLPunk
             // 連結右鍵選單事件
             db_tree.NodeMouseClick += db_tree_NodeMouseClick;
             db_tree.MouseDown += db_tree_MouseDown;
+            db_tree.AllowDrop = true;
+            db_tree.DragEnter -= DbTree_DragEnter;
+            db_tree.DragDrop -= DbTree_DragDrop;
+            db_tree.DragEnter += DbTree_DragEnter;
+            db_tree.DragDrop += DbTree_DragDrop;
 
             tool_Connection.BringToFront();
 
@@ -2051,6 +2056,168 @@ namespace mySQLPunk
             closeToolStripMenuItem.Click -= CloseToolStripMenuItem_Click;
             closeToolStripMenuItem.Click += CloseToolStripMenuItem_Click;
 
+        }
+
+        private static bool LooksLikeSqliteExtension(string path)
+        {
+            string ext = (Path.GetExtension(path) ?? string.Empty).Trim().ToLowerInvariant();
+            return ext == ".db" || ext == ".sqlite" || ext == ".sqlite3" || ext == ".db3" || ext == ".s3db";
+        }
+
+        private static bool LooksLikeSqliteHeader(string path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path) || Directory.Exists(path)) return false;
+                using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    byte[] header = new byte[16];
+                    int read = fs.Read(header, 0, header.Length);
+                    if (read != header.Length) return false;
+                    byte[] magic = Encoding.ASCII.GetBytes("SQLite format 3\0");
+                    for (int i = 0; i < magic.Length; i++)
+                        if (header[i] != magic[i]) return false;
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private int FindConnectionIndexBySqlitePath(string sqlitePath)
+        {
+            if (string.IsNullOrWhiteSpace(sqlitePath)) return -1;
+            for (int i = 0; i < myN.connections.Count; i++)
+            {
+                var conn = myN.connections[i];
+                if (conn == null) continue;
+                if (!conn.ContainsKey("db_kind") || conn["db_kind"] == null) continue;
+                if (!string.Equals(conn["db_kind"].ToString(), "sqlite", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!conn.ContainsKey("path") || conn["path"] == null) continue;
+                if (string.Equals(conn["path"].ToString(), sqlitePath, StringComparison.OrdinalIgnoreCase)) return i;
+            }
+            return -1;
+        }
+
+        private string MakeUniqueConnectionName(string baseName)
+        {
+            string name = (baseName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(name)) name = "SQLite";
+
+            var existing = new HashSet<string>(
+                myN.connections
+                    .Where(c => c != null && c.ContainsKey("conn_name") && c["conn_name"] != null)
+                    .Select(c => c["conn_name"].ToString()),
+                StringComparer.OrdinalIgnoreCase);
+
+            if (!existing.Contains(name)) return name;
+            for (int i = 2; i < 1000; i++)
+            {
+                string candidate = name + " (" + i + ")";
+                if (!existing.Contains(candidate)) return candidate;
+            }
+            return name + " (" + DateTime.Now.ToString("yyyyMMddHHmmss") + ")";
+        }
+
+        private string GetDropTargetGroupName(DragEventArgs e)
+        {
+            try
+            {
+                if (ApplicationOptionSettings.GetBool("ViewHideConnectionGroups")) return string.Empty;
+                if (db_tree == null) return string.Empty;
+
+                Point pt = db_tree.PointToClient(new Point(e.X, e.Y));
+                TreeNode node = db_tree.GetNodeAt(pt);
+                while (node != null)
+                {
+                    if (IsConnectionGroupNode(node)) return node.Text;
+                    node = node.Parent;
+                }
+            }
+            catch { }
+            return string.Empty;
+        }
+
+        private void DbTree_DragEnter(object sender, DragEventArgs e)
+        {
+            try
+            {
+                if (e.Data == null || !e.Data.GetDataPresent(DataFormats.FileDrop))
+                {
+                    e.Effect = DragDropEffects.None;
+                    return;
+                }
+
+                string[] paths = e.Data.GetData(DataFormats.FileDrop) as string[];
+                if (paths == null || paths.Length == 0)
+                {
+                    e.Effect = DragDropEffects.None;
+                    return;
+                }
+
+                bool hasSqlite = paths.Any(p => LooksLikeSqliteExtension(p) || LooksLikeSqliteHeader(p));
+                e.Effect = hasSqlite ? DragDropEffects.Copy : DragDropEffects.None;
+            }
+            catch
+            {
+                e.Effect = DragDropEffects.None;
+            }
+        }
+
+        private void DbTree_DragDrop(object sender, DragEventArgs e)
+        {
+            if (e.Data == null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+            string[] paths = e.Data.GetData(DataFormats.FileDrop) as string[];
+            if (paths == null || paths.Length == 0) return;
+
+            string targetGroup = GetDropTargetGroupName(e);
+            var sqliteFiles = paths
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .Where(p => File.Exists(p) && !Directory.Exists(p))
+                .Where(p => LooksLikeSqliteExtension(p) || LooksLikeSqliteHeader(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (sqliteFiles.Count == 0) return;
+
+            int lastIndex = -1;
+            foreach (string sqlitePath in sqliteFiles)
+            {
+                int existingIndex = FindConnectionIndexBySqlitePath(sqlitePath);
+                if (existingIndex >= 0)
+                {
+                    lastIndex = existingIndex;
+                    continue;
+                }
+
+                Dictionary<string, object> conn = new Dictionary<string, object>();
+                conn["conn_name"] = MakeUniqueConnectionName(Path.GetFileNameWithoutExtension(sqlitePath));
+                conn["host"] = "";
+                conn["port"] = "";
+                conn["initial_database"] = "main";
+                conn["db_kind"] = "sqlite";
+                conn["username"] = "";
+                conn["pwd"] = "";
+                conn["path"] = sqlitePath;
+                conn["init_geospatial"] = "T";
+                conn["isConnect"] = "F";
+                if (!string.IsNullOrWhiteSpace(targetGroup)) conn["conn_group"] = targetGroup;
+
+                add_connection(conn);
+                lastIndex = myN.connections.Count - 1;
+            }
+
+            if (lastIndex >= 0)
+            {
+                TreeNode node = FindConnectionNode(lastIndex);
+                if (node != null)
+                {
+                    db_tree.SelectedNode = node;
+                    node.EnsureVisible();
+                }
+            }
         }
 
         private void ConfigureMainMenu()
