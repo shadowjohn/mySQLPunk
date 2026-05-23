@@ -80,6 +80,26 @@ namespace mySQLPunk
             public string ErrorMessage { get; set; }
         }
 
+        private enum SqlTokenKind
+        {
+            Word,
+            StringLiteral,
+            QuotedIdentifier,
+            Symbol,
+            Operator
+        }
+
+        private sealed class SqlToken
+        {
+            public string Text { get; set; }
+            public SqlTokenKind Kind { get; set; }
+
+            public bool IsWord(string value)
+            {
+                return Kind == SqlTokenKind.Word && string.Equals(Text, value, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, bool wParam, IntPtr lParam);
 
@@ -1013,26 +1033,331 @@ namespace mySQLPunk
             string sql = txtSql.Text;
             if (string.IsNullOrEmpty(sql)) return;
 
-            // 關鍵字大寫
-            foreach (string kw in Keywords)
+            txtSql.Text = FormatSqlForEditor(sql);
+        }
+
+        private static string FormatSqlForEditor(string sql)
+        {
+            if (string.IsNullOrWhiteSpace(sql)) return sql;
+
+            List<SqlToken> tokens = TokenizeSql(sql);
+            if (tokens.Count == 0) return string.Empty;
+
+            NormalizeSqlKeywords(tokens);
+
+            int selectIndex = FindTopLevelToken(tokens, 0, tokens.Count, "SELECT");
+            int fromIndex = selectIndex >= 0 ? FindTopLevelToken(tokens, selectIndex + 1, tokens.Count, "FROM") : -1;
+            if (selectIndex == 0 && fromIndex > selectIndex)
             {
-                sql = Regex.Replace(sql, @"\b" + kw + @"\b", kw, RegexOptions.IgnoreCase);
+                return FormatSelectSql(tokens, selectIndex, fromIndex).Trim();
             }
 
-            // 主要子句換行
-            foreach (string bw in BreakKeywords)
+            return FormatSqlClauses(tokens, 0, tokens.Count).Trim();
+        }
+
+        private static string FormatSelectSql(List<SqlToken> tokens, int selectIndex, int fromIndex)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("SELECT");
+
+            List<Tuple<int, int>> columns = SplitTopLevelByComma(tokens, selectIndex + 1, fromIndex);
+            for (int i = 0; i < columns.Count; i++)
             {
-                sql = Regex.Replace(sql, @"\b" + Regex.Escape(bw) + @"\b", "\n" + bw, RegexOptions.IgnoreCase);
+                string columnSql = BuildInlineSql(tokens, columns[i].Item1, columns[i].Item2);
+                if (string.IsNullOrWhiteSpace(columnSql)) continue;
+
+                sb.Append("  ");
+                sb.Append(columnSql);
+                if (i < columns.Count - 1) sb.Append(",");
+                sb.AppendLine();
             }
 
-            // AND / OR 縮排換行
-            sql = Regex.Replace(sql, @"\bAND\b", "\n  AND", RegexOptions.IgnoreCase);
-            sql = Regex.Replace(sql, @"\bOR\b", "\n  OR", RegexOptions.IgnoreCase);
+            sb.Append(FormatSqlClauses(tokens, fromIndex, tokens.Count));
+            return sb.ToString();
+        }
 
-            // 清理多餘空行
-            sql = Regex.Replace(sql, @"\n\s*\n", "\n");
+        private static string FormatSqlClauses(List<SqlToken> tokens, int start, int end)
+        {
+            StringBuilder sb = new StringBuilder();
+            int index = start;
 
-            txtSql.Text = sql.Trim();
+            while (index < end)
+            {
+                int clauseEnd = FindNextClauseStart(tokens, index + 1, end);
+                string line = BuildClauseLine(tokens, index, clauseEnd);
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    if (sb.Length > 0) sb.AppendLine();
+                    sb.Append(line);
+                }
+                index = clauseEnd;
+            }
+
+            return sb.ToString();
+        }
+
+        private static string BuildClauseLine(List<SqlToken> tokens, int start, int end)
+        {
+            if (start >= end) return string.Empty;
+
+            StringBuilder sb = new StringBuilder();
+            int index = start;
+            if (tokens[index].IsWord("GROUP") && index + 1 < end && tokens[index + 1].IsWord("BY"))
+            {
+                sb.Append("GROUP BY");
+                index += 2;
+            }
+            else if (tokens[index].IsWord("ORDER") && index + 1 < end && tokens[index + 1].IsWord("BY"))
+            {
+                sb.Append("ORDER BY");
+                index += 2;
+            }
+            else if (IsJoinClauseStart(tokens, index, end))
+            {
+                int joinEnd = tokens[index].IsWord("JOIN") ? index + 1 : index + 2;
+                sb.Append(BuildInlineSql(tokens, index, joinEnd));
+                index = joinEnd;
+            }
+            else
+            {
+                sb.Append(tokens[index].Text);
+                index++;
+            }
+
+            string tail = FormatClauseTail(tokens, index, end);
+            if (!string.IsNullOrWhiteSpace(tail))
+            {
+                sb.Append(" ");
+                sb.Append(tail);
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static string FormatClauseTail(List<SqlToken> tokens, int start, int end)
+        {
+            StringBuilder sb = new StringBuilder();
+            int segmentStart = start;
+            int depth = 0;
+
+            for (int i = start; i < end; i++)
+            {
+                if (tokens[i].Text == "(") depth++;
+                else if (tokens[i].Text == ")" && depth > 0) depth--;
+
+                if (depth == 0 && i > segmentStart && (tokens[i].IsWord("AND") || tokens[i].IsWord("OR")))
+                {
+                    AppendInlineSegment(sb, tokens, segmentStart, i);
+                    sb.AppendLine();
+                    sb.Append("  ");
+                    sb.Append(tokens[i].Text);
+                    sb.Append(" ");
+                    segmentStart = i + 1;
+                }
+            }
+
+            AppendInlineSegment(sb, tokens, segmentStart, end);
+            return sb.ToString().TrimEnd();
+        }
+
+        private static void AppendInlineSegment(StringBuilder sb, List<SqlToken> tokens, int start, int end)
+        {
+            string text = BuildInlineSql(tokens, start, end);
+            if (!string.IsNullOrWhiteSpace(text)) sb.Append(text);
+        }
+
+        private static List<SqlToken> TokenizeSql(string sql)
+        {
+            List<SqlToken> tokens = new List<SqlToken>();
+            int i = 0;
+            while (i < sql.Length)
+            {
+                char c = sql[i];
+                if (char.IsWhiteSpace(c))
+                {
+                    i++;
+                    continue;
+                }
+
+                if (c == '\'' || c == '"' || c == '`' || c == '[')
+                {
+                    char close = c == '[' ? ']' : c;
+                    int start = i++;
+                    while (i < sql.Length)
+                    {
+                        if (sql[i] == close)
+                        {
+                            i++;
+                            if (i < sql.Length && sql[i] == close && close != ']')
+                            {
+                                i++;
+                                continue;
+                            }
+                            break;
+                        }
+                        i++;
+                    }
+                    tokens.Add(new SqlToken
+                    {
+                        Text = sql.Substring(start, i - start),
+                        Kind = c == '\'' ? SqlTokenKind.StringLiteral : SqlTokenKind.QuotedIdentifier
+                    });
+                    continue;
+                }
+
+                if (char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == ':' || c == '?')
+                {
+                    int start = i++;
+                    while (i < sql.Length && (char.IsLetterOrDigit(sql[i]) || sql[i] == '_' || sql[i] == '$'))
+                    {
+                        i++;
+                    }
+                    tokens.Add(new SqlToken { Text = sql.Substring(start, i - start), Kind = SqlTokenKind.Word });
+                    continue;
+                }
+
+                if ("=<>!+-*/%".IndexOf(c) >= 0)
+                {
+                    int start = i++;
+                    if (i < sql.Length && "=<>".IndexOf(sql[i]) >= 0) i++;
+                    tokens.Add(new SqlToken { Text = sql.Substring(start, i - start), Kind = SqlTokenKind.Operator });
+                    continue;
+                }
+
+                tokens.Add(new SqlToken { Text = c.ToString(), Kind = SqlTokenKind.Symbol });
+                i++;
+            }
+
+            return tokens;
+        }
+
+        private static void NormalizeSqlKeywords(List<SqlToken> tokens)
+        {
+            HashSet<string> keywords = new HashSet<string>(Keywords, StringComparer.OrdinalIgnoreCase);
+            foreach (SqlToken token in tokens)
+            {
+                if (token.Kind == SqlTokenKind.Word && keywords.Contains(token.Text))
+                {
+                    token.Text = token.Text.ToUpperInvariant();
+                }
+            }
+        }
+
+        private static int FindTopLevelToken(List<SqlToken> tokens, int start, int end, string word)
+        {
+            int depth = 0;
+            for (int i = start; i < end; i++)
+            {
+                if (tokens[i].Text == "(") depth++;
+                else if (tokens[i].Text == ")" && depth > 0) depth--;
+                else if (depth == 0 && tokens[i].IsWord(word)) return i;
+            }
+            return -1;
+        }
+
+        private static int FindNextClauseStart(List<SqlToken> tokens, int start, int end)
+        {
+            int depth = 0;
+            for (int i = start; i < end; i++)
+            {
+                if (tokens[i].Text == "(") depth++;
+                else if (tokens[i].Text == ")" && depth > 0) depth--;
+
+                if (depth == 0 && IsClauseStart(tokens, i, end))
+                {
+                    return i;
+                }
+            }
+            return end;
+        }
+
+        private static bool IsClauseStart(List<SqlToken> tokens, int index, int end)
+        {
+            if (index >= end || tokens[index].Kind != SqlTokenKind.Word) return false;
+            if (tokens[index].IsWord("FROM") ||
+                tokens[index].IsWord("WHERE") ||
+                tokens[index].IsWord("HAVING") ||
+                tokens[index].IsWord("LIMIT") ||
+                tokens[index].IsWord("OFFSET") ||
+                tokens[index].IsWord("UNION") ||
+                tokens[index].IsWord("VALUES") ||
+                tokens[index].IsWord("SET"))
+            {
+                return true;
+            }
+
+            if ((tokens[index].IsWord("GROUP") || tokens[index].IsWord("ORDER")) &&
+                index + 1 < end && tokens[index + 1].IsWord("BY"))
+            {
+                return true;
+            }
+
+            return IsJoinClauseStart(tokens, index, end);
+        }
+
+        private static bool IsJoinClauseStart(List<SqlToken> tokens, int index, int end)
+        {
+            if (index >= end) return false;
+            if (tokens[index].IsWord("JOIN")) return true;
+            if (index + 1 >= end || !tokens[index + 1].IsWord("JOIN")) return false;
+            return tokens[index].IsWord("INNER") ||
+                   tokens[index].IsWord("LEFT") ||
+                   tokens[index].IsWord("RIGHT") ||
+                   tokens[index].IsWord("FULL") ||
+                   tokens[index].IsWord("CROSS") ||
+                   tokens[index].IsWord("OUTER");
+        }
+
+        private static List<Tuple<int, int>> SplitTopLevelByComma(List<SqlToken> tokens, int start, int end)
+        {
+            List<Tuple<int, int>> ranges = new List<Tuple<int, int>>();
+            int depth = 0;
+            int segmentStart = start;
+
+            for (int i = start; i < end; i++)
+            {
+                if (tokens[i].Text == "(") depth++;
+                else if (tokens[i].Text == ")" && depth > 0) depth--;
+                else if (depth == 0 && tokens[i].Text == ",")
+                {
+                    ranges.Add(Tuple.Create(segmentStart, i));
+                    segmentStart = i + 1;
+                }
+            }
+
+            ranges.Add(Tuple.Create(segmentStart, end));
+            return ranges;
+        }
+
+        private static string BuildInlineSql(List<SqlToken> tokens, int start, int end)
+        {
+            StringBuilder sb = new StringBuilder();
+            SqlToken previous = null;
+
+            for (int i = start; i < end; i++)
+            {
+                SqlToken current = tokens[i];
+                if (string.IsNullOrWhiteSpace(current.Text)) continue;
+
+                if (NeedsSpaceBetween(previous, current))
+                {
+                    sb.Append(' ');
+                }
+                sb.Append(current.Text);
+                previous = current;
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        private static bool NeedsSpaceBetween(SqlToken previous, SqlToken current)
+        {
+            if (previous == null) return false;
+            if (current.Text == "," || current.Text == ";" || current.Text == ")" || current.Text == ".") return false;
+            if (previous.Text == "(" || previous.Text == ".") return false;
+            if (current.Text == "(" && previous.Kind == SqlTokenKind.Word) return false;
+            if (previous.Kind == SqlTokenKind.Operator || current.Kind == SqlTokenKind.Operator) return true;
+            return true;
         }
 
         // ── 自動補完 ──
