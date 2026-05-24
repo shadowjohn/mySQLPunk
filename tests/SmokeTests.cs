@@ -2733,6 +2733,9 @@ public static class SmokeTests
 
         string csvPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".csv");
         string jsonPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".json");
+        string xmlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".xml");
+        string htmlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".html");
+        string markdownPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".md");
         my_sqlite db = new my_sqlite();
         try
         {
@@ -2770,12 +2773,51 @@ public static class SmokeTests
             AssertContains(streamedJson, "\"name\":\"A, B\"", "Streaming JSON export should include row objects without loading a DataTable.");
             AssertContains(streamedJson, "\"payload\":\"[BLOB 3 bytes] 0xAABBCC\"", "Streaming JSON export should use shared BLOB previews.");
             AssertContains(streamedJson, "\"payload\":null", "Streaming JSON export should preserve null values.");
+
+            QueryResultStreamingExportResult streamXml = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, payload FROM export_test ORDER BY id;",
+                null,
+                xmlPath,
+                QueryResultExportFormat.Xml);
+            string streamedXml = File.ReadAllText(xmlPath, Encoding.UTF8);
+            Assert(streamXml.Rows == 2, "Streaming XML export should report exported rows.");
+            AssertContains(streamedXml, "<?xml version=\"1.0\" encoding=\"utf-8\"?>", "Streaming XML export should include a document header.");
+            AssertContains(streamedXml, "<field name=\"name\">A, B</field>", "Streaming XML export should include field values.");
+            AssertContains(streamedXml, "<field name=\"payload\" isNull=\"true\" />", "Streaming XML export should preserve null values.");
+
+            QueryResultStreamingExportResult streamHtml = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, payload FROM export_test ORDER BY id;",
+                null,
+                htmlPath,
+                QueryResultExportFormat.Html);
+            string streamedHtml = File.ReadAllText(htmlPath, Encoding.UTF8);
+            Assert(streamHtml.Rows == 2, "Streaming HTML export should report exported rows.");
+            AssertContains(streamedHtml, "<table>", "Streaming HTML export should include a table.");
+            AssertContains(streamedHtml, "<td>A, B</td>", "Streaming HTML export should include escaped table cells.");
+            AssertContains(streamedHtml, "<td>[BLOB 3 bytes] 0xAABBCC</td>", "Streaming HTML export should use shared BLOB previews.");
+
+            QueryResultStreamingExportResult streamMarkdown = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, payload FROM export_test ORDER BY id;",
+                null,
+                markdownPath,
+                QueryResultExportFormat.Markdown);
+            string streamedMarkdown = File.ReadAllText(markdownPath, Encoding.UTF8);
+            Assert(streamMarkdown.Rows == 2, "Streaming Markdown export should report exported rows.");
+            AssertContains(streamedMarkdown, "| name | payload |", "Streaming Markdown export should include headers.");
+            AssertContains(streamedMarkdown, "| A, B | [BLOB 3 bytes] 0xAABBCC |", "Streaming Markdown export should include row values.");
+            AssertContains(streamedMarkdown, "| Line<br>Break |  |", "Streaming Markdown export should keep multiline cells table-safe.");
         }
         finally
         {
             db.Dispose();
             if (File.Exists(csvPath)) File.Delete(csvPath);
             if (File.Exists(jsonPath)) File.Delete(jsonPath);
+            if (File.Exists(xmlPath)) File.Delete(xmlPath);
+            if (File.Exists(htmlPath)) File.Delete(htmlPath);
+            if (File.Exists(markdownPath)) File.Delete(markdownPath);
         }
 
         QueryForm form = (QueryForm)FormatterServices.GetUninitializedObject(typeof(QueryForm));
@@ -2788,6 +2830,12 @@ public static class SmokeTests
         AssertEquals("SELECT name FROM export_test ORDER BY id;", streamingSql, "Query form should stream the last successful result SQL.");
         Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Json, out streamingSql),
             "Query form should enable streaming export for JSON results.");
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Xml, out streamingSql),
+            "Query form should enable streaming export for XML results.");
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Html, out streamingSql),
+            "Query form should enable streaming export for HTML results.");
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Markdown, out streamingSql),
+            "Query form should enable streaming export for Markdown results.");
         Assert(!TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Xlsx, out streamingSql),
             "Query form should keep formatted workbook exports on the DataTable path.");
         SetPrivateField(form, "_isTableDataMode", true);

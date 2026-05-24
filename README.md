@@ -178,13 +178,13 @@ Smoke test harness：
   - 現況：`byte[]` 欄位在結果表格中會先嘗試顯示為 `[Geometry] WKT`，無法解析時才顯示 `[BLOB n bytes] 0x...`；右鍵可檢視十六進位、複製 Hex、匯出檔案，在資料表資料模式可匯入檔案寫回目前 BLOB 欄位，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
   - 完成內容：BLOB 十六進位檢視器改為 4KB 分頁顯示，支援首頁、上一頁、下一頁、末頁與複製本頁 Hex，避免大型 BLOB 一次轉成完整文字造成 UI 卡頓。
   - 完成內容：資料表資料模式中，若目前資料列有 Primary Key 且尚未被本機修改，右鍵「匯出 BLOB 檔案」會以 provider-level `SequentialAccess` 重新查詢單一欄位並串流寫入檔案；MySQL、PostgreSQL、SQLite、SQL Server、Oracle provider 會共用同一個串流服務，匯出時狀態列會顯示已寫入大小。
-  - 完成內容：`QueryResultExportService` 新增 provider-level streaming export 底層能力，可直接用 `DbDataReader` 將任意查詢結果輸出為 CSV / TSV / JSON，不必先載入整份 `DataTable`，並沿用既有 BLOB/geometry 預覽格式與列數進度回報；查詢視窗匯出 CSV / TSV / JSON 時，若上一個成功結果是一般查詢且可安全重跑，會直接走串流匯出，資料表編輯模式與其他格式則保留既有 `DataTable` 路徑。
-  - 限制：XLSX、XML、HTML、Markdown 仍需整份結果資料才能產生格式化輸出。沒有 Primary Key 或資料列已有未儲存變更時，單一 BLOB 匯出會退回目前格子的記憶體值。
+  - 完成內容：`QueryResultExportService` 新增 provider-level streaming export 底層能力，可直接用 `DbDataReader` 將任意查詢結果輸出為 CSV / TSV / JSON / XML / HTML / Markdown，不必先載入整份 `DataTable`，並沿用既有 BLOB/geometry 預覽格式、空值處理與列數進度回報；查詢視窗匯出上述文字格式時，若上一個成功結果是一般查詢且可安全重跑，會直接走串流匯出，資料表編輯模式與 XLSX 則保留既有 `DataTable` 路徑。
+  - 限制：XLSX 仍需整份結果資料才能產生活頁簿輸出。沒有 Primary Key 或資料列已有未儲存變更時，單一 BLOB 匯出會退回目前格子的記憶體值。
 
 - **查詢結果匯出格式 ✅ 已補齊常用格式**
   - 現況：查詢結果匯出預設使用 CSV，並可在儲存對話框選擇 Excel `.xlsx`、TSV、JSON、XML、HTML 或 Markdown。
   - 完成內容：各格式會共用結果表格顯示值轉換；BLOB/geometry 會沿用結果表格的 `[Geometry] WKT` 或 `[BLOB n bytes]` 顯示，日期與空值也會一致處理。
-  - 後續方向：若需要更完整的大型結果集匯出，可再評估 XLSX 分段寫入或 XML/HTML/Markdown 的 streaming writer；單一 BLOB/geometry 欄位的資料表模式匯出已先支援串流寫檔。
+  - 後續方向：若需要更完整的大型結果集匯出，可再評估 XLSX 分段寫入或大型 workbook 樣式化輸出；單一 BLOB/geometry 欄位的資料表模式匯出已先支援串流寫檔。
 
 ### Table/View 複製限制
 

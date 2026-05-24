@@ -74,7 +74,10 @@ namespace mySQLPunk.lib
         {
             return format == QueryResultExportFormat.Csv ||
                 format == QueryResultExportFormat.Tsv ||
-                format == QueryResultExportFormat.Json;
+                format == QueryResultExportFormat.Json ||
+                format == QueryResultExportFormat.Xml ||
+                format == QueryResultExportFormat.Html ||
+                format == QueryResultExportFormat.Markdown;
         }
 
         public static QueryResultStreamingExportResult WriteStreaming(
@@ -88,7 +91,7 @@ namespace mySQLPunk.lib
             if (database == null) throw new ArgumentNullException(nameof(database));
             if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException("SQL is required.", nameof(sql));
             if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Target path is required.", nameof(path));
-            if (!CanStreamFormat(format)) throw new NotSupportedException("Streaming export only supports CSV, TSV, and JSON.");
+            if (!CanStreamFormat(format)) throw new NotSupportedException("Streaming export only supports CSV, TSV, JSON, XML, HTML, and Markdown.");
 
             DbConnection connection = BinaryCellStreamingService.GetOpenConnection(database);
             using (DbCommand command = connection.CreateCommand())
@@ -100,9 +103,25 @@ namespace mySQLPunk.lib
                 using (CountingFileStream stream = new CountingFileStream(path))
                 using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
                 {
-                    long rows = format == QueryResultExportFormat.Json
-                        ? WriteStreamingJson(reader, writer, progress)
-                        : WriteStreamingDelimited(reader, writer, format == QueryResultExportFormat.Tsv ? '\t' : ',', progress);
+                    long rows;
+                    switch (format)
+                    {
+                        case QueryResultExportFormat.Json:
+                            rows = WriteStreamingJson(reader, writer, progress);
+                            break;
+                        case QueryResultExportFormat.Xml:
+                            rows = WriteStreamingXml(reader, writer, progress);
+                            break;
+                        case QueryResultExportFormat.Html:
+                            rows = WriteStreamingHtml(reader, writer, progress);
+                            break;
+                        case QueryResultExportFormat.Markdown:
+                            rows = WriteStreamingMarkdown(reader, writer, progress);
+                            break;
+                        default:
+                            rows = WriteStreamingDelimited(reader, writer, format == QueryResultExportFormat.Tsv ? '\t' : ',', progress);
+                            break;
+                    }
                     writer.Flush();
                     return new QueryResultStreamingExportResult
                     {
@@ -374,6 +393,117 @@ namespace mySQLPunk.lib
 
             if (rows > 0) writer.WriteLine();
             writer.Write("]");
+            return rows;
+        }
+
+        private static long WriteStreamingXml(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+
+            writer.WriteLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+            writer.WriteLine("<results>");
+            while (reader.Read())
+            {
+                writer.WriteLine("  <row>");
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    object value = ReadStreamingValue(reader, c);
+                    string columnName = XmlEscape(columnNames[c]);
+                    if (value == DBNull.Value || value == null)
+                    {
+                        writer.Write("    <field name=\"");
+                        writer.Write(columnName);
+                        writer.WriteLine("\" isNull=\"true\" />");
+                    }
+                    else
+                    {
+                        writer.Write("    <field name=\"");
+                        writer.Write(columnName);
+                        writer.Write("\">");
+                        writer.Write(XmlEscape(FormatExportValue(value)));
+                        writer.WriteLine("</field>");
+                    }
+                }
+                writer.WriteLine("  </row>");
+                rows++;
+                if (progress != null) progress(rows);
+            }
+            writer.WriteLine("</results>");
+
+            return rows;
+        }
+
+        private static long WriteStreamingHtml(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+
+            writer.WriteLine("<!doctype html>");
+            writer.WriteLine("<html><head><meta charset=\"utf-8\"><title>mySQLPunk export</title>");
+            writer.WriteLine("<style>body{font-family:Segoe UI,Arial,sans-serif}table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:4px 8px;white-space:pre-wrap}th{background:#f2f2f2}</style>");
+            writer.WriteLine("</head><body><table>");
+            writer.WriteLine("<thead><tr>");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                writer.Write("<th>");
+                writer.Write(HtmlEscape(columnNames[c]));
+                writer.WriteLine("</th>");
+            }
+            writer.WriteLine("</tr></thead><tbody>");
+
+            while (reader.Read())
+            {
+                writer.WriteLine("<tr>");
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    writer.Write("<td>");
+                    writer.Write(HtmlEscape(FormatExportValue(ReadStreamingValue(reader, c))));
+                    writer.WriteLine("</td>");
+                }
+                writer.WriteLine("</tr>");
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            writer.WriteLine("</tbody></table></body></html>");
+            return rows;
+        }
+
+        private static long WriteStreamingMarkdown(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+
+            writer.Write("| ");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(" | ");
+                writer.Write(MarkdownEscape(columnNames[c]));
+            }
+            writer.WriteLine(" |");
+
+            writer.Write("| ");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(" | ");
+                writer.Write("---");
+            }
+            writer.WriteLine(" |");
+
+            while (reader.Read())
+            {
+                writer.Write("| ");
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    if (c > 0) writer.Write(" | ");
+                    writer.Write(MarkdownEscape(FormatExportValue(ReadStreamingValue(reader, c))));
+                }
+                writer.WriteLine(" |");
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
             return rows;
         }
 
