@@ -4768,6 +4768,37 @@ namespace mySQLPunk
                 yield break;
             }
 
+            if (ContainsOracleError(reason, "ORA-00904"))
+            {
+                yield return Localization.T("Designer.OracleHintInvalidIdentifier");
+                yield return Localization.T("Designer.OracleHintRefreshAfterObjectChange");
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-01439") || ContainsOracleError(reason, "ORA-22858"))
+            {
+                yield return Localization.T("Designer.OracleHintColumnTypeMigration");
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-01408"))
+            {
+                yield return Localization.T("Designer.OracleHintDuplicateIndexColumns");
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-02264") || ContainsOracleError(reason, "ORA-02261"))
+            {
+                yield return Localization.T("Designer.OracleHintConstraintNameConflict");
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-01950"))
+            {
+                yield return Localization.T("Designer.OracleHintTablespaceQuota");
+                yield break;
+            }
+
             if (ContainsOracleError(reason, "ORA-01735") || ContainsOracleError(reason, "ORA-00922"))
             {
                 yield return Localization.T("Designer.OracleHintAlterSyntax");
@@ -4818,7 +4849,8 @@ namespace mySQLPunk
 
             bool privilegeError = ContainsOracleError(reason, "ORA-01031") || missing.Count > 0;
             bool objectMissingError = ContainsOracleError(reason, "ORA-00942") || ContainsOracleError(reason, "ORA-04043");
-            if (!privilegeError && !objectMissingError) return string.Empty;
+            bool quotaError = ContainsOracleError(reason, "ORA-01950");
+            if (!privilegeError && !objectMissingError && !quotaError) return string.Empty;
 
             string owner = string.IsNullOrWhiteSpace(databaseName) ? "<OWNER>" : databaseName;
             string objectName = string.IsNullOrWhiteSpace(tableName) ? "<TABLE_NAME>" : tableName;
@@ -4856,7 +4888,34 @@ namespace mySQLPunk
                 lines.Add(Localization.Format("Designer.OracleRepairCrossSchemaPolicy", owner));
             }
 
+            AddOracleDbaPolicyTemplate(lines, missing, qualifiedObject, owner, objectName, quotaError);
+
             return string.Join(Environment.NewLine, lines.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        }
+
+        private static void AddOracleDbaPolicyTemplate(List<string> lines, IEnumerable<string> missingPrivileges, string qualifiedObject, string owner, string objectName, bool quotaError)
+        {
+            if (lines == null) return;
+
+            lines.Add(Localization.T("Designer.OracleRepairDbaPolicyTitle"));
+            lines.Add("/* " + Localization.T("Designer.OracleRepairDbaPolicyComment") + " */");
+            lines.Add("-- " + Localization.T("Designer.OracleRepairDbaPolicyObjectCheck"));
+            lines.Add("SELECT owner, object_name, object_type, status FROM dba_objects WHERE UPPER(owner) = UPPER(" + EscapeSqlStringLiteral(owner) + ") AND UPPER(object_name) = UPPER(" + EscapeSqlStringLiteral(objectName) + ");");
+            lines.Add("-- " + Localization.T("Designer.OracleRepairDbaPolicyDirectGrants"));
+            foreach (string privilege in (missingPrivileges ?? new string[0]).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (string grantSql in BuildOracleRepairGrantSql(privilege, qualifiedObject))
+                {
+                    lines.Add(grantSql);
+                }
+            }
+            if (quotaError)
+            {
+                lines.Add("-- " + Localization.T("Designer.OracleRepairDbaPolicyQuota"));
+                lines.Add("SELECT username, default_tablespace FROM dba_users WHERE username = '<SESSION_USER>';");
+                lines.Add("ALTER USER <SESSION_USER> QUOTA <SIZE> ON <TABLESPACE_NAME>;");
+            }
+            lines.Add("-- " + Localization.T("Designer.OracleRepairDbaPolicyReview"));
         }
 
         private static IEnumerable<string> BuildOracleRepairGrantSql(string privilege, string qualifiedObject)

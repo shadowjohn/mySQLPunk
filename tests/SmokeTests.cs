@@ -1937,6 +1937,26 @@ public static class SmokeTests
             BuildOraclePrivilegeTable());
         AssertContains(oracleObjectMissingRepair, "all_objects", "Oracle object missing repair suggestions should include an object existence query.");
         AssertContains(oracleObjectMissingRepair, "GRANT SELECT ON \"MAIN\".\"DEMO_TABLE\" TO <SESSION_USER>;", "Oracle object missing repair suggestions should include SELECT grant SQL.");
+        string invalidIdentifierHints = BuildOracleErrorHints("ORA-00904: invalid identifier", "MAIN", "DEMO_TABLE");
+        AssertContains(invalidIdentifierHints, "識別名稱無效", "Oracle invalid identifier hints should call out metadata or quoted identifier mismatches.");
+        string typeMigrationHints = BuildOracleErrorHints("ORA-01439: column to be modified must be empty to change datatype", "MAIN", "DEMO_TABLE");
+        AssertContains(typeMigrationHints, "新增暫存欄位", "Oracle type migration hints should explain staged column migration.");
+        string duplicateIndexHints = BuildOracleErrorHints("ORA-01408: such column list already indexed", "MAIN", "DEMO_TABLE");
+        AssertContains(duplicateIndexHints, "重複索引", "Oracle duplicate index hints should explain existing column-list indexes.");
+        string constraintConflictHints = BuildOracleErrorHints("ORA-02264: name already used by an existing constraint", "MAIN", "DEMO_TABLE");
+        AssertContains(constraintConflictHints, "constraint 名稱", "Oracle constraint name hints should explain name conflicts.");
+        string quotaHints = BuildOracleErrorHints("ORA-01950: no privileges on tablespace 'USERS'", "MAIN", "DEMO_TABLE");
+        AssertContains(quotaHints, "quota", "Oracle quota hints should mention tablespace quota.");
+        string oracleQuotaRepair = BuildOracleRepairSuggestions(
+            "ORA-01950: no privileges on tablespace 'USERS'",
+            "MAIN",
+            "DEMO_TABLE",
+            "CREATE TABLE \"MAIN\".\"DEMO_TABLE\" (\"ID\" NUMBER);",
+            BuildOraclePrivilegeTable(),
+            BuildOraclePrivilegeTable());
+        AssertContains(oracleQuotaRepair, "DBA 最小授權範本", "Oracle repair suggestions should include a DBA policy template.");
+        AssertContains(oracleQuotaRepair, "dba_users", "Oracle quota repair suggestions should include a DBA user/tablespace check.");
+        AssertContains(oracleQuotaRepair, "ALTER USER <SESSION_USER> QUOTA <SIZE> ON <TABLESPACE_NAME>;", "Oracle quota repair suggestions should include a quota grant template.");
         string highRiskOracleMessage = BuildOracleHighRiskConfirmationMessage(
             "ALTER TABLE \"MAIN\".\"DEMO_TABLE\" DROP COLUMN \"legacy_code\";\nDROP INDEX \"MAIN\".\"IX_DEMO\";");
         AssertContains(highRiskOracleMessage, "高風險 Oracle DDL", "Oracle high-risk confirmation should explain the second confirmation.");
@@ -3922,6 +3942,13 @@ public static class SmokeTests
     {
         MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOracleRepairSuggestions", BindingFlags.Static | BindingFlags.NonPublic);
         return (string)method.Invoke(null, new object[] { reason, databaseName, tableName, sql, objectPrivileges, sessionPrivileges });
+    }
+
+    private static string BuildOracleErrorHints(string reason, string databaseName, string tableName)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("GetOracleDesignerErrorHints", BindingFlags.Static | BindingFlags.NonPublic);
+        IEnumerable<string> hints = (IEnumerable<string>)method.Invoke(null, new object[] { reason, databaseName, tableName });
+        return string.Join("\n", hints.ToArray());
     }
 
     private static DataTable BuildOraclePrivilegeTable(params string[] privileges)

@@ -163,8 +163,8 @@ Smoke test harness：
 
 - **Oracle Table Designer 對權限與物件狀態較敏感 ✅ 預覽提示、權限診斷 SQL、逐步確認清單與高風險二次確認已補齊**
   - 現況：已有多種診斷提示，例如權限不足、物件不存在、跨 schema 權限、語法不符。
-  - 完成內容：Oracle SQL 預覽會在可執行 SQL 前加入註解提示，標示目標物件、直接授權需求（ALTER / CREATE INDEX / DROP / COMMENT 等）與分段執行方式；預覽註解也會依 SQL 變更類型產生逐步確認清單，提醒欄位改名、型別/NULL/DEFAULT 變更、欄位註解、索引與 constraint / Primary Key 等執行前檢查；同時附上 `all_tab_privs` 與 `session_privs` 權限診斷 SQL，方便使用者在套用 DDL 前先確認目前帳號對目標物件的直接授權與系統權限；若儲存 SQL 偵測到 Oracle `DROP COLUMN`、`DROP INDEX` 或 `DROP CONSTRAINT`，會在一般 SQL 確認後再顯示一次高風險 DDL 確認；儲存判斷也改成檢查是否存在真正可執行 SQL，避免預覽註解誤擋操作；Oracle DDL 執行失敗時會嘗試查詢並解析 `all_tab_privs` / `session_privs` 結果，把目前直接授權、Session 系統權限與可能缺少的權限摘要加入錯誤訊息；若偵測到權限不足或物件不可見，錯誤訊息會附上可操作修復建議，包含確認 `SESSION_USER` / `CURRENT_SCHEMA`、檢查 `session_roles`、直接授權範例 SQL，以及跨 schema DDL policy 提醒。
-  - 後續方向：若需要更完整的 Oracle 風險控管，可再補更多實機錯誤碼案例與 DBA policy 範本。
+  - 完成內容：Oracle SQL 預覽會在可執行 SQL 前加入註解提示，標示目標物件、直接授權需求（ALTER / CREATE INDEX / DROP / COMMENT 等）與分段執行方式；預覽註解也會依 SQL 變更類型產生逐步確認清單，提醒欄位改名、型別/NULL/DEFAULT 變更、欄位註解、索引與 constraint / Primary Key 等執行前檢查；同時附上 `all_tab_privs` 與 `session_privs` 權限診斷 SQL，方便使用者在套用 DDL 前先確認目前帳號對目標物件的直接授權與系統權限；若儲存 SQL 偵測到 Oracle `DROP COLUMN`、`DROP INDEX` 或 `DROP CONSTRAINT`，會在一般 SQL 確認後再顯示一次高風險 DDL 確認；儲存判斷也改成檢查是否存在真正可執行 SQL，避免預覽註解誤擋操作；Oracle DDL 執行失敗時會嘗試查詢並解析 `all_tab_privs` / `session_privs` 結果，把目前直接授權、Session 系統權限與可能缺少的權限摘要加入錯誤訊息；若偵測到權限不足、物件不可見或 tablespace quota 問題，錯誤訊息會附上可操作修復建議，包含確認 `SESSION_USER` / `CURRENT_SCHEMA`、檢查 `session_roles`、直接授權範例 SQL、DBA 最小授權/配額範本，以及跨 schema DDL policy 提醒；常見 Oracle 實機錯誤碼也已補上提示，包含 `ORA-00904`、`ORA-01439`、`ORA-01408`、`ORA-02264`、`ORA-02261`、`ORA-01950` 與既有權限/物件/constraint 類錯誤。
+  - 後續方向：若需要更完整的 Oracle 風險控管，可再補更多實機 DDL 案例與團隊核准流程整合。
 
 ### 資料瀏覽與儲存限制
 
