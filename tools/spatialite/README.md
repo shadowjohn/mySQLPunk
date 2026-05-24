@@ -17,6 +17,7 @@
 腳本會：
 
 - 從 Gaia-SINS 官方來源下載 `libspatialite-5.1.0.zip`
+- 下載成功後把來源 zip 快取到 `tools/spatialite/cache/libspatialite-5.1.0.zip`
 - 透過 MSYS2 安裝 mingw64 相依套件
 - 執行 `configure`、`make`、`make install`
 - 複製 `mod_spatialite.dll` 或 `libspatialite.dll`、相依 DLL、`sqlite3.exe`、`proj.db`
@@ -26,6 +27,18 @@
 
 ```powershell
 .\tools\spatialite\Build-SpatiaLiteRuntime.ps1 -ExpectedSha256 "<官方來源 zip 的 SHA256>"
+```
+
+若環境無法連線，可先把官方來源 zip 放到 `tools/spatialite/offline/libspatialite-5.1.0.zip`，再執行：
+
+```powershell
+.\tools\spatialite\Build-SpatiaLiteRuntime.ps1 -OfflinePackagePath ".\tools\spatialite\offline\libspatialite-5.1.0.zip"
+```
+
+若要優先使用上次下載成功的快取，可執行：
+
+```powershell
+.\tools\spatialite\Build-SpatiaLiteRuntime.ps1 -PreferCachedSource
 ```
 
 ## 引入專案

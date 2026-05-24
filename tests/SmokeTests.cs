@@ -2666,10 +2666,22 @@ public static class SmokeTests
     {
         string root = Path.Combine(Path.GetTempPath(), "mysqlpunk_spatialite_" + Guid.NewGuid().ToString("N"));
         string toolsDir = Path.Combine(root, "tools", "spatialite");
+        string cacheDir = Path.Combine(toolsDir, "cache");
+        string offlineDir = Path.Combine(toolsDir, "offline");
         string runtimeDir = Path.Combine(root, "runtime");
         Directory.CreateDirectory(toolsDir);
+        Directory.CreateDirectory(cacheDir);
+        Directory.CreateDirectory(offlineDir);
         Directory.CreateDirectory(runtimeDir);
         File.WriteAllText(Path.Combine(toolsDir, "Build-SpatiaLiteRuntime.ps1"), "# test", Encoding.UTF8);
+        string sourceArchivePath = Path.Combine(cacheDir, "libspatialite-5.1.0.zip");
+        string offlineArchivePath = Path.Combine(offlineDir, "libspatialite-5.1.0.zip");
+        File.WriteAllText(sourceArchivePath, "cached source", Encoding.UTF8);
+        File.WriteAllText(offlineArchivePath, "offline source", Encoding.UTF8);
+        File.WriteAllText(
+            Path.Combine(runtimeDir, "SPATIALITE_RUNTIME_MANIFEST.json"),
+            "{\"source_url\":\"https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip\",\"source_sha256\":\"abc123\",\"built_at_utc\":\"2026-05-24T00:00:00Z\"}",
+            Encoding.UTF8);
 
         try
         {
@@ -2681,6 +2693,13 @@ public static class SmokeTests
             AssertContains(details, "SpatiaLite Repair Script|Ready", "SpatiaLite diagnostics should detect the rebuild script.");
             AssertContains(details, "Build-SpatiaLiteRuntime.ps1", "SpatiaLite diagnostics should show the rebuild script path.");
             AssertContains(details, "powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should show a runnable repair command.");
+            AssertContains(details, "SpatiaLite Manifest Source|Info|來源：https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip", "SpatiaLite diagnostics should summarize the runtime manifest source.");
+            AssertContains(details, "SHA-256：abc123", "SpatiaLite diagnostics should show the manifest source checksum.");
+            AssertContains(details, "SpatiaLite Source Cache|Ready|" + sourceArchivePath, "SpatiaLite diagnostics should detect the cached source archive.");
+            AssertContains(details, "SpatiaLite Offline Package|Ready|" + offlineArchivePath, "SpatiaLite diagnostics should detect the offline source package.");
+            AssertContains(details, "SpatiaLite Cached Repair Command|Info|powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should expose a cached repair command.");
+            AssertContains(details, "-PreferCachedSource", "SpatiaLite cached repair command should prefer the cached source archive.");
+            AssertContains(details, "-OfflinePackagePath", "SpatiaLite cached repair command should use a detected offline package.");
             AssertContains(details, "SpatiaLite Repair Log|Info", "SpatiaLite diagnostics should show the repair log path.");
             AssertContains(details, "SpatiaLite Missing DLL|Warning", "SpatiaLite diagnostics should warn when mod_spatialite.dll is missing.");
             AssertContains(details, "missing mod_spatialite", "SpatiaLite diagnostics should keep the load error.");
