@@ -206,6 +206,24 @@ public static class SmokeTests
         string pgJsonSql = (string)GetProperty(pgJsonPreview, "ConvertedSql");
         AssertContains(pgJsonSql, "payload #>> '{user,name}'", "Converted PostgreSQL SQL should use text JSON path extraction.");
 
+        object pgJsonUnquoteExtractPreview = BuildViewSqlPreview(
+            "SELECT JSON_UNQUOTE(JSON_EXTRACT(payload, '$.user.name')) AS user_name FROM event_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonUnquoteExtractPreview, "CanConvert"), "MySQL JSON_UNQUOTE(JSON_EXTRACT) should convert to PostgreSQL.");
+        string pgJsonUnquoteExtractSql = (string)GetProperty(pgJsonUnquoteExtractPreview, "ConvertedSql");
+        AssertContains(pgJsonUnquoteExtractSql, "payload #>> '{user,name}'", "Converted PostgreSQL SQL should use text JSON path extraction for JSON_UNQUOTE(JSON_EXTRACT).");
+        AssertNotContains(pgJsonUnquoteExtractSql, "JSON_UNQUOTE", "Converted PostgreSQL SQL should remove JSON_UNQUOTE.");
+
+        object mssqlJsonUnquoteExtractPreview = BuildViewSqlPreview(
+            "SELECT JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status')) AS status_text FROM event_log",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlJsonUnquoteExtractPreview, "CanConvert"), "MySQL JSON_UNQUOTE(JSON_EXTRACT) should convert to SQL Server.");
+        string mssqlJsonUnquoteExtractSql = (string)GetProperty(mssqlJsonUnquoteExtractPreview, "ConvertedSql");
+        AssertContains(mssqlJsonUnquoteExtractSql, "JSON_VALUE(payload, '$.status')", "Converted SQL Server SQL should use JSON_VALUE for JSON_UNQUOTE(JSON_EXTRACT).");
+        AssertNotContains(mssqlJsonUnquoteExtractSql, "JSON_UNQUOTE", "Converted SQL Server SQL should remove JSON_UNQUOTE.");
+
         object mysqlJsonValuePreview = BuildViewSqlPreview(
             "SELECT JSON_VALUE(payload, '$.status') AS status_text FROM event_log",
             "mssql",

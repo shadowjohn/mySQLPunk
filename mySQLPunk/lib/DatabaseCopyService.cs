@@ -537,9 +537,11 @@ namespace mySQLPunk.lib
             sql = RewriteJsonConstructorFunctions(sql, targetProvider);
             sql = RewriteJsonExistsFunctions(sql, targetProvider);
             sql = RewriteJsonLengthFunctions(sql, targetProvider);
+            sql = RewriteMySqlJsonUnquoteExtractFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonQueryFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
+            sql = RewriteJsonUnquoteWrappers(sql, targetProvider);
 
             return sql;
         }
@@ -2561,6 +2563,57 @@ namespace mySQLPunk.lib
                     return m.Value;
                 },
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteMySqlJsonUnquoteExtractFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bJSON_UNQUOTE\s*\(\s*JSON_EXTRACT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<path>\$[^']*)'\s*\)\s*\)",
+                m => BuildJsonExtractionForTarget(
+                    targetProvider,
+                    m.Groups["expr"].Value.Trim(),
+                    m.Groups["path"].Value,
+                    true,
+                    m.Value),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteJsonUnquoteWrappers(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            string sql = selectSql ?? string.Empty;
+            int searchIndex = 0;
+            while (searchIndex < sql.Length)
+            {
+                int functionIndex = FindNextFunctionCall(sql, new[] { "JSON_UNQUOTE" }, searchIndex, out _);
+                if (functionIndex < 0) break;
+
+                int openParen = SkipWhitespaceRight(sql, functionIndex + "JSON_UNQUOTE".Length);
+                if (openParen >= sql.Length || sql[openParen] != '(')
+                {
+                    searchIndex = functionIndex + "JSON_UNQUOTE".Length;
+                    continue;
+                }
+
+                int closeParen = FindMatchingCloseParen(sql, openParen);
+                if (closeParen < 0) break;
+
+                string inner = sql.Substring(openParen + 1, closeParen - openParen - 1).Trim();
+                if (string.IsNullOrWhiteSpace(inner))
+                {
+                    searchIndex = closeParen + 1;
+                    continue;
+                }
+
+                sql = sql.Substring(0, functionIndex) + inner + sql.Substring(closeParen + 1);
+                searchIndex = functionIndex + inner.Length;
+            }
+
+            return sql;
         }
 
         private static string RewritePostgreSqlJsonOperators(string selectSql, string targetProvider)
