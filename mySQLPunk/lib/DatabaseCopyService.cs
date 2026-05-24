@@ -534,6 +534,7 @@ namespace mySQLPunk.lib
             sql = RewritePatternMatchOperators(sql, targetProvider);
             sql = RewriteJsonTableExpressions(sql, targetProvider);
             sql = RewritePostgreSqlJsonOperators(sql, targetProvider);
+            sql = RewriteJsonConstructorFunctions(sql, targetProvider);
             sql = RewriteJsonExistsFunctions(sql, targetProvider);
             sql = RewriteJsonLengthFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
@@ -2707,6 +2708,105 @@ namespace mySQLPunk.lib
                 return "JSON_EXISTS(" + expr + ", '" + escapedPath + "')";
             }
 
+            return original;
+        }
+
+        private static string RewriteJsonConstructorFunctions(string selectSql, string targetProvider)
+        {
+            string sql = RewriteJsonConstructorFunctionCalls(
+                selectSql,
+                targetProvider,
+                true,
+                new[] { "JSON_OBJECT", "json_object", "JSON_BUILD_OBJECT", "JSONB_BUILD_OBJECT", "json_build_object", "jsonb_build_object" });
+
+            return RewriteJsonConstructorFunctionCalls(
+                sql,
+                targetProvider,
+                false,
+                new[] { "JSON_ARRAY", "json_array", "JSON_BUILD_ARRAY", "JSONB_BUILD_ARRAY", "json_build_array", "jsonb_build_array" });
+        }
+
+        private static string RewriteJsonConstructorFunctionCalls(string selectSql, string targetProvider, bool objectConstructor, string[] functionNames)
+        {
+            string sql = selectSql ?? string.Empty;
+            int searchIndex = 0;
+            while (searchIndex < sql.Length)
+            {
+                string functionName;
+                int functionIndex = FindNextFunctionCall(sql, functionNames, searchIndex, out functionName);
+                if (functionIndex < 0) break;
+
+                int openParen = SkipWhitespaceRight(sql, functionIndex + functionName.Length);
+                if (openParen >= sql.Length || sql[openParen] != '(')
+                {
+                    searchIndex = functionIndex + functionName.Length;
+                    continue;
+                }
+
+                int closeParen = FindMatchingCloseParen(sql, openParen);
+                if (closeParen < 0) break;
+
+                string argsText = sql.Substring(openParen + 1, closeParen - openParen - 1);
+                List<string> args = SplitTopLevelSqlList(argsText);
+                string original = sql.Substring(functionIndex, closeParen - functionIndex + 1);
+                string replacement = objectConstructor
+                    ? BuildJsonObjectConstructor(targetProvider, args, original)
+                    : BuildJsonArrayConstructor(targetProvider, args, original);
+
+                if (string.IsNullOrWhiteSpace(replacement) || string.Equals(replacement, original, StringComparison.Ordinal))
+                {
+                    searchIndex = closeParen + 1;
+                    continue;
+                }
+
+                sql = sql.Substring(0, functionIndex) + replacement + sql.Substring(closeParen + 1);
+                searchIndex = functionIndex + replacement.Length;
+            }
+
+            return sql;
+        }
+
+        private static int FindNextFunctionCall(string sql, string[] functionNames, int startIndex, out string functionName)
+        {
+            functionName = "";
+            int bestIndex = -1;
+            foreach (string candidate in functionNames ?? new string[0])
+            {
+                int index = IndexOfKeyword(sql, candidate, startIndex);
+                if (index < 0) continue;
+                if (bestIndex < 0 || index < bestIndex)
+                {
+                    bestIndex = index;
+                    functionName = candidate;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private static string BuildJsonObjectConstructor(string targetProvider, List<string> args, string original)
+        {
+            if (args == null || args.Count == 0 || args.Count % 2 != 0) return original;
+            if (targetProvider == "postgresql") return "jsonb_build_object(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "sqlite") return "json_object(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "mysql") return "JSON_OBJECT(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider != "oracle") return original;
+
+            List<string> pairs = new List<string>();
+            for (int i = 0; i + 1 < args.Count; i += 2)
+            {
+                pairs.Add("KEY " + args[i] + " VALUE " + args[i + 1]);
+            }
+            return "JSON_OBJECT(" + string.Join(", ", pairs.ToArray()) + ")";
+        }
+
+        private static string BuildJsonArrayConstructor(string targetProvider, List<string> args, string original)
+        {
+            if (args == null || args.Count == 0) return original;
+            if (targetProvider == "postgresql") return "jsonb_build_array(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "sqlite") return "json_array(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "mysql") return "JSON_ARRAY(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "oracle") return "JSON_ARRAY(" + string.Join(", ", args.ToArray()) + ")";
             return original;
         }
 

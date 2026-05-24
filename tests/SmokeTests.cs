@@ -343,6 +343,44 @@ public static class SmokeTests
         string sqliteJsonLengthSql = (string)GetProperty(sqliteJsonLengthPreview, "ConvertedSql");
         AssertContains(sqliteJsonLengthSql, "json_array_length(payload, '$.items')", "Converted SQLite SQL should use json_array_length.");
 
+        object pgJsonConstructorPreview = BuildViewSqlPreview(
+            "SELECT JSON_OBJECT('id', id, 'name', user_name) AS payload, JSON_ARRAY(id, user_name) AS tuple_json FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonConstructorPreview, "CanConvert"), "MySQL JSON constructors should convert to PostgreSQL.");
+        string pgJsonConstructorSql = (string)GetProperty(pgJsonConstructorPreview, "ConvertedSql");
+        AssertContains(pgJsonConstructorSql, "jsonb_build_object('id', id, 'name', user_name)", "Converted PostgreSQL SQL should use jsonb_build_object.");
+        AssertContains(pgJsonConstructorSql, "jsonb_build_array(id, user_name)", "Converted PostgreSQL SQL should use jsonb_build_array.");
+        AssertNotContains(pgJsonConstructorSql, "JSON_OBJECT(", "Converted PostgreSQL SQL should remove JSON_OBJECT.");
+
+        object mysqlJsonConstructorPreview = BuildViewSqlPreview(
+            "SELECT jsonb_build_object('id', id, 'name', user_name) AS payload, jsonb_build_array(id, user_name) AS tuple_json FROM users",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlJsonConstructorPreview, "CanConvert"), "PostgreSQL JSON constructors should convert to MySQL.");
+        string mysqlJsonConstructorSql = (string)GetProperty(mysqlJsonConstructorPreview, "ConvertedSql");
+        AssertContains(mysqlJsonConstructorSql, "JSON_OBJECT('id', id, 'name', user_name)", "Converted MySQL SQL should use JSON_OBJECT.");
+        AssertContains(mysqlJsonConstructorSql, "JSON_ARRAY(id, user_name)", "Converted MySQL SQL should use JSON_ARRAY.");
+        AssertNotContains(mysqlJsonConstructorSql, "jsonb_build_object", "Converted MySQL SQL should remove jsonb_build_object.");
+
+        object sqliteJsonConstructorPreview = BuildViewSqlPreview(
+            "SELECT JSON_OBJECT('id', id, 'name', user_name) AS payload, JSON_ARRAY(id, user_name) AS tuple_json FROM users",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteJsonConstructorPreview, "CanConvert"), "MySQL JSON constructors should convert to SQLite.");
+        string sqliteJsonConstructorSql = (string)GetProperty(sqliteJsonConstructorPreview, "ConvertedSql");
+        AssertContains(sqliteJsonConstructorSql, "json_object('id', id, 'name', user_name)", "Converted SQLite SQL should use json_object.");
+        AssertContains(sqliteJsonConstructorSql, "json_array(id, user_name)", "Converted SQLite SQL should use json_array.");
+
+        object oracleJsonConstructorPreview = BuildViewSqlPreview(
+            "SELECT JSON_OBJECT('id', id, 'name', user_name) AS payload, JSON_ARRAY(id, user_name) AS tuple_json FROM users",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleJsonConstructorPreview, "CanConvert"), "MySQL JSON constructors should convert to Oracle.");
+        string oracleJsonConstructorSql = (string)GetProperty(oracleJsonConstructorPreview, "ConvertedSql");
+        AssertContains(oracleJsonConstructorSql, "JSON_OBJECT(KEY 'id' VALUE id, KEY 'name' VALUE user_name)", "Converted Oracle SQL should use KEY VALUE JSON_OBJECT syntax.");
+        AssertContains(oracleJsonConstructorSql, "JSON_ARRAY(id, user_name)", "Converted Oracle SQL should keep JSON_ARRAY.");
+
         object pgJsonTablePreview = BuildViewSqlPreview(
             "SELECT jt.item_id, jt.item_name FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (item_id INT PATH '$.id', item_name VARCHAR(80) PATH '$.name')) AS jt",
             "mysql",
