@@ -779,6 +779,10 @@ namespace mySQLPunk
             Add("Designer.OracleHighRiskDropConstraint", "會刪除 constraint；請確認資料完整性規則與應用程式依賴。", "Constraints will be dropped; confirm integrity rules and application dependencies.");
             Add("Designer.OracleHighRiskConfirmContinue", "確定仍要執行嗎？", "Continue anyway?");
             Add("Designer.OraclePreviewPrivilegeQueryHint", "可先執行下列權限診斷 SQL，確認目前帳號對目標物件的直接授權與系統權限。", "You can run the following privilege diagnostic SQL first to confirm direct grants and system privileges for the target object.");
+            Add("Designer.OraclePrivilegeSummary", "權限查詢結果：物件直接授權：{0}；Session 系統權限：{1}；可能缺少：{2}。", "Privilege query result: object grants: {0}; session system privileges: {1}; possibly missing: {2}.");
+            Add("Designer.OraclePrivilegeNone", "未取得", "None detected");
+            Add("Designer.OraclePrivilegeNoMissing", "未偵測到明顯缺口", "No obvious gap detected");
+            Add("Designer.OraclePrivilegeDiagnosticFailed", "權限查詢結果無法解析：{0}", "Privilege query result could not be parsed: {0}");
             Add("Designer.CurrentSchema", "目前 schema", "current schema");
             Add("Designer.CurrentTable", "目前資料表", "current table");
             Add("Designer.OracleHintInsufficientPrivileges", "目前帳號沒有足夠權限執行這個 DDL。請確認已直接授權 ALTER、CREATE TABLE、CREATE VIEW、CREATE INDEX、DROP 或 COMMENT 等需要的權限；Oracle 的 role 權限在部分 DDL 情境可能不會生效。", "The current account does not have enough privileges to execute this DDL. Confirm that ALTER, CREATE TABLE, CREATE VIEW, CREATE INDEX, DROP, COMMENT, or other required privileges are granted directly; Oracle role privileges may not apply in some DDL contexts.");

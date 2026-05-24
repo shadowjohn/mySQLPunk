@@ -4549,18 +4549,34 @@ namespace mySQLPunk
 
         private static IEnumerable<string> BuildOraclePrivilegeDiagnosticSql(string databaseName, string tableName)
         {
+            foreach (string line in BuildOracleObjectPrivilegeDiagnosticSql(databaseName, tableName).Split(new[] { "\r\n" }, StringSplitOptions.None))
+            {
+                yield return line;
+            }
+            foreach (string line in BuildOracleSessionPrivilegeDiagnosticSql().Split(new[] { "\r\n" }, StringSplitOptions.None))
+            {
+                yield return line;
+            }
+        }
+
+        private static string BuildOracleObjectPrivilegeDiagnosticSql(string databaseName, string tableName)
+        {
             string owner = string.IsNullOrWhiteSpace(databaseName) ? "USER" : "UPPER(" + EscapeSqlStringLiteral(databaseName) + ")";
             string objectName = string.IsNullOrWhiteSpace(tableName) ? "UPPER(USER)" : "UPPER(" + EscapeSqlStringLiteral(tableName) + ")";
-            yield return "SELECT owner, table_name, privilege, grantor";
-            yield return "FROM all_tab_privs";
-            yield return "WHERE UPPER(owner) = " + owner;
-            yield return "  AND UPPER(table_name) = " + objectName;
-            yield return "  AND privilege IN ('ALTER', 'INDEX', 'SELECT', 'INSERT', 'UPDATE', 'DELETE')";
-            yield return "ORDER BY owner, table_name, privilege;";
-            yield return "SELECT privilege";
-            yield return "FROM session_privs";
-            yield return "WHERE privilege IN ('ALTER ANY TABLE', 'CREATE ANY INDEX', 'CREATE ANY TABLE', 'COMMENT ANY TABLE', 'DROP ANY TABLE')";
-            yield return "ORDER BY privilege;";
+            return "SELECT owner, table_name, privilege, grantor\r\n" +
+                   "FROM all_tab_privs\r\n" +
+                   "WHERE UPPER(owner) = " + owner + "\r\n" +
+                   "  AND UPPER(table_name) = " + objectName + "\r\n" +
+                   "  AND privilege IN ('ALTER', 'INDEX', 'SELECT', 'INSERT', 'UPDATE', 'DELETE')\r\n" +
+                   "ORDER BY owner, table_name, privilege;";
+        }
+
+        private static string BuildOracleSessionPrivilegeDiagnosticSql()
+        {
+            return "SELECT privilege\r\n" +
+                   "FROM session_privs\r\n" +
+                   "WHERE privilege IN ('ALTER ANY TABLE', 'CREATE ANY INDEX', 'CREATE ANY TABLE', 'COMMENT ANY TABLE', 'DROP ANY TABLE')\r\n" +
+                   "ORDER BY privilege;";
         }
 
         private Dictionary<string, string> ExecuteDesignerSql(string sql)
@@ -4587,6 +4603,7 @@ namespace mySQLPunk
                         {
                             lastResult["statement"] = normalizedStatement;
                         }
+                        AddOraclePrivilegeDiagnosticResult(lastResult, sql);
                         RollbackDesignerTransactionIfNeeded(transactionStarted, sqliteForeignKeysDisabled);
                         return lastResult;
                     }
@@ -4618,8 +4635,31 @@ namespace mySQLPunk
                 {
                     { "status", "ERROR" },
                     { "reason", ex.Message },
-                    { "statement", currentStatement }
+                    { "statement", currentStatement },
+                    { "oraclePrivilegeSummary", BuildOraclePrivilegeDiagnosticSummarySafe(sql) }
                 };
+            }
+        }
+
+        private void AddOraclePrivilegeDiagnosticResult(Dictionary<string, string> result, string sql)
+        {
+            if (!(_db is my_oracle) || result == null) return;
+            string summary = BuildOraclePrivilegeDiagnosticSummarySafe(sql);
+            if (!string.IsNullOrWhiteSpace(summary)) result["oraclePrivilegeSummary"] = summary;
+        }
+
+        private string BuildOraclePrivilegeDiagnosticSummarySafe(string sql)
+        {
+            try
+            {
+                if (!(_db is my_oracle)) return string.Empty;
+                DataTable objectPrivileges = _db.SelectSQL(BuildOracleObjectPrivilegeDiagnosticSql(_databaseName, GetTableNameForSave()));
+                DataTable sessionPrivileges = _db.SelectSQL(BuildOracleSessionPrivilegeDiagnosticSql());
+                return BuildOraclePrivilegeDiagnosticSummary(objectPrivileges, sessionPrivileges, sql);
+            }
+            catch (Exception ex)
+            {
+                return Localization.Format("Designer.OraclePrivilegeDiagnosticFailed", ex.Message);
             }
         }
 
@@ -4638,6 +4678,11 @@ namespace mySQLPunk
                 foreach (string hint in GetOracleDesignerErrorHints(reason, databaseName, tableName))
                 {
                     lines.Add("- " + hint);
+                }
+                string privilegeSummary = GetResultValue(result, "oraclePrivilegeSummary");
+                if (!string.IsNullOrWhiteSpace(privilegeSummary))
+                {
+                    lines.Add("- " + privilegeSummary);
                 }
             }
 
@@ -4702,6 +4747,103 @@ namespace mySQLPunk
             }
 
             yield return Localization.Format("Designer.OracleHintGeneric", owner, objectName);
+        }
+
+        private static string BuildOraclePrivilegeDiagnosticSummary(DataTable objectPrivileges, DataTable sessionPrivileges, string sql)
+        {
+            HashSet<string> objectGrantSet = ExtractOraclePrivilegeSet(objectPrivileges);
+            HashSet<string> sessionPrivilegeSet = ExtractOraclePrivilegeSet(sessionPrivileges);
+            List<string> required = BuildOracleRequiredPrivilegeLabels(sql).ToList();
+            List<string> missing = new List<string>();
+
+            foreach (string privilege in required)
+            {
+                if (OracleRequiredPrivilegeSatisfied(privilege, objectGrantSet, sessionPrivilegeSet)) continue;
+                missing.Add(privilege);
+            }
+
+            string objectText = objectGrantSet.Count == 0
+                ? Localization.T("Designer.OraclePrivilegeNone")
+                : string.Join(", ", objectGrantSet.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToArray());
+            string sessionText = sessionPrivilegeSet.Count == 0
+                ? Localization.T("Designer.OraclePrivilegeNone")
+                : string.Join(", ", sessionPrivilegeSet.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToArray());
+            string missingText = missing.Count == 0
+                ? Localization.T("Designer.OraclePrivilegeNoMissing")
+                : string.Join(", ", missing.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToArray());
+
+            return Localization.Format("Designer.OraclePrivilegeSummary", objectText, sessionText, missingText);
+        }
+
+        private static IEnumerable<string> BuildOracleRequiredPrivilegeLabels(string sql)
+        {
+            string source = sql ?? string.Empty;
+            List<string> required = new List<string>();
+            if (Regex.IsMatch(source, @"\bALTER\s+TABLE\b", RegexOptions.IgnoreCase)) required.Add("ALTER");
+            if (Regex.IsMatch(source, @"\bCREATE\s+(UNIQUE\s+)?INDEX\b|\bCREATE\s+FULLTEXT\s+INDEX\b", RegexOptions.IgnoreCase)) required.Add("INDEX");
+            if (Regex.IsMatch(source, @"\bCOMMENT\s+ON\s+(TABLE|COLUMN)\b", RegexOptions.IgnoreCase)) required.Add("COMMENT ANY TABLE");
+            if (Regex.IsMatch(source, @"\bDROP\s+TABLE\b", RegexOptions.IgnoreCase)) required.Add("DROP ANY TABLE");
+            if (Regex.IsMatch(source, @"\bCREATE\s+TABLE\b", RegexOptions.IgnoreCase)) required.Add("CREATE ANY TABLE");
+            return required.Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool OracleRequiredPrivilegeSatisfied(string privilege, HashSet<string> objectGrants, HashSet<string> sessionPrivileges)
+        {
+            if (string.Equals(privilege, "ALTER", StringComparison.OrdinalIgnoreCase))
+            {
+                return objectGrants.Contains("ALTER") || sessionPrivileges.Contains("ALTER ANY TABLE");
+            }
+            if (string.Equals(privilege, "INDEX", StringComparison.OrdinalIgnoreCase))
+            {
+                return objectGrants.Contains("INDEX") || sessionPrivileges.Contains("CREATE ANY INDEX");
+            }
+            if (string.Equals(privilege, "COMMENT ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                return sessionPrivileges.Contains("COMMENT ANY TABLE");
+            }
+            if (string.Equals(privilege, "DROP ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                return sessionPrivileges.Contains("DROP ANY TABLE");
+            }
+            if (string.Equals(privilege, "CREATE ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                return sessionPrivileges.Contains("CREATE ANY TABLE");
+            }
+            return objectGrants.Contains(privilege) || sessionPrivileges.Contains(privilege);
+        }
+
+        private static HashSet<string> ExtractOraclePrivilegeSet(DataTable table)
+        {
+            HashSet<string> output = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (table == null) return output;
+
+            string columnName = FindDataColumnName(table, "PRIVILEGE", "Privilege", "privilege");
+            if (string.IsNullOrWhiteSpace(columnName)) return output;
+
+            foreach (DataRow row in table.Rows)
+            {
+                if (row[columnName] == null || row[columnName] == DBNull.Value) continue;
+                string value = row[columnName].ToString().Trim().ToUpperInvariant();
+                if (!string.IsNullOrWhiteSpace(value)) output.Add(value);
+            }
+            return output;
+        }
+
+        private static string FindDataColumnName(DataTable table, params string[] names)
+        {
+            if (table == null || names == null) return string.Empty;
+            foreach (string name in names)
+            {
+                if (table.Columns.Contains(name)) return name;
+            }
+            foreach (DataColumn column in table.Columns)
+            {
+                foreach (string name in names)
+                {
+                    if (string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase)) return column.ColumnName;
+                }
+            }
+            return string.Empty;
         }
 
         private static bool ContainsOracleError(string reason, string code)

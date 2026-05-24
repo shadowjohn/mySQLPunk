@@ -1904,6 +1904,18 @@ public static class SmokeTests
         AssertContains(oraclePreview, "FROM all_tab_privs", "Oracle preview should include object privilege diagnostic query.");
         AssertContains(oraclePreview, "FROM session_privs", "Oracle preview should include system privilege diagnostic query.");
         AssertContains(oraclePreview, "UPPER(owner) = UPPER('MAIN')", "Oracle privilege diagnostic should target the selected schema.");
+        string oraclePrivilegeSummary = BuildOraclePrivilegeDiagnosticSummary(
+            BuildOraclePrivilegeTable("ALTER"),
+            BuildOraclePrivilegeTable("CREATE ANY INDEX"),
+            oracleSql);
+        AssertContains(oraclePrivilegeSummary, "物件直接授權：ALTER", "Oracle privilege parser should summarize direct object grants.");
+        AssertContains(oraclePrivilegeSummary, "Session 系統權限：CREATE ANY INDEX", "Oracle privilege parser should summarize session privileges.");
+        AssertContains(oraclePrivilegeSummary, "可能缺少：COMMENT ANY TABLE", "Oracle privilege parser should report missing privileges needed by the preview SQL.");
+        string oraclePrivilegeCompleteSummary = BuildOraclePrivilegeDiagnosticSummary(
+            BuildOraclePrivilegeTable("ALTER", "INDEX"),
+            BuildOraclePrivilegeTable("COMMENT ANY TABLE"),
+            oracleSql);
+        AssertContains(oraclePrivilegeCompleteSummary, "未偵測到明顯缺口", "Oracle privilege parser should recognize when required grants are present.");
         string highRiskOracleMessage = BuildOracleHighRiskConfirmationMessage(
             "ALTER TABLE \"MAIN\".\"DEMO_TABLE\" DROP COLUMN \"legacy_code\";\nDROP INDEX \"MAIN\".\"IX_DEMO\";");
         AssertContains(highRiskOracleMessage, "高風險 Oracle DDL", "Oracle high-risk confirmation should explain the second confirmation.");
@@ -3585,6 +3597,23 @@ public static class SmokeTests
     {
         MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOracleHighRiskConfirmationMessage", BindingFlags.Static | BindingFlags.NonPublic);
         return (string)method.Invoke(null, new object[] { sql });
+    }
+
+    private static string BuildOraclePrivilegeDiagnosticSummary(DataTable objectPrivileges, DataTable sessionPrivileges, string sql)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOraclePrivilegeDiagnosticSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { objectPrivileges, sessionPrivileges, sql });
+    }
+
+    private static DataTable BuildOraclePrivilegeTable(params string[] privileges)
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("PRIVILEGE");
+        foreach (string privilege in privileges)
+        {
+            table.Rows.Add(privilege);
+        }
+        return table;
     }
 
     private static string BuildGenericCreateIndexSql(IDatabase db, string databaseName, string tableName, DataTable indexes)
