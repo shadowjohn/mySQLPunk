@@ -8,6 +8,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Windows.Forms;
 using mySQLPunk;
@@ -2802,9 +2803,12 @@ public static class SmokeTests
         string offlineArchivePath = Path.Combine(offlineDir, "libspatialite-5.1.0.zip");
         File.WriteAllText(sourceArchivePath, "cached source", Encoding.UTF8);
         File.WriteAllText(offlineArchivePath, "offline source", Encoding.UTF8);
+        string runtimeDllPath = Path.Combine(runtimeDir, "libspatialite.dll");
+        File.WriteAllText(runtimeDllPath, "runtime dll", Encoding.UTF8);
+        string runtimeDllHash = ComputeFileSha256ForTest(runtimeDllPath);
         File.WriteAllText(
             Path.Combine(runtimeDir, "SPATIALITE_RUNTIME_MANIFEST.json"),
-            "{\"source_url\":\"https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip\",\"source_sha256\":\"abc123\",\"built_at_utc\":\"2026-05-24T00:00:00Z\"}",
+            "{\"source_url\":\"https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip\",\"source_sha256\":\"abc123\",\"built_at_utc\":\"2026-05-24T00:00:00Z\",\"files\":[{\"name\":\"libspatialite.dll\",\"sha256\":\"" + runtimeDllHash + "\",\"bytes\":" + new FileInfo(runtimeDllPath).Length + "},{\"name\":\"missing_dependency.dll\",\"sha256\":\"deadbeef\",\"bytes\":12},{\"name\":\"../outside.dll\",\"sha256\":\"deadbeef\",\"bytes\":12}]}",
             Encoding.UTF8);
 
         try
@@ -2819,6 +2823,9 @@ public static class SmokeTests
             AssertContains(details, "powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should show a runnable repair command.");
             AssertContains(details, "SpatiaLite Manifest Source|Info|來源：https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip", "SpatiaLite diagnostics should summarize the runtime manifest source.");
             AssertContains(details, "SHA-256：abc123", "SpatiaLite diagnostics should show the manifest source checksum.");
+            AssertContains(details, "SpatiaLite Runtime File Verification|Warning|已校驗 1，缺少 1", "SpatiaLite diagnostics should verify manifest files and report missing runtime dependencies.");
+            AssertContains(details, "missing_dependency.dll 缺少", "SpatiaLite manifest verification should name missing runtime files.");
+            AssertContains(details, "../outside.dll 檔名不安全", "SpatiaLite manifest verification should reject paths outside the runtime directory.");
             AssertContains(details, "SpatiaLite Source Cache|Ready|" + sourceArchivePath, "SpatiaLite diagnostics should detect the cached source archive.");
             AssertContains(details, "SpatiaLite Offline Package|Ready|" + offlineArchivePath, "SpatiaLite diagnostics should detect the offline source package.");
             AssertContains(details, "SpatiaLite Cached Repair Command|Info|powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should expose a cached repair command.");
@@ -2840,6 +2847,14 @@ public static class SmokeTests
             AssertContains(watchedStartInfo.Arguments, "Tee-Object", "Watched SpatiaLite repair should still tee progress output to a log.");
             Assert(watchedStartInfo.UseShellExecute, "Watched SpatiaLite repair should still open a PowerShell window.");
 
+            File.WriteAllText(
+                Path.Combine(runtimeDir, "SPATIALITE_RUNTIME_MANIFEST.json"),
+                "{\"source_url\":\"https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip\",\"source_sha256\":\"abc123\",\"built_at_utc\":\"2026-05-24T00:00:00Z\",\"files\":[{\"name\":\"libspatialite.dll\",\"sha256\":\"" + runtimeDllHash + "\",\"bytes\":" + new FileInfo(runtimeDllPath).Length + "}]}",
+                Encoding.UTF8);
+            List<SpatiaLiteDiagnosticRow> verifiedRows = SpatiaLiteRuntimeDiagnosticService.BuildRows(runtimeDir, "", root);
+            string verifiedDetails = string.Join("\n", verifiedRows.Select(r => r.Item + "|" + r.Status + "|" + r.Detail).ToArray());
+            AssertContains(verifiedDetails, "SpatiaLite Runtime File Verification|Ready|已校驗 1 個 runtime 檔案。", "SpatiaLite diagnostics should report ready when every manifest file matches.");
+
             using (my_sqlite sqlite = new my_sqlite())
             {
                 sqlite.RetryLoadSpatiaLite();
@@ -2849,6 +2864,21 @@ public static class SmokeTests
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    private static string ComputeFileSha256ForTest(string path)
+    {
+        using (SHA256 sha = SHA256.Create())
+        using (FileStream stream = File.OpenRead(path))
+        {
+            byte[] hash = sha.ComputeHash(stream);
+            StringBuilder builder = new StringBuilder(hash.Length * 2);
+            foreach (byte b in hash)
+            {
+                builder.Append(b.ToString("x2"));
+            }
+            return builder.ToString();
         }
     }
 

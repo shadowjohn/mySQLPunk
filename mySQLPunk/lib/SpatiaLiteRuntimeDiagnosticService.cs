@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using Newtonsoft.Json.Linq;
 
 namespace mySQLPunk.lib
@@ -31,6 +33,7 @@ namespace mySQLPunk.lib
 
             rows.Add(CreateRow("SpatiaLite Runtime Manifest", File.Exists(manifestPath) ? "Ready" : "Warning", manifestPath));
             rows.Add(CreateRow("SpatiaLite Manifest Source", File.Exists(manifestPath) ? "Info" : "Warning", BuildManifestSourceSummary(manifestPath)));
+            rows.Add(BuildManifestFileVerificationRow(manifestPath, safeRuntimeDir));
             rows.Add(CreateRow("SpatiaLite Source Cache", File.Exists(sourceCachePath) ? "Ready" : "Info", File.Exists(sourceCachePath) ? sourceCachePath : sourceCachePath + "（尚未建立，修復腳本下載成功後會寫入）"));
             rows.Add(CreateRow("SpatiaLite Offline Package", File.Exists(offlinePackagePath) ? "Ready" : "Info", string.IsNullOrWhiteSpace(offlinePackagePath) ? BuildOfflinePackageHint(repositoryRoot, safeRuntimeDir) : offlinePackagePath));
             rows.Add(CreateRow("SpatiaLite Repair Script", File.Exists(scriptPath) ? "Ready" : "Warning", scriptPath));
@@ -200,6 +203,113 @@ namespace mySQLPunk.lib
             catch (Exception ex)
             {
                 return manifestPath + "（manifest 無法解析：" + ex.Message + "）";
+            }
+        }
+
+        private static SpatiaLiteDiagnosticRow BuildManifestFileVerificationRow(string manifestPath, string runtimeDir)
+        {
+            if (!File.Exists(manifestPath))
+            {
+                return CreateRow("SpatiaLite Runtime File Verification", "Warning", "找不到 runtime manifest，無法校驗 runtime 檔案。");
+            }
+
+            try
+            {
+                JObject manifest = JObject.Parse(File.ReadAllText(manifestPath));
+                JArray files = manifest["files"] as JArray;
+                if (files == null || files.Count == 0)
+                {
+                    return CreateRow("SpatiaLite Runtime File Verification", "Info", "manifest 未包含 files 清單，無法逐檔校驗。");
+                }
+
+                int verified = 0;
+                int missing = 0;
+                int sizeMismatch = 0;
+                int hashMismatch = 0;
+                int invalid = 0;
+                List<string> issues = new List<string>();
+
+                foreach (JToken file in files)
+                {
+                    string name = (string)file["name"];
+                    string expectedHash = ((string)file["sha256"] ?? string.Empty).Trim().ToLowerInvariant();
+                    long? expectedBytes = (long?)file["bytes"];
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        continue;
+                    }
+
+                    if (!IsSafeManifestFileName(name))
+                    {
+                        invalid++;
+                        issues.Add(name + " 檔名不安全");
+                        continue;
+                    }
+
+                    string path = Path.Combine(runtimeDir ?? string.Empty, name);
+                    if (!File.Exists(path))
+                    {
+                        missing++;
+                        issues.Add(name + " 缺少");
+                        continue;
+                    }
+
+                    FileInfo info = new FileInfo(path);
+                    if (expectedBytes.HasValue && info.Length != expectedBytes.Value)
+                    {
+                        sizeMismatch++;
+                        issues.Add(name + " 大小不符");
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(expectedHash))
+                    {
+                        string actualHash = ComputeSha256(path);
+                        if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                        {
+                            hashMismatch++;
+                            issues.Add(name + " SHA-256 不符");
+                            continue;
+                        }
+                    }
+
+                    verified++;
+                }
+
+                if (missing == 0 && sizeMismatch == 0 && hashMismatch == 0)
+                {
+                    return CreateRow("SpatiaLite Runtime File Verification", "Ready", "已校驗 " + verified + " 個 runtime 檔案。");
+                }
+
+                string summary = "已校驗 " + verified + "，缺少 " + missing + "，大小不符 " + sizeMismatch + "，SHA-256 不符 " + hashMismatch + "，檔名不安全 " + invalid;
+                if (issues.Count > 0) summary += "；" + string.Join("、", issues.ToArray());
+                return CreateRow("SpatiaLite Runtime File Verification", "Warning", summary);
+            }
+            catch (Exception ex)
+            {
+                return CreateRow("SpatiaLite Runtime File Verification", "Warning", "manifest 無法校驗：" + ex.Message);
+            }
+        }
+
+        private static bool IsSafeManifestFileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            if (Path.IsPathRooted(name)) return false;
+            return string.Equals(Path.GetFileName(name), name, StringComparison.Ordinal);
+        }
+
+        private static string ComputeSha256(string path)
+        {
+            using (SHA256 sha = SHA256.Create())
+            using (FileStream stream = File.OpenRead(path))
+            {
+                byte[] hash = sha.ComputeHash(stream);
+                StringBuilder builder = new StringBuilder(hash.Length * 2);
+                foreach (byte b in hash)
+                {
+                    builder.Append(b.ToString("x2"));
+                }
+                return builder.ToString();
             }
         }
 
