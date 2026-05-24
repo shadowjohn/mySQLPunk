@@ -22,6 +22,7 @@ namespace mySQLPunk
         private NumericUpDown backupIntegrityIntervalInput;
         private CheckBox backupIntegrityAutoQuarantineCheckBox;
         private NumericUpDown backupIntegrityQuarantineRetainCountInput;
+        private NumericUpDown backupRestoreContentSampleRowsInput;
         private ThemePreviewControl lightPreview;
         private ThemePreviewControl darkPreview;
         private readonly Button okButton;
@@ -679,6 +680,7 @@ namespace mySQLPunk
             backupIntegrityIntervalInput = null;
             backupIntegrityAutoQuarantineCheckBox = null;
             backupIntegrityQuarantineRetainCountInput = null;
+            backupRestoreContentSampleRowsInput = null;
 
             Label sectionTitle = new Label
             {
@@ -784,6 +786,20 @@ namespace mySQLPunk
                 Location = new Point(150, 316),
                 Width = 90
             };
+            Label restoreSampleRowsLabel = new Label
+            {
+                Text = Localization.T("Options.RestoreContentSnapshotRows"),
+                AutoSize = true,
+                Location = new Point(18, 362)
+            };
+            backupRestoreContentSampleRowsInput = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = mySQLPunk.lib.BackupRestoreDiffService.MaxConfigurableContentSnapshotRows,
+                Value = BackupMirrorSettings.RestoreContentSnapshotMaxRows,
+                Location = new Point(150, 358),
+                Width = 110
+            };
             backupIntegrityScheduleEnabledCheckBox.CheckedChanged += (s, e) =>
             {
                 backupIntegrityIntervalInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
@@ -811,10 +827,12 @@ namespace mySQLPunk
             contentPanel.Controls.Add(backupIntegrityAutoQuarantineCheckBox);
             contentPanel.Controls.Add(quarantineRetainLabel);
             contentPanel.Controls.Add(backupIntegrityQuarantineRetainCountInput);
+            contentPanel.Controls.Add(restoreSampleRowsLabel);
+            contentPanel.Controls.Add(backupRestoreContentSampleRowsInput);
 
-            AddOptionTextBox("FileLogDirectory", T("記錄位置:", "Log folder:"), 370, 390);
-            AddOptionTextBox("FileQueryDirectory", T("查詢檔案位置:", "Query folder:"), 412, 390);
-            AddOptionTextBox("FileExportDirectory", T("匯出位置:", "Export folder:"), 454, 390);
+            AddOptionTextBox("FileLogDirectory", T("記錄位置:", "Log folder:"), 412, 390);
+            AddOptionTextBox("FileQueryDirectory", T("查詢檔案位置:", "Query folder:"), 454, 390);
+            AddOptionTextBox("FileExportDirectory", T("匯出位置:", "Export folder:"), 496, 390);
         }
 
         private void AddCliPathRow(string provider, string labelText, int top)
@@ -897,6 +915,10 @@ namespace mySQLPunk
             if (backupIntegrityQuarantineRetainCountInput != null)
             {
                 BackupMirrorSettings.IntegrityQuarantineRetainCount = (int)backupIntegrityQuarantineRetainCountInput.Value;
+            }
+            if (backupRestoreContentSampleRowsInput != null)
+            {
+                BackupMirrorSettings.RestoreContentSnapshotMaxRows = (int)backupRestoreContentSampleRowsInput.Value;
             }
             BackupMirrorSettings.Save();
         }
@@ -1463,6 +1485,7 @@ namespace mySQLPunk
         private static bool integrityAutoQuarantineEnabled = false;
         private static int integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
         private static int integrityQuarantineRetainCount = 50;
+        private static int restoreContentSnapshotMaxRows = mySQLPunk.lib.BackupRestoreDiffService.MaxContentSnapshotRows;
         private static DateTime lastIntegrityVerifiedUtc = DateTime.MinValue;
         private static string lastIntegrityReportPath = string.Empty;
 
@@ -1550,6 +1573,20 @@ namespace mySQLPunk
             }
         }
 
+        public static int RestoreContentSnapshotMaxRows
+        {
+            get
+            {
+                EnsureLoaded();
+                return restoreContentSnapshotMaxRows;
+            }
+            set
+            {
+                EnsureLoaded();
+                restoreContentSnapshotMaxRows = mySQLPunk.lib.BackupRestoreDiffService.ResolveMaxContentSnapshotRows(value);
+            }
+        }
+
         public static DateTime LastIntegrityVerifiedUtc
         {
             get
@@ -1593,6 +1630,7 @@ namespace mySQLPunk
                     IntegrityAutoQuarantineEnabled = integrityAutoQuarantineEnabled,
                     IntegrityIntervalHours = integrityIntervalHours,
                     IntegrityQuarantineRetainCount = integrityQuarantineRetainCount,
+                    RestoreContentSnapshotMaxRows = restoreContentSnapshotMaxRows,
                     LastIntegrityVerifiedUtc = lastIntegrityVerifiedUtc,
                     LastIntegrityReportPath = lastIntegrityReportPath
                 }, Formatting.Indented));
@@ -1631,6 +1669,7 @@ namespace mySQLPunk
                     integrityQuarantineRetainCount = data.IntegrityQuarantineRetainCount <= 0
                         ? 50
                         : data.IntegrityQuarantineRetainCount;
+                    restoreContentSnapshotMaxRows = mySQLPunk.lib.BackupRestoreDiffService.ResolveMaxContentSnapshotRows(data.RestoreContentSnapshotMaxRows);
                     lastIntegrityVerifiedUtc = data.LastIntegrityVerifiedUtc == DateTime.MinValue
                         ? DateTime.MinValue
                         : data.LastIntegrityVerifiedUtc.ToUniversalTime();
@@ -1645,6 +1684,7 @@ namespace mySQLPunk
                 integrityAutoQuarantineEnabled = false;
                 integrityIntervalHours = mySQLPunk.lib.BackupIntegrityScheduleService.DefaultIntervalHours;
                 integrityQuarantineRetainCount = 50;
+                restoreContentSnapshotMaxRows = mySQLPunk.lib.BackupRestoreDiffService.MaxContentSnapshotRows;
                 lastIntegrityVerifiedUtc = DateTime.MinValue;
                 lastIntegrityReportPath = string.Empty;
             }
@@ -1663,6 +1703,7 @@ namespace mySQLPunk
             public bool? IntegrityAutoQuarantineEnabled { get; set; }
             public int IntegrityIntervalHours { get; set; }
             public int IntegrityQuarantineRetainCount { get; set; }
+            public int RestoreContentSnapshotMaxRows { get; set; }
             public DateTime LastIntegrityVerifiedUtc { get; set; }
             public string LastIntegrityReportPath { get; set; }
         }

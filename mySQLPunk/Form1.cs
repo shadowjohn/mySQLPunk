@@ -4919,7 +4919,9 @@ namespace mySQLPunk
                             BackupRestoreDiffService.CreateTableContentFingerprint(
                                 tableName,
                                 rowCount,
-                                (offset, limit) => target.Database.SelectTablePage(target.DatabaseName, tableName, offset, limit)));
+                                (offset, limit) => target.Database.SelectTablePage(target.DatabaseName, tableName, offset, limit),
+                                BackupRestoreDiffService.ContentSnapshotPageSize,
+                                GetRestoreContentSnapshotMaxRows()));
                     }
                 }
                 catch
@@ -4928,6 +4930,11 @@ namespace mySQLPunk
             }
 
             return snapshot;
+        }
+
+        private static int GetRestoreContentSnapshotMaxRows()
+        {
+            return BackupRestoreDiffService.ResolveMaxContentSnapshotRows(BackupMirrorSettings.RestoreContentSnapshotMaxRows);
         }
 
         private static List<string> ExtractNameColumn(DataTable table)

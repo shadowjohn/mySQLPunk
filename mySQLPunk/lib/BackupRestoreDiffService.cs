@@ -60,6 +60,13 @@ namespace mySQLPunk.lib
     {
         public const int MaxContentSnapshotRows = 10000;
         public const int ContentSnapshotPageSize = 1000;
+        public const int MaxConfigurableContentSnapshotRows = 1000000;
+
+        public static int ResolveMaxContentSnapshotRows(int configuredRows)
+        {
+            if (configuredRows <= 0) return MaxContentSnapshotRows;
+            return Math.Min(configuredRows, MaxConfigurableContentSnapshotRows);
+        }
 
         public static DatabaseRestoreSnapshot CreateSnapshot(
             string databaseName,
@@ -177,7 +184,7 @@ namespace mySQLPunk.lib
             }
 
             int safePageSize = Math.Max(1, pageSize);
-            int safeMaxRows = Math.Max(1, maxRows);
+            int safeMaxRows = Math.Max(1, ResolveMaxContentSnapshotRows(maxRows));
             int targetRows = (int)Math.Min(rowCount, safeMaxRows);
             List<string> rowHashes = new List<string>();
             string header = string.Empty;

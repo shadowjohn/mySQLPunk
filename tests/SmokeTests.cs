@@ -2049,6 +2049,7 @@ public static class SmokeTests
     private static void TestBackupRestoreService()
     {
         string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk_restore_" + Guid.NewGuid().ToString("N"));
+        int oldRestoreContentSnapshotMaxRows = BackupMirrorSettings.RestoreContentSnapshotMaxRows;
         Directory.CreateDirectory(dir);
         try
         {
@@ -2310,9 +2311,17 @@ public static class SmokeTests
             string largeContentSummary = BackupRestoreDiffService.BuildSummary(largeBefore, largeAfter);
             AssertContains(largeContentSummary, "large_orders：內容指紋變更", "Large restore content diff should detect sampled row value changes.");
             AssertContains(largeContentSummary, "抽樣 120/250 列", "Large restore content diff should report sampled coverage.");
+
+            Assert(BackupRestoreDiffService.ResolveMaxContentSnapshotRows(0) == BackupRestoreDiffService.MaxContentSnapshotRows, "Restore content snapshot should use the default row limit when unset.");
+            Assert(BackupRestoreDiffService.ResolveMaxContentSnapshotRows(BackupRestoreDiffService.MaxConfigurableContentSnapshotRows + 10) == BackupRestoreDiffService.MaxConfigurableContentSnapshotRows, "Restore content snapshot should clamp oversized row limits.");
+            BackupMirrorSettings.RestoreContentSnapshotMaxRows = 75;
+            MethodInfo restoreRowsMethod = typeof(Form1).GetMethod("GetRestoreContentSnapshotMaxRows", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(restoreRowsMethod != null, "Form1 should expose the restore content snapshot row setting internally.");
+            Assert((int)restoreRowsMethod.Invoke(null, null) == 75, "Restore snapshot capture should read the configured content sample row limit.");
         }
         finally
         {
+            BackupMirrorSettings.RestoreContentSnapshotMaxRows = oldRestoreContentSnapshotMaxRows;
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
     }
