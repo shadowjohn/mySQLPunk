@@ -2777,6 +2777,22 @@ public static class SmokeTests
             if (File.Exists(csvPath)) File.Delete(csvPath);
             if (File.Exists(jsonPath)) File.Delete(jsonPath);
         }
+
+        QueryForm form = (QueryForm)FormatterServices.GetUninitializedObject(typeof(QueryForm));
+        SetPrivateField(form, "_lastResultSql", "SELECT name FROM export_test ORDER BY id;");
+        SetPrivateField(form, "_lastResultCanStreamExport", true);
+        SetPrivateField(form, "_isTableDataMode", false);
+        string streamingSql;
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Csv, out streamingSql),
+            "Query form should enable streaming export for successful non-table CSV results.");
+        AssertEquals("SELECT name FROM export_test ORDER BY id;", streamingSql, "Query form should stream the last successful result SQL.");
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Json, out streamingSql),
+            "Query form should enable streaming export for JSON results.");
+        Assert(!TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Xlsx, out streamingSql),
+            "Query form should keep formatted workbook exports on the DataTable path.");
+        SetPrivateField(form, "_isTableDataMode", true);
+        Assert(!TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Csv, out streamingSql),
+            "Query form should not re-query table edit mode because current rows may contain unsaved edits.");
     }
 
     private static void TestQueryFormOptionSettings()
@@ -3144,6 +3160,15 @@ public static class SmokeTests
         string where = (string)method.Invoke(form, args);
         index = (int)args[4];
         return where;
+    }
+
+    private static bool TryGetQueryFormStreamingExportSql(QueryForm form, QueryResultExportFormat format, out string sql)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("TryGetStreamingExportSql", BindingFlags.Instance | BindingFlags.NonPublic);
+        object[] args = { format, null };
+        bool result = (bool)method.Invoke(form, args);
+        sql = args[1] as string;
+        return result;
     }
 
     private static void InvokeQueryFormExecuteUpdate(QueryForm form, string tableName, object[] columns, List<string> primaryKeys, DataRow row)

@@ -41,6 +41,8 @@ namespace mySQLPunk
         private bool _isTableDataMode; 
         private bool _isNoPrimaryKeyReadOnlyMode;
         private bool _recordLimitEnabled = true;
+        private string _lastResultSql = "";
+        private bool _lastResultCanStreamExport;
         private const int GridFullAutoResizeRowLimit = 200;
         private const int GridRowHeightApplyLimit = 500;
         private const int WM_SETREDRAW = 0x000B;
@@ -1566,6 +1568,8 @@ namespace mySQLPunk
                 DataTable dt = result.Rows;
                 _totalRows = result.TotalRows;
                 _currentPage = result.CurrentPage;
+                _lastResultSql = "";
+                _lastResultCanStreamExport = false;
                 dt.AcceptChanges();
                 PrepareTableDataForEditing(dt);
 
@@ -1702,6 +1706,8 @@ namespace mySQLPunk
             if (string.IsNullOrEmpty(rawSql)) return;
 
             string sql = GetSqlToExecute(rawSql);
+            _lastResultSql = "";
+            _lastResultCanStreamExport = false;
             lblSqlPreview.Text = sql; // 更新底部的 SQL 預覽
 
             _cts = new CancellationTokenSource();
@@ -1746,6 +1752,13 @@ namespace mySQLPunk
                     {
                         dt.AcceptChanges();
                         PrepareTableDataForEditing(dt);
+                        _lastResultSql = "";
+                        _lastResultCanStreamExport = false;
+                    }
+                    else
+                    {
+                        _lastResultSql = sql;
+                        _lastResultCanStreamExport = dt.Rows.Count > 0;
                     }
 
                     sw.Stop();
@@ -1778,6 +1791,8 @@ namespace mySQLPunk
                 }
                 else
                 {
+                    _lastResultSql = "";
+                    _lastResultCanStreamExport = false;
                     var result = await Task.Run(
                         () => _db.ExecSQL(sql),
                         _cts.Token);
@@ -4094,7 +4109,7 @@ namespace mySQLPunk
         }
 
         // ── 匯出結果 ──
-        private void ExportCsv()
+        private async void ExportCsv()
         {
             DataTable dt = dgvResults.DataSource as DataTable;
             if (dt == null || dt.Rows.Count == 0) return;
@@ -4113,15 +4128,62 @@ namespace mySQLPunk
                 try
                 {
                     QueryResultExportFormat format = QueryResultExportService.ResolveFormat(dlg.FileName, dlg.FilterIndex);
-                    int exportedRows = QueryResultExportService.CountExportRows(dt);
-                    QueryResultExportService.Write(dt, dlg.FileName, format);
-                    lblStatus.Text = Localization.Format("Query.ExportCompleted", exportedRows, dlg.FileName);
+                    string streamingSql;
+                    if (TryGetStreamingExportSql(format, out streamingSql))
+                    {
+                        await ExportStreamingQueryResultAsync(streamingSql, dlg.FileName, format);
+                    }
+                    else
+                    {
+                        int exportedRows = QueryResultExportService.CountExportRows(dt);
+                        QueryResultExportService.Write(dt, dlg.FileName, format);
+                        lblStatus.Text = Localization.Format("Query.ExportCompleted", exportedRows, dlg.FileName);
+                    }
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show(ex.Message, Localization.T("Query.ExportError"),
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+        }
+
+        private bool TryGetStreamingExportSql(QueryResultExportFormat format, out string sql)
+        {
+            sql = "";
+            if (!QueryResultExportService.CanStreamFormat(format)) return false;
+            if (_isTableDataMode) return false;
+            if (!_lastResultCanStreamExport) return false;
+            if (string.IsNullOrWhiteSpace(_lastResultSql)) return false;
+
+            sql = _lastResultSql;
+            return true;
+        }
+
+        private async Task ExportStreamingQueryResultAsync(string sql, string targetPath, QueryResultExportFormat format)
+        {
+            bool oldExportEnabled = tsBtnExport != null && tsBtnExport.Enabled;
+            if (tsBtnExport != null) tsBtnExport.Enabled = false;
+            UpdateStatus(Localization.T("Query.StreamingExporting"));
+
+            try
+            {
+                QueryResultStreamingExportResult result = await Task.Run(() =>
+                    QueryResultExportService.WriteStreaming(_db, sql, null, targetPath, format));
+                if (!CanUpdateUi()) return;
+                lblStatus.Text = Localization.Format("Query.StreamingExportCompleted", result.Rows, FormatByteCount(result.BytesWritten), targetPath);
+            }
+            catch (NotSupportedException)
+            {
+                DataTable dt = dgvResults.DataSource as DataTable;
+                if (dt == null) throw;
+                int exportedRows = QueryResultExportService.CountExportRows(dt);
+                QueryResultExportService.Write(dt, targetPath, format);
+                lblStatus.Text = Localization.Format("Query.ExportCompleted", exportedRows, targetPath);
+            }
+            finally
+            {
+                if (CanUpdateUi() && tsBtnExport != null) tsBtnExport.Enabled = oldExportEnabled;
             }
         }
 

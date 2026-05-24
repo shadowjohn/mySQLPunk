@@ -576,6 +576,8 @@ namespace mySQLPunk
             Add("Query.Export", "匯出", "Export");
             Add("Query.ExportFileFilter", "CSV UTF-8 (*.csv)|*.csv|Excel 活頁簿 (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML 表格 (*.html)|*.html|Markdown (*.md)|*.md", "CSV UTF-8 (*.csv)|*.csv|Excel Workbook (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML Table (*.html)|*.html|Markdown (*.md)|*.md");
             Add("Query.ExportCompleted", "已匯出 {0} 筆資料到 {1}", "Exported {0} rows to {1}");
+            Add("Query.StreamingExporting", "正在串流匯出查詢結果...", "Streaming query results...");
+            Add("Query.StreamingExportCompleted", "已串流匯出 {0} 筆資料（{1}）到 {2}", "Streamed {0} rows ({1}) to {2}");
             Add("Query.ExportError", "匯出錯誤", "Export Error");
             Add("Query.Float", "浮動", "Float");
             Add("Query.Dock", "嵌入", "Dock");
