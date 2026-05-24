@@ -183,8 +183,8 @@ Smoke test harness：
 
 - **查詢結果匯出格式 ✅ 已補齊常用格式**
   - 現況：查詢結果匯出預設使用 CSV，並可在儲存對話框選擇 Excel `.xlsx`、TSV、JSON、XML、HTML 或 Markdown。
-  - 完成內容：各格式會共用結果表格顯示值轉換；BLOB/geometry 會沿用結果表格的 `[Geometry] WKT` 或 `[BLOB n bytes]` 顯示，日期與空值也會一致處理。
-  - 後續方向：若需要更完整的大型結果集匯出，可再評估 XLSX 分段寫入或大型 workbook 樣式化輸出；單一 BLOB/geometry 欄位的資料表模式匯出已先支援串流寫檔。
+  - 完成內容：各格式會共用結果表格顯示值轉換；BLOB/geometry 會沿用結果表格的 `[Geometry] WKT` 或 `[BLOB n bytes]` 顯示，日期與空值也會一致處理；XLSX 匯出會凍結標題列、套用自動篩選、穩定欄寬與表頭樣式，讓大型 workbook 開啟後可直接篩選與辨識欄位。
+  - 後續方向：若需要更完整的大型結果集匯出，可再評估 XLSX 分段寫入；單一 BLOB/geometry 欄位的資料表模式匯出已先支援串流寫檔。
 
 ### Table/View 複製限制
 

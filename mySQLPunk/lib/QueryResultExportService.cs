@@ -567,13 +567,16 @@ namespace mySQLPunk.lib
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
-            sb.AppendLine("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+            sb.Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
+            sb.Append("<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>");
+            sb.Append(BuildXlsxColumnDefinitions(dt));
+            sb.AppendLine("<sheetData>");
 
             int rowIndex = 1;
             sb.Append("<row r=\"").Append(rowIndex).Append("\">");
             for (int c = 0; c < dt.Columns.Count; c++)
             {
-                AppendInlineStringCell(sb, rowIndex, c + 1, dt.Columns[c].ColumnName);
+                AppendInlineStringCell(sb, rowIndex, c + 1, dt.Columns[c].ColumnName, 1);
             }
             sb.AppendLine("</row>");
 
@@ -584,18 +587,52 @@ namespace mySQLPunk.lib
                 sb.Append("<row r=\"").Append(rowIndex).Append("\">");
                 for (int c = 0; c < dt.Columns.Count; c++)
                 {
-                    AppendInlineStringCell(sb, rowIndex, c + 1, FormatExportValue(row[c]));
+                    AppendInlineStringCell(sb, rowIndex, c + 1, FormatExportValue(row[c]), 0);
                 }
                 sb.AppendLine("</row>");
             }
 
-            sb.AppendLine("</sheetData></worksheet>");
+            sb.AppendLine("</sheetData>");
+            string autoFilter = BuildXlsxAutoFilterReference(dt, rowIndex);
+            if (!string.IsNullOrWhiteSpace(autoFilter))
+            {
+                sb.Append("<autoFilter ref=\"").Append(autoFilter).AppendLine("\"/>");
+            }
+            sb.AppendLine("</worksheet>");
             return sb.ToString();
         }
 
-        private static void AppendInlineStringCell(StringBuilder sb, int rowIndex, int columnIndex, string value)
+        private static string BuildXlsxColumnDefinitions(DataTable dt)
         {
-            sb.Append("<c r=\"").Append(GetExcelColumnName(columnIndex)).Append(rowIndex).Append("\" t=\"inlineStr\"><is><t");
+            if (dt == null || dt.Columns.Count == 0) return string.Empty;
+
+            StringBuilder sb = new StringBuilder();
+            sb.Append("<cols>");
+            for (int c = 0; c < dt.Columns.Count; c++)
+            {
+                double width = Math.Min(60, Math.Max(10, (dt.Columns[c].ColumnName ?? string.Empty).Length + 2));
+                sb.Append("<col min=\"").Append(c + 1).Append("\" max=\"").Append(c + 1)
+                    .Append("\" width=\"").Append(width.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    .Append("\" customWidth=\"1\"/>");
+            }
+            sb.Append("</cols>");
+            return sb.ToString();
+        }
+
+        private static string BuildXlsxAutoFilterReference(DataTable dt, int lastRowIndex)
+        {
+            if (dt == null || dt.Columns.Count == 0 || lastRowIndex <= 0) return string.Empty;
+            return "A1:" + GetExcelColumnName(dt.Columns.Count) + Math.Max(1, lastRowIndex).ToString();
+        }
+
+        private static void AppendInlineStringCell(StringBuilder sb, int rowIndex, int columnIndex, string value, int styleIndex)
+        {
+            sb.Append("<c r=\"").Append(GetExcelColumnName(columnIndex)).Append(rowIndex).Append("\" t=\"inlineStr\"");
+            if (styleIndex > 0)
+            {
+                sb.Append(" s=\"").Append(styleIndex).Append("\"");
+            }
+            sb.Append("><is><t");
             if (!string.IsNullOrEmpty(value) && (value.StartsWith(" ") || value.EndsWith(" ") || value.Contains("\n") || value.Contains("\r") || value.Contains("\t")))
             {
                 sb.Append(" xml:space=\"preserve\"");
@@ -643,11 +680,11 @@ namespace mySQLPunk.lib
         {
             return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
                    "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
-                   "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>" +
-                   "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>" +
-                   "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>" +
+                   "<fonts count=\"2\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"11\"/><name val=\"Calibri\"/><color rgb=\"FFFFFFFF\"/></font></fonts>" +
+                   "<fills count=\"3\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill><fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF2563EB\"/><bgColor indexed=\"64\"/></patternFill></fill></fills>" +
+                   "<borders count=\"2\"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style=\"thin\"><color rgb=\"FF94A3B8\"/></bottom><diagonal/></border></borders>" +
                    "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>" +
-                   "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>" +
+                   "<cellXfs count=\"2\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/><xf numFmtId=\"0\" fontId=\"1\" fillId=\"2\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\"/></cellXfs>" +
                    "</styleSheet>";
         }
 

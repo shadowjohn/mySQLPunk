@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
@@ -2836,6 +2837,7 @@ public static class SmokeTests
         Assert(QueryResultExportService.ResolveFormat("result", 2) == QueryResultExportFormat.Xlsx, "Second export filter should still support Excel.");
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
 
+        string xlsxPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_query_export_" + Guid.NewGuid().ToString("N") + ".xlsx");
         string csvPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".csv");
         string jsonPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".json");
         string xmlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".xml");
@@ -2851,6 +2853,19 @@ public static class SmokeTests
                 new Dictionary<string, object> { { "p0", 1 }, { "p1", "A, B" }, { "p2", 12.5 }, { "p3", new byte[] { 0xAA, 0xBB, 0xCC } } });
             db.ExecSQL("INSERT INTO export_test (id, name, amount, payload) VALUES (@p0, @p1, @p2, @p3);",
                 new Dictionary<string, object> { { "p0", 2 }, { "p1", "Line\nBreak" }, { "p2", 7.25 }, { "p3", DBNull.Value } });
+
+            QueryResultExportService.Write(table, xlsxPath, QueryResultExportFormat.Xlsx);
+            using (ZipArchive archive = ZipFile.OpenRead(xlsxPath))
+            {
+                string sheetXml = ReadZipEntryText(archive, "xl/worksheets/sheet1.xml");
+                string stylesXml = ReadZipEntryText(archive, "xl/styles.xml");
+                AssertContains(sheetXml, "<pane ySplit=\"1\" topLeftCell=\"A2\"", "XLSX export should freeze the header row.");
+                AssertContains(sheetXml, "<autoFilter ref=\"A1:C2\"", "XLSX export should enable filters across exported columns.");
+                AssertContains(sheetXml, "<cols><col min=\"1\" max=\"1\"", "XLSX export should include stable column widths.");
+                AssertContains(sheetXml, "r=\"A1\" t=\"inlineStr\" s=\"1\"", "XLSX export should apply the header style.");
+                AssertContains(stylesXml, "<fonts count=\"2\">", "XLSX export should include a header font style.");
+                AssertContains(stylesXml, "<cellXfs count=\"2\">", "XLSX export should include a header cell format.");
+            }
 
             long lastProgress = 0;
             QueryResultStreamingExportResult streamCsv = QueryResultExportService.WriteStreaming(
@@ -2918,6 +2933,7 @@ public static class SmokeTests
         finally
         {
             db.Dispose();
+            if (File.Exists(xlsxPath)) File.Delete(xlsxPath);
             if (File.Exists(csvPath)) File.Delete(csvPath);
             if (File.Exists(jsonPath)) File.Delete(jsonPath);
             if (File.Exists(xmlPath)) File.Delete(xmlPath);
@@ -4234,6 +4250,17 @@ public static class SmokeTests
         if (value != null && value.IndexOf(unexpected, StringComparison.OrdinalIgnoreCase) >= 0)
         {
             throw new Exception(message + " Unexpected fragment: " + unexpected + " Actual: " + value);
+        }
+    }
+
+    private static string ReadZipEntryText(ZipArchive archive, string entryName)
+    {
+        ZipArchiveEntry entry = archive.GetEntry(entryName);
+        if (entry == null) throw new Exception("Missing zip entry: " + entryName);
+        using (Stream stream = entry.Open())
+        using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+        {
+            return reader.ReadToEnd();
         }
     }
 

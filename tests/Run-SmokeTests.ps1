@@ -129,6 +129,8 @@ $newtonsoft = Join-Path $outputDir "Newtonsoft.Json.dll"
     /r:System.Drawing.dll `
     /r:System.Data.dll `
     /r:System.Core.dll `
+    /r:System.IO.Compression.dll `
+    /r:System.IO.Compression.FileSystem.dll `
     $source
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
