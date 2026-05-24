@@ -1916,6 +1916,27 @@ public static class SmokeTests
             BuildOraclePrivilegeTable("COMMENT ANY TABLE"),
             oracleSql);
         AssertContains(oraclePrivilegeCompleteSummary, "未偵測到明顯缺口", "Oracle privilege parser should recognize when required grants are present.");
+        string oracleRepairSuggestions = BuildOracleRepairSuggestions(
+            "ORA-01031: insufficient privileges",
+            "MAIN",
+            "DEMO_TABLE",
+            oracleSql + "\nCREATE INDEX \"IX_DEMO_NAME\" ON \"MAIN\".\"DEMO_TABLE\" (\"display_name\");",
+            BuildOraclePrivilegeTable("ALTER"),
+            BuildOraclePrivilegeTable());
+        AssertContains(oracleRepairSuggestions, "SYS_CONTEXT('USERENV','SESSION_USER')", "Oracle repair suggestions should include a session user check.");
+        AssertContains(oracleRepairSuggestions, "session_roles", "Oracle repair suggestions should include a role check.");
+        AssertContains(oracleRepairSuggestions, "GRANT INDEX ON \"MAIN\".\"DEMO_TABLE\" TO <SESSION_USER>;", "Oracle repair suggestions should include missing object INDEX grant SQL.");
+        AssertContains(oracleRepairSuggestions, "GRANT COMMENT ANY TABLE TO <SESSION_USER>;", "Oracle repair suggestions should include missing COMMENT ANY TABLE grant SQL.");
+        AssertContains(oracleRepairSuggestions, "跨 schema", "Oracle repair suggestions should call out cross-schema policy.");
+        string oracleObjectMissingRepair = BuildOracleRepairSuggestions(
+            "ORA-00942: table or view does not exist",
+            "MAIN",
+            "DEMO_TABLE",
+            "ALTER TABLE \"MAIN\".\"DEMO_TABLE\" ADD (\"name\" VARCHAR2(20));",
+            BuildOraclePrivilegeTable(),
+            BuildOraclePrivilegeTable());
+        AssertContains(oracleObjectMissingRepair, "all_objects", "Oracle object missing repair suggestions should include an object existence query.");
+        AssertContains(oracleObjectMissingRepair, "GRANT SELECT ON \"MAIN\".\"DEMO_TABLE\" TO <SESSION_USER>;", "Oracle object missing repair suggestions should include SELECT grant SQL.");
         string highRiskOracleMessage = BuildOracleHighRiskConfirmationMessage(
             "ALTER TABLE \"MAIN\".\"DEMO_TABLE\" DROP COLUMN \"legacy_code\";\nDROP INDEX \"MAIN\".\"IX_DEMO\";");
         AssertContains(highRiskOracleMessage, "高風險 Oracle DDL", "Oracle high-risk confirmation should explain the second confirmation.");
@@ -3732,6 +3753,12 @@ public static class SmokeTests
     {
         MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOraclePrivilegeDiagnosticSummary", BindingFlags.Static | BindingFlags.NonPublic);
         return (string)method.Invoke(null, new object[] { objectPrivileges, sessionPrivileges, sql });
+    }
+
+    private static string BuildOracleRepairSuggestions(string reason, string databaseName, string tableName, string sql, DataTable objectPrivileges, DataTable sessionPrivileges)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOracleRepairSuggestions", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { reason, databaseName, tableName, sql, objectPrivileges, sessionPrivileges });
     }
 
     private static DataTable BuildOraclePrivilegeTable(params string[] privileges)

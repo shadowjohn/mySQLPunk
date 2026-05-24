@@ -791,6 +791,14 @@ namespace mySQLPunk
             Add("Designer.OraclePrivilegeNone", "未取得", "None detected");
             Add("Designer.OraclePrivilegeNoMissing", "未偵測到明顯缺口", "No obvious gap detected");
             Add("Designer.OraclePrivilegeDiagnosticFailed", "權限查詢結果無法解析：{0}", "Privilege query result could not be parsed: {0}");
+            Add("Designer.OracleRepairSuggestionTitle", "建議修復步驟：", "Suggested repair steps:");
+            Add("Designer.OracleRepairSuggestionFailed", "修復建議無法產生：{0}", "Repair suggestions could not be generated: {0}");
+            Add("Designer.OracleRepairCheckSessionUser", "先確認實際執行帳號與目前 schema：", "First confirm the actual session user and current schema:");
+            Add("Designer.OracleRepairCheckRoles", "再確認目前 role；若權限只來自 role，請改請 DBA 直接授權給 session user：", "Then confirm current roles; if privileges only come from roles, ask the DBA to grant them directly to the session user:");
+            Add("Designer.OracleRepairDirectGrantOnly", "請用 <SESSION_USER> 取代上一步查到的 session_user，並優先授予最小必要權限。", "Replace <SESSION_USER> with the session_user from the previous step, and grant the least required privileges first.");
+            Add("Designer.OracleRepairConfirmObject", "先確認目標物件是否存在且狀態正常：{0}", "Confirm that the target object exists and is valid: {0}");
+            Add("Designer.OracleRepairCrossSchemaPolicy", "目標 schema 為 {0}，若不是目前登入帳號自己的 schema，請確認團隊允許跨 schema DDL，並由物件 owner 或 DBA 直接授權。", "Target schema is {0}. If it is not the current login's own schema, confirm the team allows cross-schema DDL and ask the object owner or DBA for direct grants.");
+            Add("Designer.OracleRepairCreateAnyTable", "若需跨 schema 建表，才評估 GRANT CREATE ANY TABLE TO <SESSION_USER>;", "Only evaluate GRANT CREATE ANY TABLE TO <SESSION_USER>; when cross-schema table creation is required.");
             Add("Designer.CurrentSchema", "目前 schema", "current schema");
             Add("Designer.CurrentTable", "目前資料表", "current table");
             Add("Designer.OracleHintInsufficientPrivileges", "目前帳號沒有足夠權限執行這個 DDL。請確認已直接授權 ALTER、CREATE TABLE、CREATE VIEW、CREATE INDEX、DROP 或 COMMENT 等需要的權限；Oracle 的 role 權限在部分 DDL 情境可能不會生效。", "The current account does not have enough privileges to execute this DDL. Confirm that ALTER, CREATE TABLE, CREATE VIEW, CREATE INDEX, DROP, COMMENT, or other required privileges are granted directly; Oracle role privileges may not apply in some DDL contexts.");
