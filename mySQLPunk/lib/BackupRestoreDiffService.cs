@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using Newtonsoft.Json;
 
 namespace mySQLPunk.lib
 {
@@ -54,6 +56,57 @@ namespace mySQLPunk.lib
         public int SampledRows { get; set; }
         public bool IsPartial { get; set; }
         public string Fingerprint { get; set; }
+    }
+
+    public sealed class DatabaseRestoreContentScanReport
+    {
+        public DateTime GeneratedAtUtc { get; set; }
+        public string DatabaseName { get; set; }
+        public string ProviderName { get; set; }
+        public DatabaseRestoreContentScanSummary Summary { get; set; }
+        public List<DatabaseRestoreContentScanTableReport> Tables { get; private set; }
+
+        public DatabaseRestoreContentScanReport()
+        {
+            Tables = new List<DatabaseRestoreContentScanTableReport>();
+            Summary = new DatabaseRestoreContentScanSummary();
+        }
+    }
+
+    public sealed class DatabaseRestoreContentScanSummary
+    {
+        public int TotalTables { get; set; }
+        public int ChangedTables { get; set; }
+        public int UnchangedTables { get; set; }
+        public int AddedTables { get; set; }
+        public int RemovedTables { get; set; }
+        public int MissingSnapshotTables { get; set; }
+        public int PartialTables { get; set; }
+        public int FullyScannedTables { get; set; }
+        public long BeforeRows { get; set; }
+        public long AfterRows { get; set; }
+        public int BeforeSampledRows { get; set; }
+        public int AfterSampledRows { get; set; }
+    }
+
+    public sealed class DatabaseRestoreContentScanTableReport
+    {
+        public string TableName { get; set; }
+        public bool ExistsBefore { get; set; }
+        public bool ExistsAfter { get; set; }
+        public bool HasBeforeSnapshot { get; set; }
+        public bool HasAfterSnapshot { get; set; }
+        public long BeforeRowCount { get; set; }
+        public long AfterRowCount { get; set; }
+        public int BeforeSampledRows { get; set; }
+        public int AfterSampledRows { get; set; }
+        public bool BeforePartial { get; set; }
+        public bool AfterPartial { get; set; }
+        public bool IsChanged { get; set; }
+        public string BeforeFingerprint { get; set; }
+        public string AfterFingerprint { get; set; }
+        public string BeforeFingerprintShort { get; set; }
+        public string AfterFingerprintShort { get; set; }
     }
 
     public static class BackupRestoreDiffService
@@ -280,6 +333,76 @@ namespace mySQLPunk.lib
             return string.Join(Environment.NewLine, lines);
         }
 
+        public static DatabaseRestoreContentScanReport BuildContentScanReport(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after)
+        {
+            return BuildContentScanReport(before, after, DateTime.UtcNow);
+        }
+
+        public static DatabaseRestoreContentScanReport BuildContentScanReport(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after, DateTime generatedAtUtc)
+        {
+            DatabaseRestoreContentScanReport report = new DatabaseRestoreContentScanReport
+            {
+                GeneratedAtUtc = generatedAtUtc,
+                DatabaseName = FirstNonEmpty(after == null ? null : after.DatabaseName, before == null ? null : before.DatabaseName),
+                ProviderName = FirstNonEmpty(after == null ? null : after.ProviderName, before == null ? null : before.ProviderName)
+            };
+
+            List<string> tableNames = new List<string>();
+            AddTableNames(tableNames, before);
+            AddTableNames(tableNames, after);
+
+            foreach (string tableName in NormalizeNames(tableNames))
+            {
+                bool existsBefore = ContainsName(before == null ? null : before.Tables, tableName);
+                bool existsAfter = ContainsName(after == null ? null : after.Tables, tableName);
+                DatabaseRestoreTableContentSnapshot beforeContent = GetContentSnapshot(before, tableName);
+                DatabaseRestoreTableContentSnapshot afterContent = GetContentSnapshot(after, tableName);
+                bool hasBeforeSnapshot = beforeContent != null;
+                bool hasAfterSnapshot = afterContent != null;
+                bool comparable = hasBeforeSnapshot && hasAfterSnapshot;
+                bool changed = comparable &&
+                    !string.Equals(beforeContent.Fingerprint, afterContent.Fingerprint, StringComparison.OrdinalIgnoreCase);
+
+                DatabaseRestoreContentScanTableReport tableReport = new DatabaseRestoreContentScanTableReport
+                {
+                    TableName = tableName,
+                    ExistsBefore = existsBefore,
+                    ExistsAfter = existsAfter,
+                    HasBeforeSnapshot = hasBeforeSnapshot,
+                    HasAfterSnapshot = hasAfterSnapshot,
+                    BeforeRowCount = hasBeforeSnapshot ? beforeContent.RowCount : GetRowCount(before, tableName),
+                    AfterRowCount = hasAfterSnapshot ? afterContent.RowCount : GetRowCount(after, tableName),
+                    BeforeSampledRows = hasBeforeSnapshot ? beforeContent.SampledRows : 0,
+                    AfterSampledRows = hasAfterSnapshot ? afterContent.SampledRows : 0,
+                    BeforePartial = hasBeforeSnapshot && beforeContent.IsPartial,
+                    AfterPartial = hasAfterSnapshot && afterContent.IsPartial,
+                    IsChanged = changed,
+                    BeforeFingerprint = hasBeforeSnapshot ? beforeContent.Fingerprint : string.Empty,
+                    AfterFingerprint = hasAfterSnapshot ? afterContent.Fingerprint : string.Empty,
+                    BeforeFingerprintShort = hasBeforeSnapshot ? ShortFingerprint(beforeContent.Fingerprint) : string.Empty,
+                    AfterFingerprintShort = hasAfterSnapshot ? ShortFingerprint(afterContent.Fingerprint) : string.Empty
+                };
+
+                report.Tables.Add(tableReport);
+                ApplyContentScanSummary(report.Summary, tableReport, comparable);
+            }
+
+            report.Summary.TotalTables = report.Tables.Count;
+            return report;
+        }
+
+        public static string WriteContentScanReport(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after, string reportDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException("Report directory is required.", nameof(reportDirectory));
+
+            DatabaseRestoreContentScanReport report = BuildContentScanReport(before, after);
+            Directory.CreateDirectory(reportDirectory);
+            string fileName = "restore-content-scan_" + report.GeneratedAtUtc.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".json";
+            string path = Path.Combine(reportDirectory, fileName);
+            File.WriteAllText(path, JsonConvert.SerializeObject(report, Formatting.Indented), Encoding.UTF8);
+            return path;
+        }
+
         public static string BuildTableContentFingerprint(DataTable rows)
         {
             if (rows == null) return string.Empty;
@@ -292,6 +415,63 @@ namespace mySQLPunk.lib
             }
 
             return BuildPagedContentFingerprint(header, rowHashes, rows.Rows.Count, rows.Rows.Count, false);
+        }
+
+        private static void AddTableNames(List<string> tableNames, DatabaseRestoreSnapshot snapshot)
+        {
+            if (tableNames == null || snapshot == null) return;
+            if (snapshot.Tables != null) tableNames.AddRange(snapshot.Tables);
+            if (snapshot.TableRowCounts != null) tableNames.AddRange(snapshot.TableRowCounts.Keys);
+            if (snapshot.TableColumns != null) tableNames.AddRange(snapshot.TableColumns.Keys);
+            if (snapshot.TableContentFingerprints != null) tableNames.AddRange(snapshot.TableContentFingerprints.Keys);
+        }
+
+        private static void ApplyContentScanSummary(DatabaseRestoreContentScanSummary summary, DatabaseRestoreContentScanTableReport tableReport, bool comparable)
+        {
+            if (summary == null || tableReport == null) return;
+
+            if (tableReport.ExistsAfter && !tableReport.ExistsBefore) summary.AddedTables++;
+            if (tableReport.ExistsBefore && !tableReport.ExistsAfter) summary.RemovedTables++;
+            if (!tableReport.HasBeforeSnapshot || !tableReport.HasAfterSnapshot) summary.MissingSnapshotTables++;
+            if (tableReport.BeforePartial || tableReport.AfterPartial) summary.PartialTables++;
+            if (tableReport.HasBeforeSnapshot && tableReport.HasAfterSnapshot && !tableReport.BeforePartial && !tableReport.AfterPartial) summary.FullyScannedTables++;
+            if (comparable && tableReport.IsChanged) summary.ChangedTables++;
+            if (comparable && !tableReport.IsChanged) summary.UnchangedTables++;
+
+            summary.BeforeRows += Math.Max(0, tableReport.BeforeRowCount);
+            summary.AfterRows += Math.Max(0, tableReport.AfterRowCount);
+            summary.BeforeSampledRows += Math.Max(0, tableReport.BeforeSampledRows);
+            summary.AfterSampledRows += Math.Max(0, tableReport.AfterSampledRows);
+        }
+
+        private static DatabaseRestoreTableContentSnapshot GetContentSnapshot(DatabaseRestoreSnapshot snapshot, string tableName)
+        {
+            DatabaseRestoreTableContentSnapshot content;
+            if (snapshot == null || snapshot.TableContentFingerprints == null || string.IsNullOrWhiteSpace(tableName)) return null;
+            return snapshot.TableContentFingerprints.TryGetValue(tableName, out content) ? content : null;
+        }
+
+        private static long GetRowCount(DatabaseRestoreSnapshot snapshot, string tableName)
+        {
+            long rowCount;
+            if (snapshot == null || snapshot.TableRowCounts == null || string.IsNullOrWhiteSpace(tableName)) return 0;
+            return snapshot.TableRowCounts.TryGetValue(tableName, out rowCount) ? Math.Max(0, rowCount) : 0;
+        }
+
+        private static bool ContainsName(IEnumerable<string> names, string targetName)
+        {
+            if (names == null || string.IsNullOrWhiteSpace(targetName)) return false;
+            return names.Any(name => string.Equals((name ?? string.Empty).Trim(), targetName.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string FirstNonEmpty(params string[] values)
+        {
+            if (values == null) return string.Empty;
+            foreach (string value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+            }
+            return string.Empty;
         }
 
         private static string BuildPagedContentFingerprint(string header, List<string> rowHashes, long rowCount, int sampledRows, bool isPartial)

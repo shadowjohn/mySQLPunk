@@ -2332,6 +2332,25 @@ public static class SmokeTests
             AssertContains(largeContentSummary, "large_orders：內容指紋變更", "Large restore content diff should detect sampled row value changes.");
             AssertContains(largeContentSummary, "抽樣 120/250 列", "Large restore content diff should report sampled coverage.");
 
+            DatabaseRestoreContentScanReport scanReport = BackupRestoreDiffService.BuildContentScanReport(
+                largeBefore,
+                largeAfter,
+                new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+            Assert(scanReport.Summary.TotalTables == 1, "Restore content scan report should include scanned table totals.");
+            Assert(scanReport.Summary.ChangedTables == 1, "Restore content scan report should count changed tables.");
+            Assert(scanReport.Summary.PartialTables == 1, "Restore content scan report should count partial table scans.");
+            Assert(scanReport.Summary.BeforeSampledRows == 120 && scanReport.Summary.AfterSampledRows == 120, "Restore content scan report should include sampled row totals.");
+            Assert(scanReport.Tables.Count == 1 && scanReport.Tables[0].IsChanged, "Restore content scan report should flag changed table details.");
+            Assert(scanReport.Tables[0].BeforeFingerprintShort.Length == 12, "Restore content scan report should include short fingerprints.");
+
+            string restoreReportDirectory = Path.Combine(dir, "restore-content-reports");
+            string restoreReportPath = BackupRestoreDiffService.WriteContentScanReport(largeBefore, largeAfter, restoreReportDirectory);
+            Assert(File.Exists(restoreReportPath), "Restore content scan report should be written to disk.");
+            JObject restoreReportJson = JObject.Parse(File.ReadAllText(restoreReportPath, Encoding.UTF8));
+            Assert((int)restoreReportJson["Summary"]["ChangedTables"] == 1, "Restore content scan JSON should include changed table count.");
+            Assert((bool)restoreReportJson["Tables"][0]["IsChanged"], "Restore content scan JSON should include table change details.");
+            Assert((int)restoreReportJson["Tables"][0]["BeforeSampledRows"] == 120, "Restore content scan JSON should include sampled row coverage.");
+
             Assert(BackupRestoreDiffService.ResolveMaxContentSnapshotRows(0) == BackupRestoreDiffService.MaxContentSnapshotRows, "Restore content snapshot should use the default row limit when unset.");
             Assert(BackupRestoreDiffService.ResolveMaxContentSnapshotRows(BackupRestoreDiffService.MaxConfigurableContentSnapshotRows + 10) == BackupRestoreDiffService.MaxConfigurableContentSnapshotRows, "Restore content snapshot should clamp oversized row limits.");
             BackupMirrorSettings.RestoreContentSnapshotMaxRows = 75;

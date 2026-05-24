@@ -4743,9 +4743,14 @@ namespace mySQLPunk
                     int executed = ImportSqlScript(target, package.Script);
                     DatabaseRestoreSnapshot afterSnapshot = CaptureDatabaseRestoreSnapshot(target);
                     string diffSummary = BackupRestoreDiffService.BuildSummary(beforeSnapshot, afterSnapshot);
+                    string contentScanReportMessage = BuildRestoreContentScanReportMessage(beforeSnapshot, afterSnapshot);
                     string message = string.IsNullOrWhiteSpace(diffSummary)
                         ? Localization.Format("Backup.RestoreSuccessWithSnapshot", executed, safetyBackupPath)
                         : Localization.Format("Backup.RestoreSuccessWithSnapshotAndDiff", executed, safetyBackupPath, diffSummary);
+                    if (!string.IsNullOrWhiteSpace(contentScanReportMessage))
+                    {
+                        message += Environment.NewLine + contentScanReportMessage;
+                    }
                     MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     UpdateMainStatus(message);
                 }
@@ -4930,6 +4935,22 @@ namespace mySQLPunk
             }
 
             return snapshot;
+        }
+
+        private string BuildRestoreContentScanReportMessage(DatabaseRestoreSnapshot beforeSnapshot, DatabaseRestoreSnapshot afterSnapshot)
+        {
+            try
+            {
+                string reportPath = BackupRestoreDiffService.WriteContentScanReport(
+                    beforeSnapshot,
+                    afterSnapshot,
+                    GetRestoreContentScanReportDirectory());
+                return Localization.Format("Backup.RestoreContentScanReportCreated", reportPath);
+            }
+            catch (Exception ex)
+            {
+                return Localization.Format("Backup.RestoreContentScanReportFailed", ex.Message);
+            }
         }
 
         private static int GetRestoreContentSnapshotMaxRows()
@@ -5817,6 +5838,16 @@ namespace mySQLPunk
                 documents = Application.UserAppDataPath;
             }
             return Path.Combine(documents, "mySQLPunk", "backup-integrity-reports");
+        }
+
+        private static string GetRestoreContentScanReportDirectory()
+        {
+            string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (string.IsNullOrWhiteSpace(documents))
+            {
+                documents = Application.UserAppDataPath;
+            }
+            return Path.Combine(documents, "mySQLPunk", "restore-content-scan-reports");
         }
 
         private static string GetBackupIntegrityQuarantineDirectory()
