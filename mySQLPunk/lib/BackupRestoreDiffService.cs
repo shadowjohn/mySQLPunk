@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace mySQLPunk.lib
 {
@@ -30,6 +33,7 @@ namespace mySQLPunk.lib
         public List<string> Events { get; private set; }
         public Dictionary<string, long> TableRowCounts { get; private set; }
         public Dictionary<string, List<DatabaseRestoreColumnSnapshot>> TableColumns { get; private set; }
+        public Dictionary<string, DatabaseRestoreTableContentSnapshot> TableContentFingerprints { get; private set; }
 
         public DatabaseRestoreSnapshot()
         {
@@ -39,11 +43,22 @@ namespace mySQLPunk.lib
             Events = new List<string>();
             TableRowCounts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             TableColumns = new Dictionary<string, List<DatabaseRestoreColumnSnapshot>>(StringComparer.OrdinalIgnoreCase);
+            TableContentFingerprints = new Dictionary<string, DatabaseRestoreTableContentSnapshot>(StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    public sealed class DatabaseRestoreTableContentSnapshot
+    {
+        public string TableName { get; set; }
+        public long RowCount { get; set; }
+        public int SampledRows { get; set; }
+        public string Fingerprint { get; set; }
     }
 
     public static class BackupRestoreDiffService
     {
+        public const int MaxContentSnapshotRows = 1000;
+
         public static DatabaseRestoreSnapshot CreateSnapshot(
             string databaseName,
             string providerName,
@@ -111,6 +126,23 @@ namespace mySQLPunk.lib
             snapshot.TableRowCounts[tableName.Trim()] = Math.Max(0, rowCount);
         }
 
+        public static void SetTableContentFingerprint(
+            DatabaseRestoreSnapshot snapshot,
+            string tableName,
+            long rowCount,
+            DataTable rows)
+        {
+            if (snapshot == null || string.IsNullOrWhiteSpace(tableName) || rows == null) return;
+
+            snapshot.TableContentFingerprints[tableName.Trim()] = new DatabaseRestoreTableContentSnapshot
+            {
+                TableName = tableName.Trim(),
+                RowCount = Math.Max(0, rowCount),
+                SampledRows = rows.Rows.Count,
+                Fingerprint = BuildTableContentFingerprint(rows)
+            };
+        }
+
         public static List<DatabaseRestoreColumnSnapshot> CreateColumnSnapshots(string tableName, DataTable columns)
         {
             List<DatabaseRestoreColumnSnapshot> output = new List<DatabaseRestoreColumnSnapshot>();
@@ -158,7 +190,52 @@ namespace mySQLPunk.lib
             {
                 lines.Add("欄位差異：" + columnDiff);
             }
+
+            string contentDiff = BuildContentDiffSummary(before, after);
+            if (!string.IsNullOrWhiteSpace(contentDiff))
+            {
+                lines.Add("資料內容差異：" + contentDiff);
+            }
+
             return string.Join(Environment.NewLine, lines);
+        }
+
+        public static string BuildTableContentFingerprint(DataTable rows)
+        {
+            if (rows == null) return string.Empty;
+
+            StringBuilder header = new StringBuilder();
+            header.Append("columns");
+            foreach (DataColumn column in rows.Columns)
+            {
+                AppendLengthPrefixed(header, column.ColumnName);
+                AppendLengthPrefixed(header, column.DataType == null ? string.Empty : column.DataType.FullName);
+            }
+
+            List<string> rowTexts = new List<string>();
+            foreach (DataRow row in rows.Rows)
+            {
+                StringBuilder rowText = new StringBuilder();
+                foreach (DataColumn column in rows.Columns)
+                {
+                    AppendLengthPrefixed(rowText, FormatCellValue(row[column]));
+                }
+                rowTexts.Add(rowText.ToString());
+            }
+
+            rowTexts.Sort(StringComparer.Ordinal);
+            StringBuilder payload = new StringBuilder();
+            payload.AppendLine(header.ToString());
+            foreach (string rowText in rowTexts)
+            {
+                payload.AppendLine(rowText);
+            }
+
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(payload.ToString()));
+                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
         }
 
         private static string BuildLine(string label, int before, int after, IEnumerable<string> beforeNames, IEnumerable<string> afterNames)
@@ -262,6 +339,36 @@ namespace mySQLPunk.lib
             return FormatNameList(details);
         }
 
+        private static string BuildContentDiffSummary(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after)
+        {
+            if ((before.TableContentFingerprints == null || before.TableContentFingerprints.Count == 0) &&
+                (after.TableContentFingerprints == null || after.TableContentFingerprints.Count == 0))
+            {
+                return string.Empty;
+            }
+
+            List<string> tableNames = new List<string>();
+            if (before.TableContentFingerprints != null) tableNames.AddRange(before.TableContentFingerprints.Keys);
+            if (after.TableContentFingerprints != null) tableNames.AddRange(after.TableContentFingerprints.Keys);
+
+            List<string> details = new List<string>();
+            foreach (string tableName in NormalizeNames(tableNames))
+            {
+                DatabaseRestoreTableContentSnapshot beforeContent = null;
+                DatabaseRestoreTableContentSnapshot afterContent = null;
+                bool hasBefore = before.TableContentFingerprints != null && before.TableContentFingerprints.TryGetValue(tableName, out beforeContent);
+                bool hasAfter = after.TableContentFingerprints != null && after.TableContentFingerprints.TryGetValue(tableName, out afterContent);
+                if (!hasBefore || !hasAfter) continue;
+                if (string.Equals(beforeContent.Fingerprint, afterContent.Fingerprint, StringComparison.OrdinalIgnoreCase)) continue;
+
+                details.Add(tableName + "：內容指紋變更（SHA-256 " +
+                    ShortFingerprint(beforeContent.Fingerprint) + " -> " + ShortFingerprint(afterContent.Fingerprint) +
+                    "；列數 " + beforeContent.RowCount + " -> " + afterContent.RowCount + "）");
+            }
+
+            return details.Count == 0 ? string.Empty : FormatNameList(details);
+        }
+
         private static string BuildColumnChangeDetail(DatabaseRestoreColumnSnapshot before, DatabaseRestoreColumnSnapshot after)
         {
             List<string> parts = new List<string>();
@@ -352,6 +459,40 @@ namespace mySQLPunk.lib
         private static string FormatValue(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? "空白" : value;
+        }
+
+        private static void AppendLengthPrefixed(StringBuilder builder, string value)
+        {
+            value = value ?? string.Empty;
+            builder.Append(value.Length.ToString(CultureInfo.InvariantCulture));
+            builder.Append(':');
+            builder.Append(value);
+            builder.Append('|');
+        }
+
+        private static string FormatCellValue(object value)
+        {
+            if (value == null || value == DBNull.Value) return "<NULL>";
+
+            byte[] bytes = value as byte[];
+            if (bytes != null) return "0x" + BitConverter.ToString(bytes).Replace("-", "");
+
+            if (value is DateTime)
+            {
+                return ((DateTime)value).ToString("o", CultureInfo.InvariantCulture);
+            }
+
+            IFormattable formattable = value as IFormattable;
+            if (formattable != null) return formattable.ToString(null, CultureInfo.InvariantCulture);
+
+            return value.ToString();
+        }
+
+        private static string ShortFingerprint(string fingerprint)
+        {
+            if (string.IsNullOrWhiteSpace(fingerprint)) return "未取得";
+            string value = fingerprint.Trim();
+            return value.Length <= 12 ? value : value.Substring(0, 12);
         }
 
         private static string FormatNameList(List<string> names)

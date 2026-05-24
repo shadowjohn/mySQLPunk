@@ -2205,6 +2205,45 @@ public static class SmokeTests
             AssertContains(schemaSummary, "NULL：NO -> YES", "Restore diff should include nullability changes.");
             AssertContains(schemaSummary, "預設：'' -> NULL", "Restore diff should include default changes.");
             AssertContains(schemaSummary, "註解：姓名 -> 顯示名稱", "Restore diff should include comment changes.");
+
+            DatabaseRestoreSnapshot contentBefore = BackupRestoreDiffService.CreateSnapshot(
+                "main",
+                "sqlite",
+                new[] { "users", "orders" },
+                new string[0],
+                new string[0],
+                new string[0]);
+            DatabaseRestoreSnapshot contentAfter = BackupRestoreDiffService.CreateSnapshot(
+                "main",
+                "sqlite",
+                new[] { "users", "orders" },
+                new string[0],
+                new string[0],
+                new string[0]);
+            BackupRestoreDiffService.SetTableContentFingerprint(contentBefore, "users", 2, BuildRestoreContentRows(new[]
+            {
+                new object[] { 1, "Alice", new byte[] { 1, 2 } },
+                new object[] { 2, "Bob", DBNull.Value }
+            }));
+            BackupRestoreDiffService.SetTableContentFingerprint(contentAfter, "users", 2, BuildRestoreContentRows(new[]
+            {
+                new object[] { 2, "Bob", DBNull.Value },
+                new object[] { 1, "Alice", new byte[] { 1, 2 } }
+            }));
+            BackupRestoreDiffService.SetTableContentFingerprint(contentBefore, "orders", 2, BuildRestoreContentRows(new[]
+            {
+                new object[] { 10, "pending", null },
+                new object[] { 11, "paid", null }
+            }));
+            BackupRestoreDiffService.SetTableContentFingerprint(contentAfter, "orders", 2, BuildRestoreContentRows(new[]
+            {
+                new object[] { 10, "pending", null },
+                new object[] { 11, "refunded", null }
+            }));
+            string contentSummary = BackupRestoreDiffService.BuildSummary(contentBefore, contentAfter);
+            Assert(!contentSummary.Contains("users：內容指紋變更"), "Restore content diff should be row-order independent.");
+            AssertContains(contentSummary, "資料內容差異：orders：內容指紋變更", "Restore content diff should detect changed row values.");
+            AssertContains(contentSummary, "列數 2 -> 2", "Restore content diff should include row counts for same-count content changes.");
         }
         finally
         {
@@ -2224,6 +2263,20 @@ public static class SmokeTests
         foreach (string[] row in rows)
         {
             table.Rows.Add(row);
+        }
+        return table;
+    }
+
+    private static DataTable BuildRestoreContentRows(IEnumerable<object[]> rows)
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("id", typeof(int));
+        table.Columns.Add("status", typeof(string));
+        table.Columns.Add("payload", typeof(byte[]));
+        foreach (object[] row in rows)
+        {
+            object payload = row[2] == null ? DBNull.Value : row[2];
+            table.Rows.Add(row[0], row[1], payload);
         }
         return table;
     }

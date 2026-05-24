@@ -4855,10 +4855,13 @@ namespace mySQLPunk
                     BackupRestoreDiffService.CreateColumnSnapshots(tableName, GetColumnsSafe(target.Database, target.DatabaseName, tableName)));
                 try
                 {
-                    BackupRestoreDiffService.SetTableRowCount(
-                        snapshot,
-                        tableName,
-                        target.Database.CountRows(target.DatabaseName, tableName));
+                    long rowCount = target.Database.CountRows(target.DatabaseName, tableName);
+                    BackupRestoreDiffService.SetTableRowCount(snapshot, tableName, rowCount);
+                    if (rowCount > 0 && rowCount <= BackupRestoreDiffService.MaxContentSnapshotRows)
+                    {
+                        DataTable rows = target.Database.SelectTablePage(target.DatabaseName, tableName, 0, (int)rowCount);
+                        BackupRestoreDiffService.SetTableContentFingerprint(snapshot, tableName, rowCount, rows);
+                    }
                 }
                 catch
                 {
