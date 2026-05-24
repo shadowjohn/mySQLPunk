@@ -75,7 +75,7 @@ namespace mySQLPunk.lib
             return "powershell -ExecutionPolicy Bypass -File \"" + scriptPath + "\"";
         }
 
-        public static ProcessStartInfo BuildRepairProcessStartInfo(string repositoryRoot)
+        public static ProcessStartInfo BuildRepairProcessStartInfo(string repositoryRoot, bool keepWindowOpen = true)
         {
             string scriptPath = GetBuildScriptPath(repositoryRoot);
             if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath))
@@ -91,7 +91,7 @@ namespace mySQLPunk.lib
             return new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = "-NoExit -ExecutionPolicy Bypass -Command \"" + command.Replace("\"", "`\"") + "\"",
+                Arguments = (keepWindowOpen ? "-NoExit " : string.Empty) + "-ExecutionPolicy Bypass -Command \"" + command.Replace("\"", "`\"") + "\"",
                 WorkingDirectory = repositoryRoot,
                 UseShellExecute = true
             };

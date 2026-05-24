@@ -6191,7 +6191,18 @@ namespace mySQLPunk
 
             try
             {
-                Process.Start(SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(repositoryRoot));
+                Process process = Process.Start(SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(repositoryRoot, false));
+                if (process != null)
+                {
+                    process.EnableRaisingEvents = true;
+                    process.Exited += (s, args) =>
+                    {
+                        int exitCode = -1;
+                        try { exitCode = process.ExitCode; } catch { }
+                        try { process.Dispose(); } catch { }
+                        HandleSpatiaLiteRepairCompleted(exitCode);
+                    };
+                }
                 UpdateMainStatus("SpatiaLite runtime 修復腳本已啟動。");
             }
             catch (Exception ex)
@@ -6200,6 +6211,40 @@ namespace mySQLPunk
             }
 
             return true;
+        }
+
+        private void HandleSpatiaLiteRepairCompleted(int exitCode)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<int>(HandleSpatiaLiteRepairCompleted), exitCode);
+                return;
+            }
+
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            my_sqlite sqlite = target != null ? target.Database as my_sqlite : null;
+            if (exitCode != 0)
+            {
+                UpdateMainStatus(Localization.Format("Connection.SpatiaLiteRepairFailed", exitCode));
+                if (sqlite != null)
+                {
+                    ShowDatabaseOtherTool(target.Database, target.DatabaseName, "Connection Diagnostics", target.ConnectionInfo);
+                }
+                return;
+            }
+
+            if (sqlite == null)
+            {
+                UpdateMainStatus(Localization.T("Connection.SpatiaLiteRepairCompletedReconnect"));
+                return;
+            }
+
+            sqlite.RetryLoadSpatiaLite();
+            ShowDatabaseOtherTool(target.Database, target.DatabaseName, "Connection Diagnostics", target.ConnectionInfo);
+            UpdateMainStatus(sqlite.SpatiaLiteEnabled
+                ? Localization.T("Connection.SpatiaLiteRepairReloaded")
+                : Localization.Format("Connection.SpatiaLiteRepairReloadFailed", sqlite.SpatiaLiteLoadError));
         }
 
         private bool ActivateDatabaseObjectFromGridRow(int rowIndex, string groupName)

@@ -8,6 +8,7 @@ namespace mySQLPunk.lib
     public static class WindowsCredentialService
     {
         private const int CRED_TYPE_GENERIC = 1;
+        private const int CRED_PERSIST_SESSION = 1;
         private const int CRED_PERSIST_LOCAL_MACHINE = 2;
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -62,6 +63,12 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(targetName)) return false;
             if (password == null) password = string.Empty;
 
+            return TryWritePassword(targetName, userName, password, CRED_PERSIST_LOCAL_MACHINE)
+                || TryWritePassword(targetName, userName, password, CRED_PERSIST_SESSION);
+        }
+
+        private static bool TryWritePassword(string targetName, string userName, string password, int persist)
+        {
             byte[] passwordBytes = Encoding.Unicode.GetBytes(password);
             IntPtr blob = IntPtr.Zero;
             try
@@ -75,7 +82,7 @@ namespace mySQLPunk.lib
                     TargetName = targetName,
                     CredentialBlobSize = passwordBytes.Length,
                     CredentialBlob = blob,
-                    Persist = CRED_PERSIST_LOCAL_MACHINE,
+                    Persist = persist,
                     UserName = userName ?? string.Empty,
                     Comment = "mySQLPunk connection password"
                 };
@@ -134,7 +141,10 @@ namespace mySQLPunk.lib
             if (CredDelete(targetName, CRED_TYPE_GENERIC, 0)) return true;
 
             const int ERROR_NOT_FOUND = 1168;
-            return Marshal.GetLastWin32Error() == ERROR_NOT_FOUND;
+            if (Marshal.GetLastWin32Error() == ERROR_NOT_FOUND) return true;
+
+            string ignored;
+            return !TryReadPassword(targetName, out ignored);
         }
 
         private static string GetValue(IDictionary<string, object> conn, string key)

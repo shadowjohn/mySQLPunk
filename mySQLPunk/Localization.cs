@@ -282,6 +282,10 @@ namespace mySQLPunk
             Add("Connection.SqliteFileFilter", "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*", "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*");
             Add("Connection.SqliteNewFileFilter", "SQLite database (*.sqlite)|*.sqlite|SQLite DB (*.db)|*.db|All files (*.*)|*.*", "SQLite database (*.sqlite)|*.sqlite|SQLite DB (*.db)|*.db|All files (*.*)|*.*");
             Add("Connection.SpatiaLiteLoadFailed", "SQLite 可連線，但 SpatiaLite 載入失敗：\r\n{0}", "SQLite connected, but SpatiaLite failed to load:\r\n{0}");
+            Add("Connection.SpatiaLiteRepairFailed", "SpatiaLite runtime 修復腳本結束，但回傳代碼為 {0}。請查看修復 log。", "SpatiaLite runtime repair finished with exit code {0}. Check the repair log.");
+            Add("Connection.SpatiaLiteRepairCompletedReconnect", "SpatiaLite runtime 修復完成。請重新開啟 SQLite 連線以重新載入 extension。", "SpatiaLite runtime repair completed. Reopen the SQLite connection to reload the extension.");
+            Add("Connection.SpatiaLiteRepairReloaded", "SpatiaLite runtime 修復完成，已重新載入 SpatiaLite。", "SpatiaLite runtime repair completed and SpatiaLite was reloaded.");
+            Add("Connection.SpatiaLiteRepairReloadFailed", "SpatiaLite runtime 修復完成，但重新載入仍失敗：{0}", "SpatiaLite runtime repair completed, but reload still failed: {0}");
             Add("Connection.InitSpatialMetadataTitle", "初始化 geospatial", "Initialize geospatial");
             Add("Connection.InitSpatialMetadataPrompt", "此 SQLite 檔尚未偵測到 SpatiaLite metadata，是否要初始化？", "This SQLite file does not have SpatiaLite metadata yet. Initialize it?");
             Add("Connection.UnsupportedEdit", "此連線類型尚未支援編輯：{0}", "Editing this connection type is not supported yet: {0}");

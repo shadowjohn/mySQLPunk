@@ -44,7 +44,7 @@ namespace mySQLPunk.lib
 
         public void Close()
         {
-            if (MCT.State != ConnectionState.Closed) MCT.Close();
+            if (MCT != null && MCT.State != ConnectionState.Closed) MCT.Close();
         }
         public void close() => Close();
 
@@ -108,6 +108,21 @@ namespace mySQLPunk.lib
             {
                 cmd.ExecuteNonQuery();
             }
+        }
+
+        public void RetryLoadSpatiaLite()
+        {
+            _spatialiteLoadTried = false;
+            SpatiaLiteEnabled = false;
+            SpatiaLiteLoadError = "";
+
+            if (MCT == null || MCT.State != ConnectionState.Open)
+            {
+                SpatiaLiteLoadError = "SQLite connection is not open.";
+                return;
+            }
+
+            TryLoadSpatiaLite();
         }
 
         private void TryLoadSpatiaLite()

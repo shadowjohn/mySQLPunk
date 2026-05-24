@@ -134,8 +134,8 @@ Smoke test harness：
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。
   - 完成內容：
     - 載入失敗訊息已改用語系化字串（`Connection.SpatiaLiteLoadFailed`），並同步更新狀態列，降級行為更清楚。
-    - `其它 > 連線診斷` 會顯示 SpatiaLite runtime 目錄、`mod_spatialite.dll` 路徑、載入狀態與版本資訊；若 extension 未載入，也會顯示 runtime manifest、建置腳本路徑、可直接執行的 PowerShell 修復命令、修復 log 路徑、缺少 DLL 與目前載入錯誤，方便依 `tools/spatialite/Build-SpatiaLiteRuntime.ps1` 從 Gaia-SINS 官方 `libspatialite-5.1.0.zip` 來源重建 runtime；在連線診斷表格雙擊 `SpatiaLite Repair Command` 會直接開啟 PowerShell 執行建置腳本，並用 `Tee-Object` 將進度輸出寫入文件目錄的 `mySQLPunk/spatialite-repair-logs`。
-  - 後續方向：若需要更完整的環境修復流程，可再加入建置完成後自動重新整理 SQLite 連線與 SpatiaLite 載入狀態。
+    - `其它 > 連線診斷` 會顯示 SpatiaLite runtime 目錄、`mod_spatialite.dll` 路徑、載入狀態與版本資訊；若 extension 未載入，也會顯示 runtime manifest、建置腳本路徑、可直接執行的 PowerShell 修復命令、修復 log 路徑、缺少 DLL 與目前載入錯誤，方便依 `tools/spatialite/Build-SpatiaLiteRuntime.ps1` 從 Gaia-SINS 官方 `libspatialite-5.1.0.zip` 來源重建 runtime；在連線診斷表格雙擊 `SpatiaLite Repair Command` 會直接開啟 PowerShell 執行建置腳本，並用 `Tee-Object` 將進度輸出寫入文件目錄的 `mySQLPunk/spatialite-repair-logs`；修復腳本結束後會重置目前 SQLite provider 的 SpatiaLite 載入狀態、重新嘗試載入 extension，並刷新連線診斷表格與狀態列。
+  - 後續方向：若需要更完整的部署體驗，可再加入官方 runtime 下載快取與離線安裝包檢查。
 
 ### Table Designer 限制
 
