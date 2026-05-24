@@ -484,6 +484,14 @@ namespace mySQLPunk
             Add("Query.ConflictOperation", "操作類型：{0}", "Operation: {0}");
             Add("Query.ConflictWhere", "比對條件：{0}", "Match condition: {0}");
             Add("Query.ConflictValues", "比對/異動值：{0}", "Matched/changed values: {0}");
+            Add("Query.ConflictDatabaseDiff", "資料庫目前差異：{0}", "Current database differences: {0}");
+            Add("Query.ConflictOriginalValue", "原始={0}", "original={0}");
+            Add("Query.ConflictDatabaseValue", "資料庫={0}", "database={0}");
+            Add("Query.ConflictDatabaseDiffNoStableColumns", "沒有足夠未異動欄位可安全重查同一列。", "There are not enough unchanged columns to safely re-query the same row.");
+            Add("Query.ConflictDatabaseDiffNoRows", "未找到可安全比對的目前資料列，資料可能已被刪除或所有可比對欄位都已變更。", "No safely comparable current row was found. The row may have been deleted or all comparable columns may have changed.");
+            Add("Query.ConflictDatabaseDiffMultipleRows", "找到多筆候選資料列，為避免誤判不顯示欄位差異。", "Multiple candidate rows were found, so field differences are not shown to avoid guessing.");
+            Add("Query.ConflictDatabaseDiffReadFailed", "重查目前資料列失敗：{0}", "Failed to re-query the current row: {0}");
+            Add("Query.ConflictDatabaseDiffNoChanges", "目前資料庫值與原始值沒有可顯示差異，可能是 provider 影響列數回報或型別比對規則造成。", "The current database values do not show differences from the original values. This may be caused by provider affected-row reporting or type comparison rules.");
             Add("Object.ConfirmDeleteTable", "確定要刪除資料表「{0}」嗎？此操作不可還原！", "Delete table \"{0}\"? This action cannot be undone.");
             Add("Object.ConfirmDeleteView", "確定要刪除檢視「{0}」嗎？此操作不可還原！", "Delete view \"{0}\"? This action cannot be undone.");
             Add("Object.ConfirmDeleteFunction", "確定要刪除函式或程序「{0}」嗎？此操作不可還原！", "Delete function or procedure \"{0}\"? This action cannot be undone.");

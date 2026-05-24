@@ -2962,6 +2962,72 @@ public static class SmokeTests
             conflictMessage.IndexOf("p1=7", StringComparison.OrdinalIgnoreCase) >= 0;
         Assert(rejectedConflict, "Update/delete zero affected rows conflict should include operation, WHERE detail, and parameter values.");
 
+        DataTable databaseCurrentRow = table.Clone();
+        databaseCurrentRow.Rows.Add(7, "database name", DBNull.Value, new byte[] { 0x01, 0x02 });
+        FakeExecDatabase noPrimaryConflictDb = new FakeExecDatabase("postgresql", "0");
+        noPrimaryConflictDb.SelectResult = databaseCurrentRow;
+        SetPrivateField(form, "_db", noPrimaryConflictDb);
+        SetPrivateField(form, "_databaseName", "main");
+        string databaseDiffMessage = "";
+        try
+        {
+            InvokeQueryFormExecuteUpdate(
+                form,
+                "users",
+                new[]
+                {
+                    CreateQueryFormColumnInfo("id", false),
+                    CreateQueryFormColumnInfo("name", false),
+                    CreateQueryFormColumnInfo("note", false),
+                    CreateQueryFormColumnInfo("payload", false)
+                },
+                new List<string>(),
+                row);
+        }
+        catch (TargetInvocationException ex)
+        {
+            databaseDiffMessage = ex.InnerException != null ? ex.InnerException.Message : "";
+        }
+
+        AssertContains(databaseDiffMessage, "資料庫目前差異", "No-primary-key update conflict should try to include the current database row diff.");
+        AssertContains(databaseDiffMessage, "name", "No-primary-key conflict diff should include the changed column.");
+        AssertContains(databaseDiffMessage, "old name", "No-primary-key conflict diff should include the original value.");
+        AssertContains(databaseDiffMessage, "database name", "No-primary-key conflict diff should include the current database value.");
+        Assert(noPrimaryConflictDb.SelectedSql.Count == 1 &&
+            noPrimaryConflictDb.SelectedSql[0].IndexOf("\"id\" = :p0", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            noPrimaryConflictDb.SelectedSql[0].IndexOf("\"note\" IS NULL", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            noPrimaryConflictDb.SelectedSql[0].IndexOf("\"name\" = ", StringComparison.OrdinalIgnoreCase) < 0,
+            "No-primary-key conflict re-query should use only unchanged comparable columns.");
+
+        DataTable duplicateCurrentRows = table.Clone();
+        duplicateCurrentRows.Rows.Add(7, "database name", DBNull.Value, new byte[] { 0x01 });
+        duplicateCurrentRows.Rows.Add(7, "another name", DBNull.Value, new byte[] { 0x02 });
+        FakeExecDatabase duplicateConflictDb = new FakeExecDatabase("postgresql", "0");
+        duplicateConflictDb.SelectResult = duplicateCurrentRows;
+        SetPrivateField(form, "_db", duplicateConflictDb);
+        string duplicateConflictMessage = "";
+        try
+        {
+            InvokeQueryFormExecuteUpdate(
+                form,
+                "users",
+                new[]
+                {
+                    CreateQueryFormColumnInfo("id", false),
+                    CreateQueryFormColumnInfo("name", false),
+                    CreateQueryFormColumnInfo("note", false),
+                    CreateQueryFormColumnInfo("payload", false)
+                },
+                new List<string>(),
+                row);
+        }
+        catch (TargetInvocationException ex)
+        {
+            duplicateConflictMessage = ex.InnerException != null ? ex.InnerException.Message : "";
+        }
+
+        AssertContains(duplicateConflictMessage, "多筆候選資料列", "No-primary-key conflict diff should not guess when re-query finds multiple rows.");
+
         FakeExecDatabase insertDb = new FakeExecDatabase("postgresql", "0");
         SetPrivateField(form, "_db", insertDb);
         InvokeQueryFormExecOrThrow(form, "INSERT INTO public.users (name) VALUES (:p0);", new Dictionary<string, object>(), false);
@@ -3012,6 +3078,20 @@ public static class SmokeTests
         return where;
     }
 
+    private static void InvokeQueryFormExecuteUpdate(QueryForm form, string tableName, object[] columns, List<string> primaryKeys, DataRow row)
+    {
+        Type columnType = typeof(QueryForm).GetNestedType("TableColumnInfo", BindingFlags.NonPublic);
+        Type listType = typeof(List<>).MakeGenericType(columnType);
+        System.Collections.IList typedColumns = (System.Collections.IList)Activator.CreateInstance(listType);
+        foreach (object column in columns)
+        {
+            typedColumns.Add(column);
+        }
+
+        MethodInfo method = typeof(QueryForm).GetMethod("ExecuteUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
+        method.Invoke(form, new object[] { tableName, typedColumns, primaryKeys, row });
+    }
+
     private static object CreateQueryFormColumnInfo(string name, bool isPrimaryKey)
     {
         Type columnType = typeof(QueryForm).GetNestedType("TableColumnInfo", BindingFlags.NonPublic);
@@ -3024,7 +3104,8 @@ public static class SmokeTests
 
     private static void InvokeQueryFormExecOrThrow(QueryForm form, string sql, Dictionary<string, object> parameters, bool requireAffectedRow)
     {
-        MethodInfo method = typeof(QueryForm).GetMethod("ExecOrThrow", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo method = typeof(QueryForm).GetMethod("ExecOrThrow", BindingFlags.Instance | BindingFlags.NonPublic, null,
+            new[] { typeof(string), typeof(Dictionary<string, object>), typeof(bool) }, null);
         method.Invoke(form, new object[] { sql, parameters, requireAffectedRow });
     }
 
@@ -3922,6 +4003,8 @@ public static class SmokeTests
         private readonly string providerName;
         private readonly string rowsAffected;
         public List<string> ExecutedSql = new List<string>();
+        public List<string> SelectedSql = new List<string>();
+        public DataTable SelectResult;
 
         public FakeExecDatabase(string providerName, string rowsAffected)
         {
@@ -3935,7 +4018,11 @@ public static class SmokeTests
         public void Open() { }
         public void Close() { }
         public void Dispose() { }
-        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            SelectedSql.Add(sql);
+            return SelectResult == null ? new DataTable() : SelectResult;
+        }
         public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
         {
             ExecutedSql.Add(sql);

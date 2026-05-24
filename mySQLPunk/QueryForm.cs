@@ -3565,7 +3565,7 @@ namespace mySQLPunk
             string sql = "UPDATE " + GetQualifiedTableName(tableName) +
                          " SET " + string.Join(", ", setSql) +
                          " WHERE " + whereSql + ";";
-            ExecOrThrow(sql, parameters, true);
+            ExecOrThrow(sql, parameters, true, BuildNoPrimaryKeyConflictDetailProvider(tableName, columns, primaryKeys, row));
         }
 
         private void ExecuteDelete(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
@@ -3575,7 +3575,7 @@ namespace mySQLPunk
             string whereSql = BuildWhereClause(row, columns, primaryKeys, parameters, ref index);
             string sql = "DELETE FROM " + GetQualifiedTableName(tableName) +
                          " WHERE " + whereSql + ";";
-            ExecOrThrow(sql, parameters, true);
+            ExecOrThrow(sql, parameters, true, BuildNoPrimaryKeyConflictDetailProvider(tableName, columns, primaryKeys, row));
         }
 
         private string BuildWhereClause(
@@ -3625,6 +3625,11 @@ namespace mySQLPunk
 
         private void ExecOrThrow(string sql, Dictionary<string, object> parameters, bool requireAffectedRow)
         {
+            ExecOrThrow(sql, parameters, requireAffectedRow, null);
+        }
+
+        private void ExecOrThrow(string sql, Dictionary<string, object> parameters, bool requireAffectedRow, Func<string> conflictDetailProvider)
+        {
             Dictionary<string, string> result = _db.ExecSQL(sql, parameters);
             if (!result.ContainsKey("status") || result["status"] != "OK")
             {
@@ -3637,14 +3642,138 @@ namespace mySQLPunk
                 int rowsAffected;
                 if (int.TryParse(result["rowsAffected"], out rowsAffected) && rowsAffected == 0)
                 {
-                    throw new Exception(BuildRowsAffectedConflictMessage(sql, parameters));
+                    string extraDetail = "";
+                    if (conflictDetailProvider != null)
+                    {
+                        extraDetail = conflictDetailProvider();
+                    }
+                    throw new Exception(BuildRowsAffectedConflictMessage(sql, parameters, extraDetail));
                 }
             }
         }
 
-        private static string BuildRowsAffectedConflictMessage(string sql, Dictionary<string, object> parameters)
+        private Func<string> BuildNoPrimaryKeyConflictDetailProvider(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
+        {
+            if (primaryKeys != null && primaryKeys.Count > 0) return null;
+            return delegate
+            {
+                return BuildNoPrimaryKeyConflictDatabaseDiff(tableName, columns, row);
+            };
+        }
+
+        private string BuildNoPrimaryKeyConflictDatabaseDiff(string tableName, List<TableColumnInfo> columns, DataRow row)
+        {
+            try
+            {
+                List<string> stableColumns = columns
+                    .Where(c => row.Table.Columns.Contains(c.Name))
+                    .Where(c => IsOptimisticWhereComparableValue(row[c.Name, DataRowVersion.Original]))
+                    .Where(c => row.RowState == DataRowState.Deleted || !HasColumnChanged(row, c.Name))
+                    .Select(c => c.Name)
+                    .ToList();
+
+                if (stableColumns.Count == 0)
+                {
+                    return Localization.Format("Query.ConflictDatabaseDiff", Localization.T("Query.ConflictDatabaseDiffNoStableColumns"));
+                }
+
+                Dictionary<string, object> parameters = new Dictionary<string, object>();
+                int index = 0;
+                string whereSql = BuildWhereClause(row, columns, stableColumns, parameters, ref index);
+                string selectSql = BuildNoPrimaryKeyConflictSelectSql(tableName, columns, row, whereSql);
+                DataTable candidates = _db.SelectSQL(selectSql, parameters);
+                int count = candidates == null ? 0 : candidates.Rows.Count;
+
+                if (count == 0)
+                {
+                    return Localization.Format("Query.ConflictDatabaseDiff", Localization.T("Query.ConflictDatabaseDiffNoRows"));
+                }
+
+                if (count > 1)
+                {
+                    return Localization.Format("Query.ConflictDatabaseDiff", Localization.T("Query.ConflictDatabaseDiffMultipleRows"));
+                }
+
+                return Localization.Format("Query.ConflictDatabaseDiff", BuildNoPrimaryKeyConflictRowDiff(row, candidates.Rows[0], columns));
+            }
+            catch (Exception ex)
+            {
+                return Localization.Format("Query.ConflictDatabaseDiff", Localization.Format("Query.ConflictDatabaseDiffReadFailed", ex.Message));
+            }
+        }
+
+        private string BuildNoPrimaryKeyConflictSelectSql(string tableName, List<TableColumnInfo> columns, DataRow row, string whereSql)
+        {
+            List<string> selectColumns = columns
+                .Where(c => row.Table.Columns.Contains(c.Name))
+                .Select(c => QuoteIdentifier(c.Name))
+                .ToList();
+            if (selectColumns.Count == 0)
+            {
+                throw new Exception(Localization.T("Query.NoWritableInsertColumns"));
+            }
+
+            string selectList = string.Join(", ", selectColumns.ToArray());
+            string qualifiedTable = GetQualifiedTableName(tableName);
+            if (IsSqlServerProvider())
+            {
+                return "SELECT TOP 2 " + selectList + " FROM " + qualifiedTable + " WHERE " + whereSql + ";";
+            }
+            if (IsOracleProvider())
+            {
+                return "SELECT " + selectList + " FROM " + qualifiedTable + " WHERE (" + whereSql + ") AND ROWNUM <= 2";
+            }
+            return "SELECT " + selectList + " FROM " + qualifiedTable + " WHERE " + whereSql + " LIMIT 2;";
+        }
+
+        private static string BuildNoPrimaryKeyConflictRowDiff(DataRow originalRow, DataRow databaseRow, List<TableColumnInfo> columns)
+        {
+            List<string> diffs = new List<string>();
+            foreach (TableColumnInfo column in columns)
+            {
+                if (!originalRow.Table.Columns.Contains(column.Name) || !databaseRow.Table.Columns.Contains(column.Name)) continue;
+                object originalValue = originalRow[column.Name, DataRowVersion.Original];
+                object databaseValue = databaseRow[column.Name];
+                if (AreConflictValuesEqual(originalValue, databaseValue)) continue;
+
+                diffs.Add(column.Name + "：" +
+                    Localization.Format("Query.ConflictOriginalValue", FormatConflictParameterValue(originalValue)) + " / " +
+                    Localization.Format("Query.ConflictDatabaseValue", FormatConflictParameterValue(databaseValue)));
+            }
+
+            if (diffs.Count == 0)
+            {
+                return Localization.T("Query.ConflictDatabaseDiffNoChanges");
+            }
+
+            return TruncateConflictDetail(string.Join("；", diffs.ToArray()), 720);
+        }
+
+        private static bool AreConflictValuesEqual(object left, object right)
+        {
+            if (IsDbNull(left) && IsDbNull(right)) return true;
+            if (IsDbNull(left) || IsDbNull(right)) return false;
+            byte[] leftBytes = left as byte[];
+            byte[] rightBytes = right as byte[];
+            if (leftBytes != null || rightBytes != null)
+            {
+                if (leftBytes == null || rightBytes == null || leftBytes.Length != rightBytes.Length) return false;
+                for (int i = 0; i < leftBytes.Length; i++)
+                {
+                    if (leftBytes[i] != rightBytes[i]) return false;
+                }
+                return true;
+            }
+            return object.Equals(left, right);
+        }
+
+        private static string BuildRowsAffectedConflictMessage(string sql, Dictionary<string, object> parameters, string extraDetail)
         {
             string detail = BuildRowsAffectedConflictDetail(sql, parameters);
+            if (!string.IsNullOrWhiteSpace(extraDetail))
+            {
+                detail = string.IsNullOrWhiteSpace(detail) ? extraDetail : detail + Environment.NewLine + extraDetail;
+            }
             if (string.IsNullOrWhiteSpace(detail))
             {
                 return Localization.T("Query.NoRowsAffectedConflict");
