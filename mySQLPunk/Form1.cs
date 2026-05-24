@@ -169,6 +169,36 @@ namespace mySQLPunk
             public int ExistingOnly { get; set; }
         }
 
+        private class ConnectionImportReviewLogTarget
+        {
+            public bool Selected { get; set; }
+            public string Status { get; set; }
+            public int ImportedIndex { get; set; }
+            public string ConnectionName { get; set; }
+            public string DbKind { get; set; }
+            public string Target { get; set; }
+        }
+
+        private class ConnectionImportReviewLogEntry
+        {
+            public int FormatVersion { get; set; }
+            public string ReviewedAtUtc { get; set; }
+            public string Action { get; set; }
+            public string SourceId { get; set; }
+            public string SourceSignatureSha256 { get; set; }
+            public string SourceSignatureState { get; set; }
+            public bool SourceTrusted { get; set; }
+            public string SourceExportedAtUtc { get; set; }
+            public int Added { get; set; }
+            public int Updated { get; set; }
+            public int Unchanged { get; set; }
+            public int ExistingOnly { get; set; }
+            public int PasswordsRequired { get; set; }
+            public int SelectedImportedCount { get; set; }
+            public List<string> Groups { get; set; }
+            public List<ConnectionImportReviewLogTarget> Targets { get; set; }
+        }
+
         private enum ConnectionImportMode
         {
             Cancel,
@@ -1262,10 +1292,15 @@ namespace mySQLPunk
                         MergeImportedConnections(preview, decision.SelectedImportedIndexes);
                     }
 
+                    string reviewLogPath = TryWriteConnectionImportReviewLog(preview, decision);
                     int savedPasswords = PromptForImportedConnectionPasswords();
                     string message = savedPasswords > 0
                         ? Localization.Format("Status.ConnectionsImportedWithPasswords", savedPasswords)
                         : Localization.T("Status.ConnectionsImported");
+                    if (!string.IsNullOrWhiteSpace(reviewLogPath))
+                    {
+                        message += Environment.NewLine + Localization.Format("Connection.ImportReviewLogWritten", reviewLogPath);
+                    }
                     UpdateMainStatus(message);
                     MessageBox.Show(message, Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -1348,6 +1383,24 @@ namespace mySQLPunk
 
             myN.setSettingINI();
             drawLists();
+        }
+
+        private static string TryWriteConnectionImportReviewLog(ConnectionImportPreviewReport preview, ConnectionImportDecision decision)
+        {
+            if (preview == null || decision == null || decision.Mode == ConnectionImportMode.Cancel) return string.Empty;
+
+            try
+            {
+                IEnumerable<int> selectedIndexes = decision.Mode == ConnectionImportMode.Replace
+                    ? Enumerable.Range(0, preview.ImportedConnections.Count)
+                    : (IEnumerable<int>)decision.SelectedImportedIndexes;
+                string action = decision.Mode == ConnectionImportMode.Replace ? "replaceAll" : "mergeSelected";
+                return WriteConnectionImportReviewLog(preview, action, selectedIndexes, BuildConnectionImportReviewLogPath());
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private ConnectionImportDecision ShowConnectionImportPreviewDialog(ConnectionImportPreviewReport preview)
@@ -1563,6 +1616,88 @@ namespace mySQLPunk
             return targets.Count == 0
                 ? Localization.T("Connection.ImportReviewNoTargets")
                 : string.Join("; ", targets.ToArray());
+        }
+
+        private static string BuildConnectionImportReviewLogPath()
+        {
+            return Path.Combine(GetConnectionTrustStoreDirectory(), "connection-import-review-log.jsonl");
+        }
+
+        private static string WriteConnectionImportReviewLog(
+            ConnectionImportPreviewReport preview,
+            string action,
+            IEnumerable<int> selectedImportedIndexes,
+            string reviewLogPath)
+        {
+            if (preview == null) throw new ArgumentNullException(nameof(preview));
+            if (string.IsNullOrWhiteSpace(reviewLogPath)) throw new ArgumentException("Review log path is required.", nameof(reviewLogPath));
+
+            ConnectionImportReviewLogEntry entry = BuildConnectionImportReviewLogEntry(preview, action, selectedImportedIndexes);
+            string dir = Path.GetDirectoryName(reviewLogPath);
+            if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+            File.AppendAllText(
+                reviewLogPath,
+                JsonConvert.SerializeObject(entry, Formatting.None) + Environment.NewLine,
+                new UTF8Encoding(false));
+            return reviewLogPath;
+        }
+
+        private static ConnectionImportReviewLogEntry BuildConnectionImportReviewLogEntry(
+            ConnectionImportPreviewReport preview,
+            string action,
+            IEnumerable<int> selectedImportedIndexes)
+        {
+            if (preview == null) throw new ArgumentNullException(nameof(preview));
+
+            HashSet<int> selected = selectedImportedIndexes == null
+                ? new HashSet<int>()
+                : new HashSet<int>(selectedImportedIndexes.Where(i => i >= 0));
+            bool hasExplicitSelection = selected.Count > 0;
+
+            List<ConnectionImportReviewLogTarget> targets = new List<ConnectionImportReviewLogTarget>();
+            foreach (ConnectionImportPreviewEntry entry in preview.Entries)
+            {
+                if (entry.ImportedIndex < 0) continue;
+
+                bool isChanged = string.Equals(entry.Status, "added", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(entry.Status, "updated", StringComparison.OrdinalIgnoreCase);
+                bool isSelected = selected.Contains(entry.ImportedIndex);
+                if (!isChanged && !isSelected) continue;
+
+                targets.Add(new ConnectionImportReviewLogTarget
+                {
+                    Selected = hasExplicitSelection ? isSelected : entry.Include,
+                    Status = entry.Status ?? string.Empty,
+                    ImportedIndex = entry.ImportedIndex,
+                    ConnectionName = entry.ConnectionName ?? string.Empty,
+                    DbKind = entry.DbKind ?? string.Empty,
+                    Target = entry.Target ?? string.Empty
+                });
+            }
+
+            return new ConnectionImportReviewLogEntry
+            {
+                FormatVersion = 1,
+                ReviewedAtUtc = DateTime.UtcNow.ToString("o"),
+                Action = string.IsNullOrWhiteSpace(action) ? "unknown" : action.Trim(),
+                SourceId = preview.SourceId ?? string.Empty,
+                SourceSignatureSha256 = preview.SourceSignature ?? string.Empty,
+                SourceSignatureState = BuildConnectionImportReviewSourceState(preview),
+                SourceTrusted = preview.SourceTrusted,
+                SourceExportedAtUtc = preview.SourceExportedAtUtc ?? string.Empty,
+                Added = preview.Added,
+                Updated = preview.Updated,
+                Unchanged = preview.Unchanged,
+                ExistingOnly = preview.ExistingOnly,
+                PasswordsRequired = preview.ImportedConnections.Count(ConnectionNeedsPasswordAfterImport),
+                SelectedImportedCount = hasExplicitSelection ? selected.Count : preview.Entries.Count(e => e.ImportedIndex >= 0 && e.Include),
+                Groups = preview.ImportedGroups
+                    .Where(g => !string.IsNullOrWhiteSpace(g))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                Targets = targets
+            };
         }
 
         private static string BuildConnectionImportSignatureSummary(ConnectionImportPreviewReport preview)

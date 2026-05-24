@@ -362,6 +362,7 @@ namespace mySQLPunk
             Add("Connection.ImportReviewSourceUnsigned", "無簽章", "unsigned");
             Add("Connection.ImportReviewNoGroups", "無", "none");
             Add("Connection.ImportReviewNoTargets", "無新增或更新", "no added or updated targets");
+            Add("Connection.ImportReviewLogWritten", "匯入審核紀錄：{0}", "Import review log: {0}");
             Add("Connection.ImportPreviewInclude", "合併", "Merge");
             Add("Connection.ImportPreviewStatus", "狀態", "Status");
             Add("Connection.ImportPreviewAdded", "新增", "Added");

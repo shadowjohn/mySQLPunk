@@ -3800,12 +3800,14 @@ public static class SmokeTests
         MethodInfo summaryMethod = typeof(Form1).GetMethod("BuildConnectionImportSignatureSummary", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo trustSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportTrustSummary", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo reviewSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportReviewSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo writeReviewLogMethod = typeof(Form1).GetMethod("WriteConnectionImportReviewLog", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo trustSourceMethod = typeof(Form1).GetMethod("TrustConnectionImportSource", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo isTrustedMethod = typeof(Form1).GetMethod("IsConnectionImportSourceTrusted", BindingFlags.Static | BindingFlags.NonPublic);
         Type reportType = typeof(Form1).GetNestedType("ConnectionImportPreviewReport", BindingFlags.NonPublic);
 
         string importPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_import_signature_" + Guid.NewGuid().ToString("N") + ".json");
         string trustedSourcesPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_trusted_sources_" + Guid.NewGuid().ToString("N") + ".json");
+        string reviewLogPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_import_review_" + Guid.NewGuid().ToString("N") + ".jsonl");
         try
         {
             string sourceId = Guid.NewGuid().ToString("N");
@@ -3840,6 +3842,18 @@ public static class SmokeTests
             AssertContains(reviewSummary, "簽章有效但尚未信任", "Import review should describe source trust state.");
             AssertContains(reviewSummary, "新增/更新=1", "Import review should summarize changed connection count.");
             AssertContains(reviewSummary, "需補密碼=1", "Import review should summarize password follow-up count.");
+            string writtenReviewLogPath = (string)writeReviewLogMethod.Invoke(null, new object[] { previewReport, "mergeSelected", new[] { 0 }, reviewLogPath });
+            AssertEquals(reviewLogPath, writtenReviewLogPath, "Import review log writer should return the written path.");
+            Assert(File.Exists(reviewLogPath), "Import review log should be written as JSONL.");
+            string reviewLogLine = File.ReadAllLines(reviewLogPath, Encoding.UTF8).Last();
+            JObject reviewLog = JObject.Parse(reviewLogLine);
+            AssertEquals("mergeSelected", (string)reviewLog["Action"], "Import review log should record the import action.");
+            AssertEquals("簽章有效但尚未信任", (string)reviewLog["SourceSignatureState"], "Import review log should record source trust state.");
+            Assert((int)reviewLog["SelectedImportedCount"] == 1, "Import review log should record selected imported count.");
+            Assert((int)reviewLog["PasswordsRequired"] == 1, "Import review log should record password follow-up count.");
+            Assert(reviewLog["Groups"] != null && reviewLog["Groups"].Values<string>().Contains("signed-group"), "Import review log should preserve imported groups.");
+            Assert(reviewLog["Targets"] != null && reviewLog["Targets"].HasValues, "Import review log should include changed targets.");
+            Assert((bool)reviewLog["Targets"][0]["Selected"], "Import review log should mark selected targets.");
 
             Assert(!(bool)isTrustedMethod.Invoke(null, new object[] { sourceId, trustedSourcesPath }), "New source should not be trusted before whitelisting.");
             trustSourceMethod.Invoke(null, new object[] { sourceId, signature, trustedSourcesPath });
@@ -3856,6 +3870,7 @@ public static class SmokeTests
         {
             if (File.Exists(importPath)) File.Delete(importPath);
             if (File.Exists(trustedSourcesPath)) File.Delete(trustedSourcesPath);
+            if (File.Exists(reviewLogPath)) File.Delete(reviewLogPath);
         }
     }
 
