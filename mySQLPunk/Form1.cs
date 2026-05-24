@@ -4857,10 +4857,15 @@ namespace mySQLPunk
                 {
                     long rowCount = target.Database.CountRows(target.DatabaseName, tableName);
                     BackupRestoreDiffService.SetTableRowCount(snapshot, tableName, rowCount);
-                    if (rowCount > 0 && rowCount <= BackupRestoreDiffService.MaxContentSnapshotRows)
+                    if (rowCount > 0)
                     {
-                        DataTable rows = target.Database.SelectTablePage(target.DatabaseName, tableName, 0, (int)rowCount);
-                        BackupRestoreDiffService.SetTableContentFingerprint(snapshot, tableName, rowCount, rows);
+                        BackupRestoreDiffService.SetTableContentFingerprint(
+                            snapshot,
+                            tableName,
+                            BackupRestoreDiffService.CreateTableContentFingerprint(
+                                tableName,
+                                rowCount,
+                                (offset, limit) => target.Database.SelectTablePage(target.DatabaseName, tableName, offset, limit)));
                     }
                 }
                 catch

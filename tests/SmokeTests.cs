@@ -2255,7 +2255,40 @@ public static class SmokeTests
             string contentSummary = BackupRestoreDiffService.BuildSummary(contentBefore, contentAfter);
             Assert(!contentSummary.Contains("users：內容指紋變更"), "Restore content diff should be row-order independent.");
             AssertContains(contentSummary, "資料內容差異：orders：內容指紋變更", "Restore content diff should detect changed row values.");
+            AssertContains(contentSummary, "比對 2/2 列", "Restore content diff should report full comparison coverage for small tables.");
             AssertContains(contentSummary, "列數 2 -> 2", "Restore content diff should include row counts for same-count content changes.");
+
+            int beforePageLoads = 0;
+            DatabaseRestoreTableContentSnapshot largeBeforeContent = BackupRestoreDiffService.CreateTableContentFingerprint(
+                "large_orders",
+                250,
+                (offset, limit) =>
+                {
+                    beforePageLoads++;
+                    return BuildPagedRestoreContentRows(offset, limit, -1);
+                },
+                40,
+                120);
+            int afterPageLoads = 0;
+            DatabaseRestoreTableContentSnapshot largeAfterContent = BackupRestoreDiffService.CreateTableContentFingerprint(
+                "large_orders",
+                250,
+                (offset, limit) =>
+                {
+                    afterPageLoads++;
+                    return BuildPagedRestoreContentRows(offset, limit, 80);
+                },
+                40,
+                120);
+            Assert(beforePageLoads > 1 && afterPageLoads > 1, "Large restore content fingerprints should load data in multiple pages.");
+            Assert(largeBeforeContent.SampledRows == 120 && largeBeforeContent.IsPartial, "Large restore content fingerprint should cap sampled rows and mark partial coverage.");
+            DatabaseRestoreSnapshot largeBefore = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", new[] { "large_orders" }, new string[0], new string[0], new string[0]);
+            DatabaseRestoreSnapshot largeAfter = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", new[] { "large_orders" }, new string[0], new string[0], new string[0]);
+            BackupRestoreDiffService.SetTableContentFingerprint(largeBefore, "large_orders", largeBeforeContent);
+            BackupRestoreDiffService.SetTableContentFingerprint(largeAfter, "large_orders", largeAfterContent);
+            string largeContentSummary = BackupRestoreDiffService.BuildSummary(largeBefore, largeAfter);
+            AssertContains(largeContentSummary, "large_orders：內容指紋變更", "Large restore content diff should detect sampled row value changes.");
+            AssertContains(largeContentSummary, "抽樣 120/250 列", "Large restore content diff should report sampled coverage.");
         }
         finally
         {
@@ -2275,6 +2308,21 @@ public static class SmokeTests
         foreach (string[] row in rows)
         {
             table.Rows.Add(row);
+        }
+        return table;
+    }
+
+    private static DataTable BuildPagedRestoreContentRows(long offset, int limit, long changedId)
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("id", typeof(int));
+        table.Columns.Add("status", typeof(string));
+        table.Columns.Add("payload", typeof(byte[]));
+        for (int i = 0; i < limit; i++)
+        {
+            long id = offset + i + 1;
+            string status = id == changedId ? "changed" : "status-" + (id % 7);
+            table.Rows.Add((int)id, status, new byte[] { (byte)(id % 255) });
         }
         return table;
     }

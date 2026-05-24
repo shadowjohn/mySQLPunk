@@ -52,12 +52,14 @@ namespace mySQLPunk.lib
         public string TableName { get; set; }
         public long RowCount { get; set; }
         public int SampledRows { get; set; }
+        public bool IsPartial { get; set; }
         public string Fingerprint { get; set; }
     }
 
     public static class BackupRestoreDiffService
     {
-        public const int MaxContentSnapshotRows = 1000;
+        public const int MaxContentSnapshotRows = 10000;
+        public const int ContentSnapshotPageSize = 1000;
 
         public static DatabaseRestoreSnapshot CreateSnapshot(
             string databaseName,
@@ -139,7 +141,78 @@ namespace mySQLPunk.lib
                 TableName = tableName.Trim(),
                 RowCount = Math.Max(0, rowCount),
                 SampledRows = rows.Rows.Count,
+                IsPartial = false,
                 Fingerprint = BuildTableContentFingerprint(rows)
+            };
+        }
+
+        public static void SetTableContentFingerprint(
+            DatabaseRestoreSnapshot snapshot,
+            string tableName,
+            DatabaseRestoreTableContentSnapshot content)
+        {
+            if (snapshot == null || string.IsNullOrWhiteSpace(tableName) || content == null) return;
+            content.TableName = string.IsNullOrWhiteSpace(content.TableName) ? tableName.Trim() : content.TableName.Trim();
+            snapshot.TableContentFingerprints[tableName.Trim()] = content;
+        }
+
+        public static DatabaseRestoreTableContentSnapshot CreateTableContentFingerprint(
+            string tableName,
+            long rowCount,
+            Func<long, int, DataTable> pageLoader,
+            int pageSize = ContentSnapshotPageSize,
+            int maxRows = MaxContentSnapshotRows)
+        {
+            if (pageLoader == null) throw new ArgumentNullException(nameof(pageLoader));
+            if (rowCount <= 0)
+            {
+                return new DatabaseRestoreTableContentSnapshot
+                {
+                    TableName = tableName ?? string.Empty,
+                    RowCount = Math.Max(0, rowCount),
+                    SampledRows = 0,
+                    IsPartial = false,
+                    Fingerprint = BuildPagedContentFingerprint(string.Empty, new List<string>(), Math.Max(0, rowCount), 0, false)
+                };
+            }
+
+            int safePageSize = Math.Max(1, pageSize);
+            int safeMaxRows = Math.Max(1, maxRows);
+            int targetRows = (int)Math.Min(rowCount, safeMaxRows);
+            List<string> rowHashes = new List<string>();
+            string header = string.Empty;
+            long offset = 0;
+            int sampled = 0;
+
+            while (sampled < targetRows)
+            {
+                int take = Math.Min(safePageSize, targetRows - sampled);
+                DataTable page = pageLoader(offset, take);
+                if (page == null || page.Rows.Count == 0) break;
+
+                if (string.IsNullOrEmpty(header)) header = BuildContentHeader(page.Columns);
+
+                int processedFromPage = 0;
+                foreach (DataRow row in page.Rows)
+                {
+                    rowHashes.Add(HashText(BuildContentRowText(row, page.Columns)));
+                    sampled++;
+                    processedFromPage++;
+                    if (sampled >= targetRows) break;
+                }
+
+                offset += processedFromPage;
+                if (processedFromPage == 0 || page.Rows.Count < take) break;
+            }
+
+            bool isPartial = rowCount > sampled;
+            return new DatabaseRestoreTableContentSnapshot
+            {
+                TableName = tableName ?? string.Empty,
+                RowCount = Math.Max(0, rowCount),
+                SampledRows = sampled,
+                IsPartial = isPartial,
+                Fingerprint = BuildPagedContentFingerprint(header, rowHashes, rowCount, sampled, isPartial)
             };
         }
 
@@ -204,38 +277,31 @@ namespace mySQLPunk.lib
         {
             if (rows == null) return string.Empty;
 
-            StringBuilder header = new StringBuilder();
-            header.Append("columns");
-            foreach (DataColumn column in rows.Columns)
-            {
-                AppendLengthPrefixed(header, column.ColumnName);
-                AppendLengthPrefixed(header, column.DataType == null ? string.Empty : column.DataType.FullName);
-            }
-
-            List<string> rowTexts = new List<string>();
+            string header = BuildContentHeader(rows.Columns);
+            List<string> rowHashes = new List<string>();
             foreach (DataRow row in rows.Rows)
             {
-                StringBuilder rowText = new StringBuilder();
-                foreach (DataColumn column in rows.Columns)
-                {
-                    AppendLengthPrefixed(rowText, FormatCellValue(row[column]));
-                }
-                rowTexts.Add(rowText.ToString());
+                rowHashes.Add(HashText(BuildContentRowText(row, rows.Columns)));
             }
 
-            rowTexts.Sort(StringComparer.Ordinal);
+            return BuildPagedContentFingerprint(header, rowHashes, rows.Rows.Count, rows.Rows.Count, false);
+        }
+
+        private static string BuildPagedContentFingerprint(string header, List<string> rowHashes, long rowCount, int sampledRows, bool isPartial)
+        {
+            rowHashes = rowHashes ?? new List<string>();
+            rowHashes.Sort(StringComparer.Ordinal);
             StringBuilder payload = new StringBuilder();
-            payload.AppendLine(header.ToString());
-            foreach (string rowText in rowTexts)
+            payload.AppendLine(header ?? string.Empty);
+            payload.AppendLine("rowCount:" + Math.Max(0, rowCount).ToString(CultureInfo.InvariantCulture));
+            payload.AppendLine("sampledRows:" + Math.Max(0, sampledRows).ToString(CultureInfo.InvariantCulture));
+            payload.AppendLine("partial:" + (isPartial ? "1" : "0"));
+            foreach (string rowHash in rowHashes)
             {
-                payload.AppendLine(rowText);
+                payload.AppendLine(rowHash);
             }
 
-            using (SHA256 sha = SHA256.Create())
-            {
-                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(payload.ToString()));
-                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-            }
+            return HashText(payload.ToString());
         }
 
         private static string BuildLine(string label, int before, int after, IEnumerable<string> beforeNames, IEnumerable<string> afterNames)
@@ -363,10 +429,20 @@ namespace mySQLPunk.lib
 
                 details.Add(tableName + "：內容指紋變更（SHA-256 " +
                     ShortFingerprint(beforeContent.Fingerprint) + " -> " + ShortFingerprint(afterContent.Fingerprint) +
+                    "；" + BuildContentCoverageText(beforeContent, afterContent) +
                     "；列數 " + beforeContent.RowCount + " -> " + afterContent.RowCount + "）");
             }
 
             return details.Count == 0 ? string.Empty : FormatNameList(details);
+        }
+
+        private static string BuildContentCoverageText(DatabaseRestoreTableContentSnapshot before, DatabaseRestoreTableContentSnapshot after)
+        {
+            int sampled = Math.Min(before == null ? 0 : before.SampledRows, after == null ? 0 : after.SampledRows);
+            long total = Math.Max(before == null ? 0 : before.RowCount, after == null ? 0 : after.RowCount);
+            bool partial = (before != null && before.IsPartial) || (after != null && after.IsPartial);
+            string prefix = partial ? "抽樣" : "比對";
+            return prefix + " " + sampled.ToString(CultureInfo.InvariantCulture) + "/" + Math.Max(0, total).ToString(CultureInfo.InvariantCulture) + " 列";
         }
 
         private static string BuildColumnChangeDetail(DatabaseRestoreColumnSnapshot before, DatabaseRestoreColumnSnapshot after)
@@ -468,6 +544,39 @@ namespace mySQLPunk.lib
             builder.Append(':');
             builder.Append(value);
             builder.Append('|');
+        }
+
+        private static string BuildContentHeader(DataColumnCollection columns)
+        {
+            StringBuilder header = new StringBuilder();
+            header.Append("columns");
+            if (columns == null) return header.ToString();
+            foreach (DataColumn column in columns)
+            {
+                AppendLengthPrefixed(header, column.ColumnName);
+                AppendLengthPrefixed(header, column.DataType == null ? string.Empty : column.DataType.FullName);
+            }
+            return header.ToString();
+        }
+
+        private static string BuildContentRowText(DataRow row, DataColumnCollection columns)
+        {
+            StringBuilder rowText = new StringBuilder();
+            if (row == null || columns == null) return rowText.ToString();
+            foreach (DataColumn column in columns)
+            {
+                AppendLengthPrefixed(rowText, FormatCellValue(row[column]));
+            }
+            return rowText.ToString();
+        }
+
+        private static string HashText(string text)
+        {
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(text ?? string.Empty));
+                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
         }
 
         private static string FormatCellValue(object value)
