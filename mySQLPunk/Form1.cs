@@ -4577,8 +4577,18 @@ namespace mySQLPunk
                 {
                     SqliteColumnCommentImportPlan plan =
                         SqliteColumnCommentExchangeService.BuildImportPlanFromFile(dialog.FileName, tableName);
+                    SqliteColumnCommentImportReviewReport review =
+                        SqliteColumnCommentExchangeService.BuildImportReviewReport(target.Database, target.DatabaseName, plan);
+                    review.SourcePath = dialog.FileName;
                     if (MessageBox.Show(
-                        Localization.Format("Object.SqliteColumnCommentsImportConfirm", plan.TableCount, plan.CommentCount),
+                        Localization.Format(
+                            "Object.SqliteColumnCommentsImportConfirmWithReview",
+                            plan.TableCount,
+                            plan.CommentCount,
+                            review.Added,
+                            review.Updated,
+                            review.Removed,
+                            review.Unchanged),
                         Localization.T("Tool.ImportSqliteColumnComments"),
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Question) != DialogResult.Yes)
@@ -4591,10 +4601,18 @@ namespace mySQLPunk
                         target.Database.ExecSQL(statement);
                     }
 
+                    string reviewReportPath = TryWriteSqliteColumnCommentImportReviewReport(review);
                     RefreshDatabaseObjectNodes(target.DatabaseNode);
-                    UpdateMainStatus(Localization.Format("Object.SqliteColumnCommentsImportedStatus", plan.CommentCount));
+                    string statusMessage = Localization.Format("Object.SqliteColumnCommentsImportedStatus", plan.CommentCount);
+                    if (!string.IsNullOrWhiteSpace(reviewReportPath))
+                    {
+                        statusMessage += " " + Localization.Format("Object.SqliteColumnCommentsImportReviewReport", reviewReportPath);
+                    }
+                    UpdateMainStatus(statusMessage);
                     MessageBox.Show(
-                        Localization.Format("Object.SqliteColumnCommentsImported", plan.TableCount, plan.CommentCount),
+                        string.IsNullOrWhiteSpace(reviewReportPath)
+                            ? Localization.Format("Object.SqliteColumnCommentsImported", plan.TableCount, plan.CommentCount)
+                            : Localization.Format("Object.SqliteColumnCommentsImportedWithReview", plan.TableCount, plan.CommentCount, reviewReportPath),
                         Localization.T("Tool.ImportSqliteColumnComments"),
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -4607,6 +4625,21 @@ namespace mySQLPunk
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
                 }
+            }
+        }
+
+        private static string TryWriteSqliteColumnCommentImportReviewReport(SqliteColumnCommentImportReviewReport review)
+        {
+            if (review == null) return string.Empty;
+            try
+            {
+                return SqliteColumnCommentExchangeService.WriteImportReviewReport(
+                    review,
+                    GetSqliteColumnCommentImportReviewReportDirectory());
+            }
+            catch
+            {
+                return string.Empty;
             }
         }
 
@@ -4628,6 +4661,16 @@ namespace mySQLPunk
                 baseName = baseName.Replace(invalid, '_');
             }
             return baseName + "_column_comments.json";
+        }
+
+        private static string GetSqliteColumnCommentImportReviewReportDirectory()
+        {
+            string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (string.IsNullOrWhiteSpace(documents))
+            {
+                documents = Application.UserAppDataPath;
+            }
+            return Path.Combine(documents, "mySQLPunk", "sqlite-column-comment-import-reviews");
         }
 
         private void DumpSelectedViewSql()

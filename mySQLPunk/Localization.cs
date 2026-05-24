@@ -534,9 +534,12 @@ namespace mySQLPunk
             Add("Object.SqliteColumnCommentsExportedStatus", "SQLite 欄位註解已匯出 {0} 筆：{1}", "SQLite column comments exported ({0}): {1}");
             Add("Object.SqliteColumnCommentsExportFailed", "匯出 SQLite 欄位註解失敗：{0}", "Export SQLite column comments failed: {0}");
             Add("Object.SqliteColumnCommentsImportConfirm", "即將匯入 {0} 個資料表、{1} 筆欄位註解，並覆蓋這些資料表目前的 mySQLPunk sidecar 註解。是否繼續？", "Import {0} tables and {1} column comments, replacing current mySQLPunk sidecar comments for those tables. Continue?");
+            Add("Object.SqliteColumnCommentsImportConfirmWithReview", "即將匯入 {0} 個資料表、{1} 筆欄位註解，並覆蓋這些資料表目前的 mySQLPunk sidecar 註解。\n\n審核摘要：新增 {2}、更新 {3}、移除 {4}、不變 {5}。\n是否繼續？", "Import {0} tables and {1} column comments, replacing current mySQLPunk sidecar comments for those tables.\n\nReview summary: added {2}, updated {3}, removed {4}, unchanged {5}.\nContinue?");
             Add("Object.SqliteColumnCommentsImported", "已匯入 {0} 個資料表、{1} 筆欄位註解。", "Imported {0} tables and {1} column comments.");
+            Add("Object.SqliteColumnCommentsImportedWithReview", "已匯入 {0} 個資料表、{1} 筆欄位註解。\n審核報告：{2}", "Imported {0} tables and {1} column comments.\nReview report: {2}");
             Add("Object.SqliteColumnCommentsImportedStatus", "SQLite 欄位註解已匯入 {0} 筆。", "SQLite column comments imported: {0}.");
             Add("Object.SqliteColumnCommentsImportFailed", "匯入 SQLite 欄位註解失敗：{0}", "Import SQLite column comments failed: {0}");
+            Add("Object.SqliteColumnCommentsImportReviewReport", "審核報告：{0}", "Review report: {0}");
             Add("ImportSql.Title", "匯入 SQL 檔案", "Import SQL File");
             Add("ImportSql.SelectDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
             Add("ImportSql.Success", "SQL 匯入完成。執行語句數：{0}", "SQL import completed. Statements executed: {0}");

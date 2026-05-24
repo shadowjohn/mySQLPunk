@@ -2592,6 +2592,25 @@ public static class SmokeTests
         Assert(filteredPlan.TableCount == 1 && filteredPlan.CommentCount == 2, "SQLite comment import should support legacy table-map JSON and table filters.");
         AssertContains(filteredSql, "'O''Reilly'", "SQLite comment import should escape single quotes.");
         AssertNotContains(filteredSql, "logs", "SQLite comment table filter should skip other tables.");
+        SqliteColumnCommentImportReviewReport filteredReview =
+            SqliteColumnCommentExchangeService.BuildImportReviewReport(db, "main", filteredPlan);
+        Assert(filteredReview.Added == 2 && filteredReview.Removed == 2, "SQLite comment import review should show added and removed comments for replace semantics.");
+        Assert(filteredReview.Entries.Count == 4, "SQLite comment import review should include one entry per changed current/imported comment.");
+        AssertContains(SqliteColumnCommentExchangeService.BuildImportReviewSummary(filteredReview), "新增 2", "SQLite comment import review summary should include added count.");
+        string reviewDirectory = Path.Combine(Path.GetTempPath(), "sqlite_comment_review_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            filteredReview.SourcePath = "legacy.json";
+            string reviewPath = SqliteColumnCommentExchangeService.WriteImportReviewReport(filteredReview, reviewDirectory);
+            Assert(File.Exists(reviewPath), "SQLite comment import review should write a JSON report.");
+            JObject reviewJson = JObject.Parse(File.ReadAllText(reviewPath, Encoding.UTF8));
+            Assert((int)reviewJson["Added"] == 2 && (int)reviewJson["Removed"] == 2, "SQLite comment import review JSON should include diff counts.");
+            Assert(reviewJson["Entries"] != null && reviewJson["Entries"].HasValues, "SQLite comment import review JSON should include entry details.");
+        }
+        finally
+        {
+            if (Directory.Exists(reviewDirectory)) Directory.Delete(reviewDirectory, true);
+        }
 
         string flatArrayJson = "[{\"table\":\"users\",\"column\":\"EMAIL\",\"comment\":\"電子郵件\"},{\"table\":\"logs\",\"column\":\"MESSAGE\",\"comment\":\"訊息\"}]";
         SqliteColumnCommentImportPlan flatArrayPlan = SqliteColumnCommentExchangeService.BuildImportPlan(flatArrayJson, "users");
