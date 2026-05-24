@@ -3643,8 +3643,10 @@ public static class SmokeTests
     {
         MethodInfo computeMethod = typeof(Form1).GetMethod("ComputeConnectionImportSignature", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo readMethod = typeof(Form1).GetMethod("ReadConnectionImportSignature", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo previewMethod = typeof(Form1).GetMethod("BuildConnectionImportPreview", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo summaryMethod = typeof(Form1).GetMethod("BuildConnectionImportSignatureSummary", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo trustSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportTrustSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo reviewSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportReviewSummary", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo trustSourceMethod = typeof(Form1).GetMethod("TrustConnectionImportSource", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo isTrustedMethod = typeof(Form1).GetMethod("IsConnectionImportSourceTrusted", BindingFlags.Static | BindingFlags.NonPublic);
         Type reportType = typeof(Form1).GetNestedType("ConnectionImportPreviewReport", BindingFlags.NonPublic);
@@ -3679,6 +3681,12 @@ public static class SmokeTests
             AssertContains(summary, "SHA-256", "Signature summary should show the hash algorithm.");
             string trustSummary = (string)trustSummaryMethod.Invoke(null, new object[] { report });
             AssertContains(trustSummary, "尚未加入白名單", "Untrusted signed source should be called out.");
+            object previewReport = previewMethod.Invoke(null, new object[] { importPath, new List<Dictionary<string, object>>() });
+            string reviewSummary = (string)reviewSummaryMethod.Invoke(null, new object[] { previewReport });
+            AssertContains(reviewSummary, "團隊審核摘要", "Import review should include a team review summary.");
+            AssertContains(reviewSummary, "簽章有效但尚未信任", "Import review should describe source trust state.");
+            AssertContains(reviewSummary, "新增/更新=1", "Import review should summarize changed connection count.");
+            AssertContains(reviewSummary, "需補密碼=1", "Import review should summarize password follow-up count.");
 
             Assert(!(bool)isTrustedMethod.Invoke(null, new object[] { sourceId, trustedSourcesPath }), "New source should not be trusted before whitelisting.");
             trustSourceMethod.Invoke(null, new object[] { sourceId, signature, trustedSourcesPath });
@@ -3704,6 +3712,7 @@ public static class SmokeTests
         MethodInfo targetTextMethod = typeof(Form1).GetMethod("BuildImportedConnectionPasswordTargetText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo collectMethod = typeof(Form1).GetMethod("CollectImportedConnectionPasswords", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo previewMethod = typeof(Form1).GetMethod("BuildConnectionImportPreview", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo reviewSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportReviewSummary", BindingFlags.Static | BindingFlags.NonPublic);
 
         Dictionary<string, object> mysqlConn = new Dictionary<string, object>
         {
@@ -3769,6 +3778,12 @@ public static class SmokeTests
             Assert((int)GetProperty(report, "ExistingOnly") == 1, "Import preview should count existing-only connections.");
             var importedGroups = (System.Collections.ICollection)GetProperty(report, "ImportedGroups");
             Assert(importedGroups.Count == 1, "Import preview should keep imported groups for merge.");
+            string reviewSummary = (string)reviewSummaryMethod.Invoke(null, new object[] { report });
+            AssertContains(reviewSummary, "新增/更新=2", "Import review should count added and updated connections.");
+            AssertContains(reviewSummary, "本機只存在=1", "Import review should call out local-only connections before replace-all.");
+            AssertContains(reviewSummary, "需補密碼=3", "Import review should count imported connections that need password follow-up.");
+            AssertContains(reviewSummary, "imported", "Import review should list imported groups for team review.");
+            AssertContains(reviewSummary, "postgresql new@pg:5432", "Import review should include changed targets for reviewers.");
         }
         finally
         {

@@ -1368,7 +1368,7 @@ namespace mySQLPunk
                 dialog.MinimumSize = new Size(760, 440);
 
                 summaryLabel.Dock = DockStyle.Top;
-                summaryLabel.Height = 96;
+                summaryLabel.Height = 124;
                 summaryLabel.Padding = new Padding(12, 10, 12, 8);
                 summaryLabel.Text = BuildConnectionImportPreviewSummary(preview);
 
@@ -1508,7 +1508,61 @@ namespace mySQLPunk
             if (preview == null) return summary;
             return summary + Environment.NewLine +
                    BuildConnectionImportSignatureSummary(preview) + Environment.NewLine +
-                   BuildConnectionImportTrustSummary(preview);
+                   BuildConnectionImportTrustSummary(preview) + Environment.NewLine +
+                   BuildConnectionImportReviewSummary(preview);
+        }
+
+        private static string BuildConnectionImportReviewSummary(ConnectionImportPreviewReport preview)
+        {
+            if (preview == null) return string.Empty;
+
+            int activeChanges = preview.Added + preview.Updated;
+            int passwordRequired = preview.ImportedConnections.Count(ConnectionNeedsPasswordAfterImport);
+            string sourceState = BuildConnectionImportReviewSourceState(preview);
+            string groupSummary = preview.ImportedGroups.Count == 0
+                ? Localization.T("Connection.ImportReviewNoGroups")
+                : string.Join(", ", preview.ImportedGroups.Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g, StringComparer.OrdinalIgnoreCase).Take(5).ToArray());
+            string targetSummary = BuildConnectionImportReviewTargets(preview);
+
+            return Localization.Format(
+                "Connection.ImportReviewSummary",
+                sourceState,
+                activeChanges,
+                preview.ExistingOnly,
+                passwordRequired,
+                groupSummary,
+                targetSummary);
+        }
+
+        private static string BuildConnectionImportReviewSourceState(ConnectionImportPreviewReport preview)
+        {
+            if (preview == null || !preview.SourceSignaturePresent) return Localization.T("Connection.ImportReviewSourceUnsigned");
+            if (!preview.SourceSignatureValid) return Localization.T("Connection.ImportReviewSourceInvalid");
+            if (preview.SourceTrusted) return Localization.T("Connection.ImportReviewSourceTrusted");
+            return Localization.T("Connection.ImportReviewSourceUntrusted");
+        }
+
+        private static string BuildConnectionImportReviewTargets(ConnectionImportPreviewReport preview)
+        {
+            if (preview == null || preview.Entries.Count == 0) return Localization.T("Connection.ImportReviewNoTargets");
+
+            List<string> targets = new List<string>();
+            foreach (ConnectionImportPreviewEntry entry in preview.Entries)
+            {
+                if (!string.Equals(entry.Status, "added", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(entry.Status, "updated", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string item = entry.DbKind + " " + entry.ConnectionName + "@" + entry.Target;
+                if (!targets.Contains(item, StringComparer.OrdinalIgnoreCase)) targets.Add(item);
+                if (targets.Count >= 5) break;
+            }
+
+            return targets.Count == 0
+                ? Localization.T("Connection.ImportReviewNoTargets")
+                : string.Join("; ", targets.ToArray());
         }
 
         private static string BuildConnectionImportSignatureSummary(ConnectionImportPreviewReport preview)

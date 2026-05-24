@@ -355,6 +355,13 @@ namespace mySQLPunk
             Add("Connection.ImportTrustConfirmInvalidSignature", "這個匯入檔的來源簽章無效，內容可能已被修改。仍要繼續匯入嗎？", "This import file has an invalid source signature and may have been modified. Continue importing?");
             Add("Connection.ImportTrustConfirmMissingSourceId", "這個匯入檔是舊版簽章格式，沒有來源 ID 可加入白名單。仍要繼續匯入嗎？", "This import file uses a legacy signature without a source ID. Continue importing?");
             Add("Connection.ImportTrustConfirmUnknown", "這個匯出來源尚未加入白名單。建議確認來源後先按「信任此來源」。仍要繼續匯入嗎？", "This export source is not trusted yet. Confirm the source or click Trust This Source first. Continue importing?");
+            Add("Connection.ImportReviewSummary", "團隊審核摘要：來源={0}；新增/更新={1}；本機只存在={2}；需補密碼={3}；群組={4}；變更目標={5}", "Team review summary: source={0}; added/updated={1}; local-only={2}; passwords needed={3}; groups={4}; changed targets={5}");
+            Add("Connection.ImportReviewSourceTrusted", "已信任且簽章有效", "trusted and signature valid");
+            Add("Connection.ImportReviewSourceUntrusted", "簽章有效但尚未信任", "signature valid but not trusted");
+            Add("Connection.ImportReviewSourceInvalid", "簽章無效", "invalid signature");
+            Add("Connection.ImportReviewSourceUnsigned", "無簽章", "unsigned");
+            Add("Connection.ImportReviewNoGroups", "無", "none");
+            Add("Connection.ImportReviewNoTargets", "無新增或更新", "no added or updated targets");
             Add("Connection.ImportPreviewInclude", "合併", "Merge");
             Add("Connection.ImportPreviewStatus", "狀態", "Status");
             Add("Connection.ImportPreviewAdded", "新增", "Added");
