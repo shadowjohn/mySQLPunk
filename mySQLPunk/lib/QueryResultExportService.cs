@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.Common;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
@@ -17,6 +18,13 @@ namespace mySQLPunk.lib
         Xml,
         Html,
         Markdown
+    }
+
+    public sealed class QueryResultStreamingExportResult
+    {
+        public long Rows { get; set; }
+        public long BytesWritten { get; set; }
+        public QueryResultExportFormat Format { get; set; }
     }
 
     public static class QueryResultExportService
@@ -60,6 +68,50 @@ namespace mySQLPunk.lib
             }
 
             File.WriteAllText(path, BuildText(dt, format), Encoding.UTF8);
+        }
+
+        public static bool CanStreamFormat(QueryResultExportFormat format)
+        {
+            return format == QueryResultExportFormat.Csv ||
+                format == QueryResultExportFormat.Tsv ||
+                format == QueryResultExportFormat.Json;
+        }
+
+        public static QueryResultStreamingExportResult WriteStreaming(
+            IDatabase database,
+            string sql,
+            IDictionary<string, object> parameters,
+            string path,
+            QueryResultExportFormat format,
+            Action<long> progress = null)
+        {
+            if (database == null) throw new ArgumentNullException(nameof(database));
+            if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException("SQL is required.", nameof(sql));
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Target path is required.", nameof(path));
+            if (!CanStreamFormat(format)) throw new NotSupportedException("Streaming export only supports CSV, TSV, and JSON.");
+
+            DbConnection connection = BinaryCellStreamingService.GetOpenConnection(database);
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = sql;
+                BinaryCellStreamingService.AddParameters(command, database, parameters);
+
+                using (DbDataReader reader = command.ExecuteReader(CommandBehavior.SequentialAccess))
+                using (CountingFileStream stream = new CountingFileStream(path))
+                using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                {
+                    long rows = format == QueryResultExportFormat.Json
+                        ? WriteStreamingJson(reader, writer, progress)
+                        : WriteStreamingDelimited(reader, writer, format == QueryResultExportFormat.Tsv ? '\t' : ',', progress);
+                    writer.Flush();
+                    return new QueryResultStreamingExportResult
+                    {
+                        Rows = rows,
+                        BytesWritten = stream.BytesWritten,
+                        Format = format
+                    };
+                }
+            }
         }
 
         public static string BuildText(DataTable dt, QueryResultExportFormat format)
@@ -271,6 +323,90 @@ namespace mySQLPunk.lib
             return sb.ToString();
         }
 
+        private static long WriteStreamingDelimited(DbDataReader reader, TextWriter writer, char delimiter, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(delimiter);
+                writer.Write(DelimitedEscape(columnNames[c], delimiter));
+            }
+            writer.WriteLine();
+
+            long rows = 0;
+            while (reader.Read())
+            {
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    if (c > 0) writer.Write(delimiter);
+                    writer.Write(DelimitedEscape(FormatExportValue(ReadStreamingValue(reader, c)), delimiter));
+                }
+                writer.WriteLine();
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            return rows;
+        }
+
+        private static long WriteStreamingJson(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+            writer.Write("[");
+
+            while (reader.Read())
+            {
+                if (rows > 0) writer.Write(",");
+                writer.WriteLine();
+
+                Dictionary<string, object> item = new Dictionary<string, object>();
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    object value = ReadStreamingValue(reader, c);
+                    item[columnNames[c]] = value == DBNull.Value ? null : ConvertExportValue(value);
+                }
+
+                writer.Write(JsonConvert.SerializeObject(item, Formatting.None));
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            if (rows > 0) writer.WriteLine();
+            writer.Write("]");
+            return rows;
+        }
+
+        private static string[] GetReaderColumnNames(DbDataReader reader)
+        {
+            string[] names = new string[reader.FieldCount];
+            Dictionary<string, int> seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                string name = reader.GetName(i);
+                if (string.IsNullOrWhiteSpace(name)) name = "Column" + (i + 1).ToString();
+                int count;
+                if (seen.TryGetValue(name, out count))
+                {
+                    count++;
+                    seen[name] = count;
+                    name = name + "_" + count.ToString();
+                }
+                else
+                {
+                    seen[name] = 1;
+                }
+                names[i] = name;
+            }
+            return names;
+        }
+
+        private static object ReadStreamingValue(DbDataReader reader, int ordinal)
+        {
+            if (reader.IsDBNull(ordinal)) return DBNull.Value;
+            return reader.GetValue(ordinal);
+        }
+
         private static void WriteXlsx(DataTable dt, string path)
         {
             if (dt == null) throw new ArgumentNullException(nameof(dt));
@@ -464,6 +600,22 @@ namespace mySQLPunk.lib
                 columnNumber = (columnNumber - modulo) / 26;
             }
             return columnName;
+        }
+
+        private sealed class CountingFileStream : FileStream
+        {
+            public long BytesWritten { get; private set; }
+
+            public CountingFileStream(string path)
+                : base(path, FileMode.Create, FileAccess.Write, FileShare.None)
+            {
+            }
+
+            public override void Write(byte[] array, int offset, int count)
+            {
+                base.Write(array, offset, count);
+                BytesWritten += count;
+            }
         }
     }
 }

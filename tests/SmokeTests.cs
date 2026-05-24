@@ -2730,6 +2730,53 @@ public static class SmokeTests
         Assert(QueryResultExportService.ResolveFormat("result", 1) == QueryResultExportFormat.Csv, "First export filter should default to CSV.");
         Assert(QueryResultExportService.ResolveFormat("result", 2) == QueryResultExportFormat.Xlsx, "Second export filter should still support Excel.");
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
+
+        string csvPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".csv");
+        string jsonPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".json");
+        my_sqlite db = new my_sqlite();
+        try
+        {
+            db.SetConn("Data Source=:memory:;Version=3;New=True;");
+            db.Open();
+            db.ExecSQL("CREATE TABLE export_test (id INTEGER PRIMARY KEY, name TEXT, amount REAL, payload BLOB);");
+            db.ExecSQL("INSERT INTO export_test (id, name, amount, payload) VALUES (@p0, @p1, @p2, @p3);",
+                new Dictionary<string, object> { { "p0", 1 }, { "p1", "A, B" }, { "p2", 12.5 }, { "p3", new byte[] { 0xAA, 0xBB, 0xCC } } });
+            db.ExecSQL("INSERT INTO export_test (id, name, amount, payload) VALUES (@p0, @p1, @p2, @p3);",
+                new Dictionary<string, object> { { "p0", 2 }, { "p1", "Line\nBreak" }, { "p2", 7.25 }, { "p3", DBNull.Value } });
+
+            long lastProgress = 0;
+            QueryResultStreamingExportResult streamCsv = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, amount, payload FROM export_test WHERE id >= @p0 ORDER BY id;",
+                new Dictionary<string, object> { { "p0", 1 } },
+                csvPath,
+                QueryResultExportFormat.Csv,
+                rows => lastProgress = rows);
+            string streamedCsv = File.ReadAllText(csvPath, Encoding.UTF8);
+            Assert(streamCsv.Rows == 2 && lastProgress == 2, "Streaming CSV export should report exported rows.");
+            Assert(streamCsv.BytesWritten > 0, "Streaming CSV export should report written bytes.");
+            AssertContains(streamedCsv, "name,amount,payload", "Streaming CSV export should include headers.");
+            AssertContains(streamedCsv, "\"A, B\",12.5,[BLOB 3 bytes] 0xAABBCC", "Streaming CSV export should escape values and format BLOB previews.");
+            AssertContains(streamedCsv, "\"Line\nBreak\",7.25,", "Streaming CSV export should preserve embedded newlines safely.");
+
+            QueryResultStreamingExportResult streamJson = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, payload FROM export_test ORDER BY id;",
+                null,
+                jsonPath,
+                QueryResultExportFormat.Json);
+            string streamedJson = File.ReadAllText(jsonPath, Encoding.UTF8);
+            Assert(streamJson.Rows == 2, "Streaming JSON export should report exported rows.");
+            AssertContains(streamedJson, "\"name\":\"A, B\"", "Streaming JSON export should include row objects without loading a DataTable.");
+            AssertContains(streamedJson, "\"payload\":\"[BLOB 3 bytes] 0xAABBCC\"", "Streaming JSON export should use shared BLOB previews.");
+            AssertContains(streamedJson, "\"payload\":null", "Streaming JSON export should preserve null values.");
+        }
+        finally
+        {
+            db.Dispose();
+            if (File.Exists(csvPath)) File.Delete(csvPath);
+            if (File.Exists(jsonPath)) File.Delete(jsonPath);
+        }
     }
 
     private static void TestQueryFormOptionSettings()
