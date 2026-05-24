@@ -225,6 +225,24 @@ public static class SmokeTests
         AssertContains(mssqlJsonUnquoteExtractSql, "JSON_VALUE(payload, '$.status')", "Converted SQL Server SQL should use JSON_VALUE for JSON_UNQUOTE(JSON_EXTRACT).");
         AssertNotContains(mssqlJsonUnquoteExtractSql, "JSON_UNQUOTE", "Converted SQL Server SQL should remove JSON_UNQUOTE.");
 
+        object oracleMySqlJsonArrowTextPreview = BuildViewSqlPreview(
+            "SELECT payload ->> '$.user.name' AS user_name FROM event_log",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleMySqlJsonArrowTextPreview, "CanConvert"), "MySQL JSON ->> path operator should convert to Oracle.");
+        string oracleMySqlJsonArrowTextSql = (string)GetProperty(oracleMySqlJsonArrowTextPreview, "ConvertedSql");
+        AssertContains(oracleMySqlJsonArrowTextSql, "JSON_VALUE(payload, '$.user.name')", "Converted Oracle SQL should use JSON_VALUE for MySQL ->>.");
+        AssertNotContains(oracleMySqlJsonArrowTextSql, "->>", "Converted Oracle SQL should remove MySQL JSON ->> operator.");
+
+        object pgMySqlJsonArrowFragmentPreview = BuildViewSqlPreview(
+            "SELECT payload -> '$.items[0]' AS first_item FROM event_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgMySqlJsonArrowFragmentPreview, "CanConvert"), "MySQL JSON -> path operator should convert to PostgreSQL.");
+        string pgMySqlJsonArrowFragmentSql = (string)GetProperty(pgMySqlJsonArrowFragmentPreview, "ConvertedSql");
+        AssertContains(pgMySqlJsonArrowFragmentSql, "payload #> '{items,0}'", "Converted PostgreSQL SQL should use JSON path extraction for MySQL ->.");
+        AssertNotContains(pgMySqlJsonArrowFragmentSql, "->", "Converted PostgreSQL SQL should remove MySQL JSON -> operator.");
+
         object mysqlJsonValuePreview = BuildViewSqlPreview(
             "SELECT JSON_VALUE(payload, '$.status') AS status_text FROM event_log",
             "mssql",

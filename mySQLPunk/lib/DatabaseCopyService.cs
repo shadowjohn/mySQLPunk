@@ -533,6 +533,7 @@ namespace mySQLPunk.lib
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
             sql = RewriteJsonTableExpressions(sql, targetProvider);
+            sql = RewriteMySqlJsonPathOperators(sql, targetProvider);
             sql = RewritePostgreSqlJsonOperators(sql, targetProvider);
             sql = RewriteJsonConstructorFunctions(sql, targetProvider);
             sql = RewriteJsonExistsFunctions(sql, targetProvider);
@@ -2616,6 +2617,24 @@ namespace mySQLPunk.lib
             return sql;
         }
 
+        private static string RewriteMySqlJsonPathOperators(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b|\([^)]+\))\s*(?<op>->>|->)\s*'(?<path>\$[^']*)'",
+                m =>
+                {
+                    bool textValue = m.Groups["op"].Value == "->>";
+                    return BuildJsonExtractionForTarget(
+                        targetProvider,
+                        m.Groups["expr"].Value.Trim(),
+                        m.Groups["path"].Value,
+                        textValue,
+                        m.Value);
+                },
+                RegexOptions.IgnoreCase);
+        }
+
         private static string RewritePostgreSqlJsonOperators(string selectSql, string targetProvider)
         {
             if (targetProvider == "postgresql") return selectSql;
@@ -2660,6 +2679,11 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql" || targetProvider == "oracle")
             {
                 return (textValue ? "JSON_VALUE" : "JSON_QUERY") + "(" + expr + ", '" + escapedPath + "')";
+            }
+            if (targetProvider == "postgresql")
+            {
+                string pgPath = textValue ? BuildPostgreSqlJsonTextPath(jsonPath) : BuildPostgreSqlJsonPath(jsonPath);
+                if (!string.IsNullOrWhiteSpace(pgPath)) return expr + (textValue ? " #>> " : " #> ") + pgPath;
             }
             if (targetProvider == "sqlite")
             {
