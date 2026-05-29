@@ -1820,6 +1820,24 @@ public static class SmokeTests
         AssertContains(pgUnicodeSql, "ASCII(initial_letter)", "Converted PostgreSQL SQL should use ASCII for UNICODE.");
         AssertNotContains(pgUnicodeSql, "UNICODE", "Converted PostgreSQL SQL should remove UNICODE.");
 
+        object pgNcharPreview = BuildViewSqlPreview(
+            "SELECT NCHAR(9731) AS snow_text FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNcharPreview, "CanConvert"), "SQL Server NCHAR code function should convert to PostgreSQL.");
+        string pgNcharSql = (string)GetProperty(pgNcharPreview, "ConvertedSql");
+        AssertContains(pgNcharSql, "CHR(9731)", "Converted PostgreSQL SQL should use CHR for NCHAR code function.");
+        AssertNotContains(pgNcharSql, "NCHAR", "Converted PostgreSQL SQL should remove NCHAR code function.");
+
+        object pgCastNcharPreview = BuildViewSqlPreview(
+            "SELECT CAST(code AS NCHAR(10)) AS text_code FROM items",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCastNcharPreview, "CanConvert"), "NCHAR type in CAST should not be treated as a character-code function.");
+        string pgCastNcharSql = (string)GetProperty(pgCastNcharPreview, "ConvertedSql");
+        AssertContains(pgCastNcharSql, "CAST(code AS TEXT)", "Converted PostgreSQL SQL should map SQL Server NCHAR type through cast conversion.");
+        AssertNotContains(pgCastNcharSql, "AS CHR(10)", "Converted PostgreSQL SQL should not rewrite NCHAR type to CHR.");
+
         object mysqlStuffPreview = BuildViewSqlPreview(
             "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
             "mssql",

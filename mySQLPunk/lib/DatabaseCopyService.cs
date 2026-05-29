@@ -696,8 +696,14 @@ namespace mySQLPunk.lib
         {
             if (sourceProvider != "mssql" || targetProvider == "mssql") return selectSql;
 
-            return Regex.Replace(
+            string sql = Regex.Replace(
                 selectSql,
+                @"\bCAST\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s+AS\s+(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*\)",
+                m => RewriteSqlServerConvertCastFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
                 @"\bCONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => RewriteSqlServerConvertCastFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
@@ -2543,6 +2549,12 @@ namespace mySQLPunk.lib
                 selectSql,
                 @"\bCHR\s*\((?<args>[^()]*)\)",
                 m => RewriteCharacterCodeFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bNCHAR\s*\((?<args>[^()]*)\)",
+                m => IsCharTypeContext(sql, m.Index) ? m.Value : RewriteCharacterCodeFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
 
             return Regex.Replace(
