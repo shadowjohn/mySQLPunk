@@ -48,6 +48,7 @@ public static class SmokeTests
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
@@ -3641,6 +3642,16 @@ public static class SmokeTests
         DatabaseMetadataSnapshot hiddenSnapshot = metadataService.Load(sqliteMetadataDb, "main", new Dictionary<string, object> { { "user", "tester" } }, true);
         Assert(hiddenSnapshot.Tables.Contains("sqlite_sequence") && hiddenSnapshot.Tables.Contains("__mysqlpunk_column_comments"), "MetadataLoadService should keep hidden objects when requested.");
         Assert(ObjectVisibilityService.FilterNames(new[] { "pg_class", "public.users" }, "postgresql", "table", false).SequenceEqual(new[] { "public.users" }), "Object visibility should hide PostgreSQL pg_* objects.");
+    }
+
+    private static void TestMySqlGuidFormatNone()
+    {
+        using (var db = new my_mysql())
+        {
+            db.SetConn("Server=localhost;User ID=test;Password=test;");
+            string connectionString = db.MCT == null ? "" : (db.MCT.ConnectionString ?? "");
+            AssertContains(connectionString.ToLowerInvariant(), "guidformat=none", "MySQL connection should default GuidFormat=None to avoid CHAR(36) parsing failures during dump.");
+        }
     }
 
     private static void TestConnectionProxySettingsService()

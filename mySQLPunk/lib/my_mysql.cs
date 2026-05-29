@@ -8,44 +8,54 @@ using System.Data;
 using utility;
 namespace mySQLPunk.lib
 {
-    public class my_mysql : IDatabase
-    {
-        myinclude my = new myinclude();
-        public MySqlConnection MCT = null;
-        public MySqlCommand MC = null;
-        public MySqlParameter PA = null;
+	    public class my_mysql : IDatabase
+	    {
+	        myinclude my = new myinclude();
+	        public MySqlConnection MCT = null;
+	        public MySqlCommand MC = null;
+	        public MySqlParameter PA = null;
 
         public ConnectionState State => MCT?.State ?? ConnectionState.Closed;
         public string ProviderName => "mysql";
 
-        private const int MetadataCommandTimeoutSeconds = 8;
-        private const uint DefaultConnectionTimeoutSeconds = 8;
+	        private const int MetadataCommandTimeoutSeconds = 8;
+	        private const uint DefaultConnectionTimeoutSeconds = 8;
 
-        public void SetConn(string connection)
-        {
-            if (!connection.ToLower().Contains("allowzerodatetime"))
-            {
-                if (!connection.EndsWith(";")) connection += ";";
-                connection += "AllowZeroDateTime=True;";
-            }
-            connection = EnsureMySqlConnectionTimeout(connection);
-            MCT = new MySqlConnection(connection);
-        }
-        public void setConn(string connection) => SetConn(connection);
+	        public void SetConn(string connection)
+	        {
+	            if (!connection.ToLower().Contains("allowzerodatetime"))
+	            {
+	                if (!connection.EndsWith(";")) connection += ";";
+	                connection += "AllowZeroDateTime=True;";
+	            }
+	            connection = EnsureMySqlConnectionTimeout(connection);
+	            connection = EnsureMySqlGuidFormatNone(connection);
+	            MCT = new MySqlConnection(connection);
+	        }
+	        public void setConn(string connection) => SetConn(connection);
 
-        private static bool HasConnectionTimeoutSetting(string connection)
+	        private static bool HasConnectionTimeoutSetting(string connection)
         {
             if (string.IsNullOrWhiteSpace(connection)) return false;
             return connection.IndexOf("connection timeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    connection.IndexOf("connectiontimeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    connection.IndexOf("connect timeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   connection.IndexOf("connecttimeout", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
+	                   connection.IndexOf("connecttimeout", StringComparison.OrdinalIgnoreCase) >= 0;
+	        }
 
-        private static string EnsureMySqlConnectionTimeout(string connection)
-        {
-            if (string.IsNullOrWhiteSpace(connection)) return connection;
-            if (HasConnectionTimeoutSetting(connection)) return connection;
+	        private static bool HasGuidFormatSetting(string connection)
+	        {
+	            if (string.IsNullOrWhiteSpace(connection)) return false;
+	            return connection.IndexOf("guidformat", StringComparison.OrdinalIgnoreCase) >= 0 ||
+	                   connection.IndexOf("guid format", StringComparison.OrdinalIgnoreCase) >= 0 ||
+	                   connection.IndexOf("oldguids", StringComparison.OrdinalIgnoreCase) >= 0 ||
+	                   connection.IndexOf("old guids", StringComparison.OrdinalIgnoreCase) >= 0;
+	        }
+
+	        private static string EnsureMySqlConnectionTimeout(string connection)
+	        {
+	            if (string.IsNullOrWhiteSpace(connection)) return connection;
+	            if (HasConnectionTimeoutSetting(connection)) return connection;
 
             try
             {
@@ -58,14 +68,34 @@ namespace mySQLPunk.lib
             catch
             {
                 return connection;
-            }
-        }
+	            }
+	        }
 
-        private DataTable ExecuteDataTable(string sql, Dictionary<string, object> parameters, int commandTimeoutSeconds)
-        {
-            DataTable output = new DataTable();
-            using (MySqlCommand cmd = new MySqlCommand(sql, MCT))
-            {
+	        private static string EnsureMySqlGuidFormatNone(string connection)
+	        {
+	            if (string.IsNullOrWhiteSpace(connection)) return connection;
+	            if (HasGuidFormatSetting(connection)) return connection;
+
+	            try
+	            {
+	                var builder = new MySqlConnectionStringBuilder(connection)
+	                {
+	                    GuidFormat = MySqlGuidFormat.None
+	                };
+	                return builder.ConnectionString;
+	            }
+	            catch
+	            {
+	                if (!connection.EndsWith(";")) connection += ";";
+	                return connection + "GuidFormat=None;";
+	            }
+	        }
+
+	        private DataTable ExecuteDataTable(string sql, Dictionary<string, object> parameters, int commandTimeoutSeconds)
+	        {
+	            DataTable output = new DataTable();
+	            using (MySqlCommand cmd = new MySqlCommand(sql, MCT))
+	            {
                 cmd.CommandTimeout = commandTimeoutSeconds;
                 if (parameters != null)
                 {
