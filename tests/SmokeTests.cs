@@ -1516,6 +1516,15 @@ public static class SmokeTests
         string mssqlCeilSql = (string)GetProperty(mssqlCeilPreview, "ConvertedSql");
         AssertContains(mssqlCeilSql, "CEILING(total_amount / 100.0)", "Converted SQL Server SQL should use CEILING.");
 
+        object mssqlCeilLiteralPreview = BuildViewSqlPreview(
+            "SELECT CEIL(total_amount / 100.0) AS bill_units, 'CEIL(note)' AS literal_note FROM orders",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCeilLiteralPreview, "CanConvert"), "Oracle CEIL should convert while preserving literals.");
+        string mssqlCeilLiteralSql = (string)GetProperty(mssqlCeilLiteralPreview, "ConvertedSql");
+        AssertContains(mssqlCeilLiteralSql, "CEILING(total_amount / 100.0) AS bill_units", "Converted SQL Server SQL should convert CEIL function only.");
+        AssertContains(mssqlCeilLiteralSql, "'CEIL(note)' AS literal_note", "Converted SQL Server SQL should preserve CEIL text inside string literals.");
+
         object mssqlToNumberPreview = BuildViewSqlPreview(
             "SELECT TO_NUMBER(total_text) AS total_value, TO_NUMBER(rate_text, '999D99') AS rate_value FROM orders",
             "oracle",
@@ -1608,6 +1617,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlModPreview, "CanConvert"), "MOD should convert to SQL Server modulo operator.");
         string mssqlModSql = (string)GetProperty(mssqlModPreview, "ConvertedSql");
         AssertContains(mssqlModSql, "(order_no % 10)", "Converted SQL Server SQL should use modulo operator.");
+
+        object mssqlNestedModPreview = BuildViewSqlPreview(
+            "SELECT MOD(ABS(order_no), 10) AS shard_no, 'MOD(note)' AS literal_note FROM orders",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNestedModPreview, "CanConvert"), "Nested MOD should convert to SQL Server modulo operator.");
+        string mssqlNestedModSql = (string)GetProperty(mssqlNestedModPreview, "ConvertedSql");
+        AssertContains(mssqlNestedModSql, "(ABS(order_no) % 10)", "Converted SQL Server SQL should convert nested MOD arguments.");
+        AssertContains(mssqlNestedModSql, "'MOD(note)' AS literal_note", "Converted SQL Server SQL should preserve MOD text inside string literals.");
 
         object mssqlGreatestPreview = BuildViewSqlPreview(
             "SELECT GREATEST(score, passing_score) AS effective_score FROM exams",

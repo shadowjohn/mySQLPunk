@@ -575,23 +575,21 @@ namespace mySQLPunk.lib
             sql = RewriteTruncatingRoundFunctions(sql, targetProvider);
             if (targetProvider == "mssql")
             {
-                sql = Regex.Replace(
+                sql = RewriteCeilFunctionNames(sql, "CEIL", "CEILING");
+                return RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bCEIL\s*\(",
-                    "CEILING(",
-                    RegexOptions.IgnoreCase);
-                return Regex.Replace(
-                    sql,
-                    @"\bMOD\s*\((?<args>[^()]*)\)",
-                    m => RewriteModFunction(m),
-                    RegexOptions.IgnoreCase);
+                    "MOD",
+                    (argsText, original) => RewriteModFunction(argsText, original));
             }
 
-            return Regex.Replace(
-                sql,
-                @"\bCEILING\s*\(",
-                "CEIL(",
-                RegexOptions.IgnoreCase);
+            return RewriteCeilFunctionNames(sql, "CEILING", "CEIL");
+        }
+
+        private static string RewriteCeilFunctionNames(string selectSql, string sourceName, string targetName)
+        {
+            return ReplaceOutsideSingleQuotedStrings(
+                selectSql,
+                segment => Regex.Replace(segment, @"\b" + Regex.Escape(sourceName) + @"\s*\(", targetName + "(", RegexOptions.IgnoreCase));
         }
 
         private static string RewriteNumericTruncateFunctions(string selectSql, string targetProvider)
@@ -1160,10 +1158,10 @@ namespace mySQLPunk.lib
             return "RANDOM()";
         }
 
-        private static string RewriteModFunction(Match match)
+        private static string RewriteModFunction(string argsText, string original)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
             return "(" + args[0] + " % " + args[1] + ")";
         }
 
