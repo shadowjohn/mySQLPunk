@@ -1022,8 +1022,10 @@ namespace mySQLPunk.lib
         {
             if (string.Equals(sourceProvider, targetProvider, StringComparison.OrdinalIgnoreCase)) return selectSql;
 
-            string sql = Regex.Replace(
-                selectSql,
+            string sql = RewriteUuidFunctions(selectSql, targetProvider);
+
+            sql = Regex.Replace(
+                sql,
                 @"\bDBMS_RANDOM\s*\.\s*VALUE\s*(?:\(\s*\))?",
                 m => BuildRandomExpression(targetProvider),
                 RegexOptions.IgnoreCase);
@@ -1039,6 +1041,40 @@ namespace mySQLPunk.lib
                 @"\bRANDOM\s*\(\s*\)",
                 m => BuildRandomExpression(targetProvider),
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteUuidFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bNEWID\s*\(\s*\)",
+                m => BuildUuidExpression(targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bUUID\s*\(\s*\)",
+                m => BuildUuidExpression(targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bSYS_GUID\s*\(\s*\)",
+                m => BuildUuidExpression(targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildUuidExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "NEWID()";
+            if (targetProvider == "mysql") return "UUID()";
+            if (targetProvider == "oracle") return "SYS_GUID()";
+            if (targetProvider == "sqlite")
+            {
+                return "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))";
+            }
+
+            return "gen_random_uuid()";
         }
 
         private static string BuildRandomExpression(string targetProvider)

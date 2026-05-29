@@ -1553,6 +1553,33 @@ public static class SmokeTests
         string sqliteOracleRandomSql = (string)GetProperty(sqliteOracleRandomPreview, "ConvertedSql");
         AssertContains(sqliteOracleRandomSql, "(RANDOM() + 9223372036854775808.0) / 18446744073709551616.0", "Converted SQLite SQL should normalize RANDOM to 0-1 range.");
 
+        object mysqlNewIdPreview = BuildViewSqlPreview(
+            "SELECT NEWID() AS row_guid FROM metrics",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlNewIdPreview, "CanConvert"), "SQL Server NEWID should convert to MySQL.");
+        string mysqlNewIdSql = (string)GetProperty(mysqlNewIdPreview, "ConvertedSql");
+        AssertContains(mysqlNewIdSql, "UUID()", "Converted MySQL SQL should use UUID for NEWID.");
+        AssertNotContains(mysqlNewIdSql, "NEWID", "Converted MySQL SQL should remove SQL Server NEWID.");
+
+        object mssqlUuidPreview = BuildViewSqlPreview(
+            "SELECT UUID() AS row_guid FROM metrics",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlUuidPreview, "CanConvert"), "MySQL UUID should convert to SQL Server.");
+        string mssqlUuidSql = (string)GetProperty(mssqlUuidPreview, "ConvertedSql");
+        AssertContains(mssqlUuidSql, "NEWID()", "Converted SQL Server SQL should use NEWID for UUID.");
+        AssertNotContains(mssqlUuidSql, "UUID()", "Converted SQL Server SQL should remove MySQL UUID.");
+
+        object sqliteSysGuidPreview = BuildViewSqlPreview(
+            "SELECT SYS_GUID() AS row_guid FROM metrics",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSysGuidPreview, "CanConvert"), "Oracle SYS_GUID should convert to SQLite.");
+        string sqliteSysGuidSql = (string)GetProperty(sqliteSysGuidPreview, "ConvertedSql");
+        AssertContains(sqliteSysGuidSql, "lower(hex(randomblob(4))", "Converted SQLite SQL should build a random UUID string.");
+        AssertNotContains(sqliteSysGuidSql, "SYS_GUID", "Converted SQLite SQL should remove Oracle SYS_GUID.");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",
