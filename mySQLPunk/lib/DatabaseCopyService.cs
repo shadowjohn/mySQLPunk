@@ -3045,32 +3045,30 @@ namespace mySQLPunk.lib
         {
             if (targetProvider != "oracle" && targetProvider != "sqlite") return selectSql;
 
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bLEFT\s*\((?<args>[^()]*)\)",
-                m => RewriteLeftFunction(m),
-                RegexOptions.IgnoreCase);
+                "LEFT",
+                (argsText, original) => RewriteLeftFunction(argsText, original));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bRIGHT\s*\((?<args>[^()]*)\)",
-                m => RewriteRightFunction(m),
-                RegexOptions.IgnoreCase);
+                "RIGHT",
+                (argsText, original) => RewriteRightFunction(argsText, original));
 
             return sql;
         }
 
-        private static string RewriteLeftFunction(Match match)
+        private static string RewriteLeftFunction(string argsText, string original)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
             return "SUBSTR(" + args[0] + ", 1, " + args[1] + ")";
         }
 
-        private static string RewriteRightFunction(Match match)
+        private static string RewriteRightFunction(string argsText, string original)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
             return "SUBSTR(" + args[0] + ", -" + args[1] + ")";
         }
 

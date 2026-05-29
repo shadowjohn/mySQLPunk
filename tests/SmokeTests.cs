@@ -2258,6 +2258,16 @@ public static class SmokeTests
         string sqliteRightSql = (string)GetProperty(sqliteRightPreview, "ConvertedSql");
         AssertContains(sqliteRightSql, "SUBSTR(code, -2)", "Converted SQLite SQL should use negative SUBSTR for RIGHT.");
 
+        object oracleNestedEdgeSubstringLiteralPreview = BuildViewSqlPreview(
+            "SELECT LEFT(REPLACE(code, '-', ''), 3) AS prefix, RIGHT(REPLACE(code, '-', ''), 2) AS suffix, 'LEFT(REPLACE(code, ''-'', ''''), 3)' AS literal_note FROM items",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleNestedEdgeSubstringLiteralPreview, "CanConvert"), "Nested LEFT/RIGHT should convert while preserving literals.");
+        string oracleNestedEdgeSubstringLiteralSql = (string)GetProperty(oracleNestedEdgeSubstringLiteralPreview, "ConvertedSql");
+        AssertContains(oracleNestedEdgeSubstringLiteralSql, "SUBSTR(REPLACE(code, '-', ''), 1, 3) AS prefix", "Converted Oracle SQL should convert nested LEFT expression.");
+        AssertContains(oracleNestedEdgeSubstringLiteralSql, "SUBSTR(REPLACE(code, '-', ''), -2) AS suffix", "Converted Oracle SQL should convert nested RIGHT expression.");
+        AssertContains(oracleNestedEdgeSubstringLiteralSql, "'LEFT(REPLACE(code, ''-'', ''''), 3)' AS literal_note", "Converted Oracle SQL should preserve LEFT text inside string literals.");
+
         object mssqlPadPreview = BuildViewSqlPreview(
             "SELECT LPAD(account_no, 10, '0') AS padded_account, RPAD(code, 8, ' ') AS padded_code FROM accounts",
             "mysql",
