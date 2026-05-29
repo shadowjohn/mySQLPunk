@@ -1819,6 +1819,15 @@ public static class SmokeTests
         string pgPowSql = (string)GetProperty(pgPowPreview, "ConvertedSql");
         AssertContains(pgPowSql, "POWER(score, 2)", "Converted PostgreSQL SQL should use POWER.");
 
+        object pgPowLiteralPreview = BuildViewSqlPreview(
+            "SELECT POW(score, 2) AS score_squared, 'POW(note)' AS literal_note FROM exams",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgPowLiteralPreview, "CanConvert"), "MySQL POW should convert while preserving literals.");
+        string pgPowLiteralSql = (string)GetProperty(pgPowLiteralPreview, "ConvertedSql");
+        AssertContains(pgPowLiteralSql, "POWER(score, 2) AS score_squared", "Converted PostgreSQL SQL should convert POW function only.");
+        AssertContains(pgPowLiteralSql, "'POW(note)' AS literal_note", "Converted PostgreSQL SQL should preserve POW text inside string literals.");
+
         object mssqlPowPreview = BuildViewSqlPreview(
             "SELECT POW(score, 2) AS score_squared FROM exams",
             "mysql",

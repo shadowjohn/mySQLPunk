@@ -686,11 +686,9 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mysql" || targetProvider == "sqlite") return selectSql;
 
-            return Regex.Replace(
+            return ReplaceOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bPOW\s*\(",
-                "POWER(",
-                RegexOptions.IgnoreCase);
+                segment => Regex.Replace(segment, @"\bPOW\s*\(", "POWER(", RegexOptions.IgnoreCase));
         }
 
         private static string RewriteComparisonFunctions(string selectSql, string targetProvider)

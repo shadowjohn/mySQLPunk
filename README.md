@@ -212,6 +212,7 @@ Smoke test harness：
   - 本輪補齊：MySQL `TRUNCATE(number, decimals)` 複製到 SQL Server 會轉為 `ROUND(number, decimals, 1)`，複製到 PostgreSQL / Oracle 會轉為 `TRUNC(number, decimals)`，SQLite 會用整數截斷與 `pow(10, decimals)` 模擬，避免報表 View 留下 MySQL 專用數值函式。
   - 本輪補齊：SQL Server `ROUND(number, decimals, 1)` 的截斷語意會依目標 provider 轉為 MySQL `TRUNCATE(number, decimals)`、PostgreSQL / Oracle `TRUNC(number, decimals)`，SQLite 仍以整數截斷與 `pow(10, decimals)` 模擬；一般 `ROUND(number, decimals)` 不會被誤改。
   - 本輪補齊：`CEIL(...)` / `CEILING(...)` 名稱轉換會避開字串常值，`MOD(...)` 轉 SQL Server `%` 時也改用函式呼叫掃描器，可處理 `MOD(ABS(col), n)` 這類巢狀參數並保留 `'CEIL(...)'` / `'MOD(...)'` 文字。
+  - 本輪補齊：`POW(...)` 轉 `POWER(...)` 時只會改寫 SQL 片段，會保留 `'POW(...)'` 這類字串常值，避免報表標籤或樣板文字被誤改。
   - 本輪補齊：`NVL(...)` / `IFNULL(...)` 轉換為 `COALESCE(...)` 時只會改寫 SQL 片段，不會再誤改 `'NVL(...)'` 或 `'IFNULL(...)'` 這類字串常值，避免備註、狀態文字或樣板字串被污染。
   - 本輪補齊：`NVL2(...)` / `ISNULL(...)` 轉換會用函式呼叫掃描器避開字串常值，並可處理參數字串內含括號或巢狀函式的情境，避免漏轉真正函式或污染 `'NVL2(...)'` / `'ISNULL(...)'` 文字。
   - 本輪補齊：`LOCATE` / `CHARINDEX` / `INSTR` 的起始位置參數會轉為目標 provider 等價語法；SQLite / PostgreSQL 會用 `SUBSTR` / `SUBSTRING` 搭配 `CASE` 保留找不到時回傳 0 的行為。
