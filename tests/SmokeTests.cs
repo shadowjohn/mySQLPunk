@@ -2087,6 +2087,31 @@ public static class SmokeTests
         string sqliteSubstringIndexSql = (string)GetProperty(sqliteSubstringIndexPreview, "ConvertedSql");
         AssertContains(sqliteSubstringIndexSql, "CASE WHEN INSTR(tag_path, '/') = 0 THEN tag_path ELSE SUBSTR(tag_path, 1, INSTR(tag_path, '/') - 1) END", "Converted SQLite SQL should emulate SUBSTRING_INDEX count 1.");
 
+        object mssqlSubstringIndexLastPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(file_path, '/', -1) AS file_name FROM files",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlSubstringIndexLastPreview, "CanConvert"), "MySQL SUBSTRING_INDEX count -1 should convert to SQL Server.");
+        string mssqlSubstringIndexLastSql = (string)GetProperty(mssqlSubstringIndexLastPreview, "ConvertedSql");
+        AssertContains(mssqlSubstringIndexLastSql, "CASE WHEN CHARINDEX('/', file_path) = 0 THEN file_path ELSE RIGHT(file_path, CHARINDEX(REVERSE('/'), REVERSE(file_path)) - 1) END", "Converted SQL Server SQL should emulate SUBSTRING_INDEX count -1.");
+        AssertNotContains(mssqlSubstringIndexLastSql, "SUBSTRING_INDEX", "Converted SQL Server SQL should remove SUBSTRING_INDEX count -1.");
+
+        object pgSubstringIndexLastPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(host_name, '.', -1) AS tld FROM servers",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSubstringIndexLastPreview, "CanConvert"), "MySQL SUBSTRING_INDEX count -1 should convert to PostgreSQL.");
+        string pgSubstringIndexLastSql = (string)GetProperty(pgSubstringIndexLastPreview, "ConvertedSql");
+        AssertContains(pgSubstringIndexLastSql, "CASE WHEN POSITION('.' IN host_name) = 0 THEN host_name ELSE RIGHT(host_name, POSITION(reverse('.') IN reverse(host_name)) - 1) END", "Converted PostgreSQL SQL should emulate SUBSTRING_INDEX count -1.");
+
+        object oracleSubstringIndexLastPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(object_name, '.', -1) AS short_name FROM objects",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleSubstringIndexLastPreview, "CanConvert"), "MySQL SUBSTRING_INDEX count -1 should convert to Oracle.");
+        string oracleSubstringIndexLastSql = (string)GetProperty(oracleSubstringIndexLastPreview, "ConvertedSql");
+        AssertContains(oracleSubstringIndexLastSql, "CASE WHEN INSTR(object_name, '.') = 0 THEN object_name ELSE SUBSTR(object_name, INSTR(object_name, '.', -1) + LENGTH('.')) END", "Converted Oracle SQL should emulate SUBSTRING_INDEX count -1.");
+
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
             "mysql",

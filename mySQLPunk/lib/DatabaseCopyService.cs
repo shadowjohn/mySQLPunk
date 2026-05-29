@@ -2717,9 +2717,10 @@ namespace mySQLPunk.lib
             if (args.Count != 3) return match.Value;
 
             string count = (args[2] ?? string.Empty).Trim();
-            if (count != "1") return match.Value;
+            if (count == "1") return BuildSubstringBeforeFirstDelimiterExpression(targetProvider, args[0], args[1]);
+            if (count == "-1") return BuildSubstringAfterLastDelimiterExpression(targetProvider, args[0], args[1], match.Value);
 
-            return BuildSubstringBeforeFirstDelimiterExpression(targetProvider, args[0], args[1]);
+            return match.Value;
         }
 
         private static string BuildSubstringBeforeFirstDelimiterExpression(string targetProvider, string expr, string delimiter)
@@ -2742,6 +2743,33 @@ namespace mySQLPunk.lib
             }
 
             return "CASE WHEN " + position + " = 0 THEN " + expr + " ELSE " + beforeDelimiter + " END";
+        }
+
+        private static string BuildSubstringAfterLastDelimiterExpression(string targetProvider, string expr, string delimiter, string original)
+        {
+            string firstPosition = BuildStringPositionFunction(targetProvider, delimiter, expr);
+            string afterDelimiter;
+
+            if (targetProvider == "mssql")
+            {
+                string reversedPosition = "CHARINDEX(REVERSE(" + delimiter + "), REVERSE(" + expr + "))";
+                afterDelimiter = "RIGHT(" + expr + ", " + reversedPosition + " - 1)";
+            }
+            else if (targetProvider == "postgresql")
+            {
+                string reversedPosition = "POSITION(reverse(" + delimiter + ") IN reverse(" + expr + "))";
+                afterDelimiter = "RIGHT(" + expr + ", " + reversedPosition + " - 1)";
+            }
+            else if (targetProvider == "oracle")
+            {
+                afterDelimiter = "SUBSTR(" + expr + ", INSTR(" + expr + ", " + delimiter + ", -1) + LENGTH(" + delimiter + "))";
+            }
+            else
+            {
+                return original;
+            }
+
+            return "CASE WHEN " + firstPosition + " = 0 THEN " + expr + " ELSE " + afterDelimiter + " END";
         }
 
         private static string RewritePaddingFunctions(string selectSql, string targetProvider)
