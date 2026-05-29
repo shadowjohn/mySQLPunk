@@ -58,7 +58,8 @@ Smoke test harness：
 | SQL Dump | 可用 | 支援多 provider Table dump；SQLite 欄位註解 sidecar metadata 會隨結構匯出；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
 | 匯出 / Dump / Backup service | 可用 | 查詢結果多格式匯出、SQL dump 與邏輯 SQL 備份已抽出 service，Form UI 只負責觸發、檔案對話框與狀態呈現。 |
 | 連線與 metadata service | 可用 | 連線開啟、retry 判斷與 database metadata snapshot 已抽出 service，Form UI 保留 TreeView 呈現與錯誤提示。 |
-| 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、大型 SQL 停用編輯器輔助、資料表儲存自動交易、SQL 檔案位置、匯出位置、結果網格字型與列高度、日期/時間與數字格式、工具提示顯示開關、診斷記錄、自動復原草稿、索引標籤開啟偏好、HTTP 代理與進階註冊設定。 |
+| 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、大型 SQL 停用編輯器輔助、資料表儲存自動交易、SQL 檔案位置、匯出位置、還原差異抽樣列數、結果網格字型與列高度、日期/時間與數字格式、工具提示顯示開關、診斷記錄、自動復原草稿、索引標籤開啟偏好、HTTP 代理與進階註冊設定。 |
+| 應用程式更新 | 部分可用 | 已支援從 GitHub Releases 檢查最新版本，說明選單可手動檢查，並可依選項在啟動時背景檢查；正式自動套用更新仍待打包流程接上 installer/updater。 |
 
 ## 未完成功能與已知限制
 
@@ -68,8 +69,13 @@ Smoke test harness：
 
 - **選項中心分類功能 ✅ 查詢視窗、診斷記錄、自動復原草稿、索引標籤偏好、HTTP 代理、檢視顯示偏好與進階註冊已補齊**
   - 現況：選項視窗已具備一般、索引標籤、自動完成程式碼、編輯器、記錄、AI、自動復原、檔案位置、連線能力、環境與進階等分類。
-  - 完成內容：`ApplicationOptionSettings` 會將通用選項保存到 `application-options.json`；查詢視窗已讀取並套用記錄限制、編輯器字型大小、換行、Tab 空格、自動完成啟用狀態、是否自動載入 metadata，且 SQL 文字超過「大型檔案停用門檻」時會停用語法上色與自動完成以降低卡頓；資料表資料模式儲存時可依「自動開始交易」把同批新增、修改、刪除包在 provider 對應的 BEGIN/COMMIT/ROLLBACK 流程中；匯出預設資料夾、SQL 開啟/儲存資料夾、結果網格字型大小、結果列高度、日期/時間格式、千分位與是否使用系統數字格式也已套用；一般頁的「顯示工具提示」會控制主要工具列、連線按鈕、收藏選單與 TreeView 節點提示是否顯示；進階選項的「啟用診斷記錄」會把查詢歷程以 JSONL 寫入 `選項 > 檔案位置` 的記錄位置，內容保留 SQL 預覽與 SHA-256 指紋，不保存完整 SQL 原文；自動復原的查詢開關與間隔會啟動查詢草稿定時保存，草稿寫入查詢資料夾下的 `auto-recovery`；索引標籤設定可決定新查詢開在主視窗分頁、最後使用位置或新視窗，且「允許重複開啟相同的物件」關閉時會重用同名同型別分頁；檢視選單的導覽窗格（含僅顯示活躍物件）、資訊窗格、清單/詳細資料、欄位排序（含遞增/遞減）、欄位顯示、頂部即時篩選與「顯示隱藏的項目」會保存設定，其中僅顯示活躍物件會隱藏空的物件分類，隱藏項目會預設過濾 SQLite 系統表、SpatiaLite metadata、sidecar metadata 與常見 provider 系統物件；連線能力的 HTTP 代理設定會套用到 WebRequest/WebClient 路徑，例如自動補註解字典下載與共用 HTTP helper，且「測試連線能力」會以目前代理設定執行 HTTP 探測並回報直接連線/代理模式與結果；進階註冊可在目前使用者層級註冊 SQL 檔案開啟方式與 `mysqlpunk://` URL 協定，關閉選項時只移除本程式建立的註冊項目。
+  - 完成內容：`ApplicationOptionSettings` 會將通用選項保存到 `application-options.json`；查詢視窗已讀取並套用記錄限制、編輯器字型大小、換行、Tab 空格、自動完成啟用狀態、是否自動載入 metadata，且 SQL 文字超過「大型檔案停用門檻」時會停用語法上色與自動完成以降低卡頓；資料表資料模式儲存時可依「自動開始交易」把同批新增、修改、刪除包在 provider 對應的 BEGIN/COMMIT/ROLLBACK 流程中；匯出預設資料夾、SQL 開啟/儲存資料夾、結果網格字型大小、結果列高度、日期/時間格式、千分位與是否使用系統數字格式也已套用；檔案位置頁可設定還原差異內容指紋抽樣列數，用於控制還原前後大型資料表內容比對最多讀取幾列；一般頁的「顯示工具提示」會控制主要工具列、連線按鈕、收藏選單與 TreeView 節點提示是否顯示；一般頁的「啟動時自動檢查更新」會在啟動後背景查詢 GitHub Releases，說明選單也提供手動檢查更新；進階選項的「啟用診斷記錄」會把查詢歷程以 JSONL 寫入 `選項 > 檔案位置` 的記錄位置，內容保留 SQL 預覽與 SHA-256 指紋，不保存完整 SQL 原文；自動復原的查詢開關與間隔會啟動查詢草稿定時保存，草稿寫入查詢資料夾下的 `auto-recovery`；索引標籤設定可決定新查詢開在主視窗分頁、最後使用位置或新視窗，且「允許重複開啟相同的物件」關閉時會重用同名同型別分頁；檢視選單的導覽窗格（含僅顯示活躍物件）、資訊窗格、清單/詳細資料、欄位排序（含遞增/遞減）、欄位顯示、頂部即時篩選與「顯示隱藏的項目」會保存設定，其中僅顯示活躍物件會隱藏空的物件分類，隱藏項目會預設過濾 SQLite 系統表、SpatiaLite metadata、sidecar metadata 與常見 provider 系統物件；連線能力的 HTTP 代理設定會套用到 WebRequest/WebClient 路徑，例如自動補註解字典下載與共用 HTTP helper，且「測試連線能力」會以目前代理設定執行 HTTP 探測並回報直接連線/代理模式與結果；進階註冊可在目前使用者層級註冊 SQL 檔案開啟方式與 `mysqlpunk://` URL 協定，關閉選項時只移除本程式建立的註冊項目。
   - 後續方向：部分選項仍需逐步接到實際行為，例如 SOCKS5/provider 原生資料庫連線代理。
+
+- **應用程式打包與更新 ⚠️ 更新檢查已補第一階段**
+  - 現況：`AppUpdateService` 可讀取 GitHub Releases latest API，解析 `tag_name`、版本、release notes、下載頁與 installer asset；主選單「說明 > 檢查更新...」可手動檢查，選項「啟動時自動檢查更新」會在啟動後背景檢查。
+  - 完成內容：版本比較會支援 `v1.2.3` 這類 release tag，若發現新版會提示開啟 installer 或 release 下載頁；尚未發布 release 或網路失敗時會在手動檢查顯示錯誤，背景檢查只更新狀態列避免干擾使用者。
+  - 後續方向：正式打包可接 Velopack 或其他 installer 流程，讓下載更新進一步變成程式內下載、安裝並重啟套用。
 
 - **連線群組功能 ✅ 已完成**
   - 觸發位置：左側樹狀清單空白處右鍵選單的「新增群組」，以及連線/群組節點右鍵選單的群組操作項目。
@@ -99,9 +105,9 @@ Smoke test harness：
     - 已補上密碼傳遞策略：MySQL、PostgreSQL、SQL Server 會透過 `MYSQL_PWD`、`PGPASSWORD`、`SQLCMDPASSWORD` 環境變數傳給 CLI，不把密碼寫進命令列參數；未儲存密碼時仍會保留 CLI 互動式密碼提示。Oracle `sqlplus` 目前仍採互動式密碼輸入，避免把密碼放進連線字串。
     - 連線密碼會儲存在 Windows Credential Manager；舊版 `setting.ini` / profile JSON 中的加密 `pwd` 會在讀取時自動遷移到 credential，並重寫設定檔清空 `pwd`。編輯連線時若清空密碼欄位，會同步清除對應 credential。
     - 未儲存密碼時，MySQL、PostgreSQL、SQL Server 會在開啟 CLI 前顯示一次性密碼輸入框；輸入的密碼只放入本次 process environment，不會回寫到連線設定或設定檔。
-    - 匯入連線設定前會顯示差異預覽，依新增、更新、不變與只存在目前設定分類；使用者可選擇整包取代，也可只合併勾選的匯入連線，保留未勾選與本機既有連線；匯出的連線 JSON 會附帶來源 ID 與 SHA-256 來源簽章，匯入預覽會顯示簽章是否有效，並可將已確認的匯出來源加入本機信任來源白名單，方便辨識檔案是否被修改與是否來自已信任來源。
+    - 匯入連線設定前會顯示差異預覽，依新增、更新、不變與只存在目前設定分類；使用者可選擇整包取代，也可只合併勾選的匯入連線，保留未勾選與本機既有連線；匯出的連線 JSON 會附帶來源 ID 與 SHA-256 來源簽章，匯入預覽會顯示簽章是否有效，並可將已確認的匯出來源加入本機信任來源白名單，方便辨識檔案是否被修改與是否來自已信任來源；預覽摘要也會附上團隊審核資訊，集中列出來源信任狀態、新增/更新筆數、本機只存在筆數、需補密碼筆數、匯入群組與變更目標，方便多位維護者在合併或取代前檢查；完成取代或合併後會把匯入動作、來源簽章狀態、選取項目、變更目標、匯入群組與需補密碼數寫入本機 JSONL 審核紀錄 `connection-import-review-log.jsonl`，方便事後追蹤。
     - 匯入連線設定後，若偵測到 MySQL、PostgreSQL、Oracle 或非 Windows 驗證的 SQL Server 連線缺少密碼，會詢問是否開啟批次補密碼視窗；使用者可一次補多筆密碼，密碼只會寫入 Windows Credential Manager，不會出現在匯入檔或設定檔明文中。
-  - 後續方向：若要進一步強化跨機匯入，可再加入團隊共享設定審核流程，讓多位維護者可集中審核匯出來源。
+  - 後續方向：若要進一步強化跨機匯入，可再將本機 JSONL 審核紀錄同步到集中式儲存或簽核系統，讓多位維護者跨機追蹤誰已審核匯出來源。
 
 - **部分連線類型尚未支援編輯 ✅ 已完成**
   - 現況：MySQL、PostgreSQL、Oracle、SQLite、SQL Server 五種 provider 均有對應的編輯表單（template form）。
@@ -122,20 +128,21 @@ Smoke test harness：
     - 定期排程：`選項 > 檔案位置` 可開關「定期驗證備份完整性」並設定驗證間隔；主程式啟動後會在背景檢查本機刪除前備份、還原前快照與遠端副本資料夾，驗證結果只顯示在狀態列，不跳出干擾式通知；每次排程也會輸出 JSON 報表到文件目錄的 `mySQLPunk/backup-integrity-reports`，方便追查異常備份。
     - 異常隔離：`選項 > 檔案位置` 可選擇驗證失敗時自動隔離異常備份，並設定隔離區保留份數；開啟後排程會把失敗檔案移到文件目錄的 `mySQLPunk/backup-quarantine`，輸出隔離 manifest，並只清理 mySQLPunk 產生樣式的舊隔離檔，預設關閉以避免未經同意移動備份。
     - 隔離區還原入口：資料庫與 Backups 節點右鍵可開啟「還原隔離備份」，從 `backup-quarantine` 選擇被隔離的備份檔，若 manifest 保留原始路徑會預填還原位置；移回前會顯示隔離檔路徑、原始路徑、大小、二次完整性驗證結果與目標檔案差異預覽（原始路徑是否存在、大小變化與是否需覆蓋確認），還原動作只把備份檔移回指定位置，不會直接灌入資料庫，使用者可先檢查檔案後再走既有「還原備份」流程；也可使用「批次還原隔離備份」把有原始路徑的隔離檔移回原處，目標檔已存在時會略過不覆蓋。
-  - 後續方向：資料列數差異已納入還原摘要；若需要更完整的資料保護，可再加入資料列內容層級的還原前後差異比較。
+  - 完成內容：還原摘要已包含物件數、資料列數、欄位 schema 差異；資料表會在還原前後建立順序無關的 SHA-256 內容指紋，即使列數不變但資料值被改動，也會在「資料內容差異」中標示變更的資料表。內容指紋改用 provider 分頁讀取，每頁先計算 row hash 再組成摘要，避免一次把大型資料表整批載入記憶體；`選項 > 檔案位置` 可設定內容指紋最多抽樣列數，預設 10000 列，摘要會標示「比對」或「抽樣」覆蓋列數；還原完成後也會輸出 JSON 內容掃描報表到文件目錄的 `mySQLPunk/restore-content-scan-reports`，保留每張資料表的列數、抽樣列數、是否完整比對與前後 SHA-256 指紋，方便事後稽核。
+  - 後續方向：若需要更完整的資料保護，可再加入指定主鍵範圍或背景排程完整掃描。
 
 - **SQLite 欄位註解不支援 ✅ sidecar metadata 與交換格式已補齊**
   - 現況：SQLite 本身沒有欄位註解語法，因此 mySQLPunk 會使用 `__mysqlpunk_column_comments` sidecar metadata table 保存欄位註解。
   - 完成內容：SQLite provider 讀取欄位時會合併 sidecar 註解；Table Designer 新增/修改/重建資料表與資料庫/資料表補註解流程都會寫入 sidecar metadata。
-  - 匯出支援：SQL Dump 的結構匯出會附帶 sidecar table 建立語句與目前資料表的欄位註解 `INSERT OR REPLACE`，跨環境還原後可保留 mySQLPunk 欄位註解；SQLite 資料庫、Tables 節點與單一資料表右鍵可匯出 / 匯入專用欄位註解 JSON、XLSX、CSV、YAML，匯入時會建立 sidecar table 並覆蓋匯入範圍內資料表的註解；XLSX 匯出模板會包含 `provider`、`database`、`table`、`column`、`type`、`not_null`、`default_value`、`comment` 欄位，方便人工審核或交給外部工具補註解；CLI 可用 `--sqlite-comments-export --database <sqlite> --output <json|xlsx|csv|yaml> [--table <name>]` 與 `--sqlite-comments-import --database <sqlite> --input <json|xlsx|csv|yaml> [--table <name>]` 進行自動化交換；匯入也支援第三方扁平陣列 JSON（`table` / `column` / `comment`）、table 內 columns 陣列格式、`table,column,comment` CSV、含額外輔助欄位的 XLSX 工作表與簡化 YAML comments 清單，並接受 `object_name` / `field_name` / `comment_text`、`entity` / `attribute` / `note` 等常見第三方模板別名，方便外部工具轉接。
-  - 後續方向：若需要和其它 SQLite 工具深度整合，可再加入審核流程。
+  - 匯出支援：SQL Dump 的結構匯出會附帶 sidecar table 建立語句與目前資料表的欄位註解 `INSERT OR REPLACE`，跨環境還原後可保留 mySQLPunk 欄位註解；SQLite 資料庫、Tables 節點與單一資料表右鍵可匯出 / 匯入專用欄位註解 JSON、XLSX、CSV、YAML，匯入時會建立 sidecar table 並覆蓋匯入範圍內資料表的註解；XLSX 匯出模板會包含 `provider`、`database`、`table`、`column`、`type`、`not_null`、`default_value`、`comment` 欄位，方便人工審核或交給外部工具補註解；CLI 可用 `--sqlite-comments-export --database <sqlite> --output <json|xlsx|csv|yaml> [--table <name>]` 與 `--sqlite-comments-import --database <sqlite> --input <json|xlsx|csv|yaml> [--table <name>]` 進行自動化交換；匯入也支援第三方扁平陣列 JSON（`table` / `column` / `comment`）、table 內 columns 陣列格式、`table,column,comment` CSV、含額外輔助欄位的 XLSX 工作表與簡化 YAML comments 清單，並接受 `object_name` / `field_name` / `comment_text`、`entity` / `attribute` / `note` 等常見第三方模板別名，方便外部工具轉接；匯入前會比對目前 sidecar 註解與匯入內容，顯示新增、更新、移除與不變摘要，匯入成功後會輸出 JSON 審核報告到文件目錄的 `mySQLPunk/sqlite-column-comment-import-reviews`，方便追蹤實際覆蓋內容。
+  - 後續方向：若需要和其它 SQLite 工具深度整合，可再把審核報告接到外部簽核或共同維護平台。
 
 - **SpatiaLite extension 可能載入失敗 ✅ 診斷資訊與修復指引已補齊**
   - 現況：SQLite provider 會嘗試載入 SpatiaLite；環境缺少 extension 時會顯示載入錯誤。`tools/spatialite/Build-SpatiaLiteRuntime.ps1` 可從官方原始碼重建 runtime，`mySQLPunk.csproj` 也會明確複製 `SQLite.Interop.dll` 的 x64/x86 runtime。
   - 完成內容：
     - 載入失敗訊息已改用語系化字串（`Connection.SpatiaLiteLoadFailed`），並同步更新狀態列，降級行為更清楚。
-    - `其它 > 連線診斷` 會顯示 SpatiaLite runtime 目錄、`mod_spatialite.dll` 路徑、載入狀態與版本資訊；若 extension 未載入，也會顯示 runtime manifest、建置腳本路徑、可直接執行的 PowerShell 修復命令、修復 log 路徑、缺少 DLL 與目前載入錯誤，方便依 `tools/spatialite/Build-SpatiaLiteRuntime.ps1` 從 Gaia-SINS 官方 `libspatialite-5.1.0.zip` 來源重建 runtime；在連線診斷表格雙擊 `SpatiaLite Repair Command` 會直接開啟 PowerShell 執行建置腳本，並用 `Tee-Object` 將進度輸出寫入文件目錄的 `mySQLPunk/spatialite-repair-logs`。
-  - 後續方向：若需要更完整的環境修復流程，可再加入建置完成後自動重新整理 SQLite 連線與 SpatiaLite 載入狀態。
+    - `其它 > 連線診斷` 會顯示 SpatiaLite runtime 目錄、`mod_spatialite.dll` 路徑、載入狀態與版本資訊；若 extension 未載入，也會顯示 runtime manifest、manifest 來源摘要、manifest runtime 檔案 SHA-256/大小校驗結果、官方來源 zip 快取、離線來源包、建置腳本路徑、可直接執行的 PowerShell 修復命令、偏好快取/離線包的修復命令、修復 log 路徑、缺少 DLL 與目前載入錯誤，方便依 `tools/spatialite/Build-SpatiaLiteRuntime.ps1` 從 Gaia-SINS 官方 `libspatialite-5.1.0.zip` 來源重建 runtime；建置腳本會把下載成功的來源 zip 快取到 `tools/spatialite/cache`，也可用 `-PreferCachedSource` 或 `-OfflinePackagePath` 在離線環境重建；在連線診斷表格雙擊 `SpatiaLite Repair Command` 會直接開啟 PowerShell 執行建置腳本，並用 `Tee-Object` 將進度輸出寫入文件目錄的 `mySQLPunk/spatialite-repair-logs`；修復腳本結束後會重置目前 SQLite provider 的 SpatiaLite 載入狀態、重新嘗試載入 extension，並刷新連線診斷表格與狀態列。
+  - 後續方向：若需要更完整的部署體驗，可再加入預先打包的 runtime release 檔與自動校驗下載。
 
 ### Table Designer 限制
 
@@ -162,27 +169,28 @@ Smoke test harness：
 
 - **Oracle Table Designer 對權限與物件狀態較敏感 ✅ 預覽提示、權限診斷 SQL、逐步確認清單與高風險二次確認已補齊**
   - 現況：已有多種診斷提示，例如權限不足、物件不存在、跨 schema 權限、語法不符。
-  - 完成內容：Oracle SQL 預覽會在可執行 SQL 前加入註解提示，標示目標物件、直接授權需求（ALTER / CREATE INDEX / DROP / COMMENT 等）與分段執行方式；預覽註解也會依 SQL 變更類型產生逐步確認清單，提醒欄位改名、型別/NULL/DEFAULT 變更、欄位註解、索引與 constraint / Primary Key 等執行前檢查；同時附上 `all_tab_privs` 與 `session_privs` 權限診斷 SQL，方便使用者在套用 DDL 前先確認目前帳號對目標物件的直接授權與系統權限；若儲存 SQL 偵測到 Oracle `DROP COLUMN`、`DROP INDEX` 或 `DROP CONSTRAINT`，會在一般 SQL 確認後再顯示一次高風險 DDL 確認；儲存判斷也改成檢查是否存在真正可執行 SQL，避免預覽註解誤擋操作。
-  - 後續方向：若需要更完整的 Oracle 風險控管，可再加入實機權限查詢結果解析。
+  - 完成內容：Oracle SQL 預覽會在可執行 SQL 前加入註解提示，標示目標物件、直接授權需求（ALTER / CREATE INDEX / DROP / COMMENT 等）與分段執行方式；預覽註解也會依 SQL 變更類型產生逐步確認清單，提醒欄位改名、型別/NULL/DEFAULT 變更、欄位註解、索引與 constraint / Primary Key 等執行前檢查；同時附上 `all_tab_privs` 與 `session_privs` 權限診斷 SQL，方便使用者在套用 DDL 前先確認目前帳號對目標物件的直接授權與系統權限；若儲存 SQL 偵測到 Oracle `DROP COLUMN`、`DROP INDEX` 或 `DROP CONSTRAINT`，會在一般 SQL 確認後再顯示一次高風險 DDL 確認；儲存判斷也改成檢查是否存在真正可執行 SQL，避免預覽註解誤擋操作；Oracle DDL 執行失敗時會嘗試查詢並解析 `all_tab_privs` / `session_privs` 結果，把目前直接授權、Session 系統權限與可能缺少的權限摘要加入錯誤訊息；若偵測到權限不足、物件不可見或 tablespace quota 問題，錯誤訊息會附上可操作修復建議，包含確認 `SESSION_USER` / `CURRENT_SCHEMA`、檢查 `session_roles`、直接授權範例 SQL、DBA 最小授權/配額範本，以及跨 schema DDL policy 提醒；常見 Oracle 實機錯誤碼也已補上提示，包含 `ORA-00904`、`ORA-01439`、`ORA-01408`、`ORA-02264`、`ORA-02261`、`ORA-01950` 與既有權限/物件/constraint 類錯誤。
+  - 後續方向：若需要更完整的 Oracle 風險控管，可再補更多實機 DDL 案例與團隊核准流程整合。
 
 ### 資料瀏覽與儲存限制
 
 - **沒有 Primary Key 的資料表儲存風險較高 ✅ 唯讀選項、optimistic WHERE 與衝突值提示已補齊**
   - 現況：儲存更新/刪除時，若沒有 Primary Key，會先顯示風險警告；繼續儲存時會用可比對欄位的原始值建立 optimistic WHERE 條件，並避開 BLOB/geometry 這類大型二進位欄位；若沒有可安全比對欄位，會拒絕產生不安全 WHERE。各 provider 的 `ExecSQL` 會回傳影響列數，更新/刪除若影響 0 列會提示資料可能已被他人修改或刪除，並附上操作類型與 WHERE 比對條件摘要，方便判斷是哪個 optimistic 條件未命中。
-  - 完成內容：`選項 > 一般` 新增「沒有 Primary Key 的資料表以唯讀模式開啟」。啟用後，開啟無 Primary Key 的資料表會自動停用新增、刪除與儲存操作，並在狀態列提示原因；若使用者選擇繼續編輯，衝突訊息會補充 UPDATE/DELETE、比對條件摘要與參數值（包含原始比對值與本次異動值），避免只看到泛用錯誤。
+  - 完成內容：`選項 > 一般` 新增「沒有 Primary Key 的資料表以唯讀模式開啟」。啟用後，開啟無 Primary Key 的資料表會自動停用新增、刪除與儲存操作，並在狀態列提示原因；若使用者選擇繼續編輯，衝突訊息會補充 UPDATE/DELETE、比對條件摘要與參數值（包含原始比對值與本次異動值），避免只看到泛用錯誤。若 UPDATE/DELETE 影響 0 列，QueryForm 會用未被本機修改且可安全比對的原始欄位重查候選資料列；剛好找到一列時會顯示原始值與目前資料庫值的欄位差異，找到 0 列或多列時會明確提示無法安全判斷。
   - 風險：資料列被其他人改過，或欄位包含浮點/大文字時，WHERE 仍可能因 provider 比對規則而不穩定。
-  - 後續方向：若仍需要編輯無 Primary Key 資料表，可再補 provider 實機案例，或在可安全重查同列時顯示目前資料庫端完整欄位差異。
+  - 後續方向：若仍需要編輯無 Primary Key 資料表，可再補更多 provider 實機案例與衝突情境測試。
 
-- **BLOB/geometry 欄位操作 ✅ 分頁檢視與資料表模式串流匯出已補齊**
+- **BLOB/geometry 欄位操作 ✅ 分頁檢視、資料表模式串流匯出與查詢結果底層串流匯出已補齊**
   - 現況：`byte[]` 欄位在結果表格中會先嘗試顯示為 `[Geometry] WKT`，無法解析時才顯示 `[BLOB n bytes] 0x...`；右鍵可檢視十六進位、複製 Hex、匯出檔案，在資料表資料模式可匯入檔案寫回目前 BLOB 欄位，也可針對 geometry 複製 WKT / WKT 轉 Geometry SQL。
   - 完成內容：BLOB 十六進位檢視器改為 4KB 分頁顯示，支援首頁、上一頁、下一頁、末頁與複製本頁 Hex，避免大型 BLOB 一次轉成完整文字造成 UI 卡頓。
   - 完成內容：資料表資料模式中，若目前資料列有 Primary Key 且尚未被本機修改，右鍵「匯出 BLOB 檔案」會以 provider-level `SequentialAccess` 重新查詢單一欄位並串流寫入檔案；MySQL、PostgreSQL、SQLite、SQL Server、Oracle provider 會共用同一個串流服務，匯出時狀態列會顯示已寫入大小。
-  - 限制：任意 SQL 查詢結果仍會先載入 `DataTable`，因此超大型結果集的整批 streaming export 仍是後續方向；沒有 Primary Key 或資料列已有未儲存變更時，單一 BLOB 匯出會退回目前格子的記憶體值。
+  - 完成內容：`QueryResultExportService` 新增 provider-level streaming export 底層能力，可直接用 `DbDataReader` 將任意查詢結果輸出為 CSV / TSV / JSON / XML / HTML / Markdown，不必先載入整份 `DataTable`，並沿用既有 BLOB/geometry 預覽格式、空值處理與列數進度回報；查詢視窗匯出上述文字格式時，若上一個成功結果是一般查詢且可安全重跑，會直接走串流匯出，資料表編輯模式與 XLSX 則保留既有 `DataTable` 路徑。
+  - 限制：XLSX 仍需整份結果資料才能產生活頁簿輸出。沒有 Primary Key 或資料列已有未儲存變更時，單一 BLOB 匯出會退回目前格子的記憶體值。
 
 - **查詢結果匯出格式 ✅ 已補齊常用格式**
-  - 現況：查詢結果匯出預設使用 CSV，並可在儲存對話框選擇 Excel `.xlsx`、TSV、JSON、XML、HTML 或 Markdown。
-  - 完成內容：各格式會共用結果表格顯示值轉換；BLOB/geometry 會沿用結果表格的 `[Geometry] WKT` 或 `[BLOB n bytes]` 顯示，日期與空值也會一致處理。
-  - 後續方向：若需要直接匯出大型查詢結果集，可再評估 provider-level streaming export，避免整份 DataTable 先載入記憶體；單一 BLOB/geometry 欄位的資料表模式匯出已先支援串流寫檔。
+  - 現況：查詢結果匯出預設使用 CSV，並可在儲存對話框選擇 Excel `.xlsx`、TSV、JSON、XML、HTML、Markdown 或 SQL INSERT `.sql`。
+  - 完成內容：各格式會共用結果表格顯示值轉換；BLOB/geometry 會沿用結果表格的 `[Geometry] WKT` 或 `[BLOB n bytes]` 顯示，日期與空值也會一致處理；XLSX 匯出會凍結標題列、套用自動篩選、穩定欄寬與表頭樣式，讓大型 workbook 開啟後可直接篩選與辨識欄位；SQL INSERT 匯出會產生 `query_result` 目標表的 `INSERT INTO` 腳本，字串、NULL、數字與 BLOB 十六進位 literal 會正確輸出，且可走串流匯出大型結果；匯出完成後會顯示摘要視窗，列出格式、筆數、檔案大小與路徑，並可直接開啟檔案或所在資料夾；成功匯出後會記住這次選擇的資料夾，下次匯出會直接從同一個位置開始。
+  - 後續方向：若需要更完整的大型結果集匯出，可再評估 XLSX 分段寫入；單一 BLOB/geometry 欄位的資料表模式匯出已先支援串流寫檔。
 
 ### Table/View 複製限制
 
@@ -193,14 +201,62 @@ Smoke test harness：
     - **直接建立 Table snapshot**（最穩定，不保留 View 語法）
     - 取消複製
     - 可在同一個對話框檢查來源 View SQL 與轉換後 SQL 預覽；若無法安全轉換，會顯示原因。
-  - 方言轉換：已支援 SQL Server `TOP (n)` 轉 MySQL/PostgreSQL/SQLite `LIMIT n` 或 Oracle `FETCH FIRST`、MySQL/PostgreSQL/SQLite `LIMIT` 轉 SQL Server `TOP (n)` 或 Oracle `FETCH/OFFSET`，帶穩定 `ORDER BY` 的 MySQL/PostgreSQL/SQLite `LIMIT ... OFFSET` 可轉 SQL Server `OFFSET ... FETCH NEXT`，SQL Server / Oracle `OFFSET ... FETCH NEXT/FIRST` 可轉 MySQL/PostgreSQL/SQLite `LIMIT ... OFFSET`，標準 / Oracle / PostgreSQL `FETCH FIRST n ROWS ONLY` 可轉 SQL Server `TOP (n)` 或 MySQL/PostgreSQL/SQLite `LIMIT n`，簡單 Oracle `ROWNUM <= n` 轉目標 provider row limit，以及 `NVL` / `NVL2` / `IFNULL` / `ISNULL` / `GETDATE()` / `GETUTCDATE()` / `NOW()` / `UTC_TIMESTAMP()` / `SYSDATE` / `SYSTIMESTAMP` / `CURDATE()` / `CURRENT_DATE` / `DATE` / `TRUNC` / `DATEDIFF` / `TIMESTAMPDIFF` / `MONTHS_BETWEEN` / `DATEADD` / `DATE_ADD` / `DATE_SUB` / `ADD_MONTHS` / `EOMONTH` / `LAST_DAY` / `DATEFROMPARTS` / `YEAR` / `MONTH` / `DAY` / `HOUR` / `MINUTE` / `SECOND` / `DATEPART` / `DATE_PART` / `EXTRACT` 的常見函式轉換；`DATEDIFF` / `TIMESTAMPDIFF` / `MONTHS_BETWEEN` 已涵蓋 year、quarter、month、week、day、hour、minute、second 或月份差距，`DATEADD` / `DATE_ADD` / `DATE_SUB` / `ADD_MONTHS` 已涵蓋 year、quarter、month、week、day、hour、minute、second 或月份加減。
-  - 進階轉換：已補上簡單 `DATE_FORMAT` / `FORMAT` / `TO_CHAR` / `TO_DATE` / `TO_TIMESTAMP` / `STR_TO_DATE` / SQL Server `CONVERT(..., 23/120)` 日期格式與解析函式、PostgreSQL `DATE_TRUNC` 與 Oracle `TRUNC(..., 'MM'/'YYYY'/'HH24'/'MI')` 日期截斷，且 `DATE_TRUNC` 已涵蓋 year、month、day、hour、minute、second；`IF` / `IIF` / `DECODE` 條件函式、`CEIL` / `CEILING` 數值進位函式、`MOD` 取餘數函式轉 SQL Server `%`、`POW` 次方函式轉 `POWER`、`GREATEST` / `LEAST` 雙參數比較函式轉 SQL Server `CASE WHEN`、`TRUE` / `FALSE` 布林常值轉 SQL Server / Oracle 數值常值、PostgreSQL `欄位::型別` cast operator 與 SQL Server `TRY_CAST` / `TRY_CONVERT` 轉目標 provider `CAST(...)` 或日期解析、`ORDER BY ... NULLS FIRST/LAST` 轉 SQL Server / MySQL `CASE WHEN` 排序、`RAND` / `RANDOM` / `DBMS_RANDOM.VALUE` 隨機數函式、PostgreSQL `ILIKE` 大小寫不敏感比對、`REGEXP_LIKE` / PostgreSQL `~` 正規表示式比對、`GROUP_CONCAT` / `group_concat` / `STRING_AGG` / `LISTAGG`、`CONCAT` 與 PostgreSQL / Oracle / SQLite `||` 字串串接、`LPAD` / `RPAD` 字串補齊轉 SQL Server / SQLite 等價語法、`JSON_EXTRACT` / `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` / `JSON_CONTAINS_PATH` / `JSON_LENGTH` / `JSON_ARRAY_LENGTH` 與 PostgreSQL `->` / `->>` / `#>` / `#>>` JSON operators 的跨 provider 轉換；簡單 `JSON_TABLE(... COLUMNS (欄位 型別 PATH '$.x'))` 也可轉 PostgreSQL `LATERAL jsonb_array_elements` 逐欄位套用 PATH、SQL Server `OPENJSON ... WITH`，或 SQLite `json_each` 搭配欄位參照改寫；並可在目標為 SQL Server / Oracle 時將 `WITH RECURSIVE` 轉成 `WITH`，讓常見日期格式、日期解析、日期截斷、條件欄位、數值進位、最大/最小值比較、布林常值、型別轉換、空值排序、字串比對、正規表示式、字串聚合、字串補齊、JSON 純量讀取、JSON 片段讀取、JSON path 存在判斷、JSON 陣列長度、JSON 陣列展開與遞迴 CTE 關鍵字差異可以保留 View SQL。
+  - 方言轉換：已支援 SQL Server `TOP (n)` 轉 MySQL/PostgreSQL/SQLite `LIMIT n` 或 Oracle `FETCH FIRST`、MySQL/PostgreSQL/SQLite `LIMIT` 轉 SQL Server `TOP (n)` 或 Oracle `FETCH/OFFSET`，帶穩定 `ORDER BY` 的 MySQL/PostgreSQL/SQLite `LIMIT ... OFFSET` 可轉 SQL Server `OFFSET ... FETCH NEXT`，SQL Server / Oracle `OFFSET ... FETCH NEXT/FIRST` 可轉 MySQL/PostgreSQL/SQLite `LIMIT ... OFFSET`，標準 / Oracle / PostgreSQL `FETCH FIRST n ROWS ONLY` 可轉 SQL Server `TOP (n)` 或 MySQL/PostgreSQL/SQLite `LIMIT n`，簡單 Oracle `ROWNUM <= n` 轉目標 provider row limit，以及 `NVL` / `NVL2` / `IFNULL` / `ISNULL` / `GETDATE()` / `GETUTCDATE()` / `SYSDATETIME()` / `SYSUTCDATETIME()` / `NOW()` / `CURRENT_TIMESTAMP` / `CURRENT_TIMESTAMP()` / `UTC_TIMESTAMP()` / `SYSDATE` / `SYSTIMESTAMP` / `CURDATE()` / `CURRENT_DATE` / `CURTIME()` / `CURRENT_TIME` / `LOCALTIME` / `LOCALTIMESTAMP` / `CURRENT_USER` / `SESSION_USER` / `SYSTEM_USER` / `USER()` / `DATABASE()` / `CURRENT_DATABASE()` / `DB_NAME()` / `SCHEMA()` / `CURRENT_SCHEMA` / `SCHEMA_NAME()` / `DATE` / `TRUNC` / `DATEDIFF` / `TIMESTAMPDIFF` / `MONTHS_BETWEEN` / `DATEADD` / `DATE_ADD` / `DATE_SUB` / `ADD_MONTHS` / `EOMONTH` / `LAST_DAY` / `DATEFROMPARTS` / `YEAR` / `MONTH` / `DAY` / `HOUR` / `MINUTE` / `SECOND` / `DATEPART` / `DATE_PART` / `EXTRACT` 的常見函式轉換；`DATEDIFF` / `TIMESTAMPDIFF` / `MONTHS_BETWEEN` 已涵蓋 year、quarter、month、week、day、hour、minute、second 或月份差距，`DATEADD` / `DATE_ADD` / `DATE_SUB` / `ADD_MONTHS` 已涵蓋 year、quarter、month、week、day、hour、minute、second 或月份加減。
+  - 進階轉換：已補上簡單 `DATE_FORMAT` / `FORMAT` / `TO_CHAR` / `TO_DATE` / `TO_TIMESTAMP` / `STR_TO_DATE` / SQL Server `CONVERT(..., 23/120)` 日期格式與解析函式、PostgreSQL `DATE_TRUNC` 與 Oracle `TRUNC(..., 'MM'/'YYYY'/'HH24'/'MI')` 日期截斷，且 `DATE_TRUNC` 已涵蓋 year、month、day、hour、minute、second；`IF` / `IIF` / `DECODE` 條件函式、`CEIL` / `CEILING` 數值進位函式、`TRUNCATE(number, decimals)` 與 SQL Server `ROUND(number, decimals, 1)` 數值截斷函式、`MOD` 取餘數函式轉 SQL Server `%`、`POW` 次方函式轉 `POWER`、`GREATEST` / `LEAST` 雙參數比較函式轉 SQL Server `CASE WHEN`、`TRUE` / `FALSE` 布林常值轉 SQL Server / Oracle 數值常值、PostgreSQL `欄位::型別` cast operator 與 SQL Server `TRY_CAST` / `TRY_CONVERT` 轉目標 provider `CAST(...)` 或日期解析、`ORDER BY ... NULLS FIRST/LAST` 轉 SQL Server / MySQL `CASE WHEN` 排序、`RAND` / `RANDOM` / `DBMS_RANDOM.VALUE` 隨機數函式、PostgreSQL `ILIKE` 大小寫不敏感比對、`REGEXP_LIKE` / PostgreSQL `~` 正規表示式比對、`GROUP_CONCAT` / `group_concat` / `STRING_AGG` / `LISTAGG`、`CONCAT` 與 PostgreSQL / Oracle / SQLite `||` 字串串接、`LPAD` / `RPAD` 字串補齊轉 SQL Server / SQLite 等價語法、`JSON_EXTRACT` / `JSON_UNQUOTE(JSON_EXTRACT(...))` / `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` / `JSON_CONTAINS_PATH` / `JSON_LENGTH` / `JSON_ARRAY_LENGTH`、`JSON_OBJECT` / `JSON_ARRAY` 與 PostgreSQL `jsonb_build_object` / `jsonb_build_array`、SQLite `json_object` / `json_array`、Oracle `JSON_OBJECT KEY VALUE` 建構式，以及 MySQL / PostgreSQL `->` / `->>`、PostgreSQL `#>` / `#>>` JSON operators 的跨 provider 轉換；簡單 `JSON_TABLE(... COLUMNS (欄位 型別 PATH '$.x'))` 也可轉 PostgreSQL `LATERAL jsonb_array_elements` 逐欄位套用 PATH、SQL Server `OPENJSON ... WITH`，或 SQLite `json_each` 搭配欄位參照改寫；並可在目標為 SQL Server / Oracle 時將 `WITH RECURSIVE` 轉成 `WITH`，讓常見日期格式、日期解析、日期截斷、條件欄位、數值進位、數值截斷、最大/最小值比較、布林常值、型別轉換、空值排序、字串比對、正規表示式、字串聚合、字串補齊、JSON 純量讀取、JSON 片段讀取、JSON path 存在判斷、JSON 陣列長度、JSON 物件/陣列建構、JSON 陣列展開與遞迴 CTE 關鍵字差異可以保留 View SQL。
   - 本輪補齊：SQL Server `CONVERT(type, expr)` 一般型別轉換會在目標為 MySQL、PostgreSQL、Oracle 或 SQLite 時轉為對應 `CAST(expr AS type)`，補齊不帶日期 style 的跨 provider 轉型。
+  - 本輪補齊：SQL Server `CONVERT(type, expr)` 一般型別轉換改用函式呼叫掃描器，可處理 `CONVERT(int, REPLACE(col, '-', ''))` 這類巢狀參數，並保留字串常值中的函式範例文字。
+  - 本輪補齊：SQL Server `TRY_CAST(expr AS type)` 改用函式呼叫掃描器與 top-level `AS` 解析，可處理 `TRY_CAST(REPLACE(col, '-', '') AS int)` 這類巢狀參數，並保留字串常值中的函式範例文字。
+  - 本輪補齊：SQL Server `TRY_CONVERT(type, expr[, style])` 改用函式呼叫掃描器，可處理 `TRY_CONVERT(int, REPLACE(col, '-', ''))` 這類巢狀參數，並保留字串常值中的函式範例文字；日期 style 23/120 仍會轉為目標 provider 日期解析函式。
+  - 本輪補齊：`IF(...)` / `IIF(...)` / `DECODE(...)` / `CHOOSE(...)` 條件函式改用函式呼叫掃描器，可處理 `IIF(ABS(score) >= 60, ...)` 這類巢狀條件，並保留字串常值中的函式範例文字。
+  - 本輪補齊：`GREATEST(left, right)` / `LEAST(left, right)` 複製到 SQLite 時會轉為通用 `CASE WHEN ... THEN ... ELSE ... END`，不再只處理 SQL Server 目標。
   - 本輪補齊：`DATEPART` / `DATE_PART` / `EXTRACT` / MySQL 日期部分函式已擴充 `quarter`、`week`、`weekday` 與 `dayofyear`，SQLite 會用 `strftime('%m')` 計算季度、`strftime('%W')` 計算週序、`strftime('%w')` 計算星期序、`strftime('%j')` 計算年內日序；Oracle 目標會改用 `TO_NUMBER(TO_CHAR(...))` 保留這些日期部分。
+  - 本輪補齊：`DATEADD(...)`、`DATE_ADD(... INTERVAL ... ...)` 與 `DATE_SUB(... INTERVAL ... ...)` 的 interval 數量可使用欄位或簡單運算式，不再只支援純數字；SQLite 目標會產生動態 date/datetime modifier。
+  - 本輪補齊：`DATEPART(...)` / `DATE_PART(...)` 改用函式呼叫掃描器，可處理 `DATEPART(day, DATEADD(day, 1, created_at))` 這類巢狀日期運算；`DATEADD` / `DATE_ADD` / `DATE_SUB` / `ADD_MONTHS` 轉換也會避開字串常值，保留報表範例文字。
+  - 本輪補齊：SQL Server `DATEFROMPARTS(year, month, day)` 改用函式呼叫掃描器，可處理 `DATEFROMPARTS(ABS(year_col), month_col, day_col)` 這類巢狀參數，並保留字串常值中的函式範例文字。
+  - 本輪補齊：`EOMONTH(...)` / `LAST_DAY(...)` 月末日期函式改用函式呼叫掃描器，可處理含 offset 或巢狀日期加減的月末轉換，並保留字串常值中的函式範例文字。
+  - 本輪補齊：MySQL `CURTIME()` 與標準 `CURRENT_TIME` 會依目標 provider 轉為對應的目前時間表達式，SQL Server 使用 `CAST(GETDATE() AS time)`、SQLite 使用 `time('now')`、MySQL 使用 `CURTIME()`。
+  - 本輪補齊：標準 `LOCALTIME` / `LOCALTIMESTAMP` 會依目標 provider 轉為目前時間或目前 timestamp 表達式，並先處理 `LOCALTIMESTAMP` 以避免被 `LOCALTIME` 前綴誤轉。
+  - 本輪補齊：SQL Server `SYSDATETIME()` / `SYSUTCDATETIME()` 會依目標 provider 轉為目前 timestamp 或 UTC timestamp 表達式，與既有 `GETDATE()` / `GETUTCDATE()` 共用同一組轉換語意。
+  - 本輪補齊：標準 `CURRENT_TIMESTAMP` / `CURRENT_TIMESTAMP()` 會依目標 provider 正規化為對應目前 timestamp 表達式，MySQL 目標統一輸出 `NOW()`。
+  - 本輪補齊：`CURRENT_USER` / `SESSION_USER` / `SYSTEM_USER` / `USER()` 會依目標 provider 轉為對應目前使用者或登入者表達式，Oracle 目標的 session/system user 使用 `SYS_CONTEXT('USERENV','SESSION_USER')`。
+  - 本輪補齊：`DATABASE()` / `CURRENT_DATABASE()` / `DB_NAME()` 會依目標 provider 轉為目前資料庫名稱表達式，Oracle 目標使用 `SYS_CONTEXT('USERENV','DB_NAME')`，SQLite 目標以 `NULL` 保持可執行。
+  - 本輪補齊：`SCHEMA()` / `CURRENT_SCHEMA` / `SCHEMA_NAME()` 會依目標 provider 轉為目前 schema 表達式，SQL Server 目標使用 `SCHEMA_NAME()`，Oracle 目標使用 `SYS_CONTEXT('USERENV','CURRENT_SCHEMA')`，SQLite 目標以 `NULL` 保持可執行。
   - 本輪補齊：Oracle `TO_NUMBER(...)` / `TO_NUMBER(..., 'format')` 會在目標為 SQL Server、MySQL、PostgreSQL 或 SQLite 時轉為對應的 `CAST(...)` 數值型別，避免 Oracle View 複製到其它 provider 後留下不可執行的數值轉型函式。
+  - 本輪補齊：`TO_NUMBER(...)` 改用函式呼叫掃描器，可處理 `TO_NUMBER(REPLACE(col, ',', ''), 'format')` 這類巢狀參數，並保留字串常值中的函式範例文字。
+  - 本輪補齊：MySQL `TRUNCATE(number, decimals)` 複製到 SQL Server 會轉為 `ROUND(number, decimals, 1)`，複製到 PostgreSQL / Oracle 會轉為 `TRUNC(number, decimals)`，SQLite 會用整數截斷與 `pow(10, decimals)` 模擬，避免報表 View 留下 MySQL 專用數值函式。
+  - 本輪補齊：SQL Server `ROUND(number, decimals, 1)` 的截斷語意會依目標 provider 轉為 MySQL `TRUNCATE(number, decimals)`、PostgreSQL / Oracle `TRUNC(number, decimals)`，SQLite 仍以整數截斷與 `pow(10, decimals)` 模擬；一般 `ROUND(number, decimals)` 不會被誤改。
+  - 本輪補齊：`TRUNCATE(...)` 與三參數 `ROUND(..., ..., 1)` 改用函式呼叫掃描器，可處理 `TRUNCATE(ABS(col), 2)` 這類巢狀參數，並保留字串常值中的函式範例文字。
+  - 本輪補齊：`CEIL(...)` / `CEILING(...)` 名稱轉換會避開字串常值，`MOD(...)` 轉 SQL Server `%` 時也改用函式呼叫掃描器，可處理 `MOD(ABS(col), n)` 這類巢狀參數並保留 `'CEIL(...)'` / `'MOD(...)'` 文字。
+  - 本輪補齊：`POW(...)` 轉 `POWER(...)` 時只會改寫 SQL 片段，會保留 `'POW(...)'` 這類字串常值，避免報表標籤或樣板文字被誤改。
+  - 本輪補齊：`RAND()` / `RANDOM()` / `DBMS_RANDOM.VALUE` 隨機數函式轉換會避開字串常值，避免將 `'RAND()'` 這類報表文字誤改成目標 provider 函式名稱。
+  - 本輪補齊：`NVL(...)` / `IFNULL(...)` 轉換為 `COALESCE(...)` 時只會改寫 SQL 片段，不會再誤改 `'NVL(...)'` 或 `'IFNULL(...)'` 這類字串常值，避免備註、狀態文字或樣板字串被污染。
+  - 本輪補齊：`NVL2(...)` / `ISNULL(...)` 轉換會用函式呼叫掃描器避開字串常值，並可處理參數字串內含括號或巢狀函式的情境，避免漏轉真正函式或污染 `'NVL2(...)'` / `'ISNULL(...)'` 文字。
   - 本輪補齊：`LOCATE` / `CHARINDEX` / `INSTR` 的起始位置參數會轉為目標 provider 等價語法；SQLite / PostgreSQL 會用 `SUBSTR` / `SUBSTRING` 搭配 `CASE` 保留找不到時回傳 0 的行為。
+  - 本輪補齊：MySQL `UCASE(...)` / `LCASE(...)` 會在複製到 SQL Server、PostgreSQL、SQLite 或 Oracle 時轉為通用的 `UPPER(...)` / `LOWER(...)`，並改用函式呼叫掃描器處理巢狀參數與保留字串常值，避免目標資料庫留下不可執行的 MySQL alias 或污染報表文字。
+  - 本輪補齊：`TRIM(...)` / `LTRIM(RTRIM(...))` / `RTRIM(LTRIM(...))` 字串修剪轉換改用函式呼叫掃描器，可處理 `REPLACE(...)` 這類含逗號的巢狀參數，並保留字串常值中的函式範例文字。
+  - 本輪補齊：SQL Server `DATALENGTH(...)`、PostgreSQL/MySQL `OCTET_LENGTH(...)` 與 Oracle `LENGTHB(...)` 會依目標 provider 轉為對應的 byte-length 函式，SQLite 目標會用 `length(CAST(expr AS BLOB))` 保留位元組長度語意。
+  - 本輪補齊：MySQL/PostgreSQL `BIT_LENGTH(...)` 會依目標 provider 保留位元長度語意，SQL Server / Oracle / SQLite 目標會用對應 byte-length 函式乘以 8。
+  - 本輪補齊：SQL Server `NEWID()`、MySQL `UUID()` 與 Oracle `SYS_GUID()` 會依目標 provider 轉為對應的 UUID/Guid 產生函式，SQLite 目標會用 `randomblob()` 組出 v4-like UUID 字串。
+  - 本輪補齊：MySQL/PostgreSQL `REPEAT(...)` 與 SQL Server `REPLICATE(...)` 會依目標 provider 轉為 `REPEAT`、`REPLICATE`、SQLite `ZEROBLOB` 模擬或 Oracle `RPAD` 模擬，讓常見補零、遮罩與固定字元重複 View 可跨資料庫複製。
+  - 本輪補齊：MySQL `LPAD(...)` / `RPAD(...)` 複製到 SQL Server 或 SQLite 時改用函式呼叫掃描器，可支援巢狀參數並保留字串常值中的函式範例文字。
+  - 本輪補齊：SQL Server/MySQL `SPACE(n)` 會在目標為 PostgreSQL、SQLite 或 Oracle 時轉為對應的字串重複表達式，讓縮排、補空白與固定格式 View 可跨資料庫複製。
+  - 本輪補齊：Oracle/PostgreSQL `CHR(n)` 與 SQL Server/MySQL/SQLite `CHAR(n)` 會依目標 provider 轉為對應的字元碼函式，且會避開 `CAST(... AS CHAR(n))` 這類型別宣告，避免誤改欄位型別。
+  - 本輪補齊：SQL Server `NCHAR(n)` 會依目標 provider 轉為對應的 Unicode 字元碼函式，且一般 `CAST(... AS NCHAR/VARCHAR/INT/DATE...)` 也會依目標 provider 轉為相容型別，不再只處理 `CONVERT(...)` / `TRY_CAST(...)` / `TRY_CONVERT(...)`。
+  - 本輪補齊：MySQL/PostgreSQL/Oracle `ASCII(...)`、SQL Server `UNICODE(...)` 與 SQLite `unicode(...)` 會依目標 provider 轉為對應的字元碼讀取函式，讓字元碼分析 View 可跨資料庫複製。
+  - 本輪補齊：MySQL 一參數 `ISNULL(expr)` 會依目標 provider 轉為 `expr IS NULL` 或 `CASE WHEN expr IS NULL THEN 1 ELSE 0 END`，SQL Server 二參數 `ISNULL(expr, fallback)` 仍會轉為 `COALESCE(expr, fallback)`；避免跨 provider 複製時把 NULL 判斷誤轉成空值替代。
+  - 本輪補齊：日期格式化與解析函式轉換改用函式呼叫掃描器，`CONVERT(..., style 23/120)`、`DATE_FORMAT`、`FORMAT`、`TO_CHAR`、`TO_DATE`、`TO_TIMESTAMP` 與 `STR_TO_DATE` 會保留字串常值中的範例文字，只改寫真正的 SQL 函式呼叫。
+  - 本輪補齊：MySQL `FIELD(expr, value1, value2, ...)` 會在目標非 MySQL 時轉為通用 `CASE expr WHEN value1 THEN 1 ... ELSE 0 END`，讓自訂狀態排序與優先序 View 可跨資料庫複製。
+  - 本輪補齊：MySQL `ELT(index, value1, value2, ...)` 會在目標非 MySQL 時轉為通用 `CASE index WHEN 1 THEN value1 ... ELSE NULL END`，讓代碼轉標籤與優先序文字 View 可跨資料庫複製。
+  - 本輪補齊：MySQL `FIND_IN_SET(expr, 'value1,value2,...')` 在第二參數為靜態清單時會轉為通用 `CASE expr WHEN value1 THEN 1 ... ELSE 0 END`，讓固定清單排序與狀態順位 View 可跨資料庫複製。
+  - 本輪補齊：MySQL `STRCMP(left, right)` 會在目標非 MySQL 時轉為通用 `CASE WHEN left = right THEN 0 WHEN left < right THEN -1 ELSE 1 END`，讓字串排序/比較結果 View 可跨資料庫複製。
+  - 本輪補齊：SQL Server `CHOOSE(index, value1, value2, ...)` 會在目標非 SQL Server 時轉為通用 `CASE index WHEN 1 THEN value1 ... ELSE NULL END`，讓序號轉標籤 View 可跨資料庫複製。
+  - 本輪補齊：SQL Server `STUFF(expr, start, length, replacement)` 會在目標為 MySQL、PostgreSQL、SQLite 或 Oracle 時轉為 substring 串接表達式，並改用函式呼叫掃描器支援巢狀參數與保留字串常值，讓遮罩、局部替換與格式化 View 可跨資料庫複製。
+  - 本輪補齊：`SUBSTR(...)` / 逗號式 `SUBSTRING(...)` 名稱轉換改用函式呼叫掃描器，可處理 `REPLACE(...)` 這類含括號與逗號的巢狀參數，並保留字串常值中的函式範例文字。
+  - 本輪補齊：`LEFT(...)` / `RIGHT(...)` 複製到 Oracle 或 SQLite 時改用函式呼叫掃描器，可處理 `REPLACE(...)` 這類巢狀參數並轉為 `SUBSTR(...)`，同時保留字串常值中的函式範例文字。
+  - 本輪補齊：MySQL `SUBSTRING_INDEX(expr, delimiter, 1)` 會在目標為 SQL Server、PostgreSQL、SQLite 或 Oracle 時轉為「第一個 delimiter 前段」的等價 `CASE` 表達式；`SUBSTRING_INDEX(expr, delimiter, -1)` 會在目標為 SQL Server、PostgreSQL 或 Oracle 時轉為「最後一個 delimiter 後段」的等價表達式，找不到 delimiter 時保留原字串；轉換已改用函式呼叫掃描器，可支援巢狀參數並保留字串常值中的函式範例文字。
+  - 本輪補齊：MySQL/PostgreSQL/SQL Server `CONCAT_WS(separator, ...)` 複製到 Oracle 或 SQLite 時會展開為分隔符串接表達式，讓電話、代碼與複合鍵格式化 View 可跨資料庫複製。
   - 已知情境：Oracle 階層查詢、MySQL 專用 View 語法、帶 OFFSET 且缺少穩定排序的 SQL Server 轉換、無法解析的 SELECT SQL 仍會改用 table snapshot。
-  - 測試覆蓋：`tests/SmokeTests.cs` 已加入 TOP / LIMIT / LIMIT OFFSET / OFFSET FETCH / FETCH FIRST / ROWNUM、日期格式與解析（含 SQL Server `CONVERT` style 23/120、`TO_DATE`、`TO_TIMESTAMP`、`STR_TO_DATE`）、目前日期/時間（含 `GETUTCDATE()` / `UTC_TIMESTAMP()` / `SYSDATE` / `SYSTIMESTAMP`）、`DATE_TRUNC` 與 Oracle `TRUNC(..., 'MM'/'YYYY'/'HH24'/'MI')` 日期截斷、`NVL2` 空值條件、`DATE` / `TRUNC` 日期截斷、`DATEDIFF` / `TIMESTAMPDIFF` / `MONTHS_BETWEEN` 年/月/日/時分秒差、`DATEADD` / `DATE_ADD` / `DATE_SUB` / `ADD_MONTHS` 年/月/日/時加減、`EOMONTH` / `LAST_DAY` 月末日期、`DATEFROMPARTS` 日期組裝與 `YEAR` / `MONTH` / `DAY` / `HOUR` / `MINUTE` / `SECOND` / `DATEPART` / `DATE_PART` / `EXTRACT` 日期部分函式、`IF` / `IIF` / `DECODE` 條件函式、`CEIL` / `CEILING` 數值進位、`MOD` 取餘數、`POW` / `POWER` 次方、`GREATEST` / `LEAST` 最大/最小值比較、`TRUE` / `FALSE` 布林常值、PostgreSQL `欄位::型別` cast operator、SQL Server `TRY_CAST` / `TRY_CONVERT`、`NULLS FIRST/LAST` 空值排序、`RAND` / `RANDOM` / `DBMS_RANDOM.VALUE` 隨機數、PostgreSQL `ILIKE`、`REGEXP_LIKE` / PostgreSQL `~` 正規表示式比對、字串聚合、`CONCAT` 與 `||` 字串串接、`LEN` / `LENGTH` / `CHAR_LENGTH` / `CHARACTER_LENGTH` 字串長度、`TRIM` / `LTRIM` / `RTRIM` 字串修剪、`SUBSTR` / `SUBSTRING` / `SUBSTRING ... FROM ... FOR` / `LEFT` / `RIGHT` / `LPAD` / `RPAD` 字串擷取與補齊、`LOCATE` / `CHARINDEX` / `INSTR` / `POSITION` 字串位置、JSON 純量讀取（含 `JSON_EXTRACT` / `JSON_VALUE` / PostgreSQL `->>` / `#>>` 轉 PostgreSQL / MySQL / Oracle）、JSON 片段讀取（含 `JSON_QUERY` / PostgreSQL `->` / `#>` 轉 MySQL / PostgreSQL / SQLite）、JSON path 存在判斷（含 `JSON_EXISTS` / `JSON_CONTAINS_PATH` 轉 MySQL / PostgreSQL / SQLite / SQL Server / Oracle）、JSON 陣列長度（含 `JSON_LENGTH` / `JSON_ARRAY_LENGTH` 轉 MySQL / PostgreSQL / SQLite / SQL Server / Oracle）、簡單 `JSON_TABLE` 轉 PostgreSQL / SQL Server / SQLite、CTE/window 保留、`WITH RECURSIVE` 關鍵字轉換與不支援轉換原因的可重跑案例。
+  - 測試覆蓋：`tests/SmokeTests.cs` 已加入 TOP / LIMIT / LIMIT OFFSET / OFFSET FETCH / FETCH FIRST / ROWNUM、日期格式與解析（含 SQL Server `CONVERT` style 23/120、`TO_DATE`、`TO_TIMESTAMP`、`STR_TO_DATE`）、目前日期/時間（含 `GETUTCDATE()` / `UTC_TIMESTAMP()` / `SYSDATE` / `SYSTIMESTAMP`）、`DATE_TRUNC` 與 Oracle `TRUNC(..., 'MM'/'YYYY'/'HH24'/'MI')` 日期截斷、`NVL2` 空值條件、`DATE` / `TRUNC` 日期截斷、`DATEDIFF` / `TIMESTAMPDIFF` / `MONTHS_BETWEEN` 年/月/日/時分秒差、`DATEADD` / `DATE_ADD` / `DATE_SUB` / `ADD_MONTHS` 年/月/日/時加減、`EOMONTH` / `LAST_DAY` 月末日期、`DATEFROMPARTS` 日期組裝與 `YEAR` / `MONTH` / `DAY` / `HOUR` / `MINUTE` / `SECOND` / `DATEPART` / `DATE_PART` / `EXTRACT` 日期部分函式、`IF` / `IIF` / `DECODE` 條件函式、`CEIL` / `CEILING` 數值進位、`MOD` 取餘數、`POW` / `POWER` 次方、`GREATEST` / `LEAST` 最大/最小值比較、`TRUE` / `FALSE` 布林常值、PostgreSQL `欄位::型別` cast operator、SQL Server `TRY_CAST` / `TRY_CONVERT`、`NULLS FIRST/LAST` 空值排序、`RAND` / `RANDOM` / `DBMS_RANDOM.VALUE` 隨機數、PostgreSQL `ILIKE`、`REGEXP_LIKE` / PostgreSQL `~` 正規表示式比對、字串聚合、`CONCAT` 與 `||` 字串串接、`LEN` / `LENGTH` / `CHAR_LENGTH` / `CHARACTER_LENGTH` 字串長度、`TRIM` / `LTRIM` / `RTRIM` 字串修剪、`SUBSTR` / `SUBSTRING` / `SUBSTRING ... FROM ... FOR` / `LEFT` / `RIGHT` / `LPAD` / `RPAD` 字串擷取與補齊、`LOCATE` / `CHARINDEX` / `INSTR` / `POSITION` 字串位置、JSON 純量讀取（含 `JSON_EXTRACT` / `JSON_UNQUOTE(JSON_EXTRACT(...))` / `JSON_VALUE` / MySQL `->>` / PostgreSQL `->>` / `#>>` 轉 PostgreSQL / MySQL / Oracle / SQL Server）、JSON 片段讀取（含 `JSON_QUERY` / MySQL `->` / PostgreSQL `->` / `#>` 轉 MySQL / PostgreSQL / SQLite）、JSON path 存在判斷（含 `JSON_EXISTS` / `JSON_CONTAINS_PATH` 轉 MySQL / PostgreSQL / SQLite / SQL Server / Oracle）、JSON 陣列長度（含 `JSON_LENGTH` / `JSON_ARRAY_LENGTH` 轉 MySQL / PostgreSQL / SQLite / SQL Server / Oracle）、JSON 物件/陣列建構（含 MySQL、PostgreSQL、SQLite、Oracle 互轉）、簡單 `JSON_TABLE` 轉 PostgreSQL / SQL Server / SQLite、CTE/window 保留、`WITH RECURSIVE` 關鍵字轉換與不支援轉換原因的可重跑案例。
   - 後續方向：若需要更高相容性，可再逐 provider 擴充 JSON table 與更多 provider 專用內建函式等更複雜 SQL 方言轉換規則。
 
 ## 專案檔案導覽

@@ -94,7 +94,7 @@ namespace mySQLPunk.lib
             return null;
         }
 
-        private static void AddParameters(DbCommand command, IDatabase database, IDictionary<string, object> parameters)
+        internal static void AddParameters(DbCommand command, IDatabase database, IDictionary<string, object> parameters)
         {
             if (parameters == null) return;
 
@@ -107,7 +107,7 @@ namespace mySQLPunk.lib
             }
         }
 
-        private static string BuildParameterName(IDatabase database, string key)
+        internal static string BuildParameterName(IDatabase database, string key)
         {
             string name = (key ?? string.Empty).TrimStart('@', ':', '?');
             if (database is my_mysql) return "?" + name;

@@ -4,6 +4,9 @@ param(
     [string]$RuntimeDir = "$PSScriptRoot\..\..\mySQLPunk\binary\sqlite3_ext",
     [string]$LibSpatialiteUrl = "https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip",
     [string]$ExpectedSha256 = "",
+    [string]$SourceCacheDir = "$PSScriptRoot\cache",
+    [string]$OfflinePackagePath = "",
+    [switch]$PreferCachedSource,
     [switch]$SkipPacman,
     [switch]$KeepWorkDir
 )
@@ -26,6 +29,7 @@ function ConvertTo-MsysPath([string]$Path) {
 
 $work = Resolve-FullPath $WorkDir
 $runtime = Resolve-FullPath $RuntimeDir
+$sourceCache = Resolve-FullPath $SourceCacheDir
 $bash = Join-Path $Msys2Root "usr\bin\bash.exe"
 
 if (!(Test-Path -LiteralPath $bash)) {
@@ -38,16 +42,53 @@ if (!(Test-Path -LiteralPath $work)) {
 if (!(Test-Path -LiteralPath $runtime)) {
     New-Item -ItemType Directory -Path $runtime | Out-Null
 }
+if (!(Test-Path -LiteralPath $sourceCache)) {
+    New-Item -ItemType Directory -Path $sourceCache | Out-Null
+}
 
 $zipPath = Join-Path $work "libspatialite-5.1.0.zip"
+$cacheZipPath = Join-Path $sourceCache "libspatialite-5.1.0.zip"
 $srcDir = Join-Path $work "libspatialite-5.1.0"
 
-Write-Host "下載 libspatialite 原始碼..."
-Invoke-WebRequest -Uri $LibSpatialiteUrl -OutFile $zipPath
+function Copy-SourceArchive([string]$SourcePath, [string]$TargetPath, [string]$Reason) {
+    if (!(Test-Path -LiteralPath $SourcePath)) {
+        throw "找不到 SpatiaLite 來源 zip：$SourcePath"
+    }
+    Write-Host "$Reason：$SourcePath"
+    Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
+}
+
+if ($OfflinePackagePath) {
+    Copy-SourceArchive -SourcePath (Resolve-FullPath $OfflinePackagePath) -TargetPath $zipPath -Reason "使用離線 libspatialite 原始碼"
+}
+elseif ($PreferCachedSource -and (Test-Path -LiteralPath $cacheZipPath)) {
+    Copy-SourceArchive -SourcePath $cacheZipPath -TargetPath $zipPath -Reason "使用快取 libspatialite 原始碼"
+}
+else {
+    try {
+        Write-Host "下載 libspatialite 原始碼..."
+        Invoke-WebRequest -Uri $LibSpatialiteUrl -OutFile $zipPath
+        Copy-Item -LiteralPath $zipPath -Destination $cacheZipPath -Force
+        Write-Host "來源 zip 已快取：$cacheZipPath"
+    }
+    catch {
+        if (Test-Path -LiteralPath $cacheZipPath) {
+            Write-Host "下載失敗，改用快取 libspatialite 原始碼：$cacheZipPath"
+            Copy-Item -LiteralPath $cacheZipPath -Destination $zipPath -Force
+        }
+        else {
+            throw
+        }
+    }
+}
 
 $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLowerInvariant()
 if ($ExpectedSha256 -and $actualSha256 -ne $ExpectedSha256.ToLowerInvariant()) {
     throw "libspatialite source SHA256 不符。Expected=$ExpectedSha256 Actual=$actualSha256"
+}
+
+if (!(Test-Path -LiteralPath $cacheZipPath)) {
+    Copy-Item -LiteralPath $zipPath -Destination $cacheZipPath -Force
 }
 
 if (Test-Path -LiteralPath $srcDir) {

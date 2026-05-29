@@ -140,6 +140,9 @@
     <Compile Include="ConnectionTypeSelectionForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="ExportCompletedDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="entity\mySQLPunk_main.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
@@ -171,6 +174,7 @@
     <Compile Include="lib\BackupRestoreDiffService.cs" />
     <Compile Include="lib\BackupRemoteMirrorService.cs" />
     <Compile Include="lib\AdvancedRegistrationService.cs" />
+    <Compile Include="lib\AppUpdateService.cs" />
     <Compile Include="lib\AutoRecoveryDraftService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
     <Compile Include="lib\ConnectionProxySettingsService.cs" />

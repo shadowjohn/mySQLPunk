@@ -30,6 +30,37 @@ namespace mySQLPunk.lib
         }
     }
 
+    public sealed class SqliteColumnCommentImportReviewEntry
+    {
+        public string TableName { get; set; }
+        public string ColumnName { get; set; }
+        public string CurrentComment { get; set; }
+        public string ImportedComment { get; set; }
+        public string Status { get; set; }
+    }
+
+    public sealed class SqliteColumnCommentImportReviewReport
+    {
+        public int FormatVersion { get; set; }
+        public string ReviewedAtUtc { get; set; }
+        public string DatabaseName { get; set; }
+        public string SourcePath { get; set; }
+        public int TableCount { get; set; }
+        public int CommentCount { get; set; }
+        public int Added { get; set; }
+        public int Updated { get; set; }
+        public int Removed { get; set; }
+        public int Unchanged { get; set; }
+        public List<SqliteColumnCommentImportReviewEntry> Entries { get; private set; }
+
+        public SqliteColumnCommentImportReviewReport()
+        {
+            FormatVersion = 1;
+            ReviewedAtUtc = DateTime.UtcNow.ToString("o");
+            Entries = new List<SqliteColumnCommentImportReviewEntry>();
+        }
+    }
+
     public sealed class SqliteColumnCommentCliResult
     {
         public bool Handled { get; set; }
@@ -372,6 +403,99 @@ namespace mySQLPunk.lib
                 db.ExecSQL(statement);
             }
             return plan;
+        }
+
+        public static SqliteColumnCommentImportReviewReport BuildImportReviewReport(
+            IDatabase db,
+            string databaseName,
+            SqliteColumnCommentImportPlan plan)
+        {
+            EnsureSqlite(db);
+            if (plan == null) throw new ArgumentNullException(nameof(plan));
+
+            SqliteColumnCommentImportReviewReport report = new SqliteColumnCommentImportReviewReport
+            {
+                DatabaseName = databaseName ?? string.Empty,
+                TableCount = plan.TableCount,
+                CommentCount = plan.CommentCount
+            };
+
+            foreach (KeyValuePair<string, Dictionary<string, string>> table in plan.Tables)
+            {
+                Dictionary<string, string> current = ReadColumnComments(db, databaseName, table.Key);
+                Dictionary<string, string> imported = table.Value ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (KeyValuePair<string, string> column in imported)
+                {
+                    string currentComment;
+                    bool hasCurrent = current.TryGetValue(column.Key, out currentComment);
+                    string status = !hasCurrent
+                        ? "added"
+                        : (string.Equals(currentComment ?? string.Empty, column.Value ?? string.Empty, StringComparison.Ordinal)
+                            ? "unchanged"
+                            : "updated");
+                    AddImportReviewEntry(report, table.Key, column.Key, hasCurrent ? currentComment : string.Empty, column.Value, status);
+                }
+
+                foreach (KeyValuePair<string, string> column in current)
+                {
+                    if (imported.ContainsKey(column.Key)) continue;
+                    AddImportReviewEntry(report, table.Key, column.Key, column.Value, string.Empty, "removed");
+                }
+            }
+
+            report.Entries.Sort((left, right) =>
+            {
+                int tableCompare = string.Compare(left.TableName, right.TableName, StringComparison.OrdinalIgnoreCase);
+                return tableCompare != 0
+                    ? tableCompare
+                    : string.Compare(left.ColumnName, right.ColumnName, StringComparison.OrdinalIgnoreCase);
+            });
+            return report;
+        }
+
+        public static string BuildImportReviewSummary(SqliteColumnCommentImportReviewReport report)
+        {
+            if (report == null) return string.Empty;
+            return "審核摘要：新增 " + report.Added +
+                   "、更新 " + report.Updated +
+                   "、移除 " + report.Removed +
+                   "、不變 " + report.Unchanged;
+        }
+
+        public static string WriteImportReviewReport(SqliteColumnCommentImportReviewReport report, string reportDirectory)
+        {
+            if (report == null) throw new ArgumentNullException(nameof(report));
+            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException("Report directory is required.", nameof(reportDirectory));
+
+            Directory.CreateDirectory(reportDirectory);
+            string fileName = "sqlite-column-comments-review_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss") + ".json";
+            string path = Path.Combine(reportDirectory, fileName);
+            File.WriteAllText(path, JsonConvert.SerializeObject(report, Formatting.Indented), new UTF8Encoding(false));
+            return path;
+        }
+
+        private static void AddImportReviewEntry(
+            SqliteColumnCommentImportReviewReport report,
+            string tableName,
+            string columnName,
+            string currentComment,
+            string importedComment,
+            string status)
+        {
+            report.Entries.Add(new SqliteColumnCommentImportReviewEntry
+            {
+                TableName = tableName ?? string.Empty,
+                ColumnName = columnName ?? string.Empty,
+                CurrentComment = currentComment ?? string.Empty,
+                ImportedComment = importedComment ?? string.Empty,
+                Status = status ?? string.Empty
+            });
+
+            if (string.Equals(status, "added", StringComparison.OrdinalIgnoreCase)) report.Added++;
+            else if (string.Equals(status, "updated", StringComparison.OrdinalIgnoreCase)) report.Updated++;
+            else if (string.Equals(status, "removed", StringComparison.OrdinalIgnoreCase)) report.Removed++;
+            else if (string.Equals(status, "unchanged", StringComparison.OrdinalIgnoreCase)) report.Unchanged++;
         }
 
         public static Dictionary<string, Dictionary<string, string>> ParseExchangeJson(string json, string tableNameFilter = null)

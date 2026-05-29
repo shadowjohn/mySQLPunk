@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Windows.Forms;
 using mySQLPunk;
@@ -46,8 +48,10 @@ public static class SmokeTests
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
+        Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
@@ -101,7 +105,7 @@ public static class SmokeTests
         Assert((bool)GetProperty(mysqlPreview, "CanConvert"), "SQL Server TOP query should convert to MySQL.");
         string mysqlSql = (string)GetProperty(mysqlPreview, "ConvertedSql");
         AssertContains(mysqlSql, "LIMIT 5", "Converted MySQL SQL should contain LIMIT.");
-        AssertContains(mysqlSql, "CURRENT_TIMESTAMP", "Converted MySQL SQL should rewrite GETDATE().");
+        AssertContains(mysqlSql, "NOW()", "Converted MySQL SQL should rewrite GETDATE().");
 
         object mssqlPreview = BuildViewSqlPreview(
             "SELECT id, DATE_FORMAT(created_at, '%Y-%m-%d') AS day_text FROM logs LIMIT 10",
@@ -204,6 +208,42 @@ public static class SmokeTests
         Assert((bool)GetProperty(pgJsonPreview, "CanConvert"), "MySQL JSON_EXTRACT should convert to PostgreSQL.");
         string pgJsonSql = (string)GetProperty(pgJsonPreview, "ConvertedSql");
         AssertContains(pgJsonSql, "payload #>> '{user,name}'", "Converted PostgreSQL SQL should use text JSON path extraction.");
+
+        object pgJsonUnquoteExtractPreview = BuildViewSqlPreview(
+            "SELECT JSON_UNQUOTE(JSON_EXTRACT(payload, '$.user.name')) AS user_name FROM event_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonUnquoteExtractPreview, "CanConvert"), "MySQL JSON_UNQUOTE(JSON_EXTRACT) should convert to PostgreSQL.");
+        string pgJsonUnquoteExtractSql = (string)GetProperty(pgJsonUnquoteExtractPreview, "ConvertedSql");
+        AssertContains(pgJsonUnquoteExtractSql, "payload #>> '{user,name}'", "Converted PostgreSQL SQL should use text JSON path extraction for JSON_UNQUOTE(JSON_EXTRACT).");
+        AssertNotContains(pgJsonUnquoteExtractSql, "JSON_UNQUOTE", "Converted PostgreSQL SQL should remove JSON_UNQUOTE.");
+
+        object mssqlJsonUnquoteExtractPreview = BuildViewSqlPreview(
+            "SELECT JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status')) AS status_text FROM event_log",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlJsonUnquoteExtractPreview, "CanConvert"), "MySQL JSON_UNQUOTE(JSON_EXTRACT) should convert to SQL Server.");
+        string mssqlJsonUnquoteExtractSql = (string)GetProperty(mssqlJsonUnquoteExtractPreview, "ConvertedSql");
+        AssertContains(mssqlJsonUnquoteExtractSql, "JSON_VALUE(payload, '$.status')", "Converted SQL Server SQL should use JSON_VALUE for JSON_UNQUOTE(JSON_EXTRACT).");
+        AssertNotContains(mssqlJsonUnquoteExtractSql, "JSON_UNQUOTE", "Converted SQL Server SQL should remove JSON_UNQUOTE.");
+
+        object oracleMySqlJsonArrowTextPreview = BuildViewSqlPreview(
+            "SELECT payload ->> '$.user.name' AS user_name FROM event_log",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleMySqlJsonArrowTextPreview, "CanConvert"), "MySQL JSON ->> path operator should convert to Oracle.");
+        string oracleMySqlJsonArrowTextSql = (string)GetProperty(oracleMySqlJsonArrowTextPreview, "ConvertedSql");
+        AssertContains(oracleMySqlJsonArrowTextSql, "JSON_VALUE(payload, '$.user.name')", "Converted Oracle SQL should use JSON_VALUE for MySQL ->>.");
+        AssertNotContains(oracleMySqlJsonArrowTextSql, "->>", "Converted Oracle SQL should remove MySQL JSON ->> operator.");
+
+        object pgMySqlJsonArrowFragmentPreview = BuildViewSqlPreview(
+            "SELECT payload -> '$.items[0]' AS first_item FROM event_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgMySqlJsonArrowFragmentPreview, "CanConvert"), "MySQL JSON -> path operator should convert to PostgreSQL.");
+        string pgMySqlJsonArrowFragmentSql = (string)GetProperty(pgMySqlJsonArrowFragmentPreview, "ConvertedSql");
+        AssertContains(pgMySqlJsonArrowFragmentSql, "payload #> '{items,0}'", "Converted PostgreSQL SQL should use JSON path extraction for MySQL ->.");
+        AssertNotContains(pgMySqlJsonArrowFragmentSql, "->", "Converted PostgreSQL SQL should remove MySQL JSON -> operator.");
 
         object mysqlJsonValuePreview = BuildViewSqlPreview(
             "SELECT JSON_VALUE(payload, '$.status') AS status_text FROM event_log",
@@ -343,6 +383,44 @@ public static class SmokeTests
         string sqliteJsonLengthSql = (string)GetProperty(sqliteJsonLengthPreview, "ConvertedSql");
         AssertContains(sqliteJsonLengthSql, "json_array_length(payload, '$.items')", "Converted SQLite SQL should use json_array_length.");
 
+        object pgJsonConstructorPreview = BuildViewSqlPreview(
+            "SELECT JSON_OBJECT('id', id, 'name', user_name) AS payload, JSON_ARRAY(id, user_name) AS tuple_json FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonConstructorPreview, "CanConvert"), "MySQL JSON constructors should convert to PostgreSQL.");
+        string pgJsonConstructorSql = (string)GetProperty(pgJsonConstructorPreview, "ConvertedSql");
+        AssertContains(pgJsonConstructorSql, "jsonb_build_object('id', id, 'name', user_name)", "Converted PostgreSQL SQL should use jsonb_build_object.");
+        AssertContains(pgJsonConstructorSql, "jsonb_build_array(id, user_name)", "Converted PostgreSQL SQL should use jsonb_build_array.");
+        AssertNotContains(pgJsonConstructorSql, "JSON_OBJECT(", "Converted PostgreSQL SQL should remove JSON_OBJECT.");
+
+        object mysqlJsonConstructorPreview = BuildViewSqlPreview(
+            "SELECT jsonb_build_object('id', id, 'name', user_name) AS payload, jsonb_build_array(id, user_name) AS tuple_json FROM users",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlJsonConstructorPreview, "CanConvert"), "PostgreSQL JSON constructors should convert to MySQL.");
+        string mysqlJsonConstructorSql = (string)GetProperty(mysqlJsonConstructorPreview, "ConvertedSql");
+        AssertContains(mysqlJsonConstructorSql, "JSON_OBJECT('id', id, 'name', user_name)", "Converted MySQL SQL should use JSON_OBJECT.");
+        AssertContains(mysqlJsonConstructorSql, "JSON_ARRAY(id, user_name)", "Converted MySQL SQL should use JSON_ARRAY.");
+        AssertNotContains(mysqlJsonConstructorSql, "jsonb_build_object", "Converted MySQL SQL should remove jsonb_build_object.");
+
+        object sqliteJsonConstructorPreview = BuildViewSqlPreview(
+            "SELECT JSON_OBJECT('id', id, 'name', user_name) AS payload, JSON_ARRAY(id, user_name) AS tuple_json FROM users",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteJsonConstructorPreview, "CanConvert"), "MySQL JSON constructors should convert to SQLite.");
+        string sqliteJsonConstructorSql = (string)GetProperty(sqliteJsonConstructorPreview, "ConvertedSql");
+        AssertContains(sqliteJsonConstructorSql, "json_object('id', id, 'name', user_name)", "Converted SQLite SQL should use json_object.");
+        AssertContains(sqliteJsonConstructorSql, "json_array(id, user_name)", "Converted SQLite SQL should use json_array.");
+
+        object oracleJsonConstructorPreview = BuildViewSqlPreview(
+            "SELECT JSON_OBJECT('id', id, 'name', user_name) AS payload, JSON_ARRAY(id, user_name) AS tuple_json FROM users",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleJsonConstructorPreview, "CanConvert"), "MySQL JSON constructors should convert to Oracle.");
+        string oracleJsonConstructorSql = (string)GetProperty(oracleJsonConstructorPreview, "ConvertedSql");
+        AssertContains(oracleJsonConstructorSql, "JSON_OBJECT(KEY 'id' VALUE id, KEY 'name' VALUE user_name)", "Converted Oracle SQL should use KEY VALUE JSON_OBJECT syntax.");
+        AssertContains(oracleJsonConstructorSql, "JSON_ARRAY(id, user_name)", "Converted Oracle SQL should keep JSON_ARRAY.");
+
         object pgJsonTablePreview = BuildViewSqlPreview(
             "SELECT jt.item_id, jt.item_name FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (item_id INT PATH '$.id', item_name VARCHAR(80) PATH '$.name')) AS jt",
             "mysql",
@@ -408,6 +486,125 @@ public static class SmokeTests
         string pgUtcTimestampSql = (string)GetProperty(pgUtcTimestampPreview, "ConvertedSql");
         AssertContains(pgUtcTimestampSql, "CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AS synced_at", "Converted PostgreSQL SQL should use UTC timestamp expression.");
 
+        object mysqlSysUtcDateTimePreview = BuildViewSqlPreview(
+            "SELECT SYSUTCDATETIME() AS synced_at FROM audit_log",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlSysUtcDateTimePreview, "CanConvert"), "SQL Server SYSUTCDATETIME should convert to MySQL.");
+        string mysqlSysUtcDateTimeSql = (string)GetProperty(mysqlSysUtcDateTimePreview, "ConvertedSql");
+        AssertContains(mysqlSysUtcDateTimeSql, "UTC_TIMESTAMP() AS synced_at", "Converted MySQL SQL should use UTC_TIMESTAMP for SYSUTCDATETIME.");
+        AssertNotContains(mysqlSysUtcDateTimeSql, "SYSUTCDATETIME", "Converted MySQL SQL should remove SYSUTCDATETIME.");
+
+        object pgSysUtcDateTimePreview = BuildViewSqlPreview(
+            "SELECT SYSUTCDATETIME() AS synced_at FROM audit_log",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSysUtcDateTimePreview, "CanConvert"), "SQL Server SYSUTCDATETIME should convert to PostgreSQL.");
+        string pgSysUtcDateTimeSql = (string)GetProperty(pgSysUtcDateTimePreview, "ConvertedSql");
+        AssertContains(pgSysUtcDateTimeSql, "CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AS synced_at", "Converted PostgreSQL SQL should use UTC timestamp expression for SYSUTCDATETIME.");
+
+        object sqliteSysDateTimePreview = BuildViewSqlPreview(
+            "SELECT SYSDATETIME() AS checked_at FROM audit_log",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSysDateTimePreview, "CanConvert"), "SQL Server SYSDATETIME should convert to SQLite.");
+        string sqliteSysDateTimeSql = (string)GetProperty(sqliteSysDateTimePreview, "ConvertedSql");
+        AssertContains(sqliteSysDateTimeSql, "CURRENT_TIMESTAMP AS checked_at", "Converted SQLite SQL should use CURRENT_TIMESTAMP for SYSDATETIME.");
+
+        object mysqlCurrentTimestampCallPreview = BuildViewSqlPreview(
+            "SELECT CURRENT_TIMESTAMP() AS checked_at FROM audit_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlCurrentTimestampCallPreview, "CanConvert"), "CURRENT_TIMESTAMP() call should convert to MySQL.");
+        string mysqlCurrentTimestampCallSql = (string)GetProperty(mysqlCurrentTimestampCallPreview, "ConvertedSql");
+        AssertContains(mysqlCurrentTimestampCallSql, "NOW() AS checked_at", "Converted MySQL SQL should normalize CURRENT_TIMESTAMP() to NOW().");
+        AssertNotContains(mysqlCurrentTimestampCallSql, "CURRENT_TIMESTAMP()", "Converted MySQL SQL should remove CURRENT_TIMESTAMP() call form.");
+
+        object mssqlCurrentTimestampCallPreview = BuildViewSqlPreview(
+            "SELECT CURRENT_TIMESTAMP() AS checked_at FROM audit_log",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCurrentTimestampCallPreview, "CanConvert"), "CURRENT_TIMESTAMP() call should convert to SQL Server.");
+        string mssqlCurrentTimestampCallSql = (string)GetProperty(mssqlCurrentTimestampCallPreview, "ConvertedSql");
+        AssertContains(mssqlCurrentTimestampCallSql, "GETDATE() AS checked_at", "Converted SQL Server SQL should normalize CURRENT_TIMESTAMP() to GETDATE().");
+
+        object pgCurrentUserPreview = BuildViewSqlPreview(
+            "SELECT CURRENT_USER() AS current_user_name FROM audit_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCurrentUserPreview, "CanConvert"), "MySQL CURRENT_USER should convert to PostgreSQL.");
+        string pgCurrentUserSql = (string)GetProperty(pgCurrentUserPreview, "ConvertedSql");
+        AssertContains(pgCurrentUserSql, "CURRENT_USER AS current_user_name", "Converted PostgreSQL SQL should use CURRENT_USER.");
+        AssertNotContains(pgCurrentUserSql, "CURRENT_USER()", "Converted PostgreSQL SQL should remove MySQL CURRENT_USER call form.");
+
+        object oracleSessionUserPreview = BuildViewSqlPreview(
+            "SELECT SESSION_USER AS session_user_name FROM audit_log",
+            "postgresql",
+            "oracle");
+        Assert((bool)GetProperty(oracleSessionUserPreview, "CanConvert"), "PostgreSQL SESSION_USER should convert to Oracle.");
+        string oracleSessionUserSql = (string)GetProperty(oracleSessionUserPreview, "ConvertedSql");
+        AssertContains(oracleSessionUserSql, "SYS_CONTEXT('USERENV','SESSION_USER') AS session_user_name", "Converted Oracle SQL should use SYS_CONTEXT for SESSION_USER.");
+
+        object mysqlSystemUserPreview = BuildViewSqlPreview(
+            "SELECT SYSTEM_USER AS login_name FROM audit_log",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlSystemUserPreview, "CanConvert"), "SQL Server SYSTEM_USER should convert to MySQL.");
+        string mysqlSystemUserSql = (string)GetProperty(mysqlSystemUserPreview, "ConvertedSql");
+        AssertContains(mysqlSystemUserSql, "USER() AS login_name", "Converted MySQL SQL should use USER() for SYSTEM_USER.");
+
+        object mssqlDatabaseNamePreview = BuildViewSqlPreview(
+            "SELECT DATABASE() AS database_name FROM audit_log",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDatabaseNamePreview, "CanConvert"), "MySQL DATABASE should convert to SQL Server.");
+        string mssqlDatabaseNameSql = (string)GetProperty(mssqlDatabaseNamePreview, "ConvertedSql");
+        AssertContains(mssqlDatabaseNameSql, "DB_NAME() AS database_name", "Converted SQL Server SQL should use DB_NAME().");
+        AssertNotContains(mssqlDatabaseNameSql, "DATABASE()", "Converted SQL Server SQL should remove DATABASE().");
+
+        object mysqlCurrentDatabasePreview = BuildViewSqlPreview(
+            "SELECT CURRENT_DATABASE() AS database_name FROM audit_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlCurrentDatabasePreview, "CanConvert"), "PostgreSQL CURRENT_DATABASE should convert to MySQL.");
+        string mysqlCurrentDatabaseSql = (string)GetProperty(mysqlCurrentDatabasePreview, "ConvertedSql");
+        AssertContains(mysqlCurrentDatabaseSql, "DATABASE() AS database_name", "Converted MySQL SQL should use DATABASE().");
+        AssertNotContains(mysqlCurrentDatabaseSql, "CURRENT_DATABASE", "Converted MySQL SQL should remove CURRENT_DATABASE.");
+
+        object oracleDbNamePreview = BuildViewSqlPreview(
+            "SELECT DB_NAME() AS database_name FROM audit_log",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleDbNamePreview, "CanConvert"), "SQL Server DB_NAME should convert to Oracle.");
+        string oracleDbNameSql = (string)GetProperty(oracleDbNamePreview, "ConvertedSql");
+        AssertContains(oracleDbNameSql, "SYS_CONTEXT('USERENV','DB_NAME') AS database_name", "Converted Oracle SQL should use SYS_CONTEXT for DB_NAME.");
+
+        object pgSchemaPreview = BuildViewSqlPreview(
+            "SELECT SCHEMA() AS schema_name FROM audit_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSchemaPreview, "CanConvert"), "MySQL SCHEMA should convert to PostgreSQL.");
+        string pgSchemaSql = (string)GetProperty(pgSchemaPreview, "ConvertedSql");
+        AssertContains(pgSchemaSql, "CURRENT_SCHEMA AS schema_name", "Converted PostgreSQL SQL should use CURRENT_SCHEMA.");
+        AssertNotContains(pgSchemaSql, "SCHEMA()", "Converted PostgreSQL SQL should remove SCHEMA().");
+
+        object mssqlSchemaPreview = BuildViewSqlPreview(
+            "SELECT CURRENT_SCHEMA() AS schema_name FROM audit_log",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlSchemaPreview, "CanConvert"), "PostgreSQL CURRENT_SCHEMA should convert to SQL Server.");
+        string mssqlSchemaSql = (string)GetProperty(mssqlSchemaPreview, "ConvertedSql");
+        AssertContains(mssqlSchemaSql, "SCHEMA_NAME() AS schema_name", "Converted SQL Server SQL should use SCHEMA_NAME().");
+        AssertNotContains(mssqlSchemaSql, "CURRENT_SCHEMA", "Converted SQL Server SQL should remove CURRENT_SCHEMA.");
+
+        object oracleSchemaPreview = BuildViewSqlPreview(
+            "SELECT SCHEMA_NAME() AS schema_name FROM audit_log",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleSchemaPreview, "CanConvert"), "SQL Server SCHEMA_NAME should convert to Oracle.");
+        string oracleSchemaSql = (string)GetProperty(oracleSchemaPreview, "ConvertedSql");
+        AssertContains(oracleSchemaSql, "SYS_CONTEXT('USERENV','CURRENT_SCHEMA') AS schema_name", "Converted Oracle SQL should use SYS_CONTEXT for current schema.");
+
         object mssqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURDATE() AS today FROM users",
             "mysql",
@@ -415,6 +612,56 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlCurrentDatePreview, "CanConvert"), "MySQL CURDATE should convert to SQL Server.");
         string mssqlCurrentDateSql = (string)GetProperty(mssqlCurrentDatePreview, "ConvertedSql");
         AssertContains(mssqlCurrentDateSql, "CAST(GETDATE() AS date)", "Converted SQL Server SQL should use a date expression.");
+
+        object mssqlCurrentTimePreview = BuildViewSqlPreview(
+            "SELECT CURTIME() AS checked_time FROM audit_log",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCurrentTimePreview, "CanConvert"), "MySQL CURTIME should convert to SQL Server.");
+        string mssqlCurrentTimeSql = (string)GetProperty(mssqlCurrentTimePreview, "ConvertedSql");
+        AssertContains(mssqlCurrentTimeSql, "CAST(GETDATE() AS time)", "Converted SQL Server SQL should use a time expression.");
+        AssertNotContains(mssqlCurrentTimeSql, "CURTIME", "Converted SQL Server SQL should remove CURTIME.");
+
+        object sqliteCurrentTimePreview = BuildViewSqlPreview(
+            "SELECT CURRENT_TIME AS checked_time FROM audit_log",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteCurrentTimePreview, "CanConvert"), "PostgreSQL CURRENT_TIME should convert to SQLite.");
+        string sqliteCurrentTimeSql = (string)GetProperty(sqliteCurrentTimePreview, "ConvertedSql");
+        AssertContains(sqliteCurrentTimeSql, "time('now') AS checked_time", "Converted SQLite SQL should use time('now').");
+
+        object mysqlCurrentTimePreview = BuildViewSqlPreview(
+            "SELECT CURRENT_TIME AS checked_time FROM audit_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlCurrentTimePreview, "CanConvert"), "PostgreSQL CURRENT_TIME should convert to MySQL.");
+        string mysqlCurrentTimeSql = (string)GetProperty(mysqlCurrentTimePreview, "ConvertedSql");
+        AssertContains(mysqlCurrentTimeSql, "CURTIME() AS checked_time", "Converted MySQL SQL should use CURTIME().");
+
+        object mysqlLocalTimestampPreview = BuildViewSqlPreview(
+            "SELECT LOCALTIMESTAMP AS checked_at FROM audit_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlLocalTimestampPreview, "CanConvert"), "PostgreSQL LOCALTIMESTAMP should convert to MySQL.");
+        string mysqlLocalTimestampSql = (string)GetProperty(mysqlLocalTimestampPreview, "ConvertedSql");
+        AssertContains(mysqlLocalTimestampSql, "NOW() AS checked_at", "Converted MySQL SQL should use NOW for LOCALTIMESTAMP.");
+        AssertNotContains(mysqlLocalTimestampSql, "LOCALTIME", "Converted MySQL SQL should not leave LOCALTIME prefix artifacts.");
+
+        object mssqlLocalTimePreview = BuildViewSqlPreview(
+            "SELECT LOCALTIME AS checked_time FROM audit_log",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlLocalTimePreview, "CanConvert"), "PostgreSQL LOCALTIME should convert to SQL Server.");
+        string mssqlLocalTimeSql = (string)GetProperty(mssqlLocalTimePreview, "ConvertedSql");
+        AssertContains(mssqlLocalTimeSql, "CAST(GETDATE() AS time) AS checked_time", "Converted SQL Server SQL should use a time expression for LOCALTIME.");
+
+        object sqliteLocalTimestampPreview = BuildViewSqlPreview(
+            "SELECT LOCALTIMESTAMP AS checked_at FROM audit_log",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteLocalTimestampPreview, "CanConvert"), "PostgreSQL LOCALTIMESTAMP should convert to SQLite.");
+        string sqliteLocalTimestampSql = (string)GetProperty(sqliteLocalTimestampPreview, "ConvertedSql");
+        AssertContains(sqliteLocalTimestampSql, "CURRENT_TIMESTAMP AS checked_at", "Converted SQLite SQL should use CURRENT_TIMESTAMP for LOCALTIMESTAMP.");
 
         object mssqlSysdatePreview = BuildViewSqlPreview(
             "SELECT SYSDATE AS checked_at, 'SYSDATE' AS literal_value FROM dual",
@@ -472,6 +719,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(mysqlConvertDatePreview, "CanConvert"), "SQL Server CONVERT style 23 should convert to MySQL.");
         string mysqlConvertDateSql = (string)GetProperty(mysqlConvertDatePreview, "ConvertedSql");
         AssertContains(mysqlConvertDateSql, "DATE_FORMAT(created_at, '%Y-%m-%d')", "Converted MySQL SQL should use DATE_FORMAT for CONVERT style 23.");
+
+        object mysqlConvertDateLiteralPreview = BuildViewSqlPreview(
+            "SELECT CONVERT(varchar(10), created_at, 23) AS created_text, 'CONVERT(varchar(10), created_at, 23)' AS literal_note FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlConvertDateLiteralPreview, "CanConvert"), "SQL Server CONVERT date style should convert while preserving literals.");
+        string mysqlConvertDateLiteralSql = (string)GetProperty(mysqlConvertDateLiteralPreview, "ConvertedSql");
+        AssertContains(mysqlConvertDateLiteralSql, "DATE_FORMAT(created_at, '%Y-%m-%d') AS created_text", "Converted MySQL SQL should convert real CONVERT date style.");
+        AssertContains(mysqlConvertDateLiteralSql, "'CONVERT(varchar(10), created_at, 23)' AS literal_note", "Converted MySQL SQL should preserve CONVERT date style text inside string literals.");
 
         object oracleConvertDateTimePreview = BuildViewSqlPreview(
             "SELECT CONVERT(varchar(19), created_at, 120) AS created_text FROM orders",
@@ -666,6 +922,15 @@ public static class SmokeTests
         AssertContains(pgEndOfMonthOffsetSql, "(DATE_TRUNC('month', (created_at + (billing_offset * INTERVAL '1 month'))) + INTERVAL '1 month - 1 day')::date", "Converted PostgreSQL SQL should build month end with offset.");
         AssertNotContains(pgEndOfMonthOffsetSql, "EOMONTH", "Converted PostgreSQL SQL should remove EOMONTH.");
 
+        object pgEndOfMonthLiteralPreview = BuildViewSqlPreview(
+            "SELECT EOMONTH(created_at, billing_offset) AS billing_month_end, 'EOMONTH(created_at, billing_offset)' AS literal_note FROM invoices",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgEndOfMonthLiteralPreview, "CanConvert"), "SQL Server EOMONTH should convert while preserving literals.");
+        string pgEndOfMonthLiteralSql = (string)GetProperty(pgEndOfMonthLiteralPreview, "ConvertedSql");
+        AssertContains(pgEndOfMonthLiteralSql, "(DATE_TRUNC('month', (created_at + (billing_offset * INTERVAL '1 month'))) + INTERVAL '1 month - 1 day')::date AS billing_month_end", "Converted PostgreSQL SQL should convert EOMONTH with offset.");
+        AssertContains(pgEndOfMonthLiteralSql, "'EOMONTH(created_at, billing_offset)' AS literal_note", "Converted PostgreSQL SQL should preserve EOMONTH text inside string literals.");
+
         object sqliteEndOfMonthOffsetPreview = BuildViewSqlPreview(
             "SELECT EOMONTH(created_at, -1) AS previous_month_end FROM invoices",
             "mssql",
@@ -699,6 +964,15 @@ public static class SmokeTests
         AssertContains(pgLastDaySql, "(DATE_TRUNC('month', created_at) + INTERVAL '1 month - 1 day')::date", "Converted PostgreSQL SQL should build month end.");
         AssertNotContains(pgLastDaySql, "LAST_DAY", "Converted PostgreSQL SQL should remove LAST_DAY.");
 
+        object pgLastDayLiteralPreview = BuildViewSqlPreview(
+            "SELECT LAST_DAY(DATE_ADD(created_at, INTERVAL 1 MONTH)) AS month_end, 'LAST_DAY(DATE_ADD(created_at, INTERVAL 1 MONTH))' AS literal_note FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgLastDayLiteralPreview, "CanConvert"), "MySQL LAST_DAY should convert while preserving literals.");
+        string pgLastDayLiteralSql = (string)GetProperty(pgLastDayLiteralPreview, "ConvertedSql");
+        AssertContains(pgLastDayLiteralSql, "(DATE_TRUNC('month', created_at + INTERVAL '1 month') + INTERVAL '1 month - 1 day')::date AS month_end", "Converted PostgreSQL SQL should convert nested LAST_DAY expression.");
+        AssertContains(pgLastDayLiteralSql, "'LAST_DAY(DATE_ADD(created_at, INTERVAL 1 MONTH))' AS literal_note", "Converted PostgreSQL SQL should preserve LAST_DAY text inside string literals.");
+
         object sqliteLastDayPreview = BuildViewSqlPreview(
             "SELECT LAST_DAY(created_at) AS month_end FROM orders",
             "mysql",
@@ -715,6 +989,15 @@ public static class SmokeTests
         string pgDateFromPartsSql = (string)GetProperty(pgDateFromPartsPreview, "ConvertedSql");
         AssertContains(pgDateFromPartsSql, "MAKE_DATE(order_year, order_month, 1)", "Converted PostgreSQL SQL should use MAKE_DATE.");
         AssertNotContains(pgDateFromPartsSql, "DATEFROMPARTS", "Converted PostgreSQL SQL should remove DATEFROMPARTS.");
+
+        object pgNestedDateFromPartsPreview = BuildViewSqlPreview(
+            "SELECT DATEFROMPARTS(ABS(order_year), order_month, order_day) AS order_date, 'DATEFROMPARTS(ABS(order_year), order_month, order_day)' AS literal_note FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedDateFromPartsPreview, "CanConvert"), "Nested SQL Server DATEFROMPARTS should convert while preserving literals.");
+        string pgNestedDateFromPartsSql = (string)GetProperty(pgNestedDateFromPartsPreview, "ConvertedSql");
+        AssertContains(pgNestedDateFromPartsSql, "MAKE_DATE(ABS(order_year), order_month, order_day) AS order_date", "Converted PostgreSQL SQL should convert nested DATEFROMPARTS arguments.");
+        AssertContains(pgNestedDateFromPartsSql, "'DATEFROMPARTS(ABS(order_year), order_month, order_day)' AS literal_note", "Converted PostgreSQL SQL should preserve DATEFROMPARTS text inside string literals.");
 
         object mysqlDateFromPartsPreview = BuildViewSqlPreview(
             "SELECT DATEFROMPARTS(order_year, order_month, order_day) AS order_date FROM orders",
@@ -903,6 +1186,31 @@ public static class SmokeTests
         string pgDateAddSql = (string)GetProperty(pgDateAddPreview, "ConvertedSql");
         AssertContains(pgDateAddSql, "created_at + INTERVAL '14 day'", "Converted PostgreSQL SQL should use interval addition.");
 
+        object pgVariableDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATEADD(day, retry_days, created_at) AS retry_at FROM sessions",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgVariableDateAddPreview, "CanConvert"), "SQL Server DATEADD with expression amount should convert to PostgreSQL.");
+        string pgVariableDateAddSql = (string)GetProperty(pgVariableDateAddPreview, "ConvertedSql");
+        AssertContains(pgVariableDateAddSql, "created_at + (retry_days * INTERVAL '1 day')", "Converted PostgreSQL SQL should multiply expression interval amounts.");
+        AssertNotContains(pgVariableDateAddSql, "DATEADD", "Converted PostgreSQL SQL should remove DATEADD with expression amount.");
+
+        object mssqlVariableDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATE_ADD(created_at, INTERVAL grace_days DAY) AS expires_at FROM sessions",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlVariableDateAddPreview, "CanConvert"), "MySQL DATE_ADD with expression amount should convert to SQL Server.");
+        string mssqlVariableDateAddSql = (string)GetProperty(mssqlVariableDateAddPreview, "ConvertedSql");
+        AssertContains(mssqlVariableDateAddSql, "DATEADD(day, grace_days, created_at)", "Converted SQL Server SQL should keep expression interval amounts.");
+
+        object sqliteVariableDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATEADD(hour, reminder_hours, started_at) AS reminder_at FROM jobs",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteVariableDateAddPreview, "CanConvert"), "SQL Server DATEADD with expression amount should convert to SQLite.");
+        string sqliteVariableDateAddSql = (string)GetProperty(sqliteVariableDateAddPreview, "ConvertedSql");
+        AssertContains(sqliteVariableDateAddSql, "datetime(started_at, CASE WHEN reminder_hours < 0 THEN CAST(reminder_hours AS TEXT) || ' hour' ELSE '+' || CAST(reminder_hours AS TEXT) || ' hour' END)", "Converted SQLite SQL should build a dynamic date modifier for expression interval amounts.");
+
         object mssqlMonthAddPreview = BuildViewSqlPreview(
             "SELECT DATE_ADD(created_at, INTERVAL 2 MONTH) AS expires_at FROM sessions",
             "mysql",
@@ -1015,6 +1323,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(sqliteDatePartPreview, "CanConvert"), "SQL Server DATEPART should convert to SQLite.");
         string sqliteDatePartSql = (string)GetProperty(sqliteDatePartPreview, "ConvertedSql");
         AssertContains(sqliteDatePartSql, "CAST(strftime('%m', created_at) AS INTEGER)", "Converted SQLite SQL should use strftime.");
+
+        object sqliteNestedDatePartPreview = BuildViewSqlPreview(
+            "SELECT DATEPART(day, DATEADD(day, 1, created_at)) AS next_day, 'DATEPART(day, DATEADD(day, 1, created_at))' AS literal_note FROM orders",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteNestedDatePartPreview, "CanConvert"), "Nested SQL Server DATEPART should convert while preserving literals.");
+        string sqliteNestedDatePartSql = (string)GetProperty(sqliteNestedDatePartPreview, "ConvertedSql");
+        AssertContains(sqliteNestedDatePartSql, "CAST(strftime('%d', date(created_at, '+1 day')) AS INTEGER) AS next_day", "Converted SQLite SQL should convert nested DATEPART expression.");
+        AssertContains(sqliteNestedDatePartSql, "'DATEPART(day, DATEADD(day, 1, created_at))' AS literal_note", "Converted SQLite SQL should preserve DATEPART text inside string literals.");
 
         object mysqlExtractPreview = BuildViewSqlPreview(
             "SELECT EXTRACT(DAY FROM created_at) AS created_day FROM orders",
@@ -1145,6 +1462,15 @@ public static class SmokeTests
         string mysqlIifSql = (string)GetProperty(mysqlIifPreview, "ConvertedSql");
         AssertContains(mysqlIifSql, "IF(score >= 60, 'pass', 'fail')", "Converted MySQL SQL should use IF.");
 
+        object pgNestedIifPreview = BuildViewSqlPreview(
+            "SELECT IIF(ABS(score) >= 60, 'pass', 'fail') AS status_text, 'IIF(ABS(score) >= 60, ''pass'', ''fail'')' AS literal_note FROM exams",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedIifPreview, "CanConvert"), "Nested SQL Server IIF should convert while preserving literals.");
+        string pgNestedIifSql = (string)GetProperty(pgNestedIifPreview, "ConvertedSql");
+        AssertContains(pgNestedIifSql, "CASE WHEN ABS(score) >= 60 THEN 'pass' ELSE 'fail' END AS status_text", "Converted PostgreSQL SQL should convert nested IIF condition.");
+        AssertContains(pgNestedIifSql, "'IIF(ABS(score) >= 60, ''pass'', ''fail'')' AS literal_note", "Converted PostgreSQL SQL should preserve IIF text inside string literals.");
+
         object sqliteIifPreview = BuildViewSqlPreview(
             "SELECT IIF(score >= 60, 'pass', 'fail') AS status_text FROM exams",
             "mssql",
@@ -1201,6 +1527,42 @@ public static class SmokeTests
         string pgNvl2Sql = (string)GetProperty(pgNvl2Preview, "ConvertedSql");
         AssertContains(pgNvl2Sql, "CASE WHEN closed_at IS NOT NULL THEN 'closed' ELSE 'open' END", "Converted PostgreSQL SQL should use CASE for NVL2.");
 
+        object pgNvl2LiteralPreview = BuildViewSqlPreview(
+            "SELECT NVL2(closed_at, 'closed', 'NVL2(open)') AS state_text, 'NVL2(note)' AS literal_note FROM tickets",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgNvl2LiteralPreview, "CanConvert"), "Oracle NVL2 should convert while preserving literals.");
+        string pgNvl2LiteralSql = (string)GetProperty(pgNvl2LiteralPreview, "ConvertedSql");
+        AssertContains(pgNvl2LiteralSql, "CASE WHEN closed_at IS NOT NULL THEN 'closed' ELSE 'NVL2(open)' END", "Converted PostgreSQL SQL should convert NVL2 function only.");
+        AssertContains(pgNvl2LiteralSql, "'NVL2(note)' AS literal_note", "Converted PostgreSQL SQL should preserve NVL2 text inside string literals.");
+
+        object pgNvlLiteralPreview = BuildViewSqlPreview(
+            "SELECT NVL(display_name, 'NVL(fallback)') AS clean_name, 'NVL(note)' AS literal_note FROM users",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgNvlLiteralPreview, "CanConvert"), "Oracle NVL should convert while preserving literals.");
+        string pgNvlLiteralSql = (string)GetProperty(pgNvlLiteralPreview, "ConvertedSql");
+        AssertContains(pgNvlLiteralSql, "COALESCE(display_name, 'NVL(fallback)')", "Converted PostgreSQL SQL should convert NVL function only.");
+        AssertContains(pgNvlLiteralSql, "'NVL(note)' AS literal_note", "Converted PostgreSQL SQL should preserve NVL text inside string literals.");
+
+        object pgIfNullLiteralPreview = BuildViewSqlPreview(
+            "SELECT IFNULL(display_name, 'IFNULL(fallback)') AS clean_name, 'IFNULL(note)' AS literal_note FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgIfNullLiteralPreview, "CanConvert"), "MySQL IFNULL should convert while preserving literals.");
+        string pgIfNullLiteralSql = (string)GetProperty(pgIfNullLiteralPreview, "ConvertedSql");
+        AssertContains(pgIfNullLiteralSql, "COALESCE(display_name, 'IFNULL(fallback)')", "Converted PostgreSQL SQL should convert IFNULL function only.");
+        AssertContains(pgIfNullLiteralSql, "'IFNULL(note)' AS literal_note", "Converted PostgreSQL SQL should preserve IFNULL text inside string literals.");
+
+        object pgIsNullLiteralPreview = BuildViewSqlPreview(
+            "SELECT ISNULL(deleted_at) AS is_deleted, 'ISNULL(note)' AS literal_note FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgIsNullLiteralPreview, "CanConvert"), "MySQL ISNULL predicate should convert while preserving literals.");
+        string pgIsNullLiteralSql = (string)GetProperty(pgIsNullLiteralPreview, "ConvertedSql");
+        AssertContains(pgIsNullLiteralSql, "deleted_at IS NULL AS is_deleted", "Converted PostgreSQL SQL should convert ISNULL predicate only.");
+        AssertContains(pgIsNullLiteralSql, "'ISNULL(note)' AS literal_note", "Converted PostgreSQL SQL should preserve ISNULL text inside string literals.");
+
         object mssqlCeilPreview = BuildViewSqlPreview(
             "SELECT CEIL(total_amount / 100.0) AS bill_units FROM orders",
             "oracle",
@@ -1208,6 +1570,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlCeilPreview, "CanConvert"), "Oracle CEIL should convert to SQL Server.");
         string mssqlCeilSql = (string)GetProperty(mssqlCeilPreview, "ConvertedSql");
         AssertContains(mssqlCeilSql, "CEILING(total_amount / 100.0)", "Converted SQL Server SQL should use CEILING.");
+
+        object mssqlCeilLiteralPreview = BuildViewSqlPreview(
+            "SELECT CEIL(total_amount / 100.0) AS bill_units, 'CEIL(note)' AS literal_note FROM orders",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCeilLiteralPreview, "CanConvert"), "Oracle CEIL should convert while preserving literals.");
+        string mssqlCeilLiteralSql = (string)GetProperty(mssqlCeilLiteralPreview, "ConvertedSql");
+        AssertContains(mssqlCeilLiteralSql, "CEILING(total_amount / 100.0) AS bill_units", "Converted SQL Server SQL should convert CEIL function only.");
+        AssertContains(mssqlCeilLiteralSql, "'CEIL(note)' AS literal_note", "Converted SQL Server SQL should preserve CEIL text inside string literals.");
 
         object mssqlToNumberPreview = BuildViewSqlPreview(
             "SELECT TO_NUMBER(total_text) AS total_value, TO_NUMBER(rate_text, '999D99') AS rate_value FROM orders",
@@ -1218,6 +1589,15 @@ public static class SmokeTests
         AssertContains(mssqlToNumberSql, "CAST(total_text AS decimal(18,4))", "Converted SQL Server SQL should cast TO_NUMBER value.");
         AssertContains(mssqlToNumberSql, "CAST(rate_text AS decimal(18,4))", "Converted SQL Server SQL should cast formatted TO_NUMBER value.");
         AssertNotContains(mssqlToNumberSql, "TO_NUMBER", "Converted SQL Server SQL should remove TO_NUMBER.");
+
+        object pgNestedToNumberPreview = BuildViewSqlPreview(
+            "SELECT TO_NUMBER(REPLACE(total_text, ',', ''), '999999D99') AS total_value, 'TO_NUMBER(REPLACE(total_text, '','', ''''), ''999999D99'')' AS literal_note FROM orders",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedToNumberPreview, "CanConvert"), "Nested Oracle TO_NUMBER should convert while preserving literals.");
+        string pgNestedToNumberSql = (string)GetProperty(pgNestedToNumberPreview, "ConvertedSql");
+        AssertContains(pgNestedToNumberSql, "CAST(REPLACE(total_text, ',', '') AS numeric) AS total_value", "Converted PostgreSQL SQL should convert nested TO_NUMBER argument.");
+        AssertContains(pgNestedToNumberSql, "'TO_NUMBER(REPLACE(total_text, '','', ''''), ''999999D99'')' AS literal_note", "Converted PostgreSQL SQL should preserve TO_NUMBER text inside string literals.");
 
         object sqliteToNumberPreview = BuildViewSqlPreview(
             "SELECT TO_NUMBER(total_text) AS total_value FROM orders",
@@ -1244,6 +1624,65 @@ public static class SmokeTests
         string pgCeilingSql = (string)GetProperty(pgCeilingPreview, "ConvertedSql");
         AssertContains(pgCeilingSql, "CEIL(total_amount / 100.0)", "Converted PostgreSQL SQL should use CEIL.");
 
+        object mssqlTruncateNumberPreview = BuildViewSqlPreview(
+            "SELECT TRUNCATE(total_amount, 2) AS truncated_total FROM orders",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlTruncateNumberPreview, "CanConvert"), "MySQL TRUNCATE should convert to SQL Server.");
+        string mssqlTruncateNumberSql = (string)GetProperty(mssqlTruncateNumberPreview, "ConvertedSql");
+        AssertContains(mssqlTruncateNumberSql, "ROUND(total_amount, 2, 1)", "Converted SQL Server SQL should use ROUND with truncate flag.");
+        AssertNotContains(mssqlTruncateNumberSql, "TRUNCATE(", "Converted SQL Server SQL should remove MySQL TRUNCATE function.");
+
+        object pgTruncateNumberPreview = BuildViewSqlPreview(
+            "SELECT TRUNCATE(total_amount, 2) AS truncated_total FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTruncateNumberPreview, "CanConvert"), "MySQL TRUNCATE should convert to PostgreSQL.");
+        string pgTruncateNumberSql = (string)GetProperty(pgTruncateNumberPreview, "ConvertedSql");
+        AssertContains(pgTruncateNumberSql, "TRUNC(total_amount, 2)", "Converted PostgreSQL SQL should use TRUNC.");
+
+        object pgNestedTruncateNumberPreview = BuildViewSqlPreview(
+            "SELECT TRUNCATE(ABS(total_amount), 2) AS truncated_total, 'TRUNCATE(ABS(total_amount), 2)' AS literal_note FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedTruncateNumberPreview, "CanConvert"), "Nested MySQL TRUNCATE should convert while preserving literals.");
+        string pgNestedTruncateNumberSql = (string)GetProperty(pgNestedTruncateNumberPreview, "ConvertedSql");
+        AssertContains(pgNestedTruncateNumberSql, "TRUNC(ABS(total_amount), 2) AS truncated_total", "Converted PostgreSQL SQL should convert nested TRUNCATE arguments.");
+        AssertContains(pgNestedTruncateNumberSql, "'TRUNCATE(ABS(total_amount), 2)' AS literal_note", "Converted PostgreSQL SQL should preserve TRUNCATE text inside string literals.");
+
+        object oracleTruncateNumberPreview = BuildViewSqlPreview(
+            "SELECT TRUNCATE(total_amount, 2) AS truncated_total FROM orders",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleTruncateNumberPreview, "CanConvert"), "MySQL TRUNCATE should convert to Oracle.");
+        string oracleTruncateNumberSql = (string)GetProperty(oracleTruncateNumberPreview, "ConvertedSql");
+        AssertContains(oracleTruncateNumberSql, "TRUNC(total_amount, 2)", "Converted Oracle SQL should use TRUNC.");
+
+        object mysqlTruncatingRoundPreview = BuildViewSqlPreview(
+            "SELECT ROUND(total_amount, 2, 1) AS truncated_total FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlTruncatingRoundPreview, "CanConvert"), "SQL Server truncating ROUND should convert to MySQL.");
+        string mysqlTruncatingRoundSql = (string)GetProperty(mysqlTruncatingRoundPreview, "ConvertedSql");
+        AssertContains(mysqlTruncatingRoundSql, "TRUNCATE(total_amount, 2)", "Converted MySQL SQL should use TRUNCATE for truncating ROUND.");
+        AssertNotContains(mysqlTruncatingRoundSql, "ROUND(total_amount, 2, 1)", "Converted MySQL SQL should remove SQL Server truncating ROUND.");
+
+        object pgTruncatingRoundPreview = BuildViewSqlPreview(
+            "SELECT ROUND(total_amount, 2, 1) AS truncated_total FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTruncatingRoundPreview, "CanConvert"), "SQL Server truncating ROUND should convert to PostgreSQL.");
+        string pgTruncatingRoundSql = (string)GetProperty(pgTruncatingRoundPreview, "ConvertedSql");
+        AssertContains(pgTruncatingRoundSql, "TRUNC(total_amount, 2)", "Converted PostgreSQL SQL should use TRUNC for truncating ROUND.");
+
+        object oracleTruncatingRoundPreview = BuildViewSqlPreview(
+            "SELECT ROUND(total_amount, 2, 1) AS truncated_total FROM orders",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleTruncatingRoundPreview, "CanConvert"), "SQL Server truncating ROUND should convert to Oracle.");
+        string oracleTruncatingRoundSql = (string)GetProperty(oracleTruncatingRoundPreview, "ConvertedSql");
+        AssertContains(oracleTruncatingRoundSql, "TRUNC(total_amount, 2)", "Converted Oracle SQL should use TRUNC for truncating ROUND.");
+
         object mssqlModPreview = BuildViewSqlPreview(
             "SELECT MOD(order_no, 10) AS shard_no FROM orders",
             "mysql",
@@ -1251,6 +1690,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlModPreview, "CanConvert"), "MOD should convert to SQL Server modulo operator.");
         string mssqlModSql = (string)GetProperty(mssqlModPreview, "ConvertedSql");
         AssertContains(mssqlModSql, "(order_no % 10)", "Converted SQL Server SQL should use modulo operator.");
+
+        object mssqlNestedModPreview = BuildViewSqlPreview(
+            "SELECT MOD(ABS(order_no), 10) AS shard_no, 'MOD(note)' AS literal_note FROM orders",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNestedModPreview, "CanConvert"), "Nested MOD should convert to SQL Server modulo operator.");
+        string mssqlNestedModSql = (string)GetProperty(mssqlNestedModPreview, "ConvertedSql");
+        AssertContains(mssqlNestedModSql, "(ABS(order_no) % 10)", "Converted SQL Server SQL should convert nested MOD arguments.");
+        AssertContains(mssqlNestedModSql, "'MOD(note)' AS literal_note", "Converted SQL Server SQL should preserve MOD text inside string literals.");
 
         object mssqlGreatestPreview = BuildViewSqlPreview(
             "SELECT GREATEST(score, passing_score) AS effective_score FROM exams",
@@ -1267,6 +1715,24 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlLeastPreview, "CanConvert"), "LEAST should convert to SQL Server CASE expression.");
         string mssqlLeastSql = (string)GetProperty(mssqlLeastPreview, "ConvertedSql");
         AssertContains(mssqlLeastSql, "(CASE WHEN quantity <= stock_limit THEN quantity ELSE stock_limit END)", "Converted SQL Server SQL should use CASE for LEAST.");
+
+        object sqliteGreatestPreview = BuildViewSqlPreview(
+            "SELECT GREATEST(score, passing_score) AS effective_score FROM exams",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteGreatestPreview, "CanConvert"), "GREATEST should convert to SQLite CASE expression.");
+        string sqliteGreatestSql = (string)GetProperty(sqliteGreatestPreview, "ConvertedSql");
+        AssertContains(sqliteGreatestSql, "(CASE WHEN score >= passing_score THEN score ELSE passing_score END)", "Converted SQLite SQL should use CASE for GREATEST.");
+        AssertNotContains(sqliteGreatestSql, "GREATEST", "Converted SQLite SQL should remove GREATEST.");
+
+        object sqliteLeastPreview = BuildViewSqlPreview(
+            "SELECT LEAST(quantity, stock_limit) AS capped_quantity FROM inventory",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteLeastPreview, "CanConvert"), "LEAST should convert to SQLite CASE expression.");
+        string sqliteLeastSql = (string)GetProperty(sqliteLeastPreview, "ConvertedSql");
+        AssertContains(sqliteLeastSql, "(CASE WHEN quantity <= stock_limit THEN quantity ELSE stock_limit END)", "Converted SQLite SQL should use CASE for LEAST.");
+        AssertNotContains(sqliteLeastSql, "LEAST", "Converted SQLite SQL should remove LEAST.");
 
         object pgGreatestPreview = BuildViewSqlPreview(
             "SELECT GREATEST(score, passing_score) AS effective_score FROM exams",
@@ -1323,6 +1789,15 @@ public static class SmokeTests
         AssertContains(pgSqlServerConvertSql, "CAST(amount_text AS decimal(10,2))", "Converted PostgreSQL SQL should cast SQL Server decimal CONVERT.");
         AssertNotContains(pgSqlServerConvertSql, "CONVERT(int", "Converted PostgreSQL SQL should remove SQL Server int CONVERT.");
 
+        object pgNestedSqlServerConvertPreview = BuildViewSqlPreview(
+            "SELECT CONVERT(int, REPLACE(user_id_text, '-', '')) AS user_id, 'CONVERT(int, REPLACE(user_id_text, ''-'', ''''))' AS literal_note FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedSqlServerConvertPreview, "CanConvert"), "Nested SQL Server CONVERT casts should convert while preserving literals.");
+        string pgNestedSqlServerConvertSql = (string)GetProperty(pgNestedSqlServerConvertPreview, "ConvertedSql");
+        AssertContains(pgNestedSqlServerConvertSql, "CAST(REPLACE(user_id_text, '-', '') AS INTEGER) AS user_id", "Converted PostgreSQL SQL should cast nested SQL Server CONVERT expression.");
+        AssertContains(pgNestedSqlServerConvertSql, "'CONVERT(int, REPLACE(user_id_text, ''-'', ''''))' AS literal_note", "Converted PostgreSQL SQL should preserve CONVERT text inside string literals.");
+
         object oracleSqlServerConvertPreview = BuildViewSqlPreview(
             "SELECT CONVERT(bigint, user_id_text) AS user_id, CONVERT(bit, enabled_text) AS enabled FROM users",
             "mssql",
@@ -1359,6 +1834,15 @@ public static class SmokeTests
         AssertContains(mysqlTryCastSql, "CAST(amount_text AS decimal(10,2))", "Converted MySQL SQL should use CAST for TRY_CAST.");
         AssertNotContains(mysqlTryCastSql, "TRY_CAST", "Converted MySQL SQL should remove TRY_CAST.");
 
+        object pgNestedTryCastPreview = BuildViewSqlPreview(
+            "SELECT TRY_CAST(REPLACE(user_id_text, '-', '') AS int) AS user_id, 'TRY_CAST(REPLACE(user_id_text, ''-'', '''') AS int)' AS literal_note FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedTryCastPreview, "CanConvert"), "Nested SQL Server TRY_CAST should convert while preserving literals.");
+        string pgNestedTryCastSql = (string)GetProperty(pgNestedTryCastPreview, "ConvertedSql");
+        AssertContains(pgNestedTryCastSql, "CAST(REPLACE(user_id_text, '-', '') AS INTEGER) AS user_id", "Converted PostgreSQL SQL should cast nested TRY_CAST expression.");
+        AssertContains(pgNestedTryCastSql, "'TRY_CAST(REPLACE(user_id_text, ''-'', '''') AS int)' AS literal_note", "Converted PostgreSQL SQL should preserve TRY_CAST text inside string literals.");
+
         object pgTryConvertDatePreview = BuildViewSqlPreview(
             "SELECT TRY_CONVERT(date, order_date_text, 23) AS order_date FROM orders",
             "mssql",
@@ -1367,6 +1851,15 @@ public static class SmokeTests
         string pgTryConvertDateSql = (string)GetProperty(pgTryConvertDatePreview, "ConvertedSql");
         AssertContains(pgTryConvertDateSql, "TO_DATE(order_date_text, 'YYYY-MM-DD')", "Converted PostgreSQL SQL should parse date style 23.");
         AssertNotContains(pgTryConvertDateSql, "TRY_CONVERT", "Converted PostgreSQL SQL should remove TRY_CONVERT.");
+
+        object pgNestedTryConvertPreview = BuildViewSqlPreview(
+            "SELECT TRY_CONVERT(int, REPLACE(user_id_text, '-', '')) AS user_id, 'TRY_CONVERT(int, REPLACE(user_id_text, ''-'', ''''))' AS literal_note FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedTryConvertPreview, "CanConvert"), "Nested SQL Server TRY_CONVERT should convert while preserving literals.");
+        string pgNestedTryConvertSql = (string)GetProperty(pgNestedTryConvertPreview, "ConvertedSql");
+        AssertContains(pgNestedTryConvertSql, "CAST(REPLACE(user_id_text, '-', '') AS INTEGER) AS user_id", "Converted PostgreSQL SQL should cast nested TRY_CONVERT expression.");
+        AssertContains(pgNestedTryConvertSql, "'TRY_CONVERT(int, REPLACE(user_id_text, ''-'', ''''))' AS literal_note", "Converted PostgreSQL SQL should preserve TRY_CONVERT text inside string literals.");
 
         object oracleTryConvertDateTimePreview = BuildViewSqlPreview(
             "SELECT TRY_CONVERT(datetime, created_text, 120) AS created_at FROM orders",
@@ -1426,6 +1919,15 @@ public static class SmokeTests
         string pgPowSql = (string)GetProperty(pgPowPreview, "ConvertedSql");
         AssertContains(pgPowSql, "POWER(score, 2)", "Converted PostgreSQL SQL should use POWER.");
 
+        object pgPowLiteralPreview = BuildViewSqlPreview(
+            "SELECT POW(score, 2) AS score_squared, 'POW(note)' AS literal_note FROM exams",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgPowLiteralPreview, "CanConvert"), "MySQL POW should convert while preserving literals.");
+        string pgPowLiteralSql = (string)GetProperty(pgPowLiteralPreview, "ConvertedSql");
+        AssertContains(pgPowLiteralSql, "POWER(score, 2) AS score_squared", "Converted PostgreSQL SQL should convert POW function only.");
+        AssertContains(pgPowLiteralSql, "'POW(note)' AS literal_note", "Converted PostgreSQL SQL should preserve POW text inside string literals.");
+
         object mssqlPowPreview = BuildViewSqlPreview(
             "SELECT POW(score, 2) AS score_squared FROM exams",
             "mysql",
@@ -1441,6 +1943,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(pgRandPreview, "CanConvert"), "MySQL RAND should convert to PostgreSQL.");
         string pgRandSql = (string)GetProperty(pgRandPreview, "ConvertedSql");
         AssertContains(pgRandSql, "RANDOM()", "Converted PostgreSQL SQL should use RANDOM.");
+
+        object pgRandLiteralPreview = BuildViewSqlPreview(
+            "SELECT RAND() AS sample_value, 'RAND()' AS literal_note FROM metrics",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgRandLiteralPreview, "CanConvert"), "MySQL RAND should convert while preserving literals.");
+        string pgRandLiteralSql = (string)GetProperty(pgRandLiteralPreview, "ConvertedSql");
+        AssertContains(pgRandLiteralSql, "RANDOM() AS sample_value", "Converted PostgreSQL SQL should convert RAND function only.");
+        AssertContains(pgRandLiteralSql, "'RAND()' AS literal_note", "Converted PostgreSQL SQL should preserve RAND text inside string literals.");
 
         object mssqlRandomPreview = BuildViewSqlPreview(
             "SELECT RANDOM() AS sample_value FROM metrics",
@@ -1458,6 +1969,33 @@ public static class SmokeTests
         string sqliteOracleRandomSql = (string)GetProperty(sqliteOracleRandomPreview, "ConvertedSql");
         AssertContains(sqliteOracleRandomSql, "(RANDOM() + 9223372036854775808.0) / 18446744073709551616.0", "Converted SQLite SQL should normalize RANDOM to 0-1 range.");
 
+        object mysqlNewIdPreview = BuildViewSqlPreview(
+            "SELECT NEWID() AS row_guid FROM metrics",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlNewIdPreview, "CanConvert"), "SQL Server NEWID should convert to MySQL.");
+        string mysqlNewIdSql = (string)GetProperty(mysqlNewIdPreview, "ConvertedSql");
+        AssertContains(mysqlNewIdSql, "UUID()", "Converted MySQL SQL should use UUID for NEWID.");
+        AssertNotContains(mysqlNewIdSql, "NEWID", "Converted MySQL SQL should remove SQL Server NEWID.");
+
+        object mssqlUuidPreview = BuildViewSqlPreview(
+            "SELECT UUID() AS row_guid FROM metrics",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlUuidPreview, "CanConvert"), "MySQL UUID should convert to SQL Server.");
+        string mssqlUuidSql = (string)GetProperty(mssqlUuidPreview, "ConvertedSql");
+        AssertContains(mssqlUuidSql, "NEWID()", "Converted SQL Server SQL should use NEWID for UUID.");
+        AssertNotContains(mssqlUuidSql, "UUID()", "Converted SQL Server SQL should remove MySQL UUID.");
+
+        object sqliteSysGuidPreview = BuildViewSqlPreview(
+            "SELECT SYS_GUID() AS row_guid FROM metrics",
+            "oracle",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSysGuidPreview, "CanConvert"), "Oracle SYS_GUID should convert to SQLite.");
+        string sqliteSysGuidSql = (string)GetProperty(sqliteSysGuidPreview, "ConvertedSql");
+        AssertContains(sqliteSysGuidSql, "lower(hex(randomblob(4))", "Converted SQLite SQL should build a random UUID string.");
+        AssertNotContains(sqliteSysGuidSql, "SYS_GUID", "Converted SQLite SQL should remove Oracle SYS_GUID.");
+
         object oracleConcatPreview = BuildViewSqlPreview(
             "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users",
             "mysql",
@@ -1473,6 +2011,23 @@ public static class SmokeTests
         Assert((bool)GetProperty(sqliteConcatPreview, "CanConvert"), "MySQL CONCAT should convert to SQLite.");
         string sqliteConcatSql = (string)GetProperty(sqliteConcatPreview, "ConvertedSql");
         AssertContains(sqliteConcatSql, "code || '-' || name", "Converted SQLite SQL should use concatenation operator.");
+
+        object oracleConcatWsPreview = BuildViewSqlPreview(
+            "SELECT CONCAT_WS('-', country_code, area_code, phone_no) AS phone_key FROM contacts",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleConcatWsPreview, "CanConvert"), "MySQL CONCAT_WS should convert to Oracle.");
+        string oracleConcatWsSql = (string)GetProperty(oracleConcatWsPreview, "ConvertedSql");
+        AssertContains(oracleConcatWsSql, "country_code || '-' || area_code || '-' || phone_no", "Converted Oracle SQL should expand CONCAT_WS with separators.");
+        AssertNotContains(oracleConcatWsSql, "CONCAT_WS", "Converted Oracle SQL should remove CONCAT_WS.");
+
+        object sqliteConcatWsPreview = BuildViewSqlPreview(
+            "SELECT CONCAT_WS('-', country_code, area_code, phone_no) AS phone_key FROM contacts",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteConcatWsPreview, "CanConvert"), "MySQL CONCAT_WS should convert to SQLite.");
+        string sqliteConcatWsSql = (string)GetProperty(sqliteConcatWsPreview, "ConvertedSql");
+        AssertContains(sqliteConcatWsSql, "country_code || '-' || area_code || '-' || phone_no", "Converted SQLite SQL should expand CONCAT_WS with separators.");
 
         object mysqlConcatOperatorPreview = BuildViewSqlPreview(
             "SELECT first_name || ' ' || last_name AS full_name FROM users",
@@ -1500,6 +2055,40 @@ public static class SmokeTests
         string pgLengthSql = (string)GetProperty(pgLengthPreview, "ConvertedSql");
         AssertContains(pgLengthSql, "LENGTH(display_name)", "Converted PostgreSQL SQL should use LENGTH.");
 
+        object pgDataLengthPreview = BuildViewSqlPreview(
+            "SELECT DATALENGTH(binary_payload) AS payload_bytes FROM files",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgDataLengthPreview, "CanConvert"), "SQL Server DATALENGTH should convert to PostgreSQL.");
+        string pgDataLengthSql = (string)GetProperty(pgDataLengthPreview, "ConvertedSql");
+        AssertContains(pgDataLengthSql, "OCTET_LENGTH(binary_payload)", "Converted PostgreSQL SQL should preserve DATALENGTH byte-length semantics.");
+        AssertNotContains(pgDataLengthSql, "DATALENGTH", "Converted PostgreSQL SQL should remove SQL Server DATALENGTH.");
+
+        object sqliteDataLengthPreview = BuildViewSqlPreview(
+            "SELECT DATALENGTH(binary_payload) AS payload_bytes FROM files",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDataLengthPreview, "CanConvert"), "SQL Server DATALENGTH should convert to SQLite.");
+        string sqliteDataLengthSql = (string)GetProperty(sqliteDataLengthPreview, "ConvertedSql");
+        AssertContains(sqliteDataLengthSql, "length(CAST(binary_payload AS BLOB))", "Converted SQLite SQL should preserve DATALENGTH byte-length semantics.");
+
+        object mssqlBitLengthPreview = BuildViewSqlPreview(
+            "SELECT BIT_LENGTH(binary_payload) AS payload_bits FROM files",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlBitLengthPreview, "CanConvert"), "MySQL BIT_LENGTH should convert to SQL Server.");
+        string mssqlBitLengthSql = (string)GetProperty(mssqlBitLengthPreview, "ConvertedSql");
+        AssertContains(mssqlBitLengthSql, "(DATALENGTH(binary_payload) * 8)", "Converted SQL Server SQL should preserve BIT_LENGTH bit-count semantics.");
+        AssertNotContains(mssqlBitLengthSql, "BIT_LENGTH", "Converted SQL Server SQL should remove MySQL BIT_LENGTH.");
+
+        object sqliteBitLengthPreview = BuildViewSqlPreview(
+            "SELECT BIT_LENGTH(binary_payload) AS payload_bits FROM files",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteBitLengthPreview, "CanConvert"), "MySQL BIT_LENGTH should convert to SQLite.");
+        string sqliteBitLengthSql = (string)GetProperty(sqliteBitLengthPreview, "ConvertedSql");
+        AssertContains(sqliteBitLengthSql, "(length(CAST(binary_payload AS BLOB)) * 8)", "Converted SQLite SQL should preserve BIT_LENGTH bit-count semantics.");
+
         object mssqlCharLengthPreview = BuildViewSqlPreview(
             "SELECT CHAR_LENGTH(display_name) AS name_length FROM users",
             "mysql",
@@ -1516,6 +2105,36 @@ public static class SmokeTests
         string sqliteCharacterLengthSql = (string)GetProperty(sqliteCharacterLengthPreview, "ConvertedSql");
         AssertContains(sqliteCharacterLengthSql, "LENGTH(display_name)", "Converted SQLite SQL should use LENGTH for CHARACTER_LENGTH.");
 
+        object mssqlCaseAliasPreview = BuildViewSqlPreview(
+            "SELECT UCASE(display_name) AS upper_name, LCASE(email) AS lower_email FROM users",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCaseAliasPreview, "CanConvert"), "MySQL UCASE/LCASE aliases should convert to SQL Server.");
+        string mssqlCaseAliasSql = (string)GetProperty(mssqlCaseAliasPreview, "ConvertedSql");
+        AssertContains(mssqlCaseAliasSql, "UPPER(display_name)", "Converted SQL Server SQL should use UPPER for UCASE.");
+        AssertContains(mssqlCaseAliasSql, "LOWER(email)", "Converted SQL Server SQL should use LOWER for LCASE.");
+        AssertNotContains(mssqlCaseAliasSql, "UCASE", "Converted SQL Server SQL should remove UCASE.");
+        AssertNotContains(mssqlCaseAliasSql, "LCASE", "Converted SQL Server SQL should remove LCASE.");
+
+        object sqliteCaseAliasPreview = BuildViewSqlPreview(
+            "SELECT UCASE(display_name) AS upper_name, LCASE(email) AS lower_email FROM users",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteCaseAliasPreview, "CanConvert"), "MySQL UCASE/LCASE aliases should convert to SQLite.");
+        string sqliteCaseAliasSql = (string)GetProperty(sqliteCaseAliasPreview, "ConvertedSql");
+        AssertContains(sqliteCaseAliasSql, "UPPER(display_name)", "Converted SQLite SQL should use UPPER for UCASE.");
+        AssertContains(sqliteCaseAliasSql, "LOWER(email)", "Converted SQLite SQL should use LOWER for LCASE.");
+
+        object pgNestedCaseLiteralPreview = BuildViewSqlPreview(
+            "SELECT UCASE(TRIM(display_name)) AS upper_name, LCASE(TRIM(email)) AS lower_email, 'UCASE(TRIM(display_name))' AS literal_note FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedCaseLiteralPreview, "CanConvert"), "Nested MySQL string case functions should convert while preserving literals.");
+        string pgNestedCaseLiteralSql = (string)GetProperty(pgNestedCaseLiteralPreview, "ConvertedSql");
+        AssertContains(pgNestedCaseLiteralSql, "UPPER(TRIM(display_name)) AS upper_name", "Converted PostgreSQL SQL should convert nested UCASE expression.");
+        AssertContains(pgNestedCaseLiteralSql, "LOWER(TRIM(email)) AS lower_email", "Converted PostgreSQL SQL should convert nested LCASE expression.");
+        AssertContains(pgNestedCaseLiteralSql, "'UCASE(TRIM(display_name))' AS literal_note", "Converted PostgreSQL SQL should preserve UCASE text inside string literals.");
+
         object pgTrimPreview = BuildViewSqlPreview(
             "SELECT LTRIM(RTRIM(display_name)) AS clean_name FROM users",
             "mssql",
@@ -1523,6 +2142,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(pgTrimPreview, "CanConvert"), "SQL Server LTRIM/RTRIM should convert to PostgreSQL.");
         string pgTrimSql = (string)GetProperty(pgTrimPreview, "ConvertedSql");
         AssertContains(pgTrimSql, "TRIM(display_name)", "Converted PostgreSQL SQL should use TRIM.");
+
+        object pgNestedTrimLiteralPreview = BuildViewSqlPreview(
+            "SELECT LTRIM(RTRIM(REPLACE(display_name, '-', ''))) AS clean_name, 'LTRIM(RTRIM(REPLACE(display_name, ''-'', '''')))' AS literal_note FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedTrimLiteralPreview, "CanConvert"), "Nested SQL Server LTRIM/RTRIM should convert while preserving literals.");
+        string pgNestedTrimLiteralSql = (string)GetProperty(pgNestedTrimLiteralPreview, "ConvertedSql");
+        AssertContains(pgNestedTrimLiteralSql, "TRIM(REPLACE(display_name, '-', '')) AS clean_name", "Converted PostgreSQL SQL should convert nested LTRIM/RTRIM expression.");
+        AssertContains(pgNestedTrimLiteralSql, "'LTRIM(RTRIM(REPLACE(display_name, ''-'', '''')))' AS literal_note", "Converted PostgreSQL SQL should preserve LTRIM/RTRIM text inside string literals.");
 
         object mysqlTrimPreview = BuildViewSqlPreview(
             "SELECT RTRIM(LTRIM(display_name)) AS clean_name FROM users",
@@ -1539,6 +2167,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlTrimPreview, "CanConvert"), "PostgreSQL TRIM should convert to SQL Server.");
         string mssqlTrimSql = (string)GetProperty(mssqlTrimPreview, "ConvertedSql");
         AssertContains(mssqlTrimSql, "LTRIM(RTRIM(display_name))", "Converted SQL Server SQL should use LTRIM/RTRIM.");
+
+        object mssqlNestedTrimLiteralPreview = BuildViewSqlPreview(
+            "SELECT TRIM(REPLACE(display_name, '-', '')) AS clean_name, 'TRIM(REPLACE(display_name, ''-'', ''''))' AS literal_note FROM users",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNestedTrimLiteralPreview, "CanConvert"), "Nested PostgreSQL TRIM should convert while preserving literals.");
+        string mssqlNestedTrimLiteralSql = (string)GetProperty(mssqlNestedTrimLiteralPreview, "ConvertedSql");
+        AssertContains(mssqlNestedTrimLiteralSql, "LTRIM(RTRIM(REPLACE(display_name, '-', ''))) AS clean_name", "Converted SQL Server SQL should convert nested TRIM expression.");
+        AssertContains(mssqlNestedTrimLiteralSql, "'TRIM(REPLACE(display_name, ''-'', ''''))' AS literal_note", "Converted SQL Server SQL should preserve TRIM text inside string literals.");
 
         object mssqlLengthPreview = BuildViewSqlPreview(
             "SELECT LENGTH(display_name) AS name_length FROM users",
@@ -1563,6 +2200,24 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlSubstringPreview, "CanConvert"), "Oracle SUBSTR should convert to SQL Server.");
         string mssqlSubstringSql = (string)GetProperty(mssqlSubstringPreview, "ConvertedSql");
         AssertContains(mssqlSubstringSql, "SUBSTRING(code, 1, 3)", "Converted SQL Server SQL should use SUBSTRING.");
+
+        object mssqlNestedSubstrLiteralPreview = BuildViewSqlPreview(
+            "SELECT SUBSTR(REPLACE(code, '-', ''), 1, 3) AS prefix, 'SUBSTR(REPLACE(code, ''-'', ''''), 1, 3)' AS literal_note FROM items",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNestedSubstrLiteralPreview, "CanConvert"), "Nested Oracle SUBSTR should convert while preserving literals.");
+        string mssqlNestedSubstrLiteralSql = (string)GetProperty(mssqlNestedSubstrLiteralPreview, "ConvertedSql");
+        AssertContains(mssqlNestedSubstrLiteralSql, "SUBSTRING(REPLACE(code, '-', ''), 1, 3) AS prefix", "Converted SQL Server SQL should convert nested SUBSTR expression.");
+        AssertContains(mssqlNestedSubstrLiteralSql, "'SUBSTR(REPLACE(code, ''-'', ''''), 1, 3)' AS literal_note", "Converted SQL Server SQL should preserve SUBSTR text inside string literals.");
+
+        object sqliteNestedSubstringLiteralPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING(REPLACE(code, '-', ''), 1, 3) AS prefix, 'SUBSTRING(REPLACE(code, ''-'', ''''), 1, 3)' AS literal_note FROM items",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteNestedSubstringLiteralPreview, "CanConvert"), "Nested SQL Server SUBSTRING should convert while preserving literals.");
+        string sqliteNestedSubstringLiteralSql = (string)GetProperty(sqliteNestedSubstringLiteralPreview, "ConvertedSql");
+        AssertContains(sqliteNestedSubstringLiteralSql, "SUBSTR(REPLACE(code, '-', ''), 1, 3) AS prefix", "Converted SQLite SQL should convert nested SUBSTRING expression.");
+        AssertContains(sqliteNestedSubstringLiteralSql, "'SUBSTRING(REPLACE(code, ''-'', ''''), 1, 3)' AS literal_note", "Converted SQLite SQL should preserve SUBSTRING text inside string literals.");
 
         object mysqlStandardSubstringPreview = BuildViewSqlPreview(
             "SELECT SUBSTRING(code FROM 2 FOR 4) AS middle_code FROM items",
@@ -1604,6 +2259,16 @@ public static class SmokeTests
         string sqliteRightSql = (string)GetProperty(sqliteRightPreview, "ConvertedSql");
         AssertContains(sqliteRightSql, "SUBSTR(code, -2)", "Converted SQLite SQL should use negative SUBSTR for RIGHT.");
 
+        object oracleNestedEdgeSubstringLiteralPreview = BuildViewSqlPreview(
+            "SELECT LEFT(REPLACE(code, '-', ''), 3) AS prefix, RIGHT(REPLACE(code, '-', ''), 2) AS suffix, 'LEFT(REPLACE(code, ''-'', ''''), 3)' AS literal_note FROM items",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleNestedEdgeSubstringLiteralPreview, "CanConvert"), "Nested LEFT/RIGHT should convert while preserving literals.");
+        string oracleNestedEdgeSubstringLiteralSql = (string)GetProperty(oracleNestedEdgeSubstringLiteralPreview, "ConvertedSql");
+        AssertContains(oracleNestedEdgeSubstringLiteralSql, "SUBSTR(REPLACE(code, '-', ''), 1, 3) AS prefix", "Converted Oracle SQL should convert nested LEFT expression.");
+        AssertContains(oracleNestedEdgeSubstringLiteralSql, "SUBSTR(REPLACE(code, '-', ''), -2) AS suffix", "Converted Oracle SQL should convert nested RIGHT expression.");
+        AssertContains(oracleNestedEdgeSubstringLiteralSql, "'LEFT(REPLACE(code, ''-'', ''''), 3)' AS literal_note", "Converted Oracle SQL should preserve LEFT text inside string literals.");
+
         object mssqlPadPreview = BuildViewSqlPreview(
             "SELECT LPAD(account_no, 10, '0') AS padded_account, RPAD(code, 8, ' ') AS padded_code FROM accounts",
             "mysql",
@@ -1625,6 +2290,302 @@ public static class SmokeTests
         AssertContains(sqlitePadSql, "SUBSTR(CAST(code AS TEXT) || REPLACE(HEX(ZEROBLOB(8)), '00', ' '), 1, 8)", "Converted SQLite SQL should emulate RPAD.");
         AssertNotContains(sqlitePadSql, "LPAD", "Converted SQLite SQL should remove LPAD.");
         AssertNotContains(sqlitePadSql, "RPAD", "Converted SQLite SQL should remove RPAD.");
+
+        object mssqlNestedPadLiteralPreview = BuildViewSqlPreview(
+            "SELECT LPAD(REPLACE(account_no, '-', ''), 10, '0') AS padded_account, RPAD(REPLACE(code, '-', ''), 8, ' ') AS padded_code, 'LPAD(REPLACE(account_no, ''-'', ''''), 10, ''0'')' AS literal_note FROM accounts",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNestedPadLiteralPreview, "CanConvert"), "Nested MySQL LPAD/RPAD should convert while preserving literals.");
+        string mssqlNestedPadLiteralSql = (string)GetProperty(mssqlNestedPadLiteralPreview, "ConvertedSql");
+        AssertContains(mssqlNestedPadLiteralSql, "RIGHT(REPLICATE('0', 10) + CAST(REPLACE(account_no, '-', '') AS varchar(max)), 10) AS padded_account", "Converted SQL Server SQL should convert nested LPAD expression.");
+        AssertContains(mssqlNestedPadLiteralSql, "LEFT(CAST(REPLACE(code, '-', '') AS varchar(max)) + REPLICATE(' ', 8), 8) AS padded_code", "Converted SQL Server SQL should convert nested RPAD expression.");
+        AssertContains(mssqlNestedPadLiteralSql, "'LPAD(REPLACE(account_no, ''-'', ''''), 10, ''0'')' AS literal_note", "Converted SQL Server SQL should preserve LPAD text inside string literals.");
+
+        object mssqlRepeatPreview = BuildViewSqlPreview(
+            "SELECT REPEAT('0', 4) || code AS padded_code FROM items",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlRepeatPreview, "CanConvert"), "MySQL REPEAT should convert to SQL Server.");
+        string mssqlRepeatSql = (string)GetProperty(mssqlRepeatPreview, "ConvertedSql");
+        AssertContains(mssqlRepeatSql, "REPLICATE('0', 4)", "Converted SQL Server SQL should use REPLICATE for REPEAT.");
+        AssertNotContains(mssqlRepeatSql, "REPEAT", "Converted SQL Server SQL should remove REPEAT.");
+
+        object sqliteReplicatePreview = BuildViewSqlPreview(
+            "SELECT REPLICATE('*', 3) + mask AS masked_code FROM items",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteReplicatePreview, "CanConvert"), "SQL Server REPLICATE should convert to SQLite.");
+        string sqliteReplicateSql = (string)GetProperty(sqliteReplicatePreview, "ConvertedSql");
+        AssertContains(sqliteReplicateSql, "REPLACE(HEX(ZEROBLOB(3)), '00', '*')", "Converted SQLite SQL should emulate REPLICATE.");
+        AssertNotContains(sqliteReplicateSql, "REPLICATE", "Converted SQLite SQL should remove REPLICATE.");
+
+        object pgSpacePreview = BuildViewSqlPreview(
+            "SELECT SPACE(3) AS indent_text FROM items",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSpacePreview, "CanConvert"), "SQL Server SPACE should convert to PostgreSQL.");
+        string pgSpaceSql = (string)GetProperty(pgSpacePreview, "ConvertedSql");
+        AssertContains(pgSpaceSql, "REPEAT(' ', 3)", "Converted PostgreSQL SQL should use REPEAT for SPACE.");
+        AssertNotContains(pgSpaceSql, "SPACE", "Converted PostgreSQL SQL should remove SPACE.");
+
+        object sqliteSpacePreview = BuildViewSqlPreview(
+            "SELECT SPACE(2) AS indent_text FROM items",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSpacePreview, "CanConvert"), "MySQL SPACE should convert to SQLite.");
+        string sqliteSpaceSql = (string)GetProperty(sqliteSpacePreview, "ConvertedSql");
+        AssertContains(sqliteSpaceSql, "REPLACE(HEX(ZEROBLOB(2)), '00', ' ')", "Converted SQLite SQL should emulate SPACE.");
+        AssertNotContains(sqliteSpaceSql, "SPACE", "Converted SQLite SQL should remove SPACE.");
+
+        object mssqlChrPreview = BuildViewSqlPreview(
+            "SELECT 'line1' || CHR(10) || 'line2' AS message_text FROM messages",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlChrPreview, "CanConvert"), "Oracle CHR should convert to SQL Server.");
+        string mssqlChrSql = (string)GetProperty(mssqlChrPreview, "ConvertedSql");
+        AssertContains(mssqlChrSql, "CHAR(10)", "Converted SQL Server SQL should use CHAR for CHR.");
+        AssertNotContains(mssqlChrSql, "CHR(10)", "Converted SQL Server SQL should remove CHR.");
+
+        object pgCharCodePreview = BuildViewSqlPreview(
+            "SELECT CHAR(65) AS initial_letter FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCharCodePreview, "CanConvert"), "MySQL CHAR code function should convert to PostgreSQL.");
+        string pgCharCodeSql = (string)GetProperty(pgCharCodePreview, "ConvertedSql");
+        AssertContains(pgCharCodeSql, "CHR(65)", "Converted PostgreSQL SQL should use CHR for CHAR code function.");
+
+        object pgCastCharPreview = BuildViewSqlPreview(
+            "SELECT CAST(code AS CHAR(10)) AS text_code FROM items",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCastCharPreview, "CanConvert"), "CHAR type in CAST should not be treated as a character-code function.");
+        string pgCastCharSql = (string)GetProperty(pgCastCharPreview, "ConvertedSql");
+        AssertContains(pgCastCharSql, "CAST(code AS CHAR(10))", "Converted PostgreSQL SQL should preserve CHAR type casts.");
+        AssertNotContains(pgCastCharSql, "AS CHR(10)", "Converted PostgreSQL SQL should not rewrite CHAR type to CHR.");
+
+        object sqliteAsciiPreview = BuildViewSqlPreview(
+            "SELECT ASCII(initial_letter) AS initial_code FROM users",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteAsciiPreview, "CanConvert"), "MySQL ASCII should convert to SQLite.");
+        string sqliteAsciiSql = (string)GetProperty(sqliteAsciiPreview, "ConvertedSql");
+        AssertContains(sqliteAsciiSql, "unicode(initial_letter)", "Converted SQLite SQL should use unicode for ASCII.");
+        AssertNotContains(sqliteAsciiSql, "ASCII", "Converted SQLite SQL should remove ASCII.");
+
+        object pgUnicodePreview = BuildViewSqlPreview(
+            "SELECT UNICODE(initial_letter) AS initial_code FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgUnicodePreview, "CanConvert"), "SQL Server UNICODE should convert to PostgreSQL.");
+        string pgUnicodeSql = (string)GetProperty(pgUnicodePreview, "ConvertedSql");
+        AssertContains(pgUnicodeSql, "ASCII(initial_letter)", "Converted PostgreSQL SQL should use ASCII for UNICODE.");
+        AssertNotContains(pgUnicodeSql, "UNICODE", "Converted PostgreSQL SQL should remove UNICODE.");
+
+        object pgNcharPreview = BuildViewSqlPreview(
+            "SELECT NCHAR(9731) AS snow_text FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNcharPreview, "CanConvert"), "SQL Server NCHAR code function should convert to PostgreSQL.");
+        string pgNcharSql = (string)GetProperty(pgNcharPreview, "ConvertedSql");
+        AssertContains(pgNcharSql, "CHR(9731)", "Converted PostgreSQL SQL should use CHR for NCHAR code function.");
+        AssertNotContains(pgNcharSql, "NCHAR", "Converted PostgreSQL SQL should remove NCHAR code function.");
+
+        object pgCastNcharPreview = BuildViewSqlPreview(
+            "SELECT CAST(code AS NCHAR(10)) AS text_code FROM items",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCastNcharPreview, "CanConvert"), "NCHAR type in CAST should not be treated as a character-code function.");
+        string pgCastNcharSql = (string)GetProperty(pgCastNcharPreview, "ConvertedSql");
+        AssertContains(pgCastNcharSql, "CAST(code AS TEXT)", "Converted PostgreSQL SQL should map SQL Server NCHAR type through cast conversion.");
+        AssertNotContains(pgCastNcharSql, "AS CHR(10)", "Converted PostgreSQL SQL should not rewrite NCHAR type to CHR.");
+
+        object pgMysqlIsNullPreview = BuildViewSqlPreview(
+            "SELECT ISNULL(deleted_at) AS is_deleted_missing FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgMysqlIsNullPreview, "CanConvert"), "MySQL ISNULL predicate should convert to PostgreSQL.");
+        string pgMysqlIsNullSql = (string)GetProperty(pgMysqlIsNullPreview, "ConvertedSql");
+        AssertContains(pgMysqlIsNullSql, "deleted_at IS NULL", "Converted PostgreSQL SQL should rewrite one-argument MySQL ISNULL as IS NULL predicate.");
+        AssertNotContains(pgMysqlIsNullSql, "COALESCE(deleted_at)", "Converted PostgreSQL SQL should not treat MySQL ISNULL predicate as COALESCE.");
+
+        object pgSqlServerIsNullPreview = BuildViewSqlPreview(
+            "SELECT ISNULL(display_name, '匿名') AS display_name FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSqlServerIsNullPreview, "CanConvert"), "SQL Server ISNULL replacement should still convert to PostgreSQL.");
+        string pgSqlServerIsNullSql = (string)GetProperty(pgSqlServerIsNullPreview, "ConvertedSql");
+        AssertContains(pgSqlServerIsNullSql, "COALESCE(display_name, '匿名')", "Converted PostgreSQL SQL should keep two-argument SQL Server ISNULL as COALESCE.");
+
+        object pgFieldPreview = BuildViewSqlPreview(
+            "SELECT FIELD(status, 'new', 'active', 'closed') AS status_rank FROM tasks",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgFieldPreview, "CanConvert"), "MySQL FIELD should convert to PostgreSQL.");
+        string pgFieldSql = (string)GetProperty(pgFieldPreview, "ConvertedSql");
+        AssertContains(pgFieldSql, "CASE status WHEN 'new' THEN 1 WHEN 'active' THEN 2 WHEN 'closed' THEN 3 ELSE 0 END", "Converted PostgreSQL SQL should emulate MySQL FIELD with CASE.");
+        AssertNotContains(pgFieldSql, "FIELD(", "Converted PostgreSQL SQL should remove MySQL FIELD.");
+
+        object mssqlFieldPreview = BuildViewSqlPreview(
+            "SELECT id FROM tasks ORDER BY FIELD(priority, 'high', 'normal', 'low')",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlFieldPreview, "CanConvert"), "MySQL FIELD in ORDER BY should convert to SQL Server.");
+        string mssqlFieldSql = (string)GetProperty(mssqlFieldPreview, "ConvertedSql");
+        AssertContains(mssqlFieldSql, "ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 0 END", "Converted SQL Server SQL should preserve FIELD ordering semantics with CASE.");
+
+        object pgEltPreview = BuildViewSqlPreview(
+            "SELECT ELT(status_rank, 'new', 'active', 'closed') AS status_text FROM tasks",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgEltPreview, "CanConvert"), "MySQL ELT should convert to PostgreSQL.");
+        string pgEltSql = (string)GetProperty(pgEltPreview, "ConvertedSql");
+        AssertContains(pgEltSql, "CASE status_rank WHEN 1 THEN 'new' WHEN 2 THEN 'active' WHEN 3 THEN 'closed' ELSE NULL END", "Converted PostgreSQL SQL should emulate MySQL ELT with CASE.");
+        AssertNotContains(pgEltSql, "ELT(", "Converted PostgreSQL SQL should remove MySQL ELT.");
+
+        object sqliteEltPreview = BuildViewSqlPreview(
+            "SELECT ELT(level_no, 'low', 'normal', 'high') AS level_text FROM alerts",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteEltPreview, "CanConvert"), "MySQL ELT should convert to SQLite.");
+        string sqliteEltSql = (string)GetProperty(sqliteEltPreview, "ConvertedSql");
+        AssertContains(sqliteEltSql, "CASE level_no WHEN 1 THEN 'low' WHEN 2 THEN 'normal' WHEN 3 THEN 'high' ELSE NULL END", "Converted SQLite SQL should emulate MySQL ELT with CASE.");
+
+        object pgFindInSetPreview = BuildViewSqlPreview(
+            "SELECT FIND_IN_SET(status, 'new,active,closed') AS status_rank FROM tasks",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgFindInSetPreview, "CanConvert"), "MySQL FIND_IN_SET with literal list should convert to PostgreSQL.");
+        string pgFindInSetSql = (string)GetProperty(pgFindInSetPreview, "ConvertedSql");
+        AssertContains(pgFindInSetSql, "CASE status WHEN 'new' THEN 1 WHEN 'active' THEN 2 WHEN 'closed' THEN 3 ELSE 0 END", "Converted PostgreSQL SQL should emulate literal FIND_IN_SET with CASE.");
+        AssertNotContains(pgFindInSetSql, "FIND_IN_SET", "Converted PostgreSQL SQL should remove literal FIND_IN_SET.");
+
+        object mssqlFindInSetPreview = BuildViewSqlPreview(
+            "SELECT id FROM tasks ORDER BY FIND_IN_SET(priority, 'high,normal,low')",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlFindInSetPreview, "CanConvert"), "MySQL FIND_IN_SET in ORDER BY should convert to SQL Server.");
+        string mssqlFindInSetSql = (string)GetProperty(mssqlFindInSetPreview, "ConvertedSql");
+        AssertContains(mssqlFindInSetSql, "ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 0 END", "Converted SQL Server SQL should preserve literal FIND_IN_SET ordering with CASE.");
+
+        object pgStrCmpPreview = BuildViewSqlPreview(
+            "SELECT STRCMP(current_code, expected_code) AS compare_result FROM checks",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgStrCmpPreview, "CanConvert"), "MySQL STRCMP should convert to PostgreSQL.");
+        string pgStrCmpSql = (string)GetProperty(pgStrCmpPreview, "ConvertedSql");
+        AssertContains(pgStrCmpSql, "CASE WHEN current_code = expected_code THEN 0 WHEN current_code < expected_code THEN -1 ELSE 1 END", "Converted PostgreSQL SQL should emulate STRCMP with CASE.");
+        AssertNotContains(pgStrCmpSql, "STRCMP", "Converted PostgreSQL SQL should remove MySQL STRCMP.");
+
+        object mssqlStrCmpPreview = BuildViewSqlPreview(
+            "SELECT STRCMP(last_name, first_name) AS name_order FROM users",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlStrCmpPreview, "CanConvert"), "MySQL STRCMP should convert to SQL Server.");
+        string mssqlStrCmpSql = (string)GetProperty(mssqlStrCmpPreview, "ConvertedSql");
+        AssertContains(mssqlStrCmpSql, "CASE WHEN last_name = first_name THEN 0 WHEN last_name < first_name THEN -1 ELSE 1 END", "Converted SQL Server SQL should emulate STRCMP with CASE.");
+
+        object pgChoosePreview = BuildViewSqlPreview(
+            "SELECT CHOOSE(status_rank, 'new', 'active', 'closed') AS status_text FROM tasks",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgChoosePreview, "CanConvert"), "SQL Server CHOOSE should convert to PostgreSQL.");
+        string pgChooseSql = (string)GetProperty(pgChoosePreview, "ConvertedSql");
+        AssertContains(pgChooseSql, "CASE status_rank WHEN 1 THEN 'new' WHEN 2 THEN 'active' WHEN 3 THEN 'closed' ELSE NULL END", "Converted PostgreSQL SQL should emulate SQL Server CHOOSE with CASE.");
+        AssertNotContains(pgChooseSql, "CHOOSE", "Converted PostgreSQL SQL should remove SQL Server CHOOSE.");
+
+        object sqliteChoosePreview = BuildViewSqlPreview(
+            "SELECT CHOOSE(level_no, 'low', 'normal', 'high') AS level_text FROM alerts",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteChoosePreview, "CanConvert"), "SQL Server CHOOSE should convert to SQLite.");
+        string sqliteChooseSql = (string)GetProperty(sqliteChoosePreview, "ConvertedSql");
+        AssertContains(sqliteChooseSql, "CASE level_no WHEN 1 THEN 'low' WHEN 2 THEN 'normal' WHEN 3 THEN 'high' ELSE NULL END", "Converted SQLite SQL should emulate SQL Server CHOOSE with CASE.");
+
+        object mysqlStuffPreview = BuildViewSqlPreview(
+            "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlStuffPreview, "CanConvert"), "SQL Server STUFF should convert to MySQL.");
+        string mysqlStuffSql = (string)GetProperty(mysqlStuffPreview, "ConvertedSql");
+        AssertContains(mysqlStuffSql, "CONCAT(SUBSTRING(code, 1, 2 - 1), '***', SUBSTRING(code, 2 + 3))", "Converted MySQL SQL should emulate STUFF with substring concatenation.");
+        AssertNotContains(mysqlStuffSql, "STUFF", "Converted MySQL SQL should remove STUFF.");
+
+        object sqliteStuffPreview = BuildViewSqlPreview(
+            "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteStuffPreview, "CanConvert"), "SQL Server STUFF should convert to SQLite.");
+        string sqliteStuffSql = (string)GetProperty(sqliteStuffPreview, "ConvertedSql");
+        AssertContains(sqliteStuffSql, "SUBSTR(code, 1, 2 - 1) || '***' || SUBSTR(code, 2 + 3)", "Converted SQLite SQL should emulate STUFF with SUBSTR concatenation.");
+        AssertNotContains(sqliteStuffSql, "STUFF", "Converted SQLite SQL should remove STUFF.");
+
+        object pgNestedStuffLiteralPreview = BuildViewSqlPreview(
+            "SELECT STUFF(REPLACE(code, '-', ''), 2, 3, '***') AS masked_code, 'STUFF(REPLACE(code, ''-'', ''''), 2, 3, ''***'')' AS literal_note FROM items",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedStuffLiteralPreview, "CanConvert"), "Nested SQL Server STUFF should convert while preserving literals.");
+        string pgNestedStuffLiteralSql = (string)GetProperty(pgNestedStuffLiteralPreview, "ConvertedSql");
+        AssertContains(pgNestedStuffLiteralSql, "CONCAT(SUBSTRING(REPLACE(code, '-', '') FROM 1 FOR 2 - 1), '***', SUBSTRING(REPLACE(code, '-', '') FROM 2 + 3)) AS masked_code", "Converted PostgreSQL SQL should convert nested STUFF expression.");
+        AssertContains(pgNestedStuffLiteralSql, "'STUFF(REPLACE(code, ''-'', ''''), 2, 3, ''***'')' AS literal_note", "Converted PostgreSQL SQL should preserve STUFF text inside string literals.");
+
+        object pgSubstringIndexPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(host_name, '.', 1) AS root_host FROM servers",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSubstringIndexPreview, "CanConvert"), "MySQL SUBSTRING_INDEX should convert to PostgreSQL.");
+        string pgSubstringIndexSql = (string)GetProperty(pgSubstringIndexPreview, "ConvertedSql");
+        AssertContains(pgSubstringIndexSql, "CASE WHEN POSITION('.' IN host_name) = 0 THEN host_name ELSE SUBSTRING(host_name FROM 1 FOR POSITION('.' IN host_name) - 1) END", "Converted PostgreSQL SQL should emulate SUBSTRING_INDEX count 1.");
+        AssertNotContains(pgSubstringIndexSql, "SUBSTRING_INDEX", "Converted PostgreSQL SQL should remove SUBSTRING_INDEX.");
+
+        object pgNestedSubstringIndexLiteralPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(REPLACE(host_name, 'www.', ''), '.', 1) AS root_host, 'SUBSTRING_INDEX(REPLACE(host_name, ''www.'', ''''), ''.'', 1)' AS literal_note FROM servers",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedSubstringIndexLiteralPreview, "CanConvert"), "Nested MySQL SUBSTRING_INDEX should convert while preserving literals.");
+        string pgNestedSubstringIndexLiteralSql = (string)GetProperty(pgNestedSubstringIndexLiteralPreview, "ConvertedSql");
+        AssertContains(pgNestedSubstringIndexLiteralSql, "CASE WHEN POSITION('.' IN REPLACE(host_name, 'www.', '')) = 0 THEN REPLACE(host_name, 'www.', '') ELSE SUBSTRING(REPLACE(host_name, 'www.', '') FROM 1 FOR POSITION('.' IN REPLACE(host_name, 'www.', '')) - 1) END AS root_host", "Converted PostgreSQL SQL should convert nested SUBSTRING_INDEX expression.");
+        AssertContains(pgNestedSubstringIndexLiteralSql, "'SUBSTRING_INDEX(REPLACE(host_name, ''www.'', ''''), ''.'', 1)' AS literal_note", "Converted PostgreSQL SQL should preserve SUBSTRING_INDEX text inside string literals.");
+
+        object mssqlSubstringIndexPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(file_name, '/', 1) AS top_folder FROM files",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlSubstringIndexPreview, "CanConvert"), "MySQL SUBSTRING_INDEX should convert to SQL Server.");
+        string mssqlSubstringIndexSql = (string)GetProperty(mssqlSubstringIndexPreview, "ConvertedSql");
+        AssertContains(mssqlSubstringIndexSql, "CASE WHEN CHARINDEX('/', file_name) = 0 THEN file_name ELSE LEFT(file_name, CHARINDEX('/', file_name) - 1) END", "Converted SQL Server SQL should emulate SUBSTRING_INDEX count 1.");
+
+        object sqliteSubstringIndexPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(tag_path, '/', 1) AS root_tag FROM tags",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSubstringIndexPreview, "CanConvert"), "MySQL SUBSTRING_INDEX should convert to SQLite.");
+        string sqliteSubstringIndexSql = (string)GetProperty(sqliteSubstringIndexPreview, "ConvertedSql");
+        AssertContains(sqliteSubstringIndexSql, "CASE WHEN INSTR(tag_path, '/') = 0 THEN tag_path ELSE SUBSTR(tag_path, 1, INSTR(tag_path, '/') - 1) END", "Converted SQLite SQL should emulate SUBSTRING_INDEX count 1.");
+
+        object mssqlSubstringIndexLastPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(file_path, '/', -1) AS file_name FROM files",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlSubstringIndexLastPreview, "CanConvert"), "MySQL SUBSTRING_INDEX count -1 should convert to SQL Server.");
+        string mssqlSubstringIndexLastSql = (string)GetProperty(mssqlSubstringIndexLastPreview, "ConvertedSql");
+        AssertContains(mssqlSubstringIndexLastSql, "CASE WHEN CHARINDEX('/', file_path) = 0 THEN file_path ELSE RIGHT(file_path, CHARINDEX(REVERSE('/'), REVERSE(file_path)) - 1) END", "Converted SQL Server SQL should emulate SUBSTRING_INDEX count -1.");
+        AssertNotContains(mssqlSubstringIndexLastSql, "SUBSTRING_INDEX", "Converted SQL Server SQL should remove SUBSTRING_INDEX count -1.");
+
+        object pgSubstringIndexLastPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(host_name, '.', -1) AS tld FROM servers",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSubstringIndexLastPreview, "CanConvert"), "MySQL SUBSTRING_INDEX count -1 should convert to PostgreSQL.");
+        string pgSubstringIndexLastSql = (string)GetProperty(pgSubstringIndexLastPreview, "ConvertedSql");
+        AssertContains(pgSubstringIndexLastSql, "CASE WHEN POSITION('.' IN host_name) = 0 THEN host_name ELSE RIGHT(host_name, POSITION(reverse('.') IN reverse(host_name)) - 1) END", "Converted PostgreSQL SQL should emulate SUBSTRING_INDEX count -1.");
+
+        object oracleSubstringIndexLastPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(object_name, '.', -1) AS short_name FROM objects",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleSubstringIndexLastPreview, "CanConvert"), "MySQL SUBSTRING_INDEX count -1 should convert to Oracle.");
+        string oracleSubstringIndexLastSql = (string)GetProperty(oracleSubstringIndexLastPreview, "ConvertedSql");
+        AssertContains(oracleSubstringIndexLastSql, "CASE WHEN INSTR(object_name, '.') = 0 THEN object_name ELSE SUBSTR(object_name, INSTR(object_name, '.', -1) + LENGTH('.')) END", "Converted Oracle SQL should emulate SUBSTRING_INDEX count -1.");
 
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
@@ -1904,6 +2865,59 @@ public static class SmokeTests
         AssertContains(oraclePreview, "FROM all_tab_privs", "Oracle preview should include object privilege diagnostic query.");
         AssertContains(oraclePreview, "FROM session_privs", "Oracle preview should include system privilege diagnostic query.");
         AssertContains(oraclePreview, "UPPER(owner) = UPPER('MAIN')", "Oracle privilege diagnostic should target the selected schema.");
+        string oraclePrivilegeSummary = BuildOraclePrivilegeDiagnosticSummary(
+            BuildOraclePrivilegeTable("ALTER"),
+            BuildOraclePrivilegeTable("CREATE ANY INDEX"),
+            oracleSql);
+        AssertContains(oraclePrivilegeSummary, "物件直接授權：ALTER", "Oracle privilege parser should summarize direct object grants.");
+        AssertContains(oraclePrivilegeSummary, "Session 系統權限：CREATE ANY INDEX", "Oracle privilege parser should summarize session privileges.");
+        AssertContains(oraclePrivilegeSummary, "可能缺少：COMMENT ANY TABLE", "Oracle privilege parser should report missing privileges needed by the preview SQL.");
+        string oraclePrivilegeCompleteSummary = BuildOraclePrivilegeDiagnosticSummary(
+            BuildOraclePrivilegeTable("ALTER", "INDEX"),
+            BuildOraclePrivilegeTable("COMMENT ANY TABLE"),
+            oracleSql);
+        AssertContains(oraclePrivilegeCompleteSummary, "未偵測到明顯缺口", "Oracle privilege parser should recognize when required grants are present.");
+        string oracleRepairSuggestions = BuildOracleRepairSuggestions(
+            "ORA-01031: insufficient privileges",
+            "MAIN",
+            "DEMO_TABLE",
+            oracleSql + "\nCREATE INDEX \"IX_DEMO_NAME\" ON \"MAIN\".\"DEMO_TABLE\" (\"display_name\");",
+            BuildOraclePrivilegeTable("ALTER"),
+            BuildOraclePrivilegeTable());
+        AssertContains(oracleRepairSuggestions, "SYS_CONTEXT('USERENV','SESSION_USER')", "Oracle repair suggestions should include a session user check.");
+        AssertContains(oracleRepairSuggestions, "session_roles", "Oracle repair suggestions should include a role check.");
+        AssertContains(oracleRepairSuggestions, "GRANT INDEX ON \"MAIN\".\"DEMO_TABLE\" TO <SESSION_USER>;", "Oracle repair suggestions should include missing object INDEX grant SQL.");
+        AssertContains(oracleRepairSuggestions, "GRANT COMMENT ANY TABLE TO <SESSION_USER>;", "Oracle repair suggestions should include missing COMMENT ANY TABLE grant SQL.");
+        AssertContains(oracleRepairSuggestions, "跨 schema", "Oracle repair suggestions should call out cross-schema policy.");
+        string oracleObjectMissingRepair = BuildOracleRepairSuggestions(
+            "ORA-00942: table or view does not exist",
+            "MAIN",
+            "DEMO_TABLE",
+            "ALTER TABLE \"MAIN\".\"DEMO_TABLE\" ADD (\"name\" VARCHAR2(20));",
+            BuildOraclePrivilegeTable(),
+            BuildOraclePrivilegeTable());
+        AssertContains(oracleObjectMissingRepair, "all_objects", "Oracle object missing repair suggestions should include an object existence query.");
+        AssertContains(oracleObjectMissingRepair, "GRANT SELECT ON \"MAIN\".\"DEMO_TABLE\" TO <SESSION_USER>;", "Oracle object missing repair suggestions should include SELECT grant SQL.");
+        string invalidIdentifierHints = BuildOracleErrorHints("ORA-00904: invalid identifier", "MAIN", "DEMO_TABLE");
+        AssertContains(invalidIdentifierHints, "識別名稱無效", "Oracle invalid identifier hints should call out metadata or quoted identifier mismatches.");
+        string typeMigrationHints = BuildOracleErrorHints("ORA-01439: column to be modified must be empty to change datatype", "MAIN", "DEMO_TABLE");
+        AssertContains(typeMigrationHints, "新增暫存欄位", "Oracle type migration hints should explain staged column migration.");
+        string duplicateIndexHints = BuildOracleErrorHints("ORA-01408: such column list already indexed", "MAIN", "DEMO_TABLE");
+        AssertContains(duplicateIndexHints, "重複索引", "Oracle duplicate index hints should explain existing column-list indexes.");
+        string constraintConflictHints = BuildOracleErrorHints("ORA-02264: name already used by an existing constraint", "MAIN", "DEMO_TABLE");
+        AssertContains(constraintConflictHints, "constraint 名稱", "Oracle constraint name hints should explain name conflicts.");
+        string quotaHints = BuildOracleErrorHints("ORA-01950: no privileges on tablespace 'USERS'", "MAIN", "DEMO_TABLE");
+        AssertContains(quotaHints, "quota", "Oracle quota hints should mention tablespace quota.");
+        string oracleQuotaRepair = BuildOracleRepairSuggestions(
+            "ORA-01950: no privileges on tablespace 'USERS'",
+            "MAIN",
+            "DEMO_TABLE",
+            "CREATE TABLE \"MAIN\".\"DEMO_TABLE\" (\"ID\" NUMBER);",
+            BuildOraclePrivilegeTable(),
+            BuildOraclePrivilegeTable());
+        AssertContains(oracleQuotaRepair, "DBA 最小授權範本", "Oracle repair suggestions should include a DBA policy template.");
+        AssertContains(oracleQuotaRepair, "dba_users", "Oracle quota repair suggestions should include a DBA user/tablespace check.");
+        AssertContains(oracleQuotaRepair, "ALTER USER <SESSION_USER> QUOTA <SIZE> ON <TABLESPACE_NAME>;", "Oracle quota repair suggestions should include a quota grant template.");
         string highRiskOracleMessage = BuildOracleHighRiskConfirmationMessage(
             "ALTER TABLE \"MAIN\".\"DEMO_TABLE\" DROP COLUMN \"legacy_code\";\nDROP INDEX \"MAIN\".\"IX_DEMO\";");
         AssertContains(highRiskOracleMessage, "高風險 Oracle DDL", "Oracle high-risk confirmation should explain the second confirmation.");
@@ -2016,6 +3030,7 @@ public static class SmokeTests
     private static void TestBackupRestoreService()
     {
         string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk_restore_" + Guid.NewGuid().ToString("N"));
+        int oldRestoreContentSnapshotMaxRows = BackupMirrorSettings.RestoreContentSnapshotMaxRows;
         Directory.CreateDirectory(dir);
         try
         {
@@ -2205,9 +3220,108 @@ public static class SmokeTests
             AssertContains(schemaSummary, "NULL：NO -> YES", "Restore diff should include nullability changes.");
             AssertContains(schemaSummary, "預設：'' -> NULL", "Restore diff should include default changes.");
             AssertContains(schemaSummary, "註解：姓名 -> 顯示名稱", "Restore diff should include comment changes.");
+
+            DatabaseRestoreSnapshot contentBefore = BackupRestoreDiffService.CreateSnapshot(
+                "main",
+                "sqlite",
+                new[] { "users", "orders" },
+                new string[0],
+                new string[0],
+                new string[0]);
+            DatabaseRestoreSnapshot contentAfter = BackupRestoreDiffService.CreateSnapshot(
+                "main",
+                "sqlite",
+                new[] { "users", "orders" },
+                new string[0],
+                new string[0],
+                new string[0]);
+            BackupRestoreDiffService.SetTableContentFingerprint(contentBefore, "users", 2, BuildRestoreContentRows(new[]
+            {
+                new object[] { 1, "Alice", new byte[] { 1, 2 } },
+                new object[] { 2, "Bob", DBNull.Value }
+            }));
+            BackupRestoreDiffService.SetTableContentFingerprint(contentAfter, "users", 2, BuildRestoreContentRows(new[]
+            {
+                new object[] { 2, "Bob", DBNull.Value },
+                new object[] { 1, "Alice", new byte[] { 1, 2 } }
+            }));
+            BackupRestoreDiffService.SetTableContentFingerprint(contentBefore, "orders", 2, BuildRestoreContentRows(new[]
+            {
+                new object[] { 10, "pending", null },
+                new object[] { 11, "paid", null }
+            }));
+            BackupRestoreDiffService.SetTableContentFingerprint(contentAfter, "orders", 2, BuildRestoreContentRows(new[]
+            {
+                new object[] { 10, "pending", null },
+                new object[] { 11, "refunded", null }
+            }));
+            string contentSummary = BackupRestoreDiffService.BuildSummary(contentBefore, contentAfter);
+            Assert(!contentSummary.Contains("users：內容指紋變更"), "Restore content diff should be row-order independent.");
+            AssertContains(contentSummary, "資料內容差異：orders：內容指紋變更", "Restore content diff should detect changed row values.");
+            AssertContains(contentSummary, "比對 2/2 列", "Restore content diff should report full comparison coverage for small tables.");
+            AssertContains(contentSummary, "列數 2 -> 2", "Restore content diff should include row counts for same-count content changes.");
+
+            int beforePageLoads = 0;
+            DatabaseRestoreTableContentSnapshot largeBeforeContent = BackupRestoreDiffService.CreateTableContentFingerprint(
+                "large_orders",
+                250,
+                (offset, limit) =>
+                {
+                    beforePageLoads++;
+                    return BuildPagedRestoreContentRows(offset, limit, -1);
+                },
+                40,
+                120);
+            int afterPageLoads = 0;
+            DatabaseRestoreTableContentSnapshot largeAfterContent = BackupRestoreDiffService.CreateTableContentFingerprint(
+                "large_orders",
+                250,
+                (offset, limit) =>
+                {
+                    afterPageLoads++;
+                    return BuildPagedRestoreContentRows(offset, limit, 80);
+                },
+                40,
+                120);
+            Assert(beforePageLoads > 1 && afterPageLoads > 1, "Large restore content fingerprints should load data in multiple pages.");
+            Assert(largeBeforeContent.SampledRows == 120 && largeBeforeContent.IsPartial, "Large restore content fingerprint should cap sampled rows and mark partial coverage.");
+            DatabaseRestoreSnapshot largeBefore = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", new[] { "large_orders" }, new string[0], new string[0], new string[0]);
+            DatabaseRestoreSnapshot largeAfter = BackupRestoreDiffService.CreateSnapshot("main", "sqlite", new[] { "large_orders" }, new string[0], new string[0], new string[0]);
+            BackupRestoreDiffService.SetTableContentFingerprint(largeBefore, "large_orders", largeBeforeContent);
+            BackupRestoreDiffService.SetTableContentFingerprint(largeAfter, "large_orders", largeAfterContent);
+            string largeContentSummary = BackupRestoreDiffService.BuildSummary(largeBefore, largeAfter);
+            AssertContains(largeContentSummary, "large_orders：內容指紋變更", "Large restore content diff should detect sampled row value changes.");
+            AssertContains(largeContentSummary, "抽樣 120/250 列", "Large restore content diff should report sampled coverage.");
+
+            DatabaseRestoreContentScanReport scanReport = BackupRestoreDiffService.BuildContentScanReport(
+                largeBefore,
+                largeAfter,
+                new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+            Assert(scanReport.Summary.TotalTables == 1, "Restore content scan report should include scanned table totals.");
+            Assert(scanReport.Summary.ChangedTables == 1, "Restore content scan report should count changed tables.");
+            Assert(scanReport.Summary.PartialTables == 1, "Restore content scan report should count partial table scans.");
+            Assert(scanReport.Summary.BeforeSampledRows == 120 && scanReport.Summary.AfterSampledRows == 120, "Restore content scan report should include sampled row totals.");
+            Assert(scanReport.Tables.Count == 1 && scanReport.Tables[0].IsChanged, "Restore content scan report should flag changed table details.");
+            Assert(scanReport.Tables[0].BeforeFingerprintShort.Length == 12, "Restore content scan report should include short fingerprints.");
+
+            string restoreReportDirectory = Path.Combine(dir, "restore-content-reports");
+            string restoreReportPath = BackupRestoreDiffService.WriteContentScanReport(largeBefore, largeAfter, restoreReportDirectory);
+            Assert(File.Exists(restoreReportPath), "Restore content scan report should be written to disk.");
+            JObject restoreReportJson = JObject.Parse(File.ReadAllText(restoreReportPath, Encoding.UTF8));
+            Assert((int)restoreReportJson["Summary"]["ChangedTables"] == 1, "Restore content scan JSON should include changed table count.");
+            Assert((bool)restoreReportJson["Tables"][0]["IsChanged"], "Restore content scan JSON should include table change details.");
+            Assert((int)restoreReportJson["Tables"][0]["BeforeSampledRows"] == 120, "Restore content scan JSON should include sampled row coverage.");
+
+            Assert(BackupRestoreDiffService.ResolveMaxContentSnapshotRows(0) == BackupRestoreDiffService.MaxContentSnapshotRows, "Restore content snapshot should use the default row limit when unset.");
+            Assert(BackupRestoreDiffService.ResolveMaxContentSnapshotRows(BackupRestoreDiffService.MaxConfigurableContentSnapshotRows + 10) == BackupRestoreDiffService.MaxConfigurableContentSnapshotRows, "Restore content snapshot should clamp oversized row limits.");
+            BackupMirrorSettings.RestoreContentSnapshotMaxRows = 75;
+            MethodInfo restoreRowsMethod = typeof(Form1).GetMethod("GetRestoreContentSnapshotMaxRows", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(restoreRowsMethod != null, "Form1 should expose the restore content snapshot row setting internally.");
+            Assert((int)restoreRowsMethod.Invoke(null, null) == 75, "Restore snapshot capture should read the configured content sample row limit.");
         }
         finally
         {
+            BackupMirrorSettings.RestoreContentSnapshotMaxRows = oldRestoreContentSnapshotMaxRows;
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
     }
@@ -2224,6 +3338,35 @@ public static class SmokeTests
         foreach (string[] row in rows)
         {
             table.Rows.Add(row);
+        }
+        return table;
+    }
+
+    private static DataTable BuildPagedRestoreContentRows(long offset, int limit, long changedId)
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("id", typeof(int));
+        table.Columns.Add("status", typeof(string));
+        table.Columns.Add("payload", typeof(byte[]));
+        for (int i = 0; i < limit; i++)
+        {
+            long id = offset + i + 1;
+            string status = id == changedId ? "changed" : "status-" + (id % 7);
+            table.Rows.Add((int)id, status, new byte[] { (byte)(id % 255) });
+        }
+        return table;
+    }
+
+    private static DataTable BuildRestoreContentRows(IEnumerable<object[]> rows)
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("id", typeof(int));
+        table.Columns.Add("status", typeof(string));
+        table.Columns.Add("payload", typeof(byte[]));
+        foreach (object[] row in rows)
+        {
+            object payload = row[2] == null ? DBNull.Value : row[2];
+            table.Rows.Add(row[0], row[1], payload);
         }
         return table;
     }
@@ -2371,6 +3514,25 @@ public static class SmokeTests
         Assert(filteredPlan.TableCount == 1 && filteredPlan.CommentCount == 2, "SQLite comment import should support legacy table-map JSON and table filters.");
         AssertContains(filteredSql, "'O''Reilly'", "SQLite comment import should escape single quotes.");
         AssertNotContains(filteredSql, "logs", "SQLite comment table filter should skip other tables.");
+        SqliteColumnCommentImportReviewReport filteredReview =
+            SqliteColumnCommentExchangeService.BuildImportReviewReport(db, "main", filteredPlan);
+        Assert(filteredReview.Added == 2 && filteredReview.Removed == 2, "SQLite comment import review should show added and removed comments for replace semantics.");
+        Assert(filteredReview.Entries.Count == 4, "SQLite comment import review should include one entry per changed current/imported comment.");
+        AssertContains(SqliteColumnCommentExchangeService.BuildImportReviewSummary(filteredReview), "新增 2", "SQLite comment import review summary should include added count.");
+        string reviewDirectory = Path.Combine(Path.GetTempPath(), "sqlite_comment_review_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            filteredReview.SourcePath = "legacy.json";
+            string reviewPath = SqliteColumnCommentExchangeService.WriteImportReviewReport(filteredReview, reviewDirectory);
+            Assert(File.Exists(reviewPath), "SQLite comment import review should write a JSON report.");
+            JObject reviewJson = JObject.Parse(File.ReadAllText(reviewPath, Encoding.UTF8));
+            Assert((int)reviewJson["Added"] == 2 && (int)reviewJson["Removed"] == 2, "SQLite comment import review JSON should include diff counts.");
+            Assert(reviewJson["Entries"] != null && reviewJson["Entries"].HasValues, "SQLite comment import review JSON should include entry details.");
+        }
+        finally
+        {
+            if (Directory.Exists(reviewDirectory)) Directory.Delete(reviewDirectory, true);
+        }
 
         string flatArrayJson = "[{\"table\":\"users\",\"column\":\"EMAIL\",\"comment\":\"電子郵件\"},{\"table\":\"logs\",\"column\":\"MESSAGE\",\"comment\":\"訊息\"}]";
         SqliteColumnCommentImportPlan flatArrayPlan = SqliteColumnCommentExchangeService.BuildImportPlan(flatArrayJson, "users");
@@ -2532,10 +3694,25 @@ public static class SmokeTests
     {
         string root = Path.Combine(Path.GetTempPath(), "mysqlpunk_spatialite_" + Guid.NewGuid().ToString("N"));
         string toolsDir = Path.Combine(root, "tools", "spatialite");
+        string cacheDir = Path.Combine(toolsDir, "cache");
+        string offlineDir = Path.Combine(toolsDir, "offline");
         string runtimeDir = Path.Combine(root, "runtime");
         Directory.CreateDirectory(toolsDir);
+        Directory.CreateDirectory(cacheDir);
+        Directory.CreateDirectory(offlineDir);
         Directory.CreateDirectory(runtimeDir);
         File.WriteAllText(Path.Combine(toolsDir, "Build-SpatiaLiteRuntime.ps1"), "# test", Encoding.UTF8);
+        string sourceArchivePath = Path.Combine(cacheDir, "libspatialite-5.1.0.zip");
+        string offlineArchivePath = Path.Combine(offlineDir, "libspatialite-5.1.0.zip");
+        File.WriteAllText(sourceArchivePath, "cached source", Encoding.UTF8);
+        File.WriteAllText(offlineArchivePath, "offline source", Encoding.UTF8);
+        string runtimeDllPath = Path.Combine(runtimeDir, "libspatialite.dll");
+        File.WriteAllText(runtimeDllPath, "runtime dll", Encoding.UTF8);
+        string runtimeDllHash = ComputeFileSha256ForTest(runtimeDllPath);
+        File.WriteAllText(
+            Path.Combine(runtimeDir, "SPATIALITE_RUNTIME_MANIFEST.json"),
+            "{\"source_url\":\"https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip\",\"source_sha256\":\"abc123\",\"built_at_utc\":\"2026-05-24T00:00:00Z\",\"files\":[{\"name\":\"libspatialite.dll\",\"sha256\":\"" + runtimeDllHash + "\",\"bytes\":" + new FileInfo(runtimeDllPath).Length + "},{\"name\":\"missing_dependency.dll\",\"sha256\":\"deadbeef\",\"bytes\":12},{\"name\":\"../outside.dll\",\"sha256\":\"deadbeef\",\"bytes\":12}]}",
+            Encoding.UTF8);
 
         try
         {
@@ -2547,19 +3724,64 @@ public static class SmokeTests
             AssertContains(details, "SpatiaLite Repair Script|Ready", "SpatiaLite diagnostics should detect the rebuild script.");
             AssertContains(details, "Build-SpatiaLiteRuntime.ps1", "SpatiaLite diagnostics should show the rebuild script path.");
             AssertContains(details, "powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should show a runnable repair command.");
+            AssertContains(details, "SpatiaLite Manifest Source|Info|來源：https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip", "SpatiaLite diagnostics should summarize the runtime manifest source.");
+            AssertContains(details, "SHA-256：abc123", "SpatiaLite diagnostics should show the manifest source checksum.");
+            AssertContains(details, "SpatiaLite Runtime File Verification|Warning|已校驗 1，缺少 1", "SpatiaLite diagnostics should verify manifest files and report missing runtime dependencies.");
+            AssertContains(details, "missing_dependency.dll 缺少", "SpatiaLite manifest verification should name missing runtime files.");
+            AssertContains(details, "../outside.dll 檔名不安全", "SpatiaLite manifest verification should reject paths outside the runtime directory.");
+            AssertContains(details, "SpatiaLite Source Cache|Ready|" + sourceArchivePath, "SpatiaLite diagnostics should detect the cached source archive.");
+            AssertContains(details, "SpatiaLite Offline Package|Ready|" + offlineArchivePath, "SpatiaLite diagnostics should detect the offline source package.");
+            AssertContains(details, "SpatiaLite Cached Repair Command|Info|powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should expose a cached repair command.");
+            AssertContains(details, "-PreferCachedSource", "SpatiaLite cached repair command should prefer the cached source archive.");
+            AssertContains(details, "-OfflinePackagePath", "SpatiaLite cached repair command should use a detected offline package.");
             AssertContains(details, "SpatiaLite Repair Log|Info", "SpatiaLite diagnostics should show the repair log path.");
             AssertContains(details, "SpatiaLite Missing DLL|Warning", "SpatiaLite diagnostics should warn when mod_spatialite.dll is missing.");
             AssertContains(details, "missing mod_spatialite", "SpatiaLite diagnostics should keep the load error.");
 
             System.Diagnostics.ProcessStartInfo startInfo = SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(root);
             AssertEquals("powershell.exe", startInfo.FileName, "SpatiaLite repair should launch PowerShell.");
+            AssertContains(startInfo.Arguments, "-NoExit", "SpatiaLite repair should keep the interactive window open by default.");
             AssertContains(startInfo.Arguments, "Tee-Object", "SpatiaLite repair should tee progress output to a log.");
             AssertContains(startInfo.Arguments, "Build-SpatiaLiteRuntime.ps1", "SpatiaLite repair should invoke the rebuild script.");
             Assert(startInfo.UseShellExecute, "SpatiaLite repair should open an interactive PowerShell window.");
+
+            System.Diagnostics.ProcessStartInfo watchedStartInfo = SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(root, false);
+            Assert(!watchedStartInfo.Arguments.Contains("-NoExit"), "Watched SpatiaLite repair should exit so the UI can refresh diagnostics.");
+            AssertContains(watchedStartInfo.Arguments, "Tee-Object", "Watched SpatiaLite repair should still tee progress output to a log.");
+            Assert(watchedStartInfo.UseShellExecute, "Watched SpatiaLite repair should still open a PowerShell window.");
+
+            File.WriteAllText(
+                Path.Combine(runtimeDir, "SPATIALITE_RUNTIME_MANIFEST.json"),
+                "{\"source_url\":\"https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip\",\"source_sha256\":\"abc123\",\"built_at_utc\":\"2026-05-24T00:00:00Z\",\"files\":[{\"name\":\"libspatialite.dll\",\"sha256\":\"" + runtimeDllHash + "\",\"bytes\":" + new FileInfo(runtimeDllPath).Length + "}]}",
+                Encoding.UTF8);
+            List<SpatiaLiteDiagnosticRow> verifiedRows = SpatiaLiteRuntimeDiagnosticService.BuildRows(runtimeDir, "", root);
+            string verifiedDetails = string.Join("\n", verifiedRows.Select(r => r.Item + "|" + r.Status + "|" + r.Detail).ToArray());
+            AssertContains(verifiedDetails, "SpatiaLite Runtime File Verification|Ready|已校驗 1 個 runtime 檔案。", "SpatiaLite diagnostics should report ready when every manifest file matches.");
+
+            using (my_sqlite sqlite = new my_sqlite())
+            {
+                sqlite.RetryLoadSpatiaLite();
+                AssertContains(sqlite.SpatiaLiteLoadError, "not open", "Retrying SpatiaLite without an open SQLite connection should report a usable error.");
+            }
         }
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    private static string ComputeFileSha256ForTest(string path)
+    {
+        using (SHA256 sha = SHA256.Create())
+        using (FileStream stream = File.OpenRead(path))
+        {
+            byte[] hash = sha.ComputeHash(stream);
+            StringBuilder builder = new StringBuilder(hash.Length * 2);
+            foreach (byte b in hash)
+            {
+                builder.Append(b.ToString("x2"));
+            }
+            return builder.ToString();
         }
     }
 
@@ -2580,10 +3802,173 @@ public static class SmokeTests
 
         string markdown = QueryResultExportService.BuildText(table, QueryResultExportFormat.Markdown);
         AssertContains(markdown, "| Name | Amount | Payload |", "Markdown export should include headers.");
+        string sqlScript = QueryResultExportService.BuildText(table, QueryResultExportFormat.Sql);
+        AssertContains(sqlScript, "INSERT INTO \"query_result\" (\"Name\", \"Amount\", \"Payload\") VALUES ('A, B', 12.5, X'AABBCC');", "SQL export should write insert statements with escaped identifiers and BLOB literals.");
         Assert(QueryResultExportService.ResolveFormat("result.json", 2) == QueryResultExportFormat.Json, "Extension should determine query export format.");
+        Assert(QueryResultExportService.ResolveFormat("result.sql", 1) == QueryResultExportFormat.Sql, "SQL extension should determine query export format.");
         Assert(QueryResultExportService.ResolveFormat("result", 1) == QueryResultExportFormat.Csv, "First export filter should default to CSV.");
         Assert(QueryResultExportService.ResolveFormat("result", 2) == QueryResultExportFormat.Xlsx, "Second export filter should still support Excel.");
+        Assert(QueryResultExportService.ResolveFormat("result", 8) == QueryResultExportFormat.Sql, "SQL export filter should select SQL insert format.");
+        Assert(QueryResultExportService.CanStreamFormat(QueryResultExportFormat.Sql), "SQL insert export should support streaming query results.");
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
+
+        string xlsxPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_query_export_" + Guid.NewGuid().ToString("N") + ".xlsx");
+        string summaryPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_query_export_summary_" + Guid.NewGuid().ToString("N") + ".csv");
+        string csvPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".csv");
+        string jsonPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".json");
+        string xmlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".xml");
+        string htmlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".html");
+        string markdownPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".md");
+        string sqlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".sql");
+        my_sqlite db = new my_sqlite();
+        try
+        {
+            db.SetConn("Data Source=:memory:;Version=3;New=True;");
+            db.Open();
+            db.ExecSQL("CREATE TABLE export_test (id INTEGER PRIMARY KEY, name TEXT, amount REAL, payload BLOB);");
+            db.ExecSQL("INSERT INTO export_test (id, name, amount, payload) VALUES (@p0, @p1, @p2, @p3);",
+                new Dictionary<string, object> { { "p0", 1 }, { "p1", "A, B" }, { "p2", 12.5 }, { "p3", new byte[] { 0xAA, 0xBB, 0xCC } } });
+            db.ExecSQL("INSERT INTO export_test (id, name, amount, payload) VALUES (@p0, @p1, @p2, @p3);",
+                new Dictionary<string, object> { { "p0", 2 }, { "p1", "Line\nBreak" }, { "p2", 7.25 }, { "p3", DBNull.Value } });
+
+            QueryResultExportService.Write(table, xlsxPath, QueryResultExportFormat.Xlsx);
+            using (ZipArchive archive = ZipFile.OpenRead(xlsxPath))
+            {
+                string sheetXml = ReadZipEntryText(archive, "xl/worksheets/sheet1.xml");
+                string stylesXml = ReadZipEntryText(archive, "xl/styles.xml");
+                AssertContains(sheetXml, "<pane ySplit=\"1\" topLeftCell=\"A2\"", "XLSX export should freeze the header row.");
+                AssertContains(sheetXml, "<autoFilter ref=\"A1:C2\"", "XLSX export should enable filters across exported columns.");
+                AssertContains(sheetXml, "<cols><col min=\"1\" max=\"1\"", "XLSX export should include stable column widths.");
+                AssertContains(sheetXml, "r=\"A1\" t=\"inlineStr\" s=\"1\"", "XLSX export should apply the header style.");
+                AssertContains(stylesXml, "<fonts count=\"2\">", "XLSX export should include a header font style.");
+                AssertContains(stylesXml, "<cellXfs count=\"2\">", "XLSX export should include a header cell format.");
+            }
+
+            File.WriteAllText(summaryPath, "Name,Amount\r\nA,12.5\r\n", Encoding.UTF8);
+            QueryResultExportSummary summary = QueryResultExportService.BuildSummary(summaryPath, QueryResultExportFormat.Csv, 1);
+            AssertEquals(summaryPath, summary.Path, "Export summary should keep the target path.");
+            AssertEquals(Path.GetFileName(summaryPath), summary.FileName, "Export summary should expose the file name.");
+            AssertEquals(Path.GetDirectoryName(summaryPath), summary.DirectoryPath, "Export summary should expose the target directory.");
+            Assert(summary.Rows == 1, "Export summary should keep the exported row count.");
+            Assert(summary.BytesWritten > 0, "Export summary should read the written file size.");
+            AssertEquals("CSV", summary.FormatName, "Export summary should expose a friendly format name.");
+            AssertContains(summary.BuildDetailText(), summary.FileName, "Export summary detail text should include the file name.");
+            AssertContains(summary.BuildDetailText(), "CSV", "Export summary detail text should include the format name.");
+            using (ExportCompletedDialog dialog = new ExportCompletedDialog(summary))
+            {
+                AssertEquals(Localization.T("Query.ExportSummaryTitle"), dialog.Text, "Export completed dialog should use the localized title.");
+                Assert(dialog.Controls.Count > 0, "Export completed dialog should initialize its layout.");
+            }
+
+            long lastProgress = 0;
+            QueryResultStreamingExportResult streamCsv = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, amount, payload FROM export_test WHERE id >= @p0 ORDER BY id;",
+                new Dictionary<string, object> { { "p0", 1 } },
+                csvPath,
+                QueryResultExportFormat.Csv,
+                rows => lastProgress = rows);
+            string streamedCsv = File.ReadAllText(csvPath, Encoding.UTF8);
+            Assert(streamCsv.Rows == 2 && lastProgress == 2, "Streaming CSV export should report exported rows.");
+            Assert(streamCsv.BytesWritten > 0, "Streaming CSV export should report written bytes.");
+            AssertContains(streamedCsv, "name,amount,payload", "Streaming CSV export should include headers.");
+            AssertContains(streamedCsv, "\"A, B\",12.5,[BLOB 3 bytes] 0xAABBCC", "Streaming CSV export should escape values and format BLOB previews.");
+            AssertContains(streamedCsv, "\"Line\nBreak\",7.25,", "Streaming CSV export should preserve embedded newlines safely.");
+
+            QueryResultStreamingExportResult streamJson = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, payload FROM export_test ORDER BY id;",
+                null,
+                jsonPath,
+                QueryResultExportFormat.Json);
+            string streamedJson = File.ReadAllText(jsonPath, Encoding.UTF8);
+            Assert(streamJson.Rows == 2, "Streaming JSON export should report exported rows.");
+            AssertContains(streamedJson, "\"name\":\"A, B\"", "Streaming JSON export should include row objects without loading a DataTable.");
+            AssertContains(streamedJson, "\"payload\":\"[BLOB 3 bytes] 0xAABBCC\"", "Streaming JSON export should use shared BLOB previews.");
+            AssertContains(streamedJson, "\"payload\":null", "Streaming JSON export should preserve null values.");
+
+            QueryResultStreamingExportResult streamXml = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, payload FROM export_test ORDER BY id;",
+                null,
+                xmlPath,
+                QueryResultExportFormat.Xml);
+            string streamedXml = File.ReadAllText(xmlPath, Encoding.UTF8);
+            Assert(streamXml.Rows == 2, "Streaming XML export should report exported rows.");
+            AssertContains(streamedXml, "<?xml version=\"1.0\" encoding=\"utf-8\"?>", "Streaming XML export should include a document header.");
+            AssertContains(streamedXml, "<field name=\"name\">A, B</field>", "Streaming XML export should include field values.");
+            AssertContains(streamedXml, "<field name=\"payload\" isNull=\"true\" />", "Streaming XML export should preserve null values.");
+
+            QueryResultStreamingExportResult streamHtml = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, payload FROM export_test ORDER BY id;",
+                null,
+                htmlPath,
+                QueryResultExportFormat.Html);
+            string streamedHtml = File.ReadAllText(htmlPath, Encoding.UTF8);
+            Assert(streamHtml.Rows == 2, "Streaming HTML export should report exported rows.");
+            AssertContains(streamedHtml, "<table>", "Streaming HTML export should include a table.");
+            AssertContains(streamedHtml, "<td>A, B</td>", "Streaming HTML export should include escaped table cells.");
+            AssertContains(streamedHtml, "<td>[BLOB 3 bytes] 0xAABBCC</td>", "Streaming HTML export should use shared BLOB previews.");
+
+            QueryResultStreamingExportResult streamMarkdown = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, payload FROM export_test ORDER BY id;",
+                null,
+                markdownPath,
+                QueryResultExportFormat.Markdown);
+            string streamedMarkdown = File.ReadAllText(markdownPath, Encoding.UTF8);
+            Assert(streamMarkdown.Rows == 2, "Streaming Markdown export should report exported rows.");
+            AssertContains(streamedMarkdown, "| name | payload |", "Streaming Markdown export should include headers.");
+            AssertContains(streamedMarkdown, "| A, B | [BLOB 3 bytes] 0xAABBCC |", "Streaming Markdown export should include row values.");
+            AssertContains(streamedMarkdown, "| Line<br>Break |  |", "Streaming Markdown export should keep multiline cells table-safe.");
+
+            QueryResultStreamingExportResult streamSql = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, amount, payload FROM export_test ORDER BY id;",
+                null,
+                sqlPath,
+                QueryResultExportFormat.Sql);
+            string streamedSql = File.ReadAllText(sqlPath, Encoding.UTF8);
+            Assert(streamSql.Rows == 2, "Streaming SQL export should report exported rows.");
+            AssertContains(streamedSql, "INSERT INTO \"query_result\" (\"name\", \"amount\", \"payload\") VALUES ('A, B', 12.5, X'AABBCC');", "Streaming SQL export should write insert statements.");
+            AssertContains(streamedSql, "INSERT INTO \"query_result\" (\"name\", \"amount\", \"payload\") VALUES ('Line", "Streaming SQL export should preserve multiline string values.");
+            AssertContains(streamedSql, ", 7.25, NULL);", "Streaming SQL export should preserve null values.");
+        }
+        finally
+        {
+            db.Dispose();
+            if (File.Exists(xlsxPath)) File.Delete(xlsxPath);
+            if (File.Exists(summaryPath)) File.Delete(summaryPath);
+            if (File.Exists(csvPath)) File.Delete(csvPath);
+            if (File.Exists(jsonPath)) File.Delete(jsonPath);
+            if (File.Exists(xmlPath)) File.Delete(xmlPath);
+            if (File.Exists(htmlPath)) File.Delete(htmlPath);
+            if (File.Exists(markdownPath)) File.Delete(markdownPath);
+            if (File.Exists(sqlPath)) File.Delete(sqlPath);
+        }
+
+        QueryForm form = (QueryForm)FormatterServices.GetUninitializedObject(typeof(QueryForm));
+        SetPrivateField(form, "_lastResultSql", "SELECT name FROM export_test ORDER BY id;");
+        SetPrivateField(form, "_lastResultCanStreamExport", true);
+        SetPrivateField(form, "_isTableDataMode", false);
+        string streamingSql;
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Csv, out streamingSql),
+            "Query form should enable streaming export for successful non-table CSV results.");
+        AssertEquals("SELECT name FROM export_test ORDER BY id;", streamingSql, "Query form should stream the last successful result SQL.");
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Json, out streamingSql),
+            "Query form should enable streaming export for JSON results.");
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Xml, out streamingSql),
+            "Query form should enable streaming export for XML results.");
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Html, out streamingSql),
+            "Query form should enable streaming export for HTML results.");
+        Assert(TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Markdown, out streamingSql),
+            "Query form should enable streaming export for Markdown results.");
+        Assert(!TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Xlsx, out streamingSql),
+            "Query form should keep formatted workbook exports on the DataTable path.");
+        SetPrivateField(form, "_isTableDataMode", true);
+        Assert(!TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Csv, out streamingSql),
+            "Query form should not re-query table edit mode because current rows may contain unsaved edits.");
     }
 
     private static void TestQueryFormOptionSettings()
@@ -2605,6 +3990,7 @@ public static class SmokeTests
         bool oldShowThousands = ApplicationOptionSettings.GetBool("RecordShowThousandsSeparator");
         bool oldUseSystemNumberFormat = ApplicationOptionSettings.GetBool("RecordUseSystemNumberFormat");
         string oldRowHeightMode = ApplicationOptionSettings.GetString("RecordRowHeightMode");
+        string oldExportDirectory = ApplicationOptionSettings.GetString("FileExportDirectory");
 
         try
         {
@@ -2675,6 +4061,14 @@ public static class SmokeTests
             AssertEquals("ROLLBACK", GetTableSaveTransactionSql("oracle", "RollbackSql"), "Oracle table saves should use ROLLBACK without an explicit BEGIN.");
             ApplicationOptionSettings.SetBool("RecordAutoBeginTransaction", false);
             AssertEquals("", GetTableSaveTransactionSql("mysql", "BeginSql"), "Transaction statements should be disabled when the option is off.");
+
+            string rememberedExportDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk_export_remember_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(rememberedExportDirectory);
+            RememberQueryFormConfiguredDirectory("FileExportDirectory", Path.Combine(rememberedExportDirectory, "result.csv"));
+            AssertEquals(rememberedExportDirectory, ApplicationOptionSettings.GetString("FileExportDirectory"), "Query export should remember the selected output folder.");
+            RememberQueryFormConfiguredDirectory("FileExportDirectory", "");
+            AssertEquals(rememberedExportDirectory, ApplicationOptionSettings.GetString("FileExportDirectory"), "Empty export paths should not clear the remembered folder.");
+            Directory.Delete(rememberedExportDirectory);
         }
         finally
         {
@@ -2695,7 +4089,15 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("RecordShowThousandsSeparator", oldShowThousands);
             ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", oldUseSystemNumberFormat);
             ApplicationOptionSettings.SetString("RecordRowHeightMode", oldRowHeightMode);
+            ApplicationOptionSettings.SetString("FileExportDirectory", oldExportDirectory);
+            ApplicationOptionSettings.Save();
         }
+    }
+
+    private static void RememberQueryFormConfiguredDirectory(string optionKey, string filePath)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("RememberConfiguredDirectoryForPath", BindingFlags.Static | BindingFlags.NonPublic);
+        method.Invoke(null, new object[] { optionKey, filePath });
     }
 
     private static string GetTableSaveTransactionSql(string providerName, string propertyName)
@@ -2837,6 +4239,72 @@ public static class SmokeTests
             conflictMessage.IndexOf("p1=7", StringComparison.OrdinalIgnoreCase) >= 0;
         Assert(rejectedConflict, "Update/delete zero affected rows conflict should include operation, WHERE detail, and parameter values.");
 
+        DataTable databaseCurrentRow = table.Clone();
+        databaseCurrentRow.Rows.Add(7, "database name", DBNull.Value, new byte[] { 0x01, 0x02 });
+        FakeExecDatabase noPrimaryConflictDb = new FakeExecDatabase("postgresql", "0");
+        noPrimaryConflictDb.SelectResult = databaseCurrentRow;
+        SetPrivateField(form, "_db", noPrimaryConflictDb);
+        SetPrivateField(form, "_databaseName", "main");
+        string databaseDiffMessage = "";
+        try
+        {
+            InvokeQueryFormExecuteUpdate(
+                form,
+                "users",
+                new[]
+                {
+                    CreateQueryFormColumnInfo("id", false),
+                    CreateQueryFormColumnInfo("name", false),
+                    CreateQueryFormColumnInfo("note", false),
+                    CreateQueryFormColumnInfo("payload", false)
+                },
+                new List<string>(),
+                row);
+        }
+        catch (TargetInvocationException ex)
+        {
+            databaseDiffMessage = ex.InnerException != null ? ex.InnerException.Message : "";
+        }
+
+        AssertContains(databaseDiffMessage, "資料庫目前差異", "No-primary-key update conflict should try to include the current database row diff.");
+        AssertContains(databaseDiffMessage, "name", "No-primary-key conflict diff should include the changed column.");
+        AssertContains(databaseDiffMessage, "old name", "No-primary-key conflict diff should include the original value.");
+        AssertContains(databaseDiffMessage, "database name", "No-primary-key conflict diff should include the current database value.");
+        Assert(noPrimaryConflictDb.SelectedSql.Count == 1 &&
+            noPrimaryConflictDb.SelectedSql[0].IndexOf("\"id\" = :p0", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            noPrimaryConflictDb.SelectedSql[0].IndexOf("\"note\" IS NULL", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            noPrimaryConflictDb.SelectedSql[0].IndexOf("\"name\" = ", StringComparison.OrdinalIgnoreCase) < 0,
+            "No-primary-key conflict re-query should use only unchanged comparable columns.");
+
+        DataTable duplicateCurrentRows = table.Clone();
+        duplicateCurrentRows.Rows.Add(7, "database name", DBNull.Value, new byte[] { 0x01 });
+        duplicateCurrentRows.Rows.Add(7, "another name", DBNull.Value, new byte[] { 0x02 });
+        FakeExecDatabase duplicateConflictDb = new FakeExecDatabase("postgresql", "0");
+        duplicateConflictDb.SelectResult = duplicateCurrentRows;
+        SetPrivateField(form, "_db", duplicateConflictDb);
+        string duplicateConflictMessage = "";
+        try
+        {
+            InvokeQueryFormExecuteUpdate(
+                form,
+                "users",
+                new[]
+                {
+                    CreateQueryFormColumnInfo("id", false),
+                    CreateQueryFormColumnInfo("name", false),
+                    CreateQueryFormColumnInfo("note", false),
+                    CreateQueryFormColumnInfo("payload", false)
+                },
+                new List<string>(),
+                row);
+        }
+        catch (TargetInvocationException ex)
+        {
+            duplicateConflictMessage = ex.InnerException != null ? ex.InnerException.Message : "";
+        }
+
+        AssertContains(duplicateConflictMessage, "多筆候選資料列", "No-primary-key conflict diff should not guess when re-query finds multiple rows.");
+
         FakeExecDatabase insertDb = new FakeExecDatabase("postgresql", "0");
         SetPrivateField(form, "_db", insertDb);
         InvokeQueryFormExecOrThrow(form, "INSERT INTO public.users (name) VALUES (:p0);", new Dictionary<string, object>(), false);
@@ -2887,6 +4355,29 @@ public static class SmokeTests
         return where;
     }
 
+    private static bool TryGetQueryFormStreamingExportSql(QueryForm form, QueryResultExportFormat format, out string sql)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("TryGetStreamingExportSql", BindingFlags.Instance | BindingFlags.NonPublic);
+        object[] args = { format, null };
+        bool result = (bool)method.Invoke(form, args);
+        sql = args[1] as string;
+        return result;
+    }
+
+    private static void InvokeQueryFormExecuteUpdate(QueryForm form, string tableName, object[] columns, List<string> primaryKeys, DataRow row)
+    {
+        Type columnType = typeof(QueryForm).GetNestedType("TableColumnInfo", BindingFlags.NonPublic);
+        Type listType = typeof(List<>).MakeGenericType(columnType);
+        System.Collections.IList typedColumns = (System.Collections.IList)Activator.CreateInstance(listType);
+        foreach (object column in columns)
+        {
+            typedColumns.Add(column);
+        }
+
+        MethodInfo method = typeof(QueryForm).GetMethod("ExecuteUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
+        method.Invoke(form, new object[] { tableName, typedColumns, primaryKeys, row });
+    }
+
     private static object CreateQueryFormColumnInfo(string name, bool isPrimaryKey)
     {
         Type columnType = typeof(QueryForm).GetNestedType("TableColumnInfo", BindingFlags.NonPublic);
@@ -2899,7 +4390,8 @@ public static class SmokeTests
 
     private static void InvokeQueryFormExecOrThrow(QueryForm form, string sql, Dictionary<string, object> parameters, bool requireAffectedRow)
     {
-        MethodInfo method = typeof(QueryForm).GetMethod("ExecOrThrow", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo method = typeof(QueryForm).GetMethod("ExecOrThrow", BindingFlags.Instance | BindingFlags.NonPublic, null,
+            new[] { typeof(string), typeof(Dictionary<string, object>), typeof(bool) }, null);
         method.Invoke(form, new object[] { sql, parameters, requireAffectedRow });
     }
 
@@ -3090,6 +4582,17 @@ public static class SmokeTests
         Assert(ObjectVisibilityService.FilterNames(new[] { "pg_class", "public.users" }, "postgresql", "table", false).SequenceEqual(new[] { "public.users" }), "Object visibility should hide PostgreSQL pg_* objects.");
     }
 
+    private static void TestMySqlGuidFormatNone()
+    {
+        using (var db = new my_mysql())
+        {
+            db.SetConn("Server=localhost;User ID=test;Password=test;");
+            string connectionString = db.MCT == null ? "" : (db.MCT.ConnectionString ?? "");
+            string normalizedConnectionString = connectionString.ToLowerInvariant().Replace(" ", "");
+            AssertContains(normalizedConnectionString, "guidformat=none", "MySQL connection should default GuidFormat=None to avoid CHAR(36) parsing failures during dump.");
+        }
+    }
+
     private static void TestConnectionProxySettingsService()
     {
         ConnectionProxySettings disabled = new ConnectionProxySettings
@@ -3168,6 +4671,38 @@ public static class SmokeTests
         Assert(!disabled.RegisterSqlOpenWith, "Disabled plan should not register SQL Open With.");
         Assert(!disabled.RegisterUrlProtocol, "Disabled plan should not register URL protocol.");
         AssertEquals(0.ToString(), disabled.RegistryPaths.Count.ToString(), "Disabled plan should not report registry paths.");
+    }
+
+    private static void TestApplicationUpdateCheckService()
+    {
+        string releaseJson = @"{
+  ""tag_name"": ""v1.2.3"",
+  ""name"": ""mySQLPunk 1.2.3"",
+  ""html_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/tag/v1.2.3"",
+  ""body"": ""更新內容"",
+  ""prerelease"": false,
+  ""assets"": [
+    {
+      ""name"": ""mySQLPunk-Setup.exe"",
+      ""browser_download_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/download/v1.2.3/mySQLPunk-Setup.exe""
+    }
+  ]
+}";
+
+        AppUpdateCheckResult update = AppUpdateService.ParseGitHubLatestRelease(releaseJson, "1.0.0.0");
+        Assert(update.UpdateAvailable, "Update check should detect newer semantic versions.");
+        AssertEquals("1.2.3", update.LatestVersion.ToString(), "Update check should normalize v-prefixed release tags.");
+        AssertContains(update.ReleasePageUrl, "/releases/tag/v1.2.3", "Update check should keep the release page URL.");
+        AssertContains(update.InstallerDownloadUrl, "mySQLPunk-Setup.exe", "Update check should prefer installer assets.");
+        AssertContains(update.ReleaseNotes, "更新內容", "Update check should keep release notes.");
+
+        AppUpdateCheckResult current = AppUpdateService.ParseGitHubLatestRelease(releaseJson, "1.2.3.0");
+        Assert(!current.UpdateAvailable, "Update check should not report an update for the same version.");
+
+        AssertEquals(
+            "https://api.github.com/repos/shadowjohn/mySQLPunk/releases/latest",
+            AppUpdateService.BuildGitHubLatestReleaseApiUrl("shadowjohn", "mySQLPunk"),
+            "Update check should build the GitHub latest release endpoint.");
     }
 
     private static void TestDarkThemeControlCoverage()
@@ -3317,16 +4852,26 @@ public static class SmokeTests
         string target = WindowsCredentialService.BuildTargetName("default", conn) + "/" + Guid.NewGuid().ToString("N");
         AssertContains(target, "mySQLPunk/default/mysql/Smoke_Test_Connection/tester@localhost_3306", "Credential target should be deterministic and sanitized.");
 
+        bool wrote = false;
         try
         {
-            Assert(WindowsCredentialService.TryWritePassword(target, "tester", "secret-value"), "Credential service should write a password.");
+            wrote = WindowsCredentialService.TryWritePassword(target, "tester", "secret-value");
+            if (!wrote)
+            {
+                Console.WriteLine("[WARN] Windows credential store is unavailable in this logon session; skipped write/read/delete round-trip.");
+                return;
+            }
+
             string password;
             Assert(WindowsCredentialService.TryReadPassword(target, out password), "Credential service should read a password.");
             AssertEquals("secret-value", password, "Credential service should round-trip the password.");
         }
         finally
         {
-            Assert(WindowsCredentialService.TryDeletePassword(target), "Credential service should delete the test credential.");
+            if (wrote)
+            {
+                Assert(WindowsCredentialService.TryDeletePassword(target), "Credential service should delete the test credential.");
+            }
         }
     }
 
@@ -3334,14 +4879,18 @@ public static class SmokeTests
     {
         MethodInfo computeMethod = typeof(Form1).GetMethod("ComputeConnectionImportSignature", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo readMethod = typeof(Form1).GetMethod("ReadConnectionImportSignature", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo previewMethod = typeof(Form1).GetMethod("BuildConnectionImportPreview", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo summaryMethod = typeof(Form1).GetMethod("BuildConnectionImportSignatureSummary", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo trustSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportTrustSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo reviewSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportReviewSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo writeReviewLogMethod = typeof(Form1).GetMethod("WriteConnectionImportReviewLog", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo trustSourceMethod = typeof(Form1).GetMethod("TrustConnectionImportSource", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo isTrustedMethod = typeof(Form1).GetMethod("IsConnectionImportSourceTrusted", BindingFlags.Static | BindingFlags.NonPublic);
         Type reportType = typeof(Form1).GetNestedType("ConnectionImportPreviewReport", BindingFlags.NonPublic);
 
         string importPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_import_signature_" + Guid.NewGuid().ToString("N") + ".json");
         string trustedSourcesPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_trusted_sources_" + Guid.NewGuid().ToString("N") + ".json");
+        string reviewLogPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_import_review_" + Guid.NewGuid().ToString("N") + ".jsonl");
         try
         {
             string sourceId = Guid.NewGuid().ToString("N");
@@ -3370,6 +4919,24 @@ public static class SmokeTests
             AssertContains(summary, "SHA-256", "Signature summary should show the hash algorithm.");
             string trustSummary = (string)trustSummaryMethod.Invoke(null, new object[] { report });
             AssertContains(trustSummary, "尚未加入白名單", "Untrusted signed source should be called out.");
+            object previewReport = previewMethod.Invoke(null, new object[] { importPath, new List<Dictionary<string, object>>() });
+            string reviewSummary = (string)reviewSummaryMethod.Invoke(null, new object[] { previewReport });
+            AssertContains(reviewSummary, "團隊審核摘要", "Import review should include a team review summary.");
+            AssertContains(reviewSummary, "簽章有效但尚未信任", "Import review should describe source trust state.");
+            AssertContains(reviewSummary, "新增/更新=1", "Import review should summarize changed connection count.");
+            AssertContains(reviewSummary, "需補密碼=1", "Import review should summarize password follow-up count.");
+            string writtenReviewLogPath = (string)writeReviewLogMethod.Invoke(null, new object[] { previewReport, "mergeSelected", new[] { 0 }, reviewLogPath });
+            AssertEquals(reviewLogPath, writtenReviewLogPath, "Import review log writer should return the written path.");
+            Assert(File.Exists(reviewLogPath), "Import review log should be written as JSONL.");
+            string reviewLogLine = File.ReadAllLines(reviewLogPath, Encoding.UTF8).Last();
+            JObject reviewLog = JObject.Parse(reviewLogLine);
+            AssertEquals("mergeSelected", (string)reviewLog["Action"], "Import review log should record the import action.");
+            AssertEquals("簽章有效但尚未信任", (string)reviewLog["SourceSignatureState"], "Import review log should record source trust state.");
+            Assert((int)reviewLog["SelectedImportedCount"] == 1, "Import review log should record selected imported count.");
+            Assert((int)reviewLog["PasswordsRequired"] == 1, "Import review log should record password follow-up count.");
+            Assert(reviewLog["Groups"] != null && reviewLog["Groups"].Values<string>().Contains("signed-group"), "Import review log should preserve imported groups.");
+            Assert(reviewLog["Targets"] != null && reviewLog["Targets"].HasValues, "Import review log should include changed targets.");
+            Assert((bool)reviewLog["Targets"][0]["Selected"], "Import review log should mark selected targets.");
 
             Assert(!(bool)isTrustedMethod.Invoke(null, new object[] { sourceId, trustedSourcesPath }), "New source should not be trusted before whitelisting.");
             trustSourceMethod.Invoke(null, new object[] { sourceId, signature, trustedSourcesPath });
@@ -3386,6 +4953,7 @@ public static class SmokeTests
         {
             if (File.Exists(importPath)) File.Delete(importPath);
             if (File.Exists(trustedSourcesPath)) File.Delete(trustedSourcesPath);
+            if (File.Exists(reviewLogPath)) File.Delete(reviewLogPath);
         }
     }
 
@@ -3395,6 +4963,7 @@ public static class SmokeTests
         MethodInfo targetTextMethod = typeof(Form1).GetMethod("BuildImportedConnectionPasswordTargetText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo collectMethod = typeof(Form1).GetMethod("CollectImportedConnectionPasswords", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo previewMethod = typeof(Form1).GetMethod("BuildConnectionImportPreview", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo reviewSummaryMethod = typeof(Form1).GetMethod("BuildConnectionImportReviewSummary", BindingFlags.Static | BindingFlags.NonPublic);
 
         Dictionary<string, object> mysqlConn = new Dictionary<string, object>
         {
@@ -3460,6 +5029,12 @@ public static class SmokeTests
             Assert((int)GetProperty(report, "ExistingOnly") == 1, "Import preview should count existing-only connections.");
             var importedGroups = (System.Collections.ICollection)GetProperty(report, "ImportedGroups");
             Assert(importedGroups.Count == 1, "Import preview should keep imported groups for merge.");
+            string reviewSummary = (string)reviewSummaryMethod.Invoke(null, new object[] { report });
+            AssertContains(reviewSummary, "新增/更新=2", "Import review should count added and updated connections.");
+            AssertContains(reviewSummary, "本機只存在=1", "Import review should call out local-only connections before replace-all.");
+            AssertContains(reviewSummary, "需補密碼=3", "Import review should count imported connections that need password follow-up.");
+            AssertContains(reviewSummary, "imported", "Import review should list imported groups for team review.");
+            AssertContains(reviewSummary, "postgresql new@pg:5432", "Import review should include changed targets for reviewers.");
         }
         finally
         {
@@ -3510,6 +5085,36 @@ public static class SmokeTests
     {
         MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOracleHighRiskConfirmationMessage", BindingFlags.Static | BindingFlags.NonPublic);
         return (string)method.Invoke(null, new object[] { sql });
+    }
+
+    private static string BuildOraclePrivilegeDiagnosticSummary(DataTable objectPrivileges, DataTable sessionPrivileges, string sql)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOraclePrivilegeDiagnosticSummary", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { objectPrivileges, sessionPrivileges, sql });
+    }
+
+    private static string BuildOracleRepairSuggestions(string reason, string databaseName, string tableName, string sql, DataTable objectPrivileges, DataTable sessionPrivileges)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOracleRepairSuggestions", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { reason, databaseName, tableName, sql, objectPrivileges, sessionPrivileges });
+    }
+
+    private static string BuildOracleErrorHints(string reason, string databaseName, string tableName)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("GetOracleDesignerErrorHints", BindingFlags.Static | BindingFlags.NonPublic);
+        IEnumerable<string> hints = (IEnumerable<string>)method.Invoke(null, new object[] { reason, databaseName, tableName });
+        return string.Join("\n", hints.ToArray());
+    }
+
+    private static DataTable BuildOraclePrivilegeTable(params string[] privileges)
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("PRIVILEGE");
+        foreach (string privilege in privileges)
+        {
+            table.Rows.Add(privilege);
+        }
+        return table;
     }
 
     private static string BuildGenericCreateIndexSql(IDatabase db, string databaseName, string tableName, DataTable indexes)
@@ -3715,6 +5320,17 @@ public static class SmokeTests
         }
     }
 
+    private static string ReadZipEntryText(ZipArchive archive, string entryName)
+    {
+        ZipArchiveEntry entry = archive.GetEntry(entryName);
+        if (entry == null) throw new Exception("Missing zip entry: " + entryName);
+        using (Stream stream = entry.Open())
+        using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+        {
+            return reader.ReadToEnd();
+        }
+    }
+
     private sealed class FakeDumpDatabase : IDatabase
     {
         public ConnectionState State => ConnectionState.Open;
@@ -3770,6 +5386,8 @@ public static class SmokeTests
         private readonly string providerName;
         private readonly string rowsAffected;
         public List<string> ExecutedSql = new List<string>();
+        public List<string> SelectedSql = new List<string>();
+        public DataTable SelectResult;
 
         public FakeExecDatabase(string providerName, string rowsAffected)
         {
@@ -3783,7 +5401,11 @@ public static class SmokeTests
         public void Open() { }
         public void Close() { }
         public void Dispose() { }
-        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            SelectedSql.Add(sql);
+            return SelectResult == null ? new DataTable() : SelectResult;
+        }
         public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
         {
             ExecutedSql.Add(sql);

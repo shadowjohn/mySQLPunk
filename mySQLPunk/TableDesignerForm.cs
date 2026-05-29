@@ -4549,18 +4549,34 @@ namespace mySQLPunk
 
         private static IEnumerable<string> BuildOraclePrivilegeDiagnosticSql(string databaseName, string tableName)
         {
+            foreach (string line in BuildOracleObjectPrivilegeDiagnosticSql(databaseName, tableName).Split(new[] { "\r\n" }, StringSplitOptions.None))
+            {
+                yield return line;
+            }
+            foreach (string line in BuildOracleSessionPrivilegeDiagnosticSql().Split(new[] { "\r\n" }, StringSplitOptions.None))
+            {
+                yield return line;
+            }
+        }
+
+        private static string BuildOracleObjectPrivilegeDiagnosticSql(string databaseName, string tableName)
+        {
             string owner = string.IsNullOrWhiteSpace(databaseName) ? "USER" : "UPPER(" + EscapeSqlStringLiteral(databaseName) + ")";
             string objectName = string.IsNullOrWhiteSpace(tableName) ? "UPPER(USER)" : "UPPER(" + EscapeSqlStringLiteral(tableName) + ")";
-            yield return "SELECT owner, table_name, privilege, grantor";
-            yield return "FROM all_tab_privs";
-            yield return "WHERE UPPER(owner) = " + owner;
-            yield return "  AND UPPER(table_name) = " + objectName;
-            yield return "  AND privilege IN ('ALTER', 'INDEX', 'SELECT', 'INSERT', 'UPDATE', 'DELETE')";
-            yield return "ORDER BY owner, table_name, privilege;";
-            yield return "SELECT privilege";
-            yield return "FROM session_privs";
-            yield return "WHERE privilege IN ('ALTER ANY TABLE', 'CREATE ANY INDEX', 'CREATE ANY TABLE', 'COMMENT ANY TABLE', 'DROP ANY TABLE')";
-            yield return "ORDER BY privilege;";
+            return "SELECT owner, table_name, privilege, grantor\r\n" +
+                   "FROM all_tab_privs\r\n" +
+                   "WHERE UPPER(owner) = " + owner + "\r\n" +
+                   "  AND UPPER(table_name) = " + objectName + "\r\n" +
+                   "  AND privilege IN ('ALTER', 'INDEX', 'SELECT', 'INSERT', 'UPDATE', 'DELETE')\r\n" +
+                   "ORDER BY owner, table_name, privilege;";
+        }
+
+        private static string BuildOracleSessionPrivilegeDiagnosticSql()
+        {
+            return "SELECT privilege\r\n" +
+                   "FROM session_privs\r\n" +
+                   "WHERE privilege IN ('ALTER ANY TABLE', 'CREATE ANY INDEX', 'CREATE ANY TABLE', 'COMMENT ANY TABLE', 'DROP ANY TABLE')\r\n" +
+                   "ORDER BY privilege;";
         }
 
         private Dictionary<string, string> ExecuteDesignerSql(string sql)
@@ -4587,6 +4603,7 @@ namespace mySQLPunk
                         {
                             lastResult["statement"] = normalizedStatement;
                         }
+                        AddOraclePrivilegeDiagnosticResult(lastResult, sql);
                         RollbackDesignerTransactionIfNeeded(transactionStarted, sqliteForeignKeysDisabled);
                         return lastResult;
                     }
@@ -4614,12 +4631,53 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 RollbackDesignerTransactionIfNeeded(transactionStarted, sqliteForeignKeysDisabled);
-                return new Dictionary<string, string>
+                Dictionary<string, string> errorResult = new Dictionary<string, string>
                 {
                     { "status", "ERROR" },
                     { "reason", ex.Message },
                     { "statement", currentStatement }
                 };
+                AddOraclePrivilegeDiagnosticResult(errorResult, sql);
+                return errorResult;
+            }
+        }
+
+        private void AddOraclePrivilegeDiagnosticResult(Dictionary<string, string> result, string sql)
+        {
+            if (!(_db is my_oracle) || result == null) return;
+            string summary = BuildOraclePrivilegeDiagnosticSummarySafe(sql);
+            if (!string.IsNullOrWhiteSpace(summary)) result["oraclePrivilegeSummary"] = summary;
+            string repairSuggestions = BuildOracleRepairSuggestionsSafe(GetResultValue(result, "reason"), sql);
+            if (!string.IsNullOrWhiteSpace(repairSuggestions)) result["oracleRepairSuggestions"] = repairSuggestions;
+        }
+
+        private string BuildOraclePrivilegeDiagnosticSummarySafe(string sql)
+        {
+            try
+            {
+                if (!(_db is my_oracle)) return string.Empty;
+                DataTable objectPrivileges = _db.SelectSQL(BuildOracleObjectPrivilegeDiagnosticSql(_databaseName, GetTableNameForSave()));
+                DataTable sessionPrivileges = _db.SelectSQL(BuildOracleSessionPrivilegeDiagnosticSql());
+                return BuildOraclePrivilegeDiagnosticSummary(objectPrivileges, sessionPrivileges, sql);
+            }
+            catch (Exception ex)
+            {
+                return Localization.Format("Designer.OraclePrivilegeDiagnosticFailed", ex.Message);
+            }
+        }
+
+        private string BuildOracleRepairSuggestionsSafe(string reason, string sql)
+        {
+            try
+            {
+                if (!(_db is my_oracle)) return string.Empty;
+                DataTable objectPrivileges = _db.SelectSQL(BuildOracleObjectPrivilegeDiagnosticSql(_databaseName, GetTableNameForSave()));
+                DataTable sessionPrivileges = _db.SelectSQL(BuildOracleSessionPrivilegeDiagnosticSql());
+                return BuildOracleRepairSuggestions(reason, _databaseName, GetTableNameForSave(), sql, objectPrivileges, sessionPrivileges);
+            }
+            catch (Exception ex)
+            {
+                return Localization.Format("Designer.OracleRepairSuggestionFailed", ex.Message);
             }
         }
 
@@ -4638,6 +4696,21 @@ namespace mySQLPunk
                 foreach (string hint in GetOracleDesignerErrorHints(reason, databaseName, tableName))
                 {
                     lines.Add("- " + hint);
+                }
+                string privilegeSummary = GetResultValue(result, "oraclePrivilegeSummary");
+                if (!string.IsNullOrWhiteSpace(privilegeSummary))
+                {
+                    lines.Add("- " + privilegeSummary);
+                }
+                string repairSuggestions = GetResultValue(result, "oracleRepairSuggestions");
+                if (!string.IsNullOrWhiteSpace(repairSuggestions))
+                {
+                    lines.Add("- " + Localization.T("Designer.OracleRepairSuggestionTitle"));
+                    foreach (string line in repairSuggestions.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+                    {
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        lines.Add("  " + line);
+                    }
                 }
             }
 
@@ -4695,6 +4768,37 @@ namespace mySQLPunk
                 yield break;
             }
 
+            if (ContainsOracleError(reason, "ORA-00904"))
+            {
+                yield return Localization.T("Designer.OracleHintInvalidIdentifier");
+                yield return Localization.T("Designer.OracleHintRefreshAfterObjectChange");
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-01439") || ContainsOracleError(reason, "ORA-22858"))
+            {
+                yield return Localization.T("Designer.OracleHintColumnTypeMigration");
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-01408"))
+            {
+                yield return Localization.T("Designer.OracleHintDuplicateIndexColumns");
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-02264") || ContainsOracleError(reason, "ORA-02261"))
+            {
+                yield return Localization.T("Designer.OracleHintConstraintNameConflict");
+                yield break;
+            }
+
+            if (ContainsOracleError(reason, "ORA-01950"))
+            {
+                yield return Localization.T("Designer.OracleHintTablespaceQuota");
+                yield break;
+            }
+
             if (ContainsOracleError(reason, "ORA-01735") || ContainsOracleError(reason, "ORA-00922"))
             {
                 yield return Localization.T("Designer.OracleHintAlterSyntax");
@@ -4702,6 +4806,230 @@ namespace mySQLPunk
             }
 
             yield return Localization.Format("Designer.OracleHintGeneric", owner, objectName);
+        }
+
+        private static string BuildOraclePrivilegeDiagnosticSummary(DataTable objectPrivileges, DataTable sessionPrivileges, string sql)
+        {
+            HashSet<string> objectGrantSet = ExtractOraclePrivilegeSet(objectPrivileges);
+            HashSet<string> sessionPrivilegeSet = ExtractOraclePrivilegeSet(sessionPrivileges);
+            List<string> required = BuildOracleRequiredPrivilegeLabels(sql).ToList();
+            List<string> missing = new List<string>();
+
+            foreach (string privilege in required)
+            {
+                if (OracleRequiredPrivilegeSatisfied(privilege, objectGrantSet, sessionPrivilegeSet)) continue;
+                missing.Add(privilege);
+            }
+
+            string objectText = objectGrantSet.Count == 0
+                ? Localization.T("Designer.OraclePrivilegeNone")
+                : string.Join(", ", objectGrantSet.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToArray());
+            string sessionText = sessionPrivilegeSet.Count == 0
+                ? Localization.T("Designer.OraclePrivilegeNone")
+                : string.Join(", ", sessionPrivilegeSet.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToArray());
+            string missingText = missing.Count == 0
+                ? Localization.T("Designer.OraclePrivilegeNoMissing")
+                : string.Join(", ", missing.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToArray());
+
+            return Localization.Format("Designer.OraclePrivilegeSummary", objectText, sessionText, missingText);
+        }
+
+        private static string BuildOracleRepairSuggestions(string reason, string databaseName, string tableName, string sql, DataTable objectPrivileges, DataTable sessionPrivileges)
+        {
+            HashSet<string> objectGrantSet = ExtractOraclePrivilegeSet(objectPrivileges);
+            HashSet<string> sessionPrivilegeSet = ExtractOraclePrivilegeSet(sessionPrivileges);
+            List<string> missing = new List<string>();
+            foreach (string privilege in BuildOracleRequiredPrivilegeLabels(sql))
+            {
+                if (!OracleRequiredPrivilegeSatisfied(privilege, objectGrantSet, sessionPrivilegeSet))
+                {
+                    missing.Add(privilege);
+                }
+            }
+
+            bool privilegeError = ContainsOracleError(reason, "ORA-01031") || missing.Count > 0;
+            bool objectMissingError = ContainsOracleError(reason, "ORA-00942") || ContainsOracleError(reason, "ORA-04043");
+            bool quotaError = ContainsOracleError(reason, "ORA-01950");
+            if (!privilegeError && !objectMissingError && !quotaError) return string.Empty;
+
+            string owner = string.IsNullOrWhiteSpace(databaseName) ? "<OWNER>" : databaseName;
+            string objectName = string.IsNullOrWhiteSpace(tableName) ? "<TABLE_NAME>" : tableName;
+            string qualifiedObject = QuoteOracleRepairIdentifier(owner) + "." + QuoteOracleRepairIdentifier(objectName);
+            List<string> lines = new List<string>();
+
+            lines.Add(Localization.T("Designer.OracleRepairCheckSessionUser"));
+            lines.Add("SELECT SYS_CONTEXT('USERENV','SESSION_USER') AS session_user, SYS_CONTEXT('USERENV','CURRENT_SCHEMA') AS current_schema FROM dual;");
+            lines.Add(Localization.T("Designer.OracleRepairCheckRoles"));
+            lines.Add("SELECT granted_role FROM session_roles ORDER BY granted_role;");
+            lines.Add(Localization.T("Designer.OracleRepairDirectGrantOnly"));
+
+            if (objectMissingError)
+            {
+                lines.Add(Localization.Format("Designer.OracleRepairConfirmObject", qualifiedObject));
+                lines.Add("SELECT owner, object_name, object_type, status FROM all_objects WHERE UPPER(owner) = UPPER(" + EscapeSqlStringLiteral(owner) + ") AND UPPER(object_name) = UPPER(" + EscapeSqlStringLiteral(objectName) + ");");
+                lines.Add("GRANT SELECT ON " + qualifiedObject + " TO <SESSION_USER>;");
+            }
+
+            if (missing.Count == 0 && privilegeError)
+            {
+                missing.AddRange(BuildOracleRequiredPrivilegeLabels(sql));
+            }
+
+            foreach (string privilege in missing.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (string grantSql in BuildOracleRepairGrantSql(privilege, qualifiedObject))
+                {
+                    lines.Add(grantSql);
+                }
+            }
+
+            if (IsOracleCrossSchemaTarget(databaseName))
+            {
+                lines.Add(Localization.Format("Designer.OracleRepairCrossSchemaPolicy", owner));
+            }
+
+            AddOracleDbaPolicyTemplate(lines, missing, qualifiedObject, owner, objectName, quotaError);
+
+            return string.Join(Environment.NewLine, lines.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        }
+
+        private static void AddOracleDbaPolicyTemplate(List<string> lines, IEnumerable<string> missingPrivileges, string qualifiedObject, string owner, string objectName, bool quotaError)
+        {
+            if (lines == null) return;
+
+            lines.Add(Localization.T("Designer.OracleRepairDbaPolicyTitle"));
+            lines.Add("/* " + Localization.T("Designer.OracleRepairDbaPolicyComment") + " */");
+            lines.Add("-- " + Localization.T("Designer.OracleRepairDbaPolicyObjectCheck"));
+            lines.Add("SELECT owner, object_name, object_type, status FROM dba_objects WHERE UPPER(owner) = UPPER(" + EscapeSqlStringLiteral(owner) + ") AND UPPER(object_name) = UPPER(" + EscapeSqlStringLiteral(objectName) + ");");
+            lines.Add("-- " + Localization.T("Designer.OracleRepairDbaPolicyDirectGrants"));
+            foreach (string privilege in (missingPrivileges ?? new string[0]).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (string grantSql in BuildOracleRepairGrantSql(privilege, qualifiedObject))
+                {
+                    lines.Add(grantSql);
+                }
+            }
+            if (quotaError)
+            {
+                lines.Add("-- " + Localization.T("Designer.OracleRepairDbaPolicyQuota"));
+                lines.Add("SELECT username, default_tablespace FROM dba_users WHERE username = '<SESSION_USER>';");
+                lines.Add("ALTER USER <SESSION_USER> QUOTA <SIZE> ON <TABLESPACE_NAME>;");
+            }
+            lines.Add("-- " + Localization.T("Designer.OracleRepairDbaPolicyReview"));
+        }
+
+        private static IEnumerable<string> BuildOracleRepairGrantSql(string privilege, string qualifiedObject)
+        {
+            if (string.Equals(privilege, "ALTER", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return "GRANT ALTER ON " + qualifiedObject + " TO <SESSION_USER>;";
+                yield break;
+            }
+            if (string.Equals(privilege, "INDEX", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return "GRANT INDEX ON " + qualifiedObject + " TO <SESSION_USER>;";
+                yield break;
+            }
+            if (string.Equals(privilege, "COMMENT ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return "GRANT COMMENT ANY TABLE TO <SESSION_USER>;";
+                yield break;
+            }
+            if (string.Equals(privilege, "DROP ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return "GRANT DROP ANY TABLE TO <SESSION_USER>;";
+                yield break;
+            }
+            if (string.Equals(privilege, "CREATE ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return "GRANT CREATE TABLE TO <SESSION_USER>;";
+                yield return Localization.T("Designer.OracleRepairCreateAnyTable");
+                yield break;
+            }
+        }
+
+        private static bool IsOracleCrossSchemaTarget(string databaseName)
+        {
+            if (string.IsNullOrWhiteSpace(databaseName)) return false;
+            return !string.Equals(databaseName, "USER", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string QuoteOracleRepairIdentifier(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "\"\"";
+            if (value.StartsWith("<", StringComparison.Ordinal) && value.EndsWith(">", StringComparison.Ordinal)) return value;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static IEnumerable<string> BuildOracleRequiredPrivilegeLabels(string sql)
+        {
+            string source = sql ?? string.Empty;
+            List<string> required = new List<string>();
+            if (Regex.IsMatch(source, @"\bALTER\s+TABLE\b", RegexOptions.IgnoreCase)) required.Add("ALTER");
+            if (Regex.IsMatch(source, @"\bCREATE\s+(UNIQUE\s+)?INDEX\b|\bCREATE\s+FULLTEXT\s+INDEX\b", RegexOptions.IgnoreCase)) required.Add("INDEX");
+            if (Regex.IsMatch(source, @"\bCOMMENT\s+ON\s+(TABLE|COLUMN)\b", RegexOptions.IgnoreCase)) required.Add("COMMENT ANY TABLE");
+            if (Regex.IsMatch(source, @"\bDROP\s+TABLE\b", RegexOptions.IgnoreCase)) required.Add("DROP ANY TABLE");
+            if (Regex.IsMatch(source, @"\bCREATE\s+TABLE\b", RegexOptions.IgnoreCase)) required.Add("CREATE ANY TABLE");
+            return required.Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool OracleRequiredPrivilegeSatisfied(string privilege, HashSet<string> objectGrants, HashSet<string> sessionPrivileges)
+        {
+            if (string.Equals(privilege, "ALTER", StringComparison.OrdinalIgnoreCase))
+            {
+                return objectGrants.Contains("ALTER") || sessionPrivileges.Contains("ALTER ANY TABLE");
+            }
+            if (string.Equals(privilege, "INDEX", StringComparison.OrdinalIgnoreCase))
+            {
+                return objectGrants.Contains("INDEX") || sessionPrivileges.Contains("CREATE ANY INDEX");
+            }
+            if (string.Equals(privilege, "COMMENT ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                return sessionPrivileges.Contains("COMMENT ANY TABLE");
+            }
+            if (string.Equals(privilege, "DROP ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                return sessionPrivileges.Contains("DROP ANY TABLE");
+            }
+            if (string.Equals(privilege, "CREATE ANY TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                return sessionPrivileges.Contains("CREATE ANY TABLE");
+            }
+            return objectGrants.Contains(privilege) || sessionPrivileges.Contains(privilege);
+        }
+
+        private static HashSet<string> ExtractOraclePrivilegeSet(DataTable table)
+        {
+            HashSet<string> output = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (table == null) return output;
+
+            string columnName = FindDataColumnName(table, "PRIVILEGE", "Privilege", "privilege");
+            if (string.IsNullOrWhiteSpace(columnName)) return output;
+
+            foreach (DataRow row in table.Rows)
+            {
+                if (row[columnName] == null || row[columnName] == DBNull.Value) continue;
+                string value = row[columnName].ToString().Trim().ToUpperInvariant();
+                if (!string.IsNullOrWhiteSpace(value)) output.Add(value);
+            }
+            return output;
+        }
+
+        private static string FindDataColumnName(DataTable table, params string[] names)
+        {
+            if (table == null || names == null) return string.Empty;
+            foreach (string name in names)
+            {
+                if (table.Columns.Contains(name)) return name;
+            }
+            foreach (DataColumn column in table.Columns)
+            {
+                foreach (string name in names)
+                {
+                    if (string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase)) return column.ColumnName;
+                }
+            }
+            return string.Empty;
         }
 
         private static bool ContainsOracleError(string reason, string code)

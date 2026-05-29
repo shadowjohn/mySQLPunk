@@ -495,15 +495,14 @@ namespace mySQLPunk.lib
         {
             string sql = selectSql;
 
-            if (targetProvider != "oracle")
-                sql = Regex.Replace(sql, @"\bNVL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
-            if (targetProvider != "mysql" && targetProvider != "sqlite")
-                sql = Regex.Replace(sql, @"\bIFNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
-            if (targetProvider != "mssql")
-                sql = Regex.Replace(sql, @"\bISNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+            sql = RewriteSimpleNullFallbackFunctions(sql, targetProvider);
+            sql = RewriteIsNullFunctions(sql, targetProvider);
 
             sql = RewriteNullHandlingFunctions(sql, targetProvider);
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
+            sql = RewriteUserContextFunctions(sql, targetProvider);
+            sql = RewriteDatabaseContextFunctions(sql, targetProvider);
+            sql = RewriteSchemaContextFunctions(sql, targetProvider);
             sql = RewriteDateOnlyFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteDateTruncFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
@@ -516,6 +515,7 @@ namespace mySQLPunk.lib
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteComparisonFunctions(sql, targetProvider);
+            sql = RewriteMySqlListFunctions(sql, targetProvider);
             sql = RewriteBooleanLiterals(sql, targetProvider);
             sql = RewriteSqlServerConvertCastFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteSqlServerTryCastFunctions(sql, sourceProvider, targetProvider);
@@ -523,69 +523,149 @@ namespace mySQLPunk.lib
             sql = RewriteNullOrderingClauses(sql, targetProvider);
             sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteConcatOperators(sql, sourceProvider, targetProvider);
+            sql = RewriteConcatWsFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
+            sql = RewriteStringCaseFunctions(sql, targetProvider);
             sql = RewriteTrimFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
+            sql = RewriteSubstringIndexFunctions(sql, targetProvider);
+            sql = RewriteStuffFunctions(sql, targetProvider);
             sql = RewritePaddingFunctions(sql, targetProvider);
+            sql = RewriteStringRepeatFunctions(sql, targetProvider);
+            sql = RewriteCharacterCodeFunctions(sql, targetProvider);
+            sql = RewriteCharacterValueFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
             sql = RewriteJsonTableExpressions(sql, targetProvider);
+            sql = RewriteMySqlJsonPathOperators(sql, targetProvider);
             sql = RewritePostgreSqlJsonOperators(sql, targetProvider);
+            sql = RewriteJsonConstructorFunctions(sql, targetProvider);
             sql = RewriteJsonExistsFunctions(sql, targetProvider);
             sql = RewriteJsonLengthFunctions(sql, targetProvider);
+            sql = RewriteMySqlJsonUnquoteExtractFunctions(sql, targetProvider);
             sql = RewriteJsonValueFunctions(sql, targetProvider);
             sql = RewriteJsonQueryFunctions(sql, targetProvider);
             sql = RewriteJsonExtractFunctions(sql, targetProvider);
+            sql = RewriteJsonUnquoteWrappers(sql, targetProvider);
 
             return sql;
+        }
+
+        private static string RewriteSimpleNullFallbackFunctions(string selectSql, string targetProvider)
+        {
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = segment;
+                if (targetProvider != "oracle")
+                    sql = Regex.Replace(sql, @"\bNVL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+                if (targetProvider != "mysql" && targetProvider != "sqlite")
+                    sql = Regex.Replace(sql, @"\bIFNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+                return sql;
+            });
         }
 
         private static string RewriteNumericFunctions(string selectSql, string targetProvider)
         {
             string sql = RewriteOracleToNumberFunctions(selectSql, targetProvider);
             sql = RewritePowerFunctions(sql, targetProvider);
+            sql = RewriteNumericTruncateFunctions(sql, targetProvider);
+            sql = RewriteTruncatingRoundFunctions(sql, targetProvider);
             if (targetProvider == "mssql")
             {
-                sql = Regex.Replace(
+                sql = RewriteCeilFunctionNames(sql, "CEIL", "CEILING");
+                return RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bCEIL\s*\(",
-                    "CEILING(",
-                    RegexOptions.IgnoreCase);
-                return Regex.Replace(
-                    sql,
-                    @"\bMOD\s*\((?<args>[^()]*)\)",
-                    m => RewriteModFunction(m),
-                    RegexOptions.IgnoreCase);
+                    "MOD",
+                    (argsText, original) => RewriteModFunction(argsText, original));
             }
 
-            return Regex.Replace(
-                sql,
-                @"\bCEILING\s*\(",
-                "CEIL(",
-                RegexOptions.IgnoreCase);
+            return RewriteCeilFunctionNames(sql, "CEILING", "CEIL");
+        }
+
+        private static string RewriteCeilFunctionNames(string selectSql, string sourceName, string targetName)
+        {
+            return ReplaceOutsideSingleQuotedStrings(
+                selectSql,
+                segment => Regex.Replace(segment, @"\b" + Regex.Escape(sourceName) + @"\s*\(", targetName + "(", RegexOptions.IgnoreCase));
+        }
+
+        private static string RewriteNumericTruncateFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
+                selectSql,
+                "TRUNCATE",
+                (argsText, original) => RewriteNumericTruncateFunction(argsText, original, targetProvider));
+        }
+
+        private static string RewriteNumericTruncateFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
+
+            string value = args[0];
+            string decimals = args[1];
+            if (targetProvider == "mssql") return "ROUND(" + value + ", " + decimals + ", 1)";
+            if (targetProvider == "sqlite") return BuildSqliteNumericTruncateExpression(value, decimals);
+            return "TRUNC(" + value + ", " + decimals + ")";
+        }
+
+        private static string BuildSqliteNumericTruncateExpression(string value, string decimals)
+        {
+            string scale = "pow(10, " + decimals + ")";
+            return "(CAST((" + value + ") * " + scale + " AS INTEGER) / " + scale + ")";
+        }
+
+        private static string RewriteTruncatingRoundFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mssql") return selectSql;
+
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
+                selectSql,
+                "ROUND",
+                (argsText, original) => RewriteTruncatingRoundFunction(argsText, original, targetProvider));
+        }
+
+        private static string RewriteTruncatingRoundFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
+            if (IsZeroLiteral(args[2])) return original;
+
+            string value = args[0];
+            string decimals = args[1];
+            if (targetProvider == "mysql") return "TRUNCATE(" + value + ", " + decimals + ")";
+            if (targetProvider == "sqlite") return BuildSqliteNumericTruncateExpression(value, decimals);
+            return "TRUNC(" + value + ", " + decimals + ")";
+        }
+
+        private static bool IsZeroLiteral(string value)
+        {
+            decimal parsed;
+            return decimal.TryParse(value.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out parsed) && parsed == 0m;
         }
 
         private static string RewriteOracleToNumberFunctions(string selectSql, string targetProvider)
         {
             if (targetProvider == "oracle") return selectSql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bTO_NUMBER\s*\((?<args>[^()]*)\)",
-                m => RewriteOracleToNumberFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "TO_NUMBER",
+                (argsText, original) => RewriteOracleToNumberFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteOracleToNumberFunction(Match match, string targetProvider)
+        private static string RewriteOracleToNumberFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count == 0 || args.Count > 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count == 0 || args.Count > 2) return original;
 
             string targetType = GetGenericNumericCastType(targetProvider);
-            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+            if (string.IsNullOrWhiteSpace(targetType)) return original;
 
             return "CAST(" + args[0] + " AS " + targetType + ")";
         }
@@ -603,19 +683,27 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mysql" || targetProvider == "sqlite") return selectSql;
 
-            return Regex.Replace(
+            return ReplaceOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bPOW\s*\(",
-                "POWER(",
-                RegexOptions.IgnoreCase);
+                segment => Regex.Replace(segment, @"\bPOW\s*\(", "POWER(", RegexOptions.IgnoreCase));
         }
 
         private static string RewriteComparisonFunctions(string selectSql, string targetProvider)
         {
-            if (targetProvider != "mssql") return selectSql;
+            string sql = selectSql;
+            if (targetProvider != "mysql")
+            {
+                sql = Regex.Replace(
+                    sql,
+                    @"\bSTRCMP\s*\((?<args>[^()]*)\)",
+                    m => RewriteStrCmpFunction(m),
+                    RegexOptions.IgnoreCase);
+            }
 
-            string sql = Regex.Replace(
-                selectSql,
+            if (targetProvider != "mssql" && targetProvider != "sqlite") return sql;
+
+            sql = Regex.Replace(
+                sql,
                 @"\bGREATEST\s*\((?<args>[^()]*)\)",
                 m => RewriteGreatestLeastFunction(m, true),
                 RegexOptions.IgnoreCase);
@@ -627,6 +715,14 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
         }
 
+        private static string RewriteStrCmpFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+
+            return "CASE WHEN " + args[0] + " = " + args[1] + " THEN 0 WHEN " + args[0] + " < " + args[1] + " THEN -1 ELSE 1 END";
+        }
+
         private static string RewriteGreatestLeastFunction(Match match, bool greatest)
         {
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
@@ -634,6 +730,83 @@ namespace mySQLPunk.lib
 
             string comparison = greatest ? ">=" : "<=";
             return "(CASE WHEN " + args[0] + " " + comparison + " " + args[1] + " THEN " + args[0] + " ELSE " + args[1] + " END)";
+        }
+
+        private static string RewriteMySqlListFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bFIELD\s*\((?<args>[^()]*)\)",
+                m => RewriteFieldFunction(m),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bELT\s*\((?<args>[^()]*)\)",
+                m => RewriteEltFunction(m),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bFIND_IN_SET\s*\((?<args>[^()]*)\)",
+                m => RewriteFindInSetFunction(m),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteFieldFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 2) return match.Value;
+
+            string expr = args[0];
+            List<string> whens = new List<string>();
+            for (int i = 1; i < args.Count; i++)
+            {
+                whens.Add("WHEN " + args[i] + " THEN " + i.ToString(CultureInfo.InvariantCulture));
+            }
+
+            return "CASE " + expr + " " + string.Join(" ", whens.ToArray()) + " ELSE 0 END";
+        }
+
+        private static string RewriteEltFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 2) return match.Value;
+
+            string expr = args[0];
+            List<string> whens = new List<string>();
+            for (int i = 1; i < args.Count; i++)
+            {
+                whens.Add("WHEN " + i.ToString(CultureInfo.InvariantCulture) + " THEN " + args[i]);
+            }
+
+            return "CASE " + expr + " " + string.Join(" ", whens.ToArray()) + " ELSE NULL END";
+        }
+
+        private static string RewriteFindInSetFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2 || !IsSingleQuotedSqlString(args[1])) return match.Value;
+
+            string expr = args[0];
+            string[] values = TrimSqlStringLiteral(args[1]).Split(',');
+            if (values.Length == 0) return match.Value;
+
+            List<string> whens = new List<string>();
+            for (int i = 0; i < values.Length; i++)
+            {
+                whens.Add("WHEN '" + EscapeSqlString(values[i]) + "' THEN " + (i + 1).ToString(CultureInfo.InvariantCulture));
+            }
+
+            return "CASE " + expr + " " + string.Join(" ", whens.ToArray()) + " ELSE 0 END";
+        }
+
+        private static bool IsSingleQuotedSqlString(string value)
+        {
+            string text = (value ?? string.Empty).Trim();
+            return text.Length >= 2 && text[0] == '\'' && text[text.Length - 1] == '\'';
         }
 
         private static string RewriteBooleanLiterals(string selectSql, string targetProvider)
@@ -686,11 +859,16 @@ namespace mySQLPunk.lib
         {
             if (sourceProvider != "mssql" || targetProvider == "mssql") return selectSql;
 
-            return Regex.Replace(
+            string sql = Regex.Replace(
                 selectSql,
-                @"\bCONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\bCAST\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s+AS\s+(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*\)",
                 m => RewriteSqlServerConvertCastFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
+
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
+                sql,
+                "CONVERT",
+                (argsText, original) => RewriteSqlServerConvertFunction(argsText, original, targetProvider));
         }
 
         private static string RewriteSqlServerConvertCastFunction(Match match, string targetProvider)
@@ -705,40 +883,141 @@ namespace mySQLPunk.lib
             return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
         }
 
+        private static string RewriteSqlServerConvertFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
+
+            Match typeMatch = Regex.Match(
+                args[0].Trim(),
+                @"^(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?$",
+                RegexOptions.IgnoreCase);
+            if (!typeMatch.Success) return original;
+
+            string targetType = MapSqlServerCastType(
+                typeMatch.Groups["type"].Value,
+                typeMatch.Groups["precision"].Success ? typeMatch.Groups["precision"].Value : "",
+                typeMatch.Groups["scale"].Success ? typeMatch.Groups["scale"].Value : "",
+                targetProvider);
+            if (string.IsNullOrWhiteSpace(targetType)) return original;
+
+            return "CAST(" + args[1].Trim() + " AS " + targetType + ")";
+        }
+
         private static string RewriteSqlServerTryCastFunctions(string selectSql, string sourceProvider, string targetProvider)
         {
             if (sourceProvider != "mssql" || targetProvider == "mssql") return selectSql;
 
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bTRY_CAST\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s+AS\s+(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*\)",
-                m => RewriteSqlServerTryCastFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "TRY_CAST",
+                (argsText, original) => RewriteSqlServerTryCastFunction(argsText, original, targetProvider));
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bTRY_CONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)(?:\s*,\s*(?<style>23|120))?\s*\)",
-                m => RewriteSqlServerTryConvertFunction(m, targetProvider),
+                "TRY_CONVERT",
+                (argsText, original) => RewriteSqlServerTryConvertFunction(argsText, original, targetProvider));
+        }
+
+        private static string RewriteSqlServerTryCastFunction(string argsText, string original, string targetProvider)
+        {
+            string expr;
+            string typeSpec;
+            if (!TrySplitCastArguments(argsText, out expr, out typeSpec)) return original;
+
+            Match typeMatch = Regex.Match(
+                typeSpec.Trim(),
+                @"^(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?$",
                 RegexOptions.IgnoreCase);
-        }
+            if (!typeMatch.Success) return original;
 
-        private static string RewriteSqlServerTryCastFunction(Match match, string targetProvider)
-        {
             string targetType = MapSqlServerCastType(
-                match.Groups["type"].Value,
-                match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
-                match.Groups["scale"].Success ? match.Groups["scale"].Value : "",
+                typeMatch.Groups["type"].Value,
+                typeMatch.Groups["precision"].Success ? typeMatch.Groups["precision"].Value : "",
+                typeMatch.Groups["scale"].Success ? typeMatch.Groups["scale"].Value : "",
                 targetProvider);
-            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+            if (string.IsNullOrWhiteSpace(targetType)) return original;
 
-            return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
+            return "CAST(" + expr.Trim() + " AS " + targetType + ")";
         }
 
-        private static string RewriteSqlServerTryConvertFunction(Match match, string targetProvider)
+        private static bool TrySplitCastArguments(string argsText, out string expr, out string typeSpec)
         {
-            string sqlType = match.Groups["type"].Value;
-            string expr = match.Groups["expr"].Value.Trim();
-            string style = match.Groups["style"].Success ? match.Groups["style"].Value : "";
+            expr = "";
+            typeSpec = "";
+            string text = argsText ?? "";
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            int depth = 0;
+
+            for (int i = 0; i < text.Length - 1; i++)
+            {
+                char ch = text[i];
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    if (inSingleQuote && i + 1 < text.Length && text[i + 1] == '\'')
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        inSingleQuote = !inSingleQuote;
+                    }
+                    continue;
+                }
+
+                if (ch == '"' && !inSingleQuote)
+                {
+                    inDoubleQuote = !inDoubleQuote;
+                    continue;
+                }
+
+                if (inSingleQuote || inDoubleQuote) continue;
+                if (ch == '(')
+                {
+                    depth++;
+                    continue;
+                }
+                if (ch == ')' && depth > 0)
+                {
+                    depth--;
+                    continue;
+                }
+
+                if (depth == 0 && IsTopLevelAsKeywordAt(text, i))
+                {
+                    expr = text.Substring(0, i).Trim();
+                    typeSpec = text.Substring(i + 2).Trim();
+                    return expr.Length > 0 && typeSpec.Length > 0;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsTopLevelAsKeywordAt(string text, int index)
+        {
+            if (index < 0 || index + 2 > text.Length) return false;
+            if (string.Compare(text, index, "AS", 0, 2, true, CultureInfo.InvariantCulture) != 0) return false;
+            bool beforeOk = index == 0 || char.IsWhiteSpace(text[index - 1]);
+            bool afterOk = index + 2 >= text.Length || char.IsWhiteSpace(text[index + 2]);
+            return beforeOk && afterOk;
+        }
+
+        private static string RewriteSqlServerTryConvertFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 2 || args.Count > 3) return original;
+
+            Match typeMatch = Regex.Match(
+                args[0].Trim(),
+                @"^(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?$",
+                RegexOptions.IgnoreCase);
+            if (!typeMatch.Success) return original;
+
+            string sqlType = typeMatch.Groups["type"].Value;
+            string expr = args[1].Trim();
+            string style = args.Count == 3 ? args[2].Trim() : "";
             string normalizedType = Regex.Replace((sqlType ?? "").Trim().ToLowerInvariant(), @"\s+", "");
 
             if ((normalizedType == "date" || normalizedType == "datetime" || normalizedType == "datetime2" || normalizedType == "smalldatetime") &&
@@ -753,10 +1032,10 @@ namespace mySQLPunk.lib
 
             string targetType = MapSqlServerCastType(
                 sqlType,
-                match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
-                match.Groups["scale"].Success ? match.Groups["scale"].Value : "",
+                typeMatch.Groups["precision"].Success ? typeMatch.Groups["precision"].Value : "",
+                typeMatch.Groups["scale"].Success ? typeMatch.Groups["scale"].Value : "",
                 targetProvider);
-            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+            if (string.IsNullOrWhiteSpace(targetType)) return original;
 
             return "CAST(" + expr + " AS " + targetType + ")";
         }
@@ -911,23 +1190,62 @@ namespace mySQLPunk.lib
         {
             if (string.Equals(sourceProvider, targetProvider, StringComparison.OrdinalIgnoreCase)) return selectSql;
 
+            string sql = RewriteUuidFunctions(selectSql, targetProvider);
+
+            return ReplaceOutsideSingleQuotedStrings(sql, segment =>
+            {
+                string rewritten = Regex.Replace(
+                    segment,
+                    @"\bDBMS_RANDOM\s*\.\s*VALUE\s*(?:\(\s*\))?",
+                    m => BuildRandomExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                rewritten = Regex.Replace(
+                    rewritten,
+                    @"\bRAND\s*\(\s*\)",
+                    m => BuildRandomExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                return Regex.Replace(
+                    rewritten,
+                    @"\bRANDOM\s*\(\s*\)",
+                    m => BuildRandomExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string RewriteUuidFunctions(string selectSql, string targetProvider)
+        {
             string sql = Regex.Replace(
                 selectSql,
-                @"\bDBMS_RANDOM\s*\.\s*VALUE\s*(?:\(\s*\))?",
-                m => BuildRandomExpression(targetProvider),
+                @"\bNEWID\s*\(\s*\)",
+                m => BuildUuidExpression(targetProvider),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bRAND\s*\(\s*\)",
-                m => BuildRandomExpression(targetProvider),
+                @"\bUUID\s*\(\s*\)",
+                m => BuildUuidExpression(targetProvider),
                 RegexOptions.IgnoreCase);
 
             return Regex.Replace(
                 sql,
-                @"\bRANDOM\s*\(\s*\)",
-                m => BuildRandomExpression(targetProvider),
+                @"\bSYS_GUID\s*\(\s*\)",
+                m => BuildUuidExpression(targetProvider),
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildUuidExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "NEWID()";
+            if (targetProvider == "mysql") return "UUID()";
+            if (targetProvider == "oracle") return "SYS_GUID()";
+            if (targetProvider == "sqlite")
+            {
+                return "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))";
+            }
+
+            return "gen_random_uuid()";
         }
 
         private static string BuildRandomExpression(string targetProvider)
@@ -938,26 +1256,54 @@ namespace mySQLPunk.lib
             return "RANDOM()";
         }
 
-        private static string RewriteModFunction(Match match)
+        private static string RewriteModFunction(string argsText, string original)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
             return "(" + args[0] + " % " + args[1] + ")";
         }
 
         private static string RewriteNullHandlingFunctions(string selectSql, string targetProvider)
         {
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bNVL2\s*\((?<args>[^()]*)\)",
-                m => RewriteNvl2Function(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "NVL2",
+                (argsText, original) => RewriteNvl2Function(argsText, original, targetProvider));
         }
 
-        private static string RewriteNvl2Function(Match match, string targetProvider)
+        private static string RewriteIsNullFunctions(string selectSql, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
+                selectSql,
+                "ISNULL",
+                (argsText, original) => RewriteIsNullFunction(argsText, original, targetProvider));
+        }
+
+        private static string RewriteIsNullFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count == 1)
+            {
+                string expr = args[0];
+                if (targetProvider == "mysql") return "ISNULL(" + expr + ")";
+                if (targetProvider == "mssql" || targetProvider == "oracle")
+                    return "CASE WHEN " + expr + " IS NULL THEN 1 ELSE 0 END";
+                return expr + " IS NULL";
+            }
+
+            if (args.Count == 2)
+            {
+                if (targetProvider == "mssql") return original;
+                return "COALESCE(" + args[0] + ", " + args[1] + ")";
+            }
+
+            return original;
+        }
+
+        private static string RewriteNvl2Function(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string expr = args[0];
             string whenNotNull = args[1];
@@ -1060,29 +1406,27 @@ namespace mySQLPunk.lib
             string sql = selectSql;
             if (targetProvider != "mssql")
             {
-                sql = Regex.Replace(
+                sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bEOMONTH\s*\((?<args>[^()]*)\)",
-                    m => RewriteEndOfMonthFunction(m, targetProvider),
-                    RegexOptions.IgnoreCase);
+                    "EOMONTH",
+                    (argsText, original) => RewriteEndOfMonthFunction(argsText, original, targetProvider));
             }
 
             if (targetProvider != "mysql" && targetProvider != "oracle")
             {
-                sql = Regex.Replace(
+                sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bLAST_DAY\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                    m => BuildLastDayExpression(targetProvider, m.Groups["expr"].Value.Trim()),
-                    RegexOptions.IgnoreCase);
+                    "LAST_DAY",
+                    (argsText, original) => RewriteLastDayFunction(argsText, original, targetProvider));
             }
 
             return sql;
         }
 
-        private static string RewriteEndOfMonthFunction(Match match, string targetProvider)
+        private static string RewriteEndOfMonthFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count < 1 || args.Count > 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 1 || args.Count > 2) return original;
 
             string expr = args[0];
             string offset = args.Count == 2 ? args[1] : null;
@@ -1113,7 +1457,15 @@ namespace mySQLPunk.lib
                 return "LAST_DAY(ADD_MONTHS(" + expr + ", " + offset + "))";
             }
 
-            return match.Value;
+            return original;
+        }
+
+        private static string RewriteLastDayFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 1) return original;
+
+            return BuildLastDayExpression(targetProvider, args[0].Trim());
         }
 
         private static string BuildLastDayExpression(string targetProvider, string expr)
@@ -1126,17 +1478,15 @@ namespace mySQLPunk.lib
 
         private static string RewriteDatePartFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bDATEPART\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|dayofyear|dy|y|weekday|dw|w|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
-                RegexOptions.IgnoreCase);
+                "DATEPART",
+                (argsText, original) => RewriteDatePartFunction(argsText, original, targetProvider));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bDATE_PART\s*\(\s*'(?<part>year|quarter|month|week|dayofyear|doy|weekday|dow|day|hour|minute|second)'\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
-                RegexOptions.IgnoreCase);
+                "DATE_PART",
+                (argsText, original) => RewriteDatePartFunction(argsText, original, targetProvider));
 
             sql = Regex.Replace(
                 sql,
@@ -1151,6 +1501,37 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
 
             return sql;
+        }
+
+        private static string RewriteDatePartFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
+
+            string part = NormalizeDatePart(args[0]);
+            if (!IsSupportedDatePart(part)) return original;
+
+            return BuildDatePartExpression(targetProvider, part, args[1].Trim());
+        }
+
+        private static bool IsSupportedDatePart(string part)
+        {
+            switch (part)
+            {
+                case "year":
+                case "quarter":
+                case "month":
+                case "week":
+                case "dayofyear":
+                case "weekday":
+                case "day":
+                case "hour":
+                case "minute":
+                case "second":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static string BuildDatePartExpression(string targetProvider, string part, string expr)
@@ -1213,17 +1594,16 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mssql") return selectSql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bDATEFROMPARTS\s*\((?<args>[^()]*)\)",
-                m => RewriteDateFromPartsFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "DATEFROMPARTS",
+                (argsText, original) => RewriteDateFromPartsFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteDateFromPartsFunction(Match match, string targetProvider)
+        private static string RewriteDateFromPartsFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string year = args[0];
             string month = args[1];
@@ -1249,7 +1629,7 @@ namespace mySQLPunk.lib
                 return "TO_DATE(" + year + " || '-' || " + month + " || '-' || " + day + ", 'YYYY-MM-DD')";
             }
 
-            return match.Value;
+            return original;
         }
 
         private static string NormalizeDatePart(string part)
@@ -1292,31 +1672,33 @@ namespace mySQLPunk.lib
 
         private static string RewriteConditionalFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bIIF\s*\((?<args>[^()]*)\)",
-                m => RewriteConditionalFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "IIF",
+                (argsText, original) => RewriteConditionalFunction(argsText, original, targetProvider));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bIF\s*\((?<args>[^()]*)\)",
-                m => RewriteConditionalFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "IF",
+                (argsText, original) => RewriteConditionalFunction(argsText, original, targetProvider));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bDECODE\s*\((?<args>[^()]*)\)",
-                m => RewriteDecodeFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "DECODE",
+                (argsText, original) => RewriteDecodeFunction(argsText, original, targetProvider));
 
-            return sql;
+            if (targetProvider == "mssql") return sql;
+
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
+                sql,
+                "CHOOSE",
+                (argsText, original) => RewriteChooseFunction(argsText, original));
         }
 
-        private static string RewriteConditionalFunction(Match match, string targetProvider)
+        private static string RewriteConditionalFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string condition = args[0];
             string whenTrue = args[1];
@@ -1326,12 +1708,12 @@ namespace mySQLPunk.lib
             return "CASE WHEN " + condition + " THEN " + whenTrue + " ELSE " + whenFalse + " END";
         }
 
-        private static string RewriteDecodeFunction(Match match, string targetProvider)
+        private static string RewriteDecodeFunction(string argsText, string original, string targetProvider)
         {
-            if (targetProvider == "oracle") return match.Value;
+            if (targetProvider == "oracle") return original;
 
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count < 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 3) return original;
 
             string expr = args[0];
             int pairCount = (args.Count - 1) / 2;
@@ -1352,6 +1734,23 @@ namespace mySQLPunk.lib
             return builder.ToString();
         }
 
+        private static string RewriteChooseFunction(string argsText, string original)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 2) return original;
+
+            string expr = args[0];
+            StringBuilder builder = new StringBuilder();
+            builder.Append("CASE ").Append(expr);
+            for (int i = 1; i < args.Count; i++)
+            {
+                builder.Append(" WHEN ").Append(i.ToString(CultureInfo.InvariantCulture)).Append(" THEN ").Append(args[i]);
+            }
+
+            builder.Append(" ELSE NULL END");
+            return builder.ToString();
+        }
+
         private static string RewriteCurrentDateTimeFunctions(string selectSql, string targetProvider)
         {
             return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
@@ -1359,7 +1758,9 @@ namespace mySQLPunk.lib
                 string sql = segment;
                 if (targetProvider != "mssql")
                 {
+                    sql = Regex.Replace(sql, @"\bSYSUTCDATETIME\s*\(\s*\)", m => BuildUtcTimestampExpression(targetProvider), RegexOptions.IgnoreCase);
                     sql = Regex.Replace(sql, @"\bGETUTCDATE\s*\(\s*\)", m => BuildUtcTimestampExpression(targetProvider), RegexOptions.IgnoreCase);
+                    sql = Regex.Replace(sql, @"\bSYSDATETIME\s*\(\s*\)", m => BuildCurrentTimestampExpression(targetProvider), RegexOptions.IgnoreCase);
                 }
 
                 if (targetProvider != "mysql")
@@ -1376,6 +1777,12 @@ namespace mySQLPunk.lib
                 {
                     sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
                 }
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bCURRENT_TIMESTAMP\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentTimestampExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
 
                 if (targetProvider != "oracle")
                 {
@@ -1394,8 +1801,32 @@ namespace mySQLPunk.lib
 
                 sql = Regex.Replace(
                     sql,
-                    @"\bCURRENT_DATE\s*(?:\(\s*\))?",
+                    @"\bCURTIME\s*\(\s*\)",
+                    m => BuildCurrentTimeExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bCURRENT_DATE\b(?:\s*\(\s*\))?",
                     m => BuildCurrentDateExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bCURRENT_TIME\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentTimeExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bLOCALTIMESTAMP\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentTimestampExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bLOCALTIME\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentTimeExpression(targetProvider),
                     RegexOptions.IgnoreCase);
 
                 return sql;
@@ -1407,6 +1838,15 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql") return "CAST(GETDATE() AS date)";
             if (targetProvider == "mysql") return "CURDATE()";
             return "CURRENT_DATE";
+        }
+
+        private static string BuildCurrentTimeExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "CAST(GETDATE() AS time)";
+            if (targetProvider == "mysql") return "CURTIME()";
+            if (targetProvider == "sqlite") return "time('now')";
+            if (targetProvider == "oracle") return "TO_CHAR(SYSTIMESTAMP, 'HH24:MI:SS')";
+            return "CURRENT_TIME";
         }
 
         private static string BuildCurrentTimestampExpression(string targetProvider)
@@ -1425,97 +1865,222 @@ namespace mySQLPunk.lib
             return "CURRENT_TIMESTAMP AT TIME ZONE 'UTC'";
         }
 
+        private static string RewriteUserContextFunctions(string selectSql, string targetProvider)
+        {
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"\bCURRENT_USER\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentUserExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bSESSION_USER\b(?:\s*\(\s*\))?",
+                    m => BuildSessionUserExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bSYSTEM_USER\b(?:\s*\(\s*\))?",
+                    m => BuildSystemUserExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                return Regex.Replace(
+                    sql,
+                    @"\bUSER\s*\(\s*\)",
+                    m => BuildSystemUserExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string BuildCurrentUserExpression(string targetProvider)
+        {
+            if (targetProvider == "mysql") return "CURRENT_USER()";
+            if (targetProvider == "sqlite") return "NULL";
+            return "CURRENT_USER";
+        }
+
+        private static string BuildSessionUserExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "SESSION_USER";
+            if (targetProvider == "mysql") return "USER()";
+            if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','SESSION_USER')";
+            if (targetProvider == "sqlite") return "NULL";
+            return "SESSION_USER";
+        }
+
+        private static string BuildSystemUserExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "SYSTEM_USER";
+            if (targetProvider == "mysql") return "USER()";
+            if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','SESSION_USER')";
+            if (targetProvider == "sqlite") return "NULL";
+            return "SESSION_USER";
+        }
+
+        private static string RewriteDatabaseContextFunctions(string selectSql, string targetProvider)
+        {
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"\bCURRENT_DATABASE\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentDatabaseExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bDATABASE\s*\(\s*\)",
+                    m => BuildCurrentDatabaseExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                return Regex.Replace(
+                    sql,
+                    @"\bDB_NAME\s*\(\s*\)",
+                    m => BuildCurrentDatabaseExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string BuildCurrentDatabaseExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "DB_NAME()";
+            if (targetProvider == "mysql") return "DATABASE()";
+            if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','DB_NAME')";
+            if (targetProvider == "sqlite") return "NULL";
+            return "CURRENT_DATABASE()";
+        }
+
+        private static string RewriteSchemaContextFunctions(string selectSql, string targetProvider)
+        {
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"\bCURRENT_SCHEMA\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentSchemaExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bSCHEMA_NAME\s*\(\s*\)",
+                    m => BuildCurrentSchemaExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                return Regex.Replace(
+                    sql,
+                    @"\bSCHEMA\s*\(\s*\)",
+                    m => BuildCurrentSchemaExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string BuildCurrentSchemaExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "SCHEMA_NAME()";
+            if (targetProvider == "mysql") return "SCHEMA()";
+            if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','CURRENT_SCHEMA')";
+            if (targetProvider == "sqlite") return "NULL";
+            return "CURRENT_SCHEMA";
+        }
+
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bCONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR)\s*(?:\(\s*\d+\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*(?<style>23|120)\s*\)",
-                m =>
-                {
-                    if (targetProvider == "mssql") return m.Value;
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = GetSqlServerConvertDateFormat(m.Groups["style"].Value);
-                    if (string.IsNullOrWhiteSpace(format)) return m.Value;
-                    return BuildDateFormatExpression(targetProvider, expr, TranslateDotNetDateFormatPattern(format, targetProvider));
-                },
-                RegexOptions.IgnoreCase);
+                "CONVERT",
+                (argsText, original) => RewriteSqlServerConvertDateFormatFunction(argsText, original, targetProvider));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bDATE_FORMAT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "mysql") return m.Value;
-                    return BuildDateFormatExpression(targetProvider, expr, TranslateMySqlDateFormatPattern(format, targetProvider));
-                },
-                RegexOptions.IgnoreCase);
+                "DATE_FORMAT",
+                (argsText, original) => RewriteDateFormatFunction(argsText, original, targetProvider, "mysql"));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bFORMAT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "mssql") return m.Value;
-                    return BuildDateFormatExpression(targetProvider, expr, TranslateDotNetDateFormatPattern(format, targetProvider));
-                },
-                RegexOptions.IgnoreCase);
+                "FORMAT",
+                (argsText, original) => RewriteDateFormatFunction(argsText, original, targetProvider, "mssql"));
 
-            sql = Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bTO_CHAR\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "oracle" || targetProvider == "postgresql") return m.Value;
-                    return BuildDateFormatExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider));
-                },
-                RegexOptions.IgnoreCase);
-
-            return sql;
+                "TO_CHAR",
+                (argsText, original) => RewriteDateFormatFunction(argsText, original, targetProvider, "oracle"));
         }
 
         private static string RewriteDateParseFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bTO_TIMESTAMP\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "oracle" || targetProvider == "postgresql") return m.Value;
-                    return BuildDateParseExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider), true);
-                },
-                RegexOptions.IgnoreCase);
+                "TO_TIMESTAMP",
+                (argsText, original) => RewriteDateParseFunction(argsText, original, targetProvider, "oracle", true));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bTO_DATE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "oracle") return m.Value;
-                    return BuildDateParseExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider), false);
-                },
-                RegexOptions.IgnoreCase);
+                "TO_DATE",
+                (argsText, original) => RewriteDateParseFunction(argsText, original, targetProvider, "oracle", false));
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bSTR_TO_DATE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "mysql") return m.Value;
-                    return BuildDateParseExpression(targetProvider, expr, TranslateMySqlDateFormatPattern(format, targetProvider), false);
-                },
-                RegexOptions.IgnoreCase);
+                "STR_TO_DATE",
+                (argsText, original) => RewriteDateParseFunction(argsText, original, targetProvider, "mysql", false));
+        }
+
+        private static string RewriteSqlServerConvertDateFormatFunction(string argsText, string original, string targetProvider)
+        {
+            if (targetProvider == "mssql") return original;
+
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
+            if (!Regex.IsMatch(args[0].Trim(), @"^N?(?:VAR)?CHAR\s*(?:\(\s*\d+\s*\))?$", RegexOptions.IgnoreCase)) return original;
+
+            string format = GetSqlServerConvertDateFormat(args[2].Trim());
+            if (string.IsNullOrWhiteSpace(format)) return original;
+            return BuildDateFormatExpression(targetProvider, args[1].Trim(), TranslateDotNetDateFormatPattern(format, targetProvider));
+        }
+
+        private static string RewriteDateFormatFunction(string argsText, string original, string targetProvider, string sourceProvider)
+        {
+            if ((sourceProvider == "mysql" && targetProvider == "mysql") ||
+                (sourceProvider == "mssql" && targetProvider == "mssql") ||
+                (sourceProvider == "oracle" && (targetProvider == "oracle" || targetProvider == "postgresql")))
+            {
+                return original;
+            }
+
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2 || !IsSingleQuotedSqlString(args[1])) return original;
+
+            string expr = args[0].Trim();
+            string format = TrimSqlStringLiteral(args[1]);
+            string translated = sourceProvider == "mysql"
+                ? TranslateMySqlDateFormatPattern(format, targetProvider)
+                : sourceProvider == "mssql"
+                    ? TranslateDotNetDateFormatPattern(format, targetProvider)
+                    : TranslateOracleDateFormatPattern(format, targetProvider);
+
+            return BuildDateFormatExpression(targetProvider, expr, translated);
+        }
+
+        private static string RewriteDateParseFunction(string argsText, string original, string targetProvider, string sourceProvider, bool timestamp)
+        {
+            if ((sourceProvider == "mysql" && targetProvider == "mysql") ||
+                (sourceProvider == "oracle" && (targetProvider == "oracle" || (timestamp && targetProvider == "postgresql"))))
+            {
+                return original;
+            }
+
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2 || !IsSingleQuotedSqlString(args[1])) return original;
+
+            string expr = args[0].Trim();
+            string format = TrimSqlStringLiteral(args[1]);
+            string translated = sourceProvider == "mysql"
+                ? TranslateMySqlDateFormatPattern(format, targetProvider)
+                : TranslateOracleDateFormatPattern(format, targetProvider);
+
+            return BuildDateParseExpression(targetProvider, expr, translated, timestamp);
         }
 
         private static string GetSqlServerConvertDateFormat(string style)
@@ -1588,31 +2153,36 @@ namespace mySQLPunk.lib
             return BuildDateDiffExpression(targetProvider, "month", args[0], args[1]);
         }
 
+        private const string DateIntervalAmountPattern = @"-?(?:\d+|[A-Za-z_][A-Za-z0-9_\.]*)(?:\s*[\+\-\*/]\s*(?:\d+|[A-Za-z_][A-Za-z0-9_\.]*))*";
+
         private static string RewriteDateAddFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
-                selectSql,
-                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
-                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
-                RegexOptions.IgnoreCase);
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>" + DateIntervalAmountPattern + @")\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                    m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
+                    RegexOptions.IgnoreCase);
 
-            sql = Regex.Replace(
-                sql,
-                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
-                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value), NormalizeDatePart(m.Groups["part"].Value)),
-                RegexOptions.IgnoreCase);
+                sql = Regex.Replace(
+                    sql,
+                    @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>" + DateIntervalAmountPattern + @")\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                    m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value), NormalizeDatePart(m.Groups["part"].Value)),
+                    RegexOptions.IgnoreCase);
 
-            sql = Regex.Replace(
-                sql,
-                @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>-?\d+)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
-                RegexOptions.IgnoreCase);
+                sql = Regex.Replace(
+                    sql,
+                    @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>" + DateIntervalAmountPattern + @")\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                    m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
+                    RegexOptions.IgnoreCase);
 
-            return Regex.Replace(
-                sql,
-                @"\bADD_MONTHS\s*\((?<args>[^()]*)\)",
-                m => RewriteAddMonthsFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                return Regex.Replace(
+                    sql,
+                    @"\bADD_MONTHS\s*\((?<args>[^()]*)\)",
+                    m => RewriteAddMonthsFunction(m, targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
         }
 
         private static string RewriteAddMonthsFunction(Match match, string targetProvider)
@@ -1638,8 +2208,18 @@ namespace mySQLPunk.lib
             if (part == "week") return BuildSqliteDateAddExpression(expr, MultiplyIntegerString(amount, 7), "day");
 
             string functionName = (part == "hour" || part == "minute" || part == "second") ? "datetime" : "date";
+            if (!IsIntegerString(amount))
+            {
+                return functionName + "(" + expr + ", " + BuildSqliteDateModifierExpression(amount, part) + ")";
+            }
+
             string modifier = amount.StartsWith("-", StringComparison.Ordinal) ? amount : "+" + amount;
             return functionName + "(" + expr + ", '" + modifier + " " + part + "')";
+        }
+
+        private static string BuildSqliteDateModifierExpression(string amount, string part)
+        {
+            return "CASE WHEN " + amount + " < 0 THEN CAST(" + amount + " AS TEXT) || ' " + part + "' ELSE '+' || CAST(" + amount + " AS TEXT) || ' " + part + "' END";
         }
 
         private static string BuildOracleDateAddExpression(string expr, string amount, string part)
@@ -1668,6 +2248,11 @@ namespace mySQLPunk.lib
             string text = (amount ?? "0").Trim();
             if (text.Length == 0) return "0";
             if (IsZeroIntegerString(text)) return "0";
+            if (!IsIntegerString(text))
+            {
+                return text.StartsWith("-", StringComparison.Ordinal) ? text.Substring(1) : "-(" + text + ")";
+            }
+
             return text.StartsWith("-", StringComparison.Ordinal) ? text.Substring(1) : "-" + text;
         }
 
@@ -1787,6 +2372,33 @@ namespace mySQLPunk.lib
                     return string.Join(" || ", args.ToArray());
                 },
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteConcatWsFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql" || targetProvider == "mssql" || targetProvider == "postgresql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bCONCAT_WS\s*\((?<args>[^()]*)\)",
+                m => RewriteConcatWsFunction(m),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteConcatWsFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 3) return match.Value;
+
+            string separator = args[0];
+            List<string> output = new List<string>();
+            for (int i = 1; i < args.Count; i++)
+            {
+                if (i > 1) output.Add(separator);
+                output.Add(args[i]);
+            }
+
+            return string.Join(" || ", output.ToArray());
         }
 
         private static string RewriteConcatOperators(string selectSql, string sourceProvider, string targetProvider)
@@ -1969,9 +2581,9 @@ namespace mySQLPunk.lib
             StringBuilder current = new StringBuilder();
             bool inSingleQuote = false;
             bool inDoubleQuote = false;
+            int depth = 0;
             bool inBracketQuote = false;
             bool inBacktickQuote = false;
-            int depth = 0;
 
             for (int i = 0; i < (chain ?? "").Length; i++)
             {
@@ -2241,16 +2853,20 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mssql")
             {
-                string sql = Regex.Replace(
-                    selectSql,
+                string sql = RewriteBitLengthFunctionsForTarget(selectSql, targetProvider);
+                sql = RewriteByteLengthFunctionsForTarget(sql, targetProvider);
+                sql = Regex.Replace(
+                    sql,
                     @"\b(?:LENGTH|CHAR_LENGTH|CHARACTER_LENGTH)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                     m => "LEN(" + m.Groups["expr"].Value.Trim() + ")",
                     RegexOptions.IgnoreCase);
                 return sql;
             }
 
-            string rewrittenSql = Regex.Replace(
-                selectSql,
+            string rewrittenSql = RewriteBitLengthFunctionsForTarget(selectSql, targetProvider);
+            rewrittenSql = RewriteByteLengthFunctionsForTarget(rewrittenSql, targetProvider);
+            rewrittenSql = Regex.Replace(
+                rewrittenSql,
                 @"\bLEN\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => "LENGTH(" + m.Groups["expr"].Value.Trim() + ")",
                 RegexOptions.IgnoreCase);
@@ -2267,29 +2883,122 @@ namespace mySQLPunk.lib
             return rewrittenSql;
         }
 
+        private static string RewriteBitLengthFunctionsForTarget(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bBIT_LENGTH\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildBitLengthExpression(targetProvider, m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildBitLengthExpression(string targetProvider, string expr)
+        {
+            if (targetProvider == "mysql" || targetProvider == "postgresql") return "BIT_LENGTH(" + expr + ")";
+            return "(" + BuildByteLengthExpression(targetProvider, expr) + " * 8)";
+        }
+
+        private static string RewriteByteLengthFunctionsForTarget(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\b(?:DATALENGTH|OCTET_LENGTH|LENGTHB)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildByteLengthExpression(targetProvider, m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildByteLengthExpression(string targetProvider, string expr)
+        {
+            if (targetProvider == "mssql") return "DATALENGTH(" + expr + ")";
+            if (targetProvider == "oracle") return "LENGTHB(" + expr + ")";
+            if (targetProvider == "sqlite") return "length(CAST(" + expr + " AS BLOB))";
+            return "OCTET_LENGTH(" + expr + ")";
+        }
+
+        private static string RewriteStringCaseFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
+                selectSql,
+                "UCASE",
+                (argsText, original) => RewriteSingleArgumentFunctionName(argsText, original, "UPPER"));
+
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
+                sql,
+                "LCASE",
+                (argsText, original) => RewriteSingleArgumentFunctionName(argsText, original, "LOWER"));
+        }
+
+        private static string RewriteSingleArgumentFunctionName(string argsText, string original, string functionName)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 1) return original;
+
+            return functionName + "(" + args[0] + ")";
+        }
+
         private static string RewriteTrimFunctions(string selectSql, string targetProvider)
         {
             string sql = selectSql;
             if (targetProvider == "mssql")
             {
-                return Regex.Replace(
+                return RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                    m => "LTRIM(RTRIM(" + m.Groups["expr"].Value.Trim() + "))",
-                    RegexOptions.IgnoreCase);
+                    "TRIM",
+                    (argsText, original) => RewriteTrimForSqlServer(argsText, original));
             }
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bLTRIM\s*\(\s*RTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)\s*\)",
-                m => "TRIM(" + m.Groups["expr"].Value.Trim() + ")",
-                RegexOptions.IgnoreCase);
+                "LTRIM",
+                (argsText, original) => RewriteNestedTrimPair(argsText, original, "RTRIM"));
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bRTRIM\s*\(\s*LTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)\s*\)",
-                m => "TRIM(" + m.Groups["expr"].Value.Trim() + ")",
-                RegexOptions.IgnoreCase);
+                "RTRIM",
+                (argsText, original) => RewriteNestedTrimPair(argsText, original, "LTRIM"));
+        }
+
+        private static string RewriteTrimForSqlServer(string argsText, string original)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 1) return original;
+
+            return "LTRIM(RTRIM(" + args[0] + "))";
+        }
+
+        private static string RewriteNestedTrimPair(string argsText, string original, string innerFunctionName)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 1) return original;
+
+            string innerArgsText;
+            if (!TryGetSingleFunctionCallArguments(args[0], innerFunctionName, out innerArgsText)) return original;
+
+            List<string> innerArgs = SplitFunctionArguments(innerArgsText);
+            if (innerArgs.Count != 1) return original;
+
+            return "TRIM(" + innerArgs[0] + ")";
+        }
+
+        private static bool TryGetSingleFunctionCallArguments(string text, string functionName, out string argsText)
+        {
+            argsText = null;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            int nameStart = SkipWhitespace(text, 0);
+            if (!IsFunctionNameAt(text, nameStart, functionName)) return false;
+
+            int openIndex = SkipWhitespace(text, nameStart + functionName.Length);
+            if (openIndex >= text.Length || text[openIndex] != '(') return false;
+
+            int closeIndex = FindMatchingFunctionParenthesis(text, openIndex);
+            if (closeIndex <= openIndex) return false;
+            if (SkipWhitespace(text, closeIndex + 1) != text.Length) return false;
+
+            argsText = text.Substring(openIndex + 1, closeIndex - openIndex - 1);
+            return true;
         }
 
         private static string RewriteSubstringFunctions(string selectSql, string targetProvider)
@@ -2302,20 +3011,18 @@ namespace mySQLPunk.lib
 
             if (targetProvider == "mssql")
             {
-                return Regex.Replace(
+                return RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bSUBSTR\s*\((?<args>[^()]*)\)",
-                    m => RewriteFunctionName(m, "SUBSTRING"),
-                    RegexOptions.IgnoreCase);
+                    "SUBSTR",
+                    (argsText, original) => RewriteFunctionName(argsText, original, "SUBSTRING"));
             }
 
             if (targetProvider == "oracle" || targetProvider == "sqlite")
             {
-                return Regex.Replace(
+                return RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bSUBSTRING\s*\((?<args>[^()]*)\)",
-                    m => RewriteFunctionName(m, "SUBSTR"),
-                    RegexOptions.IgnoreCase);
+                    "SUBSTRING",
+                    (argsText, original) => RewriteFunctionName(argsText, original, "SUBSTR"));
             }
 
             return sql;
@@ -2327,10 +3034,10 @@ namespace mySQLPunk.lib
             return functionName + "(" + expr + ", " + start + ", " + length + ")";
         }
 
-        private static string RewriteFunctionName(Match match, string functionName)
+        private static string RewriteFunctionName(string argsText, string original, string functionName)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count < 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 2) return original;
             return functionName + "(" + string.Join(", ", args.ToArray()) + ")";
         }
 
@@ -2338,56 +3045,157 @@ namespace mySQLPunk.lib
         {
             if (targetProvider != "oracle" && targetProvider != "sqlite") return selectSql;
 
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bLEFT\s*\((?<args>[^()]*)\)",
-                m => RewriteLeftFunction(m),
-                RegexOptions.IgnoreCase);
+                "LEFT",
+                (argsText, original) => RewriteLeftFunction(argsText, original));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bRIGHT\s*\((?<args>[^()]*)\)",
-                m => RewriteRightFunction(m),
-                RegexOptions.IgnoreCase);
+                "RIGHT",
+                (argsText, original) => RewriteRightFunction(argsText, original));
 
             return sql;
         }
 
-        private static string RewriteLeftFunction(Match match)
+        private static string RewriteLeftFunction(string argsText, string original)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
             return "SUBSTR(" + args[0] + ", 1, " + args[1] + ")";
         }
 
-        private static string RewriteRightFunction(Match match)
+        private static string RewriteRightFunction(string argsText, string original)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
             return "SUBSTR(" + args[0] + ", -" + args[1] + ")";
+        }
+
+        private static string RewriteStuffFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mssql") return selectSql;
+
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
+                selectSql,
+                "STUFF",
+                (argsText, original) => RewriteStuffFunction(argsText, original, targetProvider));
+        }
+
+        private static string RewriteStuffFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 4) return original;
+
+            string expr = args[0];
+            string start = args[1];
+            string length = args[2];
+            string replacement = args[3];
+
+            if (targetProvider == "mysql")
+            {
+                return "CONCAT(SUBSTRING(" + expr + ", 1, " + start + " - 1), " + replacement + ", SUBSTRING(" + expr + ", " + start + " + " + length + "))";
+            }
+
+            if (targetProvider == "postgresql")
+            {
+                return "CONCAT(SUBSTRING(" + expr + " FROM 1 FOR " + start + " - 1), " + replacement + ", SUBSTRING(" + expr + " FROM " + start + " + " + length + "))";
+            }
+
+            string substringName = (targetProvider == "oracle" || targetProvider == "sqlite") ? "SUBSTR" : "SUBSTRING";
+            return substringName + "(" + expr + ", 1, " + start + " - 1) || " + replacement + " || " + substringName + "(" + expr + ", " + start + " + " + length + ")";
+        }
+
+        private static string RewriteSubstringIndexFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
+                selectSql,
+                "SUBSTRING_INDEX",
+                (argsText, original) => RewriteSubstringIndexFunction(argsText, original, targetProvider));
+        }
+
+        private static string RewriteSubstringIndexFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
+
+            string count = (args[2] ?? string.Empty).Trim();
+            if (count == "1") return BuildSubstringBeforeFirstDelimiterExpression(targetProvider, args[0], args[1]);
+            if (count == "-1") return BuildSubstringAfterLastDelimiterExpression(targetProvider, args[0], args[1], original);
+
+            return original;
+        }
+
+        private static string BuildSubstringBeforeFirstDelimiterExpression(string targetProvider, string expr, string delimiter)
+        {
+            string position = BuildStringPositionFunction(targetProvider, delimiter, expr);
+            string beforeDelimiter;
+
+            if (targetProvider == "mssql")
+            {
+                beforeDelimiter = "LEFT(" + expr + ", " + position + " - 1)";
+            }
+            else if (targetProvider == "postgresql")
+            {
+                beforeDelimiter = "SUBSTRING(" + expr + " FROM 1 FOR " + position + " - 1)";
+            }
+            else
+            {
+                string substringName = (targetProvider == "oracle" || targetProvider == "sqlite") ? "SUBSTR" : "SUBSTRING";
+                beforeDelimiter = substringName + "(" + expr + ", 1, " + position + " - 1)";
+            }
+
+            return "CASE WHEN " + position + " = 0 THEN " + expr + " ELSE " + beforeDelimiter + " END";
+        }
+
+        private static string BuildSubstringAfterLastDelimiterExpression(string targetProvider, string expr, string delimiter, string original)
+        {
+            string firstPosition = BuildStringPositionFunction(targetProvider, delimiter, expr);
+            string afterDelimiter;
+
+            if (targetProvider == "mssql")
+            {
+                string reversedPosition = "CHARINDEX(REVERSE(" + delimiter + "), REVERSE(" + expr + "))";
+                afterDelimiter = "RIGHT(" + expr + ", " + reversedPosition + " - 1)";
+            }
+            else if (targetProvider == "postgresql")
+            {
+                string reversedPosition = "POSITION(reverse(" + delimiter + ") IN reverse(" + expr + "))";
+                afterDelimiter = "RIGHT(" + expr + ", " + reversedPosition + " - 1)";
+            }
+            else if (targetProvider == "oracle")
+            {
+                afterDelimiter = "SUBSTR(" + expr + ", INSTR(" + expr + ", " + delimiter + ", -1) + LENGTH(" + delimiter + "))";
+            }
+            else
+            {
+                return original;
+            }
+
+            return "CASE WHEN " + firstPosition + " = 0 THEN " + expr + " ELSE " + afterDelimiter + " END";
         }
 
         private static string RewritePaddingFunctions(string selectSql, string targetProvider)
         {
             if (targetProvider != "mssql" && targetProvider != "sqlite") return selectSql;
 
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bLPAD\s*\((?<args>[^()]*)\)",
-                m => RewritePadFunction(m, targetProvider, true),
-                RegexOptions.IgnoreCase);
+                "LPAD",
+                (argsText, original) => RewritePadFunction(argsText, original, targetProvider, true));
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bRPAD\s*\((?<args>[^()]*)\)",
-                m => RewritePadFunction(m, targetProvider, false),
-                RegexOptions.IgnoreCase);
+                "RPAD",
+                (argsText, original) => RewritePadFunction(argsText, original, targetProvider, false));
         }
 
-        private static string RewritePadFunction(Match match, string targetProvider, bool leftPad)
+        private static string RewritePadFunction(string argsText, string original, string targetProvider, bool leftPad)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string length = args[1];
             string pad = args[2];
@@ -2407,6 +3215,128 @@ namespace mySQLPunk.lib
             }
 
             return "LEFT(" + mssqlValue + " + REPLICATE(" + pad + ", " + length + "), " + length + ")";
+        }
+
+        private static string RewriteStringRepeatFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bREPEAT\s*\((?<args>[^()]*)\)",
+                m => RewriteStringRepeatFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bREPLICATE\s*\((?<args>[^()]*)\)",
+                m => RewriteStringRepeatFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bSPACE\s*\(\s*(?<count>[^()]*)\s*\)",
+                m => BuildStringRepeatExpression(targetProvider, "' '", m.Groups["count"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteStringRepeatFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+
+            return BuildStringRepeatExpression(targetProvider, args[0], args[1]);
+        }
+
+        private static string BuildStringRepeatExpression(string targetProvider, string value, string count)
+        {
+            if (targetProvider == "mssql") return "REPLICATE(" + value + ", " + count + ")";
+            if (targetProvider == "mysql" || targetProvider == "postgresql") return "REPEAT(" + value + ", " + count + ")";
+            if (targetProvider == "sqlite") return "REPLACE(HEX(ZEROBLOB(" + count + ")), '00', " + value + ")";
+            if (targetProvider == "oracle") return "RPAD(" + value + ", LENGTH(" + value + ") * " + count + ", " + value + ")";
+
+            return value;
+        }
+
+        private static string RewriteCharacterCodeFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bCHR\s*\((?<args>[^()]*)\)",
+                m => RewriteCharacterCodeFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            sql = Regex.Replace(
+                sql,
+                @"\bNCHAR\s*\((?<args>[^()]*)\)",
+                m => IsCharTypeContext(sql, m.Index) ? m.Value : RewriteCharacterCodeFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bCHAR\s*\((?<args>[^()]*)\)",
+                m => IsCharTypeContext(sql, m.Index) ? m.Value : RewriteCharacterCodeFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteCharacterCodeFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 1) return match.Value;
+
+            string code = args[0];
+            if (targetProvider == "oracle" || targetProvider == "postgresql") return "CHR(" + code + ")";
+            if (targetProvider == "mssql" || targetProvider == "mysql" || targetProvider == "sqlite") return "CHAR(" + code + ")";
+
+            return match.Value;
+        }
+
+        private static bool IsCharTypeContext(string sql, int matchIndex)
+        {
+            int previousIndex = matchIndex - 1;
+            while (previousIndex >= 0 && char.IsWhiteSpace(sql[previousIndex])) previousIndex--;
+            if (previousIndex < 0) return false;
+
+            int wordEnd = previousIndex;
+            while (previousIndex >= 0 && char.IsLetter(sql[previousIndex])) previousIndex--;
+            string previousWord = sql.Substring(previousIndex + 1, wordEnd - previousIndex).ToUpperInvariant();
+            if (previousWord == "AS") return true;
+
+            if (sql[wordEnd] == '(')
+            {
+                int beforeParen = wordEnd - 1;
+                while (beforeParen >= 0 && char.IsWhiteSpace(sql[beforeParen])) beforeParen--;
+                int outerWordEnd = beforeParen;
+                while (beforeParen >= 0 && char.IsLetter(sql[beforeParen])) beforeParen--;
+                string outerWord = sql.Substring(beforeParen + 1, outerWordEnd - beforeParen).ToUpperInvariant();
+                return outerWord == "CONVERT" || outerWord == "CAST";
+            }
+
+            return false;
+        }
+
+        private static string RewriteCharacterValueFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bASCII\s*\((?<args>[^()]*)\)",
+                m => RewriteCharacterValueFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bUNICODE\s*\((?<args>[^()]*)\)",
+                m => RewriteCharacterValueFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteCharacterValueFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 1) return match.Value;
+
+            string expr = args[0];
+            if (targetProvider == "sqlite") return "unicode(" + expr + ")";
+            if (targetProvider == "mssql") return "UNICODE(" + expr + ")";
+            return "ASCII(" + expr + ")";
         }
 
         private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)
@@ -2562,6 +3492,75 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
         }
 
+        private static string RewriteMySqlJsonUnquoteExtractFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bJSON_UNQUOTE\s*\(\s*JSON_EXTRACT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<path>\$[^']*)'\s*\)\s*\)",
+                m => BuildJsonExtractionForTarget(
+                    targetProvider,
+                    m.Groups["expr"].Value.Trim(),
+                    m.Groups["path"].Value,
+                    true,
+                    m.Value),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteJsonUnquoteWrappers(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            string sql = selectSql ?? string.Empty;
+            int searchIndex = 0;
+            while (searchIndex < sql.Length)
+            {
+                int functionIndex = FindNextFunctionCall(sql, new[] { "JSON_UNQUOTE" }, searchIndex, out _);
+                if (functionIndex < 0) break;
+
+                int openParen = SkipWhitespaceRight(sql, functionIndex + "JSON_UNQUOTE".Length);
+                if (openParen >= sql.Length || sql[openParen] != '(')
+                {
+                    searchIndex = functionIndex + "JSON_UNQUOTE".Length;
+                    continue;
+                }
+
+                int closeParen = FindMatchingCloseParen(sql, openParen);
+                if (closeParen < 0) break;
+
+                string inner = sql.Substring(openParen + 1, closeParen - openParen - 1).Trim();
+                if (string.IsNullOrWhiteSpace(inner))
+                {
+                    searchIndex = closeParen + 1;
+                    continue;
+                }
+
+                sql = sql.Substring(0, functionIndex) + inner + sql.Substring(closeParen + 1);
+                searchIndex = functionIndex + inner.Length;
+            }
+
+            return sql;
+        }
+
+        private static string RewriteMySqlJsonPathOperators(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"(?<expr>\b[A-Za-z_][A-Za-z0-9_\.]*\b|\([^)]+\))\s*(?<op>->>|->)\s*'(?<path>\$[^']*)'",
+                m =>
+                {
+                    bool textValue = m.Groups["op"].Value == "->>";
+                    return BuildJsonExtractionForTarget(
+                        targetProvider,
+                        m.Groups["expr"].Value.Trim(),
+                        m.Groups["path"].Value,
+                        textValue,
+                        m.Value);
+                },
+                RegexOptions.IgnoreCase);
+        }
+
         private static string RewritePostgreSqlJsonOperators(string selectSql, string targetProvider)
         {
             if (targetProvider == "postgresql") return selectSql;
@@ -2606,6 +3605,11 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql" || targetProvider == "oracle")
             {
                 return (textValue ? "JSON_VALUE" : "JSON_QUERY") + "(" + expr + ", '" + escapedPath + "')";
+            }
+            if (targetProvider == "postgresql")
+            {
+                string pgPath = textValue ? BuildPostgreSqlJsonTextPath(jsonPath) : BuildPostgreSqlJsonPath(jsonPath);
+                if (!string.IsNullOrWhiteSpace(pgPath)) return expr + (textValue ? " #>> " : " #> ") + pgPath;
             }
             if (targetProvider == "sqlite")
             {
@@ -2707,6 +3711,105 @@ namespace mySQLPunk.lib
                 return "JSON_EXISTS(" + expr + ", '" + escapedPath + "')";
             }
 
+            return original;
+        }
+
+        private static string RewriteJsonConstructorFunctions(string selectSql, string targetProvider)
+        {
+            string sql = RewriteJsonConstructorFunctionCalls(
+                selectSql,
+                targetProvider,
+                true,
+                new[] { "JSON_OBJECT", "json_object", "JSON_BUILD_OBJECT", "JSONB_BUILD_OBJECT", "json_build_object", "jsonb_build_object" });
+
+            return RewriteJsonConstructorFunctionCalls(
+                sql,
+                targetProvider,
+                false,
+                new[] { "JSON_ARRAY", "json_array", "JSON_BUILD_ARRAY", "JSONB_BUILD_ARRAY", "json_build_array", "jsonb_build_array" });
+        }
+
+        private static string RewriteJsonConstructorFunctionCalls(string selectSql, string targetProvider, bool objectConstructor, string[] functionNames)
+        {
+            string sql = selectSql ?? string.Empty;
+            int searchIndex = 0;
+            while (searchIndex < sql.Length)
+            {
+                string functionName;
+                int functionIndex = FindNextFunctionCall(sql, functionNames, searchIndex, out functionName);
+                if (functionIndex < 0) break;
+
+                int openParen = SkipWhitespaceRight(sql, functionIndex + functionName.Length);
+                if (openParen >= sql.Length || sql[openParen] != '(')
+                {
+                    searchIndex = functionIndex + functionName.Length;
+                    continue;
+                }
+
+                int closeParen = FindMatchingCloseParen(sql, openParen);
+                if (closeParen < 0) break;
+
+                string argsText = sql.Substring(openParen + 1, closeParen - openParen - 1);
+                List<string> args = SplitTopLevelSqlList(argsText);
+                string original = sql.Substring(functionIndex, closeParen - functionIndex + 1);
+                string replacement = objectConstructor
+                    ? BuildJsonObjectConstructor(targetProvider, args, original)
+                    : BuildJsonArrayConstructor(targetProvider, args, original);
+
+                if (string.IsNullOrWhiteSpace(replacement) || string.Equals(replacement, original, StringComparison.Ordinal))
+                {
+                    searchIndex = closeParen + 1;
+                    continue;
+                }
+
+                sql = sql.Substring(0, functionIndex) + replacement + sql.Substring(closeParen + 1);
+                searchIndex = functionIndex + replacement.Length;
+            }
+
+            return sql;
+        }
+
+        private static int FindNextFunctionCall(string sql, string[] functionNames, int startIndex, out string functionName)
+        {
+            functionName = "";
+            int bestIndex = -1;
+            foreach (string candidate in functionNames ?? new string[0])
+            {
+                int index = IndexOfKeyword(sql, candidate, startIndex);
+                if (index < 0) continue;
+                if (bestIndex < 0 || index < bestIndex)
+                {
+                    bestIndex = index;
+                    functionName = candidate;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private static string BuildJsonObjectConstructor(string targetProvider, List<string> args, string original)
+        {
+            if (args == null || args.Count == 0 || args.Count % 2 != 0) return original;
+            if (targetProvider == "postgresql") return "jsonb_build_object(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "sqlite") return "json_object(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "mysql") return "JSON_OBJECT(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider != "oracle") return original;
+
+            List<string> pairs = new List<string>();
+            for (int i = 0; i + 1 < args.Count; i += 2)
+            {
+                pairs.Add("KEY " + args[i] + " VALUE " + args[i + 1]);
+            }
+            return "JSON_OBJECT(" + string.Join(", ", pairs.ToArray()) + ")";
+        }
+
+        private static string BuildJsonArrayConstructor(string targetProvider, List<string> args, string original)
+        {
+            if (args == null || args.Count == 0) return original;
+            if (targetProvider == "postgresql") return "jsonb_build_array(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "sqlite") return "json_array(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "mysql") return "JSON_ARRAY(" + string.Join(", ", args.ToArray()) + ")";
+            if (targetProvider == "oracle") return "JSON_ARRAY(" + string.Join(", ", args.ToArray()) + ")";
             return original;
         }
 
@@ -3380,6 +4483,7 @@ namespace mySQLPunk.lib
             StringBuilder current = new StringBuilder();
             bool inSingleQuote = false;
             bool inDoubleQuote = false;
+            int depth = 0;
 
             for (int i = 0; i < (argsText ?? string.Empty).Length; i++)
             {
@@ -3401,7 +4505,17 @@ namespace mySQLPunk.lib
                     current.Append(ch);
                     inDoubleQuote = !inDoubleQuote;
                 }
-                else if (ch == ',' && !inSingleQuote && !inDoubleQuote)
+                else if (ch == '(' && !inSingleQuote && !inDoubleQuote)
+                {
+                    depth++;
+                    current.Append(ch);
+                }
+                else if (ch == ')' && !inSingleQuote && !inDoubleQuote && depth > 0)
+                {
+                    depth--;
+                    current.Append(ch);
+                }
+                else if (ch == ',' && !inSingleQuote && !inDoubleQuote && depth == 0)
                 {
                     string item = current.ToString().Trim();
                     if (item.Length > 0) args.Add(item);
@@ -3416,6 +4530,125 @@ namespace mySQLPunk.lib
             string tail = current.ToString().Trim();
             if (tail.Length > 0) args.Add(tail);
             return args;
+        }
+
+        private static string RewriteFunctionCallsOutsideSingleQuotedStrings(string sql, string functionName, Func<string, string, string> rewrite)
+        {
+            if (string.IsNullOrEmpty(sql) || string.IsNullOrEmpty(functionName)) return sql;
+
+            StringBuilder output = new StringBuilder(sql.Length);
+            int index = 0;
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+
+            while (index < sql.Length)
+            {
+                char ch = sql[index];
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    output.Append(ch);
+                    if (inSingleQuote && index + 1 < sql.Length && sql[index + 1] == '\'')
+                    {
+                        output.Append(sql[++index]);
+                    }
+                    else
+                    {
+                        inSingleQuote = !inSingleQuote;
+                    }
+                    index++;
+                    continue;
+                }
+
+                if (ch == '"' && !inSingleQuote)
+                {
+                    output.Append(ch);
+                    inDoubleQuote = !inDoubleQuote;
+                    index++;
+                    continue;
+                }
+
+                if (!inSingleQuote && !inDoubleQuote && IsFunctionNameAt(sql, index, functionName))
+                {
+                    int nameEnd = index + functionName.Length;
+                    int openIndex = SkipWhitespace(sql, nameEnd);
+                    if (openIndex < sql.Length && sql[openIndex] == '(')
+                    {
+                        int closeIndex = FindMatchingFunctionParenthesis(sql, openIndex);
+                        if (closeIndex > openIndex)
+                        {
+                            string original = sql.Substring(index, closeIndex - index + 1);
+                            string argsText = sql.Substring(openIndex + 1, closeIndex - openIndex - 1);
+                            output.Append(rewrite(argsText, original));
+                            index = closeIndex + 1;
+                            continue;
+                        }
+                    }
+                }
+
+                output.Append(ch);
+                index++;
+            }
+
+            return output.ToString();
+        }
+
+        private static bool IsFunctionNameAt(string text, int index, string functionName)
+        {
+            if (index < 0 || index + functionName.Length > text.Length) return false;
+            if (index > 0 && IsIdentifierChainChar(text[index - 1])) return false;
+            if (string.Compare(text, index, functionName, 0, functionName.Length, true, CultureInfo.InvariantCulture) != 0) return false;
+
+            int nameEnd = index + functionName.Length;
+            return nameEnd >= text.Length || !IsIdentifierChainChar(text[nameEnd]);
+        }
+
+        private static int SkipWhitespace(string text, int index)
+        {
+            while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+            return index;
+        }
+
+        private static int FindMatchingFunctionParenthesis(string text, int openIndex)
+        {
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            int depth = 0;
+
+            for (int i = openIndex; i < text.Length; i++)
+            {
+                char ch = text[i];
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    if (inSingleQuote && i + 1 < text.Length && text[i + 1] == '\'')
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        inSingleQuote = !inSingleQuote;
+                    }
+                    continue;
+                }
+
+                if (ch == '"' && !inSingleQuote)
+                {
+                    inDoubleQuote = !inDoubleQuote;
+                    continue;
+                }
+
+                if (inSingleQuote || inDoubleQuote) continue;
+                if (ch == '(')
+                {
+                    depth++;
+                }
+                else if (ch == ')')
+                {
+                    depth--;
+                    if (depth == 0) return i;
+                }
+            }
+
+            return -1;
         }
 
         private static string BuildStringAggregate(string targetProvider, string expr, string separator)

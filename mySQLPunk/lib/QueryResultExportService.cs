@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.Common;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
@@ -16,7 +17,46 @@ namespace mySQLPunk.lib
         Json,
         Xml,
         Html,
-        Markdown
+        Markdown,
+        Sql
+    }
+
+    public sealed class QueryResultStreamingExportResult
+    {
+        public long Rows { get; set; }
+        public long BytesWritten { get; set; }
+        public QueryResultExportFormat Format { get; set; }
+    }
+
+    public sealed class QueryResultExportSummary
+    {
+        public string Path { get; set; }
+        public string FileName { get; set; }
+        public string DirectoryPath { get; set; }
+        public long Rows { get; set; }
+        public long BytesWritten { get; set; }
+        public QueryResultExportFormat Format { get; set; }
+        public string FormatName { get; set; }
+
+        public string BuildDetailText()
+        {
+            return "Format: " + FormatName + Environment.NewLine +
+                "Rows: " + Rows.ToString("N0") + Environment.NewLine +
+                "Size: " + FormatByteCount(BytesWritten) + Environment.NewLine +
+                "File: " + FileName + Environment.NewLine +
+                "Path: " + Path;
+        }
+
+        public static string FormatByteCount(long bytes)
+        {
+            if (bytes < 1024) return bytes + " B";
+            double value = bytes / 1024d;
+            if (value < 1024) return value.ToString("0.##") + " KB";
+            value /= 1024d;
+            if (value < 1024) return value.ToString("0.##") + " MB";
+            value /= 1024d;
+            return value.ToString("0.##") + " GB";
+        }
     }
 
     public static class QueryResultExportService
@@ -36,6 +76,7 @@ namespace mySQLPunk.lib
                 case ".htm": return QueryResultExportFormat.Html;
                 case ".md":
                 case ".markdown": return QueryResultExportFormat.Markdown;
+                case ".sql": return QueryResultExportFormat.Sql;
             }
 
             switch (filterIndex)
@@ -47,6 +88,7 @@ namespace mySQLPunk.lib
                 case 5: return QueryResultExportFormat.Xml;
                 case 6: return QueryResultExportFormat.Html;
                 case 7: return QueryResultExportFormat.Markdown;
+                case 8: return QueryResultExportFormat.Sql;
                 default: return QueryResultExportFormat.Csv;
             }
         }
@@ -60,6 +102,107 @@ namespace mySQLPunk.lib
             }
 
             File.WriteAllText(path, BuildText(dt, format), Encoding.UTF8);
+        }
+
+        public static QueryResultExportSummary BuildSummary(string path, QueryResultExportFormat format, long rows, long? bytesWritten = null)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Target path is required.", nameof(path));
+
+            FileInfo file = new FileInfo(path);
+            long bytes = bytesWritten.HasValue ? bytesWritten.Value : (file.Exists ? file.Length : 0);
+            return new QueryResultExportSummary
+            {
+                Path = path,
+                FileName = System.IO.Path.GetFileName(path),
+                DirectoryPath = System.IO.Path.GetDirectoryName(path),
+                Rows = rows,
+                BytesWritten = bytes,
+                Format = format,
+                FormatName = GetFormatName(format)
+            };
+        }
+
+        public static string GetFormatName(QueryResultExportFormat format)
+        {
+            switch (format)
+            {
+                case QueryResultExportFormat.Xlsx: return "Excel";
+                case QueryResultExportFormat.Csv: return "CSV";
+                case QueryResultExportFormat.Tsv: return "TSV";
+                case QueryResultExportFormat.Json: return "JSON";
+                case QueryResultExportFormat.Xml: return "XML";
+                case QueryResultExportFormat.Html: return "HTML";
+                case QueryResultExportFormat.Markdown: return "Markdown";
+                case QueryResultExportFormat.Sql: return "SQL";
+                default: return format.ToString();
+            }
+        }
+
+        public static bool CanStreamFormat(QueryResultExportFormat format)
+        {
+            return format == QueryResultExportFormat.Csv ||
+                format == QueryResultExportFormat.Tsv ||
+                format == QueryResultExportFormat.Json ||
+                format == QueryResultExportFormat.Xml ||
+                format == QueryResultExportFormat.Html ||
+                format == QueryResultExportFormat.Markdown ||
+                format == QueryResultExportFormat.Sql;
+        }
+
+        public static QueryResultStreamingExportResult WriteStreaming(
+            IDatabase database,
+            string sql,
+            IDictionary<string, object> parameters,
+            string path,
+            QueryResultExportFormat format,
+            Action<long> progress = null)
+        {
+            if (database == null) throw new ArgumentNullException(nameof(database));
+            if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException("SQL is required.", nameof(sql));
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Target path is required.", nameof(path));
+            if (!CanStreamFormat(format)) throw new NotSupportedException("Streaming export only supports CSV, TSV, JSON, XML, HTML, Markdown, and SQL.");
+
+            DbConnection connection = BinaryCellStreamingService.GetOpenConnection(database);
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = sql;
+                BinaryCellStreamingService.AddParameters(command, database, parameters);
+
+                using (DbDataReader reader = command.ExecuteReader(CommandBehavior.SequentialAccess))
+                using (CountingFileStream stream = new CountingFileStream(path))
+                using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                {
+                    long rows;
+                    switch (format)
+                    {
+                        case QueryResultExportFormat.Json:
+                            rows = WriteStreamingJson(reader, writer, progress);
+                            break;
+                        case QueryResultExportFormat.Xml:
+                            rows = WriteStreamingXml(reader, writer, progress);
+                            break;
+                        case QueryResultExportFormat.Html:
+                            rows = WriteStreamingHtml(reader, writer, progress);
+                            break;
+                        case QueryResultExportFormat.Markdown:
+                            rows = WriteStreamingMarkdown(reader, writer, progress);
+                            break;
+                        case QueryResultExportFormat.Sql:
+                            rows = WriteStreamingSql(reader, writer, progress);
+                            break;
+                        default:
+                            rows = WriteStreamingDelimited(reader, writer, format == QueryResultExportFormat.Tsv ? '\t' : ',', progress);
+                            break;
+                    }
+                    writer.Flush();
+                    return new QueryResultStreamingExportResult
+                    {
+                        Rows = rows,
+                        BytesWritten = stream.BytesWritten,
+                        Format = format
+                    };
+                }
+            }
         }
 
         public static string BuildText(DataTable dt, QueryResultExportFormat format)
@@ -76,6 +219,8 @@ namespace mySQLPunk.lib
                     return BuildHtml(dt);
                 case QueryResultExportFormat.Markdown:
                     return BuildMarkdown(dt);
+                case QueryResultExportFormat.Sql:
+                    return BuildSql(dt);
                 default:
                     int exportedRows;
                     return BuildCsv(dt, out exportedRows);
@@ -271,6 +416,302 @@ namespace mySQLPunk.lib
             return sb.ToString();
         }
 
+        private static string BuildSql(DataTable dt)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+
+            StringBuilder sb = new StringBuilder();
+            using (StringWriter writer = new StringWriter(sb))
+            {
+                writer.WriteLine("-- mySQLPunk query result export");
+                foreach (DataRow row in dt.Rows)
+                {
+                    if (row.RowState == DataRowState.Deleted) continue;
+                    AppendSqlInsert(writer, GetDataTableColumnNames(dt), index => row[index]);
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static long WriteStreamingDelimited(DbDataReader reader, TextWriter writer, char delimiter, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(delimiter);
+                writer.Write(DelimitedEscape(columnNames[c], delimiter));
+            }
+            writer.WriteLine();
+
+            long rows = 0;
+            while (reader.Read())
+            {
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    if (c > 0) writer.Write(delimiter);
+                    writer.Write(DelimitedEscape(FormatExportValue(ReadStreamingValue(reader, c)), delimiter));
+                }
+                writer.WriteLine();
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            return rows;
+        }
+
+        private static long WriteStreamingJson(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+            writer.Write("[");
+
+            while (reader.Read())
+            {
+                if (rows > 0) writer.Write(",");
+                writer.WriteLine();
+
+                Dictionary<string, object> item = new Dictionary<string, object>();
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    object value = ReadStreamingValue(reader, c);
+                    item[columnNames[c]] = value == DBNull.Value ? null : ConvertExportValue(value);
+                }
+
+                writer.Write(JsonConvert.SerializeObject(item, Formatting.None));
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            if (rows > 0) writer.WriteLine();
+            writer.Write("]");
+            return rows;
+        }
+
+        private static long WriteStreamingXml(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+
+            writer.WriteLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+            writer.WriteLine("<results>");
+            while (reader.Read())
+            {
+                writer.WriteLine("  <row>");
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    object value = ReadStreamingValue(reader, c);
+                    string columnName = XmlEscape(columnNames[c]);
+                    if (value == DBNull.Value || value == null)
+                    {
+                        writer.Write("    <field name=\"");
+                        writer.Write(columnName);
+                        writer.WriteLine("\" isNull=\"true\" />");
+                    }
+                    else
+                    {
+                        writer.Write("    <field name=\"");
+                        writer.Write(columnName);
+                        writer.Write("\">");
+                        writer.Write(XmlEscape(FormatExportValue(value)));
+                        writer.WriteLine("</field>");
+                    }
+                }
+                writer.WriteLine("  </row>");
+                rows++;
+                if (progress != null) progress(rows);
+            }
+            writer.WriteLine("</results>");
+
+            return rows;
+        }
+
+        private static long WriteStreamingHtml(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+
+            writer.WriteLine("<!doctype html>");
+            writer.WriteLine("<html><head><meta charset=\"utf-8\"><title>mySQLPunk export</title>");
+            writer.WriteLine("<style>body{font-family:Segoe UI,Arial,sans-serif}table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:4px 8px;white-space:pre-wrap}th{background:#f2f2f2}</style>");
+            writer.WriteLine("</head><body><table>");
+            writer.WriteLine("<thead><tr>");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                writer.Write("<th>");
+                writer.Write(HtmlEscape(columnNames[c]));
+                writer.WriteLine("</th>");
+            }
+            writer.WriteLine("</tr></thead><tbody>");
+
+            while (reader.Read())
+            {
+                writer.WriteLine("<tr>");
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    writer.Write("<td>");
+                    writer.Write(HtmlEscape(FormatExportValue(ReadStreamingValue(reader, c))));
+                    writer.WriteLine("</td>");
+                }
+                writer.WriteLine("</tr>");
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            writer.WriteLine("</tbody></table></body></html>");
+            return rows;
+        }
+
+        private static long WriteStreamingMarkdown(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+
+            writer.Write("| ");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(" | ");
+                writer.Write(MarkdownEscape(columnNames[c]));
+            }
+            writer.WriteLine(" |");
+
+            writer.Write("| ");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(" | ");
+                writer.Write("---");
+            }
+            writer.WriteLine(" |");
+
+            while (reader.Read())
+            {
+                writer.Write("| ");
+                for (int c = 0; c < reader.FieldCount; c++)
+                {
+                    if (c > 0) writer.Write(" | ");
+                    writer.Write(MarkdownEscape(FormatExportValue(ReadStreamingValue(reader, c))));
+                }
+                writer.WriteLine(" |");
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            return rows;
+        }
+
+        private static long WriteStreamingSql(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+            writer.WriteLine("-- mySQLPunk query result export");
+
+            while (reader.Read())
+            {
+                AppendSqlInsert(writer, columnNames, index => ReadStreamingValue(reader, index));
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            return rows;
+        }
+
+        private static string[] GetDataTableColumnNames(DataTable dt)
+        {
+            string[] names = new string[dt.Columns.Count];
+            for (int i = 0; i < dt.Columns.Count; i++)
+            {
+                names[i] = string.IsNullOrWhiteSpace(dt.Columns[i].ColumnName)
+                    ? "Column" + (i + 1).ToString()
+                    : dt.Columns[i].ColumnName;
+            }
+            return names;
+        }
+
+        private static void AppendSqlInsert(TextWriter writer, string[] columnNames, Func<int, object> valueProvider)
+        {
+            writer.Write("INSERT INTO ");
+            writer.Write(SqlIdentifier("query_result"));
+            writer.Write(" (");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(", ");
+                writer.Write(SqlIdentifier(columnNames[c]));
+            }
+            writer.Write(") VALUES (");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(", ");
+                writer.Write(SqlLiteral(valueProvider(c)));
+            }
+            writer.WriteLine(");");
+        }
+
+        private static string SqlIdentifier(string value)
+        {
+            value = string.IsNullOrWhiteSpace(value) ? "Column" : value;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static string SqlLiteral(object value)
+        {
+            if (value == null || value == DBNull.Value) return "NULL";
+
+            byte[] bytes = value as byte[];
+            if (bytes != null) return "X'" + ToHex(bytes) + "'";
+
+            if (value is bool) return (bool)value ? "1" : "0";
+            if (value is DateTime) return "'" + ((DateTime)value).ToString("yyyy-MM-dd HH:mm:ss").Replace("'", "''") + "'";
+            if (value is DateTimeOffset) return "'" + ((DateTimeOffset)value).ToString("yyyy-MM-dd HH:mm:ss zzz").Replace("'", "''") + "'";
+            if (value is byte || value is sbyte || value is short || value is ushort ||
+                value is int || value is uint || value is long || value is ulong ||
+                value is float || value is double || value is decimal)
+            {
+                return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            return "'" + value.ToString().Replace("'", "''") + "'";
+        }
+
+        private static string ToHex(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return string.Empty;
+            StringBuilder sb = new StringBuilder(bytes.Length * 2);
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                sb.Append(bytes[i].ToString("X2"));
+            }
+            return sb.ToString();
+        }
+
+        private static string[] GetReaderColumnNames(DbDataReader reader)
+        {
+            string[] names = new string[reader.FieldCount];
+            Dictionary<string, int> seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                string name = reader.GetName(i);
+                if (string.IsNullOrWhiteSpace(name)) name = "Column" + (i + 1).ToString();
+                int count;
+                if (seen.TryGetValue(name, out count))
+                {
+                    count++;
+                    seen[name] = count;
+                    name = name + "_" + count.ToString();
+                }
+                else
+                {
+                    seen[name] = 1;
+                }
+                names[i] = name;
+            }
+            return names;
+        }
+
+        private static object ReadStreamingValue(DbDataReader reader, int ordinal)
+        {
+            if (reader.IsDBNull(ordinal)) return DBNull.Value;
+            return reader.GetValue(ordinal);
+        }
+
         private static void WriteXlsx(DataTable dt, string path)
         {
             if (dt == null) throw new ArgumentNullException(nameof(dt));
@@ -301,13 +742,16 @@ namespace mySQLPunk.lib
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
-            sb.AppendLine("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+            sb.Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
+            sb.Append("<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>");
+            sb.Append(BuildXlsxColumnDefinitions(dt));
+            sb.AppendLine("<sheetData>");
 
             int rowIndex = 1;
             sb.Append("<row r=\"").Append(rowIndex).Append("\">");
             for (int c = 0; c < dt.Columns.Count; c++)
             {
-                AppendInlineStringCell(sb, rowIndex, c + 1, dt.Columns[c].ColumnName);
+                AppendInlineStringCell(sb, rowIndex, c + 1, dt.Columns[c].ColumnName, 1);
             }
             sb.AppendLine("</row>");
 
@@ -318,18 +762,52 @@ namespace mySQLPunk.lib
                 sb.Append("<row r=\"").Append(rowIndex).Append("\">");
                 for (int c = 0; c < dt.Columns.Count; c++)
                 {
-                    AppendInlineStringCell(sb, rowIndex, c + 1, FormatExportValue(row[c]));
+                    AppendInlineStringCell(sb, rowIndex, c + 1, FormatExportValue(row[c]), 0);
                 }
                 sb.AppendLine("</row>");
             }
 
-            sb.AppendLine("</sheetData></worksheet>");
+            sb.AppendLine("</sheetData>");
+            string autoFilter = BuildXlsxAutoFilterReference(dt, rowIndex);
+            if (!string.IsNullOrWhiteSpace(autoFilter))
+            {
+                sb.Append("<autoFilter ref=\"").Append(autoFilter).AppendLine("\"/>");
+            }
+            sb.AppendLine("</worksheet>");
             return sb.ToString();
         }
 
-        private static void AppendInlineStringCell(StringBuilder sb, int rowIndex, int columnIndex, string value)
+        private static string BuildXlsxColumnDefinitions(DataTable dt)
         {
-            sb.Append("<c r=\"").Append(GetExcelColumnName(columnIndex)).Append(rowIndex).Append("\" t=\"inlineStr\"><is><t");
+            if (dt == null || dt.Columns.Count == 0) return string.Empty;
+
+            StringBuilder sb = new StringBuilder();
+            sb.Append("<cols>");
+            for (int c = 0; c < dt.Columns.Count; c++)
+            {
+                double width = Math.Min(60, Math.Max(10, (dt.Columns[c].ColumnName ?? string.Empty).Length + 2));
+                sb.Append("<col min=\"").Append(c + 1).Append("\" max=\"").Append(c + 1)
+                    .Append("\" width=\"").Append(width.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    .Append("\" customWidth=\"1\"/>");
+            }
+            sb.Append("</cols>");
+            return sb.ToString();
+        }
+
+        private static string BuildXlsxAutoFilterReference(DataTable dt, int lastRowIndex)
+        {
+            if (dt == null || dt.Columns.Count == 0 || lastRowIndex <= 0) return string.Empty;
+            return "A1:" + GetExcelColumnName(dt.Columns.Count) + Math.Max(1, lastRowIndex).ToString();
+        }
+
+        private static void AppendInlineStringCell(StringBuilder sb, int rowIndex, int columnIndex, string value, int styleIndex)
+        {
+            sb.Append("<c r=\"").Append(GetExcelColumnName(columnIndex)).Append(rowIndex).Append("\" t=\"inlineStr\"");
+            if (styleIndex > 0)
+            {
+                sb.Append(" s=\"").Append(styleIndex).Append("\"");
+            }
+            sb.Append("><is><t");
             if (!string.IsNullOrEmpty(value) && (value.StartsWith(" ") || value.EndsWith(" ") || value.Contains("\n") || value.Contains("\r") || value.Contains("\t")))
             {
                 sb.Append(" xml:space=\"preserve\"");
@@ -377,11 +855,11 @@ namespace mySQLPunk.lib
         {
             return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
                    "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
-                   "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>" +
-                   "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>" +
-                   "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>" +
+                   "<fonts count=\"2\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"11\"/><name val=\"Calibri\"/><color rgb=\"FFFFFFFF\"/></font></fonts>" +
+                   "<fills count=\"3\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill><fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF2563EB\"/><bgColor indexed=\"64\"/></patternFill></fill></fills>" +
+                   "<borders count=\"2\"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style=\"thin\"><color rgb=\"FF94A3B8\"/></bottom><diagonal/></border></borders>" +
                    "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>" +
-                   "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>" +
+                   "<cellXfs count=\"2\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/><xf numFmtId=\"0\" fontId=\"1\" fillId=\"2\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\"/></cellXfs>" +
                    "</styleSheet>";
         }
 
@@ -464,6 +942,22 @@ namespace mySQLPunk.lib
                 columnNumber = (columnNumber - modulo) / 26;
             }
             return columnName;
+        }
+
+        private sealed class CountingFileStream : FileStream
+        {
+            public long BytesWritten { get; private set; }
+
+            public CountingFileStream(string path)
+                : base(path, FileMode.Create, FileAccess.Write, FileShare.None)
+            {
+            }
+
+            public override void Write(byte[] array, int offset, int count)
+            {
+                base.Write(array, offset, count);
+                BytesWritten += count;
+            }
         }
     }
 }

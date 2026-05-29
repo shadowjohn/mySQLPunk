@@ -81,6 +81,7 @@ namespace mySQLPunk
             Add("Menu.Close", "關閉", "Close");
             Add("Menu.Exit", "離開", "Exit");
             Add("Menu.About", "關於", "About");
+            Add("Menu.CheckUpdates", "檢查更新...", "Check for Updates...");
 
             Add("View.NavigationPane", "導覽窗格", "Navigation Pane");
             Add("View.ShowNavigationPane", "顯示導覽窗格", "Show Navigation Pane");
@@ -282,6 +283,10 @@ namespace mySQLPunk
             Add("Connection.SqliteFileFilter", "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*", "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*");
             Add("Connection.SqliteNewFileFilter", "SQLite database (*.sqlite)|*.sqlite|SQLite DB (*.db)|*.db|All files (*.*)|*.*", "SQLite database (*.sqlite)|*.sqlite|SQLite DB (*.db)|*.db|All files (*.*)|*.*");
             Add("Connection.SpatiaLiteLoadFailed", "SQLite 可連線，但 SpatiaLite 載入失敗：\r\n{0}", "SQLite connected, but SpatiaLite failed to load:\r\n{0}");
+            Add("Connection.SpatiaLiteRepairFailed", "SpatiaLite runtime 修復腳本結束，但回傳代碼為 {0}。請查看修復 log。", "SpatiaLite runtime repair finished with exit code {0}. Check the repair log.");
+            Add("Connection.SpatiaLiteRepairCompletedReconnect", "SpatiaLite runtime 修復完成。請重新開啟 SQLite 連線以重新載入 extension。", "SpatiaLite runtime repair completed. Reopen the SQLite connection to reload the extension.");
+            Add("Connection.SpatiaLiteRepairReloaded", "SpatiaLite runtime 修復完成，已重新載入 SpatiaLite。", "SpatiaLite runtime repair completed and SpatiaLite was reloaded.");
+            Add("Connection.SpatiaLiteRepairReloadFailed", "SpatiaLite runtime 修復完成，但重新載入仍失敗：{0}", "SpatiaLite runtime repair completed, but reload still failed: {0}");
             Add("Connection.InitSpatialMetadataTitle", "初始化 geospatial", "Initialize geospatial");
             Add("Connection.InitSpatialMetadataPrompt", "此 SQLite 檔尚未偵測到 SpatiaLite metadata，是否要初始化？", "This SQLite file does not have SpatiaLite metadata yet. Initialize it?");
             Add("Connection.UnsupportedEdit", "此連線類型尚未支援編輯：{0}", "Editing this connection type is not supported yet: {0}");
@@ -313,6 +318,10 @@ namespace mySQLPunk
             Add("Connection.CliNotFound", "找不到 {0} 命令列工具，請先安裝並確認已加入 PATH。\n說明：{1}", "Cannot find {0} CLI tool. Please install it and make sure it is added to PATH.\nHelp: {1}");
             Add("Connection.CliTemporaryPasswordPrompt", "此連線未儲存密碼。\n請輸入本次命令列介面要使用的密碼；留空會改由命令列工具自行提示。", "This connection does not have a saved password.\nEnter the password to use for this CLI session; leave blank to let the CLI prompt for it.");
             Add("Connection.CliTemporaryPasswordCancelled", "已取消開啟命令列介面。", "Opening command line interface cancelled.");
+            Add("Update.Checking", "正在檢查更新...", "Checking for updates...");
+            Add("Update.Available", "發現新版本 {0}。\n目前版本：{1}\n\n是否開啟下載頁？", "Version {0} is available.\nCurrent version: {1}\n\nOpen the download page?");
+            Add("Update.NotAvailable", "目前已是最新版本。", "You are already on the latest version.");
+            Add("Update.CheckFailed", "檢查更新失敗：{0}", "Check for updates failed: {0}");
             Add("Connection.MarkedColor", "已標記連線色彩：{0}", "Connection color marked: {0}");
 
             Add("ConnectionWizard.Title", "選取連線類型", "Select Connection Type");
@@ -351,6 +360,14 @@ namespace mySQLPunk
             Add("Connection.ImportTrustConfirmInvalidSignature", "這個匯入檔的來源簽章無效，內容可能已被修改。仍要繼續匯入嗎？", "This import file has an invalid source signature and may have been modified. Continue importing?");
             Add("Connection.ImportTrustConfirmMissingSourceId", "這個匯入檔是舊版簽章格式，沒有來源 ID 可加入白名單。仍要繼續匯入嗎？", "This import file uses a legacy signature without a source ID. Continue importing?");
             Add("Connection.ImportTrustConfirmUnknown", "這個匯出來源尚未加入白名單。建議確認來源後先按「信任此來源」。仍要繼續匯入嗎？", "This export source is not trusted yet. Confirm the source or click Trust This Source first. Continue importing?");
+            Add("Connection.ImportReviewSummary", "團隊審核摘要：來源={0}；新增/更新={1}；本機只存在={2}；需補密碼={3}；群組={4}；變更目標={5}", "Team review summary: source={0}; added/updated={1}; local-only={2}; passwords needed={3}; groups={4}; changed targets={5}");
+            Add("Connection.ImportReviewSourceTrusted", "已信任且簽章有效", "trusted and signature valid");
+            Add("Connection.ImportReviewSourceUntrusted", "簽章有效但尚未信任", "signature valid but not trusted");
+            Add("Connection.ImportReviewSourceInvalid", "簽章無效", "invalid signature");
+            Add("Connection.ImportReviewSourceUnsigned", "無簽章", "unsigned");
+            Add("Connection.ImportReviewNoGroups", "無", "none");
+            Add("Connection.ImportReviewNoTargets", "無新增或更新", "no added or updated targets");
+            Add("Connection.ImportReviewLogWritten", "匯入審核紀錄：{0}", "Import review log: {0}");
             Add("Connection.ImportPreviewInclude", "合併", "Merge");
             Add("Connection.ImportPreviewStatus", "狀態", "Status");
             Add("Connection.ImportPreviewAdded", "新增", "Added");
@@ -373,6 +390,8 @@ namespace mySQLPunk
             Add("Backup.RestoreSuccess", "備份還原完成。執行語句數：{0}", "Backup restore completed. Statements executed: {0}");
             Add("Backup.RestoreSuccessWithSnapshot", "備份還原完成。執行語句數：{0}\n還原前快照：{1}", "Backup restore completed. Statements executed: {0}\nPre-restore snapshot: {1}");
             Add("Backup.RestoreSuccessWithSnapshotAndDiff", "備份還原完成。執行語句數：{0}\n還原前快照：{1}\n\n還原後差異檢查：\n{2}", "Backup restore completed. Statements executed: {0}\nPre-restore snapshot: {1}\n\nPost-restore diff check:\n{2}");
+            Add("Backup.RestoreContentScanReportCreated", "還原內容掃描報表：{0}", "Restore content scan report: {0}");
+            Add("Backup.RestoreContentScanReportFailed", "還原內容掃描報表建立失敗：{0}", "Failed to create restore content scan report: {0}");
             Add("Backup.RestoreFailed", "還原備份失敗：{0}", "Backup restore failed: {0}");
             Add("Backup.RestoreSafetyBackupCreated", "還原前快照已建立：{0}", "Pre-restore snapshot created: {0}");
             Add("Backup.RestoreSafetyBackupFailedCancelled", "建立還原前快照失敗，已取消還原：{0}", "Failed to create pre-restore snapshot; restore canceled: {0}");
@@ -480,6 +499,14 @@ namespace mySQLPunk
             Add("Query.ConflictOperation", "操作類型：{0}", "Operation: {0}");
             Add("Query.ConflictWhere", "比對條件：{0}", "Match condition: {0}");
             Add("Query.ConflictValues", "比對/異動值：{0}", "Matched/changed values: {0}");
+            Add("Query.ConflictDatabaseDiff", "資料庫目前差異：{0}", "Current database differences: {0}");
+            Add("Query.ConflictOriginalValue", "原始={0}", "original={0}");
+            Add("Query.ConflictDatabaseValue", "資料庫={0}", "database={0}");
+            Add("Query.ConflictDatabaseDiffNoStableColumns", "沒有足夠未異動欄位可安全重查同一列。", "There are not enough unchanged columns to safely re-query the same row.");
+            Add("Query.ConflictDatabaseDiffNoRows", "未找到可安全比對的目前資料列，資料可能已被刪除或所有可比對欄位都已變更。", "No safely comparable current row was found. The row may have been deleted or all comparable columns may have changed.");
+            Add("Query.ConflictDatabaseDiffMultipleRows", "找到多筆候選資料列，為避免誤判不顯示欄位差異。", "Multiple candidate rows were found, so field differences are not shown to avoid guessing.");
+            Add("Query.ConflictDatabaseDiffReadFailed", "重查目前資料列失敗：{0}", "Failed to re-query the current row: {0}");
+            Add("Query.ConflictDatabaseDiffNoChanges", "目前資料庫值與原始值沒有可顯示差異，可能是 provider 影響列數回報或型別比對規則造成。", "The current database values do not show differences from the original values. This may be caused by provider affected-row reporting or type comparison rules.");
             Add("Object.ConfirmDeleteTable", "確定要刪除資料表「{0}」嗎？此操作不可還原！", "Delete table \"{0}\"? This action cannot be undone.");
             Add("Object.ConfirmDeleteView", "確定要刪除檢視「{0}」嗎？此操作不可還原！", "Delete view \"{0}\"? This action cannot be undone.");
             Add("Object.ConfirmDeleteFunction", "確定要刪除函式或程序「{0}」嗎？此操作不可還原！", "Delete function or procedure \"{0}\"? This action cannot be undone.");
@@ -512,9 +539,12 @@ namespace mySQLPunk
             Add("Object.SqliteColumnCommentsExportedStatus", "SQLite 欄位註解已匯出 {0} 筆：{1}", "SQLite column comments exported ({0}): {1}");
             Add("Object.SqliteColumnCommentsExportFailed", "匯出 SQLite 欄位註解失敗：{0}", "Export SQLite column comments failed: {0}");
             Add("Object.SqliteColumnCommentsImportConfirm", "即將匯入 {0} 個資料表、{1} 筆欄位註解，並覆蓋這些資料表目前的 mySQLPunk sidecar 註解。是否繼續？", "Import {0} tables and {1} column comments, replacing current mySQLPunk sidecar comments for those tables. Continue?");
+            Add("Object.SqliteColumnCommentsImportConfirmWithReview", "即將匯入 {0} 個資料表、{1} 筆欄位註解，並覆蓋這些資料表目前的 mySQLPunk sidecar 註解。\n\n審核摘要：新增 {2}、更新 {3}、移除 {4}、不變 {5}。\n是否繼續？", "Import {0} tables and {1} column comments, replacing current mySQLPunk sidecar comments for those tables.\n\nReview summary: added {2}, updated {3}, removed {4}, unchanged {5}.\nContinue?");
             Add("Object.SqliteColumnCommentsImported", "已匯入 {0} 個資料表、{1} 筆欄位註解。", "Imported {0} tables and {1} column comments.");
+            Add("Object.SqliteColumnCommentsImportedWithReview", "已匯入 {0} 個資料表、{1} 筆欄位註解。\n審核報告：{2}", "Imported {0} tables and {1} column comments.\nReview report: {2}");
             Add("Object.SqliteColumnCommentsImportedStatus", "SQLite 欄位註解已匯入 {0} 筆。", "SQLite column comments imported: {0}.");
             Add("Object.SqliteColumnCommentsImportFailed", "匯入 SQLite 欄位註解失敗：{0}", "Import SQLite column comments failed: {0}");
+            Add("Object.SqliteColumnCommentsImportReviewReport", "審核報告：{0}", "Review report: {0}");
             Add("ImportSql.Title", "匯入 SQL 檔案", "Import SQL File");
             Add("ImportSql.SelectDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
             Add("ImportSql.Success", "SQL 匯入完成。執行語句數：{0}", "SQL import completed. Statements executed: {0}");
@@ -562,8 +592,19 @@ namespace mySQLPunk
             Add("Query.Delete", "刪除", "Delete");
             Add("Query.Refresh", "重新整理", "Refresh");
             Add("Query.Export", "匯出", "Export");
-            Add("Query.ExportFileFilter", "CSV UTF-8 (*.csv)|*.csv|Excel 活頁簿 (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML 表格 (*.html)|*.html|Markdown (*.md)|*.md", "CSV UTF-8 (*.csv)|*.csv|Excel Workbook (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML Table (*.html)|*.html|Markdown (*.md)|*.md");
+            Add("Query.ExportFileFilter", "CSV UTF-8 (*.csv)|*.csv|Excel 活頁簿 (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML 表格 (*.html)|*.html|Markdown (*.md)|*.md|SQL INSERT (*.sql)|*.sql", "CSV UTF-8 (*.csv)|*.csv|Excel Workbook (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML Table (*.html)|*.html|Markdown (*.md)|*.md|SQL INSERT (*.sql)|*.sql");
             Add("Query.ExportCompleted", "已匯出 {0} 筆資料到 {1}", "Exported {0} rows to {1}");
+            Add("Query.StreamingExporting", "正在串流匯出查詢結果...", "Streaming query results...");
+            Add("Query.StreamingExportCompleted", "已串流匯出 {0} 筆資料（{1}）到 {2}", "Streamed {0} rows ({1}) to {2}");
+            Add("Query.ExportSummaryTitle", "匯出完成", "Export Completed");
+            Add("Query.ExportSummaryMessage", "查詢結果已成功匯出。", "Query results were exported successfully.");
+            Add("Query.ExportSummaryFormat", "格式：", "Format:");
+            Add("Query.ExportSummaryRows", "列數：", "Rows:");
+            Add("Query.ExportSummarySize", "大小：", "Size:");
+            Add("Query.ExportSummaryFile", "檔案：", "File:");
+            Add("Query.ExportSummaryPath", "路徑：", "Path:");
+            Add("Query.OpenExportedFile", "開啟檔案", "Open File");
+            Add("Query.OpenExportFolder", "開啟資料夾", "Open Folder");
             Add("Query.ExportError", "匯出錯誤", "Export Error");
             Add("Query.Float", "浮動", "Float");
             Add("Query.Dock", "嵌入", "Dock");
@@ -775,6 +816,24 @@ namespace mySQLPunk
             Add("Designer.OracleHighRiskDropConstraint", "會刪除 constraint；請確認資料完整性規則與應用程式依賴。", "Constraints will be dropped; confirm integrity rules and application dependencies.");
             Add("Designer.OracleHighRiskConfirmContinue", "確定仍要執行嗎？", "Continue anyway?");
             Add("Designer.OraclePreviewPrivilegeQueryHint", "可先執行下列權限診斷 SQL，確認目前帳號對目標物件的直接授權與系統權限。", "You can run the following privilege diagnostic SQL first to confirm direct grants and system privileges for the target object.");
+            Add("Designer.OraclePrivilegeSummary", "權限查詢結果：物件直接授權：{0}；Session 系統權限：{1}；可能缺少：{2}。", "Privilege query result: object grants: {0}; session system privileges: {1}; possibly missing: {2}.");
+            Add("Designer.OraclePrivilegeNone", "未取得", "None detected");
+            Add("Designer.OraclePrivilegeNoMissing", "未偵測到明顯缺口", "No obvious gap detected");
+            Add("Designer.OraclePrivilegeDiagnosticFailed", "權限查詢結果無法解析：{0}", "Privilege query result could not be parsed: {0}");
+            Add("Designer.OracleRepairSuggestionTitle", "建議修復步驟：", "Suggested repair steps:");
+            Add("Designer.OracleRepairSuggestionFailed", "修復建議無法產生：{0}", "Repair suggestions could not be generated: {0}");
+            Add("Designer.OracleRepairCheckSessionUser", "先確認實際執行帳號與目前 schema：", "First confirm the actual session user and current schema:");
+            Add("Designer.OracleRepairCheckRoles", "再確認目前 role；若權限只來自 role，請改請 DBA 直接授權給 session user：", "Then confirm current roles; if privileges only come from roles, ask the DBA to grant them directly to the session user:");
+            Add("Designer.OracleRepairDirectGrantOnly", "請用 <SESSION_USER> 取代上一步查到的 session_user，並優先授予最小必要權限。", "Replace <SESSION_USER> with the session_user from the previous step, and grant the least required privileges first.");
+            Add("Designer.OracleRepairConfirmObject", "先確認目標物件是否存在且狀態正常：{0}", "Confirm that the target object exists and is valid: {0}");
+            Add("Designer.OracleRepairCrossSchemaPolicy", "目標 schema 為 {0}，若不是目前登入帳號自己的 schema，請確認團隊允許跨 schema DDL，並由物件 owner 或 DBA 直接授權。", "Target schema is {0}. If it is not the current login's own schema, confirm the team allows cross-schema DDL and ask the object owner or DBA for direct grants.");
+            Add("Designer.OracleRepairCreateAnyTable", "若需跨 schema 建表，才評估 GRANT CREATE ANY TABLE TO <SESSION_USER>;", "Only evaluate GRANT CREATE ANY TABLE TO <SESSION_USER>; when cross-schema table creation is required.");
+            Add("Designer.OracleRepairDbaPolicyTitle", "DBA 最小授權範本：", "DBA least-privilege grant template:");
+            Add("Designer.OracleRepairDbaPolicyComment", "請 DBA 先審核 SQL 預覽與變更單，只保留必要的直接授權；DDL 完成後移除不再需要的權限。", "Ask the DBA to review the SQL preview and change ticket first, keep only required direct grants, and revoke unneeded privileges after the DDL is complete.");
+            Add("Designer.OracleRepairDbaPolicyObjectCheck", "DBA 確認目標物件與狀態", "DBA verifies the target object and status");
+            Add("Designer.OracleRepairDbaPolicyDirectGrants", "DBA 直接授權範本（避免只透過 role 授權 DDL）", "DBA direct grant template (avoid role-only grants for DDL)");
+            Add("Designer.OracleRepairDbaPolicyQuota", "若錯誤為 ORA-01950，DBA 需確認預設 tablespace 與 quota", "If the error is ORA-01950, the DBA should verify the default tablespace and quota");
+            Add("Designer.OracleRepairDbaPolicyReview", "請將實際授權、核准人與回收時間記錄到變更單。", "Record the actual grants, approver, and revoke date in the change ticket.");
             Add("Designer.CurrentSchema", "目前 schema", "current schema");
             Add("Designer.CurrentTable", "目前資料表", "current table");
             Add("Designer.OracleHintInsufficientPrivileges", "目前帳號沒有足夠權限執行這個 DDL。請確認已直接授權 ALTER、CREATE TABLE、CREATE VIEW、CREATE INDEX、DROP 或 COMMENT 等需要的權限；Oracle 的 role 權限在部分 DDL 情境可能不會生效。", "The current account does not have enough privileges to execute this DDL. Confirm that ALTER, CREATE TABLE, CREATE VIEW, CREATE INDEX, DROP, COMMENT, or other required privileges are granted directly; Oracle role privileges may not apply in some DDL contexts.");
@@ -785,6 +844,11 @@ namespace mySQLPunk
             Add("Designer.OracleHintNullStateChanged", "欄位 NULL/NOT NULL 狀態和目前資料庫狀態不一致，可能是其他人已先修改欄位。請重新載入 Table Designer 後再套用變更。", "The column NULL/NOT NULL state no longer matches the database, possibly because someone else changed the column first. Reload Table Designer before applying the change.");
             Add("Designer.OracleHintNotNullConflict", "欄位要改成 NOT NULL，但既有資料可能包含 NULL。請先清理資料或設定預設值，再重新儲存。", "The column is being changed to NOT NULL, but existing data may contain NULL values. Clean the data or set a default value before saving again.");
             Add("Designer.OracleHintConstraintIndexConflict", "正在刪除或修改被主鍵/唯一約束使用的索引。請先處理對應 constraint，再調整索引。", "An index used by a primary key or unique constraint is being deleted or modified. Handle the related constraint first, then adjust the index.");
+            Add("Designer.OracleHintInvalidIdentifier", "Oracle 回報欄位或物件識別名稱無效。請確認欄位是否剛被重新命名、大小寫/引號是否一致，並重新整理 metadata。", "Oracle reported an invalid column or object identifier. Confirm whether the column was renamed, whether casing/quotes match, and refresh metadata.");
+            Add("Designer.OracleHintColumnTypeMigration", "Oracle 無法直接修改此欄位型別；通常需要先確認欄位為空，或採新增暫存欄位、搬移資料、刪舊欄位、改名的分段遷移流程。", "Oracle cannot directly change this column type. Usually the column must be empty, or you need a staged migration: add a temporary column, move data, drop the old column, and rename.");
+            Add("Designer.OracleHintDuplicateIndexColumns", "相同欄位組合已存在索引。請重新整理索引清單，避免建立重複索引，或改用不同欄位順序/索引類型。", "An index already exists on the same column list. Refresh indexes and avoid duplicate indexes, or use a different column order/index type.");
+            Add("Designer.OracleHintConstraintNameConflict", "constraint 名稱已被使用或和既有主鍵/唯一約束衝突。請重新整理 constraint/index 清單，改用未使用的名稱後再套用。", "The constraint name is already used or conflicts with an existing primary/unique constraint. Refresh constraints/indexes and use an unused name.");
+            Add("Designer.OracleHintTablespaceQuota", "目前帳號在目標 tablespace 沒有 quota，建立或重建資料表/索引可能失敗。請 DBA 檢查 default tablespace 與 QUOTA 設定。", "The current account has no quota on the target tablespace, so creating or rebuilding tables/indexes may fail. Ask the DBA to check the default tablespace and QUOTA settings.");
             Add("Designer.OracleHintAlterSyntax", "產生的 ALTER TABLE 語法不符合目前 Oracle 版本或物件型態。請檢查 SQL 預覽，或改用分段 SQL 手動調整。", "The generated ALTER TABLE syntax does not match the current Oracle version or object type. Check the SQL preview or adjust it manually with staged SQL.");
             Add("Designer.OracleHintGeneric", "請檢查目前帳號對 {0}.{1} 的 DDL 權限、物件是否仍存在，以及 SQL 預覽中的語法是否符合 Oracle 限制。", "Check the current account's DDL privileges on {0}.{1}, whether the object still exists, and whether the SQL preview syntax matches Oracle limitations.");
 
@@ -819,6 +883,7 @@ namespace mySQLPunk
             Add("Options.BackupIntegrityIntervalHours", "驗證間隔（小時）:", "Check interval (hours):");
             Add("Options.BackupIntegrityAutoQuarantine", "驗證失敗時自動隔離異常備份", "Automatically quarantine invalid backups");
             Add("Options.BackupIntegrityQuarantineRetainCount", "隔離區保留份數:", "Quarantine files to keep:");
+            Add("Options.RestoreContentSnapshotRows", "還原差異抽樣列數:", "Restore diff sample rows:");
             Add("Options.ExecutableFilter", "執行檔 (*.exe)|*.exe|所有檔案 (*.*)|*.*", "Executable files (*.exe)|*.exe|All files (*.*)|*.*");
         }
 
