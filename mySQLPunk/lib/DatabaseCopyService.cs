@@ -1595,8 +1595,20 @@ namespace mySQLPunk.lib
 
                 sql = Regex.Replace(
                     sql,
-                    @"\bCURRENT_DATE\s*(?:\(\s*\))?",
+                    @"\bCURTIME\s*\(\s*\)",
+                    m => BuildCurrentTimeExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bCURRENT_DATE\b(?:\s*\(\s*\))?",
                     m => BuildCurrentDateExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bCURRENT_TIME\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentTimeExpression(targetProvider),
                     RegexOptions.IgnoreCase);
 
                 return sql;
@@ -1608,6 +1620,15 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql") return "CAST(GETDATE() AS date)";
             if (targetProvider == "mysql") return "CURDATE()";
             return "CURRENT_DATE";
+        }
+
+        private static string BuildCurrentTimeExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "CAST(GETDATE() AS time)";
+            if (targetProvider == "mysql") return "CURTIME()";
+            if (targetProvider == "sqlite") return "time('now')";
+            if (targetProvider == "oracle") return "TO_CHAR(SYSTIMESTAMP, 'HH24:MI:SS')";
+            return "CURRENT_TIME";
         }
 
         private static string BuildCurrentTimestampExpression(string targetProvider)

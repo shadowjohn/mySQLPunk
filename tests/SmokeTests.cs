@@ -493,6 +493,31 @@ public static class SmokeTests
         string mssqlCurrentDateSql = (string)GetProperty(mssqlCurrentDatePreview, "ConvertedSql");
         AssertContains(mssqlCurrentDateSql, "CAST(GETDATE() AS date)", "Converted SQL Server SQL should use a date expression.");
 
+        object mssqlCurrentTimePreview = BuildViewSqlPreview(
+            "SELECT CURTIME() AS checked_time FROM audit_log",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCurrentTimePreview, "CanConvert"), "MySQL CURTIME should convert to SQL Server.");
+        string mssqlCurrentTimeSql = (string)GetProperty(mssqlCurrentTimePreview, "ConvertedSql");
+        AssertContains(mssqlCurrentTimeSql, "CAST(GETDATE() AS time)", "Converted SQL Server SQL should use a time expression.");
+        AssertNotContains(mssqlCurrentTimeSql, "CURTIME", "Converted SQL Server SQL should remove CURTIME.");
+
+        object sqliteCurrentTimePreview = BuildViewSqlPreview(
+            "SELECT CURRENT_TIME AS checked_time FROM audit_log",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteCurrentTimePreview, "CanConvert"), "PostgreSQL CURRENT_TIME should convert to SQLite.");
+        string sqliteCurrentTimeSql = (string)GetProperty(sqliteCurrentTimePreview, "ConvertedSql");
+        AssertContains(sqliteCurrentTimeSql, "time('now') AS checked_time", "Converted SQLite SQL should use time('now').");
+
+        object mysqlCurrentTimePreview = BuildViewSqlPreview(
+            "SELECT CURRENT_TIME AS checked_time FROM audit_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlCurrentTimePreview, "CanConvert"), "PostgreSQL CURRENT_TIME should convert to MySQL.");
+        string mysqlCurrentTimeSql = (string)GetProperty(mysqlCurrentTimePreview, "ConvertedSql");
+        AssertContains(mysqlCurrentTimeSql, "CURTIME() AS checked_time", "Converted MySQL SQL should use CURTIME().");
+
         object mssqlSysdatePreview = BuildViewSqlPreview(
             "SELECT SYSDATE AS checked_at, 'SYSDATE' AS literal_value FROM dual",
             "oracle",
