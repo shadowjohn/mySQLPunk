@@ -209,6 +209,7 @@ Smoke test harness：
   - 本輪補齊：`DATABASE()` / `CURRENT_DATABASE()` / `DB_NAME()` 會依目標 provider 轉為目前資料庫名稱表達式，Oracle 目標使用 `SYS_CONTEXT('USERENV','DB_NAME')`，SQLite 目標以 `NULL` 保持可執行。
   - 本輪補齊：`SCHEMA()` / `CURRENT_SCHEMA` / `SCHEMA_NAME()` 會依目標 provider 轉為目前 schema 表達式，SQL Server 目標使用 `SCHEMA_NAME()`，Oracle 目標使用 `SYS_CONTEXT('USERENV','CURRENT_SCHEMA')`，SQLite 目標以 `NULL` 保持可執行。
   - 本輪補齊：Oracle `TO_NUMBER(...)` / `TO_NUMBER(..., 'format')` 會在目標為 SQL Server、MySQL、PostgreSQL 或 SQLite 時轉為對應的 `CAST(...)` 數值型別，避免 Oracle View 複製到其它 provider 後留下不可執行的數值轉型函式。
+  - 本輪補齊：`TO_NUMBER(...)` 改用函式呼叫掃描器，可處理 `TO_NUMBER(REPLACE(col, ',', ''), 'format')` 這類巢狀參數，並保留字串常值中的函式範例文字。
   - 本輪補齊：MySQL `TRUNCATE(number, decimals)` 複製到 SQL Server 會轉為 `ROUND(number, decimals, 1)`，複製到 PostgreSQL / Oracle 會轉為 `TRUNC(number, decimals)`，SQLite 會用整數截斷與 `pow(10, decimals)` 模擬，避免報表 View 留下 MySQL 專用數值函式。
   - 本輪補齊：SQL Server `ROUND(number, decimals, 1)` 的截斷語意會依目標 provider 轉為 MySQL `TRUNCATE(number, decimals)`、PostgreSQL / Oracle `TRUNC(number, decimals)`，SQLite 仍以整數截斷與 `pow(10, decimals)` 模擬；一般 `ROUND(number, decimals)` 不會被誤改。
   - 本輪補齊：`TRUNCATE(...)` 與三參數 `ROUND(..., ..., 1)` 改用函式呼叫掃描器，可處理 `TRUNCATE(ABS(col), 2)` 這類巢狀參數，並保留字串常值中的函式範例文字。

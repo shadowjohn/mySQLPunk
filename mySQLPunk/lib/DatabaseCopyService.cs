@@ -653,20 +653,19 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "oracle") return selectSql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bTO_NUMBER\s*\((?<args>[^()]*)\)",
-                m => RewriteOracleToNumberFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "TO_NUMBER",
+                (argsText, original) => RewriteOracleToNumberFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteOracleToNumberFunction(Match match, string targetProvider)
+        private static string RewriteOracleToNumberFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count == 0 || args.Count > 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count == 0 || args.Count > 2) return original;
 
             string targetType = GetGenericNumericCastType(targetProvider);
-            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+            if (string.IsNullOrWhiteSpace(targetType)) return original;
 
             return "CAST(" + args[0] + " AS " + targetType + ")";
         }

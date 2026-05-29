@@ -1544,6 +1544,15 @@ public static class SmokeTests
         AssertContains(mssqlToNumberSql, "CAST(rate_text AS decimal(18,4))", "Converted SQL Server SQL should cast formatted TO_NUMBER value.");
         AssertNotContains(mssqlToNumberSql, "TO_NUMBER", "Converted SQL Server SQL should remove TO_NUMBER.");
 
+        object pgNestedToNumberPreview = BuildViewSqlPreview(
+            "SELECT TO_NUMBER(REPLACE(total_text, ',', ''), '999999D99') AS total_value, 'TO_NUMBER(REPLACE(total_text, '','', ''''), ''999999D99'')' AS literal_note FROM orders",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedToNumberPreview, "CanConvert"), "Nested Oracle TO_NUMBER should convert while preserving literals.");
+        string pgNestedToNumberSql = (string)GetProperty(pgNestedToNumberPreview, "ConvertedSql");
+        AssertContains(pgNestedToNumberSql, "CAST(REPLACE(total_text, ',', '') AS numeric) AS total_value", "Converted PostgreSQL SQL should convert nested TO_NUMBER argument.");
+        AssertContains(pgNestedToNumberSql, "'TO_NUMBER(REPLACE(total_text, '','', ''''), ''999999D99'')' AS literal_note", "Converted PostgreSQL SQL should preserve TO_NUMBER text inside string literals.");
+
         object sqliteToNumberPreview = BuildViewSqlPreview(
             "SELECT TO_NUMBER(total_text) AS total_value FROM orders",
             "oracle",
