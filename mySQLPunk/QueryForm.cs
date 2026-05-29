@@ -624,6 +624,23 @@ namespace mySQLPunk
             }
         }
 
+        private static void RememberConfiguredDirectoryForPath(string optionKey, string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(optionKey) || string.IsNullOrWhiteSpace(filePath)) return;
+
+            try
+            {
+                string directory = Path.GetDirectoryName(filePath);
+                if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
+
+                ApplicationOptionSettings.SetString(optionKey, directory);
+                ApplicationOptionSettings.Save();
+            }
+            catch
+            {
+            }
+        }
+
         private void CreateLoadingOverlay(Control parent)
         {
             loadingOverlay = new Panel
@@ -4138,6 +4155,7 @@ namespace mySQLPunk
                         int exportedRows = QueryResultExportService.CountExportRows(dt);
                         QueryResultExportService.Write(dt, dlg.FileName, format);
                         QueryResultExportSummary summary = QueryResultExportService.BuildSummary(dlg.FileName, format, exportedRows);
+                        RememberConfiguredDirectoryForPath("FileExportDirectory", summary.Path);
                         lblStatus.Text = Localization.Format("Query.ExportCompleted", summary.Rows, summary.Path);
                         ShowExportCompletedSummary(summary);
                     }
@@ -4184,6 +4202,7 @@ namespace mySQLPunk
                     QueryResultExportService.WriteStreaming(_db, sql, null, targetPath, format));
                 if (!CanUpdateUi()) return;
                 QueryResultExportSummary summary = QueryResultExportService.BuildSummary(targetPath, format, result.Rows, result.BytesWritten);
+                RememberConfiguredDirectoryForPath("FileExportDirectory", summary.Path);
                 lblStatus.Text = Localization.Format("Query.StreamingExportCompleted", summary.Rows, QueryResultExportSummary.FormatByteCount(summary.BytesWritten), summary.Path);
                 ShowExportCompletedSummary(summary);
             }
@@ -4194,6 +4213,7 @@ namespace mySQLPunk
                 int exportedRows = QueryResultExportService.CountExportRows(dt);
                 QueryResultExportService.Write(dt, targetPath, format);
                 QueryResultExportSummary summary = QueryResultExportService.BuildSummary(targetPath, format, exportedRows);
+                RememberConfiguredDirectoryForPath("FileExportDirectory", summary.Path);
                 lblStatus.Text = Localization.Format("Query.ExportCompleted", summary.Rows, summary.Path);
                 ShowExportCompletedSummary(summary);
             }

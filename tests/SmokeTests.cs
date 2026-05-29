@@ -3970,6 +3970,7 @@ public static class SmokeTests
         bool oldShowThousands = ApplicationOptionSettings.GetBool("RecordShowThousandsSeparator");
         bool oldUseSystemNumberFormat = ApplicationOptionSettings.GetBool("RecordUseSystemNumberFormat");
         string oldRowHeightMode = ApplicationOptionSettings.GetString("RecordRowHeightMode");
+        string oldExportDirectory = ApplicationOptionSettings.GetString("FileExportDirectory");
 
         try
         {
@@ -4040,6 +4041,14 @@ public static class SmokeTests
             AssertEquals("ROLLBACK", GetTableSaveTransactionSql("oracle", "RollbackSql"), "Oracle table saves should use ROLLBACK without an explicit BEGIN.");
             ApplicationOptionSettings.SetBool("RecordAutoBeginTransaction", false);
             AssertEquals("", GetTableSaveTransactionSql("mysql", "BeginSql"), "Transaction statements should be disabled when the option is off.");
+
+            string rememberedExportDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk_export_remember_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(rememberedExportDirectory);
+            RememberQueryFormConfiguredDirectory("FileExportDirectory", Path.Combine(rememberedExportDirectory, "result.csv"));
+            AssertEquals(rememberedExportDirectory, ApplicationOptionSettings.GetString("FileExportDirectory"), "Query export should remember the selected output folder.");
+            RememberQueryFormConfiguredDirectory("FileExportDirectory", "");
+            AssertEquals(rememberedExportDirectory, ApplicationOptionSettings.GetString("FileExportDirectory"), "Empty export paths should not clear the remembered folder.");
+            Directory.Delete(rememberedExportDirectory);
         }
         finally
         {
@@ -4060,7 +4069,15 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("RecordShowThousandsSeparator", oldShowThousands);
             ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", oldUseSystemNumberFormat);
             ApplicationOptionSettings.SetString("RecordRowHeightMode", oldRowHeightMode);
+            ApplicationOptionSettings.SetString("FileExportDirectory", oldExportDirectory);
+            ApplicationOptionSettings.Save();
         }
+    }
+
+    private static void RememberQueryFormConfiguredDirectory(string optionKey, string filePath)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("RememberConfiguredDirectoryForPath", BindingFlags.Static | BindingFlags.NonPublic);
+        method.Invoke(null, new object[] { optionKey, filePath });
     }
 
     private static string GetTableSaveTransactionSql(string providerName, string propertyName)
