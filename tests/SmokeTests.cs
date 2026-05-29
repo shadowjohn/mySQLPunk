@@ -1345,6 +1345,24 @@ public static class SmokeTests
         string mssqlLeastSql = (string)GetProperty(mssqlLeastPreview, "ConvertedSql");
         AssertContains(mssqlLeastSql, "(CASE WHEN quantity <= stock_limit THEN quantity ELSE stock_limit END)", "Converted SQL Server SQL should use CASE for LEAST.");
 
+        object sqliteGreatestPreview = BuildViewSqlPreview(
+            "SELECT GREATEST(score, passing_score) AS effective_score FROM exams",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteGreatestPreview, "CanConvert"), "GREATEST should convert to SQLite CASE expression.");
+        string sqliteGreatestSql = (string)GetProperty(sqliteGreatestPreview, "ConvertedSql");
+        AssertContains(sqliteGreatestSql, "(CASE WHEN score >= passing_score THEN score ELSE passing_score END)", "Converted SQLite SQL should use CASE for GREATEST.");
+        AssertNotContains(sqliteGreatestSql, "GREATEST", "Converted SQLite SQL should remove GREATEST.");
+
+        object sqliteLeastPreview = BuildViewSqlPreview(
+            "SELECT LEAST(quantity, stock_limit) AS capped_quantity FROM inventory",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteLeastPreview, "CanConvert"), "LEAST should convert to SQLite CASE expression.");
+        string sqliteLeastSql = (string)GetProperty(sqliteLeastPreview, "ConvertedSql");
+        AssertContains(sqliteLeastSql, "(CASE WHEN quantity <= stock_limit THEN quantity ELSE stock_limit END)", "Converted SQLite SQL should use CASE for LEAST.");
+        AssertNotContains(sqliteLeastSql, "LEAST", "Converted SQLite SQL should remove LEAST.");
+
         object pgGreatestPreview = BuildViewSqlPreview(
             "SELECT GREATEST(score, passing_score) AS effective_score FROM exams",
             "mysql",

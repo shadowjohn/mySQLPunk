@@ -632,7 +632,7 @@ namespace mySQLPunk.lib
                     RegexOptions.IgnoreCase);
             }
 
-            if (targetProvider != "mssql") return sql;
+            if (targetProvider != "mssql" && targetProvider != "sqlite") return sql;
 
             sql = Regex.Replace(
                 sql,
