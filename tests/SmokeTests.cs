@@ -1855,6 +1855,23 @@ public static class SmokeTests
         string pgSqlServerIsNullSql = (string)GetProperty(pgSqlServerIsNullPreview, "ConvertedSql");
         AssertContains(pgSqlServerIsNullSql, "COALESCE(display_name, '匿名')", "Converted PostgreSQL SQL should keep two-argument SQL Server ISNULL as COALESCE.");
 
+        object pgFieldPreview = BuildViewSqlPreview(
+            "SELECT FIELD(status, 'new', 'active', 'closed') AS status_rank FROM tasks",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgFieldPreview, "CanConvert"), "MySQL FIELD should convert to PostgreSQL.");
+        string pgFieldSql = (string)GetProperty(pgFieldPreview, "ConvertedSql");
+        AssertContains(pgFieldSql, "CASE status WHEN 'new' THEN 1 WHEN 'active' THEN 2 WHEN 'closed' THEN 3 ELSE 0 END", "Converted PostgreSQL SQL should emulate MySQL FIELD with CASE.");
+        AssertNotContains(pgFieldSql, "FIELD(", "Converted PostgreSQL SQL should remove MySQL FIELD.");
+
+        object mssqlFieldPreview = BuildViewSqlPreview(
+            "SELECT id FROM tasks ORDER BY FIELD(priority, 'high', 'normal', 'low')",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlFieldPreview, "CanConvert"), "MySQL FIELD in ORDER BY should convert to SQL Server.");
+        string mssqlFieldSql = (string)GetProperty(mssqlFieldPreview, "ConvertedSql");
+        AssertContains(mssqlFieldSql, "ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 0 END", "Converted SQL Server SQL should preserve FIELD ordering semantics with CASE.");
+
         object mysqlStuffPreview = BuildViewSqlPreview(
             "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
             "mssql",
