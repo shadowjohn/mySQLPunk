@@ -531,6 +531,7 @@ namespace mySQLPunk.lib
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
             sql = RewritePaddingFunctions(sql, targetProvider);
             sql = RewriteStringRepeatFunctions(sql, targetProvider);
+            sql = RewriteCharacterCodeFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
@@ -2469,6 +2470,57 @@ namespace mySQLPunk.lib
             if (targetProvider == "oracle") return "RPAD(" + value + ", LENGTH(" + value + ") * " + count + ", " + value + ")";
 
             return value;
+        }
+
+        private static string RewriteCharacterCodeFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bCHR\s*\((?<args>[^()]*)\)",
+                m => RewriteCharacterCodeFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bCHAR\s*\((?<args>[^()]*)\)",
+                m => IsCharTypeContext(sql, m.Index) ? m.Value : RewriteCharacterCodeFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteCharacterCodeFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 1) return match.Value;
+
+            string code = args[0];
+            if (targetProvider == "oracle" || targetProvider == "postgresql") return "CHR(" + code + ")";
+            if (targetProvider == "mssql" || targetProvider == "mysql" || targetProvider == "sqlite") return "CHAR(" + code + ")";
+
+            return match.Value;
+        }
+
+        private static bool IsCharTypeContext(string sql, int matchIndex)
+        {
+            int previousIndex = matchIndex - 1;
+            while (previousIndex >= 0 && char.IsWhiteSpace(sql[previousIndex])) previousIndex--;
+            if (previousIndex < 0) return false;
+
+            int wordEnd = previousIndex;
+            while (previousIndex >= 0 && char.IsLetter(sql[previousIndex])) previousIndex--;
+            string previousWord = sql.Substring(previousIndex + 1, wordEnd - previousIndex).ToUpperInvariant();
+            if (previousWord == "AS") return true;
+
+            if (sql[wordEnd] == '(')
+            {
+                int beforeParen = wordEnd - 1;
+                while (beforeParen >= 0 && char.IsWhiteSpace(sql[beforeParen])) beforeParen--;
+                int outerWordEnd = beforeParen;
+                while (beforeParen >= 0 && char.IsLetter(sql[beforeParen])) beforeParen--;
+                string outerWord = sql.Substring(beforeParen + 1, outerWordEnd - beforeParen).ToUpperInvariant();
+                return outerWord == "CONVERT" || outerWord == "CAST";
+            }
+
+            return false;
         }
 
         private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)

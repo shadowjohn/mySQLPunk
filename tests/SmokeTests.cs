@@ -1759,6 +1759,32 @@ public static class SmokeTests
         AssertContains(sqliteSpaceSql, "REPLACE(HEX(ZEROBLOB(2)), '00', ' ')", "Converted SQLite SQL should emulate SPACE.");
         AssertNotContains(sqliteSpaceSql, "SPACE", "Converted SQLite SQL should remove SPACE.");
 
+        object mssqlChrPreview = BuildViewSqlPreview(
+            "SELECT 'line1' || CHR(10) || 'line2' AS message_text FROM messages",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlChrPreview, "CanConvert"), "Oracle CHR should convert to SQL Server.");
+        string mssqlChrSql = (string)GetProperty(mssqlChrPreview, "ConvertedSql");
+        AssertContains(mssqlChrSql, "CHAR(10)", "Converted SQL Server SQL should use CHAR for CHR.");
+        AssertNotContains(mssqlChrSql, "CHR(10)", "Converted SQL Server SQL should remove CHR.");
+
+        object pgCharCodePreview = BuildViewSqlPreview(
+            "SELECT CHAR(65) AS initial_letter FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCharCodePreview, "CanConvert"), "MySQL CHAR code function should convert to PostgreSQL.");
+        string pgCharCodeSql = (string)GetProperty(pgCharCodePreview, "ConvertedSql");
+        AssertContains(pgCharCodeSql, "CHR(65)", "Converted PostgreSQL SQL should use CHR for CHAR code function.");
+
+        object pgCastCharPreview = BuildViewSqlPreview(
+            "SELECT CAST(code AS CHAR(10)) AS text_code FROM items",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCastCharPreview, "CanConvert"), "CHAR type in CAST should not be treated as a character-code function.");
+        string pgCastCharSql = (string)GetProperty(pgCastCharPreview, "ConvertedSql");
+        AssertContains(pgCastCharSql, "CAST(code AS CHAR(10))", "Converted PostgreSQL SQL should preserve CHAR type casts.");
+        AssertNotContains(pgCastCharSql, "AS CHR(10)", "Converted PostgreSQL SQL should not rewrite CHAR type to CHR.");
+
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
             "mysql",
