@@ -505,6 +505,7 @@ namespace mySQLPunk.lib
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
             sql = RewriteUserContextFunctions(sql, targetProvider);
             sql = RewriteDatabaseContextFunctions(sql, targetProvider);
+            sql = RewriteSchemaContextFunctions(sql, targetProvider);
             sql = RewriteDateOnlyFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteDateTruncFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
@@ -1755,6 +1756,39 @@ namespace mySQLPunk.lib
             if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','DB_NAME')";
             if (targetProvider == "sqlite") return "NULL";
             return "CURRENT_DATABASE()";
+        }
+
+        private static string RewriteSchemaContextFunctions(string selectSql, string targetProvider)
+        {
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"\bCURRENT_SCHEMA\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentSchemaExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bSCHEMA_NAME\s*\(\s*\)",
+                    m => BuildCurrentSchemaExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                return Regex.Replace(
+                    sql,
+                    @"\bSCHEMA\s*\(\s*\)",
+                    m => BuildCurrentSchemaExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string BuildCurrentSchemaExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "SCHEMA_NAME()";
+            if (targetProvider == "mysql") return "SCHEMA()";
+            if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','CURRENT_SCHEMA')";
+            if (targetProvider == "sqlite") return "NULL";
+            return "CURRENT_SCHEMA";
         }
 
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)

@@ -578,6 +578,32 @@ public static class SmokeTests
         string oracleDbNameSql = (string)GetProperty(oracleDbNamePreview, "ConvertedSql");
         AssertContains(oracleDbNameSql, "SYS_CONTEXT('USERENV','DB_NAME') AS database_name", "Converted Oracle SQL should use SYS_CONTEXT for DB_NAME.");
 
+        object pgSchemaPreview = BuildViewSqlPreview(
+            "SELECT SCHEMA() AS schema_name FROM audit_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSchemaPreview, "CanConvert"), "MySQL SCHEMA should convert to PostgreSQL.");
+        string pgSchemaSql = (string)GetProperty(pgSchemaPreview, "ConvertedSql");
+        AssertContains(pgSchemaSql, "CURRENT_SCHEMA AS schema_name", "Converted PostgreSQL SQL should use CURRENT_SCHEMA.");
+        AssertNotContains(pgSchemaSql, "SCHEMA()", "Converted PostgreSQL SQL should remove SCHEMA().");
+
+        object mssqlSchemaPreview = BuildViewSqlPreview(
+            "SELECT CURRENT_SCHEMA() AS schema_name FROM audit_log",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlSchemaPreview, "CanConvert"), "PostgreSQL CURRENT_SCHEMA should convert to SQL Server.");
+        string mssqlSchemaSql = (string)GetProperty(mssqlSchemaPreview, "ConvertedSql");
+        AssertContains(mssqlSchemaSql, "SCHEMA_NAME() AS schema_name", "Converted SQL Server SQL should use SCHEMA_NAME().");
+        AssertNotContains(mssqlSchemaSql, "CURRENT_SCHEMA", "Converted SQL Server SQL should remove CURRENT_SCHEMA.");
+
+        object oracleSchemaPreview = BuildViewSqlPreview(
+            "SELECT SCHEMA_NAME() AS schema_name FROM audit_log",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleSchemaPreview, "CanConvert"), "SQL Server SCHEMA_NAME should convert to Oracle.");
+        string oracleSchemaSql = (string)GetProperty(oracleSchemaPreview, "ConvertedSql");
+        AssertContains(oracleSchemaSql, "SYS_CONTEXT('USERENV','CURRENT_SCHEMA') AS schema_name", "Converted Oracle SQL should use SYS_CONTEXT for current schema.");
+
         object mssqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURDATE() AS today FROM users",
             "mysql",
