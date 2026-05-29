@@ -119,13 +119,13 @@ namespace mySQLPunk.lib
 
         public void Open()
         {
-            if (MCT.State != ConnectionState.Open) MCT.Open();
+            if (MCT != null && MCT.State != ConnectionState.Open) MCT.Open();
         }
         public void open() => Open();
 
         public void Close()
         {
-            if (MCT.State != ConnectionState.Closed) MCT.Close();
+            if (MCT != null && MCT.State != ConnectionState.Closed) MCT.Close();
         }
         public void close() => Close();
 

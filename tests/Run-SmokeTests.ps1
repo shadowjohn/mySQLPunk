@@ -91,15 +91,15 @@ function Resolve-NuGetExePath {
 
 $msbuild = Resolve-MSBuildExePath
 if (!$msbuild) {
-    throw "找不到 MSBuild。請安裝 Visual Studio Build Tools，或設定 MSBUILD_EXE 指向 MSBuild.exe。"
+    throw "MSBuild not found. Install Visual Studio Build Tools or set MSBUILD_EXE to MSBuild.exe."
 }
 
 $csc = Resolve-CscExePath $msbuild
 if (!$csc) {
-    throw "找不到 C# compiler。請安裝 Roslyn compiler，或設定 CSC_EXE 指向 csc.exe。"
+    throw "C# compiler not found. Install Roslyn compiler or set CSC_EXE to csc.exe."
 }
 
-Write-Host "NuGet restore：$solutionPath"
+Write-Host "NuGet restore: $solutionPath"
 $nugetExe = Resolve-NuGetExePath
 if ($nugetExe) {
     & $nugetExe restore $solutionPath -NonInteractive
@@ -107,9 +107,9 @@ if ($nugetExe) {
         exit $LASTEXITCODE
     }
 } elseif (Test-Path -LiteralPath (Join-Path $repoRoot "packages")) {
-    Write-Warning "找不到 nuget.exe，已偵測到 packages 目錄，略過 NuGet restore。"
+    Write-Warning "nuget.exe not found, packages directory detected; skipping NuGet restore."
 } else {
-    throw "找不到 nuget.exe，且 packages 目錄不存在。請安裝 NuGet Command Line、設定 NUGET_EXE，或先還原 packages。"
+    throw "nuget.exe not found and packages directory is missing. Install NuGet Command Line, set NUGET_EXE, or restore packages first."
 }
 
 & $msbuild $solutionPath /p:Configuration=$Configuration "/p:Platform=$Platform" /p:OutputPath=bin\CodexVerify\ /verbosity:minimal
@@ -121,10 +121,15 @@ $testExe = Join-Path $outputDir "mySQLPunk.SmokeTests.exe"
 $source = Join-Path $PSScriptRoot "SmokeTests.cs"
 $appExe = Join-Path $outputDir "mySQLPunk.exe"
 $newtonsoft = Join-Path $outputDir "Newtonsoft.Json.dll"
+$mysqlConnector = Join-Path $outputDir "MySqlConnector.dll"
+if (!(Test-Path -LiteralPath $mysqlConnector)) {
+    $mysqlConnector = Join-Path $repoRoot "packages\MySqlConnector.2.3.7\lib\net471\MySqlConnector.dll"
+}
 
 & $csc /nologo /platform:anycpu "/out:$testExe" `
     "/r:$appExe" `
     "/r:$newtonsoft" `
+    "/r:$mysqlConnector" `
     /r:System.Windows.Forms.dll `
     /r:System.Drawing.dll `
     /r:System.Data.dll `
@@ -134,6 +139,12 @@ $newtonsoft = Join-Path $outputDir "Newtonsoft.Json.dll"
     $source
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
+}
+
+$appConfig = "$appExe.config"
+$testConfig = "$testExe.config"
+if (Test-Path -LiteralPath $appConfig) {
+    Copy-Item -LiteralPath $appConfig -Destination $testConfig -Force
 }
 
 & $testExe

@@ -3650,7 +3650,8 @@ public static class SmokeTests
         {
             db.SetConn("Server=localhost;User ID=test;Password=test;");
             string connectionString = db.MCT == null ? "" : (db.MCT.ConnectionString ?? "");
-            AssertContains(connectionString.ToLowerInvariant(), "guidformat=none", "MySQL connection should default GuidFormat=None to avoid CHAR(36) parsing failures during dump.");
+            string normalizedConnectionString = connectionString.ToLowerInvariant().Replace(" ", "");
+            AssertContains(normalizedConnectionString, "guidformat=none", "MySQL connection should default GuidFormat=None to avoid CHAR(36) parsing failures during dump.");
         }
     }
 
