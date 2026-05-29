@@ -2919,17 +2919,23 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mysql") return selectSql;
 
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bUCASE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => "UPPER(" + m.Groups["expr"].Value.Trim() + ")",
-                RegexOptions.IgnoreCase);
+                "UCASE",
+                (argsText, original) => RewriteSingleArgumentFunctionName(argsText, original, "UPPER"));
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bLCASE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => "LOWER(" + m.Groups["expr"].Value.Trim() + ")",
-                RegexOptions.IgnoreCase);
+                "LCASE",
+                (argsText, original) => RewriteSingleArgumentFunctionName(argsText, original, "LOWER"));
+        }
+
+        private static string RewriteSingleArgumentFunctionName(string argsText, string original, string functionName)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 1) return original;
+
+            return functionName + "(" + args[0] + ")";
         }
 
         private static string RewriteTrimFunctions(string selectSql, string targetProvider)

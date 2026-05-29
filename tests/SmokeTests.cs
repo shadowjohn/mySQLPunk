@@ -2124,6 +2124,16 @@ public static class SmokeTests
         AssertContains(sqliteCaseAliasSql, "UPPER(display_name)", "Converted SQLite SQL should use UPPER for UCASE.");
         AssertContains(sqliteCaseAliasSql, "LOWER(email)", "Converted SQLite SQL should use LOWER for LCASE.");
 
+        object pgNestedCaseLiteralPreview = BuildViewSqlPreview(
+            "SELECT UCASE(TRIM(display_name)) AS upper_name, LCASE(TRIM(email)) AS lower_email, 'UCASE(TRIM(display_name))' AS literal_note FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedCaseLiteralPreview, "CanConvert"), "Nested MySQL string case functions should convert while preserving literals.");
+        string pgNestedCaseLiteralSql = (string)GetProperty(pgNestedCaseLiteralPreview, "ConvertedSql");
+        AssertContains(pgNestedCaseLiteralSql, "UPPER(TRIM(display_name)) AS upper_name", "Converted PostgreSQL SQL should convert nested UCASE expression.");
+        AssertContains(pgNestedCaseLiteralSql, "LOWER(TRIM(email)) AS lower_email", "Converted PostgreSQL SQL should convert nested LCASE expression.");
+        AssertContains(pgNestedCaseLiteralSql, "'UCASE(TRIM(display_name))' AS literal_note", "Converted PostgreSQL SQL should preserve UCASE text inside string literals.");
+
         object pgTrimPreview = BuildViewSqlPreview(
             "SELECT LTRIM(RTRIM(display_name)) AS clean_name FROM users",
             "mssql",
