@@ -1560,7 +1560,9 @@ namespace mySQLPunk.lib
                 string sql = segment;
                 if (targetProvider != "mssql")
                 {
+                    sql = Regex.Replace(sql, @"\bSYSUTCDATETIME\s*\(\s*\)", m => BuildUtcTimestampExpression(targetProvider), RegexOptions.IgnoreCase);
                     sql = Regex.Replace(sql, @"\bGETUTCDATE\s*\(\s*\)", m => BuildUtcTimestampExpression(targetProvider), RegexOptions.IgnoreCase);
+                    sql = Regex.Replace(sql, @"\bSYSDATETIME\s*\(\s*\)", m => BuildCurrentTimestampExpression(targetProvider), RegexOptions.IgnoreCase);
                 }
 
                 if (targetProvider != "mysql")

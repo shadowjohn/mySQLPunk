@@ -485,6 +485,31 @@ public static class SmokeTests
         string pgUtcTimestampSql = (string)GetProperty(pgUtcTimestampPreview, "ConvertedSql");
         AssertContains(pgUtcTimestampSql, "CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AS synced_at", "Converted PostgreSQL SQL should use UTC timestamp expression.");
 
+        object mysqlSysUtcDateTimePreview = BuildViewSqlPreview(
+            "SELECT SYSUTCDATETIME() AS synced_at FROM audit_log",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlSysUtcDateTimePreview, "CanConvert"), "SQL Server SYSUTCDATETIME should convert to MySQL.");
+        string mysqlSysUtcDateTimeSql = (string)GetProperty(mysqlSysUtcDateTimePreview, "ConvertedSql");
+        AssertContains(mysqlSysUtcDateTimeSql, "UTC_TIMESTAMP() AS synced_at", "Converted MySQL SQL should use UTC_TIMESTAMP for SYSUTCDATETIME.");
+        AssertNotContains(mysqlSysUtcDateTimeSql, "SYSUTCDATETIME", "Converted MySQL SQL should remove SYSUTCDATETIME.");
+
+        object pgSysUtcDateTimePreview = BuildViewSqlPreview(
+            "SELECT SYSUTCDATETIME() AS synced_at FROM audit_log",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSysUtcDateTimePreview, "CanConvert"), "SQL Server SYSUTCDATETIME should convert to PostgreSQL.");
+        string pgSysUtcDateTimeSql = (string)GetProperty(pgSysUtcDateTimePreview, "ConvertedSql");
+        AssertContains(pgSysUtcDateTimeSql, "CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AS synced_at", "Converted PostgreSQL SQL should use UTC timestamp expression for SYSUTCDATETIME.");
+
+        object sqliteSysDateTimePreview = BuildViewSqlPreview(
+            "SELECT SYSDATETIME() AS checked_at FROM audit_log",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSysDateTimePreview, "CanConvert"), "SQL Server SYSDATETIME should convert to SQLite.");
+        string sqliteSysDateTimeSql = (string)GetProperty(sqliteSysDateTimePreview, "ConvertedSql");
+        AssertContains(sqliteSysDateTimeSql, "CURRENT_TIMESTAMP AS checked_at", "Converted SQLite SQL should use CURRENT_TIMESTAMP for SYSDATETIME.");
+
         object mssqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURDATE() AS today FROM users",
             "mysql",
