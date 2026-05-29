@@ -495,10 +495,7 @@ namespace mySQLPunk.lib
         {
             string sql = selectSql;
 
-            if (targetProvider != "oracle")
-                sql = Regex.Replace(sql, @"\bNVL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
-            if (targetProvider != "mysql" && targetProvider != "sqlite")
-                sql = Regex.Replace(sql, @"\bIFNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+            sql = RewriteSimpleNullFallbackFunctions(sql, targetProvider);
             sql = RewriteIsNullFunctions(sql, targetProvider);
 
             sql = RewriteNullHandlingFunctions(sql, targetProvider);
@@ -555,6 +552,19 @@ namespace mySQLPunk.lib
             sql = RewriteJsonUnquoteWrappers(sql, targetProvider);
 
             return sql;
+        }
+
+        private static string RewriteSimpleNullFallbackFunctions(string selectSql, string targetProvider)
+        {
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = segment;
+                if (targetProvider != "oracle")
+                    sql = Regex.Replace(sql, @"\bNVL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+                if (targetProvider != "mysql" && targetProvider != "sqlite")
+                    sql = Regex.Replace(sql, @"\bIFNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+                return sql;
+            });
         }
 
         private static string RewriteNumericFunctions(string selectSql, string targetProvider)

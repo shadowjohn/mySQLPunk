@@ -211,6 +211,7 @@ Smoke test harness：
   - 本輪補齊：Oracle `TO_NUMBER(...)` / `TO_NUMBER(..., 'format')` 會在目標為 SQL Server、MySQL、PostgreSQL 或 SQLite 時轉為對應的 `CAST(...)` 數值型別，避免 Oracle View 複製到其它 provider 後留下不可執行的數值轉型函式。
   - 本輪補齊：MySQL `TRUNCATE(number, decimals)` 複製到 SQL Server 會轉為 `ROUND(number, decimals, 1)`，複製到 PostgreSQL / Oracle 會轉為 `TRUNC(number, decimals)`，SQLite 會用整數截斷與 `pow(10, decimals)` 模擬，避免報表 View 留下 MySQL 專用數值函式。
   - 本輪補齊：SQL Server `ROUND(number, decimals, 1)` 的截斷語意會依目標 provider 轉為 MySQL `TRUNCATE(number, decimals)`、PostgreSQL / Oracle `TRUNC(number, decimals)`，SQLite 仍以整數截斷與 `pow(10, decimals)` 模擬；一般 `ROUND(number, decimals)` 不會被誤改。
+  - 本輪補齊：`NVL(...)` / `IFNULL(...)` 轉換為 `COALESCE(...)` 時只會改寫 SQL 片段，不會再誤改 `'NVL(...)'` 或 `'IFNULL(...)'` 這類字串常值，避免備註、狀態文字或樣板字串被污染。
   - 本輪補齊：`LOCATE` / `CHARINDEX` / `INSTR` 的起始位置參數會轉為目標 provider 等價語法；SQLite / PostgreSQL 會用 `SUBSTR` / `SUBSTRING` 搭配 `CASE` 保留找不到時回傳 0 的行為。
   - 本輪補齊：MySQL `UCASE(...)` / `LCASE(...)` 會在複製到 SQL Server、PostgreSQL、SQLite 或 Oracle 時轉為通用的 `UPPER(...)` / `LOWER(...)`，避免目標資料庫留下不可執行的 MySQL alias。
   - 本輪補齊：SQL Server `DATALENGTH(...)`、PostgreSQL/MySQL `OCTET_LENGTH(...)` 與 Oracle `LENGTHB(...)` 會依目標 provider 轉為對應的 byte-length 函式，SQLite 目標會用 `length(CAST(expr AS BLOB))` 保留位元組長度語意。

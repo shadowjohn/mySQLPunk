@@ -1472,6 +1472,24 @@ public static class SmokeTests
         string pgNvl2Sql = (string)GetProperty(pgNvl2Preview, "ConvertedSql");
         AssertContains(pgNvl2Sql, "CASE WHEN closed_at IS NOT NULL THEN 'closed' ELSE 'open' END", "Converted PostgreSQL SQL should use CASE for NVL2.");
 
+        object pgNvlLiteralPreview = BuildViewSqlPreview(
+            "SELECT NVL(display_name, 'NVL(fallback)') AS clean_name, 'NVL(note)' AS literal_note FROM users",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgNvlLiteralPreview, "CanConvert"), "Oracle NVL should convert while preserving literals.");
+        string pgNvlLiteralSql = (string)GetProperty(pgNvlLiteralPreview, "ConvertedSql");
+        AssertContains(pgNvlLiteralSql, "COALESCE(display_name, 'NVL(fallback)')", "Converted PostgreSQL SQL should convert NVL function only.");
+        AssertContains(pgNvlLiteralSql, "'NVL(note)' AS literal_note", "Converted PostgreSQL SQL should preserve NVL text inside string literals.");
+
+        object pgIfNullLiteralPreview = BuildViewSqlPreview(
+            "SELECT IFNULL(display_name, 'IFNULL(fallback)') AS clean_name, 'IFNULL(note)' AS literal_note FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgIfNullLiteralPreview, "CanConvert"), "MySQL IFNULL should convert while preserving literals.");
+        string pgIfNullLiteralSql = (string)GetProperty(pgIfNullLiteralPreview, "ConvertedSql");
+        AssertContains(pgIfNullLiteralSql, "COALESCE(display_name, 'IFNULL(fallback)')", "Converted PostgreSQL SQL should convert IFNULL function only.");
+        AssertContains(pgIfNullLiteralSql, "'IFNULL(note)' AS literal_note", "Converted PostgreSQL SQL should preserve IFNULL text inside string literals.");
+
         object mssqlCeilPreview = BuildViewSqlPreview(
             "SELECT CEIL(total_amount / 100.0) AS bill_units FROM orders",
             "oracle",
