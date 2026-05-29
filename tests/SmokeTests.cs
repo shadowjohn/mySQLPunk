@@ -104,7 +104,7 @@ public static class SmokeTests
         Assert((bool)GetProperty(mysqlPreview, "CanConvert"), "SQL Server TOP query should convert to MySQL.");
         string mysqlSql = (string)GetProperty(mysqlPreview, "ConvertedSql");
         AssertContains(mysqlSql, "LIMIT 5", "Converted MySQL SQL should contain LIMIT.");
-        AssertContains(mysqlSql, "CURRENT_TIMESTAMP", "Converted MySQL SQL should rewrite GETDATE().");
+        AssertContains(mysqlSql, "NOW()", "Converted MySQL SQL should rewrite GETDATE().");
 
         object mssqlPreview = BuildViewSqlPreview(
             "SELECT id, DATE_FORMAT(created_at, '%Y-%m-%d') AS day_text FROM logs LIMIT 10",
@@ -509,6 +509,23 @@ public static class SmokeTests
         Assert((bool)GetProperty(sqliteSysDateTimePreview, "CanConvert"), "SQL Server SYSDATETIME should convert to SQLite.");
         string sqliteSysDateTimeSql = (string)GetProperty(sqliteSysDateTimePreview, "ConvertedSql");
         AssertContains(sqliteSysDateTimeSql, "CURRENT_TIMESTAMP AS checked_at", "Converted SQLite SQL should use CURRENT_TIMESTAMP for SYSDATETIME.");
+
+        object mysqlCurrentTimestampCallPreview = BuildViewSqlPreview(
+            "SELECT CURRENT_TIMESTAMP() AS checked_at FROM audit_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlCurrentTimestampCallPreview, "CanConvert"), "CURRENT_TIMESTAMP() call should convert to MySQL.");
+        string mysqlCurrentTimestampCallSql = (string)GetProperty(mysqlCurrentTimestampCallPreview, "ConvertedSql");
+        AssertContains(mysqlCurrentTimestampCallSql, "NOW() AS checked_at", "Converted MySQL SQL should normalize CURRENT_TIMESTAMP() to NOW().");
+        AssertNotContains(mysqlCurrentTimestampCallSql, "CURRENT_TIMESTAMP()", "Converted MySQL SQL should remove CURRENT_TIMESTAMP() call form.");
+
+        object mssqlCurrentTimestampCallPreview = BuildViewSqlPreview(
+            "SELECT CURRENT_TIMESTAMP() AS checked_at FROM audit_log",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCurrentTimestampCallPreview, "CanConvert"), "CURRENT_TIMESTAMP() call should convert to SQL Server.");
+        string mssqlCurrentTimestampCallSql = (string)GetProperty(mssqlCurrentTimestampCallPreview, "ConvertedSql");
+        AssertContains(mssqlCurrentTimestampCallSql, "GETDATE() AS checked_at", "Converted SQL Server SQL should normalize CURRENT_TIMESTAMP() to GETDATE().");
 
         object mssqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURDATE() AS today FROM users",

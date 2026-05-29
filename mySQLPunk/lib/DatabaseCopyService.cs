@@ -1580,6 +1580,12 @@ namespace mySQLPunk.lib
                     sql = Regex.Replace(sql, @"\bNOW\s*\(\s*\)", "CURRENT_TIMESTAMP", RegexOptions.IgnoreCase);
                 }
 
+                sql = Regex.Replace(
+                    sql,
+                    @"\bCURRENT_TIMESTAMP\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentTimestampExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
                 if (targetProvider != "oracle")
                 {
                     sql = Regex.Replace(
