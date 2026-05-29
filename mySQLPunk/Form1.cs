@@ -1221,6 +1221,52 @@ namespace mySQLPunk
             MessageBox.Show(message, Localization.T("Menu.Help"), MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
+        private async void CheckForUpdatesAsync(bool silent)
+        {
+            if (!silent) UpdateMainStatus(Localization.T("Update.Checking"));
+
+            try
+            {
+                AppUpdateCheckResult result = await Task.Run(() =>
+                    AppUpdateService.CheckGitHubLatestRelease(Application.ProductVersion));
+
+                if (result.UpdateAvailable)
+                {
+                    string targetUrl = string.IsNullOrWhiteSpace(result.InstallerDownloadUrl)
+                        ? result.ReleasePageUrl
+                        : result.InstallerDownloadUrl;
+                    string message = Localization.Format("Update.Available", result.LatestVersion, result.CurrentVersion);
+                    DialogResult answer = MessageBox.Show(
+                        message,
+                        Localization.T("Menu.CheckUpdates"),
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information);
+                    if (answer == DialogResult.Yes && !string.IsNullOrWhiteSpace(targetUrl))
+                    {
+                        Process.Start(new ProcessStartInfo(targetUrl) { UseShellExecute = true });
+                    }
+                    UpdateMainStatus(message.Replace("\n", " "));
+                    return;
+                }
+
+                if (!silent)
+                {
+                    string message = Localization.T("Update.NotAvailable");
+                    UpdateMainStatus(message);
+                    MessageBox.Show(message, Localization.T("Menu.CheckUpdates"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                string message = Localization.Format("Update.CheckFailed", ex.Message);
+                UpdateMainStatus(message);
+                if (!silent)
+                {
+                    MessageBox.Show(message, Localization.T("Menu.CheckUpdates"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+        }
+
         private void OpenConnectionToolStripMenuItem_Click(object sender, EventArgs e)
         {
             TreeNode root = GetSelectedConnectionRoot();
@@ -2422,6 +2468,7 @@ namespace mySQLPunk
             ttToolStripMenuItem.Text = Localization.T("Menu.Window");
             helpToolStripMenuItem.Text = Localization.T("Menu.Help");
             aboutToolStripMenuItem.Text = Localization.T("Menu.About");
+            ToolStripMenuItem checkUpdatesMenu = new ToolStripMenuItem(Localization.T("Menu.CheckUpdates"));
 
             ToolStripMenuItem editMenu = new ToolStripMenuItem(Localization.T("Menu.Edit"));
             ToolStripMenuItem viewMenu = new ToolStripMenuItem(Localization.T("Menu.View"));
@@ -2470,6 +2517,7 @@ namespace mySQLPunk
             capabilitiesMenu.Click += (s, e) => ShowSelectedOtherTool("Provider Capabilities");
             maintenanceMenu.Click += (s, e) => ShowSelectedOtherTool("Maintenance Checklist");
             optionsMenu.Click += (s, e) => OpenOptionsDialog();
+            checkUpdatesMenu.Click += (s, e) => CheckForUpdatesAsync(false);
             toolsMenu.DropDownItems.AddRange(new ToolStripItem[]
             {
                 dataDictionaryMenu,
@@ -2484,6 +2532,13 @@ namespace mySQLPunk
                 new ToolStripSeparator(),
                 languageMenu,
                 themeMenu
+            });
+            helpToolStripMenuItem.DropDownItems.Clear();
+            helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                checkUpdatesMenu,
+                new ToolStripSeparator(),
+                aboutToolStripMenuItem
             });
 
             menuStrip1.Items.Clear();
@@ -5921,6 +5976,10 @@ namespace mySQLPunk
             drawLists();
             ArrangeMainLayout();
             StartBackupIntegritySchedule();
+            if (ApplicationOptionSettings.GetBool("AutoCheckUpdates"))
+            {
+                BeginInvoke(new Action(() => CheckForUpdatesAsync(true)));
+            }
         }
 
         private void StartBackupIntegritySchedule()

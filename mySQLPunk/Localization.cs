@@ -81,6 +81,7 @@ namespace mySQLPunk
             Add("Menu.Close", "關閉", "Close");
             Add("Menu.Exit", "離開", "Exit");
             Add("Menu.About", "關於", "About");
+            Add("Menu.CheckUpdates", "檢查更新...", "Check for Updates...");
 
             Add("View.NavigationPane", "導覽窗格", "Navigation Pane");
             Add("View.ShowNavigationPane", "顯示導覽窗格", "Show Navigation Pane");
@@ -317,6 +318,10 @@ namespace mySQLPunk
             Add("Connection.CliNotFound", "找不到 {0} 命令列工具，請先安裝並確認已加入 PATH。\n說明：{1}", "Cannot find {0} CLI tool. Please install it and make sure it is added to PATH.\nHelp: {1}");
             Add("Connection.CliTemporaryPasswordPrompt", "此連線未儲存密碼。\n請輸入本次命令列介面要使用的密碼；留空會改由命令列工具自行提示。", "This connection does not have a saved password.\nEnter the password to use for this CLI session; leave blank to let the CLI prompt for it.");
             Add("Connection.CliTemporaryPasswordCancelled", "已取消開啟命令列介面。", "Opening command line interface cancelled.");
+            Add("Update.Checking", "正在檢查更新...", "Checking for updates...");
+            Add("Update.Available", "發現新版本 {0}。\n目前版本：{1}\n\n是否開啟下載頁？", "Version {0} is available.\nCurrent version: {1}\n\nOpen the download page?");
+            Add("Update.NotAvailable", "目前已是最新版本。", "You are already on the latest version.");
+            Add("Update.CheckFailed", "檢查更新失敗：{0}", "Check for updates failed: {0}");
             Add("Connection.MarkedColor", "已標記連線色彩：{0}", "Connection color marked: {0}");
 
             Add("ConnectionWizard.Title", "選取連線類型", "Select Connection Type");

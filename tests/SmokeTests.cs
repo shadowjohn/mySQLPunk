@@ -51,6 +51,7 @@ public static class SmokeTests
         Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
+        Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
@@ -4670,6 +4671,38 @@ public static class SmokeTests
         Assert(!disabled.RegisterSqlOpenWith, "Disabled plan should not register SQL Open With.");
         Assert(!disabled.RegisterUrlProtocol, "Disabled plan should not register URL protocol.");
         AssertEquals(0.ToString(), disabled.RegistryPaths.Count.ToString(), "Disabled plan should not report registry paths.");
+    }
+
+    private static void TestApplicationUpdateCheckService()
+    {
+        string releaseJson = @"{
+  ""tag_name"": ""v1.2.3"",
+  ""name"": ""mySQLPunk 1.2.3"",
+  ""html_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/tag/v1.2.3"",
+  ""body"": ""更新內容"",
+  ""prerelease"": false,
+  ""assets"": [
+    {
+      ""name"": ""mySQLPunk-Setup.exe"",
+      ""browser_download_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/download/v1.2.3/mySQLPunk-Setup.exe""
+    }
+  ]
+}";
+
+        AppUpdateCheckResult update = AppUpdateService.ParseGitHubLatestRelease(releaseJson, "1.0.0.0");
+        Assert(update.UpdateAvailable, "Update check should detect newer semantic versions.");
+        AssertEquals("1.2.3", update.LatestVersion.ToString(), "Update check should normalize v-prefixed release tags.");
+        AssertContains(update.ReleasePageUrl, "/releases/tag/v1.2.3", "Update check should keep the release page URL.");
+        AssertContains(update.InstallerDownloadUrl, "mySQLPunk-Setup.exe", "Update check should prefer installer assets.");
+        AssertContains(update.ReleaseNotes, "更新內容", "Update check should keep release notes.");
+
+        AppUpdateCheckResult current = AppUpdateService.ParseGitHubLatestRelease(releaseJson, "1.2.3.0");
+        Assert(!current.UpdateAvailable, "Update check should not report an update for the same version.");
+
+        AssertEquals(
+            "https://api.github.com/repos/shadowjohn/mySQLPunk/releases/latest",
+            AppUpdateService.BuildGitHubLatestReleaseApiUrl("shadowjohn", "mySQLPunk"),
+            "Update check should build the GitHub latest release endpoint.");
     }
 
     private static void TestDarkThemeControlCoverage()
