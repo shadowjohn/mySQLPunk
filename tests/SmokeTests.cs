@@ -1586,6 +1586,15 @@ public static class SmokeTests
         string pgTruncateNumberSql = (string)GetProperty(pgTruncateNumberPreview, "ConvertedSql");
         AssertContains(pgTruncateNumberSql, "TRUNC(total_amount, 2)", "Converted PostgreSQL SQL should use TRUNC.");
 
+        object pgNestedTruncateNumberPreview = BuildViewSqlPreview(
+            "SELECT TRUNCATE(ABS(total_amount), 2) AS truncated_total, 'TRUNCATE(ABS(total_amount), 2)' AS literal_note FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedTruncateNumberPreview, "CanConvert"), "Nested MySQL TRUNCATE should convert while preserving literals.");
+        string pgNestedTruncateNumberSql = (string)GetProperty(pgNestedTruncateNumberPreview, "ConvertedSql");
+        AssertContains(pgNestedTruncateNumberSql, "TRUNC(ABS(total_amount), 2) AS truncated_total", "Converted PostgreSQL SQL should convert nested TRUNCATE arguments.");
+        AssertContains(pgNestedTruncateNumberSql, "'TRUNCATE(ABS(total_amount), 2)' AS literal_note", "Converted PostgreSQL SQL should preserve TRUNCATE text inside string literals.");
+
         object oracleTruncateNumberPreview = BuildViewSqlPreview(
             "SELECT TRUNCATE(total_amount, 2) AS truncated_total FROM orders",
             "mysql",

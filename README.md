@@ -211,6 +211,7 @@ Smoke test harness：
   - 本輪補齊：Oracle `TO_NUMBER(...)` / `TO_NUMBER(..., 'format')` 會在目標為 SQL Server、MySQL、PostgreSQL 或 SQLite 時轉為對應的 `CAST(...)` 數值型別，避免 Oracle View 複製到其它 provider 後留下不可執行的數值轉型函式。
   - 本輪補齊：MySQL `TRUNCATE(number, decimals)` 複製到 SQL Server 會轉為 `ROUND(number, decimals, 1)`，複製到 PostgreSQL / Oracle 會轉為 `TRUNC(number, decimals)`，SQLite 會用整數截斷與 `pow(10, decimals)` 模擬，避免報表 View 留下 MySQL 專用數值函式。
   - 本輪補齊：SQL Server `ROUND(number, decimals, 1)` 的截斷語意會依目標 provider 轉為 MySQL `TRUNCATE(number, decimals)`、PostgreSQL / Oracle `TRUNC(number, decimals)`，SQLite 仍以整數截斷與 `pow(10, decimals)` 模擬；一般 `ROUND(number, decimals)` 不會被誤改。
+  - 本輪補齊：`TRUNCATE(...)` 與三參數 `ROUND(..., ..., 1)` 改用函式呼叫掃描器，可處理 `TRUNCATE(ABS(col), 2)` 這類巢狀參數，並保留字串常值中的函式範例文字。
   - 本輪補齊：`CEIL(...)` / `CEILING(...)` 名稱轉換會避開字串常值，`MOD(...)` 轉 SQL Server `%` 時也改用函式呼叫掃描器，可處理 `MOD(ABS(col), n)` 這類巢狀參數並保留 `'CEIL(...)'` / `'MOD(...)'` 文字。
   - 本輪補齊：`POW(...)` 轉 `POWER(...)` 時只會改寫 SQL 片段，會保留 `'POW(...)'` 這類字串常值，避免報表標籤或樣板文字被誤改。
   - 本輪補齊：`RAND()` / `RANDOM()` / `DBMS_RANDOM.VALUE` 隨機數函式轉換會避開字串常值，避免將 `'RAND()'` 這類報表文字誤改成目標 provider 函式名稱。

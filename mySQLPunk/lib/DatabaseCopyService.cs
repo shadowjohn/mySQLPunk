@@ -596,17 +596,16 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mysql") return selectSql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bTRUNCATE\s*\((?<args>[^()]*)\)",
-                m => RewriteNumericTruncateFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "TRUNCATE",
+                (argsText, original) => RewriteNumericTruncateFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteNumericTruncateFunction(Match match, string targetProvider)
+        private static string RewriteNumericTruncateFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
 
             string value = args[0];
             string decimals = args[1];
@@ -625,18 +624,17 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mssql") return selectSql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bROUND\s*\((?<args>[^()]*)\)",
-                m => RewriteTruncatingRoundFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "ROUND",
+                (argsText, original) => RewriteTruncatingRoundFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteTruncatingRoundFunction(Match match, string targetProvider)
+        private static string RewriteTruncatingRoundFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
-            if (IsZeroLiteral(args[2])) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
+            if (IsZeroLiteral(args[2])) return original;
 
             string value = args[0];
             string decimals = args[1];
