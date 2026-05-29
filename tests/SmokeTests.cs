@@ -527,6 +527,31 @@ public static class SmokeTests
         string mssqlCurrentTimestampCallSql = (string)GetProperty(mssqlCurrentTimestampCallPreview, "ConvertedSql");
         AssertContains(mssqlCurrentTimestampCallSql, "GETDATE() AS checked_at", "Converted SQL Server SQL should normalize CURRENT_TIMESTAMP() to GETDATE().");
 
+        object pgCurrentUserPreview = BuildViewSqlPreview(
+            "SELECT CURRENT_USER() AS current_user_name FROM audit_log",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgCurrentUserPreview, "CanConvert"), "MySQL CURRENT_USER should convert to PostgreSQL.");
+        string pgCurrentUserSql = (string)GetProperty(pgCurrentUserPreview, "ConvertedSql");
+        AssertContains(pgCurrentUserSql, "CURRENT_USER AS current_user_name", "Converted PostgreSQL SQL should use CURRENT_USER.");
+        AssertNotContains(pgCurrentUserSql, "CURRENT_USER()", "Converted PostgreSQL SQL should remove MySQL CURRENT_USER call form.");
+
+        object oracleSessionUserPreview = BuildViewSqlPreview(
+            "SELECT SESSION_USER AS session_user_name FROM audit_log",
+            "postgresql",
+            "oracle");
+        Assert((bool)GetProperty(oracleSessionUserPreview, "CanConvert"), "PostgreSQL SESSION_USER should convert to Oracle.");
+        string oracleSessionUserSql = (string)GetProperty(oracleSessionUserPreview, "ConvertedSql");
+        AssertContains(oracleSessionUserSql, "SYS_CONTEXT('USERENV','SESSION_USER') AS session_user_name", "Converted Oracle SQL should use SYS_CONTEXT for SESSION_USER.");
+
+        object mysqlSystemUserPreview = BuildViewSqlPreview(
+            "SELECT SYSTEM_USER AS login_name FROM audit_log",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlSystemUserPreview, "CanConvert"), "SQL Server SYSTEM_USER should convert to MySQL.");
+        string mysqlSystemUserSql = (string)GetProperty(mysqlSystemUserPreview, "ConvertedSql");
+        AssertContains(mysqlSystemUserSql, "USER() AS login_name", "Converted MySQL SQL should use USER() for SYSTEM_USER.");
+
         object mssqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURDATE() AS today FROM users",
             "mysql",

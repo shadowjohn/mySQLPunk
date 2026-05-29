@@ -503,6 +503,7 @@ namespace mySQLPunk.lib
 
             sql = RewriteNullHandlingFunctions(sql, targetProvider);
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
+            sql = RewriteUserContextFunctions(sql, targetProvider);
             sql = RewriteDateOnlyFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteDateTruncFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
@@ -1665,6 +1666,61 @@ namespace mySQLPunk.lib
             if (targetProvider == "oracle") return "SYS_EXTRACT_UTC(SYSTIMESTAMP)";
             if (targetProvider == "sqlite") return "datetime('now')";
             return "CURRENT_TIMESTAMP AT TIME ZONE 'UTC'";
+        }
+
+        private static string RewriteUserContextFunctions(string selectSql, string targetProvider)
+        {
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"\bCURRENT_USER\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentUserExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bSESSION_USER\b(?:\s*\(\s*\))?",
+                    m => BuildSessionUserExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bSYSTEM_USER\b(?:\s*\(\s*\))?",
+                    m => BuildSystemUserExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                return Regex.Replace(
+                    sql,
+                    @"\bUSER\s*\(\s*\)",
+                    m => BuildSystemUserExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string BuildCurrentUserExpression(string targetProvider)
+        {
+            if (targetProvider == "mysql") return "CURRENT_USER()";
+            if (targetProvider == "sqlite") return "NULL";
+            return "CURRENT_USER";
+        }
+
+        private static string BuildSessionUserExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "SESSION_USER";
+            if (targetProvider == "mysql") return "USER()";
+            if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','SESSION_USER')";
+            if (targetProvider == "sqlite") return "NULL";
+            return "SESSION_USER";
+        }
+
+        private static string BuildSystemUserExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "SYSTEM_USER";
+            if (targetProvider == "mysql") return "USER()";
+            if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','SESSION_USER')";
+            if (targetProvider == "sqlite") return "NULL";
+            return "SESSION_USER";
         }
 
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)
