@@ -908,11 +908,10 @@ namespace mySQLPunk.lib
         {
             if (sourceProvider != "mssql" || targetProvider == "mssql") return selectSql;
 
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bTRY_CAST\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s+AS\s+(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*\)",
-                m => RewriteSqlServerTryCastFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "TRY_CAST",
+                (argsText, original) => RewriteSqlServerTryCastFunction(argsText, original, targetProvider));
 
             return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
@@ -920,16 +919,89 @@ namespace mySQLPunk.lib
                 (argsText, original) => RewriteSqlServerTryConvertFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteSqlServerTryCastFunction(Match match, string targetProvider)
+        private static string RewriteSqlServerTryCastFunction(string argsText, string original, string targetProvider)
         {
-            string targetType = MapSqlServerCastType(
-                match.Groups["type"].Value,
-                match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
-                match.Groups["scale"].Success ? match.Groups["scale"].Value : "",
-                targetProvider);
-            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+            string expr;
+            string typeSpec;
+            if (!TrySplitCastArguments(argsText, out expr, out typeSpec)) return original;
 
-            return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
+            Match typeMatch = Regex.Match(
+                typeSpec.Trim(),
+                @"^(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?$",
+                RegexOptions.IgnoreCase);
+            if (!typeMatch.Success) return original;
+
+            string targetType = MapSqlServerCastType(
+                typeMatch.Groups["type"].Value,
+                typeMatch.Groups["precision"].Success ? typeMatch.Groups["precision"].Value : "",
+                typeMatch.Groups["scale"].Success ? typeMatch.Groups["scale"].Value : "",
+                targetProvider);
+            if (string.IsNullOrWhiteSpace(targetType)) return original;
+
+            return "CAST(" + expr.Trim() + " AS " + targetType + ")";
+        }
+
+        private static bool TrySplitCastArguments(string argsText, out string expr, out string typeSpec)
+        {
+            expr = "";
+            typeSpec = "";
+            string text = argsText ?? "";
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            int depth = 0;
+
+            for (int i = 0; i < text.Length - 1; i++)
+            {
+                char ch = text[i];
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    if (inSingleQuote && i + 1 < text.Length && text[i + 1] == '\'')
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        inSingleQuote = !inSingleQuote;
+                    }
+                    continue;
+                }
+
+                if (ch == '"' && !inSingleQuote)
+                {
+                    inDoubleQuote = !inDoubleQuote;
+                    continue;
+                }
+
+                if (inSingleQuote || inDoubleQuote) continue;
+                if (ch == '(')
+                {
+                    depth++;
+                    continue;
+                }
+                if (ch == ')' && depth > 0)
+                {
+                    depth--;
+                    continue;
+                }
+
+                if (depth == 0 && IsTopLevelAsKeywordAt(text, i))
+                {
+                    expr = text.Substring(0, i).Trim();
+                    typeSpec = text.Substring(i + 2).Trim();
+                    return expr.Length > 0 && typeSpec.Length > 0;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsTopLevelAsKeywordAt(string text, int index)
+        {
+            if (index < 0 || index + 2 > text.Length) return false;
+            if (string.Compare(text, index, "AS", 0, 2, true, CultureInfo.InvariantCulture) != 0) return false;
+            bool beforeOk = index == 0 || char.IsWhiteSpace(text[index - 1]);
+            bool afterOk = index + 2 >= text.Length || char.IsWhiteSpace(text[index + 2]);
+            return beforeOk && afterOk;
         }
 
         private static string RewriteSqlServerTryConvertFunction(string argsText, string original, string targetProvider)

@@ -1788,6 +1788,15 @@ public static class SmokeTests
         AssertContains(mysqlTryCastSql, "CAST(amount_text AS decimal(10,2))", "Converted MySQL SQL should use CAST for TRY_CAST.");
         AssertNotContains(mysqlTryCastSql, "TRY_CAST", "Converted MySQL SQL should remove TRY_CAST.");
 
+        object pgNestedTryCastPreview = BuildViewSqlPreview(
+            "SELECT TRY_CAST(REPLACE(user_id_text, '-', '') AS int) AS user_id, 'TRY_CAST(REPLACE(user_id_text, ''-'', '''') AS int)' AS literal_note FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedTryCastPreview, "CanConvert"), "Nested SQL Server TRY_CAST should convert while preserving literals.");
+        string pgNestedTryCastSql = (string)GetProperty(pgNestedTryCastPreview, "ConvertedSql");
+        AssertContains(pgNestedTryCastSql, "CAST(REPLACE(user_id_text, '-', '') AS INTEGER) AS user_id", "Converted PostgreSQL SQL should cast nested TRY_CAST expression.");
+        AssertContains(pgNestedTryCastSql, "'TRY_CAST(REPLACE(user_id_text, ''-'', '''') AS int)' AS literal_note", "Converted PostgreSQL SQL should preserve TRY_CAST text inside string literals.");
+
         object pgTryConvertDatePreview = BuildViewSqlPreview(
             "SELECT TRY_CONVERT(date, order_date_text, 23) AS order_date FROM orders",
             "mssql",
