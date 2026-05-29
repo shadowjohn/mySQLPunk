@@ -1872,6 +1872,23 @@ public static class SmokeTests
         string mssqlFieldSql = (string)GetProperty(mssqlFieldPreview, "ConvertedSql");
         AssertContains(mssqlFieldSql, "ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 0 END", "Converted SQL Server SQL should preserve FIELD ordering semantics with CASE.");
 
+        object pgEltPreview = BuildViewSqlPreview(
+            "SELECT ELT(status_rank, 'new', 'active', 'closed') AS status_text FROM tasks",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgEltPreview, "CanConvert"), "MySQL ELT should convert to PostgreSQL.");
+        string pgEltSql = (string)GetProperty(pgEltPreview, "ConvertedSql");
+        AssertContains(pgEltSql, "CASE status_rank WHEN 1 THEN 'new' WHEN 2 THEN 'active' WHEN 3 THEN 'closed' ELSE NULL END", "Converted PostgreSQL SQL should emulate MySQL ELT with CASE.");
+        AssertNotContains(pgEltSql, "ELT(", "Converted PostgreSQL SQL should remove MySQL ELT.");
+
+        object sqliteEltPreview = BuildViewSqlPreview(
+            "SELECT ELT(level_no, 'low', 'normal', 'high') AS level_text FROM alerts",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteEltPreview, "CanConvert"), "MySQL ELT should convert to SQLite.");
+        string sqliteEltSql = (string)GetProperty(sqliteEltPreview, "ConvertedSql");
+        AssertContains(sqliteEltSql, "CASE level_no WHEN 1 THEN 'low' WHEN 2 THEN 'normal' WHEN 3 THEN 'high' ELSE NULL END", "Converted SQLite SQL should emulate MySQL ELT with CASE.");
+
         object mysqlStuffPreview = BuildViewSqlPreview(
             "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
             "mssql",

@@ -515,7 +515,7 @@ namespace mySQLPunk.lib
             sql = RewriteConditionalFunctions(sql, targetProvider);
             sql = RewriteNumericFunctions(sql, targetProvider);
             sql = RewriteComparisonFunctions(sql, targetProvider);
-            sql = RewriteFieldFunctions(sql, targetProvider);
+            sql = RewriteMySqlListFunctions(sql, targetProvider);
             sql = RewriteBooleanLiterals(sql, targetProvider);
             sql = RewriteSqlServerConvertCastFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteSqlServerTryCastFunctions(sql, sourceProvider, targetProvider);
@@ -646,14 +646,20 @@ namespace mySQLPunk.lib
             return "(CASE WHEN " + args[0] + " " + comparison + " " + args[1] + " THEN " + args[0] + " ELSE " + args[1] + " END)";
         }
 
-        private static string RewriteFieldFunctions(string selectSql, string targetProvider)
+        private static string RewriteMySqlListFunctions(string selectSql, string targetProvider)
         {
             if (targetProvider == "mysql") return selectSql;
 
-            return Regex.Replace(
+            string sql = Regex.Replace(
                 selectSql,
                 @"\bFIELD\s*\((?<args>[^()]*)\)",
                 m => RewriteFieldFunction(m),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bELT\s*\((?<args>[^()]*)\)",
+                m => RewriteEltFunction(m),
                 RegexOptions.IgnoreCase);
         }
 
@@ -670,6 +676,21 @@ namespace mySQLPunk.lib
             }
 
             return "CASE " + expr + " " + string.Join(" ", whens.ToArray()) + " ELSE 0 END";
+        }
+
+        private static string RewriteEltFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 2) return match.Value;
+
+            string expr = args[0];
+            List<string> whens = new List<string>();
+            for (int i = 1; i < args.Count; i++)
+            {
+                whens.Add("WHEN " + i.ToString(CultureInfo.InvariantCulture) + " THEN " + args[i]);
+            }
+
+            return "CASE " + expr + " " + string.Join(" ", whens.ToArray()) + " ELSE NULL END";
         }
 
         private static string RewriteBooleanLiterals(string selectSql, string targetProvider)
