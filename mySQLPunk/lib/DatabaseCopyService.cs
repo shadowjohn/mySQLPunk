@@ -2432,16 +2432,18 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mssql")
             {
-                string sql = Regex.Replace(
-                    selectSql,
+                string sql = RewriteByteLengthFunctionsForTarget(selectSql, targetProvider);
+                sql = Regex.Replace(
+                    sql,
                     @"\b(?:LENGTH|CHAR_LENGTH|CHARACTER_LENGTH)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                     m => "LEN(" + m.Groups["expr"].Value.Trim() + ")",
                     RegexOptions.IgnoreCase);
                 return sql;
             }
 
-            string rewrittenSql = Regex.Replace(
-                selectSql,
+            string rewrittenSql = RewriteByteLengthFunctionsForTarget(selectSql, targetProvider);
+            rewrittenSql = Regex.Replace(
+                rewrittenSql,
                 @"\bLEN\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => "LENGTH(" + m.Groups["expr"].Value.Trim() + ")",
                 RegexOptions.IgnoreCase);
@@ -2456,6 +2458,23 @@ namespace mySQLPunk.lib
             }
 
             return rewrittenSql;
+        }
+
+        private static string RewriteByteLengthFunctionsForTarget(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\b(?:DATALENGTH|OCTET_LENGTH|LENGTHB)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildByteLengthExpression(targetProvider, m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildByteLengthExpression(string targetProvider, string expr)
+        {
+            if (targetProvider == "mssql") return "DATALENGTH(" + expr + ")";
+            if (targetProvider == "oracle") return "LENGTHB(" + expr + ")";
+            if (targetProvider == "sqlite") return "length(CAST(" + expr + " AS BLOB))";
+            return "OCTET_LENGTH(" + expr + ")";
         }
 
         private static string RewriteStringCaseFunctions(string selectSql, string targetProvider)

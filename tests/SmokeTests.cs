@@ -1612,6 +1612,23 @@ public static class SmokeTests
         string pgLengthSql = (string)GetProperty(pgLengthPreview, "ConvertedSql");
         AssertContains(pgLengthSql, "LENGTH(display_name)", "Converted PostgreSQL SQL should use LENGTH.");
 
+        object pgDataLengthPreview = BuildViewSqlPreview(
+            "SELECT DATALENGTH(binary_payload) AS payload_bytes FROM files",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgDataLengthPreview, "CanConvert"), "SQL Server DATALENGTH should convert to PostgreSQL.");
+        string pgDataLengthSql = (string)GetProperty(pgDataLengthPreview, "ConvertedSql");
+        AssertContains(pgDataLengthSql, "OCTET_LENGTH(binary_payload)", "Converted PostgreSQL SQL should preserve DATALENGTH byte-length semantics.");
+        AssertNotContains(pgDataLengthSql, "DATALENGTH", "Converted PostgreSQL SQL should remove SQL Server DATALENGTH.");
+
+        object sqliteDataLengthPreview = BuildViewSqlPreview(
+            "SELECT DATALENGTH(binary_payload) AS payload_bytes FROM files",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteDataLengthPreview, "CanConvert"), "SQL Server DATALENGTH should convert to SQLite.");
+        string sqliteDataLengthSql = (string)GetProperty(sqliteDataLengthPreview, "ConvertedSql");
+        AssertContains(sqliteDataLengthSql, "length(CAST(binary_payload AS BLOB))", "Converted SQLite SQL should preserve DATALENGTH byte-length semantics.");
+
         object mssqlCharLengthPreview = BuildViewSqlPreview(
             "SELECT CHAR_LENGTH(display_name) AS name_length FROM users",
             "mysql",
