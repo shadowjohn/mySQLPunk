@@ -1797,6 +1797,15 @@ public static class SmokeTests
         AssertContains(pgTryConvertDateSql, "TO_DATE(order_date_text, 'YYYY-MM-DD')", "Converted PostgreSQL SQL should parse date style 23.");
         AssertNotContains(pgTryConvertDateSql, "TRY_CONVERT", "Converted PostgreSQL SQL should remove TRY_CONVERT.");
 
+        object pgNestedTryConvertPreview = BuildViewSqlPreview(
+            "SELECT TRY_CONVERT(int, REPLACE(user_id_text, '-', '')) AS user_id, 'TRY_CONVERT(int, REPLACE(user_id_text, ''-'', ''''))' AS literal_note FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedTryConvertPreview, "CanConvert"), "Nested SQL Server TRY_CONVERT should convert while preserving literals.");
+        string pgNestedTryConvertSql = (string)GetProperty(pgNestedTryConvertPreview, "ConvertedSql");
+        AssertContains(pgNestedTryConvertSql, "CAST(REPLACE(user_id_text, '-', '') AS INTEGER) AS user_id", "Converted PostgreSQL SQL should cast nested TRY_CONVERT expression.");
+        AssertContains(pgNestedTryConvertSql, "'TRY_CONVERT(int, REPLACE(user_id_text, ''-'', ''''))' AS literal_note", "Converted PostgreSQL SQL should preserve TRY_CONVERT text inside string literals.");
+
         object oracleTryConvertDateTimePreview = BuildViewSqlPreview(
             "SELECT TRY_CONVERT(datetime, created_text, 120) AS created_at FROM orders",
             "mssql",

@@ -914,11 +914,10 @@ namespace mySQLPunk.lib
                 m => RewriteSqlServerTryCastFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bTRY_CONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)(?:\s*,\s*(?<style>23|120))?\s*\)",
-                m => RewriteSqlServerTryConvertFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "TRY_CONVERT",
+                (argsText, original) => RewriteSqlServerTryConvertFunction(argsText, original, targetProvider));
         }
 
         private static string RewriteSqlServerTryCastFunction(Match match, string targetProvider)
@@ -933,11 +932,20 @@ namespace mySQLPunk.lib
             return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
         }
 
-        private static string RewriteSqlServerTryConvertFunction(Match match, string targetProvider)
+        private static string RewriteSqlServerTryConvertFunction(string argsText, string original, string targetProvider)
         {
-            string sqlType = match.Groups["type"].Value;
-            string expr = match.Groups["expr"].Value.Trim();
-            string style = match.Groups["style"].Success ? match.Groups["style"].Value : "";
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 2 || args.Count > 3) return original;
+
+            Match typeMatch = Regex.Match(
+                args[0].Trim(),
+                @"^(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?$",
+                RegexOptions.IgnoreCase);
+            if (!typeMatch.Success) return original;
+
+            string sqlType = typeMatch.Groups["type"].Value;
+            string expr = args[1].Trim();
+            string style = args.Count == 3 ? args[2].Trim() : "";
             string normalizedType = Regex.Replace((sqlType ?? "").Trim().ToLowerInvariant(), @"\s+", "");
 
             if ((normalizedType == "date" || normalizedType == "datetime" || normalizedType == "datetime2" || normalizedType == "smalldatetime") &&
@@ -952,10 +960,10 @@ namespace mySQLPunk.lib
 
             string targetType = MapSqlServerCastType(
                 sqlType,
-                match.Groups["precision"].Success ? match.Groups["precision"].Value : "",
-                match.Groups["scale"].Success ? match.Groups["scale"].Value : "",
+                typeMatch.Groups["precision"].Success ? typeMatch.Groups["precision"].Value : "",
+                typeMatch.Groups["scale"].Success ? typeMatch.Groups["scale"].Value : "",
                 targetProvider);
-            if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
+            if (string.IsNullOrWhiteSpace(targetType)) return original;
 
             return "CAST(" + expr + " AS " + targetType + ")";
         }
