@@ -1515,6 +1515,31 @@ public static class SmokeTests
         string pgCeilingSql = (string)GetProperty(pgCeilingPreview, "ConvertedSql");
         AssertContains(pgCeilingSql, "CEIL(total_amount / 100.0)", "Converted PostgreSQL SQL should use CEIL.");
 
+        object mssqlTruncateNumberPreview = BuildViewSqlPreview(
+            "SELECT TRUNCATE(total_amount, 2) AS truncated_total FROM orders",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlTruncateNumberPreview, "CanConvert"), "MySQL TRUNCATE should convert to SQL Server.");
+        string mssqlTruncateNumberSql = (string)GetProperty(mssqlTruncateNumberPreview, "ConvertedSql");
+        AssertContains(mssqlTruncateNumberSql, "ROUND(total_amount, 2, 1)", "Converted SQL Server SQL should use ROUND with truncate flag.");
+        AssertNotContains(mssqlTruncateNumberSql, "TRUNCATE(", "Converted SQL Server SQL should remove MySQL TRUNCATE function.");
+
+        object pgTruncateNumberPreview = BuildViewSqlPreview(
+            "SELECT TRUNCATE(total_amount, 2) AS truncated_total FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTruncateNumberPreview, "CanConvert"), "MySQL TRUNCATE should convert to PostgreSQL.");
+        string pgTruncateNumberSql = (string)GetProperty(pgTruncateNumberPreview, "ConvertedSql");
+        AssertContains(pgTruncateNumberSql, "TRUNC(total_amount, 2)", "Converted PostgreSQL SQL should use TRUNC.");
+
+        object oracleTruncateNumberPreview = BuildViewSqlPreview(
+            "SELECT TRUNCATE(total_amount, 2) AS truncated_total FROM orders",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleTruncateNumberPreview, "CanConvert"), "MySQL TRUNCATE should convert to Oracle.");
+        string oracleTruncateNumberSql = (string)GetProperty(oracleTruncateNumberPreview, "ConvertedSql");
+        AssertContains(oracleTruncateNumberSql, "TRUNC(total_amount, 2)", "Converted Oracle SQL should use TRUNC.");
+
         object mssqlModPreview = BuildViewSqlPreview(
             "SELECT MOD(order_no, 10) AS shard_no FROM orders",
             "mysql",

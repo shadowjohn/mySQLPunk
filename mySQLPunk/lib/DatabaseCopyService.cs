@@ -561,6 +561,7 @@ namespace mySQLPunk.lib
         {
             string sql = RewriteOracleToNumberFunctions(selectSql, targetProvider);
             sql = RewritePowerFunctions(sql, targetProvider);
+            sql = RewriteNumericTruncateFunctions(sql, targetProvider);
             if (targetProvider == "mssql")
             {
                 sql = Regex.Replace(
@@ -580,6 +581,35 @@ namespace mySQLPunk.lib
                 @"\bCEILING\s*\(",
                 "CEIL(",
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteNumericTruncateFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bTRUNCATE\s*\((?<args>[^()]*)\)",
+                m => RewriteNumericTruncateFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteNumericTruncateFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+
+            string value = args[0];
+            string decimals = args[1];
+            if (targetProvider == "mssql") return "ROUND(" + value + ", " + decimals + ", 1)";
+            if (targetProvider == "sqlite") return BuildSqliteNumericTruncateExpression(value, decimals);
+            return "TRUNC(" + value + ", " + decimals + ")";
+        }
+
+        private static string BuildSqliteNumericTruncateExpression(string value, string decimals)
+        {
+            string scale = "pow(10, " + decimals + ")";
+            return "(CAST((" + value + ") * " + scale + " AS INTEGER) / " + scale + ")";
         }
 
         private static string RewriteOracleToNumberFunctions(string selectSql, string targetProvider)
