@@ -2440,10 +2440,16 @@ namespace mySQLPunk.lib
                 m => RewriteStringRepeatFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
 
-            return Regex.Replace(
+            sql = Regex.Replace(
                 sql,
                 @"\bREPLICATE\s*\((?<args>[^()]*)\)",
                 m => RewriteStringRepeatFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bSPACE\s*\(\s*(?<count>[^()]*)\s*\)",
+                m => BuildStringRepeatExpression(targetProvider, "' '", m.Groups["count"].Value.Trim()),
                 RegexOptions.IgnoreCase);
         }
 
@@ -2452,14 +2458,17 @@ namespace mySQLPunk.lib
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
             if (args.Count != 2) return match.Value;
 
-            string value = args[0];
-            string count = args[1];
+            return BuildStringRepeatExpression(targetProvider, args[0], args[1]);
+        }
+
+        private static string BuildStringRepeatExpression(string targetProvider, string value, string count)
+        {
             if (targetProvider == "mssql") return "REPLICATE(" + value + ", " + count + ")";
             if (targetProvider == "mysql" || targetProvider == "postgresql") return "REPEAT(" + value + ", " + count + ")";
             if (targetProvider == "sqlite") return "REPLACE(HEX(ZEROBLOB(" + count + ")), '00', " + value + ")";
             if (targetProvider == "oracle") return "RPAD(" + value + ", LENGTH(" + value + ") * " + count + ", " + value + ")";
 
-            return match.Value;
+            return value;
         }
 
         private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)

@@ -1741,6 +1741,24 @@ public static class SmokeTests
         AssertContains(sqliteReplicateSql, "REPLACE(HEX(ZEROBLOB(3)), '00', '*')", "Converted SQLite SQL should emulate REPLICATE.");
         AssertNotContains(sqliteReplicateSql, "REPLICATE", "Converted SQLite SQL should remove REPLICATE.");
 
+        object pgSpacePreview = BuildViewSqlPreview(
+            "SELECT SPACE(3) AS indent_text FROM items",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSpacePreview, "CanConvert"), "SQL Server SPACE should convert to PostgreSQL.");
+        string pgSpaceSql = (string)GetProperty(pgSpacePreview, "ConvertedSql");
+        AssertContains(pgSpaceSql, "REPEAT(' ', 3)", "Converted PostgreSQL SQL should use REPEAT for SPACE.");
+        AssertNotContains(pgSpaceSql, "SPACE", "Converted PostgreSQL SQL should remove SPACE.");
+
+        object sqliteSpacePreview = BuildViewSqlPreview(
+            "SELECT SPACE(2) AS indent_text FROM items",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSpacePreview, "CanConvert"), "MySQL SPACE should convert to SQLite.");
+        string sqliteSpaceSql = (string)GetProperty(sqliteSpacePreview, "ConvertedSql");
+        AssertContains(sqliteSpaceSql, "REPLACE(HEX(ZEROBLOB(2)), '00', ' ')", "Converted SQLite SQL should emulate SPACE.");
+        AssertNotContains(sqliteSpaceSql, "SPACE", "Converted SQLite SQL should remove SPACE.");
+
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
             "mysql",
