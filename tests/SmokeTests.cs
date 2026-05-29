@@ -1551,6 +1551,23 @@ public static class SmokeTests
         string sqliteConcatSql = (string)GetProperty(sqliteConcatPreview, "ConvertedSql");
         AssertContains(sqliteConcatSql, "code || '-' || name", "Converted SQLite SQL should use concatenation operator.");
 
+        object oracleConcatWsPreview = BuildViewSqlPreview(
+            "SELECT CONCAT_WS('-', country_code, area_code, phone_no) AS phone_key FROM contacts",
+            "mysql",
+            "oracle");
+        Assert((bool)GetProperty(oracleConcatWsPreview, "CanConvert"), "MySQL CONCAT_WS should convert to Oracle.");
+        string oracleConcatWsSql = (string)GetProperty(oracleConcatWsPreview, "ConvertedSql");
+        AssertContains(oracleConcatWsSql, "country_code || '-' || area_code || '-' || phone_no", "Converted Oracle SQL should expand CONCAT_WS with separators.");
+        AssertNotContains(oracleConcatWsSql, "CONCAT_WS", "Converted Oracle SQL should remove CONCAT_WS.");
+
+        object sqliteConcatWsPreview = BuildViewSqlPreview(
+            "SELECT CONCAT_WS('-', country_code, area_code, phone_no) AS phone_key FROM contacts",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteConcatWsPreview, "CanConvert"), "MySQL CONCAT_WS should convert to SQLite.");
+        string sqliteConcatWsSql = (string)GetProperty(sqliteConcatWsPreview, "ConvertedSql");
+        AssertContains(sqliteConcatWsSql, "country_code || '-' || area_code || '-' || phone_no", "Converted SQLite SQL should expand CONCAT_WS with separators.");
+
         object mysqlConcatOperatorPreview = BuildViewSqlPreview(
             "SELECT first_name || ' ' || last_name AS full_name FROM users",
             "postgresql",

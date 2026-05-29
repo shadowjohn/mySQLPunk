@@ -523,6 +523,7 @@ namespace mySQLPunk.lib
             sql = RewriteNullOrderingClauses(sql, targetProvider);
             sql = RewriteRandomFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteConcatOperators(sql, sourceProvider, targetProvider);
+            sql = RewriteConcatWsFunctions(sql, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
             sql = RewriteStringCaseFunctions(sql, targetProvider);
@@ -1795,6 +1796,33 @@ namespace mySQLPunk.lib
                     return string.Join(" || ", args.ToArray());
                 },
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteConcatWsFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql" || targetProvider == "mssql" || targetProvider == "postgresql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bCONCAT_WS\s*\((?<args>[^()]*)\)",
+                m => RewriteConcatWsFunction(m),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteConcatWsFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 3) return match.Value;
+
+            string separator = args[0];
+            List<string> output = new List<string>();
+            for (int i = 1; i < args.Count; i++)
+            {
+                if (i > 1) output.Add(separator);
+                output.Add(args[i]);
+            }
+
+            return string.Join(" || ", output.ToArray());
         }
 
         private static string RewriteConcatOperators(string selectSql, string sourceProvider, string targetProvider)
