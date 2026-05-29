@@ -980,6 +980,31 @@ public static class SmokeTests
         string pgDateAddSql = (string)GetProperty(pgDateAddPreview, "ConvertedSql");
         AssertContains(pgDateAddSql, "created_at + INTERVAL '14 day'", "Converted PostgreSQL SQL should use interval addition.");
 
+        object pgVariableDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATEADD(day, retry_days, created_at) AS retry_at FROM sessions",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgVariableDateAddPreview, "CanConvert"), "SQL Server DATEADD with expression amount should convert to PostgreSQL.");
+        string pgVariableDateAddSql = (string)GetProperty(pgVariableDateAddPreview, "ConvertedSql");
+        AssertContains(pgVariableDateAddSql, "created_at + (retry_days * INTERVAL '1 day')", "Converted PostgreSQL SQL should multiply expression interval amounts.");
+        AssertNotContains(pgVariableDateAddSql, "DATEADD", "Converted PostgreSQL SQL should remove DATEADD with expression amount.");
+
+        object mssqlVariableDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATE_ADD(created_at, INTERVAL grace_days DAY) AS expires_at FROM sessions",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlVariableDateAddPreview, "CanConvert"), "MySQL DATE_ADD with expression amount should convert to SQL Server.");
+        string mssqlVariableDateAddSql = (string)GetProperty(mssqlVariableDateAddPreview, "ConvertedSql");
+        AssertContains(mssqlVariableDateAddSql, "DATEADD(day, grace_days, created_at)", "Converted SQL Server SQL should keep expression interval amounts.");
+
+        object sqliteVariableDateAddPreview = BuildViewSqlPreview(
+            "SELECT DATEADD(hour, reminder_hours, started_at) AS reminder_at FROM jobs",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteVariableDateAddPreview, "CanConvert"), "SQL Server DATEADD with expression amount should convert to SQLite.");
+        string sqliteVariableDateAddSql = (string)GetProperty(sqliteVariableDateAddPreview, "ConvertedSql");
+        AssertContains(sqliteVariableDateAddSql, "datetime(started_at, CASE WHEN reminder_hours < 0 THEN CAST(reminder_hours AS TEXT) || ' hour' ELSE '+' || CAST(reminder_hours AS TEXT) || ' hour' END)", "Converted SQLite SQL should build a dynamic date modifier for expression interval amounts.");
+
         object mssqlMonthAddPreview = BuildViewSqlPreview(
             "SELECT DATE_ADD(created_at, INTERVAL 2 MONTH) AS expires_at FROM sessions",
             "mysql",

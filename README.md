@@ -200,6 +200,7 @@ Smoke test harness：
   - 本輪補齊：SQL Server `CONVERT(type, expr)` 一般型別轉換會在目標為 MySQL、PostgreSQL、Oracle 或 SQLite 時轉為對應 `CAST(expr AS type)`，補齊不帶日期 style 的跨 provider 轉型。
   - 本輪補齊：`GREATEST(left, right)` / `LEAST(left, right)` 複製到 SQLite 時會轉為通用 `CASE WHEN ... THEN ... ELSE ... END`，不再只處理 SQL Server 目標。
   - 本輪補齊：`DATEPART` / `DATE_PART` / `EXTRACT` / MySQL 日期部分函式已擴充 `quarter`、`week`、`weekday` 與 `dayofyear`，SQLite 會用 `strftime('%m')` 計算季度、`strftime('%W')` 計算週序、`strftime('%w')` 計算星期序、`strftime('%j')` 計算年內日序；Oracle 目標會改用 `TO_NUMBER(TO_CHAR(...))` 保留這些日期部分。
+  - 本輪補齊：`DATEADD(...)`、`DATE_ADD(... INTERVAL ... ...)` 與 `DATE_SUB(... INTERVAL ... ...)` 的 interval 數量可使用欄位或簡單運算式，不再只支援純數字；SQLite 目標會產生動態 date/datetime modifier。
   - 本輪補齊：Oracle `TO_NUMBER(...)` / `TO_NUMBER(..., 'format')` 會在目標為 SQL Server、MySQL、PostgreSQL 或 SQLite 時轉為對應的 `CAST(...)` 數值型別，避免 Oracle View 複製到其它 provider 後留下不可執行的數值轉型函式。
   - 本輪補齊：`LOCATE` / `CHARINDEX` / `INSTR` 的起始位置參數會轉為目標 provider 等價語法；SQLite / PostgreSQL 會用 `SUBSTR` / `SUBSTRING` 搭配 `CASE` 保留找不到時回傳 0 的行為。
   - 本輪補齊：MySQL `UCASE(...)` / `LCASE(...)` 會在複製到 SQL Server、PostgreSQL、SQLite 或 Oracle 時轉為通用的 `UPPER(...)` / `LOWER(...)`，避免目標資料庫留下不可執行的 MySQL alias。

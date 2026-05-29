@@ -1788,23 +1788,25 @@ namespace mySQLPunk.lib
             return BuildDateDiffExpression(targetProvider, "month", args[0], args[1]);
         }
 
+        private const string DateIntervalAmountPattern = @"-?(?:\d+|[A-Za-z_][A-Za-z0-9_\.]*)(?:\s*[\+\-\*/]\s*(?:\d+|[A-Za-z_][A-Za-z0-9_\.]*))*";
+
         private static string RewriteDateAddFunctions(string selectSql, string targetProvider)
         {
             string sql = Regex.Replace(
                 selectSql,
-                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>" + DateIntervalAmountPattern + @")\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
                 m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>-?\d+)\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>" + DateIntervalAmountPattern + @")\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
                 m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value), NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
             sql = Regex.Replace(
                 sql,
-                @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>-?\d+)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>" + DateIntervalAmountPattern + @")\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
                 m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
                 RegexOptions.IgnoreCase);
 
@@ -1838,8 +1840,18 @@ namespace mySQLPunk.lib
             if (part == "week") return BuildSqliteDateAddExpression(expr, MultiplyIntegerString(amount, 7), "day");
 
             string functionName = (part == "hour" || part == "minute" || part == "second") ? "datetime" : "date";
+            if (!IsIntegerString(amount))
+            {
+                return functionName + "(" + expr + ", " + BuildSqliteDateModifierExpression(amount, part) + ")";
+            }
+
             string modifier = amount.StartsWith("-", StringComparison.Ordinal) ? amount : "+" + amount;
             return functionName + "(" + expr + ", '" + modifier + " " + part + "')";
+        }
+
+        private static string BuildSqliteDateModifierExpression(string amount, string part)
+        {
+            return "CASE WHEN " + amount + " < 0 THEN CAST(" + amount + " AS TEXT) || ' " + part + "' ELSE '+' || CAST(" + amount + " AS TEXT) || ' " + part + "' END";
         }
 
         private static string BuildOracleDateAddExpression(string expr, string amount, string part)
@@ -1868,6 +1880,11 @@ namespace mySQLPunk.lib
             string text = (amount ?? "0").Trim();
             if (text.Length == 0) return "0";
             if (IsZeroIntegerString(text)) return "0";
+            if (!IsIntegerString(text))
+            {
+                return text.StartsWith("-", StringComparison.Ordinal) ? text.Substring(1) : "-(" + text + ")";
+            }
+
             return text.StartsWith("-", StringComparison.Ordinal) ? text.Substring(1) : "-" + text;
         }
 
