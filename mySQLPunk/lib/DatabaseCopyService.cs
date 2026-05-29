@@ -3076,17 +3076,16 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mssql") return selectSql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bSTUFF\s*\((?<args>[^()]*)\)",
-                m => RewriteStuffFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "STUFF",
+                (argsText, original) => RewriteStuffFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteStuffFunction(Match match, string targetProvider)
+        private static string RewriteStuffFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 4) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 4) return original;
 
             string expr = args[0];
             string start = args[1];

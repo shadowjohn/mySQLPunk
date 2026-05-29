@@ -243,7 +243,7 @@ Smoke test harness：
   - 本輪補齊：MySQL `FIND_IN_SET(expr, 'value1,value2,...')` 在第二參數為靜態清單時會轉為通用 `CASE expr WHEN value1 THEN 1 ... ELSE 0 END`，讓固定清單排序與狀態順位 View 可跨資料庫複製。
   - 本輪補齊：MySQL `STRCMP(left, right)` 會在目標非 MySQL 時轉為通用 `CASE WHEN left = right THEN 0 WHEN left < right THEN -1 ELSE 1 END`，讓字串排序/比較結果 View 可跨資料庫複製。
   - 本輪補齊：SQL Server `CHOOSE(index, value1, value2, ...)` 會在目標非 SQL Server 時轉為通用 `CASE index WHEN 1 THEN value1 ... ELSE NULL END`，讓序號轉標籤 View 可跨資料庫複製。
-  - 本輪補齊：SQL Server `STUFF(expr, start, length, replacement)` 會在目標為 MySQL、PostgreSQL、SQLite 或 Oracle 時轉為 substring 串接表達式，讓遮罩、局部替換與格式化 View 可跨資料庫複製。
+  - 本輪補齊：SQL Server `STUFF(expr, start, length, replacement)` 會在目標為 MySQL、PostgreSQL、SQLite 或 Oracle 時轉為 substring 串接表達式，並改用函式呼叫掃描器支援巢狀參數與保留字串常值，讓遮罩、局部替換與格式化 View 可跨資料庫複製。
   - 本輪補齊：`SUBSTR(...)` / 逗號式 `SUBSTRING(...)` 名稱轉換改用函式呼叫掃描器，可處理 `REPLACE(...)` 這類含括號與逗號的巢狀參數，並保留字串常值中的函式範例文字。
   - 本輪補齊：`LEFT(...)` / `RIGHT(...)` 複製到 Oracle 或 SQLite 時改用函式呼叫掃描器，可處理 `REPLACE(...)` 這類巢狀參數並轉為 `SUBSTR(...)`，同時保留字串常值中的函式範例文字。
   - 本輪補齊：MySQL `SUBSTRING_INDEX(expr, delimiter, 1)` 會在目標為 SQL Server、PostgreSQL、SQLite 或 Oracle 時轉為「第一個 delimiter 前段」的等價 `CASE` 表達式；`SUBSTRING_INDEX(expr, delimiter, -1)` 會在目標為 SQL Server、PostgreSQL 或 Oracle 時轉為「最後一個 delimiter 後段」的等價表達式，找不到 delimiter 時保留原字串。

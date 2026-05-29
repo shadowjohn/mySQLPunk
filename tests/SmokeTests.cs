@@ -2508,6 +2508,15 @@ public static class SmokeTests
         AssertContains(sqliteStuffSql, "SUBSTR(code, 1, 2 - 1) || '***' || SUBSTR(code, 2 + 3)", "Converted SQLite SQL should emulate STUFF with SUBSTR concatenation.");
         AssertNotContains(sqliteStuffSql, "STUFF", "Converted SQLite SQL should remove STUFF.");
 
+        object pgNestedStuffLiteralPreview = BuildViewSqlPreview(
+            "SELECT STUFF(REPLACE(code, '-', ''), 2, 3, '***') AS masked_code, 'STUFF(REPLACE(code, ''-'', ''''), 2, 3, ''***'')' AS literal_note FROM items",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedStuffLiteralPreview, "CanConvert"), "Nested SQL Server STUFF should convert while preserving literals.");
+        string pgNestedStuffLiteralSql = (string)GetProperty(pgNestedStuffLiteralPreview, "ConvertedSql");
+        AssertContains(pgNestedStuffLiteralSql, "CONCAT(SUBSTRING(REPLACE(code, '-', '') FROM 1 FOR 2 - 1), '***', SUBSTRING(REPLACE(code, '-', '') FROM 2 + 3)) AS masked_code", "Converted PostgreSQL SQL should convert nested STUFF expression.");
+        AssertContains(pgNestedStuffLiteralSql, "'STUFF(REPLACE(code, ''-'', ''''), 2, 3, ''***'')' AS literal_note", "Converted PostgreSQL SQL should preserve STUFF text inside string literals.");
+
         object pgSubstringIndexPreview = BuildViewSqlPreview(
             "SELECT SUBSTRING_INDEX(host_name, '.', 1) AS root_host FROM servers",
             "mysql",
