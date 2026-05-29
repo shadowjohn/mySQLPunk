@@ -865,11 +865,10 @@ namespace mySQLPunk.lib
                 m => RewriteSqlServerConvertCastFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bCONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => RewriteSqlServerConvertCastFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "CONVERT",
+                (argsText, original) => RewriteSqlServerConvertFunction(argsText, original, targetProvider));
         }
 
         private static string RewriteSqlServerConvertCastFunction(Match match, string targetProvider)
@@ -882,6 +881,27 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(targetType)) return match.Value;
 
             return "CAST(" + match.Groups["expr"].Value.Trim() + " AS " + targetType + ")";
+        }
+
+        private static string RewriteSqlServerConvertFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
+
+            Match typeMatch = Regex.Match(
+                args[0].Trim(),
+                @"^(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR|TEXT|INT|INTEGER|BIGINT|BIT|NUMERIC|DECIMAL|FLOAT|REAL|DATE|DATETIME2?|SMALLDATETIME)(?:\s*\(\s*(?<precision>\d+)(?:\s*,\s*(?<scale>\d+))?\s*\))?$",
+                RegexOptions.IgnoreCase);
+            if (!typeMatch.Success) return original;
+
+            string targetType = MapSqlServerCastType(
+                typeMatch.Groups["type"].Value,
+                typeMatch.Groups["precision"].Success ? typeMatch.Groups["precision"].Value : "",
+                typeMatch.Groups["scale"].Success ? typeMatch.Groups["scale"].Value : "",
+                targetProvider);
+            if (string.IsNullOrWhiteSpace(targetType)) return original;
+
+            return "CAST(" + args[1].Trim() + " AS " + targetType + ")";
         }
 
         private static string RewriteSqlServerTryCastFunctions(string selectSql, string sourceProvider, string targetProvider)

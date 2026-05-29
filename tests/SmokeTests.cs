@@ -1743,6 +1743,15 @@ public static class SmokeTests
         AssertContains(pgSqlServerConvertSql, "CAST(amount_text AS decimal(10,2))", "Converted PostgreSQL SQL should cast SQL Server decimal CONVERT.");
         AssertNotContains(pgSqlServerConvertSql, "CONVERT(int", "Converted PostgreSQL SQL should remove SQL Server int CONVERT.");
 
+        object pgNestedSqlServerConvertPreview = BuildViewSqlPreview(
+            "SELECT CONVERT(int, REPLACE(user_id_text, '-', '')) AS user_id, 'CONVERT(int, REPLACE(user_id_text, ''-'', ''''))' AS literal_note FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedSqlServerConvertPreview, "CanConvert"), "Nested SQL Server CONVERT casts should convert while preserving literals.");
+        string pgNestedSqlServerConvertSql = (string)GetProperty(pgNestedSqlServerConvertPreview, "ConvertedSql");
+        AssertContains(pgNestedSqlServerConvertSql, "CAST(REPLACE(user_id_text, '-', '') AS INTEGER) AS user_id", "Converted PostgreSQL SQL should cast nested SQL Server CONVERT expression.");
+        AssertContains(pgNestedSqlServerConvertSql, "'CONVERT(int, REPLACE(user_id_text, ''-'', ''''))' AS literal_note", "Converted PostgreSQL SQL should preserve CONVERT text inside string literals.");
+
         object oracleSqlServerConvertPreview = BuildViewSqlPreview(
             "SELECT CONVERT(bigint, user_id_text) AS user_id, CONVERT(bit, enabled_text) AS enabled FROM users",
             "mssql",
