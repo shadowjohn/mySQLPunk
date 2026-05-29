@@ -1844,6 +1844,15 @@ public static class SmokeTests
         string pgRandSql = (string)GetProperty(pgRandPreview, "ConvertedSql");
         AssertContains(pgRandSql, "RANDOM()", "Converted PostgreSQL SQL should use RANDOM.");
 
+        object pgRandLiteralPreview = BuildViewSqlPreview(
+            "SELECT RAND() AS sample_value, 'RAND()' AS literal_note FROM metrics",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgRandLiteralPreview, "CanConvert"), "MySQL RAND should convert while preserving literals.");
+        string pgRandLiteralSql = (string)GetProperty(pgRandLiteralPreview, "ConvertedSql");
+        AssertContains(pgRandLiteralSql, "RANDOM() AS sample_value", "Converted PostgreSQL SQL should convert RAND function only.");
+        AssertContains(pgRandLiteralSql, "'RAND()' AS literal_note", "Converted PostgreSQL SQL should preserve RAND text inside string literals.");
+
         object mssqlRandomPreview = BuildViewSqlPreview(
             "SELECT RANDOM() AS sample_value FROM metrics",
             "postgresql",

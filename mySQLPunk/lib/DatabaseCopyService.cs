@@ -1095,23 +1095,26 @@ namespace mySQLPunk.lib
 
             string sql = RewriteUuidFunctions(selectSql, targetProvider);
 
-            sql = Regex.Replace(
-                sql,
-                @"\bDBMS_RANDOM\s*\.\s*VALUE\s*(?:\(\s*\))?",
-                m => BuildRandomExpression(targetProvider),
-                RegexOptions.IgnoreCase);
+            return ReplaceOutsideSingleQuotedStrings(sql, segment =>
+            {
+                string rewritten = Regex.Replace(
+                    segment,
+                    @"\bDBMS_RANDOM\s*\.\s*VALUE\s*(?:\(\s*\))?",
+                    m => BuildRandomExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
 
-            sql = Regex.Replace(
-                sql,
-                @"\bRAND\s*\(\s*\)",
-                m => BuildRandomExpression(targetProvider),
-                RegexOptions.IgnoreCase);
+                rewritten = Regex.Replace(
+                    rewritten,
+                    @"\bRAND\s*\(\s*\)",
+                    m => BuildRandomExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
 
-            return Regex.Replace(
-                sql,
-                @"\bRANDOM\s*\(\s*\)",
-                m => BuildRandomExpression(targetProvider),
-                RegexOptions.IgnoreCase);
+                return Regex.Replace(
+                    rewritten,
+                    @"\bRANDOM\s*\(\s*\)",
+                    m => BuildRandomExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
         }
 
         private static string RewriteUuidFunctions(string selectSql, string targetProvider)
