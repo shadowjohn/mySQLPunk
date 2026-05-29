@@ -622,10 +622,20 @@ namespace mySQLPunk.lib
 
         private static string RewriteComparisonFunctions(string selectSql, string targetProvider)
         {
-            if (targetProvider != "mssql") return selectSql;
+            string sql = selectSql;
+            if (targetProvider != "mysql")
+            {
+                sql = Regex.Replace(
+                    sql,
+                    @"\bSTRCMP\s*\((?<args>[^()]*)\)",
+                    m => RewriteStrCmpFunction(m),
+                    RegexOptions.IgnoreCase);
+            }
 
-            string sql = Regex.Replace(
-                selectSql,
+            if (targetProvider != "mssql") return sql;
+
+            sql = Regex.Replace(
+                sql,
                 @"\bGREATEST\s*\((?<args>[^()]*)\)",
                 m => RewriteGreatestLeastFunction(m, true),
                 RegexOptions.IgnoreCase);
@@ -635,6 +645,14 @@ namespace mySQLPunk.lib
                 @"\bLEAST\s*\((?<args>[^()]*)\)",
                 m => RewriteGreatestLeastFunction(m, false),
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteStrCmpFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+
+            return "CASE WHEN " + args[0] + " = " + args[1] + " THEN 0 WHEN " + args[0] + " < " + args[1] + " THEN -1 ELSE 1 END";
         }
 
         private static string RewriteGreatestLeastFunction(Match match, bool greatest)

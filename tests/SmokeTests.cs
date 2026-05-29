@@ -1906,6 +1906,23 @@ public static class SmokeTests
         string mssqlFindInSetSql = (string)GetProperty(mssqlFindInSetPreview, "ConvertedSql");
         AssertContains(mssqlFindInSetSql, "ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 0 END", "Converted SQL Server SQL should preserve literal FIND_IN_SET ordering with CASE.");
 
+        object pgStrCmpPreview = BuildViewSqlPreview(
+            "SELECT STRCMP(current_code, expected_code) AS compare_result FROM checks",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgStrCmpPreview, "CanConvert"), "MySQL STRCMP should convert to PostgreSQL.");
+        string pgStrCmpSql = (string)GetProperty(pgStrCmpPreview, "ConvertedSql");
+        AssertContains(pgStrCmpSql, "CASE WHEN current_code = expected_code THEN 0 WHEN current_code < expected_code THEN -1 ELSE 1 END", "Converted PostgreSQL SQL should emulate STRCMP with CASE.");
+        AssertNotContains(pgStrCmpSql, "STRCMP", "Converted PostgreSQL SQL should remove MySQL STRCMP.");
+
+        object mssqlStrCmpPreview = BuildViewSqlPreview(
+            "SELECT STRCMP(last_name, first_name) AS name_order FROM users",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlStrCmpPreview, "CanConvert"), "MySQL STRCMP should convert to SQL Server.");
+        string mssqlStrCmpSql = (string)GetProperty(mssqlStrCmpPreview, "ConvertedSql");
+        AssertContains(mssqlStrCmpSql, "CASE WHEN last_name = first_name THEN 0 WHEN last_name < first_name THEN -1 ELSE 1 END", "Converted SQL Server SQL should emulate STRCMP with CASE.");
+
         object mysqlStuffPreview = BuildViewSqlPreview(
             "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
             "mssql",
