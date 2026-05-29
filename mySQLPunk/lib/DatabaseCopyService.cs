@@ -1638,37 +1638,33 @@ namespace mySQLPunk.lib
 
         private static string RewriteConditionalFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bIIF\s*\((?<args>[^()]*)\)",
-                m => RewriteConditionalFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "IIF",
+                (argsText, original) => RewriteConditionalFunction(argsText, original, targetProvider));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bIF\s*\((?<args>[^()]*)\)",
-                m => RewriteConditionalFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "IF",
+                (argsText, original) => RewriteConditionalFunction(argsText, original, targetProvider));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bDECODE\s*\((?<args>[^()]*)\)",
-                m => RewriteDecodeFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "DECODE",
+                (argsText, original) => RewriteDecodeFunction(argsText, original, targetProvider));
 
             if (targetProvider == "mssql") return sql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bCHOOSE\s*\((?<args>[^()]*)\)",
-                m => RewriteChooseFunction(m),
-                RegexOptions.IgnoreCase);
+                "CHOOSE",
+                (argsText, original) => RewriteChooseFunction(argsText, original));
         }
 
-        private static string RewriteConditionalFunction(Match match, string targetProvider)
+        private static string RewriteConditionalFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string condition = args[0];
             string whenTrue = args[1];
@@ -1678,12 +1674,12 @@ namespace mySQLPunk.lib
             return "CASE WHEN " + condition + " THEN " + whenTrue + " ELSE " + whenFalse + " END";
         }
 
-        private static string RewriteDecodeFunction(Match match, string targetProvider)
+        private static string RewriteDecodeFunction(string argsText, string original, string targetProvider)
         {
-            if (targetProvider == "oracle") return match.Value;
+            if (targetProvider == "oracle") return original;
 
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count < 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 3) return original;
 
             string expr = args[0];
             int pairCount = (args.Count - 1) / 2;
@@ -1704,10 +1700,10 @@ namespace mySQLPunk.lib
             return builder.ToString();
         }
 
-        private static string RewriteChooseFunction(Match match)
+        private static string RewriteChooseFunction(string argsText, string original)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count < 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 2) return original;
 
             string expr = args[0];
             StringBuilder builder = new StringBuilder();

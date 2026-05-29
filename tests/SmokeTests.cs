@@ -1425,6 +1425,15 @@ public static class SmokeTests
         string mysqlIifSql = (string)GetProperty(mysqlIifPreview, "ConvertedSql");
         AssertContains(mysqlIifSql, "IF(score >= 60, 'pass', 'fail')", "Converted MySQL SQL should use IF.");
 
+        object pgNestedIifPreview = BuildViewSqlPreview(
+            "SELECT IIF(ABS(score) >= 60, 'pass', 'fail') AS status_text, 'IIF(ABS(score) >= 60, ''pass'', ''fail'')' AS literal_note FROM exams",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedIifPreview, "CanConvert"), "Nested SQL Server IIF should convert while preserving literals.");
+        string pgNestedIifSql = (string)GetProperty(pgNestedIifPreview, "ConvertedSql");
+        AssertContains(pgNestedIifSql, "CASE WHEN ABS(score) >= 60 THEN 'pass' ELSE 'fail' END AS status_text", "Converted PostgreSQL SQL should convert nested IIF condition.");
+        AssertContains(pgNestedIifSql, "'IIF(ABS(score) >= 60, ''pass'', ''fail'')' AS literal_note", "Converted PostgreSQL SQL should preserve IIF text inside string literals.");
+
         object sqliteIifPreview = BuildViewSqlPreview(
             "SELECT IIF(score >= 60, 'pass', 'fail') AS status_text FROM exams",
             "mssql",
