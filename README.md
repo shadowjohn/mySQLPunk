@@ -204,6 +204,7 @@ Smoke test harness：
   - 本輪補齊：`LOCATE` / `CHARINDEX` / `INSTR` 的起始位置參數會轉為目標 provider 等價語法；SQLite / PostgreSQL 會用 `SUBSTR` / `SUBSTRING` 搭配 `CASE` 保留找不到時回傳 0 的行為。
   - 本輪補齊：MySQL `UCASE(...)` / `LCASE(...)` 會在複製到 SQL Server、PostgreSQL、SQLite 或 Oracle 時轉為通用的 `UPPER(...)` / `LOWER(...)`，避免目標資料庫留下不可執行的 MySQL alias。
   - 本輪補齊：SQL Server `DATALENGTH(...)`、PostgreSQL/MySQL `OCTET_LENGTH(...)` 與 Oracle `LENGTHB(...)` 會依目標 provider 轉為對應的 byte-length 函式，SQLite 目標會用 `length(CAST(expr AS BLOB))` 保留位元組長度語意。
+  - 本輪補齊：MySQL/PostgreSQL `BIT_LENGTH(...)` 會依目標 provider 保留位元長度語意，SQL Server / Oracle / SQLite 目標會用對應 byte-length 函式乘以 8。
   - 本輪補齊：MySQL/PostgreSQL `REPEAT(...)` 與 SQL Server `REPLICATE(...)` 會依目標 provider 轉為 `REPEAT`、`REPLICATE`、SQLite `ZEROBLOB` 模擬或 Oracle `RPAD` 模擬，讓常見補零、遮罩與固定字元重複 View 可跨資料庫複製。
   - 本輪補齊：SQL Server/MySQL `SPACE(n)` 會在目標為 PostgreSQL、SQLite 或 Oracle 時轉為對應的字串重複表達式，讓縮排、補空白與固定格式 View 可跨資料庫複製。
   - 本輪補齊：Oracle/PostgreSQL `CHR(n)` 與 SQL Server/MySQL/SQLite `CHAR(n)` 會依目標 provider 轉為對應的字元碼函式，且會避開 `CAST(... AS CHAR(n))` 這類型別宣告，避免誤改欄位型別。

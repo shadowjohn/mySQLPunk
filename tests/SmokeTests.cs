@@ -1629,6 +1629,23 @@ public static class SmokeTests
         string sqliteDataLengthSql = (string)GetProperty(sqliteDataLengthPreview, "ConvertedSql");
         AssertContains(sqliteDataLengthSql, "length(CAST(binary_payload AS BLOB))", "Converted SQLite SQL should preserve DATALENGTH byte-length semantics.");
 
+        object mssqlBitLengthPreview = BuildViewSqlPreview(
+            "SELECT BIT_LENGTH(binary_payload) AS payload_bits FROM files",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlBitLengthPreview, "CanConvert"), "MySQL BIT_LENGTH should convert to SQL Server.");
+        string mssqlBitLengthSql = (string)GetProperty(mssqlBitLengthPreview, "ConvertedSql");
+        AssertContains(mssqlBitLengthSql, "(DATALENGTH(binary_payload) * 8)", "Converted SQL Server SQL should preserve BIT_LENGTH bit-count semantics.");
+        AssertNotContains(mssqlBitLengthSql, "BIT_LENGTH", "Converted SQL Server SQL should remove MySQL BIT_LENGTH.");
+
+        object sqliteBitLengthPreview = BuildViewSqlPreview(
+            "SELECT BIT_LENGTH(binary_payload) AS payload_bits FROM files",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteBitLengthPreview, "CanConvert"), "MySQL BIT_LENGTH should convert to SQLite.");
+        string sqliteBitLengthSql = (string)GetProperty(sqliteBitLengthPreview, "ConvertedSql");
+        AssertContains(sqliteBitLengthSql, "(length(CAST(binary_payload AS BLOB)) * 8)", "Converted SQLite SQL should preserve BIT_LENGTH bit-count semantics.");
+
         object mssqlCharLengthPreview = BuildViewSqlPreview(
             "SELECT CHAR_LENGTH(display_name) AS name_length FROM users",
             "mysql",

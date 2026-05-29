@@ -2432,7 +2432,8 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mssql")
             {
-                string sql = RewriteByteLengthFunctionsForTarget(selectSql, targetProvider);
+                string sql = RewriteBitLengthFunctionsForTarget(selectSql, targetProvider);
+                sql = RewriteByteLengthFunctionsForTarget(sql, targetProvider);
                 sql = Regex.Replace(
                     sql,
                     @"\b(?:LENGTH|CHAR_LENGTH|CHARACTER_LENGTH)\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
@@ -2441,7 +2442,8 @@ namespace mySQLPunk.lib
                 return sql;
             }
 
-            string rewrittenSql = RewriteByteLengthFunctionsForTarget(selectSql, targetProvider);
+            string rewrittenSql = RewriteBitLengthFunctionsForTarget(selectSql, targetProvider);
+            rewrittenSql = RewriteByteLengthFunctionsForTarget(rewrittenSql, targetProvider);
             rewrittenSql = Regex.Replace(
                 rewrittenSql,
                 @"\bLEN\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
@@ -2458,6 +2460,21 @@ namespace mySQLPunk.lib
             }
 
             return rewrittenSql;
+        }
+
+        private static string RewriteBitLengthFunctionsForTarget(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bBIT_LENGTH\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => BuildBitLengthExpression(targetProvider, m.Groups["expr"].Value.Trim()),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string BuildBitLengthExpression(string targetProvider, string expr)
+        {
+            if (targetProvider == "mysql" || targetProvider == "postgresql") return "BIT_LENGTH(" + expr + ")";
+            return "(" + BuildByteLengthExpression(targetProvider, expr) + " * 8)";
         }
 
         private static string RewriteByteLengthFunctionsForTarget(string selectSql, string targetProvider)
