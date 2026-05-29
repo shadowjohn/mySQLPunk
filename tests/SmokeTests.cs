@@ -1472,6 +1472,15 @@ public static class SmokeTests
         string pgNvl2Sql = (string)GetProperty(pgNvl2Preview, "ConvertedSql");
         AssertContains(pgNvl2Sql, "CASE WHEN closed_at IS NOT NULL THEN 'closed' ELSE 'open' END", "Converted PostgreSQL SQL should use CASE for NVL2.");
 
+        object pgNvl2LiteralPreview = BuildViewSqlPreview(
+            "SELECT NVL2(closed_at, 'closed', 'NVL2(open)') AS state_text, 'NVL2(note)' AS literal_note FROM tickets",
+            "oracle",
+            "postgresql");
+        Assert((bool)GetProperty(pgNvl2LiteralPreview, "CanConvert"), "Oracle NVL2 should convert while preserving literals.");
+        string pgNvl2LiteralSql = (string)GetProperty(pgNvl2LiteralPreview, "ConvertedSql");
+        AssertContains(pgNvl2LiteralSql, "CASE WHEN closed_at IS NOT NULL THEN 'closed' ELSE 'NVL2(open)' END", "Converted PostgreSQL SQL should convert NVL2 function only.");
+        AssertContains(pgNvl2LiteralSql, "'NVL2(note)' AS literal_note", "Converted PostgreSQL SQL should preserve NVL2 text inside string literals.");
+
         object pgNvlLiteralPreview = BuildViewSqlPreview(
             "SELECT NVL(display_name, 'NVL(fallback)') AS clean_name, 'NVL(note)' AS literal_note FROM users",
             "oracle",
@@ -1489,6 +1498,15 @@ public static class SmokeTests
         string pgIfNullLiteralSql = (string)GetProperty(pgIfNullLiteralPreview, "ConvertedSql");
         AssertContains(pgIfNullLiteralSql, "COALESCE(display_name, 'IFNULL(fallback)')", "Converted PostgreSQL SQL should convert IFNULL function only.");
         AssertContains(pgIfNullLiteralSql, "'IFNULL(note)' AS literal_note", "Converted PostgreSQL SQL should preserve IFNULL text inside string literals.");
+
+        object pgIsNullLiteralPreview = BuildViewSqlPreview(
+            "SELECT ISNULL(deleted_at) AS is_deleted, 'ISNULL(note)' AS literal_note FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgIsNullLiteralPreview, "CanConvert"), "MySQL ISNULL predicate should convert while preserving literals.");
+        string pgIsNullLiteralSql = (string)GetProperty(pgIsNullLiteralPreview, "ConvertedSql");
+        AssertContains(pgIsNullLiteralSql, "deleted_at IS NULL AS is_deleted", "Converted PostgreSQL SQL should convert ISNULL predicate only.");
+        AssertContains(pgIsNullLiteralSql, "'ISNULL(note)' AS literal_note", "Converted PostgreSQL SQL should preserve ISNULL text inside string literals.");
 
         object mssqlCeilPreview = BuildViewSqlPreview(
             "SELECT CEIL(total_amount / 100.0) AS bill_units FROM orders",

@@ -1169,25 +1169,23 @@ namespace mySQLPunk.lib
 
         private static string RewriteNullHandlingFunctions(string selectSql, string targetProvider)
         {
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bNVL2\s*\((?<args>[^()]*)\)",
-                m => RewriteNvl2Function(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "NVL2",
+                (argsText, original) => RewriteNvl2Function(argsText, original, targetProvider));
         }
 
         private static string RewriteIsNullFunctions(string selectSql, string targetProvider)
         {
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bISNULL\s*\((?<args>[^()]*)\)",
-                m => RewriteIsNullFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "ISNULL",
+                (argsText, original) => RewriteIsNullFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteIsNullFunction(Match match, string targetProvider)
+        private static string RewriteIsNullFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            List<string> args = SplitFunctionArguments(argsText);
             if (args.Count == 1)
             {
                 string expr = args[0];
@@ -1199,17 +1197,17 @@ namespace mySQLPunk.lib
 
             if (args.Count == 2)
             {
-                if (targetProvider == "mssql") return match.Value;
+                if (targetProvider == "mssql") return original;
                 return "COALESCE(" + args[0] + ", " + args[1] + ")";
             }
 
-            return match.Value;
+            return original;
         }
 
-        private static string RewriteNvl2Function(Match match, string targetProvider)
+        private static string RewriteNvl2Function(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string expr = args[0];
             string whenNotNull = args[1];
@@ -2450,9 +2448,9 @@ namespace mySQLPunk.lib
             StringBuilder current = new StringBuilder();
             bool inSingleQuote = false;
             bool inDoubleQuote = false;
+            int depth = 0;
             bool inBracketQuote = false;
             bool inBacktickQuote = false;
-            int depth = 0;
 
             for (int i = 0; i < (chain ?? "").Length; i++)
             {
@@ -4316,6 +4314,7 @@ namespace mySQLPunk.lib
             StringBuilder current = new StringBuilder();
             bool inSingleQuote = false;
             bool inDoubleQuote = false;
+            int depth = 0;
 
             for (int i = 0; i < (argsText ?? string.Empty).Length; i++)
             {
@@ -4337,7 +4336,17 @@ namespace mySQLPunk.lib
                     current.Append(ch);
                     inDoubleQuote = !inDoubleQuote;
                 }
-                else if (ch == ',' && !inSingleQuote && !inDoubleQuote)
+                else if (ch == '(' && !inSingleQuote && !inDoubleQuote)
+                {
+                    depth++;
+                    current.Append(ch);
+                }
+                else if (ch == ')' && !inSingleQuote && !inDoubleQuote && depth > 0)
+                {
+                    depth--;
+                    current.Append(ch);
+                }
+                else if (ch == ',' && !inSingleQuote && !inDoubleQuote && depth == 0)
                 {
                     string item = current.ToString().Trim();
                     if (item.Length > 0) args.Add(item);
@@ -4352,6 +4361,125 @@ namespace mySQLPunk.lib
             string tail = current.ToString().Trim();
             if (tail.Length > 0) args.Add(tail);
             return args;
+        }
+
+        private static string RewriteFunctionCallsOutsideSingleQuotedStrings(string sql, string functionName, Func<string, string, string> rewrite)
+        {
+            if (string.IsNullOrEmpty(sql) || string.IsNullOrEmpty(functionName)) return sql;
+
+            StringBuilder output = new StringBuilder(sql.Length);
+            int index = 0;
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+
+            while (index < sql.Length)
+            {
+                char ch = sql[index];
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    output.Append(ch);
+                    if (inSingleQuote && index + 1 < sql.Length && sql[index + 1] == '\'')
+                    {
+                        output.Append(sql[++index]);
+                    }
+                    else
+                    {
+                        inSingleQuote = !inSingleQuote;
+                    }
+                    index++;
+                    continue;
+                }
+
+                if (ch == '"' && !inSingleQuote)
+                {
+                    output.Append(ch);
+                    inDoubleQuote = !inDoubleQuote;
+                    index++;
+                    continue;
+                }
+
+                if (!inSingleQuote && !inDoubleQuote && IsFunctionNameAt(sql, index, functionName))
+                {
+                    int nameEnd = index + functionName.Length;
+                    int openIndex = SkipWhitespace(sql, nameEnd);
+                    if (openIndex < sql.Length && sql[openIndex] == '(')
+                    {
+                        int closeIndex = FindMatchingFunctionParenthesis(sql, openIndex);
+                        if (closeIndex > openIndex)
+                        {
+                            string original = sql.Substring(index, closeIndex - index + 1);
+                            string argsText = sql.Substring(openIndex + 1, closeIndex - openIndex - 1);
+                            output.Append(rewrite(argsText, original));
+                            index = closeIndex + 1;
+                            continue;
+                        }
+                    }
+                }
+
+                output.Append(ch);
+                index++;
+            }
+
+            return output.ToString();
+        }
+
+        private static bool IsFunctionNameAt(string text, int index, string functionName)
+        {
+            if (index < 0 || index + functionName.Length > text.Length) return false;
+            if (index > 0 && IsIdentifierChainChar(text[index - 1])) return false;
+            if (string.Compare(text, index, functionName, 0, functionName.Length, true, CultureInfo.InvariantCulture) != 0) return false;
+
+            int nameEnd = index + functionName.Length;
+            return nameEnd >= text.Length || !IsIdentifierChainChar(text[nameEnd]);
+        }
+
+        private static int SkipWhitespace(string text, int index)
+        {
+            while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+            return index;
+        }
+
+        private static int FindMatchingFunctionParenthesis(string text, int openIndex)
+        {
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            int depth = 0;
+
+            for (int i = openIndex; i < text.Length; i++)
+            {
+                char ch = text[i];
+                if (ch == '\'' && !inDoubleQuote)
+                {
+                    if (inSingleQuote && i + 1 < text.Length && text[i + 1] == '\'')
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        inSingleQuote = !inSingleQuote;
+                    }
+                    continue;
+                }
+
+                if (ch == '"' && !inSingleQuote)
+                {
+                    inDoubleQuote = !inDoubleQuote;
+                    continue;
+                }
+
+                if (inSingleQuote || inDoubleQuote) continue;
+                if (ch == '(')
+                {
+                    depth++;
+                }
+                else if (ch == ')')
+                {
+                    depth--;
+                    if (depth == 0) return i;
+                }
+            }
+
+            return -1;
         }
 
         private static string BuildStringAggregate(string targetProvider, string expr, string separator)
