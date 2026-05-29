@@ -499,8 +499,7 @@ namespace mySQLPunk.lib
                 sql = Regex.Replace(sql, @"\bNVL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
             if (targetProvider != "mysql" && targetProvider != "sqlite")
                 sql = Regex.Replace(sql, @"\bIFNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
-            if (targetProvider != "mssql")
-                sql = Regex.Replace(sql, @"\bISNULL\s*\(", "COALESCE(", RegexOptions.IgnoreCase);
+            sql = RewriteIsNullFunctions(sql, targetProvider);
 
             sql = RewriteNullHandlingFunctions(sql, targetProvider);
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
@@ -968,6 +967,36 @@ namespace mySQLPunk.lib
                 @"\bNVL2\s*\((?<args>[^()]*)\)",
                 m => RewriteNvl2Function(m, targetProvider),
                 RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteIsNullFunctions(string selectSql, string targetProvider)
+        {
+            return Regex.Replace(
+                selectSql,
+                @"\bISNULL\s*\((?<args>[^()]*)\)",
+                m => RewriteIsNullFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteIsNullFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count == 1)
+            {
+                string expr = args[0];
+                if (targetProvider == "mysql") return "ISNULL(" + expr + ")";
+                if (targetProvider == "mssql" || targetProvider == "oracle")
+                    return "CASE WHEN " + expr + " IS NULL THEN 1 ELSE 0 END";
+                return expr + " IS NULL";
+            }
+
+            if (args.Count == 2)
+            {
+                if (targetProvider == "mssql") return match.Value;
+                return "COALESCE(" + args[0] + ", " + args[1] + ")";
+            }
+
+            return match.Value;
         }
 
         private static string RewriteNvl2Function(Match match, string targetProvider)

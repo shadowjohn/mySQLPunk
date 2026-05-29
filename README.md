@@ -207,6 +207,7 @@ Smoke test harness：
   - 本輪補齊：Oracle/PostgreSQL `CHR(n)` 與 SQL Server/MySQL/SQLite `CHAR(n)` 會依目標 provider 轉為對應的字元碼函式，且會避開 `CAST(... AS CHAR(n))` 這類型別宣告，避免誤改欄位型別。
   - 本輪補齊：SQL Server `NCHAR(n)` 會依目標 provider 轉為對應的 Unicode 字元碼函式，且一般 `CAST(... AS NCHAR/VARCHAR/INT/DATE...)` 也會依目標 provider 轉為相容型別，不再只處理 `CONVERT(...)` / `TRY_CAST(...)` / `TRY_CONVERT(...)`。
   - 本輪補齊：MySQL/PostgreSQL/Oracle `ASCII(...)`、SQL Server `UNICODE(...)` 與 SQLite `unicode(...)` 會依目標 provider 轉為對應的字元碼讀取函式，讓字元碼分析 View 可跨資料庫複製。
+  - 本輪補齊：MySQL 一參數 `ISNULL(expr)` 會依目標 provider 轉為 `expr IS NULL` 或 `CASE WHEN expr IS NULL THEN 1 ELSE 0 END`，SQL Server 二參數 `ISNULL(expr, fallback)` 仍會轉為 `COALESCE(expr, fallback)`；避免跨 provider 複製時把 NULL 判斷誤轉成空值替代。
   - 本輪補齊：SQL Server `STUFF(expr, start, length, replacement)` 會在目標為 MySQL、PostgreSQL、SQLite 或 Oracle 時轉為 substring 串接表達式，讓遮罩、局部替換與格式化 View 可跨資料庫複製。
   - 本輪補齊：MySQL/PostgreSQL/SQL Server `CONCAT_WS(separator, ...)` 複製到 Oracle 或 SQLite 時會展開為分隔符串接表達式，讓電話、代碼與複合鍵格式化 View 可跨資料庫複製。
   - 已知情境：Oracle 階層查詢、MySQL 專用 View 語法、帶 OFFSET 且缺少穩定排序的 SQL Server 轉換、無法解析的 SELECT SQL 仍會改用 table snapshot。

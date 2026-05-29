@@ -1838,6 +1838,23 @@ public static class SmokeTests
         AssertContains(pgCastNcharSql, "CAST(code AS TEXT)", "Converted PostgreSQL SQL should map SQL Server NCHAR type through cast conversion.");
         AssertNotContains(pgCastNcharSql, "AS CHR(10)", "Converted PostgreSQL SQL should not rewrite NCHAR type to CHR.");
 
+        object pgMysqlIsNullPreview = BuildViewSqlPreview(
+            "SELECT ISNULL(deleted_at) AS is_deleted_missing FROM users",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgMysqlIsNullPreview, "CanConvert"), "MySQL ISNULL predicate should convert to PostgreSQL.");
+        string pgMysqlIsNullSql = (string)GetProperty(pgMysqlIsNullPreview, "ConvertedSql");
+        AssertContains(pgMysqlIsNullSql, "deleted_at IS NULL", "Converted PostgreSQL SQL should rewrite one-argument MySQL ISNULL as IS NULL predicate.");
+        AssertNotContains(pgMysqlIsNullSql, "COALESCE(deleted_at)", "Converted PostgreSQL SQL should not treat MySQL ISNULL predicate as COALESCE.");
+
+        object pgSqlServerIsNullPreview = BuildViewSqlPreview(
+            "SELECT ISNULL(display_name, '匿名') AS display_name FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSqlServerIsNullPreview, "CanConvert"), "SQL Server ISNULL replacement should still convert to PostgreSQL.");
+        string pgSqlServerIsNullSql = (string)GetProperty(pgSqlServerIsNullPreview, "ConvertedSql");
+        AssertContains(pgSqlServerIsNullSql, "COALESCE(display_name, '匿名')", "Converted PostgreSQL SQL should keep two-argument SQL Server ISNULL as COALESCE.");
+
         object mysqlStuffPreview = BuildViewSqlPreview(
             "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
             "mssql",
