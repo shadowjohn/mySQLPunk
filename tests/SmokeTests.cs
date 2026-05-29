@@ -2526,6 +2526,15 @@ public static class SmokeTests
         AssertContains(pgSubstringIndexSql, "CASE WHEN POSITION('.' IN host_name) = 0 THEN host_name ELSE SUBSTRING(host_name FROM 1 FOR POSITION('.' IN host_name) - 1) END", "Converted PostgreSQL SQL should emulate SUBSTRING_INDEX count 1.");
         AssertNotContains(pgSubstringIndexSql, "SUBSTRING_INDEX", "Converted PostgreSQL SQL should remove SUBSTRING_INDEX.");
 
+        object pgNestedSubstringIndexLiteralPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(REPLACE(host_name, 'www.', ''), '.', 1) AS root_host, 'SUBSTRING_INDEX(REPLACE(host_name, ''www.'', ''''), ''.'', 1)' AS literal_note FROM servers",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedSubstringIndexLiteralPreview, "CanConvert"), "Nested MySQL SUBSTRING_INDEX should convert while preserving literals.");
+        string pgNestedSubstringIndexLiteralSql = (string)GetProperty(pgNestedSubstringIndexLiteralPreview, "ConvertedSql");
+        AssertContains(pgNestedSubstringIndexLiteralSql, "CASE WHEN POSITION('.' IN REPLACE(host_name, 'www.', '')) = 0 THEN REPLACE(host_name, 'www.', '') ELSE SUBSTRING(REPLACE(host_name, 'www.', '') FROM 1 FOR POSITION('.' IN REPLACE(host_name, 'www.', '')) - 1) END AS root_host", "Converted PostgreSQL SQL should convert nested SUBSTRING_INDEX expression.");
+        AssertContains(pgNestedSubstringIndexLiteralSql, "'SUBSTRING_INDEX(REPLACE(host_name, ''www.'', ''''), ''.'', 1)' AS literal_note", "Converted PostgreSQL SQL should preserve SUBSTRING_INDEX text inside string literals.");
+
         object mssqlSubstringIndexPreview = BuildViewSqlPreview(
             "SELECT SUBSTRING_INDEX(file_name, '/', 1) AS top_folder FROM files",
             "mysql",

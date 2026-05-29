@@ -3110,23 +3110,22 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mysql") return selectSql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bSUBSTRING_INDEX\s*\((?<args>[^()]*)\)",
-                m => RewriteSubstringIndexFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "SUBSTRING_INDEX",
+                (argsText, original) => RewriteSubstringIndexFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteSubstringIndexFunction(Match match, string targetProvider)
+        private static string RewriteSubstringIndexFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string count = (args[2] ?? string.Empty).Trim();
             if (count == "1") return BuildSubstringBeforeFirstDelimiterExpression(targetProvider, args[0], args[1]);
-            if (count == "-1") return BuildSubstringAfterLastDelimiterExpression(targetProvider, args[0], args[1], match.Value);
+            if (count == "-1") return BuildSubstringAfterLastDelimiterExpression(targetProvider, args[0], args[1], original);
 
-            return match.Value;
+            return original;
         }
 
         private static string BuildSubstringBeforeFirstDelimiterExpression(string targetProvider, string expr, string delimiter)
