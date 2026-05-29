@@ -1802,6 +1802,24 @@ public static class SmokeTests
         AssertContains(pgCastCharSql, "CAST(code AS CHAR(10))", "Converted PostgreSQL SQL should preserve CHAR type casts.");
         AssertNotContains(pgCastCharSql, "AS CHR(10)", "Converted PostgreSQL SQL should not rewrite CHAR type to CHR.");
 
+        object sqliteAsciiPreview = BuildViewSqlPreview(
+            "SELECT ASCII(initial_letter) AS initial_code FROM users",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteAsciiPreview, "CanConvert"), "MySQL ASCII should convert to SQLite.");
+        string sqliteAsciiSql = (string)GetProperty(sqliteAsciiPreview, "ConvertedSql");
+        AssertContains(sqliteAsciiSql, "unicode(initial_letter)", "Converted SQLite SQL should use unicode for ASCII.");
+        AssertNotContains(sqliteAsciiSql, "ASCII", "Converted SQLite SQL should remove ASCII.");
+
+        object pgUnicodePreview = BuildViewSqlPreview(
+            "SELECT UNICODE(initial_letter) AS initial_code FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgUnicodePreview, "CanConvert"), "SQL Server UNICODE should convert to PostgreSQL.");
+        string pgUnicodeSql = (string)GetProperty(pgUnicodePreview, "ConvertedSql");
+        AssertContains(pgUnicodeSql, "ASCII(initial_letter)", "Converted PostgreSQL SQL should use ASCII for UNICODE.");
+        AssertNotContains(pgUnicodeSql, "UNICODE", "Converted PostgreSQL SQL should remove UNICODE.");
+
         object mysqlStuffPreview = BuildViewSqlPreview(
             "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
             "mssql",

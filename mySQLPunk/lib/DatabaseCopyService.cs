@@ -534,6 +534,7 @@ namespace mySQLPunk.lib
             sql = RewritePaddingFunctions(sql, targetProvider);
             sql = RewriteStringRepeatFunctions(sql, targetProvider);
             sql = RewriteCharacterCodeFunctions(sql, targetProvider);
+            sql = RewriteCharacterValueFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
@@ -2585,6 +2586,32 @@ namespace mySQLPunk.lib
             }
 
             return false;
+        }
+
+        private static string RewriteCharacterValueFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bASCII\s*\((?<args>[^()]*)\)",
+                m => RewriteCharacterValueFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bUNICODE\s*\((?<args>[^()]*)\)",
+                m => RewriteCharacterValueFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteCharacterValueFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 1) return match.Value;
+
+            string expr = args[0];
+            if (targetProvider == "sqlite") return "unicode(" + expr + ")";
+            if (targetProvider == "mssql") return "UNICODE(" + expr + ")";
+            return "ASCII(" + expr + ")";
         }
 
         private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)
