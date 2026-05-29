@@ -1406,29 +1406,27 @@ namespace mySQLPunk.lib
             string sql = selectSql;
             if (targetProvider != "mssql")
             {
-                sql = Regex.Replace(
+                sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bEOMONTH\s*\((?<args>[^()]*)\)",
-                    m => RewriteEndOfMonthFunction(m, targetProvider),
-                    RegexOptions.IgnoreCase);
+                    "EOMONTH",
+                    (argsText, original) => RewriteEndOfMonthFunction(argsText, original, targetProvider));
             }
 
             if (targetProvider != "mysql" && targetProvider != "oracle")
             {
-                sql = Regex.Replace(
+                sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bLAST_DAY\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                    m => BuildLastDayExpression(targetProvider, m.Groups["expr"].Value.Trim()),
-                    RegexOptions.IgnoreCase);
+                    "LAST_DAY",
+                    (argsText, original) => RewriteLastDayFunction(argsText, original, targetProvider));
             }
 
             return sql;
         }
 
-        private static string RewriteEndOfMonthFunction(Match match, string targetProvider)
+        private static string RewriteEndOfMonthFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count < 1 || args.Count > 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 1 || args.Count > 2) return original;
 
             string expr = args[0];
             string offset = args.Count == 2 ? args[1] : null;
@@ -1459,7 +1457,15 @@ namespace mySQLPunk.lib
                 return "LAST_DAY(ADD_MONTHS(" + expr + ", " + offset + "))";
             }
 
-            return match.Value;
+            return original;
+        }
+
+        private static string RewriteLastDayFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 1) return original;
+
+            return BuildLastDayExpression(targetProvider, args[0].Trim());
         }
 
         private static string BuildLastDayExpression(string targetProvider, string expr)

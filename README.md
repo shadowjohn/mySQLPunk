@@ -207,6 +207,7 @@ Smoke test harness：
   - 本輪補齊：`DATEADD(...)`、`DATE_ADD(... INTERVAL ... ...)` 與 `DATE_SUB(... INTERVAL ... ...)` 的 interval 數量可使用欄位或簡單運算式，不再只支援純數字；SQLite 目標會產生動態 date/datetime modifier。
   - 本輪補齊：`DATEPART(...)` / `DATE_PART(...)` 改用函式呼叫掃描器，可處理 `DATEPART(day, DATEADD(day, 1, created_at))` 這類巢狀日期運算；`DATEADD` / `DATE_ADD` / `DATE_SUB` / `ADD_MONTHS` 轉換也會避開字串常值，保留報表範例文字。
   - 本輪補齊：SQL Server `DATEFROMPARTS(year, month, day)` 改用函式呼叫掃描器，可處理 `DATEFROMPARTS(ABS(year_col), month_col, day_col)` 這類巢狀參數，並保留字串常值中的函式範例文字。
+  - 本輪補齊：`EOMONTH(...)` / `LAST_DAY(...)` 月末日期函式改用函式呼叫掃描器，可處理含 offset 或巢狀日期加減的月末轉換，並保留字串常值中的函式範例文字。
   - 本輪補齊：MySQL `CURTIME()` 與標準 `CURRENT_TIME` 會依目標 provider 轉為對應的目前時間表達式，SQL Server 使用 `CAST(GETDATE() AS time)`、SQLite 使用 `time('now')`、MySQL 使用 `CURTIME()`。
   - 本輪補齊：標準 `LOCALTIME` / `LOCALTIMESTAMP` 會依目標 provider 轉為目前時間或目前 timestamp 表達式，並先處理 `LOCALTIMESTAMP` 以避免被 `LOCALTIME` 前綴誤轉。
   - 本輪補齊：SQL Server `SYSDATETIME()` / `SYSUTCDATETIME()` 會依目標 provider 轉為目前 timestamp 或 UTC timestamp 表達式，與既有 `GETDATE()` / `GETUTCDATE()` 共用同一組轉換語意。

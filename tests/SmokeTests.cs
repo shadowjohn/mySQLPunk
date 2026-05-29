@@ -921,6 +921,15 @@ public static class SmokeTests
         AssertContains(pgEndOfMonthOffsetSql, "(DATE_TRUNC('month', (created_at + (billing_offset * INTERVAL '1 month'))) + INTERVAL '1 month - 1 day')::date", "Converted PostgreSQL SQL should build month end with offset.");
         AssertNotContains(pgEndOfMonthOffsetSql, "EOMONTH", "Converted PostgreSQL SQL should remove EOMONTH.");
 
+        object pgEndOfMonthLiteralPreview = BuildViewSqlPreview(
+            "SELECT EOMONTH(created_at, billing_offset) AS billing_month_end, 'EOMONTH(created_at, billing_offset)' AS literal_note FROM invoices",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgEndOfMonthLiteralPreview, "CanConvert"), "SQL Server EOMONTH should convert while preserving literals.");
+        string pgEndOfMonthLiteralSql = (string)GetProperty(pgEndOfMonthLiteralPreview, "ConvertedSql");
+        AssertContains(pgEndOfMonthLiteralSql, "(DATE_TRUNC('month', (created_at + (billing_offset * INTERVAL '1 month'))) + INTERVAL '1 month - 1 day')::date AS billing_month_end", "Converted PostgreSQL SQL should convert EOMONTH with offset.");
+        AssertContains(pgEndOfMonthLiteralSql, "'EOMONTH(created_at, billing_offset)' AS literal_note", "Converted PostgreSQL SQL should preserve EOMONTH text inside string literals.");
+
         object sqliteEndOfMonthOffsetPreview = BuildViewSqlPreview(
             "SELECT EOMONTH(created_at, -1) AS previous_month_end FROM invoices",
             "mssql",
@@ -953,6 +962,15 @@ public static class SmokeTests
         string pgLastDaySql = (string)GetProperty(pgLastDayPreview, "ConvertedSql");
         AssertContains(pgLastDaySql, "(DATE_TRUNC('month', created_at) + INTERVAL '1 month - 1 day')::date", "Converted PostgreSQL SQL should build month end.");
         AssertNotContains(pgLastDaySql, "LAST_DAY", "Converted PostgreSQL SQL should remove LAST_DAY.");
+
+        object pgLastDayLiteralPreview = BuildViewSqlPreview(
+            "SELECT LAST_DAY(DATE_ADD(created_at, INTERVAL 1 MONTH)) AS month_end, 'LAST_DAY(DATE_ADD(created_at, INTERVAL 1 MONTH))' AS literal_note FROM orders",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgLastDayLiteralPreview, "CanConvert"), "MySQL LAST_DAY should convert while preserving literals.");
+        string pgLastDayLiteralSql = (string)GetProperty(pgLastDayLiteralPreview, "ConvertedSql");
+        AssertContains(pgLastDayLiteralSql, "(DATE_TRUNC('month', created_at + INTERVAL '1 month') + INTERVAL '1 month - 1 day')::date AS month_end", "Converted PostgreSQL SQL should convert nested LAST_DAY expression.");
+        AssertContains(pgLastDayLiteralSql, "'LAST_DAY(DATE_ADD(created_at, INTERVAL 1 MONTH))' AS literal_note", "Converted PostgreSQL SQL should preserve LAST_DAY text inside string literals.");
 
         object sqliteLastDayPreview = BuildViewSqlPreview(
             "SELECT LAST_DAY(created_at) AS month_end FROM orders",
