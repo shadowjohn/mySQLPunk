@@ -1305,6 +1305,15 @@ public static class SmokeTests
         string sqliteDatePartSql = (string)GetProperty(sqliteDatePartPreview, "ConvertedSql");
         AssertContains(sqliteDatePartSql, "CAST(strftime('%m', created_at) AS INTEGER)", "Converted SQLite SQL should use strftime.");
 
+        object sqliteNestedDatePartPreview = BuildViewSqlPreview(
+            "SELECT DATEPART(day, DATEADD(day, 1, created_at)) AS next_day, 'DATEPART(day, DATEADD(day, 1, created_at))' AS literal_note FROM orders",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteNestedDatePartPreview, "CanConvert"), "Nested SQL Server DATEPART should convert while preserving literals.");
+        string sqliteNestedDatePartSql = (string)GetProperty(sqliteNestedDatePartPreview, "ConvertedSql");
+        AssertContains(sqliteNestedDatePartSql, "CAST(strftime('%d', date(created_at, '+1 day')) AS INTEGER) AS next_day", "Converted SQLite SQL should convert nested DATEPART expression.");
+        AssertContains(sqliteNestedDatePartSql, "'DATEPART(day, DATEADD(day, 1, created_at))' AS literal_note", "Converted SQLite SQL should preserve DATEPART text inside string literals.");
+
         object mysqlExtractPreview = BuildViewSqlPreview(
             "SELECT EXTRACT(DAY FROM created_at) AS created_day FROM orders",
             "postgresql",

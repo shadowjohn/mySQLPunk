@@ -1472,17 +1472,15 @@ namespace mySQLPunk.lib
 
         private static string RewriteDatePartFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bDATEPART\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|dayofyear|dy|y|weekday|dw|w|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
-                RegexOptions.IgnoreCase);
+                "DATEPART",
+                (argsText, original) => RewriteDatePartFunction(argsText, original, targetProvider));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bDATE_PART\s*\(\s*'(?<part>year|quarter|month|week|dayofyear|doy|weekday|dow|day|hour|minute|second)'\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => BuildDatePartExpression(targetProvider, NormalizeDatePart(m.Groups["part"].Value), m.Groups["expr"].Value.Trim()),
-                RegexOptions.IgnoreCase);
+                "DATE_PART",
+                (argsText, original) => RewriteDatePartFunction(argsText, original, targetProvider));
 
             sql = Regex.Replace(
                 sql,
@@ -1497,6 +1495,37 @@ namespace mySQLPunk.lib
                 RegexOptions.IgnoreCase);
 
             return sql;
+        }
+
+        private static string RewriteDatePartFunction(string argsText, string original, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2) return original;
+
+            string part = NormalizeDatePart(args[0]);
+            if (!IsSupportedDatePart(part)) return original;
+
+            return BuildDatePartExpression(targetProvider, part, args[1].Trim());
+        }
+
+        private static bool IsSupportedDatePart(string part)
+        {
+            switch (part)
+            {
+                case "year":
+                case "quarter":
+                case "month":
+                case "week":
+                case "dayofyear":
+                case "weekday":
+                case "day":
+                case "hour":
+                case "minute":
+                case "second":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static string BuildDatePartExpression(string targetProvider, string part, string expr)
@@ -2122,29 +2151,32 @@ namespace mySQLPunk.lib
 
         private static string RewriteDateAddFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
-                selectSql,
-                @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>" + DateIntervalAmountPattern + @")\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
-                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
-                RegexOptions.IgnoreCase);
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"\bDATE_ADD\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>" + DateIntervalAmountPattern + @")\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                    m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
+                    RegexOptions.IgnoreCase);
 
-            sql = Regex.Replace(
-                sql,
-                @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>" + DateIntervalAmountPattern + @")\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
-                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value), NormalizeDatePart(m.Groups["part"].Value)),
-                RegexOptions.IgnoreCase);
+                sql = Regex.Replace(
+                    sql,
+                    @"\bDATE_SUB\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*INTERVAL\s+(?<amount>" + DateIntervalAmountPattern + @")\s+(?<part>YEAR|YY|YYYY|QUARTER|QQ|Q|MONTH|MM|M|WEEK|WK|WW|DAY|DD|D|HOUR|HH|MINUTE|MI|N|SECOND|SS|S)\s*\)",
+                    m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), NegateIntegerString(m.Groups["amount"].Value), NormalizeDatePart(m.Groups["part"].Value)),
+                    RegexOptions.IgnoreCase);
 
-            sql = Regex.Replace(
-                sql,
-                @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>" + DateIntervalAmountPattern + @")\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
-                RegexOptions.IgnoreCase);
+                sql = Regex.Replace(
+                    sql,
+                    @"\bDATEADD\s*\(\s*(?<part>year|yy|yyyy|quarter|qq|q|month|mm|m|week|wk|ww|day|dd|d|hour|hh|minute|mi|n|second|ss|s)\s*,\s*(?<amount>" + DateIntervalAmountPattern + @")\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                    m => BuildDateAddExpression(targetProvider, m.Groups["expr"].Value.Trim(), m.Groups["amount"].Value, NormalizeDatePart(m.Groups["part"].Value)),
+                    RegexOptions.IgnoreCase);
 
-            return Regex.Replace(
-                sql,
-                @"\bADD_MONTHS\s*\((?<args>[^()]*)\)",
-                m => RewriteAddMonthsFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                return Regex.Replace(
+                    sql,
+                    @"\bADD_MONTHS\s*\((?<args>[^()]*)\)",
+                    m => RewriteAddMonthsFunction(m, targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
         }
 
         private static string RewriteAddMonthsFunction(Match match, string targetProvider)
