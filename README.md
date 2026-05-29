@@ -227,6 +227,7 @@ Smoke test harness：
   - 本輪補齊：SQL Server `NCHAR(n)` 會依目標 provider 轉為對應的 Unicode 字元碼函式，且一般 `CAST(... AS NCHAR/VARCHAR/INT/DATE...)` 也會依目標 provider 轉為相容型別，不再只處理 `CONVERT(...)` / `TRY_CAST(...)` / `TRY_CONVERT(...)`。
   - 本輪補齊：MySQL/PostgreSQL/Oracle `ASCII(...)`、SQL Server `UNICODE(...)` 與 SQLite `unicode(...)` 會依目標 provider 轉為對應的字元碼讀取函式，讓字元碼分析 View 可跨資料庫複製。
   - 本輪補齊：MySQL 一參數 `ISNULL(expr)` 會依目標 provider 轉為 `expr IS NULL` 或 `CASE WHEN expr IS NULL THEN 1 ELSE 0 END`，SQL Server 二參數 `ISNULL(expr, fallback)` 仍會轉為 `COALESCE(expr, fallback)`；避免跨 provider 複製時把 NULL 判斷誤轉成空值替代。
+  - 本輪補齊：日期格式化與解析函式轉換改用函式呼叫掃描器，`CONVERT(..., style 23/120)`、`DATE_FORMAT`、`FORMAT`、`TO_CHAR`、`TO_DATE`、`TO_TIMESTAMP` 與 `STR_TO_DATE` 會保留字串常值中的範例文字，只改寫真正的 SQL 函式呼叫。
   - 本輪補齊：MySQL `FIELD(expr, value1, value2, ...)` 會在目標非 MySQL 時轉為通用 `CASE expr WHEN value1 THEN 1 ... ELSE 0 END`，讓自訂狀態排序與優先序 View 可跨資料庫複製。
   - 本輪補齊：MySQL `ELT(index, value1, value2, ...)` 會在目標非 MySQL 時轉為通用 `CASE index WHEN 1 THEN value1 ... ELSE NULL END`，讓代碼轉標籤與優先序文字 View 可跨資料庫複製。
   - 本輪補齊：MySQL `FIND_IN_SET(expr, 'value1,value2,...')` 在第二參數為靜態清單時會轉為通用 `CASE expr WHEN value1 THEN 1 ... ELSE 0 END`，讓固定清單排序與狀態順位 View 可跨資料庫複製。

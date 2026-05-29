@@ -1861,95 +1861,99 @@ namespace mySQLPunk.lib
 
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bCONVERT\s*\(\s*(?<type>N?VARCHAR|N?CHAR|VARCHAR|CHAR)\s*(?:\(\s*\d+\s*\))?\s*,\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*(?<style>23|120)\s*\)",
-                m =>
-                {
-                    if (targetProvider == "mssql") return m.Value;
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = GetSqlServerConvertDateFormat(m.Groups["style"].Value);
-                    if (string.IsNullOrWhiteSpace(format)) return m.Value;
-                    return BuildDateFormatExpression(targetProvider, expr, TranslateDotNetDateFormatPattern(format, targetProvider));
-                },
-                RegexOptions.IgnoreCase);
+                "CONVERT",
+                (argsText, original) => RewriteSqlServerConvertDateFormatFunction(argsText, original, targetProvider));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bDATE_FORMAT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "mysql") return m.Value;
-                    return BuildDateFormatExpression(targetProvider, expr, TranslateMySqlDateFormatPattern(format, targetProvider));
-                },
-                RegexOptions.IgnoreCase);
+                "DATE_FORMAT",
+                (argsText, original) => RewriteDateFormatFunction(argsText, original, targetProvider, "mysql"));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bFORMAT\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "mssql") return m.Value;
-                    return BuildDateFormatExpression(targetProvider, expr, TranslateDotNetDateFormatPattern(format, targetProvider));
-                },
-                RegexOptions.IgnoreCase);
+                "FORMAT",
+                (argsText, original) => RewriteDateFormatFunction(argsText, original, targetProvider, "mssql"));
 
-            sql = Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bTO_CHAR\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "oracle" || targetProvider == "postgresql") return m.Value;
-                    return BuildDateFormatExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider));
-                },
-                RegexOptions.IgnoreCase);
-
-            return sql;
+                "TO_CHAR",
+                (argsText, original) => RewriteDateFormatFunction(argsText, original, targetProvider, "oracle"));
         }
 
         private static string RewriteDateParseFunctions(string selectSql, string targetProvider)
         {
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bTO_TIMESTAMP\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "oracle" || targetProvider == "postgresql") return m.Value;
-                    return BuildDateParseExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider), true);
-                },
-                RegexOptions.IgnoreCase);
+                "TO_TIMESTAMP",
+                (argsText, original) => RewriteDateParseFunction(argsText, original, targetProvider, "oracle", true));
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bTO_DATE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "oracle") return m.Value;
-                    return BuildDateParseExpression(targetProvider, expr, TranslateOracleDateFormatPattern(format, targetProvider), false);
-                },
-                RegexOptions.IgnoreCase);
+                "TO_DATE",
+                (argsText, original) => RewriteDateParseFunction(argsText, original, targetProvider, "oracle", false));
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bSTR_TO_DATE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*,\s*'(?<format>[^']+)'\s*\)",
-                m =>
-                {
-                    string expr = m.Groups["expr"].Value.Trim();
-                    string format = m.Groups["format"].Value;
-                    if (targetProvider == "mysql") return m.Value;
-                    return BuildDateParseExpression(targetProvider, expr, TranslateMySqlDateFormatPattern(format, targetProvider), false);
-                },
-                RegexOptions.IgnoreCase);
+                "STR_TO_DATE",
+                (argsText, original) => RewriteDateParseFunction(argsText, original, targetProvider, "mysql", false));
+        }
+
+        private static string RewriteSqlServerConvertDateFormatFunction(string argsText, string original, string targetProvider)
+        {
+            if (targetProvider == "mssql") return original;
+
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
+            if (!Regex.IsMatch(args[0].Trim(), @"^N?(?:VAR)?CHAR\s*(?:\(\s*\d+\s*\))?$", RegexOptions.IgnoreCase)) return original;
+
+            string format = GetSqlServerConvertDateFormat(args[2].Trim());
+            if (string.IsNullOrWhiteSpace(format)) return original;
+            return BuildDateFormatExpression(targetProvider, args[1].Trim(), TranslateDotNetDateFormatPattern(format, targetProvider));
+        }
+
+        private static string RewriteDateFormatFunction(string argsText, string original, string targetProvider, string sourceProvider)
+        {
+            if ((sourceProvider == "mysql" && targetProvider == "mysql") ||
+                (sourceProvider == "mssql" && targetProvider == "mssql") ||
+                (sourceProvider == "oracle" && (targetProvider == "oracle" || targetProvider == "postgresql")))
+            {
+                return original;
+            }
+
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2 || !IsSingleQuotedSqlString(args[1])) return original;
+
+            string expr = args[0].Trim();
+            string format = TrimSqlStringLiteral(args[1]);
+            string translated = sourceProvider == "mysql"
+                ? TranslateMySqlDateFormatPattern(format, targetProvider)
+                : sourceProvider == "mssql"
+                    ? TranslateDotNetDateFormatPattern(format, targetProvider)
+                    : TranslateOracleDateFormatPattern(format, targetProvider);
+
+            return BuildDateFormatExpression(targetProvider, expr, translated);
+        }
+
+        private static string RewriteDateParseFunction(string argsText, string original, string targetProvider, string sourceProvider, bool timestamp)
+        {
+            if ((sourceProvider == "mysql" && targetProvider == "mysql") ||
+                (sourceProvider == "oracle" && (targetProvider == "oracle" || (timestamp && targetProvider == "postgresql"))))
+            {
+                return original;
+            }
+
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 2 || !IsSingleQuotedSqlString(args[1])) return original;
+
+            string expr = args[0].Trim();
+            string format = TrimSqlStringLiteral(args[1]);
+            string translated = sourceProvider == "mysql"
+                ? TranslateMySqlDateFormatPattern(format, targetProvider)
+                : TranslateOracleDateFormatPattern(format, targetProvider);
+
+            return BuildDateParseExpression(targetProvider, expr, translated, timestamp);
         }
 
         private static string GetSqlServerConvertDateFormat(string style)

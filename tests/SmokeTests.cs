@@ -719,6 +719,15 @@ public static class SmokeTests
         string mysqlConvertDateSql = (string)GetProperty(mysqlConvertDatePreview, "ConvertedSql");
         AssertContains(mysqlConvertDateSql, "DATE_FORMAT(created_at, '%Y-%m-%d')", "Converted MySQL SQL should use DATE_FORMAT for CONVERT style 23.");
 
+        object mysqlConvertDateLiteralPreview = BuildViewSqlPreview(
+            "SELECT CONVERT(varchar(10), created_at, 23) AS created_text, 'CONVERT(varchar(10), created_at, 23)' AS literal_note FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlConvertDateLiteralPreview, "CanConvert"), "SQL Server CONVERT date style should convert while preserving literals.");
+        string mysqlConvertDateLiteralSql = (string)GetProperty(mysqlConvertDateLiteralPreview, "ConvertedSql");
+        AssertContains(mysqlConvertDateLiteralSql, "DATE_FORMAT(created_at, '%Y-%m-%d') AS created_text", "Converted MySQL SQL should convert real CONVERT date style.");
+        AssertContains(mysqlConvertDateLiteralSql, "'CONVERT(varchar(10), created_at, 23)' AS literal_note", "Converted MySQL SQL should preserve CONVERT date style text inside string literals.");
+
         object oracleConvertDateTimePreview = BuildViewSqlPreview(
             "SELECT CONVERT(varchar(19), created_at, 120) AS created_text FROM orders",
             "mssql",
