@@ -1451,7 +1451,13 @@ namespace mySQLPunk.lib
                 m => RewriteDecodeFunction(m, targetProvider),
                 RegexOptions.IgnoreCase);
 
-            return sql;
+            if (targetProvider == "mssql") return sql;
+
+            return Regex.Replace(
+                sql,
+                @"\bCHOOSE\s*\((?<args>[^()]*)\)",
+                m => RewriteChooseFunction(m),
+                RegexOptions.IgnoreCase);
         }
 
         private static string RewriteConditionalFunction(Match match, string targetProvider)
@@ -1490,6 +1496,23 @@ namespace mySQLPunk.lib
             }
 
             builder.Append(" END");
+            return builder.ToString();
+        }
+
+        private static string RewriteChooseFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count < 2) return match.Value;
+
+            string expr = args[0];
+            StringBuilder builder = new StringBuilder();
+            builder.Append("CASE ").Append(expr);
+            for (int i = 1; i < args.Count; i++)
+            {
+                builder.Append(" WHEN ").Append(i.ToString(CultureInfo.InvariantCulture)).Append(" THEN ").Append(args[i]);
+            }
+
+            builder.Append(" ELSE NULL END");
             return builder.ToString();
         }
 

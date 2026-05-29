@@ -1923,6 +1923,23 @@ public static class SmokeTests
         string mssqlStrCmpSql = (string)GetProperty(mssqlStrCmpPreview, "ConvertedSql");
         AssertContains(mssqlStrCmpSql, "CASE WHEN last_name = first_name THEN 0 WHEN last_name < first_name THEN -1 ELSE 1 END", "Converted SQL Server SQL should emulate STRCMP with CASE.");
 
+        object pgChoosePreview = BuildViewSqlPreview(
+            "SELECT CHOOSE(status_rank, 'new', 'active', 'closed') AS status_text FROM tasks",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgChoosePreview, "CanConvert"), "SQL Server CHOOSE should convert to PostgreSQL.");
+        string pgChooseSql = (string)GetProperty(pgChoosePreview, "ConvertedSql");
+        AssertContains(pgChooseSql, "CASE status_rank WHEN 1 THEN 'new' WHEN 2 THEN 'active' WHEN 3 THEN 'closed' ELSE NULL END", "Converted PostgreSQL SQL should emulate SQL Server CHOOSE with CASE.");
+        AssertNotContains(pgChooseSql, "CHOOSE", "Converted PostgreSQL SQL should remove SQL Server CHOOSE.");
+
+        object sqliteChoosePreview = BuildViewSqlPreview(
+            "SELECT CHOOSE(level_no, 'low', 'normal', 'high') AS level_text FROM alerts",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteChoosePreview, "CanConvert"), "SQL Server CHOOSE should convert to SQLite.");
+        string sqliteChooseSql = (string)GetProperty(sqliteChoosePreview, "ConvertedSql");
+        AssertContains(sqliteChooseSql, "CASE level_no WHEN 1 THEN 'low' WHEN 2 THEN 'normal' WHEN 3 THEN 'high' ELSE NULL END", "Converted SQLite SQL should emulate SQL Server CHOOSE with CASE.");
+
         object mysqlStuffPreview = BuildViewSqlPreview(
             "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
             "mssql",
