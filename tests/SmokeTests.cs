@@ -2290,6 +2290,16 @@ public static class SmokeTests
         AssertNotContains(sqlitePadSql, "LPAD", "Converted SQLite SQL should remove LPAD.");
         AssertNotContains(sqlitePadSql, "RPAD", "Converted SQLite SQL should remove RPAD.");
 
+        object mssqlNestedPadLiteralPreview = BuildViewSqlPreview(
+            "SELECT LPAD(REPLACE(account_no, '-', ''), 10, '0') AS padded_account, RPAD(REPLACE(code, '-', ''), 8, ' ') AS padded_code, 'LPAD(REPLACE(account_no, ''-'', ''''), 10, ''0'')' AS literal_note FROM accounts",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNestedPadLiteralPreview, "CanConvert"), "Nested MySQL LPAD/RPAD should convert while preserving literals.");
+        string mssqlNestedPadLiteralSql = (string)GetProperty(mssqlNestedPadLiteralPreview, "ConvertedSql");
+        AssertContains(mssqlNestedPadLiteralSql, "RIGHT(REPLICATE('0', 10) + CAST(REPLACE(account_no, '-', '') AS varchar(max)), 10) AS padded_account", "Converted SQL Server SQL should convert nested LPAD expression.");
+        AssertContains(mssqlNestedPadLiteralSql, "LEFT(CAST(REPLACE(code, '-', '') AS varchar(max)) + REPLICATE(' ', 8), 8) AS padded_code", "Converted SQL Server SQL should convert nested RPAD expression.");
+        AssertContains(mssqlNestedPadLiteralSql, "'LPAD(REPLACE(account_no, ''-'', ''''), 10, ''0'')' AS literal_note", "Converted SQL Server SQL should preserve LPAD text inside string literals.");
+
         object mssqlRepeatPreview = BuildViewSqlPreview(
             "SELECT REPEAT('0', 4) || code AS padded_code FROM items",
             "mysql",

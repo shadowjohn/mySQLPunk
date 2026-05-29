@@ -3181,23 +3181,21 @@ namespace mySQLPunk.lib
         {
             if (targetProvider != "mssql" && targetProvider != "sqlite") return selectSql;
 
-            string sql = Regex.Replace(
+            string sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bLPAD\s*\((?<args>[^()]*)\)",
-                m => RewritePadFunction(m, targetProvider, true),
-                RegexOptions.IgnoreCase);
+                "LPAD",
+                (argsText, original) => RewritePadFunction(argsText, original, targetProvider, true));
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bRPAD\s*\((?<args>[^()]*)\)",
-                m => RewritePadFunction(m, targetProvider, false),
-                RegexOptions.IgnoreCase);
+                "RPAD",
+                (argsText, original) => RewritePadFunction(argsText, original, targetProvider, false));
         }
 
-        private static string RewritePadFunction(Match match, string targetProvider, bool leftPad)
+        private static string RewritePadFunction(string argsText, string original, string targetProvider, bool leftPad)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string length = args[1];
             string pad = args[2];
