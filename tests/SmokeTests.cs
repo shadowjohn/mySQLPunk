@@ -1785,6 +1785,24 @@ public static class SmokeTests
         AssertContains(pgCastCharSql, "CAST(code AS CHAR(10))", "Converted PostgreSQL SQL should preserve CHAR type casts.");
         AssertNotContains(pgCastCharSql, "AS CHR(10)", "Converted PostgreSQL SQL should not rewrite CHAR type to CHR.");
 
+        object mysqlStuffPreview = BuildViewSqlPreview(
+            "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlStuffPreview, "CanConvert"), "SQL Server STUFF should convert to MySQL.");
+        string mysqlStuffSql = (string)GetProperty(mysqlStuffPreview, "ConvertedSql");
+        AssertContains(mysqlStuffSql, "CONCAT(SUBSTRING(code, 1, 2 - 1), '***', SUBSTRING(code, 2 + 3))", "Converted MySQL SQL should emulate STUFF with substring concatenation.");
+        AssertNotContains(mysqlStuffSql, "STUFF", "Converted MySQL SQL should remove STUFF.");
+
+        object sqliteStuffPreview = BuildViewSqlPreview(
+            "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteStuffPreview, "CanConvert"), "SQL Server STUFF should convert to SQLite.");
+        string sqliteStuffSql = (string)GetProperty(sqliteStuffPreview, "ConvertedSql");
+        AssertContains(sqliteStuffSql, "SUBSTR(code, 1, 2 - 1) || '***' || SUBSTR(code, 2 + 3)", "Converted SQLite SQL should emulate STUFF with SUBSTR concatenation.");
+        AssertNotContains(sqliteStuffSql, "STUFF", "Converted SQLite SQL should remove STUFF.");
+
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
             "mysql",

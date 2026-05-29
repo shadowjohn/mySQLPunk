@@ -529,6 +529,7 @@ namespace mySQLPunk.lib
             sql = RewriteTrimFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
+            sql = RewriteStuffFunctions(sql, targetProvider);
             sql = RewritePaddingFunctions(sql, targetProvider);
             sql = RewriteStringRepeatFunctions(sql, targetProvider);
             sql = RewriteCharacterCodeFunctions(sql, targetProvider);
@@ -2389,6 +2390,41 @@ namespace mySQLPunk.lib
             List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
             if (args.Count != 2) return match.Value;
             return "SUBSTR(" + args[0] + ", -" + args[1] + ")";
+        }
+
+        private static string RewriteStuffFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mssql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bSTUFF\s*\((?<args>[^()]*)\)",
+                m => RewriteStuffFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteStuffFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 4) return match.Value;
+
+            string expr = args[0];
+            string start = args[1];
+            string length = args[2];
+            string replacement = args[3];
+
+            if (targetProvider == "mysql")
+            {
+                return "CONCAT(SUBSTRING(" + expr + ", 1, " + start + " - 1), " + replacement + ", SUBSTRING(" + expr + ", " + start + " + " + length + "))";
+            }
+
+            if (targetProvider == "postgresql")
+            {
+                return "CONCAT(SUBSTRING(" + expr + " FROM 1 FOR " + start + " - 1), " + replacement + ", SUBSTRING(" + expr + " FROM " + start + " + " + length + "))";
+            }
+
+            string substringName = (targetProvider == "oracle" || targetProvider == "sqlite") ? "SUBSTR" : "SUBSTRING";
+            return substringName + "(" + expr + ", 1, " + start + " - 1) || " + replacement + " || " + substringName + "(" + expr + ", " + start + " + " + length + ")";
         }
 
         private static string RewritePaddingFunctions(string selectSql, string targetProvider)
