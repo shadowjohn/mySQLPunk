@@ -125,13 +125,7 @@ namespace mySQLPunk
             TreeView treeView = control as TreeView;
             if (treeView != null)
             {
-                treeView.BackColor = ElevatedColor;
-                treeView.ForeColor = TextColor;
-                treeView.LineColor = BorderColor;
-                treeView.BorderStyle = BorderStyle.None;
-                treeView.FullRowSelect = true;
-                treeView.ItemHeight = 24;
-                treeView.HideSelection = false;
+                ApplyTreeView(treeView);
                 return;
             }
 
@@ -358,6 +352,52 @@ namespace mySQLPunk
             }
         }
 
+        private static void ApplyTreeView(TreeView treeView)
+        {
+            treeView.BackColor = ElevatedColor;
+            treeView.ForeColor = TextColor;
+            treeView.LineColor = BorderColor;
+            treeView.BorderStyle = BorderStyle.None;
+            treeView.FullRowSelect = true;
+            treeView.ItemHeight = 24;
+            treeView.HideSelection = false;
+            treeView.DrawNode -= TreeView_DrawNode;
+            treeView.DrawMode = TreeViewDrawMode.OwnerDrawText;
+            treeView.DrawNode += TreeView_DrawNode;
+        }
+
+        private static void TreeView_DrawNode(object sender, DrawTreeNodeEventArgs e)
+        {
+            TreeView treeView = sender as TreeView;
+            if (treeView == null || e.Node == null)
+            {
+                e.DrawDefault = true;
+                return;
+            }
+
+            bool selected = (e.State & TreeNodeStates.Selected) == TreeNodeStates.Selected;
+            Color backColor = selected ? SelectionColor : treeView.BackColor;
+            Color textColor = selected
+                ? SelectionTextColor
+                : (e.Node.ForeColor.IsEmpty ? treeView.ForeColor : e.Node.ForeColor);
+
+            Rectangle bounds = e.Bounds;
+            if (bounds.Width <= 0 || bounds.Height <= 0) return;
+
+            using (SolidBrush brush = new SolidBrush(backColor))
+            {
+                e.Graphics.FillRectangle(brush, bounds);
+            }
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                e.Node.Text,
+                treeView.Font,
+                bounds,
+                textColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+        }
+
         private static void ApplyDataGridView(DataGridView dgv)
         {
             dgv.BackgroundColor = WindowBackColor;
@@ -406,6 +446,25 @@ namespace mySQLPunk
             dgv.TopLeftHeaderCell.Style.ForeColor = TextColor;
             dgv.TopLeftHeaderCell.Style.SelectionBackColor = SurfaceColor;
             dgv.TopLeftHeaderCell.Style.SelectionForeColor = TextColor;
+
+            ApplyDataGridViewSelectionStyles(dgv);
+        }
+
+        private static void ApplyDataGridViewSelectionStyles(DataGridView dgv)
+        {
+            foreach (DataGridViewRow row in dgv.Rows)
+            {
+                if (row == null) continue;
+                row.DefaultCellStyle.SelectionBackColor = SelectionColor;
+                row.DefaultCellStyle.SelectionForeColor = SelectionTextColor;
+
+                foreach (DataGridViewCell cell in row.Cells)
+                {
+                    if (cell == null) continue;
+                    cell.Style.SelectionBackColor = SelectionColor;
+                    cell.Style.SelectionForeColor = SelectionTextColor;
+                }
+            }
         }
 
         private static string GetThemeFilePath()
