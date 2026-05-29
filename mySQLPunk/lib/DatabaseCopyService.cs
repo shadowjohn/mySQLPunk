@@ -530,6 +530,7 @@ namespace mySQLPunk.lib
             sql = RewriteSubstringFunctions(sql, targetProvider);
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
             sql = RewritePaddingFunctions(sql, targetProvider);
+            sql = RewriteStringRepeatFunctions(sql, targetProvider);
             sql = RewriteStringPositionFunctions(sql, targetProvider);
             sql = RewriteStringAggregateFunctions(sql, targetProvider);
             sql = RewritePatternMatchOperators(sql, targetProvider);
@@ -2429,6 +2430,36 @@ namespace mySQLPunk.lib
             }
 
             return "LEFT(" + mssqlValue + " + REPLICATE(" + pad + ", " + length + "), " + length + ")";
+        }
+
+        private static string RewriteStringRepeatFunctions(string selectSql, string targetProvider)
+        {
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bREPEAT\s*\((?<args>[^()]*)\)",
+                m => RewriteStringRepeatFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bREPLICATE\s*\((?<args>[^()]*)\)",
+                m => RewriteStringRepeatFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteStringRepeatFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2) return match.Value;
+
+            string value = args[0];
+            string count = args[1];
+            if (targetProvider == "mssql") return "REPLICATE(" + value + ", " + count + ")";
+            if (targetProvider == "mysql" || targetProvider == "postgresql") return "REPEAT(" + value + ", " + count + ")";
+            if (targetProvider == "sqlite") return "REPLACE(HEX(ZEROBLOB(" + count + ")), '00', " + value + ")";
+            if (targetProvider == "oracle") return "RPAD(" + value + ", LENGTH(" + value + ") * " + count + ", " + value + ")";
+
+            return match.Value;
         }
 
         private static string RewriteStringPositionFunctions(string selectSql, string targetProvider)

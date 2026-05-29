@@ -1723,6 +1723,24 @@ public static class SmokeTests
         AssertNotContains(sqlitePadSql, "LPAD", "Converted SQLite SQL should remove LPAD.");
         AssertNotContains(sqlitePadSql, "RPAD", "Converted SQLite SQL should remove RPAD.");
 
+        object mssqlRepeatPreview = BuildViewSqlPreview(
+            "SELECT REPEAT('0', 4) || code AS padded_code FROM items",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlRepeatPreview, "CanConvert"), "MySQL REPEAT should convert to SQL Server.");
+        string mssqlRepeatSql = (string)GetProperty(mssqlRepeatPreview, "ConvertedSql");
+        AssertContains(mssqlRepeatSql, "REPLICATE('0', 4)", "Converted SQL Server SQL should use REPLICATE for REPEAT.");
+        AssertNotContains(mssqlRepeatSql, "REPEAT", "Converted SQL Server SQL should remove REPEAT.");
+
+        object sqliteReplicatePreview = BuildViewSqlPreview(
+            "SELECT REPLICATE('*', 3) + mask AS masked_code FROM items",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteReplicatePreview, "CanConvert"), "SQL Server REPLICATE should convert to SQLite.");
+        string sqliteReplicateSql = (string)GetProperty(sqliteReplicatePreview, "ConvertedSql");
+        AssertContains(sqliteReplicateSql, "REPLACE(HEX(ZEROBLOB(3)), '00', '*')", "Converted SQLite SQL should emulate REPLICATE.");
+        AssertNotContains(sqliteReplicateSql, "REPLICATE", "Converted SQLite SQL should remove REPLICATE.");
+
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
             "mysql",
