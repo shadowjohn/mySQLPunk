@@ -1540,6 +1540,31 @@ public static class SmokeTests
         string oracleTruncateNumberSql = (string)GetProperty(oracleTruncateNumberPreview, "ConvertedSql");
         AssertContains(oracleTruncateNumberSql, "TRUNC(total_amount, 2)", "Converted Oracle SQL should use TRUNC.");
 
+        object mysqlTruncatingRoundPreview = BuildViewSqlPreview(
+            "SELECT ROUND(total_amount, 2, 1) AS truncated_total FROM orders",
+            "mssql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlTruncatingRoundPreview, "CanConvert"), "SQL Server truncating ROUND should convert to MySQL.");
+        string mysqlTruncatingRoundSql = (string)GetProperty(mysqlTruncatingRoundPreview, "ConvertedSql");
+        AssertContains(mysqlTruncatingRoundSql, "TRUNCATE(total_amount, 2)", "Converted MySQL SQL should use TRUNCATE for truncating ROUND.");
+        AssertNotContains(mysqlTruncatingRoundSql, "ROUND(total_amount, 2, 1)", "Converted MySQL SQL should remove SQL Server truncating ROUND.");
+
+        object pgTruncatingRoundPreview = BuildViewSqlPreview(
+            "SELECT ROUND(total_amount, 2, 1) AS truncated_total FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgTruncatingRoundPreview, "CanConvert"), "SQL Server truncating ROUND should convert to PostgreSQL.");
+        string pgTruncatingRoundSql = (string)GetProperty(pgTruncatingRoundPreview, "ConvertedSql");
+        AssertContains(pgTruncatingRoundSql, "TRUNC(total_amount, 2)", "Converted PostgreSQL SQL should use TRUNC for truncating ROUND.");
+
+        object oracleTruncatingRoundPreview = BuildViewSqlPreview(
+            "SELECT ROUND(total_amount, 2, 1) AS truncated_total FROM orders",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleTruncatingRoundPreview, "CanConvert"), "SQL Server truncating ROUND should convert to Oracle.");
+        string oracleTruncatingRoundSql = (string)GetProperty(oracleTruncatingRoundPreview, "ConvertedSql");
+        AssertContains(oracleTruncatingRoundSql, "TRUNC(total_amount, 2)", "Converted Oracle SQL should use TRUNC for truncating ROUND.");
+
         object mssqlModPreview = BuildViewSqlPreview(
             "SELECT MOD(order_no, 10) AS shard_no FROM orders",
             "mysql",

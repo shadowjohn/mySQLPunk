@@ -562,6 +562,7 @@ namespace mySQLPunk.lib
             string sql = RewriteOracleToNumberFunctions(selectSql, targetProvider);
             sql = RewritePowerFunctions(sql, targetProvider);
             sql = RewriteNumericTruncateFunctions(sql, targetProvider);
+            sql = RewriteTruncatingRoundFunctions(sql, targetProvider);
             if (targetProvider == "mssql")
             {
                 sql = Regex.Replace(
@@ -610,6 +611,36 @@ namespace mySQLPunk.lib
         {
             string scale = "pow(10, " + decimals + ")";
             return "(CAST((" + value + ") * " + scale + " AS INTEGER) / " + scale + ")";
+        }
+
+        private static string RewriteTruncatingRoundFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mssql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bROUND\s*\((?<args>[^()]*)\)",
+                m => RewriteTruncatingRoundFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteTruncatingRoundFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 3) return match.Value;
+            if (IsZeroLiteral(args[2])) return match.Value;
+
+            string value = args[0];
+            string decimals = args[1];
+            if (targetProvider == "mysql") return "TRUNCATE(" + value + ", " + decimals + ")";
+            if (targetProvider == "sqlite") return BuildSqliteNumericTruncateExpression(value, decimals);
+            return "TRUNC(" + value + ", " + decimals + ")";
+        }
+
+        private static bool IsZeroLiteral(string value)
+        {
+            decimal parsed;
+            return decimal.TryParse(value.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out parsed) && parsed == 0m;
         }
 
         private static string RewriteOracleToNumberFunctions(string selectSql, string targetProvider)
