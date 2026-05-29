@@ -1593,6 +1593,26 @@ public static class SmokeTests
         string sqliteCharacterLengthSql = (string)GetProperty(sqliteCharacterLengthPreview, "ConvertedSql");
         AssertContains(sqliteCharacterLengthSql, "LENGTH(display_name)", "Converted SQLite SQL should use LENGTH for CHARACTER_LENGTH.");
 
+        object mssqlCaseAliasPreview = BuildViewSqlPreview(
+            "SELECT UCASE(display_name) AS upper_name, LCASE(email) AS lower_email FROM users",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlCaseAliasPreview, "CanConvert"), "MySQL UCASE/LCASE aliases should convert to SQL Server.");
+        string mssqlCaseAliasSql = (string)GetProperty(mssqlCaseAliasPreview, "ConvertedSql");
+        AssertContains(mssqlCaseAliasSql, "UPPER(display_name)", "Converted SQL Server SQL should use UPPER for UCASE.");
+        AssertContains(mssqlCaseAliasSql, "LOWER(email)", "Converted SQL Server SQL should use LOWER for LCASE.");
+        AssertNotContains(mssqlCaseAliasSql, "UCASE", "Converted SQL Server SQL should remove UCASE.");
+        AssertNotContains(mssqlCaseAliasSql, "LCASE", "Converted SQL Server SQL should remove LCASE.");
+
+        object sqliteCaseAliasPreview = BuildViewSqlPreview(
+            "SELECT UCASE(display_name) AS upper_name, LCASE(email) AS lower_email FROM users",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteCaseAliasPreview, "CanConvert"), "MySQL UCASE/LCASE aliases should convert to SQLite.");
+        string sqliteCaseAliasSql = (string)GetProperty(sqliteCaseAliasPreview, "ConvertedSql");
+        AssertContains(sqliteCaseAliasSql, "UPPER(display_name)", "Converted SQLite SQL should use UPPER for UCASE.");
+        AssertContains(sqliteCaseAliasSql, "LOWER(email)", "Converted SQLite SQL should use LOWER for LCASE.");
+
         object pgTrimPreview = BuildViewSqlPreview(
             "SELECT LTRIM(RTRIM(display_name)) AS clean_name FROM users",
             "mssql",

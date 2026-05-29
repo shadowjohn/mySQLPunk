@@ -525,6 +525,7 @@ namespace mySQLPunk.lib
             sql = RewriteConcatOperators(sql, sourceProvider, targetProvider);
             sql = RewriteConcatFunctions(sql, targetProvider);
             sql = RewriteStringLengthFunctions(sql, targetProvider);
+            sql = RewriteStringCaseFunctions(sql, targetProvider);
             sql = RewriteTrimFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
@@ -2269,6 +2270,23 @@ namespace mySQLPunk.lib
             }
 
             return rewrittenSql;
+        }
+
+        private static string RewriteStringCaseFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            string sql = Regex.Replace(
+                selectSql,
+                @"\bUCASE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => "UPPER(" + m.Groups["expr"].Value.Trim() + ")",
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bLCASE\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
+                m => "LOWER(" + m.Groups["expr"].Value.Trim() + ")",
+                RegexOptions.IgnoreCase);
         }
 
         private static string RewriteTrimFunctions(string selectSql, string targetProvider)
