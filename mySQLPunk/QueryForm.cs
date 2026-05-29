@@ -4137,7 +4137,9 @@ namespace mySQLPunk
                     {
                         int exportedRows = QueryResultExportService.CountExportRows(dt);
                         QueryResultExportService.Write(dt, dlg.FileName, format);
-                        lblStatus.Text = Localization.Format("Query.ExportCompleted", exportedRows, dlg.FileName);
+                        QueryResultExportSummary summary = QueryResultExportService.BuildSummary(dlg.FileName, format, exportedRows);
+                        lblStatus.Text = Localization.Format("Query.ExportCompleted", summary.Rows, summary.Path);
+                        ShowExportCompletedSummary(summary);
                     }
                 }
                 catch (Exception ex)
@@ -4145,6 +4147,16 @@ namespace mySQLPunk
                     MessageBox.Show(ex.Message, Localization.T("Query.ExportError"),
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+        }
+
+        private void ShowExportCompletedSummary(QueryResultExportSummary summary)
+        {
+            if (!CanUpdateUi() || summary == null) return;
+
+            using (ExportCompletedDialog dialog = new ExportCompletedDialog(summary))
+            {
+                dialog.ShowDialog(this);
             }
         }
 
@@ -4171,7 +4183,9 @@ namespace mySQLPunk
                 QueryResultStreamingExportResult result = await Task.Run(() =>
                     QueryResultExportService.WriteStreaming(_db, sql, null, targetPath, format));
                 if (!CanUpdateUi()) return;
-                lblStatus.Text = Localization.Format("Query.StreamingExportCompleted", result.Rows, FormatByteCount(result.BytesWritten), targetPath);
+                QueryResultExportSummary summary = QueryResultExportService.BuildSummary(targetPath, format, result.Rows, result.BytesWritten);
+                lblStatus.Text = Localization.Format("Query.StreamingExportCompleted", summary.Rows, QueryResultExportSummary.FormatByteCount(summary.BytesWritten), summary.Path);
+                ShowExportCompletedSummary(summary);
             }
             catch (NotSupportedException)
             {
@@ -4179,7 +4193,9 @@ namespace mySQLPunk
                 if (dt == null) throw;
                 int exportedRows = QueryResultExportService.CountExportRows(dt);
                 QueryResultExportService.Write(dt, targetPath, format);
-                lblStatus.Text = Localization.Format("Query.ExportCompleted", exportedRows, targetPath);
+                QueryResultExportSummary summary = QueryResultExportService.BuildSummary(targetPath, format, exportedRows);
+                lblStatus.Text = Localization.Format("Query.ExportCompleted", summary.Rows, summary.Path);
+                ShowExportCompletedSummary(summary);
             }
             finally
             {

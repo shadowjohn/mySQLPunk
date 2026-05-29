@@ -591,6 +591,15 @@ namespace mySQLPunk
             Add("Query.ExportCompleted", "已匯出 {0} 筆資料到 {1}", "Exported {0} rows to {1}");
             Add("Query.StreamingExporting", "正在串流匯出查詢結果...", "Streaming query results...");
             Add("Query.StreamingExportCompleted", "已串流匯出 {0} 筆資料（{1}）到 {2}", "Streamed {0} rows ({1}) to {2}");
+            Add("Query.ExportSummaryTitle", "匯出完成", "Export Completed");
+            Add("Query.ExportSummaryMessage", "查詢結果已成功匯出。", "Query results were exported successfully.");
+            Add("Query.ExportSummaryFormat", "格式：", "Format:");
+            Add("Query.ExportSummaryRows", "列數：", "Rows:");
+            Add("Query.ExportSummarySize", "大小：", "Size:");
+            Add("Query.ExportSummaryFile", "檔案：", "File:");
+            Add("Query.ExportSummaryPath", "路徑：", "Path:");
+            Add("Query.OpenExportedFile", "開啟檔案", "Open File");
+            Add("Query.OpenExportFolder", "開啟資料夾", "Open Folder");
             Add("Query.ExportError", "匯出錯誤", "Export Error");
             Add("Query.Float", "浮動", "Float");
             Add("Query.Dock", "嵌入", "Dock");

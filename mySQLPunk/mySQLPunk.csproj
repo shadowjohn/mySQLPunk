@@ -140,6 +140,9 @@
     <Compile Include="ConnectionTypeSelectionForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="ExportCompletedDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="entity\mySQLPunk_main.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>

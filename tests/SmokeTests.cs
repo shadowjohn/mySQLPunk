@@ -3807,6 +3807,7 @@ public static class SmokeTests
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
 
         string xlsxPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_query_export_" + Guid.NewGuid().ToString("N") + ".xlsx");
+        string summaryPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_query_export_summary_" + Guid.NewGuid().ToString("N") + ".csv");
         string csvPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".csv");
         string jsonPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".json");
         string xmlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".xml");
@@ -3834,6 +3835,22 @@ public static class SmokeTests
                 AssertContains(sheetXml, "r=\"A1\" t=\"inlineStr\" s=\"1\"", "XLSX export should apply the header style.");
                 AssertContains(stylesXml, "<fonts count=\"2\">", "XLSX export should include a header font style.");
                 AssertContains(stylesXml, "<cellXfs count=\"2\">", "XLSX export should include a header cell format.");
+            }
+
+            File.WriteAllText(summaryPath, "Name,Amount\r\nA,12.5\r\n", Encoding.UTF8);
+            QueryResultExportSummary summary = QueryResultExportService.BuildSummary(summaryPath, QueryResultExportFormat.Csv, 1);
+            AssertEquals(summaryPath, summary.Path, "Export summary should keep the target path.");
+            AssertEquals(Path.GetFileName(summaryPath), summary.FileName, "Export summary should expose the file name.");
+            AssertEquals(Path.GetDirectoryName(summaryPath), summary.DirectoryPath, "Export summary should expose the target directory.");
+            Assert(summary.Rows == 1, "Export summary should keep the exported row count.");
+            Assert(summary.BytesWritten > 0, "Export summary should read the written file size.");
+            AssertEquals("CSV", summary.FormatName, "Export summary should expose a friendly format name.");
+            AssertContains(summary.BuildDetailText(), summary.FileName, "Export summary detail text should include the file name.");
+            AssertContains(summary.BuildDetailText(), "CSV", "Export summary detail text should include the format name.");
+            using (ExportCompletedDialog dialog = new ExportCompletedDialog(summary))
+            {
+                AssertEquals(Localization.T("Query.ExportSummaryTitle"), dialog.Text, "Export completed dialog should use the localized title.");
+                Assert(dialog.Controls.Count > 0, "Export completed dialog should initialize its layout.");
             }
 
             long lastProgress = 0;
@@ -3903,6 +3920,7 @@ public static class SmokeTests
         {
             db.Dispose();
             if (File.Exists(xlsxPath)) File.Delete(xlsxPath);
+            if (File.Exists(summaryPath)) File.Delete(summaryPath);
             if (File.Exists(csvPath)) File.Delete(csvPath);
             if (File.Exists(jsonPath)) File.Delete(jsonPath);
             if (File.Exists(xmlPath)) File.Delete(xmlPath);

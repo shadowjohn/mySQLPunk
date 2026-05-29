@@ -27,6 +27,37 @@ namespace mySQLPunk.lib
         public QueryResultExportFormat Format { get; set; }
     }
 
+    public sealed class QueryResultExportSummary
+    {
+        public string Path { get; set; }
+        public string FileName { get; set; }
+        public string DirectoryPath { get; set; }
+        public long Rows { get; set; }
+        public long BytesWritten { get; set; }
+        public QueryResultExportFormat Format { get; set; }
+        public string FormatName { get; set; }
+
+        public string BuildDetailText()
+        {
+            return "Format: " + FormatName + Environment.NewLine +
+                "Rows: " + Rows.ToString("N0") + Environment.NewLine +
+                "Size: " + FormatByteCount(BytesWritten) + Environment.NewLine +
+                "File: " + FileName + Environment.NewLine +
+                "Path: " + Path;
+        }
+
+        public static string FormatByteCount(long bytes)
+        {
+            if (bytes < 1024) return bytes + " B";
+            double value = bytes / 1024d;
+            if (value < 1024) return value.ToString("0.##") + " KB";
+            value /= 1024d;
+            if (value < 1024) return value.ToString("0.##") + " MB";
+            value /= 1024d;
+            return value.ToString("0.##") + " GB";
+        }
+    }
+
     public static class QueryResultExportService
     {
         public static QueryResultExportFormat ResolveFormat(string path, int filterIndex)
@@ -68,6 +99,39 @@ namespace mySQLPunk.lib
             }
 
             File.WriteAllText(path, BuildText(dt, format), Encoding.UTF8);
+        }
+
+        public static QueryResultExportSummary BuildSummary(string path, QueryResultExportFormat format, long rows, long? bytesWritten = null)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Target path is required.", nameof(path));
+
+            FileInfo file = new FileInfo(path);
+            long bytes = bytesWritten.HasValue ? bytesWritten.Value : (file.Exists ? file.Length : 0);
+            return new QueryResultExportSummary
+            {
+                Path = path,
+                FileName = System.IO.Path.GetFileName(path),
+                DirectoryPath = System.IO.Path.GetDirectoryName(path),
+                Rows = rows,
+                BytesWritten = bytes,
+                Format = format,
+                FormatName = GetFormatName(format)
+            };
+        }
+
+        public static string GetFormatName(QueryResultExportFormat format)
+        {
+            switch (format)
+            {
+                case QueryResultExportFormat.Xlsx: return "Excel";
+                case QueryResultExportFormat.Csv: return "CSV";
+                case QueryResultExportFormat.Tsv: return "TSV";
+                case QueryResultExportFormat.Json: return "JSON";
+                case QueryResultExportFormat.Xml: return "XML";
+                case QueryResultExportFormat.Html: return "HTML";
+                case QueryResultExportFormat.Markdown: return "Markdown";
+                default: return format.ToString();
+            }
         }
 
         public static bool CanStreamFormat(QueryResultExportFormat format)
