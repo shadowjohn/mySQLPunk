@@ -1611,6 +1611,18 @@ namespace mySQLPunk.lib
                     m => BuildCurrentTimeExpression(targetProvider),
                     RegexOptions.IgnoreCase);
 
+                sql = Regex.Replace(
+                    sql,
+                    @"\bLOCALTIMESTAMP\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentTimestampExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bLOCALTIME\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentTimeExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
                 return sql;
             });
         }

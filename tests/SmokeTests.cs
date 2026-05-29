@@ -518,6 +518,31 @@ public static class SmokeTests
         string mysqlCurrentTimeSql = (string)GetProperty(mysqlCurrentTimePreview, "ConvertedSql");
         AssertContains(mysqlCurrentTimeSql, "CURTIME() AS checked_time", "Converted MySQL SQL should use CURTIME().");
 
+        object mysqlLocalTimestampPreview = BuildViewSqlPreview(
+            "SELECT LOCALTIMESTAMP AS checked_at FROM audit_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlLocalTimestampPreview, "CanConvert"), "PostgreSQL LOCALTIMESTAMP should convert to MySQL.");
+        string mysqlLocalTimestampSql = (string)GetProperty(mysqlLocalTimestampPreview, "ConvertedSql");
+        AssertContains(mysqlLocalTimestampSql, "NOW() AS checked_at", "Converted MySQL SQL should use NOW for LOCALTIMESTAMP.");
+        AssertNotContains(mysqlLocalTimestampSql, "LOCALTIME", "Converted MySQL SQL should not leave LOCALTIME prefix artifacts.");
+
+        object mssqlLocalTimePreview = BuildViewSqlPreview(
+            "SELECT LOCALTIME AS checked_time FROM audit_log",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlLocalTimePreview, "CanConvert"), "PostgreSQL LOCALTIME should convert to SQL Server.");
+        string mssqlLocalTimeSql = (string)GetProperty(mssqlLocalTimePreview, "ConvertedSql");
+        AssertContains(mssqlLocalTimeSql, "CAST(GETDATE() AS time) AS checked_time", "Converted SQL Server SQL should use a time expression for LOCALTIME.");
+
+        object sqliteLocalTimestampPreview = BuildViewSqlPreview(
+            "SELECT LOCALTIMESTAMP AS checked_at FROM audit_log",
+            "postgresql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteLocalTimestampPreview, "CanConvert"), "PostgreSQL LOCALTIMESTAMP should convert to SQLite.");
+        string sqliteLocalTimestampSql = (string)GetProperty(sqliteLocalTimestampPreview, "ConvertedSql");
+        AssertContains(sqliteLocalTimestampSql, "CURRENT_TIMESTAMP AS checked_at", "Converted SQLite SQL should use CURRENT_TIMESTAMP for LOCALTIMESTAMP.");
+
         object mssqlSysdatePreview = BuildViewSqlPreview(
             "SELECT SYSDATE AS checked_at, 'SYSDATE' AS literal_value FROM dual",
             "oracle",
