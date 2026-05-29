@@ -210,6 +210,7 @@ Smoke test harness：
   - 本輪補齊：MySQL 一參數 `ISNULL(expr)` 會依目標 provider 轉為 `expr IS NULL` 或 `CASE WHEN expr IS NULL THEN 1 ELSE 0 END`，SQL Server 二參數 `ISNULL(expr, fallback)` 仍會轉為 `COALESCE(expr, fallback)`；避免跨 provider 複製時把 NULL 判斷誤轉成空值替代。
   - 本輪補齊：MySQL `FIELD(expr, value1, value2, ...)` 會在目標非 MySQL 時轉為通用 `CASE expr WHEN value1 THEN 1 ... ELSE 0 END`，讓自訂狀態排序與優先序 View 可跨資料庫複製。
   - 本輪補齊：MySQL `ELT(index, value1, value2, ...)` 會在目標非 MySQL 時轉為通用 `CASE index WHEN 1 THEN value1 ... ELSE NULL END`，讓代碼轉標籤與優先序文字 View 可跨資料庫複製。
+  - 本輪補齊：MySQL `FIND_IN_SET(expr, 'value1,value2,...')` 在第二參數為靜態清單時會轉為通用 `CASE expr WHEN value1 THEN 1 ... ELSE 0 END`，讓固定清單排序與狀態順位 View 可跨資料庫複製。
   - 本輪補齊：SQL Server `STUFF(expr, start, length, replacement)` 會在目標為 MySQL、PostgreSQL、SQLite 或 Oracle 時轉為 substring 串接表達式，讓遮罩、局部替換與格式化 View 可跨資料庫複製。
   - 本輪補齊：MySQL/PostgreSQL/SQL Server `CONCAT_WS(separator, ...)` 複製到 Oracle 或 SQLite 時會展開為分隔符串接表達式，讓電話、代碼與複合鍵格式化 View 可跨資料庫複製。
   - 已知情境：Oracle 階層查詢、MySQL 專用 View 語法、帶 OFFSET 且缺少穩定排序的 SQL Server 轉換、無法解析的 SELECT SQL 仍會改用 table snapshot。

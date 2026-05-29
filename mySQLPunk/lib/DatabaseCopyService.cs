@@ -656,10 +656,16 @@ namespace mySQLPunk.lib
                 m => RewriteFieldFunction(m),
                 RegexOptions.IgnoreCase);
 
-            return Regex.Replace(
+            sql = Regex.Replace(
                 sql,
                 @"\bELT\s*\((?<args>[^()]*)\)",
                 m => RewriteEltFunction(m),
+                RegexOptions.IgnoreCase);
+
+            return Regex.Replace(
+                sql,
+                @"\bFIND_IN_SET\s*\((?<args>[^()]*)\)",
+                m => RewriteFindInSetFunction(m),
                 RegexOptions.IgnoreCase);
         }
 
@@ -691,6 +697,30 @@ namespace mySQLPunk.lib
             }
 
             return "CASE " + expr + " " + string.Join(" ", whens.ToArray()) + " ELSE NULL END";
+        }
+
+        private static string RewriteFindInSetFunction(Match match)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 2 || !IsSingleQuotedSqlString(args[1])) return match.Value;
+
+            string expr = args[0];
+            string[] values = TrimSqlStringLiteral(args[1]).Split(',');
+            if (values.Length == 0) return match.Value;
+
+            List<string> whens = new List<string>();
+            for (int i = 0; i < values.Length; i++)
+            {
+                whens.Add("WHEN '" + EscapeSqlString(values[i]) + "' THEN " + (i + 1).ToString(CultureInfo.InvariantCulture));
+            }
+
+            return "CASE " + expr + " " + string.Join(" ", whens.ToArray()) + " ELSE 0 END";
+        }
+
+        private static bool IsSingleQuotedSqlString(string value)
+        {
+            string text = (value ?? string.Empty).Trim();
+            return text.Length >= 2 && text[0] == '\'' && text[text.Length - 1] == '\'';
         }
 
         private static string RewriteBooleanLiterals(string selectSql, string targetProvider)

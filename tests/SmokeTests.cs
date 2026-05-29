@@ -1889,6 +1889,23 @@ public static class SmokeTests
         string sqliteEltSql = (string)GetProperty(sqliteEltPreview, "ConvertedSql");
         AssertContains(sqliteEltSql, "CASE level_no WHEN 1 THEN 'low' WHEN 2 THEN 'normal' WHEN 3 THEN 'high' ELSE NULL END", "Converted SQLite SQL should emulate MySQL ELT with CASE.");
 
+        object pgFindInSetPreview = BuildViewSqlPreview(
+            "SELECT FIND_IN_SET(status, 'new,active,closed') AS status_rank FROM tasks",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgFindInSetPreview, "CanConvert"), "MySQL FIND_IN_SET with literal list should convert to PostgreSQL.");
+        string pgFindInSetSql = (string)GetProperty(pgFindInSetPreview, "ConvertedSql");
+        AssertContains(pgFindInSetSql, "CASE status WHEN 'new' THEN 1 WHEN 'active' THEN 2 WHEN 'closed' THEN 3 ELSE 0 END", "Converted PostgreSQL SQL should emulate literal FIND_IN_SET with CASE.");
+        AssertNotContains(pgFindInSetSql, "FIND_IN_SET", "Converted PostgreSQL SQL should remove literal FIND_IN_SET.");
+
+        object mssqlFindInSetPreview = BuildViewSqlPreview(
+            "SELECT id FROM tasks ORDER BY FIND_IN_SET(priority, 'high,normal,low')",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlFindInSetPreview, "CanConvert"), "MySQL FIND_IN_SET in ORDER BY should convert to SQL Server.");
+        string mssqlFindInSetSql = (string)GetProperty(mssqlFindInSetPreview, "ConvertedSql");
+        AssertContains(mssqlFindInSetSql, "ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 0 END", "Converted SQL Server SQL should preserve literal FIND_IN_SET ordering with CASE.");
+
         object mysqlStuffPreview = BuildViewSqlPreview(
             "SELECT STUFF(code, 2, 3, '***') AS masked_code FROM items",
             "mssql",
