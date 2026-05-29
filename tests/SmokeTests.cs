@@ -3801,9 +3801,14 @@ public static class SmokeTests
 
         string markdown = QueryResultExportService.BuildText(table, QueryResultExportFormat.Markdown);
         AssertContains(markdown, "| Name | Amount | Payload |", "Markdown export should include headers.");
+        string sqlScript = QueryResultExportService.BuildText(table, QueryResultExportFormat.Sql);
+        AssertContains(sqlScript, "INSERT INTO \"query_result\" (\"Name\", \"Amount\", \"Payload\") VALUES ('A, B', 12.5, X'AABBCC');", "SQL export should write insert statements with escaped identifiers and BLOB literals.");
         Assert(QueryResultExportService.ResolveFormat("result.json", 2) == QueryResultExportFormat.Json, "Extension should determine query export format.");
+        Assert(QueryResultExportService.ResolveFormat("result.sql", 1) == QueryResultExportFormat.Sql, "SQL extension should determine query export format.");
         Assert(QueryResultExportService.ResolveFormat("result", 1) == QueryResultExportFormat.Csv, "First export filter should default to CSV.");
         Assert(QueryResultExportService.ResolveFormat("result", 2) == QueryResultExportFormat.Xlsx, "Second export filter should still support Excel.");
+        Assert(QueryResultExportService.ResolveFormat("result", 8) == QueryResultExportFormat.Sql, "SQL export filter should select SQL insert format.");
+        Assert(QueryResultExportService.CanStreamFormat(QueryResultExportFormat.Sql), "SQL insert export should support streaming query results.");
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
 
         string xlsxPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_query_export_" + Guid.NewGuid().ToString("N") + ".xlsx");
@@ -3813,6 +3818,7 @@ public static class SmokeTests
         string xmlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".xml");
         string htmlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".html");
         string markdownPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".md");
+        string sqlPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_stream_export_" + Guid.NewGuid().ToString("N") + ".sql");
         my_sqlite db = new my_sqlite();
         try
         {
@@ -3915,6 +3921,18 @@ public static class SmokeTests
             AssertContains(streamedMarkdown, "| name | payload |", "Streaming Markdown export should include headers.");
             AssertContains(streamedMarkdown, "| A, B | [BLOB 3 bytes] 0xAABBCC |", "Streaming Markdown export should include row values.");
             AssertContains(streamedMarkdown, "| Line<br>Break |  |", "Streaming Markdown export should keep multiline cells table-safe.");
+
+            QueryResultStreamingExportResult streamSql = QueryResultExportService.WriteStreaming(
+                db,
+                "SELECT name, amount, payload FROM export_test ORDER BY id;",
+                null,
+                sqlPath,
+                QueryResultExportFormat.Sql);
+            string streamedSql = File.ReadAllText(sqlPath, Encoding.UTF8);
+            Assert(streamSql.Rows == 2, "Streaming SQL export should report exported rows.");
+            AssertContains(streamedSql, "INSERT INTO \"query_result\" (\"name\", \"amount\", \"payload\") VALUES ('A, B', 12.5, X'AABBCC');", "Streaming SQL export should write insert statements.");
+            AssertContains(streamedSql, "INSERT INTO \"query_result\" (\"name\", \"amount\", \"payload\") VALUES ('Line", "Streaming SQL export should preserve multiline string values.");
+            AssertContains(streamedSql, ", 7.25, NULL);", "Streaming SQL export should preserve null values.");
         }
         finally
         {
@@ -3926,6 +3944,7 @@ public static class SmokeTests
             if (File.Exists(xmlPath)) File.Delete(xmlPath);
             if (File.Exists(htmlPath)) File.Delete(htmlPath);
             if (File.Exists(markdownPath)) File.Delete(markdownPath);
+            if (File.Exists(sqlPath)) File.Delete(sqlPath);
         }
 
         QueryForm form = (QueryForm)FormatterServices.GetUninitializedObject(typeof(QueryForm));

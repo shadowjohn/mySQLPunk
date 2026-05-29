@@ -17,7 +17,8 @@ namespace mySQLPunk.lib
         Json,
         Xml,
         Html,
-        Markdown
+        Markdown,
+        Sql
     }
 
     public sealed class QueryResultStreamingExportResult
@@ -75,6 +76,7 @@ namespace mySQLPunk.lib
                 case ".htm": return QueryResultExportFormat.Html;
                 case ".md":
                 case ".markdown": return QueryResultExportFormat.Markdown;
+                case ".sql": return QueryResultExportFormat.Sql;
             }
 
             switch (filterIndex)
@@ -86,6 +88,7 @@ namespace mySQLPunk.lib
                 case 5: return QueryResultExportFormat.Xml;
                 case 6: return QueryResultExportFormat.Html;
                 case 7: return QueryResultExportFormat.Markdown;
+                case 8: return QueryResultExportFormat.Sql;
                 default: return QueryResultExportFormat.Csv;
             }
         }
@@ -130,6 +133,7 @@ namespace mySQLPunk.lib
                 case QueryResultExportFormat.Xml: return "XML";
                 case QueryResultExportFormat.Html: return "HTML";
                 case QueryResultExportFormat.Markdown: return "Markdown";
+                case QueryResultExportFormat.Sql: return "SQL";
                 default: return format.ToString();
             }
         }
@@ -141,7 +145,8 @@ namespace mySQLPunk.lib
                 format == QueryResultExportFormat.Json ||
                 format == QueryResultExportFormat.Xml ||
                 format == QueryResultExportFormat.Html ||
-                format == QueryResultExportFormat.Markdown;
+                format == QueryResultExportFormat.Markdown ||
+                format == QueryResultExportFormat.Sql;
         }
 
         public static QueryResultStreamingExportResult WriteStreaming(
@@ -155,7 +160,7 @@ namespace mySQLPunk.lib
             if (database == null) throw new ArgumentNullException(nameof(database));
             if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException("SQL is required.", nameof(sql));
             if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Target path is required.", nameof(path));
-            if (!CanStreamFormat(format)) throw new NotSupportedException("Streaming export only supports CSV, TSV, JSON, XML, HTML, and Markdown.");
+            if (!CanStreamFormat(format)) throw new NotSupportedException("Streaming export only supports CSV, TSV, JSON, XML, HTML, Markdown, and SQL.");
 
             DbConnection connection = BinaryCellStreamingService.GetOpenConnection(database);
             using (DbCommand command = connection.CreateCommand())
@@ -181,6 +186,9 @@ namespace mySQLPunk.lib
                             break;
                         case QueryResultExportFormat.Markdown:
                             rows = WriteStreamingMarkdown(reader, writer, progress);
+                            break;
+                        case QueryResultExportFormat.Sql:
+                            rows = WriteStreamingSql(reader, writer, progress);
                             break;
                         default:
                             rows = WriteStreamingDelimited(reader, writer, format == QueryResultExportFormat.Tsv ? '\t' : ',', progress);
@@ -211,6 +219,8 @@ namespace mySQLPunk.lib
                     return BuildHtml(dt);
                 case QueryResultExportFormat.Markdown:
                     return BuildMarkdown(dt);
+                case QueryResultExportFormat.Sql:
+                    return BuildSql(dt);
                 default:
                     int exportedRows;
                     return BuildCsv(dt, out exportedRows);
@@ -406,6 +416,23 @@ namespace mySQLPunk.lib
             return sb.ToString();
         }
 
+        private static string BuildSql(DataTable dt)
+        {
+            if (dt == null) throw new ArgumentNullException(nameof(dt));
+
+            StringBuilder sb = new StringBuilder();
+            using (StringWriter writer = new StringWriter(sb))
+            {
+                writer.WriteLine("-- mySQLPunk query result export");
+                foreach (DataRow row in dt.Rows)
+                {
+                    if (row.RowState == DataRowState.Deleted) continue;
+                    AppendSqlInsert(writer, GetDataTableColumnNames(dt), index => row[index]);
+                }
+            }
+            return sb.ToString();
+        }
+
         private static long WriteStreamingDelimited(DbDataReader reader, TextWriter writer, char delimiter, Action<long> progress)
         {
             string[] columnNames = GetReaderColumnNames(reader);
@@ -569,6 +596,90 @@ namespace mySQLPunk.lib
             }
 
             return rows;
+        }
+
+        private static long WriteStreamingSql(DbDataReader reader, TextWriter writer, Action<long> progress)
+        {
+            string[] columnNames = GetReaderColumnNames(reader);
+            long rows = 0;
+            writer.WriteLine("-- mySQLPunk query result export");
+
+            while (reader.Read())
+            {
+                AppendSqlInsert(writer, columnNames, index => ReadStreamingValue(reader, index));
+                rows++;
+                if (progress != null) progress(rows);
+            }
+
+            return rows;
+        }
+
+        private static string[] GetDataTableColumnNames(DataTable dt)
+        {
+            string[] names = new string[dt.Columns.Count];
+            for (int i = 0; i < dt.Columns.Count; i++)
+            {
+                names[i] = string.IsNullOrWhiteSpace(dt.Columns[i].ColumnName)
+                    ? "Column" + (i + 1).ToString()
+                    : dt.Columns[i].ColumnName;
+            }
+            return names;
+        }
+
+        private static void AppendSqlInsert(TextWriter writer, string[] columnNames, Func<int, object> valueProvider)
+        {
+            writer.Write("INSERT INTO ");
+            writer.Write(SqlIdentifier("query_result"));
+            writer.Write(" (");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(", ");
+                writer.Write(SqlIdentifier(columnNames[c]));
+            }
+            writer.Write(") VALUES (");
+            for (int c = 0; c < columnNames.Length; c++)
+            {
+                if (c > 0) writer.Write(", ");
+                writer.Write(SqlLiteral(valueProvider(c)));
+            }
+            writer.WriteLine(");");
+        }
+
+        private static string SqlIdentifier(string value)
+        {
+            value = string.IsNullOrWhiteSpace(value) ? "Column" : value;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static string SqlLiteral(object value)
+        {
+            if (value == null || value == DBNull.Value) return "NULL";
+
+            byte[] bytes = value as byte[];
+            if (bytes != null) return "X'" + ToHex(bytes) + "'";
+
+            if (value is bool) return (bool)value ? "1" : "0";
+            if (value is DateTime) return "'" + ((DateTime)value).ToString("yyyy-MM-dd HH:mm:ss").Replace("'", "''") + "'";
+            if (value is DateTimeOffset) return "'" + ((DateTimeOffset)value).ToString("yyyy-MM-dd HH:mm:ss zzz").Replace("'", "''") + "'";
+            if (value is byte || value is sbyte || value is short || value is ushort ||
+                value is int || value is uint || value is long || value is ulong ||
+                value is float || value is double || value is decimal)
+            {
+                return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            return "'" + value.ToString().Replace("'", "''") + "'";
+        }
+
+        private static string ToHex(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return string.Empty;
+            StringBuilder sb = new StringBuilder(bytes.Length * 2);
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                sb.Append(bytes[i].ToString("X2"));
+            }
+            return sb.ToString();
         }
 
         private static string[] GetReaderColumnNames(DbDataReader reader)

@@ -182,8 +182,8 @@ Smoke test harness：
   - 限制：XLSX 仍需整份結果資料才能產生活頁簿輸出。沒有 Primary Key 或資料列已有未儲存變更時，單一 BLOB 匯出會退回目前格子的記憶體值。
 
 - **查詢結果匯出格式 ✅ 已補齊常用格式**
-  - 現況：查詢結果匯出預設使用 CSV，並可在儲存對話框選擇 Excel `.xlsx`、TSV、JSON、XML、HTML 或 Markdown。
-  - 完成內容：各格式會共用結果表格顯示值轉換；BLOB/geometry 會沿用結果表格的 `[Geometry] WKT` 或 `[BLOB n bytes]` 顯示，日期與空值也會一致處理；XLSX 匯出會凍結標題列、套用自動篩選、穩定欄寬與表頭樣式，讓大型 workbook 開啟後可直接篩選與辨識欄位；匯出完成後會顯示摘要視窗，列出格式、筆數、檔案大小與路徑，並可直接開啟檔案或所在資料夾；成功匯出後會記住這次選擇的資料夾，下次匯出會直接從同一個位置開始。
+  - 現況：查詢結果匯出預設使用 CSV，並可在儲存對話框選擇 Excel `.xlsx`、TSV、JSON、XML、HTML、Markdown 或 SQL INSERT `.sql`。
+  - 完成內容：各格式會共用結果表格顯示值轉換；BLOB/geometry 會沿用結果表格的 `[Geometry] WKT` 或 `[BLOB n bytes]` 顯示，日期與空值也會一致處理；XLSX 匯出會凍結標題列、套用自動篩選、穩定欄寬與表頭樣式，讓大型 workbook 開啟後可直接篩選與辨識欄位；SQL INSERT 匯出會產生 `query_result` 目標表的 `INSERT INTO` 腳本，字串、NULL、數字與 BLOB 十六進位 literal 會正確輸出，且可走串流匯出大型結果；匯出完成後會顯示摘要視窗，列出格式、筆數、檔案大小與路徑，並可直接開啟檔案或所在資料夾；成功匯出後會記住這次選擇的資料夾，下次匯出會直接從同一個位置開始。
   - 後續方向：若需要更完整的大型結果集匯出，可再評估 XLSX 分段寫入；單一 BLOB/geometry 欄位的資料表模式匯出已先支援串流寫檔。
 
 ### Table/View 複製限制
