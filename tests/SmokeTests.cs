@@ -2142,6 +2142,15 @@ public static class SmokeTests
         string pgTrimSql = (string)GetProperty(pgTrimPreview, "ConvertedSql");
         AssertContains(pgTrimSql, "TRIM(display_name)", "Converted PostgreSQL SQL should use TRIM.");
 
+        object pgNestedTrimLiteralPreview = BuildViewSqlPreview(
+            "SELECT LTRIM(RTRIM(REPLACE(display_name, '-', ''))) AS clean_name, 'LTRIM(RTRIM(REPLACE(display_name, ''-'', '''')))' AS literal_note FROM users",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedTrimLiteralPreview, "CanConvert"), "Nested SQL Server LTRIM/RTRIM should convert while preserving literals.");
+        string pgNestedTrimLiteralSql = (string)GetProperty(pgNestedTrimLiteralPreview, "ConvertedSql");
+        AssertContains(pgNestedTrimLiteralSql, "TRIM(REPLACE(display_name, '-', '')) AS clean_name", "Converted PostgreSQL SQL should convert nested LTRIM/RTRIM expression.");
+        AssertContains(pgNestedTrimLiteralSql, "'LTRIM(RTRIM(REPLACE(display_name, ''-'', '''')))' AS literal_note", "Converted PostgreSQL SQL should preserve LTRIM/RTRIM text inside string literals.");
+
         object mysqlTrimPreview = BuildViewSqlPreview(
             "SELECT RTRIM(LTRIM(display_name)) AS clean_name FROM users",
             "mssql",
@@ -2157,6 +2166,15 @@ public static class SmokeTests
         Assert((bool)GetProperty(mssqlTrimPreview, "CanConvert"), "PostgreSQL TRIM should convert to SQL Server.");
         string mssqlTrimSql = (string)GetProperty(mssqlTrimPreview, "ConvertedSql");
         AssertContains(mssqlTrimSql, "LTRIM(RTRIM(display_name))", "Converted SQL Server SQL should use LTRIM/RTRIM.");
+
+        object mssqlNestedTrimLiteralPreview = BuildViewSqlPreview(
+            "SELECT TRIM(REPLACE(display_name, '-', '')) AS clean_name, 'TRIM(REPLACE(display_name, ''-'', ''''))' AS literal_note FROM users",
+            "postgresql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNestedTrimLiteralPreview, "CanConvert"), "Nested PostgreSQL TRIM should convert while preserving literals.");
+        string mssqlNestedTrimLiteralSql = (string)GetProperty(mssqlNestedTrimLiteralPreview, "ConvertedSql");
+        AssertContains(mssqlNestedTrimLiteralSql, "LTRIM(RTRIM(REPLACE(display_name, '-', ''))) AS clean_name", "Converted SQL Server SQL should convert nested TRIM expression.");
+        AssertContains(mssqlNestedTrimLiteralSql, "'TRIM(REPLACE(display_name, ''-'', ''''))' AS literal_note", "Converted SQL Server SQL should preserve TRIM text inside string literals.");
 
         object mssqlLengthPreview = BuildViewSqlPreview(
             "SELECT LENGTH(display_name) AS name_length FROM users",

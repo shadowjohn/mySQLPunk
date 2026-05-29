@@ -227,6 +227,7 @@ Smoke test harness：
   - 本輪補齊：`NVL2(...)` / `ISNULL(...)` 轉換會用函式呼叫掃描器避開字串常值，並可處理參數字串內含括號或巢狀函式的情境，避免漏轉真正函式或污染 `'NVL2(...)'` / `'ISNULL(...)'` 文字。
   - 本輪補齊：`LOCATE` / `CHARINDEX` / `INSTR` 的起始位置參數會轉為目標 provider 等價語法；SQLite / PostgreSQL 會用 `SUBSTR` / `SUBSTRING` 搭配 `CASE` 保留找不到時回傳 0 的行為。
   - 本輪補齊：MySQL `UCASE(...)` / `LCASE(...)` 會在複製到 SQL Server、PostgreSQL、SQLite 或 Oracle 時轉為通用的 `UPPER(...)` / `LOWER(...)`，並改用函式呼叫掃描器處理巢狀參數與保留字串常值，避免目標資料庫留下不可執行的 MySQL alias 或污染報表文字。
+  - 本輪補齊：`TRIM(...)` / `LTRIM(RTRIM(...))` / `RTRIM(LTRIM(...))` 字串修剪轉換改用函式呼叫掃描器，可處理 `REPLACE(...)` 這類含逗號的巢狀參數，並保留字串常值中的函式範例文字。
   - 本輪補齊：SQL Server `DATALENGTH(...)`、PostgreSQL/MySQL `OCTET_LENGTH(...)` 與 Oracle `LENGTHB(...)` 會依目標 provider 轉為對應的 byte-length 函式，SQLite 目標會用 `length(CAST(expr AS BLOB))` 保留位元組長度語意。
   - 本輪補齊：MySQL/PostgreSQL `BIT_LENGTH(...)` 會依目標 provider 保留位元長度語意，SQL Server / Oracle / SQLite 目標會用對應 byte-length 函式乘以 8。
   - 本輪補齊：SQL Server `NEWID()`、MySQL `UUID()` 與 Oracle `SYS_GUID()` 會依目標 provider 轉為對應的 UUID/Guid 產生函式，SQLite 目標會用 `randomblob()` 組出 v4-like UUID 字串。

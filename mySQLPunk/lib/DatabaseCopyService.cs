@@ -2943,24 +2943,62 @@ namespace mySQLPunk.lib
             string sql = selectSql;
             if (targetProvider == "mssql")
             {
-                return Regex.Replace(
+                return RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)",
-                    m => "LTRIM(RTRIM(" + m.Groups["expr"].Value.Trim() + "))",
-                    RegexOptions.IgnoreCase);
+                    "TRIM",
+                    (argsText, original) => RewriteTrimForSqlServer(argsText, original));
             }
 
-            sql = Regex.Replace(
+            sql = RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bLTRIM\s*\(\s*RTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)\s*\)",
-                m => "TRIM(" + m.Groups["expr"].Value.Trim() + ")",
-                RegexOptions.IgnoreCase);
+                "LTRIM",
+                (argsText, original) => RewriteNestedTrimPair(argsText, original, "RTRIM"));
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 sql,
-                @"\bRTRIM\s*\(\s*LTRIM\s*\(\s*(?<expr>[^,()]+(?:\([^)]*\))?)\s*\)\s*\)",
-                m => "TRIM(" + m.Groups["expr"].Value.Trim() + ")",
-                RegexOptions.IgnoreCase);
+                "RTRIM",
+                (argsText, original) => RewriteNestedTrimPair(argsText, original, "LTRIM"));
+        }
+
+        private static string RewriteTrimForSqlServer(string argsText, string original)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 1) return original;
+
+            return "LTRIM(RTRIM(" + args[0] + "))";
+        }
+
+        private static string RewriteNestedTrimPair(string argsText, string original, string innerFunctionName)
+        {
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 1) return original;
+
+            string innerArgsText;
+            if (!TryGetSingleFunctionCallArguments(args[0], innerFunctionName, out innerArgsText)) return original;
+
+            List<string> innerArgs = SplitFunctionArguments(innerArgsText);
+            if (innerArgs.Count != 1) return original;
+
+            return "TRIM(" + innerArgs[0] + ")";
+        }
+
+        private static bool TryGetSingleFunctionCallArguments(string text, string functionName, out string argsText)
+        {
+            argsText = null;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            int nameStart = SkipWhitespace(text, 0);
+            if (!IsFunctionNameAt(text, nameStart, functionName)) return false;
+
+            int openIndex = SkipWhitespace(text, nameStart + functionName.Length);
+            if (openIndex >= text.Length || text[openIndex] != '(') return false;
+
+            int closeIndex = FindMatchingFunctionParenthesis(text, openIndex);
+            if (closeIndex <= openIndex) return false;
+            if (SkipWhitespace(text, closeIndex + 1) != text.Length) return false;
+
+            argsText = text.Substring(openIndex + 1, closeIndex - openIndex - 1);
+            return true;
         }
 
         private static string RewriteSubstringFunctions(string selectSql, string targetProvider)
