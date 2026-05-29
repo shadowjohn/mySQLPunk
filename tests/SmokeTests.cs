@@ -2200,6 +2200,24 @@ public static class SmokeTests
         string mssqlSubstringSql = (string)GetProperty(mssqlSubstringPreview, "ConvertedSql");
         AssertContains(mssqlSubstringSql, "SUBSTRING(code, 1, 3)", "Converted SQL Server SQL should use SUBSTRING.");
 
+        object mssqlNestedSubstrLiteralPreview = BuildViewSqlPreview(
+            "SELECT SUBSTR(REPLACE(code, '-', ''), 1, 3) AS prefix, 'SUBSTR(REPLACE(code, ''-'', ''''), 1, 3)' AS literal_note FROM items",
+            "oracle",
+            "mssql");
+        Assert((bool)GetProperty(mssqlNestedSubstrLiteralPreview, "CanConvert"), "Nested Oracle SUBSTR should convert while preserving literals.");
+        string mssqlNestedSubstrLiteralSql = (string)GetProperty(mssqlNestedSubstrLiteralPreview, "ConvertedSql");
+        AssertContains(mssqlNestedSubstrLiteralSql, "SUBSTRING(REPLACE(code, '-', ''), 1, 3) AS prefix", "Converted SQL Server SQL should convert nested SUBSTR expression.");
+        AssertContains(mssqlNestedSubstrLiteralSql, "'SUBSTR(REPLACE(code, ''-'', ''''), 1, 3)' AS literal_note", "Converted SQL Server SQL should preserve SUBSTR text inside string literals.");
+
+        object sqliteNestedSubstringLiteralPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING(REPLACE(code, '-', ''), 1, 3) AS prefix, 'SUBSTRING(REPLACE(code, ''-'', ''''), 1, 3)' AS literal_note FROM items",
+            "mssql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteNestedSubstringLiteralPreview, "CanConvert"), "Nested SQL Server SUBSTRING should convert while preserving literals.");
+        string sqliteNestedSubstringLiteralSql = (string)GetProperty(sqliteNestedSubstringLiteralPreview, "ConvertedSql");
+        AssertContains(sqliteNestedSubstringLiteralSql, "SUBSTR(REPLACE(code, '-', ''), 1, 3) AS prefix", "Converted SQLite SQL should convert nested SUBSTRING expression.");
+        AssertContains(sqliteNestedSubstringLiteralSql, "'SUBSTRING(REPLACE(code, ''-'', ''''), 1, 3)' AS literal_note", "Converted SQLite SQL should preserve SUBSTRING text inside string literals.");
+
         object mysqlStandardSubstringPreview = BuildViewSqlPreview(
             "SELECT SUBSTRING(code FROM 2 FOR 4) AS middle_code FROM items",
             "postgresql",

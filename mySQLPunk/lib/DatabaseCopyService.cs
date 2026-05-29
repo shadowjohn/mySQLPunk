@@ -3011,20 +3011,18 @@ namespace mySQLPunk.lib
 
             if (targetProvider == "mssql")
             {
-                return Regex.Replace(
+                return RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bSUBSTR\s*\((?<args>[^()]*)\)",
-                    m => RewriteFunctionName(m, "SUBSTRING"),
-                    RegexOptions.IgnoreCase);
+                    "SUBSTR",
+                    (argsText, original) => RewriteFunctionName(argsText, original, "SUBSTRING"));
             }
 
             if (targetProvider == "oracle" || targetProvider == "sqlite")
             {
-                return Regex.Replace(
+                return RewriteFunctionCallsOutsideSingleQuotedStrings(
                     sql,
-                    @"\bSUBSTRING\s*\((?<args>[^()]*)\)",
-                    m => RewriteFunctionName(m, "SUBSTR"),
-                    RegexOptions.IgnoreCase);
+                    "SUBSTRING",
+                    (argsText, original) => RewriteFunctionName(argsText, original, "SUBSTR"));
             }
 
             return sql;
@@ -3036,10 +3034,10 @@ namespace mySQLPunk.lib
             return functionName + "(" + expr + ", " + start + ", " + length + ")";
         }
 
-        private static string RewriteFunctionName(Match match, string functionName)
+        private static string RewriteFunctionName(string argsText, string original, string functionName)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count < 2) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count < 2) return original;
             return functionName + "(" + string.Join(", ", args.ToArray()) + ")";
         }
 
