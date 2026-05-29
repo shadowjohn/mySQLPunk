@@ -2062,6 +2062,31 @@ public static class SmokeTests
         AssertContains(sqliteStuffSql, "SUBSTR(code, 1, 2 - 1) || '***' || SUBSTR(code, 2 + 3)", "Converted SQLite SQL should emulate STUFF with SUBSTR concatenation.");
         AssertNotContains(sqliteStuffSql, "STUFF", "Converted SQLite SQL should remove STUFF.");
 
+        object pgSubstringIndexPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(host_name, '.', 1) AS root_host FROM servers",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgSubstringIndexPreview, "CanConvert"), "MySQL SUBSTRING_INDEX should convert to PostgreSQL.");
+        string pgSubstringIndexSql = (string)GetProperty(pgSubstringIndexPreview, "ConvertedSql");
+        AssertContains(pgSubstringIndexSql, "CASE WHEN POSITION('.' IN host_name) = 0 THEN host_name ELSE SUBSTRING(host_name FROM 1 FOR POSITION('.' IN host_name) - 1) END", "Converted PostgreSQL SQL should emulate SUBSTRING_INDEX count 1.");
+        AssertNotContains(pgSubstringIndexSql, "SUBSTRING_INDEX", "Converted PostgreSQL SQL should remove SUBSTRING_INDEX.");
+
+        object mssqlSubstringIndexPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(file_name, '/', 1) AS top_folder FROM files",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlSubstringIndexPreview, "CanConvert"), "MySQL SUBSTRING_INDEX should convert to SQL Server.");
+        string mssqlSubstringIndexSql = (string)GetProperty(mssqlSubstringIndexPreview, "ConvertedSql");
+        AssertContains(mssqlSubstringIndexSql, "CASE WHEN CHARINDEX('/', file_name) = 0 THEN file_name ELSE LEFT(file_name, CHARINDEX('/', file_name) - 1) END", "Converted SQL Server SQL should emulate SUBSTRING_INDEX count 1.");
+
+        object sqliteSubstringIndexPreview = BuildViewSqlPreview(
+            "SELECT SUBSTRING_INDEX(tag_path, '/', 1) AS root_tag FROM tags",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteSubstringIndexPreview, "CanConvert"), "MySQL SUBSTRING_INDEX should convert to SQLite.");
+        string sqliteSubstringIndexSql = (string)GetProperty(sqliteSubstringIndexPreview, "ConvertedSql");
+        AssertContains(sqliteSubstringIndexSql, "CASE WHEN INSTR(tag_path, '/') = 0 THEN tag_path ELSE SUBSTR(tag_path, 1, INSTR(tag_path, '/') - 1) END", "Converted SQLite SQL should emulate SUBSTRING_INDEX count 1.");
+
         object mssqlPositionPreview = BuildViewSqlPreview(
             "SELECT LOCATE('@', email) AS at_pos FROM users",
             "mysql",

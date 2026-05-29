@@ -530,6 +530,7 @@ namespace mySQLPunk.lib
             sql = RewriteTrimFunctions(sql, targetProvider);
             sql = RewriteSubstringFunctions(sql, targetProvider);
             sql = RewriteEdgeSubstringFunctions(sql, targetProvider);
+            sql = RewriteSubstringIndexFunctions(sql, targetProvider);
             sql = RewriteStuffFunctions(sql, targetProvider);
             sql = RewritePaddingFunctions(sql, targetProvider);
             sql = RewriteStringRepeatFunctions(sql, targetProvider);
@@ -2697,6 +2698,50 @@ namespace mySQLPunk.lib
 
             string substringName = (targetProvider == "oracle" || targetProvider == "sqlite") ? "SUBSTR" : "SUBSTRING";
             return substringName + "(" + expr + ", 1, " + start + " - 1) || " + replacement + " || " + substringName + "(" + expr + ", " + start + " + " + length + ")";
+        }
+
+        private static string RewriteSubstringIndexFunctions(string selectSql, string targetProvider)
+        {
+            if (targetProvider == "mysql") return selectSql;
+
+            return Regex.Replace(
+                selectSql,
+                @"\bSUBSTRING_INDEX\s*\((?<args>[^()]*)\)",
+                m => RewriteSubstringIndexFunction(m, targetProvider),
+                RegexOptions.IgnoreCase);
+        }
+
+        private static string RewriteSubstringIndexFunction(Match match, string targetProvider)
+        {
+            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
+            if (args.Count != 3) return match.Value;
+
+            string count = (args[2] ?? string.Empty).Trim();
+            if (count != "1") return match.Value;
+
+            return BuildSubstringBeforeFirstDelimiterExpression(targetProvider, args[0], args[1]);
+        }
+
+        private static string BuildSubstringBeforeFirstDelimiterExpression(string targetProvider, string expr, string delimiter)
+        {
+            string position = BuildStringPositionFunction(targetProvider, delimiter, expr);
+            string beforeDelimiter;
+
+            if (targetProvider == "mssql")
+            {
+                beforeDelimiter = "LEFT(" + expr + ", " + position + " - 1)";
+            }
+            else if (targetProvider == "postgresql")
+            {
+                beforeDelimiter = "SUBSTRING(" + expr + " FROM 1 FOR " + position + " - 1)";
+            }
+            else
+            {
+                string substringName = (targetProvider == "oracle" || targetProvider == "sqlite") ? "SUBSTR" : "SUBSTRING";
+                beforeDelimiter = substringName + "(" + expr + ", 1, " + position + " - 1)";
+            }
+
+            return "CASE WHEN " + position + " = 0 THEN " + expr + " ELSE " + beforeDelimiter + " END";
         }
 
         private static string RewritePaddingFunctions(string selectSql, string targetProvider)
