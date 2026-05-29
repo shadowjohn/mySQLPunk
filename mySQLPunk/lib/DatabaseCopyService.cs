@@ -1559,17 +1559,16 @@ namespace mySQLPunk.lib
         {
             if (targetProvider == "mssql") return selectSql;
 
-            return Regex.Replace(
+            return RewriteFunctionCallsOutsideSingleQuotedStrings(
                 selectSql,
-                @"\bDATEFROMPARTS\s*\((?<args>[^()]*)\)",
-                m => RewriteDateFromPartsFunction(m, targetProvider),
-                RegexOptions.IgnoreCase);
+                "DATEFROMPARTS",
+                (argsText, original) => RewriteDateFromPartsFunction(argsText, original, targetProvider));
         }
 
-        private static string RewriteDateFromPartsFunction(Match match, string targetProvider)
+        private static string RewriteDateFromPartsFunction(string argsText, string original, string targetProvider)
         {
-            List<string> args = SplitFunctionArguments(match.Groups["args"].Value);
-            if (args.Count != 3) return match.Value;
+            List<string> args = SplitFunctionArguments(argsText);
+            if (args.Count != 3) return original;
 
             string year = args[0];
             string month = args[1];
@@ -1595,7 +1594,7 @@ namespace mySQLPunk.lib
                 return "TO_DATE(" + year + " || '-' || " + month + " || '-' || " + day + ", 'YYYY-MM-DD')";
             }
 
-            return match.Value;
+            return original;
         }
 
         private static string NormalizeDatePart(string part)

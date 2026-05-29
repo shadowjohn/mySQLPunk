@@ -971,6 +971,15 @@ public static class SmokeTests
         AssertContains(pgDateFromPartsSql, "MAKE_DATE(order_year, order_month, 1)", "Converted PostgreSQL SQL should use MAKE_DATE.");
         AssertNotContains(pgDateFromPartsSql, "DATEFROMPARTS", "Converted PostgreSQL SQL should remove DATEFROMPARTS.");
 
+        object pgNestedDateFromPartsPreview = BuildViewSqlPreview(
+            "SELECT DATEFROMPARTS(ABS(order_year), order_month, order_day) AS order_date, 'DATEFROMPARTS(ABS(order_year), order_month, order_day)' AS literal_note FROM orders",
+            "mssql",
+            "postgresql");
+        Assert((bool)GetProperty(pgNestedDateFromPartsPreview, "CanConvert"), "Nested SQL Server DATEFROMPARTS should convert while preserving literals.");
+        string pgNestedDateFromPartsSql = (string)GetProperty(pgNestedDateFromPartsPreview, "ConvertedSql");
+        AssertContains(pgNestedDateFromPartsSql, "MAKE_DATE(ABS(order_year), order_month, order_day) AS order_date", "Converted PostgreSQL SQL should convert nested DATEFROMPARTS arguments.");
+        AssertContains(pgNestedDateFromPartsSql, "'DATEFROMPARTS(ABS(order_year), order_month, order_day)' AS literal_note", "Converted PostgreSQL SQL should preserve DATEFROMPARTS text inside string literals.");
+
         object mysqlDateFromPartsPreview = BuildViewSqlPreview(
             "SELECT DATEFROMPARTS(order_year, order_month, order_day) AS order_date FROM orders",
             "mssql",
