@@ -552,6 +552,32 @@ public static class SmokeTests
         string mysqlSystemUserSql = (string)GetProperty(mysqlSystemUserPreview, "ConvertedSql");
         AssertContains(mysqlSystemUserSql, "USER() AS login_name", "Converted MySQL SQL should use USER() for SYSTEM_USER.");
 
+        object mssqlDatabaseNamePreview = BuildViewSqlPreview(
+            "SELECT DATABASE() AS database_name FROM audit_log",
+            "mysql",
+            "mssql");
+        Assert((bool)GetProperty(mssqlDatabaseNamePreview, "CanConvert"), "MySQL DATABASE should convert to SQL Server.");
+        string mssqlDatabaseNameSql = (string)GetProperty(mssqlDatabaseNamePreview, "ConvertedSql");
+        AssertContains(mssqlDatabaseNameSql, "DB_NAME() AS database_name", "Converted SQL Server SQL should use DB_NAME().");
+        AssertNotContains(mssqlDatabaseNameSql, "DATABASE()", "Converted SQL Server SQL should remove DATABASE().");
+
+        object mysqlCurrentDatabasePreview = BuildViewSqlPreview(
+            "SELECT CURRENT_DATABASE() AS database_name FROM audit_log",
+            "postgresql",
+            "mysql");
+        Assert((bool)GetProperty(mysqlCurrentDatabasePreview, "CanConvert"), "PostgreSQL CURRENT_DATABASE should convert to MySQL.");
+        string mysqlCurrentDatabaseSql = (string)GetProperty(mysqlCurrentDatabasePreview, "ConvertedSql");
+        AssertContains(mysqlCurrentDatabaseSql, "DATABASE() AS database_name", "Converted MySQL SQL should use DATABASE().");
+        AssertNotContains(mysqlCurrentDatabaseSql, "CURRENT_DATABASE", "Converted MySQL SQL should remove CURRENT_DATABASE.");
+
+        object oracleDbNamePreview = BuildViewSqlPreview(
+            "SELECT DB_NAME() AS database_name FROM audit_log",
+            "mssql",
+            "oracle");
+        Assert((bool)GetProperty(oracleDbNamePreview, "CanConvert"), "SQL Server DB_NAME should convert to Oracle.");
+        string oracleDbNameSql = (string)GetProperty(oracleDbNamePreview, "ConvertedSql");
+        AssertContains(oracleDbNameSql, "SYS_CONTEXT('USERENV','DB_NAME') AS database_name", "Converted Oracle SQL should use SYS_CONTEXT for DB_NAME.");
+
         object mssqlCurrentDatePreview = BuildViewSqlPreview(
             "SELECT CURDATE() AS today FROM users",
             "mysql",

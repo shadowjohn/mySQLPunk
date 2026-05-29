@@ -504,6 +504,7 @@ namespace mySQLPunk.lib
             sql = RewriteNullHandlingFunctions(sql, targetProvider);
             sql = RewriteCurrentDateTimeFunctions(sql, targetProvider);
             sql = RewriteUserContextFunctions(sql, targetProvider);
+            sql = RewriteDatabaseContextFunctions(sql, targetProvider);
             sql = RewriteDateOnlyFunctions(sql, sourceProvider, targetProvider);
             sql = RewriteDateTruncFunctions(sql, targetProvider);
             sql = RewriteDateFormatFunctions(sql, targetProvider);
@@ -1721,6 +1722,39 @@ namespace mySQLPunk.lib
             if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','SESSION_USER')";
             if (targetProvider == "sqlite") return "NULL";
             return "SESSION_USER";
+        }
+
+        private static string RewriteDatabaseContextFunctions(string selectSql, string targetProvider)
+        {
+            return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
+            {
+                string sql = Regex.Replace(
+                    segment,
+                    @"\bCURRENT_DATABASE\b(?:\s*\(\s*\))?",
+                    m => BuildCurrentDatabaseExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                sql = Regex.Replace(
+                    sql,
+                    @"\bDATABASE\s*\(\s*\)",
+                    m => BuildCurrentDatabaseExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+
+                return Regex.Replace(
+                    sql,
+                    @"\bDB_NAME\s*\(\s*\)",
+                    m => BuildCurrentDatabaseExpression(targetProvider),
+                    RegexOptions.IgnoreCase);
+            });
+        }
+
+        private static string BuildCurrentDatabaseExpression(string targetProvider)
+        {
+            if (targetProvider == "mssql") return "DB_NAME()";
+            if (targetProvider == "mysql") return "DATABASE()";
+            if (targetProvider == "oracle") return "SYS_CONTEXT('USERENV','DB_NAME')";
+            if (targetProvider == "sqlite") return "NULL";
+            return "CURRENT_DATABASE()";
         }
 
         private static string RewriteDateFormatFunctions(string selectSql, string targetProvider)
