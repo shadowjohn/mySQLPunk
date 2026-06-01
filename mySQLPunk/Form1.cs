@@ -1232,18 +1232,27 @@ namespace mySQLPunk
 
                 if (result.UpdateAvailable)
                 {
-                    string targetUrl = string.IsNullOrWhiteSpace(result.InstallerDownloadUrl)
-                        ? result.ReleasePageUrl
-                        : result.InstallerDownloadUrl;
                     string message = Localization.Format("Update.Available", result.LatestVersion, result.CurrentVersion);
                     DialogResult answer = MessageBox.Show(
                         message,
                         Localization.T("Menu.CheckUpdates"),
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Information);
-                    if (answer == DialogResult.Yes && !string.IsNullOrWhiteSpace(targetUrl))
+                    if (answer == DialogResult.Yes)
                     {
-                        Process.Start(new ProcessStartInfo(targetUrl) { UseShellExecute = true });
+                        if (!string.IsNullOrWhiteSpace(result.InstallerDownloadUrl))
+                        {
+                            await DownloadAndLaunchUpdateInstallerAsync(result);
+                        }
+                        else if (MessageBox.Show(
+                            Localization.T("Update.OpenReleasePage"),
+                            Localization.T("Menu.CheckUpdates"),
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Information) == DialogResult.Yes &&
+                            !string.IsNullOrWhiteSpace(result.ReleasePageUrl))
+                        {
+                            Process.Start(new ProcessStartInfo(result.ReleasePageUrl) { UseShellExecute = true });
+                        }
                     }
                     UpdateMainStatus(message.Replace("\n", " "));
                     return;
@@ -1265,6 +1274,23 @@ namespace mySQLPunk
                     MessageBox.Show(message, Localization.T("Menu.CheckUpdates"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
+        }
+
+        private async Task DownloadAndLaunchUpdateInstallerAsync(AppUpdateCheckResult result)
+        {
+            string downloadDirectory = Path.Combine(Path.GetTempPath(), "mySQLPunk", "updates");
+            Directory.CreateDirectory(downloadDirectory);
+            string targetPath = AppUpdateService.BuildInstallerDownloadPath(result, downloadDirectory);
+            UpdateMainStatus(Localization.Format("Update.Downloading", AppUpdateService.GetInstallerFileName(result)));
+
+            using (System.Net.WebClient client = new System.Net.WebClient())
+            {
+                client.Headers[System.Net.HttpRequestHeader.UserAgent] = "mySQLPunk-update-download";
+                await client.DownloadFileTaskAsync(new Uri(result.InstallerDownloadUrl), targetPath);
+            }
+
+            UpdateMainStatus(Localization.Format("Update.Downloaded", targetPath));
+            Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
         }
 
         private void OpenConnectionToolStripMenuItem_Click(object sender, EventArgs e)

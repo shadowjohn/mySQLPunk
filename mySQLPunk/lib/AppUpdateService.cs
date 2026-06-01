@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net;
 using Newtonsoft.Json.Linq;
 
@@ -79,11 +80,6 @@ namespace mySQLPunk.lib
                 InstallerDownloadUrl = FindInstallerAssetUrl(release["assets"] as JArray)
             };
 
-            if (string.IsNullOrWhiteSpace(result.InstallerDownloadUrl))
-            {
-                result.InstallerDownloadUrl = result.ReleasePageUrl;
-            }
-
             return result;
         }
 
@@ -97,6 +93,42 @@ namespace mySQLPunk.lib
 
             Version version;
             return Version.TryParse(normalized, out version) ? version : new Version(0, 0, 0, 0);
+        }
+
+        public static string BuildInstallerDownloadPath(AppUpdateCheckResult result, string directory)
+        {
+            if (result == null) throw new ArgumentNullException(nameof(result));
+            if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException("Download directory is required.", nameof(directory));
+
+            string fileName = GetInstallerFileName(result);
+            return Path.Combine(directory, fileName);
+        }
+
+        public static string GetInstallerFileName(AppUpdateCheckResult result)
+        {
+            if (result == null) throw new ArgumentNullException(nameof(result));
+
+            string fileName = "";
+            if (!string.IsNullOrWhiteSpace(result.InstallerDownloadUrl))
+            {
+                Uri uri;
+                if (Uri.TryCreate(result.InstallerDownloadUrl, UriKind.Absolute, out uri))
+                {
+                    fileName = Uri.UnescapeDataString(Path.GetFileName(uri.LocalPath));
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                string version = result.LatestVersion == null ? "latest" : result.LatestVersion.ToString();
+                fileName = "mySQLPunk-Setup-" + version + ".exe";
+            }
+
+            foreach (char invalid in Path.GetInvalidFileNameChars())
+            {
+                fileName = fileName.Replace(invalid, '_');
+            }
+            return fileName;
         }
 
         private static string FindInstallerAssetUrl(JArray assets)

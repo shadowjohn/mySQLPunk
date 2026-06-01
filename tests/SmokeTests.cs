@@ -4695,9 +4695,20 @@ public static class SmokeTests
         AssertContains(update.ReleasePageUrl, "/releases/tag/v1.2.3", "Update check should keep the release page URL.");
         AssertContains(update.InstallerDownloadUrl, "mySQLPunk-Setup.exe", "Update check should prefer installer assets.");
         AssertContains(update.ReleaseNotes, "更新內容", "Update check should keep release notes.");
+        string downloadPath = AppUpdateService.BuildInstallerDownloadPath(update, Path.GetTempPath());
+        AssertEquals("mySQLPunk-Setup.exe", Path.GetFileName(downloadPath), "Update download path should keep the installer asset file name.");
+        AssertEquals(Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), Path.GetDirectoryName(downloadPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), "Update download path should use the requested directory.");
 
         AppUpdateCheckResult current = AppUpdateService.ParseGitHubLatestRelease(releaseJson, "1.2.3.0");
         Assert(!current.UpdateAvailable, "Update check should not report an update for the same version.");
+
+        string noAssetJson = @"{
+  ""tag_name"": ""v1.2.4"",
+  ""html_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/tag/v1.2.4"",
+  ""assets"": []
+}";
+        AppUpdateCheckResult noAsset = AppUpdateService.ParseGitHubLatestRelease(noAssetJson, "1.0.0.0");
+        AssertEquals("", noAsset.InstallerDownloadUrl, "Update check should not treat the release page as an installer asset.");
 
         AssertEquals(
             "https://api.github.com/repos/shadowjohn/mySQLPunk/releases/latest",
