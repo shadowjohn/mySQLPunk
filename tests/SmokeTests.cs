@@ -52,6 +52,7 @@ public static class SmokeTests
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
+        Run("Release packaging script", TestReleasePackagingScript, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
@@ -4714,6 +4715,35 @@ public static class SmokeTests
             "https://api.github.com/repos/shadowjohn/mySQLPunk/releases/latest",
             AppUpdateService.BuildGitHubLatestReleaseApiUrl("shadowjohn", "mySQLPunk"),
             "Update check should build the GitHub latest release endpoint.");
+    }
+
+    private static void TestReleasePackagingScript()
+    {
+        string root = FindRepositoryRootForTest();
+        string scriptPath = Path.Combine(root, "scripts", "package-release.ps1");
+        Assert(File.Exists(scriptPath), "Release packaging script should exist.");
+
+        string script = File.ReadAllText(scriptPath, Encoding.UTF8);
+        AssertContains(script, "Compress-Archive", "Release packaging script should create a zip archive.");
+        AssertContains(script, "release-manifest.json", "Release packaging script should write a release manifest.");
+        AssertContains(script, "SHA256", "Release packaging script should include a SHA-256 checksum.");
+        AssertContains(script, "mySQLPunk.exe", "Release packaging script should package the application executable.");
+        AssertContains(script, "MSBuild", "Release packaging script should build the Release configuration.");
+    }
+
+    private static string FindRepositoryRootForTest()
+    {
+        DirectoryInfo current = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+        while (current != null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "README.md")) &&
+                File.Exists(Path.Combine(current.FullName, "mySQLPunk.sln")))
+            {
+                return current.FullName;
+            }
+            current = current.Parent;
+        }
+        throw new DirectoryNotFoundException("Cannot find repository root.");
     }
 
     private static void TestDarkThemeControlCoverage()
