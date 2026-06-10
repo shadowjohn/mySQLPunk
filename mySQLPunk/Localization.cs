@@ -654,6 +654,7 @@ namespace mySQLPunk
             Add("ImportSql.Failed", "匯入 SQL 失敗：", "SQL import failed: ");
 
             Add("Query.Query", "查詢", "Query");
+            Add("Query.Command", "命令", "Command");
             Add("Query.Execute", "執行", "Execute");
             Add("Query.Stop", "停止", "Stop");
             Add("Query.Beautify", "美化", "Beautify");

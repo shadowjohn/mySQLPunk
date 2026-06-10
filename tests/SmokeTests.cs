@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
@@ -4786,6 +4787,16 @@ public static class SmokeTests
             Assert(zhSearchColumn != null, "Database search should include matching fake column metadata.");
             AssertContains(zhSearchColumn["類型"].ToString(), "欄位", "Database search should localize Traditional Chinese column type.");
 
+            SeedQueryHistory(form);
+            MethodInfo queryHistoryMethod = typeof(Form1).GetMethod("BuildQueryHistoryTable", BindingFlags.Instance | BindingFlags.NonPublic);
+            DataTable zhQueryHistory = (DataTable)queryHistoryMethod.Invoke(form, new object[] { "main" });
+            DataRow zhQueryHistoryQuery = FindDataRow(zhQueryHistory, "SQL", "SELECT 1");
+            Assert(zhQueryHistoryQuery != null, "Query history should include seeded query entry.");
+            AssertContains(zhQueryHistoryQuery["類型"].ToString(), "查詢", "Query history should localize Traditional Chinese query type.");
+            DataRow zhQueryHistoryCommand = FindDataRow(zhQueryHistory, "SQL", "UPDATE users SET name = 'A'");
+            Assert(zhQueryHistoryCommand != null, "Query history should include seeded command entry.");
+            AssertContains(zhQueryHistoryCommand["類型"].ToString(), "命令", "Query history should localize Traditional Chinese command type.");
+
             DataTable zhDiagnostics = (DataTable)diagnosticsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow zhConnectionState = FindDataRow(zhDiagnostics, "項目", "連線狀態");
             Assert(zhConnectionState != null, "Connection diagnostics should localize Traditional Chinese connection state item.");
@@ -4873,6 +4884,14 @@ public static class SmokeTests
             Assert(enSearchView != null, "Database search should include matching fake view metadata.");
             AssertEquals("View", enSearchView["類型"].ToString(), "Database search should support English view type.");
             AssertEquals("Views", enSearchView["位置"].ToString(), "Database search should support English view location.");
+
+            DataTable enQueryHistory = (DataTable)queryHistoryMethod.Invoke(form, new object[] { "main" });
+            DataRow enQueryHistoryQuery = FindDataRow(enQueryHistory, "SQL", "SELECT 1");
+            Assert(enQueryHistoryQuery != null, "Query history should include seeded query entry in English.");
+            AssertEquals("Query", enQueryHistoryQuery["類型"].ToString(), "Query history should support English query type.");
+            DataRow enQueryHistoryCommand = FindDataRow(enQueryHistory, "SQL", "UPDATE users SET name = 'A'");
+            Assert(enQueryHistoryCommand != null, "Query history should include seeded command entry in English.");
+            AssertEquals("Command", enQueryHistoryCommand["類型"].ToString(), "Query history should support English command type.");
 
             DataTable enMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow enLargestTable = FindDataRow(enMaintenance, "項目", "Largest Table");
@@ -5738,6 +5757,29 @@ public static class SmokeTests
     {
         FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         field.SetValue(target, value);
+    }
+
+    private static void SeedQueryHistory(object form)
+    {
+        Type entryType = typeof(Form1).GetNestedType("QueryHistoryEntry", BindingFlags.NonPublic);
+        Type listType = typeof(List<>).MakeGenericType(entryType);
+        IList entries = (IList)Activator.CreateInstance(listType);
+        entries.Add(CreateQueryHistoryEntry(entryType, "main", "SELECT 1", "OK", 1, 12, true));
+        entries.Add(CreateQueryHistoryEntry(entryType, "main", "UPDATE users SET name = 'A'", "OK", 1, 18, false));
+        SetPrivateField(form, "_queryHistory", entries);
+    }
+
+    private static object CreateQueryHistoryEntry(Type entryType, string databaseName, string sql, string status, int rows, long elapsedMilliseconds, bool isQuery)
+    {
+        object entry = Activator.CreateInstance(entryType, true);
+        entryType.GetField("ExecutedAt", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).SetValue(entry, new DateTime(2026, 1, 2, 3, 4, 5));
+        entryType.GetField("DatabaseName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).SetValue(entry, databaseName);
+        entryType.GetField("Sql", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).SetValue(entry, sql);
+        entryType.GetField("Status", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).SetValue(entry, status);
+        entryType.GetField("Rows", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).SetValue(entry, rows);
+        entryType.GetField("ElapsedMilliseconds", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).SetValue(entry, elapsedMilliseconds);
+        entryType.GetField("IsQuery", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).SetValue(entry, isQuery);
+        return entry;
     }
 
     private static T GetPrivateField<T>(object target, string fieldName)

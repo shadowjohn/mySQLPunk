@@ -7697,7 +7697,7 @@ namespace mySQLPunk
                 DataRow row = dt.NewRow();
                 row["時間"] = entry.ExecutedAt.ToString("yyyy-MM-dd HH:mm:ss");
                 row["資料庫"] = entry.DatabaseName;
-                row["類型"] = entry.IsQuery ? "Query" : "Command";
+                row["類型"] = Localization.T(entry.IsQuery ? "Query.Query" : "Query.Command");
                 row["狀態"] = entry.Status;
                 row["列數"] = entry.Rows >= 0 ? entry.Rows.ToString() : "";
                 row["耗時(ms)"] = entry.ElapsedMilliseconds.ToString();
