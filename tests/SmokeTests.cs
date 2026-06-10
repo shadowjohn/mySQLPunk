@@ -3831,8 +3831,21 @@ public static class SmokeTests
 
             using (my_sqlite sqlite = new my_sqlite())
             {
-                sqlite.RetryLoadSpatiaLite();
-                AssertContains(sqlite.SpatiaLiteLoadError, "not open", "Retrying SpatiaLite without an open SQLite connection should report a usable error.");
+                string oldLanguage = Localization.CurrentLanguage;
+                try
+                {
+                    Localization.SetLanguage(Localization.TraditionalChinese, false);
+                    sqlite.RetryLoadSpatiaLite();
+                    AssertContains(sqlite.SpatiaLiteLoadError, "尚未開啟", "Retrying SpatiaLite without an open SQLite connection should localize the error in Traditional Chinese.");
+
+                    Localization.SetLanguage(Localization.English, false);
+                    sqlite.RetryLoadSpatiaLite();
+                    AssertContains(sqlite.SpatiaLiteLoadError, "not open", "Retrying SpatiaLite without an open SQLite connection should localize the error in English.");
+                }
+                finally
+                {
+                    Localization.SetLanguage(oldLanguage, false);
+                }
             }
         }
         finally

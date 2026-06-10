@@ -287,6 +287,10 @@ namespace mySQLPunk
             Add("Connection.SpatiaLiteRepairCompletedReconnect", "SpatiaLite runtime 修復完成。請重新開啟 SQLite 連線以重新載入 extension。", "SpatiaLite runtime repair completed. Reopen the SQLite connection to reload the extension.");
             Add("Connection.SpatiaLiteRepairReloaded", "SpatiaLite runtime 修復完成，已重新載入 SpatiaLite。", "SpatiaLite runtime repair completed and SpatiaLite was reloaded.");
             Add("Connection.SpatiaLiteRepairReloadFailed", "SpatiaLite runtime 修復完成，但重新載入仍失敗：{0}", "SpatiaLite runtime repair completed, but reload still failed: {0}");
+            Add("Connection.SpatiaLiteNotLoaded", "SpatiaLite extension 尚未載入：{0}", "SpatiaLite extension is not loaded: {0}");
+            Add("Connection.SqliteConnectionNotOpen", "SQLite 連線尚未開啟。", "SQLite connection is not open.");
+            Add("Connection.SpatiaLiteRuntimeDirectoryMissing", "找不到 SpatiaLite runtime 目錄：{0}", "Cannot find SpatiaLite runtime directory: {0}");
+            Add("Connection.SpatiaLiteDllMissing", "找不到 mod_spatialite.dll：{0}", "Cannot find mod_spatialite.dll: {0}");
             Add("Connection.InitSpatialMetadataTitle", "初始化 geospatial", "Initialize geospatial");
             Add("Connection.InitSpatialMetadataPrompt", "此 SQLite 檔尚未偵測到 SpatiaLite metadata，是否要初始化？", "This SQLite file does not have SpatiaLite metadata yet. Initialize it?");
             Add("Connection.UnsupportedEdit", "此連線類型尚未支援編輯：{0}", "Editing this connection type is not supported yet: {0}");

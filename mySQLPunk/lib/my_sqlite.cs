@@ -101,7 +101,7 @@ namespace mySQLPunk.lib
             }
             if (!SpatiaLiteEnabled)
             {
-                throw new Exception("SpatiaLite extension 尚未載入：" + SpatiaLiteLoadError);
+                throw new Exception(Localization.Format("Connection.SpatiaLiteNotLoaded", SpatiaLiteLoadError));
             }
 
             using (SQLiteCommand cmd = new SQLiteCommand("SELECT InitSpatialMetaData(1);", MCT))
@@ -118,7 +118,7 @@ namespace mySQLPunk.lib
 
             if (MCT == null || MCT.State != ConnectionState.Open)
             {
-                SpatiaLiteLoadError = "SQLite connection is not open.";
+                SpatiaLiteLoadError = Localization.T("Connection.SqliteConnectionNotOpen");
                 return;
             }
 
@@ -137,14 +137,14 @@ namespace mySQLPunk.lib
                 string extDir = GetSpatiaLiteRuntimeDir();
                 if (!Directory.Exists(extDir))
                 {
-                    SpatiaLiteLoadError = "找不到 SpatiaLite runtime 目錄：" + extDir;
+                    SpatiaLiteLoadError = Localization.Format("Connection.SpatiaLiteRuntimeDirectoryMissing", extDir);
                     return;
                 }
 
                 string dllPath = Path.Combine(extDir, "mod_spatialite.dll");
                 if (!File.Exists(dllPath))
                 {
-                    SpatiaLiteLoadError = "找不到 mod_spatialite.dll：" + dllPath;
+                    SpatiaLiteLoadError = Localization.Format("Connection.SpatiaLiteDllMissing", dllPath);
                     return;
                 }
 
