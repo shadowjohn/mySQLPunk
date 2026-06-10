@@ -136,6 +136,10 @@ Smoke test harness：
   - 現況：`模型 > Column Catalog` 會列出資料表/檢視欄位，`模型 > Index Catalog` 會列出索引或無明確索引狀態。
   - 完成內容：欄位目錄的物件類型與索引目錄的無索引 fallback 已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **報表與 BI 物件類型 ✅ 已語系化**
+  - 現況：`查詢 > Object Inventory`、`Table Row Counts`、`BI > Object Distribution` 與 `BI > Row Count Ranking` 會顯示物件類型、分類與就緒狀態。
+  - 完成內容：資料表/檢視類型、就緒狀態、物件分布分類與備份來源/目標類型已改用語系字串，繁中與英文介面都會顯示一致文字。
+
 - **命令列介面依賴本機 CLI ✅ 偵測、匯入預覽與匯入後補密碼已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
   - 完成內容：

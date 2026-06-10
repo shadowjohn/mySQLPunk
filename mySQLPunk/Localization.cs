@@ -313,6 +313,12 @@ namespace mySQLPunk
             Add("DatabaseModel.ObjectTypeTable", "資料表", "Table");
             Add("DatabaseModel.ObjectTypeView", "檢視", "View");
             Add("DatabaseModel.NoExplicitIndexes", "（沒有明確索引）", "(no explicit indexes)");
+            Add("DatabaseReport.SqliteBackupSource", "SQLite 備份來源", "SQLite Backup Source");
+            Add("DatabaseReport.SqlBackupTarget", "SQL 備份目標", "SQL Backup Target");
+            Add("DatabaseBI.CategoryTables", "資料表", "Tables");
+            Add("DatabaseBI.CategoryViews", "檢視", "Views");
+            Add("DatabaseBI.CategoryFunctions", "函式", "Functions");
+            Add("DatabaseBI.CategoryEvents", "事件", "Events");
             Add("MaintenanceChecklist.ConnectionOpen", "連線已開啟", "Connection Open");
             Add("MaintenanceChecklist.TablesLoaded", "已載入資料表", "Tables Loaded");
             Add("MaintenanceChecklist.ViewsLoaded", "已載入檢視", "Views Loaded");

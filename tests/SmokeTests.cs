@@ -4712,6 +4712,10 @@ public static class SmokeTests
         MethodInfo schemaOverviewMethod = typeof(Form1).GetMethod("BuildSchemaOverviewModel", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo columnCatalogMethod = typeof(Form1).GetMethod("BuildColumnCatalogModel", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo indexCatalogMethod = typeof(Form1).GetMethod("BuildIndexCatalogModel", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo tableRowCountReportMethod = typeof(Form1).GetMethod("BuildTableRowCountReport", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo objectInventoryReportMethod = typeof(Form1).GetMethod("BuildObjectInventoryReport", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo objectDistributionBIMethod = typeof(Form1).GetMethod("BuildObjectDistributionBI", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo rowCountRankingBIMethod = typeof(Form1).GetMethod("BuildRowCountRankingBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4734,6 +4738,26 @@ public static class SmokeTests
             DataRow zhNoIndex = FindDataRow(zhIndexCatalog, "資料表", "public.users");
             Assert(zhNoIndex != null, "Index catalog should include fake table metadata.");
             AssertContains(zhNoIndex["索引"].ToString(), "沒有明確索引", "Index catalog should localize Traditional Chinese empty-index fallback.");
+
+            DataTable zhRowCounts = (DataTable)tableRowCountReportMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow zhRowCount = FindDataRow(zhRowCounts, "資料表", "public.users");
+            Assert(zhRowCount != null, "Table row count report should include fake table metadata.");
+            AssertContains(zhRowCount["狀態"].ToString(), "就緒", "Table row count report should localize Traditional Chinese ready status.");
+
+            DataTable zhInventory = (DataTable)objectInventoryReportMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
+            DataRow zhInventoryTable = FindDataRow(zhInventory, "名稱", "public.users");
+            Assert(zhInventoryTable != null, "Object inventory should include fake table metadata.");
+            AssertContains(zhInventoryTable["類型"].ToString(), "資料表", "Object inventory should localize Traditional Chinese table type.");
+            AssertContains(zhInventoryTable["狀態"].ToString(), "就緒", "Object inventory should localize Traditional Chinese ready status.");
+
+            DataTable zhDistribution = (DataTable)objectDistributionBIMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            Assert(FindDataRow(zhDistribution, "類別", "資料表") != null, "Object distribution BI should localize Traditional Chinese table category.");
+
+            DataTable zhRanking = (DataTable)rowCountRankingBIMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow zhRankingTable = FindDataRow(zhRanking, "名稱", "public.users");
+            Assert(zhRankingTable != null, "Row count ranking BI should include fake table metadata.");
+            AssertContains(zhRankingTable["類型"].ToString(), "資料表", "Row count ranking BI should localize Traditional Chinese table type.");
+            AssertContains(zhRankingTable["狀態"].ToString(), "就緒", "Row count ranking BI should localize Traditional Chinese ready status.");
 
             DataTable zhDiagnostics = (DataTable)diagnosticsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow zhConnectionState = FindDataRow(zhDiagnostics, "項目", "連線狀態");
@@ -4788,6 +4812,21 @@ public static class SmokeTests
             DataRow enNoIndex = FindDataRow(enIndexCatalog, "資料表", "public.users");
             Assert(enNoIndex != null, "Index catalog should include fake table metadata.");
             AssertEquals("(no explicit indexes)", enNoIndex["索引"].ToString(), "Index catalog should support English empty-index fallback.");
+
+            DataTable enInventory = (DataTable)objectInventoryReportMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
+            DataRow enInventoryView = FindDataRow(enInventory, "名稱", "public.active_users");
+            Assert(enInventoryView != null, "Object inventory should include fake view metadata.");
+            AssertEquals("View", enInventoryView["類型"].ToString(), "Object inventory should support English view type.");
+            AssertEquals("Ready", enInventoryView["狀態"].ToString(), "Object inventory should support English ready status.");
+
+            DataTable enDistribution = (DataTable)objectDistributionBIMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            Assert(FindDataRow(enDistribution, "類別", "Tables") != null, "Object distribution BI should support English table category.");
+
+            DataTable enRanking = (DataTable)rowCountRankingBIMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow enRankingView = FindDataRow(enRanking, "名稱", "public.active_users");
+            Assert(enRankingView != null, "Row count ranking BI should include fake view metadata.");
+            AssertEquals("View", enRankingView["類型"].ToString(), "Row count ranking BI should support English view type.");
+            AssertEquals("Ready", enRankingView["狀態"].ToString(), "Row count ranking BI should support English ready status.");
 
             DataTable enMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow enLargestTable = FindDataRow(enMaintenance, "項目", "Largest Table");

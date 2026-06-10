@@ -7765,6 +7765,7 @@ namespace mySQLPunk
             dt.Columns.Add("資料表");
             dt.Columns.Add("列數");
             dt.Columns.Add("狀態");
+            string ready = Localization.T("Diagnostic.StatusReady");
 
             foreach (string tableName in GetTablesSafe(db, dbName))
             {
@@ -7773,7 +7774,7 @@ namespace mySQLPunk
                 try
                 {
                     row["列數"] = db.CountRows(dbName, tableName).ToString();
-                    row["狀態"] = "Ready";
+                    row["狀態"] = ready;
                 }
                 catch (Exception ex)
                 {
@@ -7792,15 +7793,18 @@ namespace mySQLPunk
             dt.Columns.Add("名稱");
             dt.Columns.Add("類型");
             dt.Columns.Add("狀態");
+            string ready = Localization.T("Diagnostic.StatusReady");
+            string tableType = Localization.T("DatabaseModel.ObjectTypeTable");
+            string viewType = Localization.T("DatabaseModel.ObjectTypeView");
 
             foreach (string tableName in GetTablesSafe(db, dbName))
             {
-                AddInventoryRow(dt, tableName, "Table", "Ready");
+                AddInventoryRow(dt, tableName, tableType, ready);
             }
 
             foreach (string viewName in GetViewsSafe(db, dbName))
             {
-                AddInventoryRow(dt, viewName, "View", "Ready");
+                AddInventoryRow(dt, viewName, viewType, ready);
             }
 
             foreach (DataRow row in GetDatabaseFunctions(db, dbName).Rows)
@@ -7813,7 +7817,7 @@ namespace mySQLPunk
                 AddInventoryRow(dt, row["Name"].ToString(), row["Type"].ToString(), row["Status"].ToString());
             }
 
-            AddInventoryRow(dt, dbName, db is my_sqlite ? "SQLite Backup Source" : "SQL Backup Target", GetBackupSourceDescription(db, connInfo));
+            AddInventoryRow(dt, dbName, db is my_sqlite ? Localization.T("DatabaseReport.SqliteBackupSource") : Localization.T("DatabaseReport.SqlBackupTarget"), GetBackupSourceDescription(db, connInfo));
             return dt;
         }
 
@@ -8169,10 +8173,10 @@ namespace mySQLPunk
             int eventCount = GetDatabaseEvents(db, dbName).Rows.Count;
             int total = tableCount + viewCount + functionCount + eventCount;
 
-            AddBIDistributionRow(dt, "Tables", tableCount, total);
-            AddBIDistributionRow(dt, "Views", viewCount, total);
-            AddBIDistributionRow(dt, "Functions", functionCount, total);
-            AddBIDistributionRow(dt, "Events", eventCount, total);
+            AddBIDistributionRow(dt, Localization.T("DatabaseBI.CategoryTables"), tableCount, total);
+            AddBIDistributionRow(dt, Localization.T("DatabaseBI.CategoryViews"), viewCount, total);
+            AddBIDistributionRow(dt, Localization.T("DatabaseBI.CategoryFunctions"), functionCount, total);
+            AddBIDistributionRow(dt, Localization.T("DatabaseBI.CategoryEvents"), eventCount, total);
             return dt;
         }
 
@@ -8212,13 +8216,15 @@ namespace mySQLPunk
             dt.Columns.Add("狀態");
 
             List<Tuple<string, string, long, string>> rows = new List<Tuple<string, string, long, string>>();
+            string tableType = Localization.T("DatabaseModel.ObjectTypeTable");
+            string viewType = Localization.T("DatabaseModel.ObjectTypeView");
             foreach (string tableName in GetTablesSafe(db, dbName))
             {
-                rows.Add(GetBIObjectRowCount(db, dbName, tableName, "Table"));
+                rows.Add(GetBIObjectRowCount(db, dbName, tableName, tableType));
             }
             foreach (string viewName in GetViewsSafe(db, dbName))
             {
-                rows.Add(GetBIObjectRowCount(db, dbName, viewName, "View"));
+                rows.Add(GetBIObjectRowCount(db, dbName, viewName, viewType));
             }
 
             int rank = 1;
@@ -8255,7 +8261,7 @@ namespace mySQLPunk
         {
             try
             {
-                return Tuple.Create(objectName, objectType, db.CountRows(dbName, objectName), "Ready");
+                return Tuple.Create(objectName, objectType, db.CountRows(dbName, objectName), Localization.T("Diagnostic.StatusReady"));
             }
             catch (Exception ex)
             {
