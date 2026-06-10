@@ -4709,12 +4709,21 @@ public static class SmokeTests
         Assert(ObjectVisibilityService.FilterNames(new[] { "pg_class", "public.users" }, "postgresql", "table", false).SequenceEqual(new[] { "public.users" }), "Object visibility should hide PostgreSQL pg_* objects.");
 
         object form = FormatterServices.GetUninitializedObject(typeof(Form1));
+        MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
         string oldLanguage = Localization.CurrentLanguage;
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            DataTable zhDiagnostics = (DataTable)diagnosticsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
+            DataRow zhConnectionState = FindDataRow(zhDiagnostics, "項目", "連線狀態");
+            Assert(zhConnectionState != null, "Connection diagnostics should localize Traditional Chinese connection state item.");
+            AssertContains(zhConnectionState["狀態"].ToString(), "就緒", "Connection diagnostics should localize ready status.");
+            DataRow zhDatabase = FindDataRow(zhDiagnostics, "項目", "資料庫");
+            Assert(zhDatabase != null, "Connection diagnostics should localize Traditional Chinese database item.");
+            AssertEquals("main", zhDatabase["說明"].ToString(), "Connection diagnostics should keep the database name as detail.");
+
             using (my_sqlite sqlite = new my_sqlite())
             {
                 DataTable sqliteCapabilities = (DataTable)capabilitiesMethod.Invoke(form, new object[] { sqlite, "main" });
@@ -4739,6 +4748,11 @@ public static class SmokeTests
             Assert(tablesCapability != null, "Provider capabilities should include tables.");
             AssertContains(tablesCapability["狀態"].ToString(), "Supported", "Provider capabilities should support English status labels.");
             AssertContains(tablesCapability["說明"].ToString(), "loaded", "Provider capabilities should support English detail labels.");
+
+            DataTable enDiagnostics = (DataTable)diagnosticsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
+            DataRow enProvider = FindDataRow(enDiagnostics, "項目", "Provider");
+            Assert(enProvider != null, "Connection diagnostics should support English provider item.");
+            AssertContains(enProvider["狀態"].ToString(), "Ready", "Connection diagnostics should support English ready status.");
 
             DataTable enMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow enLargestTable = FindDataRow(enMaintenance, "項目", "Largest Table");
