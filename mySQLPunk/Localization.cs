@@ -662,6 +662,14 @@ namespace mySQLPunk
             Add("Object.CopyViewDdlUnavailable", "無法取得 View DDL。", "Cannot get View DDL.");
             Add("Object.ViewDdlUnavailable", "無法取得 View DDL。", "Cannot get View DDL.");
             Add("Object.ViewDdlParseFailed", "無法解析 {0} View DDL。", "Cannot parse {0} View DDL.");
+            Add("Object.ViewSqlSelectParseFailed", "無法解析 SELECT SQL", "Cannot parse SELECT SQL.");
+            Add("Object.ViewSqlLimitOffsetSqlServerOrderRequired", "LIMIT OFFSET 轉 SQL Server 需要穩定 ORDER BY，無法安全自動轉換", "Converting LIMIT OFFSET to SQL Server requires a stable ORDER BY and cannot be converted safely.");
+            Add("Object.ViewSqlRownumComplex", "ROWNUM 條件過於複雜，無法安全自動轉換", "The ROWNUM condition is too complex to convert safely.");
+            Add("Object.ViewSqlTopNotPortable", "TOP 語法不是目標資料庫通用語法", "TOP syntax is not portable to the target database.");
+            Add("Object.ViewSqlOracleHierarchyOrRownumUnsupported", "Oracle 階層查詢或 ROWNUM 無法自動轉換", "Oracle hierarchical queries or ROWNUM cannot be converted automatically.");
+            Add("Object.ViewSqlMySqlSpecificUnsupported", "MySQL 專用 View 語法無法自動轉換", "MySQL-specific View syntax cannot be converted automatically.");
+            Add("Object.ViewSqlRegexUnsupported", "目標資料庫沒有通用內建正規表示式比對語法，無法安全自動轉換", "The target database has no portable built-in regular expression match syntax, so it cannot be converted safely.");
+            Add("Object.ViewSqlJsonTableUnsupported", "JSON_TABLE 語法無法安全自動轉換為目標資料庫", "JSON_TABLE syntax cannot be safely converted to the target database.");
             Add("Object.ViewCopyTitle", "跨 Provider 複製 View", "Cross-provider View Copy");
             Add("Object.ViewCopyPrompt", "來源（{0}）View：{1}\n目標 Provider：{2}\n\n選擇複製方式：", "Source ({0}) view: {1}\nTarget provider: {2}\n\nSelect copy mode:");
             Add("Object.ViewCopyAutoConvert", "嘗試轉換 View SQL（無法轉換時改用 table snapshot）", "Try converting View SQL (fall back to table snapshot if conversion fails)");

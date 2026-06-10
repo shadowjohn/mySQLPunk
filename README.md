@@ -208,6 +208,10 @@ Smoke test harness：
   - 現況：MySQL、PostgreSQL、SQL Server、Oracle 與 SQLite provider 會在複製 View、重新命名 View 或跨 provider 建立 View 時解析來源 View DDL。
   - 完成內容：空 View DDL 與各 provider View DDL 解析失敗已改用語系字串，繁中與英文介面都會顯示一致文字，並已納入 smoke test 覆蓋壞 DDL 的實際例外路徑。
 
+- **跨 Provider View SQL 轉換原因 ✅ 已語系化**
+  - 現況：跨 provider 複製 View 時，SQL 方言轉換無法安全處理會回報 fallback 原因，並改用 table snapshot。
+  - 完成內容：SELECT 解析失敗、LIMIT/OFFSET、ROWNUM、TOP、Oracle 階層查詢、MySQL 專用語法、REGEXP 與 JSON_TABLE 等轉換原因已改用語系字串，繁中與英文介面都會顯示一致文字，並已納入 smoke test 覆蓋。
+
 - **Metadata 載入與匯入審核紀錄錯誤 ✅ 已語系化**
   - 現況：資料庫展開時會分段載入 Tables、Views、Functions、Users 與 Events；連線匯入完成後會寫入本機 JSONL 審核紀錄。
   - 完成內容：各 metadata 分類載入失敗與匯入審核紀錄路徑缺失等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字，並保留 provider 原始錯誤訊息方便排查。

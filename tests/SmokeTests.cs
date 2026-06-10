@@ -2755,6 +2755,7 @@ public static class SmokeTests
         string regexpReason = (string)GetProperty(mssqlRegexpLikePreview, "Reason");
         AssertContains(regexpReason, "正規表示式", "Regex rejection should explain unsupported regex conversion.");
 
+        Localization.SetLanguage(Localization.TraditionalChinese, false);
         object cteWindowPreview = BuildViewSqlPreview(
             "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM items) SELECT id FROM ranked WHERE rn = 1",
             "postgresql",
@@ -2779,7 +2780,71 @@ public static class SmokeTests
             "mysql");
         Assert(!(bool)GetProperty(unsupportedPreview, "CanConvert"), "Oracle hierarchical query should be rejected instead of converted silently.");
         string reason = (string)GetProperty(unsupportedPreview, "Reason");
-        Assert(!string.IsNullOrWhiteSpace(reason), "Unsupported conversion should return a readable reason.");
+        AssertContains(reason, "Oracle 階層查詢", "Unsupported conversion should return a localized Traditional Chinese reason.");
+
+        Localization.SetLanguage(Localization.English, false);
+        try
+        {
+            object parseFailedPreview = BuildViewSqlPreview(
+                "CREATE VIEW v AS BROKEN SQL",
+                "mysql",
+                "postgresql");
+            Assert(!(bool)GetProperty(parseFailedPreview, "CanConvert"), "Malformed View SQL should not convert.");
+            AssertContains((string)GetProperty(parseFailedPreview, "Reason"), "Cannot parse SELECT SQL", "Parse failure reason should localize to English.");
+
+            object unsafeOffsetPreview = BuildViewSqlPreview(
+                "SELECT id, name FROM users LIMIT 10 OFFSET 5",
+                "mysql",
+                "mssql");
+            Assert(!(bool)GetProperty(unsafeOffsetPreview, "CanConvert"), "Unsafe SQL Server offset conversion should still be rejected.");
+            AssertContains((string)GetProperty(unsafeOffsetPreview, "Reason"), "requires a stable ORDER BY", "LIMIT OFFSET reason should localize to English.");
+
+            object complexRownumPreview = BuildViewSqlPreview(
+                "SELECT id FROM users WHERE (ROWNUM <= 10 OR status = 'active')",
+                "oracle",
+                "mysql");
+            Assert(!(bool)GetProperty(complexRownumPreview, "CanConvert"), "Complex ROWNUM predicates should still be rejected.");
+            AssertContains((string)GetProperty(complexRownumPreview, "Reason"), "too complex", "ROWNUM reason should localize to English.");
+
+            object topPreview = BuildViewSqlPreview(
+                "SELECT id FROM (SELECT TOP 5 id FROM users) t",
+                "mssql",
+                "mysql");
+            Assert(!(bool)GetProperty(topPreview, "CanConvert"), "Unrewritten TOP syntax should still be rejected.");
+            AssertContains((string)GetProperty(topPreview, "Reason"), "TOP syntax is not portable", "TOP reason should localize to English.");
+
+            object oracleUnsupportedPreview = BuildViewSqlPreview(
+                "CREATE VIEW v AS SELECT id FROM employee START WITH manager_id IS NULL CONNECT BY PRIOR id = manager_id",
+                "oracle",
+                "mysql");
+            Assert(!(bool)GetProperty(oracleUnsupportedPreview, "CanConvert"), "Oracle hierarchical query should still be rejected in English.");
+            AssertContains((string)GetProperty(oracleUnsupportedPreview, "Reason"), "Oracle hierarchical queries", "Oracle hierarchy reason should localize to English.");
+
+            object mysqlSpecificPreview = BuildViewSqlPreview(
+                "SELECT @counter := @counter + 1 AS seq_no, id FROM users",
+                "mysql",
+                "postgresql");
+            Assert(!(bool)GetProperty(mysqlSpecificPreview, "CanConvert"), "MySQL-specific View syntax should still be rejected.");
+            AssertContains((string)GetProperty(mysqlSpecificPreview, "Reason"), "MySQL-specific View syntax", "MySQL-specific reason should localize to English.");
+
+            object englishRegexpLikePreview = BuildViewSqlPreview(
+                "SELECT id FROM users WHERE REGEXP_LIKE(email, '^[^@]+@example\\.com$')",
+                "oracle",
+                "mssql");
+            Assert(!(bool)GetProperty(englishRegexpLikePreview, "CanConvert"), "REGEXP_LIKE should still be rejected for SQL Server in English.");
+            AssertContains((string)GetProperty(englishRegexpLikePreview, "Reason"), "regular expression", "Regex reason should localize to English.");
+
+            object jsonTableUnsupportedPreview = BuildViewSqlPreview(
+                "SELECT jt.seq_no FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (seq_no FOR ORDINALITY)) jt",
+                "mysql",
+                "mssql");
+            Assert(!(bool)GetProperty(jsonTableUnsupportedPreview, "CanConvert"), "Unsupported JSON_TABLE shape should still be rejected.");
+            AssertContains((string)GetProperty(jsonTableUnsupportedPreview, "Reason"), "JSON_TABLE syntax cannot be safely converted", "JSON_TABLE reason should localize to English.");
+        }
+        finally
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+        }
     }
 
     private static object BuildViewSqlPreview(string sql, string sourceProvider, string targetProvider)

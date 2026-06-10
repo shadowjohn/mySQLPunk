@@ -291,7 +291,7 @@ namespace mySQLPunk.lib
             string selectSql = ExtractSelectSql(sourceViewSql);
             if (string.IsNullOrWhiteSpace(selectSql))
             {
-                reason = "無法解析 SELECT SQL";
+                reason = Localization.T("Object.ViewSqlSelectParseFailed");
                 return false;
             }
 
@@ -399,7 +399,7 @@ namespace mySQLPunk.lib
                 {
                     if (!HasOrderByClause(body))
                     {
-                        reason = "LIMIT OFFSET 轉 SQL Server 需要穩定 ORDER BY，無法安全自動轉換";
+                        reason = Localization.T("Object.ViewSqlLimitOffsetSqlServerOrderRequired");
                         return false;
                     }
 
@@ -489,7 +489,7 @@ namespace mySQLPunk.lib
 
             if (Regex.IsMatch(body, @"\bROWNUM\b", RegexOptions.IgnoreCase))
             {
-                reason = "ROWNUM 條件過於複雜，無法安全自動轉換";
+                reason = Localization.T("Object.ViewSqlRownumComplex");
                 return false;
             }
 
@@ -4878,21 +4878,21 @@ namespace mySQLPunk.lib
             if (!provider.Equals("mssql", StringComparison.OrdinalIgnoreCase) &&
                 Regex.IsMatch(featureSql, @"\bTOP\s+\(?\d+", RegexOptions.IgnoreCase))
             {
-                reason = "TOP 語法不是目標資料庫通用語法";
+                reason = Localization.T("Object.ViewSqlTopNotPortable");
                 return true;
             }
 
             if (!provider.Equals("oracle", StringComparison.OrdinalIgnoreCase) &&
                 Regex.IsMatch(featureSql, @"\b(CONNECT\s+BY|START\s+WITH|ROWNUM)\b", RegexOptions.IgnoreCase))
             {
-                reason = "Oracle 階層查詢或 ROWNUM 無法自動轉換";
+                reason = Localization.T("Object.ViewSqlOracleHierarchyOrRownumUnsupported");
                 return true;
             }
 
             if (!provider.Equals("mysql", StringComparison.OrdinalIgnoreCase) &&
                 Regex.IsMatch(featureSql, @"\bSQL\s+SECURITY\b|@", RegexOptions.IgnoreCase))
             {
-                reason = "MySQL 專用 View 語法無法自動轉換";
+                reason = Localization.T("Object.ViewSqlMySqlSpecificUnsupported");
                 return true;
             }
 
@@ -4900,7 +4900,7 @@ namespace mySQLPunk.lib
                  provider.Equals("sqlite", StringComparison.OrdinalIgnoreCase)) &&
                 Regex.IsMatch(featureSql, @"\bREGEXP_LIKE\s*\(|\b[A-Za-z_][A-Za-z0-9_\.]*\s+~\s+", RegexOptions.IgnoreCase))
             {
-                reason = "目標資料庫沒有通用內建正規表示式比對語法，無法安全自動轉換";
+                reason = Localization.T("Object.ViewSqlRegexUnsupported");
                 return true;
             }
 
@@ -4908,7 +4908,7 @@ namespace mySQLPunk.lib
                 !provider.Equals("oracle", StringComparison.OrdinalIgnoreCase) &&
                 Regex.IsMatch(featureSql, @"\bJSON_TABLE\s*\(", RegexOptions.IgnoreCase))
             {
-                reason = "JSON_TABLE 語法無法安全自動轉換為目標資料庫";
+                reason = Localization.T("Object.ViewSqlJsonTableUnsupported");
                 return true;
             }
 
