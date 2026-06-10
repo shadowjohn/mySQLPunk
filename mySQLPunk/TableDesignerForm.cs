@@ -798,7 +798,7 @@ namespace mySQLPunk
                 try
                 {
                     Dictionary<string, string> comments = ParseAutoColumnCommentJson(downloadJson());
-                    if (comments.Count == 0) throw new InvalidOperationException("字典沒有可用資料");
+                    if (comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsDictionaryEmpty"));
                     saveCache?.Invoke(comments);
 
                     lock (AutoColumnCommentSync)
@@ -836,7 +836,9 @@ namespace mySQLPunk
                 {
                     lock (AutoColumnCommentSync)
                     {
-                        AutoColumnCommentLastError = "遠端自動註解字典載入失敗，已改用本機快取：" + (lastException?.Message ?? "未知錯誤");
+                        AutoColumnCommentLastError = Localization.Format(
+                            "Designer.AutoCommentsRemoteCacheFallback",
+                            lastException?.Message ?? Localization.T("Designer.AutoCommentsUnknownError"));
                         AutoColumnCommentLastErrorUtc = DateTime.UtcNow;
                         AutoColumnCommentLastSource = "cache";
                         AutoColumnCommentLastSourceName = null;
@@ -850,7 +852,9 @@ namespace mySQLPunk
                 Trace.WriteLine("[AutoColumnComment] cache load failed: " + cacheEx.Message);
             }
 
-            throw new Exception("自動註解字典載入失敗：" + (lastException?.Message ?? "未知錯誤"), lastException);
+            throw new Exception(Localization.Format(
+                "Designer.AutoCommentsLoadFailed",
+                lastException?.Message ?? Localization.T("Designer.AutoCommentsUnknownError")), lastException);
         }
 
         private static string DownloadAutoColumnCommentJson()
@@ -866,7 +870,7 @@ namespace mySQLPunk
         private static Dictionary<string, string> ParseAutoColumnCommentJson(string json)
         {
             Dictionary<string, string> parsed = ParseAutoColumnCommentDictionaryPayload(json);
-            if (parsed == null) throw new InvalidOperationException("字典回傳格式不正確（解析結果為 null）");
+            if (parsed == null) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsInvalidDictionaryPayload"));
 
             Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in parsed)
@@ -1232,7 +1236,7 @@ namespace mySQLPunk
 
         public static Dictionary<string, string> ImportAutoColumnCommentDictionaryFile(string sourcePath)
         {
-            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(sourcePath));
             AutoColumnCommentDictionaryImportPreview preview = PreviewAutoColumnCommentDictionaryImportFile(sourcePath);
             Dictionary<string, string> comments = preview.Comments;
             if (comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsImportEmpty"));
@@ -1244,7 +1248,7 @@ namespace mySQLPunk
 
         public static int ExportAutoColumnCommentDictionaryFile(string targetPath, Dictionary<string, string> comments)
         {
-            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("targetPath");
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException(Localization.T("Common.TargetPathRequired"), nameof(targetPath));
             if (comments == null || comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsUnavailable"));
 
             string dir = Path.GetDirectoryName(targetPath);
@@ -1411,7 +1415,7 @@ namespace mySQLPunk
 
         public static AutoColumnCommentDictionaryImportPreview PreviewAutoColumnCommentDictionaryImportFile(string sourcePath)
         {
-            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(sourcePath));
             string json = File.ReadAllText(sourcePath, Encoding.UTF8);
             Dictionary<string, string> comments = ParseAutoColumnCommentJson(json);
             if (comments.Count == 0) throw new InvalidOperationException(Localization.T("Designer.AutoCommentsImportEmpty"));

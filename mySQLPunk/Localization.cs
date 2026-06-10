@@ -882,7 +882,11 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsImportSuccess", "已匯入 {0} 筆自動註解字典。", "Imported {0} auto comment dictionary entries.");
             Add("Designer.AutoCommentsImportFailed", "匯入自動註解字典失敗：{0}", "Import auto comment dictionary failed: {0}");
             Add("Designer.AutoCommentsImportEmpty", "自動註解字典沒有可用項目。", "The auto comment dictionary has no usable entries.");
+            Add("Designer.AutoCommentsDictionaryEmpty", "字典沒有可用資料。", "The dictionary has no usable data.");
             Add("Designer.AutoCommentsInvalidDictionaryFormat", "自動註解字典格式不正確。", "The auto comment dictionary format is invalid.");
+            Add("Designer.AutoCommentsInvalidDictionaryPayload", "字典回傳格式不正確（解析結果為 null）。", "The dictionary response format is invalid (parsed result is null).");
+            Add("Designer.AutoCommentsRemoteCacheFallback", "遠端自動註解字典載入失敗，已改用本機快取：{0}", "Remote auto comment dictionary load failed; using the local cache: {0}");
+            Add("Designer.AutoCommentsUnknownError", "未知錯誤", "unknown error");
             Add("Designer.AutoCommentsImportDiffSummary", "即將匯入 {0} 筆自動註解字典。\n\n新增：{1}\n更新：{2}\n匯入後會移除：{3}\n不變：{4}\n\n按確定後會覆蓋目前本機字典。", "Import {0} auto comment dictionary entries.\n\nAdded: {1}\nUpdated: {2}\nRemoved after import: {3}\nUnchanged: {4}\n\nClick OK to replace the current local dictionary.");
             Add("Designer.AutoCommentsDictionarySignatureMissing", "來源簽章：無簽章（舊版或外部 JSON）", "Source signature: missing (legacy or external JSON)");
             Add("Designer.AutoCommentsDictionarySignatureValid", "有效", "valid");

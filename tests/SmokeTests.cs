@@ -3724,6 +3724,92 @@ public static class SmokeTests
         {
             if (File.Exists(signedPath)) File.Delete(signedPath);
         }
+
+        string dictionaryErrorLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                TableDesignerForm.ImportAutoColumnCommentDictionaryFile("");
+                Assert(false, "Auto comment dictionary import should require a source path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請指定檔案路徑", "Auto comment dictionary import source validation should localize Traditional Chinese messages.");
+            }
+
+            try
+            {
+                TableDesignerForm.ExportAutoColumnCommentDictionaryFile("", imported);
+                Assert(false, "Auto comment dictionary export should require a target path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請指定輸出目標路徑", "Auto comment dictionary export target validation should localize Traditional Chinese messages.");
+            }
+
+            string emptyDictionaryPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_comment_dictionary_empty_" + Guid.NewGuid().ToString("N") + ".json");
+            try
+            {
+                File.WriteAllText(emptyDictionaryPath, "", Encoding.UTF8);
+                TableDesignerForm.PreviewAutoColumnCommentDictionaryImportFile(emptyDictionaryPath);
+                Assert(false, "Auto comment dictionary preview should reject empty payloads.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "字典回傳格式不正確", "Auto comment dictionary empty payload errors should localize Traditional Chinese messages.");
+            }
+            finally
+            {
+                if (File.Exists(emptyDictionaryPath)) File.Delete(emptyDictionaryPath);
+            }
+
+            MethodInfo loadCoreMethod = typeof(TableDesignerForm).GetMethod("LoadAutoColumnCommentsCore", BindingFlags.Static | BindingFlags.NonPublic);
+            Dictionary<string, string> cachedDictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "CACHE_ONLY", "快取欄位" }
+            };
+            Dictionary<string, string> loadedFromCache = (Dictionary<string, string>)loadCoreMethod.Invoke(null, new object[]
+            {
+                new Func<string>(() => { throw new InvalidOperationException("remote down"); }),
+                new Action<Dictionary<string, string>>(_ => { }),
+                new Func<Dictionary<string, string>>(() => cachedDictionary)
+            });
+            Assert(loadedFromCache.ContainsKey("CACHE_ONLY"), "Auto comment dictionary should fall back to local cache when remote load fails.");
+            AssertContains(TableDesignerForm.GetAutoColumnCommentLastError(), "已改用本機快取", "Auto comment dictionary cache fallback should localize Traditional Chinese status.");
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                TableDesignerForm.PreviewAutoColumnCommentDictionaryImportFile("");
+                Assert(false, "Auto comment dictionary preview should require a source path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "File path is required", "Auto comment dictionary preview source validation should localize English messages.");
+            }
+
+            string invalidDictionaryPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_comment_dictionary_invalid_" + Guid.NewGuid().ToString("N") + ".json");
+            try
+            {
+                File.WriteAllText(invalidDictionaryPath, "[]", Encoding.UTF8);
+                TableDesignerForm.PreviewAutoColumnCommentDictionaryImportFile(invalidDictionaryPath);
+                Assert(false, "Auto comment dictionary preview should reject non-object JSON.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "auto comment dictionary format is invalid", "Auto comment dictionary invalid format errors should localize English messages.");
+            }
+            finally
+            {
+                if (File.Exists(invalidDictionaryPath)) File.Delete(invalidDictionaryPath);
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(dictionaryErrorLanguage, false);
+        }
     }
 
     private static void TestTableDesignerCommentDictionaryVersions()
