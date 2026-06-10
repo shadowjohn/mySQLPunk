@@ -4753,6 +4753,23 @@ public static class SmokeTests
             AssertEquals("CSV", summary.FormatName, "Export summary should expose a friendly format name.");
             AssertContains(summary.BuildDetailText(), summary.FileName, "Export summary detail text should include the file name.");
             AssertContains(summary.BuildDetailText(), "CSV", "Export summary detail text should include the format name.");
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                string zhSummaryDetail = summary.BuildDetailText();
+                AssertContains(zhSummaryDetail, "格式： CSV", "Export summary detail text should localize Traditional Chinese labels.");
+                AssertContains(zhSummaryDetail, "列數： 1", "Export summary detail text should include localized row count.");
+                Assert(!zhSummaryDetail.Contains("Format:"), "Traditional Chinese export summary detail should not keep hardcoded English labels.");
+
+                Localization.SetLanguage(Localization.English, false);
+                string enSummaryDetail = summary.BuildDetailText();
+                AssertContains(enSummaryDetail, "Format: CSV", "Export summary detail text should support English labels.");
+                AssertContains(enSummaryDetail, "Rows: 1", "English export summary detail should include row count.");
+            }
+            finally
+            {
+                Localization.SetLanguage(previousLanguage, false);
+            }
             using (ExportCompletedDialog dialog = new ExportCompletedDialog(summary))
             {
                 AssertEquals(Localization.T("Query.ExportSummaryTitle"), dialog.Text, "Export completed dialog should use the localized title.");

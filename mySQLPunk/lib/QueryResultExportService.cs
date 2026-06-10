@@ -40,11 +40,11 @@ namespace mySQLPunk.lib
 
         public string BuildDetailText()
         {
-            return "Format: " + FormatName + Environment.NewLine +
-                "Rows: " + Rows.ToString("N0") + Environment.NewLine +
-                "Size: " + FormatByteCount(BytesWritten) + Environment.NewLine +
-                "File: " + FileName + Environment.NewLine +
-                "Path: " + Path;
+            return Localization.T("Query.ExportSummaryFormat") + " " + FormatName + Environment.NewLine +
+                Localization.T("Query.ExportSummaryRows") + " " + Rows.ToString("N0") + Environment.NewLine +
+                Localization.T("Query.ExportSummarySize") + " " + FormatByteCount(BytesWritten) + Environment.NewLine +
+                Localization.T("Query.ExportSummaryFile") + " " + FileName + Environment.NewLine +
+                Localization.T("Query.ExportSummaryPath") + " " + Path;
         }
 
         public static string FormatByteCount(long bytes)
