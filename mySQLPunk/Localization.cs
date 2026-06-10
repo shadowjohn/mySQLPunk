@@ -25,6 +25,9 @@ namespace mySQLPunk
             Add("AppUpdate.GitHubOwnerRequired", "請指定 GitHub owner。", "GitHub owner is required.");
             Add("AppUpdate.GitHubRepositoryRequired", "請指定 GitHub repository。", "GitHub repository is required.");
             Add("AppUpdate.ReleaseJsonRequired", "Release JSON 不可為空。", "Release JSON is required.");
+            Add("AppUpdate.PortableZipPathRequired", "請指定可攜版更新壓縮檔路徑。", "Portable update zip path is required.");
+            Add("AppUpdate.PortableZipMissing", "找不到可攜版更新壓縮檔：{0}", "Portable update zip does not exist: {0}");
+            Add("AppUpdate.ApplicationDirectoryRequired", "請指定應用程式資料夾。", "Application directory is required.");
             Add("AdvancedRegistration.ApplicationPathRequired", "請指定應用程式路徑。", "Application path is required.");
             Add("Query.StreamingUnsupportedFormat", "串流匯出只支援 CSV、TSV、JSON、XML、HTML、Markdown 與 SQL。", "Streaming export only supports CSV, TSV, JSON, XML, HTML, Markdown, and SQL.");
             Add("Query.StreamingConnectionUnavailable", "目前連線類型未提供串流連線。", "This provider does not expose a streaming connection.");
@@ -436,6 +439,8 @@ namespace mySQLPunk
             Add("Update.HashMismatch", "更新檔 {0} 的 SHA-256 與 release manifest 不符。\n預期：{1}...\n實際：{2}...\n已停止開啟此更新檔。", "The SHA-256 for update package {0} does not match the release manifest.\nExpected: {1}...\nActual: {2}...\nOpening this update package was stopped.");
             Add("Update.Downloaded", "更新安裝程式已下載：{0}", "Update installer downloaded: {0}");
             Add("Update.PortableDownloaded", "可攜版更新壓縮檔已下載：{0}", "Portable update zip downloaded: {0}");
+            Add("Update.PortableApplyPrompt", "可攜版更新已下載：\n{0}\n\n是否關閉 mySQLPunk 並套用更新？\n選擇「否」會改為開啟壓縮檔，讓你手動更新。", "Portable update downloaded:\n{0}\n\nClose mySQLPunk and apply the update now?\nChoose No to open the zip for manual update.");
+            Add("Update.PortableApplyStarted", "可攜版更新腳本已啟動：{0}", "Portable update script started: {0}");
             Add("Update.NotAvailable", "目前已是最新版本。", "You are already on the latest version.");
             Add("Update.CheckFailed", "檢查更新失敗：{0}", "Check for updates failed: {0}");
             Add("Connection.MarkedColor", "已標記連線色彩：{0}", "Connection color marked: {0}");

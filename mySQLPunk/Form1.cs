@@ -1325,7 +1325,26 @@ namespace mySQLPunk
             }
 
             UpdateMainStatus(Localization.Format("Update.PortableDownloaded", targetPath));
-            Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
+            if (MessageBox.Show(
+                Localization.Format("Update.PortableApplyPrompt", targetPath),
+                Localization.T("Menu.CheckUpdates"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                string scriptPath = AppUpdateService.WritePortableUpdateApplyScript(
+                    targetPath,
+                    Application.StartupPath,
+                    Application.ExecutablePath,
+                    Process.GetCurrentProcess().Id,
+                    downloadDirectory);
+                Process.Start(AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(scriptPath));
+                UpdateMainStatus(Localization.Format("Update.PortableApplyStarted", scriptPath));
+                BeginInvoke(new Action(Application.Exit));
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
+            }
         }
 
         private async Task VerifyDownloadedUpdatePackageAsync(System.Net.WebClient client, AppUpdateCheckResult result, string targetPath)

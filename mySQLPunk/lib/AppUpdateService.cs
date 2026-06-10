@@ -1,7 +1,9 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography;
+using System.Text;
 using Newtonsoft.Json.Linq;
 
 namespace mySQLPunk.lib
@@ -119,6 +121,68 @@ namespace mySQLPunk.lib
 
             string fileName = GetPortableZipFileName(result);
             return Path.Combine(directory, fileName);
+        }
+
+        public static string WritePortableUpdateApplyScript(string portableZipPath, string applicationDirectory, string executablePath, int processId, string scriptDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(portableZipPath)) throw new ArgumentException(Localization.T("AppUpdate.PortableZipPathRequired"), nameof(portableZipPath));
+            if (!File.Exists(portableZipPath)) throw new FileNotFoundException(Localization.Format("AppUpdate.PortableZipMissing", portableZipPath), portableZipPath);
+            if (string.IsNullOrWhiteSpace(applicationDirectory)) throw new ArgumentException(Localization.T("AppUpdate.ApplicationDirectoryRequired"), nameof(applicationDirectory));
+            if (string.IsNullOrWhiteSpace(executablePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(executablePath));
+            if (string.IsNullOrWhiteSpace(scriptDirectory)) throw new ArgumentException(Localization.T("Common.DownloadDirectoryRequired"), nameof(scriptDirectory));
+
+            Directory.CreateDirectory(scriptDirectory);
+            string scriptPath = Path.Combine(scriptDirectory, "apply-portable-update-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".ps1");
+            File.WriteAllText(scriptPath, BuildPortableUpdateApplyScript(portableZipPath, applicationDirectory, executablePath, processId), new UTF8Encoding(false));
+            return scriptPath;
+        }
+
+        public static string BuildPortableUpdateApplyScript(string portableZipPath, string applicationDirectory, string executablePath, int processId)
+        {
+            if (string.IsNullOrWhiteSpace(portableZipPath)) throw new ArgumentException(Localization.T("AppUpdate.PortableZipPathRequired"), nameof(portableZipPath));
+            if (string.IsNullOrWhiteSpace(applicationDirectory)) throw new ArgumentException(Localization.T("AppUpdate.ApplicationDirectoryRequired"), nameof(applicationDirectory));
+            if (string.IsNullOrWhiteSpace(executablePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(executablePath));
+
+            StringBuilder script = new StringBuilder();
+            script.AppendLine("$ErrorActionPreference = 'Stop'");
+            script.AppendLine("$zipPath = '" + EscapePowerShellSingleQuotedString(portableZipPath) + "'");
+            script.AppendLine("$appDir = '" + EscapePowerShellSingleQuotedString(applicationDirectory) + "'");
+            script.AppendLine("$exePath = '" + EscapePowerShellSingleQuotedString(executablePath) + "'");
+            script.AppendLine("$processIdToWait = " + Math.Max(0, processId));
+            script.AppendLine("if ($processIdToWait -gt 0) {");
+            script.AppendLine("    try { Wait-Process -Id $processIdToWait -Timeout 120 -ErrorAction SilentlyContinue } catch { }");
+            script.AppendLine("}");
+            script.AppendLine("$staging = Join-Path ([System.IO.Path]::GetTempPath()) ('mysqlpunk-update-' + [System.Guid]::NewGuid().ToString('N'))");
+            script.AppendLine("New-Item -ItemType Directory -Path $staging -Force | Out-Null");
+            script.AppendLine("try {");
+            script.AppendLine("    Expand-Archive -LiteralPath $zipPath -DestinationPath $staging -Force");
+            script.AppendLine("    $source = $staging");
+            script.AppendLine("    $children = @(Get-ChildItem -LiteralPath $staging -Directory)");
+            script.AppendLine("    if ($children.Count -eq 1 -and (Test-Path -LiteralPath (Join-Path $children[0].FullName 'mySQLPunk.exe'))) {");
+            script.AppendLine("        $source = $children[0].FullName");
+            script.AppendLine("    }");
+            script.AppendLine("    Get-ChildItem -LiteralPath $source -Force | ForEach-Object {");
+            script.AppendLine("        Copy-Item -LiteralPath $_.FullName -Destination $appDir -Recurse -Force");
+            script.AppendLine("    }");
+            script.AppendLine("}");
+            script.AppendLine("finally {");
+            script.AppendLine("    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue");
+            script.AppendLine("}");
+            script.AppendLine("if (Test-Path -LiteralPath $exePath) {");
+            script.AppendLine("    Start-Process -FilePath $exePath");
+            script.AppendLine("}");
+            return script.ToString();
+        }
+
+        public static ProcessStartInfo BuildPortableUpdateApplyProcessStartInfo(string scriptPath)
+        {
+            if (string.IsNullOrWhiteSpace(scriptPath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(scriptPath));
+
+            return new ProcessStartInfo("powershell.exe")
+            {
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + scriptPath.Replace("\"", "\\\"") + "\"",
+                UseShellExecute = true
+            };
         }
 
         public static string GetInstallerFileName(AppUpdateCheckResult result)
@@ -295,6 +359,11 @@ namespace mySQLPunk.lib
                 sanitized = sanitized.Replace(invalid, '_');
             }
             return sanitized;
+        }
+
+        private static string EscapePowerShellSingleQuotedString(string value)
+        {
+            return (value ?? "").Replace("'", "''");
         }
     }
 }

@@ -6069,6 +6069,36 @@ public static class SmokeTests
         AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", AppUpdateService.GetPortableZipFileName(portableZip), "Portable update filename should keep the release asset name.");
         AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", Path.GetFileName(AppUpdateService.BuildPortableZipDownloadPath(portableZip, Path.GetTempPath())), "Portable update download path should keep the zip asset file name.");
 
+        string portableScriptZipPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_portable_update_" + Guid.NewGuid().ToString("N") + ".zip");
+        string portableScriptDir = Path.Combine(Path.GetTempPath(), "mysqlpunk_portable_update_script_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            File.WriteAllText(portableScriptZipPath, "zip-content", Encoding.UTF8);
+            string scriptPath = AppUpdateService.WritePortableUpdateApplyScript(
+                portableScriptZipPath,
+                @"C:\Tools\mySQLPunk",
+                @"C:\Tools\mySQLPunk\mySQLPunk.exe",
+                1234,
+                portableScriptDir);
+            Assert(File.Exists(scriptPath), "Portable updater should write an apply script.");
+
+            string script = File.ReadAllText(scriptPath, Encoding.UTF8);
+            AssertContains(script, "Wait-Process -Id $processIdToWait", "Portable updater should wait for the current process before copying files.");
+            AssertContains(script, "Expand-Archive -LiteralPath $zipPath", "Portable updater should extract the downloaded zip.");
+            AssertContains(script, "Copy-Item -LiteralPath $_.FullName -Destination $appDir", "Portable updater should copy extracted files into the app directory.");
+            AssertContains(script, "Start-Process -FilePath $exePath", "Portable updater should relaunch the application after copying.");
+
+            System.Diagnostics.ProcessStartInfo startInfo = AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(scriptPath);
+            AssertEquals("powershell.exe", startInfo.FileName, "Portable updater should launch PowerShell.");
+            AssertContains(startInfo.Arguments, "-ExecutionPolicy Bypass", "Portable updater should bypass script policy for the generated script only.");
+            AssertContains(startInfo.Arguments, scriptPath, "Portable updater should run the generated script.");
+        }
+        finally
+        {
+            if (File.Exists(portableScriptZipPath)) File.Delete(portableScriptZipPath);
+            if (Directory.Exists(portableScriptDir)) Directory.Delete(portableScriptDir, true);
+        }
+
         string updatePackagePath = Path.Combine(Path.GetTempPath(), "mysqlpunk_update_hash_" + Guid.NewGuid().ToString("N") + ".zip");
         try
         {
@@ -6132,6 +6162,26 @@ public static class SmokeTests
             catch (ArgumentException ex)
             {
                 AssertContains(ex.Message, "GitHub repository is required", "Update check should localize English GitHub repository validation.");
+            }
+
+            try
+            {
+                AppUpdateService.BuildPortableUpdateApplyScript("", @"C:\App", @"C:\App\mySQLPunk.exe", 1);
+                Assert(false, "Portable updater should require a zip path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "Portable update zip path is required", "Portable updater should localize English zip path validation.");
+            }
+
+            try
+            {
+                AppUpdateService.BuildPortableUpdateApplyScript(@"C:\Temp\update.zip", "", @"C:\App\mySQLPunk.exe", 1);
+                Assert(false, "Portable updater should require an application directory.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "Application directory is required", "Portable updater should localize English app directory validation.");
             }
 
             try

@@ -78,7 +78,7 @@ Smoke test harness：
 | 匯出 / Dump / Backup service | 可用 | 查詢結果多格式匯出、SQL dump 與邏輯 SQL 備份已抽出 service，Form UI 只負責觸發、檔案對話框與狀態呈現。 |
 | 連線與 metadata service | 可用 | 連線開啟、retry 判斷與 database metadata snapshot 已抽出 service，Form UI 保留 TreeView 呈現與錯誤提示。 |
 | 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、大型 SQL 停用編輯器輔助、資料表儲存自動交易、SQL 檔案位置、匯出位置、還原差異抽樣列數、結果網格字型與列高度、日期/時間與數字格式、工具提示顯示開關、診斷記錄、自動復原草稿、索引標籤開啟偏好、HTTP 代理與進階註冊設定。 |
-| 應用程式更新 | 部分可用 | 已支援從 GitHub Releases 檢查最新版本，說明選單可手動檢查，並可依選項在啟動時背景檢查；若 release 附帶 installer asset，可從程式內下載並啟動安裝程式；若只有 portable zip，可從程式內下載並開啟壓縮檔；若 release 附帶 `release-manifest.json` 且包含下載檔 SHA-256，開啟前會先校驗雜湊；`scripts/package-release.ps1` 可產生 portable zip 與 manifest，正式無縫套用更新仍待接 installer/updater。 |
+| 應用程式更新 | 部分可用 | 已支援從 GitHub Releases 檢查最新版本，說明選單可手動檢查，並可依選項在啟動時背景檢查；若 release 附帶 installer asset，可從程式內下載並啟動安裝程式；若只有 portable zip，可從程式內下載、校驗並產生套用腳本，關閉目前程式後解壓覆蓋並重新啟動；若 release 附帶 `release-manifest.json` 且包含下載檔 SHA-256，開啟或套用前會先校驗雜湊；`scripts/package-release.ps1` 可產生 portable zip 與 manifest，正式 installer/updater 體驗仍可再強化。 |
 
 ## 未完成功能與已知限制
 
@@ -91,10 +91,10 @@ Smoke test harness：
   - 完成內容：`ApplicationOptionSettings` 會將通用選項保存到 `application-options.json`；查詢視窗已讀取並套用記錄限制、編輯器字型大小、換行、Tab 空格、自動完成啟用狀態、是否自動載入 metadata，且 SQL 文字超過「大型檔案停用門檻」時會停用語法上色與自動完成以降低卡頓；資料表資料模式儲存時可依「自動開始交易」把同批新增、修改、刪除包在 provider 對應的 BEGIN/COMMIT/ROLLBACK 流程中；匯出預設資料夾、SQL 開啟/儲存資料夾、結果網格字型大小、結果列高度、日期/時間格式、千分位與是否使用系統數字格式也已套用；檔案位置頁可設定還原差異內容指紋抽樣列數，用於控制還原前後大型資料表內容比對最多讀取幾列；一般頁的「顯示工具提示」會控制主要工具列、連線按鈕、收藏選單與 TreeView 節點提示是否顯示；一般頁的「啟動時自動檢查更新」會在啟動後背景查詢 GitHub Releases，說明選單也提供手動檢查更新；進階選項的「啟用診斷記錄」會把查詢歷程以 JSONL 寫入 `選項 > 檔案位置` 的記錄位置，內容保留 SQL 預覽與 SHA-256 指紋，不保存完整 SQL 原文；自動復原的查詢開關與間隔會啟動查詢草稿定時保存，草稿寫入查詢資料夾下的 `auto-recovery`；索引標籤設定可決定新查詢開在主視窗分頁、最後使用位置或新視窗，且「允許重複開啟相同的物件」關閉時會重用同名同型別分頁；檢視選單的導覽窗格（含僅顯示活躍物件）、資訊窗格、清單/詳細資料、欄位排序（含遞增/遞減）、欄位顯示、頂部即時篩選、「隱藏物件群組」與「顯示隱藏的項目」會保存並套用設定，其中僅顯示活躍物件會隱藏空的物件分類，隱藏物件群組會把 Tables / Views / Functions / Users / Events / Queries 的物件直接顯示在 database 節點下且保留右鍵與雙擊操作，隱藏項目會預設過濾 SQLite 系統表、SpatiaLite metadata、sidecar metadata 與常見 provider 系統物件；連線能力的 HTTP 代理設定會套用到 WebRequest/WebClient 路徑，例如自動補註解字典下載與共用 HTTP helper，且「測試連線能力」會以目前代理設定執行 HTTP 探測並依目前語系回報直接連線、代理模式、SOCKS5 限制與結果；進階註冊可在目前使用者層級註冊 SQL 檔案開啟方式與 `mysqlpunk://` URL 協定，關閉選項時只移除本程式建立的註冊項目。
   - 後續方向：部分選項仍需逐步接到實際行為，例如 SOCKS5/provider 原生資料庫連線代理。
 
-- **應用程式打包與更新 ⚠️ 更新檢查與 portable 打包已補第一階段**
+- **應用程式打包與更新 ⚠️ 更新檢查、portable 打包與可攜版套用腳本已補齊**
   - 現況：`AppUpdateService` 可讀取 GitHub Releases latest API，解析 `tag_name`、版本、release notes、下載頁、installer asset 與 portable zip asset；主選單「說明 > 檢查更新...」可手動檢查，選項「啟動時自動檢查更新」會在啟動後背景檢查。
-  - 完成內容：版本比較會支援 `v1.2.3` 這類 release tag，若發現新版且 release 內有 `.exe` / `.msi` / `.msix` / `.appinstaller` asset，會下載到暫存更新資料夾並啟動安裝程式；若沒有 installer 但有 `mySQLPunk` portable zip，會下載到暫存更新資料夾並用系統 shell 開啟壓縮檔；若 release 同時附帶 `release-manifest.json` 且 manifest 內有對應檔名的 SHA-256，會在開啟更新檔前先比對下載檔雜湊，不符時停止開啟並顯示錯誤；若 release 沒有可直接下載的更新檔，才會提示開啟 release 下載頁；尚未發布 release 或網路失敗時會在手動檢查顯示錯誤，背景檢查只更新狀態列避免干擾使用者；更新檢查與下載會套用選項中心的 HTTP/HTTPS 代理設定；`scripts/package-release.ps1` 可用 Release 組態建置並產生 portable zip 與 `release-manifest.json`，manifest 包含 SHA-256 與檔案大小，可作為 GitHub Releases 上傳素材。
-  - 後續方向：正式打包可接 Velopack 或其他 installer 流程，讓更新進一步變成程式內下載、安裝並重啟套用。
+  - 完成內容：版本比較會支援 `v1.2.3` 這類 release tag，若發現新版且 release 內有 `.exe` / `.msi` / `.msix` / `.appinstaller` asset，會下載到暫存更新資料夾並啟動安裝程式；若沒有 installer 但有 `mySQLPunk` portable zip，會下載到暫存更新資料夾並詢問是否立即套用，選擇套用時會產生 PowerShell 腳本，等待目前程式結束後解壓 zip、覆蓋應用程式資料夾並重新啟動 `mySQLPunk.exe`，選擇不套用則維持開啟壓縮檔供手動更新；若 release 同時附帶 `release-manifest.json` 且 manifest 內有對應檔名的 SHA-256，會在開啟或套用前先比對下載檔雜湊，不符時停止並顯示錯誤；若 release 沒有可直接下載的更新檔，才會提示開啟 release 下載頁；尚未發布 release 或網路失敗時會在手動檢查顯示錯誤，背景檢查只更新狀態列避免干擾使用者；更新檢查與下載會套用選項中心的 HTTP/HTTPS 代理設定；`scripts/package-release.ps1` 可用 Release 組態建置並產生 portable zip 與 `release-manifest.json`，manifest 包含 SHA-256 與檔案大小，可作為 GitHub Releases 上傳素材。
+  - 後續方向：正式打包仍可接 Velopack 或其他 installer 流程，讓安裝版更新支援更完整的差分、回復與版本控管。
 
 - **連線群組與物件群組顯示 ✅ 已完成**
   - 觸發位置：左側樹狀清單空白處右鍵選單的「新增群組」，以及連線/群組節點右鍵選單的群組操作項目。
