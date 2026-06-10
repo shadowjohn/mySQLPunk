@@ -237,6 +237,11 @@ namespace mySQLPunk
             Add("Status.ConnectionsExported", "連線設定已匯出。", "Connections exported.");
             Add("Status.ConnectionsImported", "連線設定已匯入。", "Connections imported.");
             Add("Status.ConnectionListRefreshed", "連線清單已重新整理。", "Connection list refreshed.");
+            Add("Status.SpatiaLiteReady", "SQLite + SpatiaLite 就緒", "SQLite + SpatiaLite ready");
+            Add("Status.SpatiaLiteRepairStarted", "SpatiaLite runtime 修復腳本已啟動。", "SpatiaLite runtime repair script started.");
+            Add("Status.QueryHistoryLoaded", "查詢歷程已載入：{0}", "Query history loaded: {0}");
+            Add("Status.QueryTabOpened", "查詢分頁已開啟：{0}", "Query tab opened: {0}");
+            Add("Status.DatabaseGroupMissing", "目前資料庫沒有 {0} 節點。", "Current database has no {0} node.");
             Add("Status.BackupIntegrityPassed", "備份完整性定期驗證完成：{0} 個檔案通過。", "Scheduled backup integrity check completed: {0} files passed.");
             Add("Status.BackupIntegrityFailed", "備份完整性定期驗證發現 {0} 個異常檔案。", "Scheduled backup integrity check found {0} invalid files.");
             Add("Status.BackupIntegritySkipped", "備份完整性定期驗證已略過：目前沒有備份檔。", "Scheduled backup integrity check skipped: no backup files found.");

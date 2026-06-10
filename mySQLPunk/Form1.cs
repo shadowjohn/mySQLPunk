@@ -550,7 +550,7 @@ namespace mySQLPunk
                         myN.connections[index]["isConnect"] = "T";
                         ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
 
-                        if (db.SpatiaLiteEnabled) UpdateMainStatus("SQLite + SpatiaLite ready");
+                        if (db.SpatiaLiteEnabled) UpdateMainStatus(BuildSpatiaLiteReadyStatusText());
                         else if (!string.IsNullOrWhiteSpace(db.SpatiaLiteLoadError)) UpdateMainStatus(db.SpatiaLiteLoadError);
 
                         TreeNode connNode = FindConnectionNode(index);
@@ -1375,6 +1375,31 @@ namespace mySQLPunk
         {
             string value = (hash ?? string.Empty).Trim();
             return value.Length <= 12 ? value : value.Substring(0, 12);
+        }
+
+        private static string BuildSpatiaLiteReadyStatusText()
+        {
+            return Localization.T("Status.SpatiaLiteReady");
+        }
+
+        private static string BuildSpatiaLiteRepairStartedStatusText()
+        {
+            return Localization.T("Status.SpatiaLiteRepairStarted");
+        }
+
+        private static string BuildQueryHistoryLoadedStatusText(string databaseName)
+        {
+            return Localization.Format("Status.QueryHistoryLoaded", databaseName);
+        }
+
+        private static string BuildQueryTabOpenedStatusText(string tabTitle)
+        {
+            return Localization.Format("Status.QueryTabOpened", tabTitle);
+        }
+
+        private static string BuildDatabaseGroupMissingStatusText(string groupName)
+        {
+            return Localization.Format("Status.DatabaseGroupMissing", groupName);
         }
 
         private void OpenConnectionToolStripMenuItem_Click(object sender, EventArgs e)
@@ -2722,7 +2747,7 @@ namespace mySQLPunk
 
             thirty_two_change("query");
             table_top.DataSource = BuildQueryHistoryTable(target.DatabaseName);
-            UpdateMainStatus("Query history loaded: " + target.DatabaseName);
+            UpdateMainStatus(BuildQueryHistoryLoadedStatusText(target.DatabaseName));
         }
 
         private void BuildViewMenuItems(ToolStripMenuItem viewMenu)
@@ -6741,7 +6766,7 @@ namespace mySQLPunk
                         HandleSpatiaLiteRepairCompleted(exitCode);
                     };
                 }
-                UpdateMainStatus("SpatiaLite runtime 修復腳本已啟動。");
+                UpdateMainStatus(BuildSpatiaLiteRepairStartedStatusText());
             }
             catch (Exception ex)
             {
@@ -6863,7 +6888,7 @@ namespace mySQLPunk
             queryTabs.SelectedIndex = tabIndex;
             queryTabs.BringToFront();
             UpdateObjectFilterVisibility();
-            UpdateMainStatus("Query tab opened: " + queryTabs.TabPages[tabIndex].Text);
+            UpdateMainStatus(BuildQueryTabOpenedStatusText(queryTabs.TabPages[tabIndex].Text));
             return true;
         }
 
@@ -13045,7 +13070,7 @@ namespace mySQLPunk
                 }
             }
 
-            UpdateMainStatus("目前資料庫沒有 " + groupName + " 節點。");
+            UpdateMainStatus(BuildDatabaseGroupMissingStatusText(groupName));
         }
 
         private TreeNode GetSelectedDatabaseNode()

@@ -5656,10 +5656,21 @@ public static class SmokeTests
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo spatiaLiteReadyStatusMethod = typeof(Form1).GetMethod("BuildSpatiaLiteReadyStatusText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo spatiaLiteRepairStatusMethod = typeof(Form1).GetMethod("BuildSpatiaLiteRepairStartedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo queryHistoryLoadedStatusMethod = typeof(Form1).GetMethod("BuildQueryHistoryLoadedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo queryTabOpenedStatusMethod = typeof(Form1).GetMethod("BuildQueryTabOpenedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo databaseGroupMissingStatusMethod = typeof(Form1).GetMethod("BuildDatabaseGroupMissingStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         string oldLanguage = Localization.CurrentLanguage;
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertEquals("SQLite + SpatiaLite 就緒", (string)spatiaLiteReadyStatusMethod.Invoke(null, new object[0]), "SpatiaLite ready status should localize Traditional Chinese.");
+            AssertEquals("SpatiaLite runtime 修復腳本已啟動。", (string)spatiaLiteRepairStatusMethod.Invoke(null, new object[0]), "SpatiaLite repair status should localize Traditional Chinese.");
+            AssertEquals("查詢歷程已載入：main", (string)queryHistoryLoadedStatusMethod.Invoke(null, new object[] { "main" }), "Query history status should localize Traditional Chinese.");
+            AssertEquals("查詢分頁已開啟：Query 1", (string)queryTabOpenedStatusMethod.Invoke(null, new object[] { "Query 1" }), "Query tab status should localize Traditional Chinese.");
+            AssertEquals("目前資料庫沒有 Reports 節點。", (string)databaseGroupMissingStatusMethod.Invoke(null, new object[] { "Reports" }), "Missing database group status should localize Traditional Chinese.");
+
             DataTable zhSchemaOverview = (DataTable)schemaOverviewMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
             DataRow zhSchemaTable = FindDataRow(zhSchemaOverview, "名稱", "public.users");
             Assert(zhSchemaTable != null, "Schema overview should include fake table metadata.");
@@ -5774,6 +5785,12 @@ public static class SmokeTests
             AssertContains(zhOpenTabs["說明"].ToString(), "分頁", "Maintenance checklist should localize query tab count detail.");
 
             Localization.SetLanguage(Localization.English, false);
+            AssertEquals("SQLite + SpatiaLite ready", (string)spatiaLiteReadyStatusMethod.Invoke(null, new object[0]), "SpatiaLite ready status should support English.");
+            AssertEquals("SpatiaLite runtime repair script started.", (string)spatiaLiteRepairStatusMethod.Invoke(null, new object[0]), "SpatiaLite repair status should support English.");
+            AssertEquals("Query history loaded: main", (string)queryHistoryLoadedStatusMethod.Invoke(null, new object[] { "main" }), "Query history status should support English.");
+            AssertEquals("Query tab opened: Query 1", (string)queryTabOpenedStatusMethod.Invoke(null, new object[] { "Query 1" }), "Query tab status should support English.");
+            AssertEquals("Current database has no Reports node.", (string)databaseGroupMissingStatusMethod.Invoke(null, new object[] { "Reports" }), "Missing database group status should support English.");
+
             DataTable postgresCapabilities = (DataTable)capabilitiesMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
             DataRow tablesCapability = FindDataRow(postgresCapabilities, "項目", "Tables");
             Assert(tablesCapability != null, "Provider capabilities should include tables.");
