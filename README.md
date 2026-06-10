@@ -308,6 +308,7 @@ Smoke test harness：
 
 - **既有資料表修改仍有不支援情境 ✅ provider ALTER 與進階索引 smoke test 已補齊**
   - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」；PostgreSQL Table Designer 已支援 `schema.table` 形式的既有資料表 SQL 產生，不再固定套用 `public` schema；PostgreSQL / SQL Server / Oracle 的 FULLTEXT、SPATIAL 索引 SQL 產生已納入可重跑 smoke test。
+  - 本輪補齊：SQLite 既有欄位型別、NULL 或 DEFAULT 變更需要重建表的限制說明已改用語系字串，繁中與英文預覽都會顯示一致原因。
   - 本輪補齊：Table Designer 載入既有資料表索引 metadata 失敗時不再沉默吞錯，會顯示可理解的警告訊息，索引頁改以空白狀態開啟，欄位設計仍可繼續使用。
   - 本輪補齊：PostgreSQL provider 會列出非 `public` schema 的 Table/View、Function 與 Trigger，並讓欄位、索引、資料瀏覽、列數、複製建表、View DDL 與批次寫入等主要操作依 `schema.table` 產生正確 SQL；QueryForm 資料表新增/更新/刪除與 Form1 共用物件 SQL（開啟查詢、Drop、Dump/DDL、資料產生、補註解）也會依 `schema.table` 寫入正確 schema；Table Designer 欄位修改、註解、Primary Key 變更與索引刪除的 SQL 預覽也會依目前資料表 schema 產生正確物件名稱；新增 View / Function 範本會沿用目前選取物件的 schema，避免在非預設 schema 工作時又產生 `public` / `dbo` 範本。
   - 本輪驗證：新增 MySQL / PostgreSQL / SQL Server / Oracle / SQLite 既有資料表 ALTER smoke test，覆蓋欄位改名、型別變更、NULL / DEFAULT、註解、新增欄位、MySQL 刪欄位，以及 SQLite 受限 ALTER 的重建表策略。

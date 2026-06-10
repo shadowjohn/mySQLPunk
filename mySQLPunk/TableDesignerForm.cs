@@ -2990,7 +2990,7 @@ namespace mySQLPunk
             if (_db is my_sqlite)
             {
                 if (typeChanged || nullChanged || defaultChanged)
-                    unsupported.Add("SQLite 修改既有欄位型別、NULL 或 DEFAULT 需要重建資料表：" + columnName);
+                    unsupported.Add(Localization.Format("Designer.SqliteAlterColumnRebuildRequired", columnName));
                 if (commentChanged)
                     statements.AddRange(BuildSqliteColumnCommentStatements(_tableName, current));
                 return statements;

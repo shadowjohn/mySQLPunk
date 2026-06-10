@@ -3173,6 +3173,24 @@ public static class SmokeTests
         AssertContains(sqliteSql, "DROP TABLE \"demo_table\"", "SQLite ALTER should drop the old table during rebuild.");
         AssertContains(sqliteSql, "RENAME TO \"demo_table\"", "SQLite ALTER should rename the rebuild table back.");
         AssertContains(sqliteSql, "__mysqlpunk_column_comments", "SQLite ALTER should preserve sidecar comments.");
+
+        string oldLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            string sqliteUnsupportedZh = BuildSqliteAlterColumnUnsupportedMessage();
+            AssertContains(sqliteUnsupportedZh, "SQLite 修改既有欄位型別", "SQLite unsupported ALTER detail should localize Traditional Chinese messages.");
+            AssertContains(sqliteUnsupportedZh, "display_name", "SQLite unsupported ALTER detail should include the column name.");
+
+            Localization.SetLanguage(Localization.English, false);
+            string sqliteUnsupportedEn = BuildSqliteAlterColumnUnsupportedMessage();
+            AssertContains(sqliteUnsupportedEn, "SQLite requires a table rebuild", "SQLite unsupported ALTER detail should localize English messages.");
+            AssertContains(sqliteUnsupportedEn, "display_name", "SQLite unsupported ALTER English detail should include the column name.");
+        }
+        finally
+        {
+            Localization.SetLanguage(oldLanguage, false);
+        }
     }
 
     private static void TestPreDeleteBackupPathBuilder()
@@ -7068,6 +7086,30 @@ public static class SmokeTests
         {
             indexesGrid.Dispose();
         }
+    }
+
+    private static string BuildSqliteAlterColumnUnsupportedMessage()
+    {
+        TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
+        SetPrivateField(form, "_db", new my_sqlite());
+        SetPrivateField(form, "_tableName", "demo_table");
+
+        DataTable originalColumns = CreateDesignerColumnsTable();
+        AddDesignerColumn(originalColumns, "display_name", "varchar", "50", "", false, false, "", "old comment", "display_name");
+        DataTable currentColumns = CreateDesignerColumnsTable();
+        AddDesignerColumn(currentColumns, "display_name", "varchar", "120", "", true, false, "unknown", "old comment", "display_name");
+
+        List<string> unsupported = new List<string>();
+        MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod("BuildAlterColumnStatements", BindingFlags.Instance | BindingFlags.NonPublic);
+        buildMethod.Invoke(form, new object[]
+        {
+            originalColumns.Rows[0],
+            currentColumns.Rows[0],
+            "display_name",
+            unsupported
+        });
+
+        return string.Join("\n", unsupported.ToArray());
     }
 
     private static string BuildOraclePreviewNotice(string sql, string databaseName, string tableName)

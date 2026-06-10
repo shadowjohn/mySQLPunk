@@ -1003,6 +1003,7 @@ namespace mySQLPunk
             Add("Designer.ConfirmCloseChanges", "你要儲存對 {0} 的變更嗎？", "Save changes to {0}?");
             Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
             Add("Designer.NoChangesDetected", "沒有偵測到變更。", "No changes detected.");
+            Add("Designer.SqliteAlterColumnRebuildRequired", "SQLite 修改既有欄位型別、NULL 或 DEFAULT 需要重建資料表：{0}", "SQLite requires a table rebuild to change an existing column type, NULL setting, or DEFAULT: {0}");
             Add("Designer.AutoCommentsUnavailable", "無法載入自動註解字典，請稍後再試。", "Cannot load the auto comment dictionary. Try again later.");
             Add("Designer.AutoCommentsLoadFailed", "無法載入自動註解字典：{0}", "Cannot load the auto comment dictionary: {0}");
             Add("Designer.AutoCommentsUnsupported", "目前連線類型不支援欄位註解，無法直接補註解。", "The current connection type does not support column comments, so comments cannot be filled directly.");
