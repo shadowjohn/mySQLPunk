@@ -5811,6 +5811,10 @@ public static class SmokeTests
         MethodInfo queryHistoryLoadedStatusMethod = typeof(Form1).GetMethod("BuildQueryHistoryLoadedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo queryTabOpenedStatusMethod = typeof(Form1).GetMethod("BuildQueryTabOpenedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo databaseGroupMissingStatusMethod = typeof(Form1).GetMethod("BuildDatabaseGroupMissingStatusText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo modelDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseModelDescription", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo biDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseBIDescription", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo otherDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseOtherToolDescription", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo reportDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseReportDescription", BindingFlags.Static | BindingFlags.NonPublic);
         string oldLanguage = Localization.CurrentLanguage;
         try
         {
@@ -5822,6 +5826,10 @@ public static class SmokeTests
             AssertEquals("查詢歷程已載入：main", (string)queryHistoryLoadedStatusMethod.Invoke(null, new object[] { "main" }), "Query history status should localize Traditional Chinese.");
             AssertEquals("查詢分頁已開啟：Query 1", (string)queryTabOpenedStatusMethod.Invoke(null, new object[] { "Query 1" }), "Query tab status should localize Traditional Chinese.");
             AssertEquals("目前資料庫沒有 Reports 節點。", (string)databaseGroupMissingStatusMethod.Invoke(null, new object[] { "Reports" }), "Missing database group status should localize Traditional Chinese.");
+            AssertContains((string)modelDescriptionMethod.Invoke(null, new object[] { "Column Catalog" }), "欄位", "Model descriptions should localize Traditional Chinese text.");
+            AssertContains((string)biDescriptionMethod.Invoke(null, new object[] { "Table Size Summary" }), "資料長度", "BI descriptions should localize Traditional Chinese text.");
+            AssertContains((string)otherDescriptionMethod.Invoke(null, new object[] { "Provider Capabilities" }), "可用功能", "Other tool descriptions should localize Traditional Chinese text.");
+            AssertContains((string)reportDescriptionMethod.Invoke(null, new object[] { "Object Inventory" }), "備份目標", "Report descriptions should localize Traditional Chinese text.");
 
             DataTable zhSchemaOverview = (DataTable)schemaOverviewMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
             DataRow zhSchemaTable = FindDataRow(zhSchemaOverview, "名稱", "public.users");
@@ -5869,6 +5877,7 @@ public static class SmokeTests
             DataRow zhModelRow = FindDataRow(zhModelsGroup, "名稱", "Schema Overview");
             Assert(zhModelRow != null, "Database models group should include schema overview.");
             AssertContains(zhModelRow["類型"].ToString(), "模型", "Database models group should localize Traditional Chinese model type.");
+            AssertContains(zhModelRow["描述"].ToString(), "欄位數", "Database models group should localize Traditional Chinese descriptions.");
 
             DataTable zhUnknownGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Unknown", new Dictionary<string, object>() });
             DataRow zhUnknownRow = FindDataRow(zhUnknownGroup, "名稱", "Unknown");
@@ -5944,6 +5953,10 @@ public static class SmokeTests
             AssertEquals("Query history loaded: main", (string)queryHistoryLoadedStatusMethod.Invoke(null, new object[] { "main" }), "Query history status should support English.");
             AssertEquals("Query tab opened: Query 1", (string)queryTabOpenedStatusMethod.Invoke(null, new object[] { "Query 1" }), "Query tab status should support English.");
             AssertEquals("Current database has no Reports node.", (string)databaseGroupMissingStatusMethod.Invoke(null, new object[] { "Reports" }), "Missing database group status should support English.");
+            AssertContains((string)modelDescriptionMethod.Invoke(null, new object[] { "Column Catalog" }), "columns", "Model descriptions should support English text.");
+            AssertContains((string)biDescriptionMethod.Invoke(null, new object[] { "Table Size Summary" }), "data length", "BI descriptions should support English text.");
+            AssertContains((string)otherDescriptionMethod.Invoke(null, new object[] { "Provider Capabilities" }), "capabilities", "Other tool descriptions should support English text.");
+            AssertContains((string)reportDescriptionMethod.Invoke(null, new object[] { "Object Inventory" }), "backup targets", "Report descriptions should support English text.");
 
             DataTable postgresCapabilities = (DataTable)capabilitiesMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
             DataRow tablesCapability = FindDataRow(postgresCapabilities, "項目", "Tables");
@@ -5992,6 +6005,7 @@ public static class SmokeTests
             Assert(enReportRow != null, "Database reports group should include database summary.");
             AssertEquals("Report", enReportRow["類型"].ToString(), "Database reports group should support English report type.");
             AssertEquals("Ready", enReportRow["狀態"].ToString(), "Database reports group should support English ready status.");
+            AssertContains(enReportRow["描述"].ToString(), "object counts", "Database reports group should support English descriptions.");
 
             DataTable enBackupsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Backups", new Dictionary<string, object>() });
             DataRow enBackupRow = FindDataRow(enBackupsGroup, "名稱", "main");

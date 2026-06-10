@@ -361,6 +361,9 @@ namespace mySQLPunk
             Add("DatabaseModel.ObjectTypeTable", "資料表", "Table");
             Add("DatabaseModel.ObjectTypeView", "檢視", "View");
             Add("DatabaseModel.NoExplicitIndexes", "（沒有明確索引）", "(no explicit indexes)");
+            Add("DatabaseModel.DescriptionSchemaOverview", "彙整資料表與檢視的欄位數、索引數與列數", "Summarizes table and view column counts, index counts, and row counts.");
+            Add("DatabaseModel.DescriptionColumnCatalog", "列出資料表與檢視欄位、型別、空值與鍵資訊", "Lists table and view columns, data types, nullability, and key metadata.");
+            Add("DatabaseModel.DescriptionIndexCatalog", "列出資料表索引、欄位順序與唯一性", "Lists table indexes, column order, and uniqueness.");
             Add("Detail.ErrorLoadingTableDetails", "載入資料表細節失敗：{0}", "Error loading details: {0}");
             Add("Detail.ErrorLoadingViewDetails", "載入檢視細節失敗：{0}", "Error loading view details: {0}");
             Add("Detail.ErrorLoadingEventDetails", "載入事件細節失敗：{0}", "Error loading event details: {0}");
@@ -371,10 +374,16 @@ namespace mySQLPunk
             Add("Detail.UserNotFound", "找不到使用者：{0}", "User not found: {0}");
             Add("DatabaseReport.SqliteBackupSource", "SQLite 備份來源", "SQLite Backup Source");
             Add("DatabaseReport.SqlBackupTarget", "SQL 備份目標", "SQL Backup Target");
+            Add("DatabaseReport.DescriptionDatabaseSummary", "彙整資料庫物件數量與目前開啟狀態", "Summarizes database object counts and current open state.");
+            Add("DatabaseReport.DescriptionTableRowCounts", "列出所有資料表目前列數", "Lists current row counts for all tables.");
+            Add("DatabaseReport.DescriptionObjectInventory", "彙整資料表、檢視、函式、事件與備份目標", "Summarizes tables, views, functions, events, and backup targets.");
             Add("DatabaseBI.CategoryTables", "資料表", "Tables");
             Add("DatabaseBI.CategoryViews", "檢視", "Views");
             Add("DatabaseBI.CategoryFunctions", "函式", "Functions");
             Add("DatabaseBI.CategoryEvents", "事件", "Events");
+            Add("DatabaseBI.DescriptionObjectDistribution", "統計資料庫物件類別分布", "Counts database object category distribution.");
+            Add("DatabaseBI.DescriptionTableSizeSummary", "彙整資料表列數、資料長度、索引長度與引擎", "Summarizes table rows, data length, index length, and engine.");
+            Add("DatabaseBI.DescriptionRowCountRanking", "依列數排序資料表與檢視", "Ranks tables and views by row count.");
             Add("DatabaseGroup.TypeModel", "模型", "Model");
             Add("DatabaseGroup.TypeBI", "BI", "BI");
             Add("DatabaseGroup.TypeOther", "其它", "Other");
@@ -384,6 +393,9 @@ namespace mySQLPunk
             Add("DatabaseGroup.StatusMissingSource", "缺少來源", "Missing source");
             Add("DatabaseGroup.StatusEmpty", "空白", "Empty");
             Add("DatabaseGroup.LogicalBackupPath", "（邏輯備份）", "(logical backup)");
+            Add("DatabaseOther.DescriptionProviderCapabilities", "列出目前資料庫 Provider 可用功能", "Lists capabilities available for the current database provider.");
+            Add("DatabaseOther.DescriptionMaintenanceChecklist", "彙整連線、備份、查詢分頁與資料表狀態", "Summarizes connection, backup, query tab, and table status.");
+            Add("DatabaseOther.DescriptionConnectionDiagnostics", "檢查連線狀態、物件數量與備份來源", "Checks connection state, object counts, and backup source.");
             Add("DatabaseSearch.TypeTable", "資料表", "Table");
             Add("DatabaseSearch.TypeView", "檢視", "View");
             Add("DatabaseSearch.TypeTableColumn", "資料表欄位", "Table Column");

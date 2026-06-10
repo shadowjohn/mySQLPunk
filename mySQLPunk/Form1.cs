@@ -7924,15 +7924,15 @@ namespace mySQLPunk
         {
             if (string.Equals(reportName, "Table Row Counts", StringComparison.OrdinalIgnoreCase))
             {
-                return "列出所有資料表目前列數";
+                return Localization.T("DatabaseReport.DescriptionTableRowCounts");
             }
 
             if (string.Equals(reportName, "Object Inventory", StringComparison.OrdinalIgnoreCase))
             {
-                return "彙整資料表、檢視、函式、事件與備份目標";
+                return Localization.T("DatabaseReport.DescriptionObjectInventory");
             }
 
-            return "彙整資料庫物件數量與目前開啟狀態";
+            return Localization.T("DatabaseReport.DescriptionDatabaseSummary");
         }
 
         private static List<string> GetTablesSafe(IDatabase db, string dbName)
@@ -8106,15 +8106,15 @@ namespace mySQLPunk
         {
             if (string.Equals(modelName, "Column Catalog", StringComparison.OrdinalIgnoreCase))
             {
-                return "列出資料表與檢視欄位、型別、空值與鍵資訊";
+                return Localization.T("DatabaseModel.DescriptionColumnCatalog");
             }
 
             if (string.Equals(modelName, "Index Catalog", StringComparison.OrdinalIgnoreCase))
             {
-                return "列出資料表索引、欄位順序與唯一性";
+                return Localization.T("DatabaseModel.DescriptionIndexCatalog");
             }
 
-            return "彙整資料表與檢視的欄位數、索引數與列數";
+            return Localization.T("DatabaseModel.DescriptionSchemaOverview");
         }
 
         private static DataTable GetColumnsSafe(IDatabase db, string dbName, string objectName)
@@ -8362,15 +8362,15 @@ namespace mySQLPunk
         {
             if (string.Equals(biName, "Table Size Summary", StringComparison.OrdinalIgnoreCase))
             {
-                return "彙整資料表列數、資料長度、索引長度與引擎";
+                return Localization.T("DatabaseBI.DescriptionTableSizeSummary");
             }
 
             if (string.Equals(biName, "Row Count Ranking", StringComparison.OrdinalIgnoreCase))
             {
-                return "依列數排序資料表與檢視";
+                return Localization.T("DatabaseBI.DescriptionRowCountRanking");
             }
 
-            return "統計資料庫物件類別分布";
+            return Localization.T("DatabaseBI.DescriptionObjectDistribution");
         }
 
         private void ShowDatabaseOtherTool(IDatabase db, string dbName, string toolName, Dictionary<string, object> connInfo = null)
@@ -8531,15 +8531,15 @@ namespace mySQLPunk
         {
             if (string.Equals(toolName, "Provider Capabilities", StringComparison.OrdinalIgnoreCase))
             {
-                return "列出目前資料庫 Provider 可用功能";
+                return Localization.T("DatabaseOther.DescriptionProviderCapabilities");
             }
 
             if (string.Equals(toolName, "Maintenance Checklist", StringComparison.OrdinalIgnoreCase))
             {
-                return "彙整連線、備份、查詢分頁與資料表狀態";
+                return Localization.T("DatabaseOther.DescriptionMaintenanceChecklist");
             }
 
-            return "檢查連線狀態、物件數量與備份來源";
+            return Localization.T("DatabaseOther.DescriptionConnectionDiagnostics");
         }
 
         private DataTable GetDatabaseEvents(IDatabase db, string dbName)
