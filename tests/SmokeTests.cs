@@ -3716,6 +3716,41 @@ public static class SmokeTests
             AssertContains(largeContentSummary, "large_orders：內容指紋變更", "Large restore content diff should detect sampled row value changes.");
             AssertContains(largeContentSummary, "抽樣 120/250 列", "Large restore content diff should report sampled coverage.");
 
+            string restoreDiffLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.English, false);
+                string englishNamedSummary = BackupRestoreDiffService.BuildSummary(namedBefore, namedAfter);
+                AssertContains(englishNamedSummary, "Tables: 2 -> 7 (+5)", "Restore diff should localize English table count lines.");
+                AssertContains(englishNamedSummary, "Added: archive_2026, audit_log, daily_stats, monthly_stats, orders ... and 6 items", "Restore diff should localize English long added table lists.");
+                AssertContains(englishNamedSummary, "Removed: old_logs", "Restore diff should localize English removed table names.");
+                AssertContains(englishNamedSummary, "Views: 1 -> 2 (+1)", "Restore diff should localize English view count lines.");
+
+                string englishSchemaSummary = BackupRestoreDiffService.BuildSummary(schemaBefore, schemaAfter);
+                AssertContains(englishSchemaSummary, "Row count diff: users: 2 -> 5 (+3)", "Restore diff should localize English row count changes.");
+                AssertContains(englishSchemaSummary, "Column diff:", "Restore diff should localize English schema column headings.");
+                AssertContains(englishSchemaSummary, "Added users.email", "Restore diff should localize English added columns.");
+                AssertContains(englishSchemaSummary, "Removed users.legacy_code", "Restore diff should localize English removed columns.");
+                AssertContains(englishSchemaSummary, "Changed users.name", "Restore diff should localize English changed columns.");
+                AssertContains(englishSchemaSummary, "type: varchar(50) -> varchar(100)", "Restore diff should localize English type changes.");
+                AssertContains(englishSchemaSummary, "default: '' -> NULL", "Restore diff should localize English default changes.");
+                AssertContains(englishSchemaSummary, "comment: 姓名 -> 顯示名稱", "Restore diff should localize English comment change labels.");
+
+                string englishContentSummary = BackupRestoreDiffService.BuildSummary(contentBefore, contentAfter);
+                Assert(!englishContentSummary.Contains("users: content fingerprint changed"), "English restore content diff should remain row-order independent.");
+                AssertContains(englishContentSummary, "Data content diff: orders: content fingerprint changed", "Restore content diff should localize English content changes.");
+                AssertContains(englishContentSummary, "compared 2/2 rows", "Restore content diff should localize English full comparison coverage.");
+                AssertContains(englishContentSummary, "rows 2 -> 2", "Restore content diff should localize English row counts.");
+
+                string englishLargeContentSummary = BackupRestoreDiffService.BuildSummary(largeBefore, largeAfter);
+                AssertContains(englishLargeContentSummary, "large_orders: content fingerprint changed", "Large restore content diff should localize English changed table details.");
+                AssertContains(englishLargeContentSummary, "sampled 120/250 rows", "Large restore content diff should localize English sampled coverage.");
+            }
+            finally
+            {
+                Localization.SetLanguage(restoreDiffLanguage, false);
+            }
+
             DatabaseRestoreContentScanReport scanReport = BackupRestoreDiffService.BuildContentScanReport(
                 largeBefore,
                 largeAfter,

@@ -307,27 +307,27 @@ namespace mySQLPunk.lib
 
             List<string> lines = new List<string>
             {
-                BuildLine("資料表", before.TableCount, after.TableCount, before.Tables, after.Tables),
-                BuildLine("檢視", before.ViewCount, after.ViewCount, before.Views, after.Views),
-                BuildLine("函式/程序", before.FunctionCount, after.FunctionCount, before.Functions, after.Functions),
-                BuildLine("事件/Trigger", before.EventCount, after.EventCount, before.Events, after.Events)
+                BuildLine(Localization.T("Backup.RestoreDiffTables"), before.TableCount, after.TableCount, before.Tables, after.Tables),
+                BuildLine(Localization.T("Backup.RestoreDiffViews"), before.ViewCount, after.ViewCount, before.Views, after.Views),
+                BuildLine(Localization.T("Backup.RestoreDiffRoutines"), before.FunctionCount, after.FunctionCount, before.Functions, after.Functions),
+                BuildLine(Localization.T("Backup.RestoreDiffEvents"), before.EventCount, after.EventCount, before.Events, after.Events)
             };
             string rowCountDiff = BuildRowCountDiffSummary(before, after);
             if (!string.IsNullOrWhiteSpace(rowCountDiff))
             {
-                lines.Add("資料列差異：" + rowCountDiff);
+                lines.Add(Localization.Format("Backup.RestoreDiffRowCount", rowCountDiff));
             }
 
             string columnDiff = BuildColumnDiffSummary(before, after);
             if (!string.IsNullOrWhiteSpace(columnDiff))
             {
-                lines.Add("欄位差異：" + columnDiff);
+                lines.Add(Localization.Format("Backup.RestoreDiffColumn", columnDiff));
             }
 
             string contentDiff = BuildContentDiffSummary(before, after);
             if (!string.IsNullOrWhiteSpace(contentDiff))
             {
-                lines.Add("資料內容差異：" + contentDiff);
+                lines.Add(Localization.Format("Backup.RestoreDiffContent", contentDiff));
             }
 
             return string.Join(Environment.NewLine, lines);
@@ -495,9 +495,9 @@ namespace mySQLPunk.lib
         {
             int delta = after - before;
             string deltaText = delta == 0 ? "0" : (delta > 0 ? "+" : "") + delta.ToString();
-            string line = label + "：" + before + " -> " + after + " (" + deltaText + ")";
+            string line = Localization.Format("Backup.RestoreDiffLine", label, before, after, deltaText);
             string detail = BuildNameDiffDetail(beforeNames, afterNames);
-            return string.IsNullOrWhiteSpace(detail) ? line : line + "，" + detail;
+            return string.IsNullOrWhiteSpace(detail) ? line : line + Localization.T("Backup.RestoreDiffLineDetailSeparator") + detail;
         }
 
         private static string BuildNameDiffDetail(IEnumerable<string> beforeNames, IEnumerable<string> afterNames)
@@ -509,9 +509,9 @@ namespace mySQLPunk.lib
             List<string> added = afterList.Except(beforeList, StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
             List<string> removed = beforeList.Except(afterList, StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
             List<string> parts = new List<string>();
-            if (added.Count > 0) parts.Add("新增：" + FormatNameList(added));
-            if (removed.Count > 0) parts.Add("移除：" + FormatNameList(removed));
-            return string.Join("；", parts);
+            if (added.Count > 0) parts.Add(Localization.Format("Backup.RestoreDiffAdded", FormatNameList(added)));
+            if (removed.Count > 0) parts.Add(Localization.Format("Backup.RestoreDiffRemoved", FormatNameList(removed)));
+            return string.Join(Localization.T("Backup.RestoreDiffPartSeparator"), parts);
         }
 
         private static string BuildRowCountDiffSummary(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after)
@@ -535,8 +535,12 @@ namespace mySQLPunk.lib
                 long afterCount = hasAfter ? after.TableRowCounts[tableName] : 0;
                 if (hasBefore && hasAfter && beforeCount == afterCount) continue;
 
-                details.Add(tableName + "：" + FormatRowCountValue(hasBefore, beforeCount) + " -> " +
-                    FormatRowCountValue(hasAfter, afterCount) + FormatRowCountDelta(hasBefore, hasAfter, beforeCount, afterCount));
+                details.Add(Localization.Format(
+                    "Backup.RestoreDiffTableValueLine",
+                    tableName,
+                    FormatRowCountValue(hasBefore, beforeCount),
+                    FormatRowCountValue(hasAfter, afterCount),
+                    FormatRowCountDelta(hasBefore, hasAfter, beforeCount, afterCount)));
             }
 
             return details.Count == 0 ? string.Empty : FormatNameList(details);
@@ -544,7 +548,7 @@ namespace mySQLPunk.lib
 
         private static string FormatRowCountValue(bool hasValue, long value)
         {
-            return hasValue ? value.ToString() : "未取得";
+            return hasValue ? value.ToString() : Localization.T("Backup.RestoreDiffValueMissing");
         }
 
         private static string FormatRowCountDelta(bool hasBefore, bool hasAfter, long before, long after)
@@ -577,14 +581,14 @@ namespace mySQLPunk.lib
 
                 List<string> added = afterMap.Keys.Except(beforeMap.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
                 List<string> removed = beforeMap.Keys.Except(afterMap.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
-                foreach (string column in added) details.Add("新增 " + tableName + "." + column);
-                foreach (string column in removed) details.Add("移除 " + tableName + "." + column);
+                foreach (string column in added) details.Add(Localization.Format("Backup.RestoreDiffColumnAdded", tableName, column));
+                foreach (string column in removed) details.Add(Localization.Format("Backup.RestoreDiffColumnRemoved", tableName, column));
 
                 List<string> common = beforeMap.Keys.Intersect(afterMap.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
                 foreach (string column in common)
                 {
                     string change = BuildColumnChangeDetail(beforeMap[column], afterMap[column]);
-                    if (!string.IsNullOrWhiteSpace(change)) details.Add("變更 " + tableName + "." + column + "（" + change + "）");
+                    if (!string.IsNullOrWhiteSpace(change)) details.Add(Localization.Format("Backup.RestoreDiffColumnChanged", tableName, column, change));
                 }
             }
 
@@ -614,10 +618,14 @@ namespace mySQLPunk.lib
                 if (!hasBefore || !hasAfter) continue;
                 if (string.Equals(beforeContent.Fingerprint, afterContent.Fingerprint, StringComparison.OrdinalIgnoreCase)) continue;
 
-                details.Add(tableName + "：內容指紋變更（SHA-256 " +
-                    ShortFingerprint(beforeContent.Fingerprint) + " -> " + ShortFingerprint(afterContent.Fingerprint) +
-                    "；" + BuildContentCoverageText(beforeContent, afterContent) +
-                    "；列數 " + beforeContent.RowCount + " -> " + afterContent.RowCount + "）");
+                details.Add(Localization.Format(
+                    "Backup.RestoreDiffContentFingerprintChanged",
+                    tableName,
+                    ShortFingerprint(beforeContent.Fingerprint),
+                    ShortFingerprint(afterContent.Fingerprint),
+                    BuildContentCoverageText(beforeContent, afterContent),
+                    beforeContent.RowCount,
+                    afterContent.RowCount));
             }
 
             return details.Count == 0 ? string.Empty : FormatNameList(details);
@@ -628,18 +636,22 @@ namespace mySQLPunk.lib
             int sampled = Math.Min(before == null ? 0 : before.SampledRows, after == null ? 0 : after.SampledRows);
             long total = Math.Max(before == null ? 0 : before.RowCount, after == null ? 0 : after.RowCount);
             bool partial = (before != null && before.IsPartial) || (after != null && after.IsPartial);
-            string prefix = partial ? "抽樣" : "比對";
-            return prefix + " " + sampled.ToString(CultureInfo.InvariantCulture) + "/" + Math.Max(0, total).ToString(CultureInfo.InvariantCulture) + " 列";
+            string prefix = partial ? Localization.T("Backup.RestoreDiffCoveragePartial") : Localization.T("Backup.RestoreDiffCoverageFull");
+            return Localization.Format(
+                "Backup.RestoreDiffCoverage",
+                prefix,
+                sampled.ToString(CultureInfo.InvariantCulture),
+                Math.Max(0, total).ToString(CultureInfo.InvariantCulture));
         }
 
         private static string BuildColumnChangeDetail(DatabaseRestoreColumnSnapshot before, DatabaseRestoreColumnSnapshot after)
         {
             List<string> parts = new List<string>();
-            AddChangedPart(parts, "型別", before.DataType, after.DataType);
+            AddChangedPart(parts, Localization.T("Backup.RestoreDiffColumnType"), before.DataType, after.DataType);
             AddChangedPart(parts, "NULL", before.IsNullable, after.IsNullable);
-            AddChangedPart(parts, "預設", before.DefaultValue, after.DefaultValue);
-            AddChangedPart(parts, "註解", before.Comment, after.Comment);
-            return string.Join("；", parts);
+            AddChangedPart(parts, Localization.T("Backup.RestoreDiffColumnDefault"), before.DefaultValue, after.DefaultValue);
+            AddChangedPart(parts, Localization.T("Backup.RestoreDiffColumnComment"), before.Comment, after.Comment);
+            return string.Join(Localization.T("Backup.RestoreDiffPartSeparator"), parts);
         }
 
         private static void AddChangedPart(List<string> parts, string label, string before, string after)
@@ -647,7 +659,7 @@ namespace mySQLPunk.lib
             string oldValue = NormalizeText(before);
             string newValue = NormalizeText(after);
             if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase)) return;
-            parts.Add(label + "：" + FormatValue(oldValue) + " -> " + FormatValue(newValue));
+            parts.Add(Localization.Format("Backup.RestoreDiffColumnChangePart", label, FormatValue(oldValue), FormatValue(newValue)));
         }
 
         private static List<DatabaseRestoreColumnSnapshot> GetColumnsForTable(DatabaseRestoreSnapshot snapshot, string tableName)
@@ -721,7 +733,7 @@ namespace mySQLPunk.lib
 
         private static string FormatValue(string value)
         {
-            return string.IsNullOrWhiteSpace(value) ? "空白" : value;
+            return string.IsNullOrWhiteSpace(value) ? Localization.T("Backup.RestoreDiffBlankValue") : value;
         }
 
         private static void AppendLengthPrefixed(StringBuilder builder, string value)
@@ -786,7 +798,7 @@ namespace mySQLPunk.lib
 
         private static string ShortFingerprint(string fingerprint)
         {
-            if (string.IsNullOrWhiteSpace(fingerprint)) return "未取得";
+            if (string.IsNullOrWhiteSpace(fingerprint)) return Localization.T("Backup.RestoreDiffValueMissing");
             string value = fingerprint.Trim();
             return value.Length <= 12 ? value : value.Substring(0, 12);
         }
@@ -795,7 +807,7 @@ namespace mySQLPunk.lib
         {
             const int maxNames = 5;
             if (names.Count <= maxNames) return string.Join(", ", names);
-            return string.Join(", ", names.Take(maxNames)) + " ... 等 " + names.Count + " 個";
+            return Localization.Format("Backup.RestoreDiffNameListOverflow", string.Join(", ", names.Take(maxNames)), names.Count);
         }
     }
 }
