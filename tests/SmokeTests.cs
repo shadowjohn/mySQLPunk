@@ -4710,6 +4710,7 @@ public static class SmokeTests
 
         object form = FormatterServices.GetUninitializedObject(typeof(Form1));
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
         string oldLanguage = Localization.CurrentLanguage;
         try
         {
@@ -4723,12 +4724,27 @@ public static class SmokeTests
                 AssertContains(storedFunctions["說明"].ToString(), "SQLite", "SQLite stored functions capability should explain the provider limitation.");
             }
 
+            DataTable zhMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
+            DataRow zhTablesLoaded = FindDataRow(zhMaintenance, "項目", "已載入資料表");
+            Assert(zhTablesLoaded != null, "Maintenance checklist should localize Traditional Chinese table item.");
+            AssertContains(zhTablesLoaded["狀態"].ToString(), "正常", "Maintenance checklist should localize OK status.");
+            AssertContains(zhTablesLoaded["說明"].ToString(), "資料表", "Maintenance checklist should localize table count detail.");
+            DataRow zhOpenTabs = FindDataRow(zhMaintenance, "項目", "開啟中的查詢分頁");
+            Assert(zhOpenTabs != null, "Maintenance checklist should localize Traditional Chinese query tabs item.");
+            AssertContains(zhOpenTabs["說明"].ToString(), "分頁", "Maintenance checklist should localize query tab count detail.");
+
             Localization.SetLanguage(Localization.English, false);
             DataTable postgresCapabilities = (DataTable)capabilitiesMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
             DataRow tablesCapability = FindDataRow(postgresCapabilities, "項目", "Tables");
             Assert(tablesCapability != null, "Provider capabilities should include tables.");
             AssertContains(tablesCapability["狀態"].ToString(), "Supported", "Provider capabilities should support English status labels.");
             AssertContains(tablesCapability["說明"].ToString(), "loaded", "Provider capabilities should support English detail labels.");
+
+            DataTable enMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
+            DataRow enLargestTable = FindDataRow(enMaintenance, "項目", "Largest Table");
+            Assert(enLargestTable != null, "Maintenance checklist should support English item labels.");
+            AssertContains(enLargestTable["狀態"].ToString(), "Info", "Maintenance checklist should support English status labels.");
+            AssertContains(enLargestTable["說明"].ToString(), "rows", "Maintenance checklist should support English row count detail.");
         }
         finally
         {

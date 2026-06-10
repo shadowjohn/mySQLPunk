@@ -8374,12 +8374,18 @@ namespace mySQLPunk
             DataTable dt = CreateOtherToolTable();
             List<string> tables = GetTablesSafe(db, dbName);
             List<string> views = GetViewsSafe(db, dbName);
-            AddOtherToolRow(dt, "Connection Open", db.State == ConnectionState.Open ? "OK" : "Warning", db.State.ToString());
-            AddOtherToolRow(dt, "Tables Loaded", tables.Count > 0 ? "OK" : "Warning", tables.Count + " table(s)");
-            AddOtherToolRow(dt, "Views Loaded", views.Count > 0 ? "OK" : "Info", views.Count + " view(s)");
-            AddOtherToolRow(dt, "Backup Target", string.IsNullOrWhiteSpace(GetBackupSourceDescription(db, connInfo)) ? "Warning" : "OK", GetBackupSourceDescription(db, connInfo));
-            AddOtherToolRow(dt, "Open Query Tabs", GetOpenQueryTabs(dbName).Count > 0 ? "Info" : "OK", GetOpenQueryTabs(dbName).Count + " tab(s)");
-            AddOtherToolRow(dt, "Largest Table", "Info", GetLargestTableDescription(db, dbName, tables));
+            string ok = Localization.T("Diagnostic.StatusOk");
+            string warning = Localization.T("Diagnostic.StatusWarning");
+            string info = Localization.T("Diagnostic.StatusInfo");
+            string backupSource = GetBackupSourceDescription(db, connInfo);
+            int openQueryTabCount = GetOpenQueryTabs(dbName).Count;
+
+            AddOtherToolRow(dt, Localization.T("MaintenanceChecklist.ConnectionOpen"), db.State == ConnectionState.Open ? ok : warning, db.State.ToString());
+            AddOtherToolRow(dt, Localization.T("MaintenanceChecklist.TablesLoaded"), tables.Count > 0 ? ok : warning, Localization.Format("MaintenanceChecklist.TableCount", tables.Count));
+            AddOtherToolRow(dt, Localization.T("MaintenanceChecklist.ViewsLoaded"), views.Count > 0 ? ok : info, Localization.Format("MaintenanceChecklist.ViewCount", views.Count));
+            AddOtherToolRow(dt, Localization.T("MaintenanceChecklist.BackupTarget"), string.IsNullOrWhiteSpace(backupSource) ? warning : ok, backupSource);
+            AddOtherToolRow(dt, Localization.T("MaintenanceChecklist.OpenQueryTabs"), openQueryTabCount > 0 ? info : ok, Localization.Format("MaintenanceChecklist.TabCount", openQueryTabCount));
+            AddOtherToolRow(dt, Localization.T("MaintenanceChecklist.LargestTable"), info, GetLargestTableDescription(db, dbName, tables));
             return dt;
         }
 
@@ -8403,7 +8409,7 @@ namespace mySQLPunk
 
         private string GetLargestTableDescription(IDatabase db, string dbName, List<string> tables)
         {
-            if (tables == null || tables.Count == 0) return "(no tables)";
+            if (tables == null || tables.Count == 0) return Localization.T("MaintenanceChecklist.NoTables");
 
             string largestName = "";
             long largestRows = -1;
@@ -8421,7 +8427,9 @@ namespace mySQLPunk
                 catch { }
             }
 
-            return largestRows < 0 ? "(unavailable)" : largestName + " (" + largestRows + " rows)";
+            return largestRows < 0
+                ? Localization.T("MaintenanceChecklist.Unavailable")
+                : Localization.Format("MaintenanceChecklist.LargestTableRows", largestName, largestRows);
         }
 
         private static string GetDatabaseOtherToolDescription(string toolName)
