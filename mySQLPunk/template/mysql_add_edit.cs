@@ -18,9 +18,24 @@ namespace mySQLPunk.template
             InitializeComponent();
             Form1.ApplyModernTheme(this);
             Localization.ApplyTo(this);
+            ApplyLanguage();
         }
         public Form1 F1 { get; set; }
         public int editIndex { get; set; } = -1;
+
+        private void ApplyLanguage()
+        {
+            Text = "MySQL";
+            tabPage1.Text = Localization.T("Common.General");
+            label1.Text = Localization.T("Common.ConnectionNameColon");
+            label2.Text = Localization.T("Common.HostNameColon");
+            label3.Text = Localization.T("Common.PortColon");
+            label4.Text = Localization.T("Common.UsernameColon");
+            label5.Text = Localization.T("Common.PasswordColon");
+            mysql_add_edit_test_connection.Text = Localization.T("Common.TestConnection");
+            mysql_add_edit_ok.Text = Localization.T("Common.OK");
+            mysql_add_edit_cancel.Text = Localization.T("Common.Cancel");
+        }
 
         private void mysql_add_edit_Load(object sender, EventArgs e)
         {

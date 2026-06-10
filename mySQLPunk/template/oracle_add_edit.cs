@@ -19,15 +19,36 @@ namespace mySQLPunk.template
             InitializeComponent();
             Form1.ApplyModernTheme(this);
             Localization.ApplyTo(this);
-
+            ApplyLanguage();
         }
         public Form1 F1 { get; set; }
         public int editIndex { get; set; } = -1;
 
+        private void ApplyLanguage()
+        {
+            Text = "Oracle";
+            tabPage1.Text = Localization.T("Common.General");
+            label1.Text = Localization.T("Common.ConnectionNameColon");
+            label2.Text = Localization.T("Common.ConnectionType") + ":";
+            label3.Text = Localization.T("Common.HostNameColon");
+            label4.Text = Localization.T("Common.PortColon");
+            label5.Text = Localization.T("Common.ServiceNameSid") + ":";
+            label6.Text = Localization.T("Common.UsernameColon");
+            label7.Text = Localization.T("Common.PasswordColon");
+            label8.Text = Localization.T("Common.NetServiceName") + ":";
+            label10.Text = Localization.T("Common.UsernameColon");
+            label9.Text = Localization.T("Common.PasswordColon");
+            radioButton1.Text = Localization.T("Common.ServiceName");
+            radioButton2.Text = Localization.T("Common.SID");
+            oracle_add_edit_test_connection.Text = Localization.T("Common.TestConnection");
+            oracle_add_edit_ok.Text = Localization.T("Common.OK");
+            oracle_add_edit_cancel.Text = Localization.T("Common.Cancel");
+        }
+
         private void oracle_add_edit_Load(object sender, EventArgs e)
         {
             comboBox1.DropDownStyle = ComboBoxStyle.DropDown;
-            label4.Text = Localization.T("Common.PortColon");
+            ApplyLanguage();
 
             if (oracle_connection_type.SelectedIndex < 0)
             {

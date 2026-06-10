@@ -208,6 +208,10 @@ Smoke test harness：
   - 現況：MySQL、PostgreSQL、SQLite、Oracle 與 SQL Server 連線失敗時會顯示錯誤原因，暫時性錯誤也會詢問是否重試一次。
   - 完成內容：連線失敗訊息與重試提示已改用共用語系 helper，繁中與英文介面都會依目前語系顯示一致文字，並已納入 smoke test 覆蓋。
 
+- **連線編輯視窗 ✅ 已語系化**
+  - 現況：MySQL、PostgreSQL、Oracle 與 SQL Server 連線編輯 / 新增視窗會顯示分頁、欄位標籤、測試連線、確定與取消等控制項。
+  - 完成內容：上述四個 provider 的連線表單已補齊繁中 / 英文控制項文字，Oracle 的 Service Name、Net Service Name 等欄位也已改為可語系化顯示，並已納入 smoke test 覆蓋實際表單控制項。
+
 - **備份狀態列與未知錯誤 fallback ✅ 已語系化**
   - 現況：備份建立 / 失敗與 SQL 執行未知錯誤 fallback 會顯示在狀態列或例外訊息中。
   - 完成內容：備份建立含路徑、備份失敗與未知錯誤 fallback 已改用語系字串，繁中與英文介面都會顯示一致文字。

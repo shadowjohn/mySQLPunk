@@ -50,6 +50,7 @@ public static class SmokeTests
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
         Run("Provider SQL 執行 fallback", TestDatabaseExecutionResultService, ref passed);
         Run("Connection profile service", TestConnectionProfileService, ref passed);
         Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
@@ -6231,6 +6232,85 @@ public static class SmokeTests
         finally
         {
             Localization.SetLanguage(oldLanguage, false);
+        }
+    }
+
+    private static void TestConnectionEditorLocalization()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            using (mySQLPunk.template.mysql_add_edit mysql = new mySQLPunk.template.mysql_add_edit())
+            {
+                AssertEquals("一般", GetPrivateField<TabPage>(mysql, "tabPage1").Text, "MySQL connection editor tab should localize Traditional Chinese.");
+                AssertEquals("連線名稱:", GetPrivateField<Label>(mysql, "label1").Text, "MySQL connection editor name label should localize Traditional Chinese.");
+                AssertEquals("主機名稱 / IP 位址:", GetPrivateField<Label>(mysql, "label2").Text, "MySQL connection editor host label should localize Traditional Chinese.");
+                AssertEquals("測試連線", GetPrivateField<Button>(mysql, "mysql_add_edit_test_connection").Text, "MySQL connection editor test button should localize Traditional Chinese.");
+                AssertEquals("確定", GetPrivateField<Button>(mysql, "mysql_add_edit_ok").Text, "MySQL connection editor OK button should localize Traditional Chinese.");
+                AssertEquals("取消", GetPrivateField<Button>(mysql, "mysql_add_edit_cancel").Text, "MySQL connection editor cancel button should localize Traditional Chinese.");
+            }
+
+            using (mySQLPunk.template.postgresql_add_edit postgresql = new mySQLPunk.template.postgresql_add_edit())
+            {
+                AssertEquals("PostgreSQL", postgresql.Text, "PostgreSQL connection editor title should use canonical provider casing.");
+                AssertEquals("初始資料庫:", GetPrivateField<Label>(postgresql, "label6").Text, "PostgreSQL connection editor initial database label should localize Traditional Chinese.");
+                AssertEquals("使用者名稱:", GetPrivateField<Label>(postgresql, "label4").Text, "PostgreSQL connection editor username label should localize Traditional Chinese.");
+                AssertEquals("密碼:", GetPrivateField<Label>(postgresql, "label5").Text, "PostgreSQL connection editor password label should localize Traditional Chinese.");
+            }
+
+            using (mySQLPunk.template.oracle_add_edit oracle = new mySQLPunk.template.oracle_add_edit())
+            {
+                AssertEquals("連線類型:", GetPrivateField<Label>(oracle, "label2").Text, "Oracle connection editor connection type label should localize Traditional Chinese.");
+                AssertEquals("服務名稱 / SID:", GetPrivateField<Label>(oracle, "label5").Text, "Oracle connection editor service label should localize Traditional Chinese.");
+                AssertEquals("網路服務名稱:", GetPrivateField<Label>(oracle, "label8").Text, "Oracle connection editor net service label should localize Traditional Chinese.");
+                AssertEquals("服務名稱", GetPrivateField<RadioButton>(oracle, "radioButton1").Text, "Oracle connection editor service radio should localize Traditional Chinese.");
+                AssertEquals("測試連線", GetPrivateField<Button>(oracle, "oracle_add_edit_test_connection").Text, "Oracle connection editor test button should localize Traditional Chinese.");
+            }
+
+            using (mySQLPunk.template.sqlserver_add_edit sqlServer = new mySQLPunk.template.sqlserver_add_edit())
+            {
+                AssertEquals("SQL Server 連線", sqlServer.Text, "SQL Server connection editor title should localize Traditional Chinese.");
+                AssertEquals("使用 Windows 驗證", GetPrivateField<CheckBox>(sqlServer, "chkWindowsAuth").Text, "SQL Server Windows auth checkbox should localize Traditional Chinese.");
+                AssertEquals("測試連線", GetPrivateField<Button>(sqlServer, "btnTest").Text, "SQL Server connection editor test button should localize Traditional Chinese.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            using (mySQLPunk.template.mysql_add_edit mysql = new mySQLPunk.template.mysql_add_edit())
+            {
+                AssertEquals("General", GetPrivateField<TabPage>(mysql, "tabPage1").Text, "MySQL connection editor tab should support English.");
+                AssertEquals("Connection Name:", GetPrivateField<Label>(mysql, "label1").Text, "MySQL connection editor name label should support English.");
+                AssertEquals("Host Name/IP Address:", GetPrivateField<Label>(mysql, "label2").Text, "MySQL connection editor host label should support English.");
+                AssertEquals("Test Connection", GetPrivateField<Button>(mysql, "mysql_add_edit_test_connection").Text, "MySQL connection editor test button should support English.");
+                AssertEquals("OK", GetPrivateField<Button>(mysql, "mysql_add_edit_ok").Text, "MySQL connection editor OK button should support English.");
+                AssertEquals("Cancel", GetPrivateField<Button>(mysql, "mysql_add_edit_cancel").Text, "MySQL connection editor cancel button should support English.");
+            }
+
+            using (mySQLPunk.template.postgresql_add_edit postgresql = new mySQLPunk.template.postgresql_add_edit())
+            {
+                AssertEquals("Initial Database:", GetPrivateField<Label>(postgresql, "label6").Text, "PostgreSQL connection editor initial database label should support English.");
+                AssertEquals("User Name:", GetPrivateField<Label>(postgresql, "label4").Text, "PostgreSQL connection editor username label should support English.");
+                AssertEquals("Password:", GetPrivateField<Label>(postgresql, "label5").Text, "PostgreSQL connection editor password label should support English.");
+            }
+
+            using (mySQLPunk.template.oracle_add_edit oracle = new mySQLPunk.template.oracle_add_edit())
+            {
+                AssertEquals("Connection Type:", GetPrivateField<Label>(oracle, "label2").Text, "Oracle connection editor connection type label should support English.");
+                AssertEquals("Service Name/SID:", GetPrivateField<Label>(oracle, "label5").Text, "Oracle connection editor service label should support English.");
+                AssertEquals("Net Service Name:", GetPrivateField<Label>(oracle, "label8").Text, "Oracle connection editor net service label should support English.");
+                AssertEquals("Service Name", GetPrivateField<RadioButton>(oracle, "radioButton1").Text, "Oracle connection editor service radio should support English.");
+            }
+
+            using (mySQLPunk.template.sqlserver_add_edit sqlServer = new mySQLPunk.template.sqlserver_add_edit())
+            {
+                AssertEquals("SQL Server Connection", sqlServer.Text, "SQL Server connection editor title should support English.");
+                AssertEquals("Use Windows Authentication", GetPrivateField<CheckBox>(sqlServer, "chkWindowsAuth").Text, "SQL Server Windows auth checkbox should support English.");
+                AssertEquals("Test Connection", GetPrivateField<Button>(sqlServer, "btnTest").Text, "SQL Server connection editor test button should support English.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
         }
     }
 

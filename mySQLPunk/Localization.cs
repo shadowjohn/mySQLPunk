@@ -343,11 +343,11 @@ namespace mySQLPunk
             Add("Common.WindowsAuth", "使用 Windows 驗證", "Use Windows Authentication");
             Add("Common.SQLiteFile", "SQLite 檔案", "SQLite File");
             Add("Common.InitGeospatial", "初始化 geospatial / SpatiaLite metadata", "Initialize geospatial / SpatiaLite metadata");
-            Add("Common.ServiceName", "Service Name", "Service Name");
-            Add("Common.ServiceNameSid", "Service Name / SID", "Service Name/SID");
+            Add("Common.ServiceName", "服務名稱", "Service Name");
+            Add("Common.ServiceNameSid", "服務名稱 / SID", "Service Name/SID");
             Add("Common.SID", "SID", "SID");
             Add("Common.ConnectionType", "連線類型", "Connection Type");
-            Add("Common.NetServiceName", "Net Service Name", "Net Service Name");
+            Add("Common.NetServiceName", "網路服務名稱", "Net Service Name");
             Add("Common.SQLiteConnection", "SQLite 連線", "SQLite Connection");
             Add("Common.SqlServerConnection", "SQL Server 連線", "SQL Server Connection");
             Add("Connection.EnterConnectionName", "請輸入連線名稱。", "Enter a connection name.");
