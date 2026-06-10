@@ -4993,12 +4993,16 @@ public static class SmokeTests
             ApplicationOptionSettings.SetBool("RecordUseSystemNumberFormat", false);
             ApplicationOptionSettings.SetString("RecordRowHeightMode", "comfortable");
 
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
             using (QueryForm form = new QueryForm(new FakeDumpDatabase(), "main"))
             {
                 ToolStripTextBox pageSize = GetPrivateField<ToolStripTextBox>(form, "txtPageSize");
                 RichTextBox editor = GetPrivateField<RichTextBox>(form, "txtSql");
                 DataGridView grid = GetPrivateField<DataGridView>(form, "dgvResults");
                 List<string> completionTables = GetPrivateField<List<string>>(form, "_tableNames");
+                ToolStripButton addButton = GetPrivateField<ToolStripButton>(form, "btnDataAdd");
+                ToolStripButton applyButton = GetPrivateField<ToolStripButton>(form, "btnDataApply");
+                ToolStripButton nextButton = GetPrivateField<ToolStripButton>(form, "btnDataNext");
 
                 AssertEquals("321", pageSize.Text, "Query form should use the configured record limit.");
                 Assert(!editor.WordWrap, "Query editor should honor the configured word wrap setting.");
@@ -5007,6 +5011,21 @@ public static class SmokeTests
                 Assert(grid.AutoSizeRowsMode == DataGridViewAutoSizeRowsMode.None, "Result grid should disable automatic row resizing when row height is configured.");
                 Assert(grid.RowTemplate.Height >= 32, "Result grid should honor the comfortable row height setting.");
                 Assert(completionTables.Count == 0, "Disabled auto-complete should skip metadata loading.");
+                AssertEquals("新增資料列", addButton.ToolTipText, "Data toolbar add tooltip should localize Traditional Chinese.");
+                AssertEquals("儲存資料變更", applyButton.ToolTipText, "Data toolbar save tooltip should localize Traditional Chinese.");
+                AssertEquals("下一頁", nextButton.ToolTipText, "Data toolbar pagination tooltip should localize Traditional Chinese.");
+
+                Localization.SetLanguage(Localization.English, false);
+                form.ApplyLanguage();
+                AssertEquals("Add row", addButton.ToolTipText, "Data toolbar add tooltip should support English.");
+                AssertEquals("Save data changes", applyButton.ToolTipText, "Data toolbar save tooltip should support English.");
+                AssertEquals("Next page", nextButton.ToolTipText, "Data toolbar pagination tooltip should support English.");
+
+                ApplicationOptionSettings.SetBool("ShowObjectTooltips", false);
+                form.ApplyLanguage();
+                AssertEquals("", addButton.ToolTipText, "Data toolbar tooltips should be cleared when tooltips are disabled.");
+                AssertEquals("", nextButton.ToolTipText, "Data toolbar pagination tooltips should be cleared when tooltips are disabled.");
+                ApplicationOptionSettings.SetBool("ShowObjectTooltips", true);
             }
 
             ApplicationOptionSettings.SetString("RecordRowHeightMode", "compact");

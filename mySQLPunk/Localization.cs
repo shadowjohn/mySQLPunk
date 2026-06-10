@@ -955,6 +955,15 @@ namespace mySQLPunk
             Add("Query.Limit", " 筆數限制：", " Limit: ");
             Add("Query.Records", " 筆 ", " records ");
             Add("Query.PageFormat", " 第 {0} / {1} 頁 (總計：{2}) ", " Page {0} of {1} (Total: {2}) ");
+            Add("Query.DataAddTooltip", "新增資料列", "Add row");
+            Add("Query.DataDeleteTooltip", "刪除選取資料列", "Delete selected rows");
+            Add("Query.DataApplyTooltip", "儲存資料變更", "Save data changes");
+            Add("Query.DataCancelTooltip", "取消變更並重新載入", "Cancel changes and reload");
+            Add("Query.DataRefreshTooltip", "重新載入資料", "Reload data");
+            Add("Query.DataFirstPageTooltip", "第一頁", "First page");
+            Add("Query.DataPreviousPageTooltip", "上一頁", "Previous page");
+            Add("Query.DataNextPageTooltip", "下一頁", "Next page");
+            Add("Query.DataLastPageTooltip", "最後一頁", "Last page");
             Add("Query.TableData", "資料表資料", "Table Data");
             Add("Query.SqlSaved", "SQL 已儲存：{0}", "SQL saved: {0}");
             Add("Query.SqlOpened", "SQL 已開啟：{0}", "SQL opened: {0}");

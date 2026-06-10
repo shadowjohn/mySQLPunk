@@ -462,6 +462,7 @@ namespace mySQLPunk
                 lblLimit, txtPageSize, lblRecords,
                 btnDataLast, btnDataNext, lblDataPagination, btnDataPrev, btnDataFirst
             });
+            ApplyDataToolbarButtonTooltips();
             btnDataNext.Alignment = ToolStripItemAlignment.Right;
             lblDataPagination.Alignment = ToolStripItemAlignment.Right;
             btnDataPrev.Alignment = ToolStripItemAlignment.Right;
@@ -1969,12 +1970,34 @@ namespace mySQLPunk
             if (tsBtnFloat != null) tsBtnFloat.Text = Localization.T("Query.Float");
             if (tsBtnDock != null) tsBtnDock.Text = Localization.T("Query.Dock");
             if (tabResults != null && tabResults.TabPages.Count > 0) tabResults.TabPages[0].Text = Localization.T("Query.Results");
+            ApplyDataToolbarButtonTooltips();
             UpdateLoadingOverlayText();
             if (lblStatus != null && (lblStatus.Text == "Ready" || lblStatus.Text == "就緒")) lblStatus.Text = Localization.T("Status.Ready");
             RefreshResultsContextMenu();
             UpdatePaginationUI();
             Localization.ApplyTo(this);
             ApplyTheme();
+        }
+
+        private void ApplyDataToolbarButtonTooltips()
+        {
+            ApplyToolStripTooltip(btnDataAdd, Localization.T("Query.DataAddTooltip"));
+            ApplyToolStripTooltip(btnDataDelete, Localization.T("Query.DataDeleteTooltip"));
+            ApplyToolStripTooltip(btnDataApply, Localization.T("Query.DataApplyTooltip"));
+            ApplyToolStripTooltip(btnDataCancel, Localization.T("Query.DataCancelTooltip"));
+            ApplyToolStripTooltip(btnDataRefresh, Localization.T("Query.DataRefreshTooltip"));
+            ApplyToolStripTooltip(btnDataFirst, Localization.T("Query.DataFirstPageTooltip"));
+            ApplyToolStripTooltip(btnDataPrev, Localization.T("Query.DataPreviousPageTooltip"));
+            ApplyToolStripTooltip(btnDataNext, Localization.T("Query.DataNextPageTooltip"));
+            ApplyToolStripTooltip(btnDataLast, Localization.T("Query.DataLastPageTooltip"));
+        }
+
+        private static void ApplyToolStripTooltip(ToolStripItem item, string tooltip)
+        {
+            if (item == null) return;
+            bool showTooltip = ApplicationOptionSettings.GetBool("ShowObjectTooltips") && !string.IsNullOrWhiteSpace(tooltip);
+            item.AutoToolTip = showTooltip;
+            item.ToolTipText = showTooltip ? tooltip : string.Empty;
         }
 
         private void ApplyMenuLanguage()
