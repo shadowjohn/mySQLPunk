@@ -33,6 +33,17 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 
 此腳本會使用 Release 組態建置專案，將 `mySQLPunk/bin/Release` 整理成 `dist/mySQLPunk-<version>-win-x64-portable`，產生 portable zip 與 `release-manifest.json`，manifest 會包含檔名、大小與 SHA-256，方便上傳 GitHub Releases 後供程式內更新檢查與下載使用。
 
+GitHub Actions 自動發版：
+
+```powershell
+# 1. 先確認 mySQLPunk/Properties/AssemblyInfo.cs 的 AssemblyVersion / AssemblyFileVersion
+#    已更新成要發布的版本，例如 1.0.1.0。
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+推送 `v*` tag 後，`.github/workflows/release.yml` 會在 GitHub 的 Windows runner 上還原 NuGet、用 MSBuild 編譯 Release、執行 `scripts/package-release.ps1`，並建立或更新 GitHub Release，上傳 portable zip 與 `release-manifest.json`。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。Workflow 會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新。
+
 備註：
 
 - Repo 根目錄有提供 `NuGet.Config`，會強制將 NuGet 還原目錄固定在本專案的 `packages/`，避免受使用者全域 NuGet 設定影響導致 `..\packages\...` 找不到。

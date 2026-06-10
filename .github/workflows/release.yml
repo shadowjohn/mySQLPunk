@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "V*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 1.0.1 or v1.0.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build and publish release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Resolve release version
+        id: release_version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $rawVersion = "${{ inputs.version }}"
+          } else {
+            $rawVersion = "${{ github.ref_name }}"
+          }
+
+          $version = $rawVersion.Trim()
+          if ($version.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $version = $version.Substring(1)
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
+            throw "Release version must be n.n.n or n.n.n.n. Received: $rawVersion"
+          }
+
+          $tagName = "v$version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag_name=$tagName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Verify assembly version matches release
+        shell: pwsh
+        run: |
+          $assemblyInfoPath = ".\mySQLPunk\Properties\AssemblyInfo.cs"
+          $assemblyInfo = Get-Content -LiteralPath $assemblyInfoPath -Raw -Encoding UTF8
+          if ($assemblyInfo -notmatch 'AssemblyFileVersion\("([^"]+)"\)') {
+            throw "AssemblyFileVersion was not found in $assemblyInfoPath"
+          }
+
+          $assemblyVersion = [version]$Matches[1]
+          $releaseVersion = [version]"${{ steps.release_version.outputs.version }}"
+          if ($releaseVersion.Revision -lt 0) {
+            $releaseVersion = [version]::new($releaseVersion.Major, $releaseVersion.Minor, $releaseVersion.Build, 0)
+          }
+          if ($assemblyVersion.Revision -lt 0) {
+            $assemblyVersion = [version]::new($assemblyVersion.Major, $assemblyVersion.Minor, $assemblyVersion.Build, 0)
+          }
+
+          if ($assemblyVersion -ne $releaseVersion) {
+            throw "AssemblyFileVersion $assemblyVersion does not match release version $releaseVersion. Update AssemblyInfo.cs before publishing."
+          }
+
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\mySQLPunk.sln -NonInteractive
+
+      - name: Build and package
+        shell: pwsh
+        run: .\scripts\package-release.ps1 -Version "${{ steps.release_version.outputs.version }}" -Configuration Release -OutputRoot .\dist
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          $notes = @"
+          mySQLPunk ${{ steps.release_version.outputs.version }}
+
+          Assets:
+          - Portable ZIP
+          - release-manifest.json
+          "@
+          $notes.Trim() | Set-Content -LiteralPath ".\dist\release-notes.md" -Encoding UTF8
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mySQLPunk-${{ steps.release_version.outputs.version }}-release-assets
+          path: |
+            dist/*.zip
+            dist/release-manifest.json
+            dist/release-notes.md
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG_NAME: ${{ steps.release_version.outputs.tag_name }}
+          RELEASE_NAME: mySQLPunk ${{ steps.release_version.outputs.version }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+
+          $releaseByTagUrl = "https://api.github.com/repos/$env:REPOSITORY/releases/tags/$env:TAG_NAME"
+          try {
+            $release = Invoke-RestMethod -Method Get -Uri $releaseByTagUrl -Headers $headers
+          } catch {
+            $statusCode = 0
+            if ($_.Exception.Response -ne $null) {
+              $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+            if ($statusCode -ne 404) {
+              throw
+            }
+
+            $body = @{
+              tag_name = $env:TAG_NAME
+              target_commitish = $env:GITHUB_SHA
+              name = $env:RELEASE_NAME
+              body = Get-Content -LiteralPath ".\dist\release-notes.md" -Raw
+              draft = $false
+              prerelease = $false
+            } | ConvertTo-Json -Depth 4
+
+            $release = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:REPOSITORY/releases" -Headers $headers -Body $body -ContentType "application/json"
+          }
+
+          $uploadBaseUrl = $release.upload_url -replace '\{.*\}$', ''
+          $assets = @(
+            Get-ChildItem -LiteralPath ".\dist" -Filter "*.zip" | Select-Object -First 1
+            Get-Item -LiteralPath ".\dist\release-manifest.json"
+          )
+
+          foreach ($asset in $assets) {
+            $existingAssets = @($release.assets | Where-Object { $_.name -eq $asset.Name })
+            foreach ($existingAsset in $existingAssets) {
+              Invoke-RestMethod -Method Delete -Uri $existingAsset.url -Headers $headers | Out-Null
+            }
+
+            $assetName = [uri]::EscapeDataString($asset.Name)
+            $uploadUrl = "$uploadBaseUrl?name=$assetName"
+            Invoke-RestMethod -Method Post -Uri $uploadUrl -Headers $headers -InFile $asset.FullName -ContentType "application/octet-stream" | Out-Null
+          }

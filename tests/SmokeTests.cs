@@ -51,8 +51,10 @@ public static class SmokeTests
         Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
+        Run("Application about message", TestApplicationAboutMessage, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
+        Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
@@ -4711,10 +4713,38 @@ public static class SmokeTests
         AppUpdateCheckResult noAsset = AppUpdateService.ParseGitHubLatestRelease(noAssetJson, "1.0.0.0");
         AssertEquals("", noAsset.InstallerDownloadUrl, "Update check should not treat the release page as an installer asset.");
 
+        string portableZipJson = @"{
+  ""tag_name"": ""v1.2.5"",
+  ""html_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/tag/v1.2.5"",
+  ""assets"": [
+    {
+      ""name"": ""mySQLPunk-1.2.5-win-x64-portable.zip"",
+      ""browser_download_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/download/v1.2.5/mySQLPunk-1.2.5-win-x64-portable.zip""
+    },
+    {
+      ""name"": ""release-manifest.json"",
+      ""browser_download_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/download/v1.2.5/release-manifest.json""
+    }
+  ]
+}";
+        AppUpdateCheckResult portableZip = AppUpdateService.ParseGitHubLatestRelease(portableZipJson, "1.0.0.0");
+        AssertEquals("", portableZip.InstallerDownloadUrl, "Portable release assets should open the release page instead of launching a zip as an installer.");
+
         AssertEquals(
             "https://api.github.com/repos/shadowjohn/mySQLPunk/releases/latest",
             AppUpdateService.BuildGitHubLatestReleaseApiUrl("shadowjohn", "mySQLPunk"),
             "Update check should build the GitHub latest release endpoint.");
+    }
+
+    private static void TestApplicationAboutMessage()
+    {
+        MethodInfo method = typeof(Form1).GetMethod("BuildAboutMessage", BindingFlags.Public | BindingFlags.Static);
+        Assert(method != null, "About message builder should be exposed for smoke tests.");
+
+        string message = (string)method.Invoke(null, new object[] { "1.0.0.0" });
+
+        AssertContains(message, "版本：1.0.0.0", "About message should include the current version.");
+        AssertContains(message, "作者：\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin\r\nCodex 協作", "About message should list authors on separate lines.");
     }
 
     private static void TestReleasePackagingScript()
@@ -4729,6 +4759,22 @@ public static class SmokeTests
         AssertContains(script, "SHA256", "Release packaging script should include a SHA-256 checksum.");
         AssertContains(script, "mySQLPunk.exe", "Release packaging script should package the application executable.");
         AssertContains(script, "MSBuild", "Release packaging script should build the Release configuration.");
+    }
+
+    private static void TestGitHubReleaseWorkflow()
+    {
+        string root = FindRepositoryRootForTest();
+        string workflowPath = Path.Combine(root, ".github", "workflows", "release.yml");
+        Assert(File.Exists(workflowPath), "GitHub release workflow should exist.");
+
+        string workflow = File.ReadAllText(workflowPath, Encoding.UTF8);
+        AssertContains(workflow, "windows-latest", "Release workflow should build on a Windows runner.");
+        AssertContains(workflow, "tags:", "Release workflow should run for pushed version tags.");
+        AssertContains(workflow, "workflow_dispatch:", "Release workflow should allow manual releases.");
+        AssertContains(workflow, "contents: write", "Release workflow should be allowed to create GitHub Releases.");
+        AssertContains(workflow, "nuget restore", "Release workflow should restore packages before building.");
+        AssertContains(workflow, "scripts\\package-release.ps1", "Release workflow should use the repository packaging script.");
+        AssertContains(workflow, "api.github.com/repos/$env:REPOSITORY/releases", "Release workflow should create or update a GitHub Release through the API.");
     }
 
     private static string FindRepositoryRootForTest()

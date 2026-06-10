@@ -146,12 +146,6 @@ namespace mySQLPunk.lib
                 }
             }
 
-            foreach (JToken asset in assets)
-            {
-                string url = (string)asset["browser_download_url"] ?? "";
-                if (!string.IsNullOrWhiteSpace(url)) return url;
-            }
-
             return "";
         }
     }
