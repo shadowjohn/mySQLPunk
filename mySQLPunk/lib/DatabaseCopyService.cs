@@ -58,9 +58,12 @@ namespace mySQLPunk.lib
         public DatabaseCopyResult Copy(DatabaseCopyItem source, DatabaseCopyItem target, Action<DatabaseCopyProgress> progress, ViewCopyFallback viewFallback = ViewCopyFallback.AutoSnapshot)
         {
             if (source == null || target == null) throw new ArgumentNullException("source");
-            if (source.Database == null || target.Database == null) throw new ArgumentException("來源或目標資料庫尚未連線");
+            if (source.Database == null || target.Database == null) throw new ArgumentException(Localization.T("Object.CopyDatabaseNotConnected"));
 
             string kind = NormalizeKind(source.ObjectKind);
+            if (kind != "table" && kind != "view")
+                throw new NotSupportedException(Localization.T("Object.CopyOnlyTableViewSupported"));
+
             bool crossProviderView = kind == "view" &&
                 !string.Equals(source.ProviderName, target.ProviderName, StringComparison.OrdinalIgnoreCase);
             string targetKind = crossProviderView ? "view" : kind;
@@ -79,7 +82,7 @@ namespace mySQLPunk.lib
                         {
                             SourceName = source.ObjectName,
                             TargetName = targetName,
-                            Message = "使用者選擇直接建立 table snapshot"
+                            Message = Localization.T("Object.CopyForceTableSnapshot")
                         });
                         targetName = GenerateTargetName(target.Database, target.DatabaseName, source.ObjectName, "table");
                         return CopyTable(source, target, targetName, progress);
@@ -98,7 +101,7 @@ namespace mySQLPunk.lib
                 return CopyView(source, target, targetName, progress);
             }
 
-            throw new NotSupportedException("只支援複製 Table / View");
+            throw new NotSupportedException(Localization.T("Object.CopyOnlyTableViewSupported"));
         }
 
         private DatabaseCopyResult CopyTable(DatabaseCopyItem source, DatabaseCopyItem target, string targetName, Action<DatabaseCopyProgress> progress)
@@ -107,12 +110,12 @@ namespace mySQLPunk.lib
             {
                 SourceName = source.ObjectName,
                 TargetName = targetName,
-                Message = "讀取來源結構..."
+                Message = Localization.T("Object.CopyReadSourceSchema")
             });
 
             DataTable columns = source.Database.GetCopyColumns(source.DatabaseName, source.ObjectName);
             if (columns == null || columns.Rows.Count == 0)
-                throw new Exception("來源資料表沒有可複製的欄位");
+                throw new Exception(Localization.T("Object.CopyNoColumns"));
 
             DataTable indexes = null;
             try { indexes = source.Database.GetCopyIndexes(source.DatabaseName, source.ObjectName); }
@@ -137,7 +140,7 @@ namespace mySQLPunk.lib
                     TargetName = targetName,
                     CopiedRows = copied,
                     TotalRows = total,
-                    Message = "Copying " + source.ObjectName + " -> " + targetName + ": " + copied + " / " + total
+                    Message = Localization.Format("Object.CopyProgress", source.ObjectName, targetName, copied, total)
                 });
             }
 
@@ -166,7 +169,7 @@ namespace mySQLPunk.lib
             {
                 SourceName = source.ObjectName,
                 TargetName = targetName,
-                Message = "轉換 View SQL..."
+                Message = Localization.T("Object.CopyConvertViewSql")
             });
 
             string sourceSql = source.Database.GetViewCreateStatement(source.DatabaseName, source.ObjectName);
@@ -178,7 +181,7 @@ namespace mySQLPunk.lib
                 {
                     SourceName = source.ObjectName,
                     TargetName = targetName,
-                    Message = "View SQL 無法安全轉換，改用 table snapshot：" + reason
+                    Message = Localization.Format("Object.CopyViewSqlFallback", reason)
                 });
                 return false;
             }
@@ -200,7 +203,7 @@ namespace mySQLPunk.lib
                 {
                     SourceName = source.ObjectName,
                     TargetName = targetName,
-                    Message = "View 建立失敗，改用 table snapshot：" + ex.Message
+                    Message = Localization.Format("Object.CopyViewCreateFallback", ex.Message)
                 });
                 return false;
             }
@@ -212,11 +215,11 @@ namespace mySQLPunk.lib
             {
                 SourceName = source.ObjectName,
                 TargetName = targetName,
-                Message = "讀取 View DDL..."
+                Message = Localization.T("Object.CopyReadViewDdl")
             });
 
             string sql = source.Database.GetViewCreateStatement(source.DatabaseName, source.ObjectName);
-            if (string.IsNullOrWhiteSpace(sql)) throw new Exception("無法取得 View DDL");
+            if (string.IsNullOrWhiteSpace(sql)) throw new Exception(Localization.T("Object.CopyViewDdlUnavailable"));
 
             target.Database.CreateViewFromStatement(target.DatabaseName, targetName, sql);
 
@@ -250,7 +253,9 @@ namespace mySQLPunk.lib
         {
             if (string.Equals(kind, "views", StringComparison.OrdinalIgnoreCase)) return "view";
             if (string.Equals(kind, "view", StringComparison.OrdinalIgnoreCase)) return "view";
-            return "table";
+            if (string.Equals(kind, "tables", StringComparison.OrdinalIgnoreCase)) return "table";
+            if (string.Equals(kind, "table", StringComparison.OrdinalIgnoreCase)) return "table";
+            return (kind ?? string.Empty).Trim().ToLowerInvariant();
         }
     }
 

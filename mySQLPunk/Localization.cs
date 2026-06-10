@@ -415,6 +415,7 @@ namespace mySQLPunk
             Add("Connection.ProfileDefaultAlreadyExists", "預設連線設定檔已存在。", "Default connection profile already exists.");
             Add("Connection.ProfileDefaultCannotRename", "預設連線設定檔不可重新命名。", "Default connection profile cannot be renamed.");
             Add("Connection.ProfileDefaultCannotDelete", "預設連線設定檔不可刪除。", "Default connection profile cannot be deleted.");
+            Add("Connection.DatabaseFactoryReturnedNull", "資料庫建立器未回傳連線物件。", "Database factory returned null.");
             Add("Connection.CommandLineUnavailable", "命令列介面目前尚未支援此連線類型。", "Command line interface is not supported for this connection type yet.");
             Add("Connection.CommandLineOpened", "已開啟命令列介面。", "Command line interface opened.");
             Add("Connection.CommandLineOpenFailed", "開啟命令列介面失敗：{0}", "Open command line interface failed: {0}");
@@ -628,6 +629,17 @@ namespace mySQLPunk
             Add("Object.TargetNameExists", "目標名稱已存在：{0}", "Target name already exists: {0}");
             Add("Object.RenameFailed", "重新命名失敗：{0}", "Rename failed: {0}");
             Add("Object.CopyFailed", "複製失敗：{0}", "Copy failed: {0}");
+            Add("Object.CopyDatabaseNotConnected", "來源或目標資料庫尚未連線。", "Source or target database is not connected.");
+            Add("Object.CopyOnlyTableViewSupported", "只支援複製 Table / View。", "Only Table / View copy is supported.");
+            Add("Object.CopyForceTableSnapshot", "使用者選擇直接建立 table snapshot。", "User selected direct table snapshot creation.");
+            Add("Object.CopyReadSourceSchema", "讀取來源結構...", "Reading source schema...");
+            Add("Object.CopyNoColumns", "來源資料表沒有可複製的欄位。", "Source table has no columns to copy.");
+            Add("Object.CopyProgress", "正在複製 {0} -> {1}: {2} / {3}", "Copying {0} -> {1}: {2} / {3}");
+            Add("Object.CopyConvertViewSql", "轉換 View SQL...", "Converting View SQL...");
+            Add("Object.CopyViewSqlFallback", "View SQL 無法安全轉換，改用 table snapshot：{0}", "View SQL cannot be converted safely; using table snapshot: {0}");
+            Add("Object.CopyViewCreateFallback", "View 建立失敗，改用 table snapshot：{0}", "View creation failed; using table snapshot: {0}");
+            Add("Object.CopyReadViewDdl", "讀取 View DDL...", "Reading View DDL...");
+            Add("Object.CopyViewDdlUnavailable", "無法取得 View DDL。", "Cannot get View DDL.");
             Add("Object.ViewCopyTitle", "跨 Provider 複製 View", "Cross-provider View Copy");
             Add("Object.ViewCopyPrompt", "來源（{0}）View：{1}\n目標 Provider：{2}\n\n選擇複製方式：", "Source ({0}) view: {1}\nTarget provider: {2}\n\nSelect copy mode:");
             Add("Object.ViewCopyAutoConvert", "嘗試轉換 View SQL（無法轉換時改用 table snapshot）", "Try converting View SQL (fall back to table snapshot if conversion fails)");

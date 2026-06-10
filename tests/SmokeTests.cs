@@ -5457,6 +5457,100 @@ public static class SmokeTests
         Assert(ConnectionOpenService.ShouldOfferRetry(new TimeoutException("timeout")), "Timeout should be retryable.");
         Assert(!ConnectionOpenService.ShouldOfferRetry(new Exception("password authentication failed")), "Credential failures should not be retryable.");
 
+        string connectionLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                ConnectionOpenService.Open(() => null, "Host=localhost");
+                Assert(false, "ConnectionOpenService should reject null database factory results.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "資料庫建立器未回傳連線物件", "ConnectionOpenService null factory errors should localize Traditional Chinese messages.");
+            }
+
+            DatabaseCopyService copyService = new DatabaseCopyService();
+            DatabaseCopyItem connectedTableSource = new DatabaseCopyItem
+            {
+                Database = new FakeCopyDatabase("mysql"),
+                DatabaseName = "main",
+                ObjectName = "users",
+                ObjectKind = "table",
+                ProviderName = "mysql"
+            };
+            DatabaseCopyItem connectedTableTarget = new DatabaseCopyItem
+            {
+                Database = new FakeCopyDatabase("mysql"),
+                DatabaseName = "main",
+                ObjectName = "users",
+                ObjectKind = "table",
+                ProviderName = "mysql"
+            };
+
+            try
+            {
+                copyService.Copy(new DatabaseCopyItem { ObjectKind = "table" }, connectedTableTarget, null);
+                Assert(false, "Database copy should require connected source and target databases.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "來源或目標資料庫尚未連線", "Database copy connection validation should localize Traditional Chinese messages.");
+            }
+
+            try
+            {
+                copyService.Copy(connectedTableSource, connectedTableTarget, null);
+                Assert(false, "Database copy should reject source tables without copyable columns.");
+            }
+            catch (Exception ex)
+            {
+                AssertContains(ex.Message, "來源資料表沒有可複製的欄位", "Database copy empty column errors should localize Traditional Chinese messages.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            DatabaseCopyItem unsupportedSource = new DatabaseCopyItem
+            {
+                Database = new FakeCopyDatabase("mysql", includeCopyColumns: true),
+                DatabaseName = "main",
+                ObjectName = "proc_ping",
+                ObjectKind = "function",
+                ProviderName = "mysql"
+            };
+            try
+            {
+                copyService.Copy(unsupportedSource, connectedTableTarget, null);
+                Assert(false, "Database copy should reject unsupported object kinds.");
+            }
+            catch (NotSupportedException ex)
+            {
+                AssertContains(ex.Message, "Only Table / View copy is supported", "Database copy unsupported kind errors should localize English messages.");
+            }
+
+            DatabaseCopyItem emptyViewSource = new DatabaseCopyItem
+            {
+                Database = new FakeCopyDatabase("mysql", includeCopyColumns: true, viewSql: ""),
+                DatabaseName = "main",
+                ObjectName = "active_users",
+                ObjectKind = "view",
+                ProviderName = "mysql"
+            };
+            try
+            {
+                copyService.Copy(emptyViewSource, connectedTableTarget, null);
+                Assert(false, "Database copy should reject views without DDL.");
+            }
+            catch (Exception ex)
+            {
+                AssertContains(ex.Message, "Cannot get View DDL", "Database copy missing view DDL errors should localize English messages.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(connectionLanguage, false);
+        }
+
         MetadataLoadService metadataService = new MetadataLoadService(
             (db, name) => CreateNamedRowsTable("Name", "fn_ping"),
             (db, name, connInfo) => CreateNamedRowsTable("Name", connInfo["user"].ToString()),
@@ -6944,6 +7038,59 @@ public static class SmokeTests
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
         public string GetViewCreateStatement(string databaseName, string viewName) { return ""; }
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
+    }
+
+    private sealed class FakeCopyDatabase : IDatabase
+    {
+        private readonly string providerName;
+        private readonly bool includeCopyColumns;
+        private readonly string viewSql;
+
+        public FakeCopyDatabase(string providerName, bool includeCopyColumns = false, string viewSql = "CREATE VIEW active_users AS SELECT id FROM users")
+        {
+            this.providerName = providerName;
+            this.includeCopyColumns = includeCopyColumns;
+            this.viewSql = viewSql;
+        }
+
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => providerName;
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { return new DataTable(); }
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null) { return new Dictionary<string, string> { { "status", "OK" } }; }
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public List<string> GetDatabases() { return new List<string> { "main" }; }
+        public List<string> GetTables(string databaseName) { return new List<string>(); }
+        public List<string> GetViews(string databaseName) { return new List<string>(); }
+        public DataTable GetColumns(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return ""; }
+        public bool TableExists(string databaseName, string tableName) { return false; }
+        public bool ViewExists(string databaseName, string viewName) { return false; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 0; }
+        public DataTable GetCopyColumns(string databaseName, string tableName)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Name");
+            table.Columns.Add("Type");
+            if (includeCopyColumns) table.Rows.Add("id", "int");
+            return table;
+        }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return viewSql; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { }
     }
 
     private sealed class FakeSqliteCommentDatabase : IDatabase

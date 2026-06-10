@@ -24,7 +24,7 @@ namespace mySQLPunk.lib
             if (databaseFactory == null) throw new ArgumentNullException(nameof(databaseFactory));
 
             IDatabase db = databaseFactory();
-            if (db == null) throw new InvalidOperationException("Database factory returned null.");
+            if (db == null) throw new InvalidOperationException(Localization.T("Connection.DatabaseFactoryReturnedNull"));
 
             try
             {

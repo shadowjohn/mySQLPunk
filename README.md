@@ -188,6 +188,10 @@ Smoke test harness：
   - 現況：複製、重新命名或刪除連線設定檔時，底層會阻擋覆蓋預設設定檔、重新命名預設設定檔與刪除預設設定檔。
   - 完成內容：預設設定檔已存在、不可重新命名、不可刪除與設定檔已存在等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **連線開啟與物件複製錯誤 ✅ 已語系化**
+  - 現況：連線開啟 service 會透過 provider factory 建立資料庫物件；Table/View 複製服務會檢查來源/目標連線、物件類型、來源欄位與 View DDL。
+  - 完成內容：資料庫建立器未回傳連線物件、來源或目標資料庫未連線、只支援複製 Table/View、來源資料表沒有可複製欄位、View DDL 無法取得，以及複製流程進度與 fallback 訊息已改用語系字串，繁中與英文介面都會顯示一致文字。
+
 - **Geometry / WKB 解析錯誤 ✅ 已語系化**
   - 現況：資料表結果中的 geometry 欄位可轉成 WKT，底層 WKB / SpatiaLite 解析器會檢查 byte order、geometry type、collection、polygon ring 與資料長度。
   - 完成內容：WKB byte order 無效、不支援 geometry 類型、SpatiaLite marker 無效、資料提前結束與集合/點/環數量過大等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。
