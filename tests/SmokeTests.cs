@@ -4107,7 +4107,18 @@ public static class SmokeTests
             SqliteColumnCommentExchangeService.BuildImportReviewReport(db, "main", filteredPlan);
         Assert(filteredReview.Added == 2 && filteredReview.Removed == 2, "SQLite comment import review should show added and removed comments for replace semantics.");
         Assert(filteredReview.Entries.Count == 4, "SQLite comment import review should include one entry per changed current/imported comment.");
-        AssertContains(SqliteColumnCommentExchangeService.BuildImportReviewSummary(filteredReview), "新增 2", "SQLite comment import review summary should include added count.");
+        string reviewLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertContains(SqliteColumnCommentExchangeService.BuildImportReviewSummary(filteredReview), "新增 2", "SQLite comment import review summary should include added count.");
+            Localization.SetLanguage(Localization.English, false);
+            AssertContains(SqliteColumnCommentExchangeService.BuildImportReviewSummary(filteredReview), "Review summary: added 2", "SQLite comment import review summary should support English.");
+        }
+        finally
+        {
+            Localization.SetLanguage(reviewLanguage, false);
+        }
         string reviewDirectory = Path.Combine(Path.GetTempPath(), "sqlite_comment_review_" + Guid.NewGuid().ToString("N"));
         try
         {

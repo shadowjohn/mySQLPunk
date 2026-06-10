@@ -457,10 +457,12 @@ namespace mySQLPunk.lib
         public static string BuildImportReviewSummary(SqliteColumnCommentImportReviewReport report)
         {
             if (report == null) return string.Empty;
-            return "審核摘要：新增 " + report.Added +
-                   "、更新 " + report.Updated +
-                   "、移除 " + report.Removed +
-                   "、不變 " + report.Unchanged;
+            return Localization.Format(
+                "Object.SqliteColumnCommentsImportReviewSummary",
+                report.Added,
+                report.Updated,
+                report.Removed,
+                report.Unchanged);
         }
 
         public static string WriteImportReviewReport(SqliteColumnCommentImportReviewReport report, string reportDirectory)
