@@ -192,6 +192,10 @@ Smoke test harness：
   - 現況：資料表結果中的 geometry 欄位可轉成 WKT，底層 WKB / SpatiaLite 解析器會檢查 byte order、geometry type、collection、polygon ring 與資料長度。
   - 完成內容：WKB byte order 無效、不支援 geometry 類型、SpatiaLite marker 無效、資料提前結束與集合/點/環數量過大等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **SQLite 專用物件精靈驗證錯誤 ✅ 已語系化**
+  - 現況：SQLite FTS / RTree / SpatiaLite 精靈會檢查 virtual table 名稱、欄位、RTree min/max 維度欄位與 spatial index 目標。
+  - 完成內容：欄位必填、物件名稱必填與 RTree 維度欄位需成對等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。
+
 - **命令列介面依賴本機 CLI ✅ 偵測、匯入預覽與匯入後補密碼已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
   - 完成內容：

@@ -2816,16 +2816,45 @@ public static class SmokeTests
         string spatialSql = SqliteSpecialObjectSqlBuilder.BuildSpatiaLiteSpatialIndex("places", "geom");
         AssertEquals("SELECT CreateSpatialIndex('places', 'geom');", spatialSql, "SpatiaLite spatial index SQL should call CreateSpatialIndex.");
 
-        bool rejected = false;
+        string previousLanguage = Localization.CurrentLanguage;
         try
         {
-            SqliteSpecialObjectSqlBuilder.BuildRTreeVirtualTable("bad", "id", SqliteSpecialObjectSqlBuilder.SplitCommaSeparatedNames("minX, maxX, minY"));
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                SqliteSpecialObjectSqlBuilder.BuildRTreeVirtualTable("bad", "id", SqliteSpecialObjectSqlBuilder.SplitCommaSeparatedNames("minX, maxX, minY"));
+                Assert(false, "RTree builder should reject incomplete min/max dimension pairs.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "RTree 維度欄位必須包含 min/max 成對欄位", "RTree dimension validation should localize Traditional Chinese messages.");
+            }
+
+            try
+            {
+                SqliteSpecialObjectSqlBuilder.BuildFtsVirtualTable("doc_search", new string[0], "unicode61", "");
+                Assert(false, "FTS builder should require at least one column.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請填寫 columns", "SQLite special object column validation should localize Traditional Chinese messages.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                SqliteSpecialObjectSqlBuilder.BuildSpatiaLiteSpatialIndex("", "geom");
+                Assert(false, "SpatiaLite spatial index builder should require a table name.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "tableName is required", "SQLite special object name validation should localize English messages.");
+            }
         }
-        catch (ArgumentException)
+        finally
         {
-            rejected = true;
+            Localization.SetLanguage(previousLanguage, false);
         }
-        Assert(rejected, "RTree builder should reject incomplete min/max dimension pairs.");
     }
 
     private static void TestTableDesignerDdlBuilder()

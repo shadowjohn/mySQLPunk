@@ -41,7 +41,7 @@ namespace mySQLPunk.lib
             List<string> dimensions = NormalizeNames(dimensionColumns, "dimensionColumns");
             if (dimensions.Count < 4 || dimensions.Count % 2 != 0)
             {
-                throw new ArgumentException("RTree dimension columns must contain min/max pairs, for example minX,maxX,minY,maxY.");
+                throw new ArgumentException(Localization.T("SqliteWizard.RTreeDimensionPairsRequired"));
             }
 
             List<string> parts = new List<string> { QuoteIdentifier(rowId) };
@@ -87,14 +87,14 @@ namespace mySQLPunk.lib
                 }
             }
 
-            if (output.Count == 0) throw new ArgumentException(parameterName + " is required.");
+            if (output.Count == 0) throw new ArgumentException(Localization.Format("SqliteWizard.ValueRequired", parameterName));
             return output;
         }
 
         private static string RequireName(string value, string parameterName)
         {
             string name = (value ?? "").Trim();
-            if (name.Length == 0) throw new ArgumentException(parameterName + " is required.");
+            if (name.Length == 0) throw new ArgumentException(Localization.Format("SqliteWizard.ValueRequired", parameterName));
             return name;
         }
 

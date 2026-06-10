@@ -943,6 +943,8 @@ namespace mySQLPunk
             Add("SqliteWizard.TargetTable", "目標資料表", "Target table");
             Add("SqliteWizard.GeometryColumn", "Geometry 欄位", "Geometry column");
             Add("SqliteWizard.SqlPreview", "SQL 預覽", "SQL Preview");
+            Add("SqliteWizard.ValueRequired", "請填寫 {0}。", "{0} is required.");
+            Add("SqliteWizard.RTreeDimensionPairsRequired", "RTree 維度欄位必須包含 min/max 成對欄位，例如 minX,maxX,minY,maxY。", "RTree dimension columns must contain min/max pairs, for example minX,maxX,minY,maxY.");
             Add("SqliteWizard.NoSql", "目前沒有可執行的 SQL。", "There is no executable SQL.");
             Add("SqliteWizard.ExecuteSucceeded", "SQLite 專用物件 SQL 執行成功。", "SQLite special object SQL executed successfully.");
             Add("SqliteWizard.ExecuteFailed", "SQLite 專用物件 SQL 執行失敗：{0}", "SQLite special object SQL failed: {0}");
