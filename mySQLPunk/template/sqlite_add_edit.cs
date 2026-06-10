@@ -133,7 +133,7 @@ namespace mySQLPunk.template
             }
             catch (Exception ex)
             {
-                MessageBox.Show(Localization.Format("Connection.TestFailed", "SQLite", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(ConnectionDialogMessageService.BuildTestFailedMessage("SQLite", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -152,7 +152,7 @@ namespace mySQLPunk.template
             }
             catch (Exception ex)
             {
-                MessageBox.Show(Localization.Format("Connection.InitializationFailed", "SQLite", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(ConnectionDialogMessageService.BuildInitializationFailedMessage("SQLite", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 

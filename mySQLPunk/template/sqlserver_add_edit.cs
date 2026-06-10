@@ -201,7 +201,7 @@ namespace mySQLPunk.template
             }
             catch (Exception ex)
             {
-                MessageBox.Show(Localization.Format("Connection.TestFailed", "SQL Server", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(ConnectionDialogMessageService.BuildTestFailedMessage("SQL Server", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

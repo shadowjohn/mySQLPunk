@@ -150,7 +150,7 @@ namespace mySQLPunk.template
             }
             catch (Exception ex)
             {
-                MessageBox.Show(Localization.Format("Connection.TestFailed", "PostgreSQL", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(ConnectionDialogMessageService.BuildTestFailedMessage("PostgreSQL", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
         

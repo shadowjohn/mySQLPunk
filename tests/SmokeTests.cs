@@ -6294,6 +6294,8 @@ public static class SmokeTests
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertEquals("MySQL 連線失敗：未知錯誤", ConnectionDialogMessageService.BuildTestFailedMessage("MySQL", new Exception("")), "Blank connection test errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("SQLite 初始化失敗：未知錯誤", ConnectionDialogMessageService.BuildInitializationFailedMessage("SQLite", new Exception("   ")), "Blank SQLite initialization errors should localize Traditional Chinese unknown errors.");
             using (mySQLPunk.template.mysql_add_edit mysql = new mySQLPunk.template.mysql_add_edit())
             {
                 AssertEquals("一般", GetPrivateField<TabPage>(mysql, "tabPage1").Text, "MySQL connection editor tab should localize Traditional Chinese.");
@@ -6329,6 +6331,8 @@ public static class SmokeTests
             }
 
             Localization.SetLanguage(Localization.English, false);
+            AssertEquals("PostgreSQL connection failed: Unknown error", ConnectionDialogMessageService.BuildTestFailedMessage("PostgreSQL", new Exception("")), "Blank connection test errors should localize English unknown errors.");
+            AssertEquals("SQL Server connection failed: login denied", ConnectionDialogMessageService.BuildTestFailedMessage("SQL Server", new InvalidOperationException(" login denied ")), "Connection test errors should preserve explicit English reasons.");
             using (mySQLPunk.template.mysql_add_edit mysql = new mySQLPunk.template.mysql_add_edit())
             {
                 AssertEquals("General", GetPrivateField<TabPage>(mysql, "tabPage1").Text, "MySQL connection editor tab should support English.");
