@@ -12,6 +12,7 @@ namespace mySQLPunk.lib
         public string ReleaseName { get; set; }
         public string ReleasePageUrl { get; set; }
         public string InstallerDownloadUrl { get; set; }
+        public string PortableZipDownloadUrl { get; set; }
         public string ReleaseNotes { get; set; }
         public bool IsPrerelease { get; set; }
 
@@ -58,6 +59,8 @@ namespace mySQLPunk.lib
             {
                 client.Headers[HttpRequestHeader.UserAgent] = "mySQLPunk-update-check";
                 client.Headers[HttpRequestHeader.Accept] = "application/vnd.github+json";
+                IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();
+                if (proxy != null) client.Proxy = proxy;
                 string json = client.DownloadString(BuildGitHubLatestReleaseApiUrl(owner, repository));
                 return ParseGitHubLatestRelease(json, currentVersion);
             }
@@ -69,6 +72,7 @@ namespace mySQLPunk.lib
 
             JObject release = JObject.Parse(json);
             string tagName = (string)release["tag_name"] ?? "";
+            JArray assets = release["assets"] as JArray;
             AppUpdateCheckResult result = new AppUpdateCheckResult
             {
                 CurrentVersion = ParseVersion(currentVersion),
@@ -77,7 +81,8 @@ namespace mySQLPunk.lib
                 ReleasePageUrl = (string)release["html_url"] ?? "",
                 ReleaseNotes = (string)release["body"] ?? "",
                 IsPrerelease = (bool?)release["prerelease"] ?? false,
-                InstallerDownloadUrl = FindInstallerAssetUrl(release["assets"] as JArray)
+                InstallerDownloadUrl = FindInstallerAssetUrl(assets),
+                PortableZipDownloadUrl = FindPortableZipAssetUrl(assets)
             };
 
             return result;
@@ -104,19 +109,20 @@ namespace mySQLPunk.lib
             return Path.Combine(directory, fileName);
         }
 
+        public static string BuildPortableZipDownloadPath(AppUpdateCheckResult result, string directory)
+        {
+            if (result == null) throw new ArgumentNullException(nameof(result));
+            if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException("Download directory is required.", nameof(directory));
+
+            string fileName = GetPortableZipFileName(result);
+            return Path.Combine(directory, fileName);
+        }
+
         public static string GetInstallerFileName(AppUpdateCheckResult result)
         {
             if (result == null) throw new ArgumentNullException(nameof(result));
 
-            string fileName = "";
-            if (!string.IsNullOrWhiteSpace(result.InstallerDownloadUrl))
-            {
-                Uri uri;
-                if (Uri.TryCreate(result.InstallerDownloadUrl, UriKind.Absolute, out uri))
-                {
-                    fileName = Uri.UnescapeDataString(Path.GetFileName(uri.LocalPath));
-                }
-            }
+            string fileName = GetFileNameFromUrl(result.InstallerDownloadUrl);
 
             if (string.IsNullOrWhiteSpace(fileName))
             {
@@ -124,11 +130,22 @@ namespace mySQLPunk.lib
                 fileName = "mySQLPunk-Setup-" + version + ".exe";
             }
 
-            foreach (char invalid in Path.GetInvalidFileNameChars())
+            return SanitizeFileName(fileName);
+        }
+
+        public static string GetPortableZipFileName(AppUpdateCheckResult result)
+        {
+            if (result == null) throw new ArgumentNullException(nameof(result));
+
+            string fileName = GetFileNameFromUrl(result.PortableZipDownloadUrl);
+
+            if (string.IsNullOrWhiteSpace(fileName))
             {
-                fileName = fileName.Replace(invalid, '_');
+                string version = result.LatestVersion == null ? "latest" : result.LatestVersion.ToString();
+                fileName = "mySQLPunk-" + version + "-win-x64-portable.zip";
             }
-            return fileName;
+
+            return SanitizeFileName(fileName);
         }
 
         private static string FindInstallerAssetUrl(JArray assets)
@@ -147,6 +164,51 @@ namespace mySQLPunk.lib
             }
 
             return "";
+        }
+
+        private static string FindPortableZipAssetUrl(JArray assets)
+        {
+            if (assets == null) return "";
+
+            string fallbackZipUrl = "";
+            foreach (JToken asset in assets)
+            {
+                string name = ((string)asset["name"] ?? "").ToLowerInvariant();
+                string url = (string)asset["browser_download_url"] ?? "";
+                if (string.IsNullOrWhiteSpace(url)) continue;
+                if (!name.EndsWith(".zip")) continue;
+
+                if (name.Contains("portable") && name.Contains("mysqlpunk"))
+                {
+                    return url;
+                }
+
+                if (string.IsNullOrWhiteSpace(fallbackZipUrl) && name.Contains("mysqlpunk"))
+                {
+                    fallbackZipUrl = url;
+                }
+            }
+
+            return fallbackZipUrl;
+        }
+
+        private static string GetFileNameFromUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return "";
+
+            Uri uri;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out uri)) return "";
+            return Uri.UnescapeDataString(Path.GetFileName(uri.LocalPath));
+        }
+
+        private static string SanitizeFileName(string fileName)
+        {
+            string sanitized = fileName ?? "";
+            foreach (char invalid in Path.GetInvalidFileNameChars())
+            {
+                sanitized = sanitized.Replace(invalid, '_');
+            }
+            return sanitized;
         }
     }
 }

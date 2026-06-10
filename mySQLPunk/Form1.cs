@@ -1252,6 +1252,10 @@ namespace mySQLPunk
                         {
                             await DownloadAndLaunchUpdateInstallerAsync(result);
                         }
+                        else if (!string.IsNullOrWhiteSpace(result.PortableZipDownloadUrl))
+                        {
+                            await DownloadAndOpenPortableUpdateAsync(result);
+                        }
                         else if (MessageBox.Show(
                             Localization.T("Update.OpenReleasePage"),
                             Localization.T("Menu.CheckUpdates"),
@@ -1294,10 +1298,31 @@ namespace mySQLPunk
             using (System.Net.WebClient client = new System.Net.WebClient())
             {
                 client.Headers[System.Net.HttpRequestHeader.UserAgent] = "mySQLPunk-update-download";
+                System.Net.IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();
+                if (proxy != null) client.Proxy = proxy;
                 await client.DownloadFileTaskAsync(new Uri(result.InstallerDownloadUrl), targetPath);
             }
 
             UpdateMainStatus(Localization.Format("Update.Downloaded", targetPath));
+            Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
+        }
+
+        private async Task DownloadAndOpenPortableUpdateAsync(AppUpdateCheckResult result)
+        {
+            string downloadDirectory = Path.Combine(Path.GetTempPath(), "mySQLPunk", "updates");
+            Directory.CreateDirectory(downloadDirectory);
+            string targetPath = AppUpdateService.BuildPortableZipDownloadPath(result, downloadDirectory);
+            UpdateMainStatus(Localization.Format("Update.Downloading", AppUpdateService.GetPortableZipFileName(result)));
+
+            using (System.Net.WebClient client = new System.Net.WebClient())
+            {
+                client.Headers[System.Net.HttpRequestHeader.UserAgent] = "mySQLPunk-update-download";
+                System.Net.IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();
+                if (proxy != null) client.Proxy = proxy;
+                await client.DownloadFileTaskAsync(new Uri(result.PortableZipDownloadUrl), targetPath);
+            }
+
+            UpdateMainStatus(Localization.Format("Update.PortableDownloaded", targetPath));
             Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
         }
 

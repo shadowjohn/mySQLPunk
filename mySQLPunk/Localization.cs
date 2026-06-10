@@ -319,10 +319,11 @@ namespace mySQLPunk
             Add("Connection.CliTemporaryPasswordPrompt", "此連線未儲存密碼。\n請輸入本次命令列介面要使用的密碼；留空會改由命令列工具自行提示。", "This connection does not have a saved password.\nEnter the password to use for this CLI session; leave blank to let the CLI prompt for it.");
             Add("Connection.CliTemporaryPasswordCancelled", "已取消開啟命令列介面。", "Opening command line interface cancelled.");
             Add("Update.Checking", "正在檢查更新...", "Checking for updates...");
-            Add("Update.Available", "發現新版本 {0}。\n目前版本：{1}\n\n是否下載並啟動更新？", "Version {0} is available.\nCurrent version: {1}\n\nDownload and start the update?");
-            Add("Update.OpenReleasePage", "找不到可直接下載的安裝檔。\n是否開啟下載頁？", "No direct installer download was found.\nOpen the release page?");
+            Add("Update.Available", "發現新版本 {0}。\n目前版本：{1}\n\n是否下載更新？", "Version {0} is available.\nCurrent version: {1}\n\nDownload the update?");
+            Add("Update.OpenReleasePage", "找不到可直接下載的更新檔。\n是否開啟下載頁？", "No direct update package was found.\nOpen the release page?");
             Add("Update.Downloading", "正在下載更新：{0}", "Downloading update: {0}");
             Add("Update.Downloaded", "更新安裝程式已下載：{0}", "Update installer downloaded: {0}");
+            Add("Update.PortableDownloaded", "可攜版更新壓縮檔已下載：{0}", "Portable update zip downloaded: {0}");
             Add("Update.NotAvailable", "目前已是最新版本。", "You are already on the latest version.");
             Add("Update.CheckFailed", "檢查更新失敗：{0}", "Check for updates failed: {0}");
             Add("Connection.MarkedColor", "已標記連線色彩：{0}", "Connection color marked: {0}");

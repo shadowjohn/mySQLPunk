@@ -4743,6 +4743,7 @@ public static class SmokeTests
 }";
         AppUpdateCheckResult noAsset = AppUpdateService.ParseGitHubLatestRelease(noAssetJson, "1.0.0.0");
         AssertEquals("", noAsset.InstallerDownloadUrl, "Update check should not treat the release page as an installer asset.");
+        AssertEquals("", noAsset.PortableZipDownloadUrl, "Update check should not invent a portable package when no assets exist.");
 
         string portableZipJson = @"{
   ""tag_name"": ""v1.2.5"",
@@ -4759,7 +4760,10 @@ public static class SmokeTests
   ]
 }";
         AppUpdateCheckResult portableZip = AppUpdateService.ParseGitHubLatestRelease(portableZipJson, "1.0.0.0");
-        AssertEquals("", portableZip.InstallerDownloadUrl, "Portable release assets should open the release page instead of launching a zip as an installer.");
+        AssertEquals("", portableZip.InstallerDownloadUrl, "Portable release assets should not be launched as an installer.");
+        AssertContains(portableZip.PortableZipDownloadUrl, "mySQLPunk-1.2.5-win-x64-portable.zip", "Portable release assets should be available as downloadable update packages.");
+        AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", AppUpdateService.GetPortableZipFileName(portableZip), "Portable update filename should keep the release asset name.");
+        AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", Path.GetFileName(AppUpdateService.BuildPortableZipDownloadPath(portableZip, Path.GetTempPath())), "Portable update download path should keep the zip asset file name.");
 
         AssertEquals(
             "https://api.github.com/repos/shadowjohn/mySQLPunk/releases/latest",
