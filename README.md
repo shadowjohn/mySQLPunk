@@ -31,7 +31,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 .\scripts\package-release.ps1 -Version 1.0.0
 ```
 
-此腳本會使用 Release 組態建置專案，將 `mySQLPunk/bin/Release` 整理成 `dist/mySQLPunk-<version>-win-x64-portable`，產生 portable zip 與 `release-manifest.json`，manifest 會包含檔名、大小與 SHA-256，方便上傳 GitHub Releases 後供程式內更新檢查與下載使用。
+此腳本會使用 Release 組態建置專案，將 `mySQLPunk/bin/Release` 整理成 `dist/mySQLPunk-<version>-win-x64-portable`，產生 portable zip 與 `release-manifest.json`，manifest 會包含檔名、大小與 SHA-256，方便上傳 GitHub Releases 後供程式內更新檢查與下載使用。打包時會一併放入 `THIRD_PARTY_NOTICES.md` 與可取得的 NuGet license/notice 檔，並排除不屬於程式必要 runtime 的 `sqlite3.exe`、`libreadline8.dll`、`libtermcap-0.dll`。
 
 GitHub Actions 自動發版：
 
@@ -120,7 +120,7 @@ Smoke test harness：
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
   - 完成內容：
     - 已加入 CLI 可用性偵測（先透過 `where.exe`，再掃描 `PATH`）。找不到時會顯示安裝說明連結，不會直接開啟空白終端機。
-    - `選項 > 環境` 可自訂 MySQL、PostgreSQL、SQL Server、Oracle、SQLite CLI 執行檔路徑；未設定時仍會使用 `PATH`，SQLite 會優先使用內建 `sqlite3.exe`。
+    - `選項 > 環境` 可自訂 MySQL、PostgreSQL、SQL Server、Oracle、SQLite CLI 執行檔路徑；未設定時仍會使用 `PATH`。
     - 已補上密碼傳遞策略：MySQL、PostgreSQL、SQL Server 會透過 `MYSQL_PWD`、`PGPASSWORD`、`SQLCMDPASSWORD` 環境變數傳給 CLI，不把密碼寫進命令列參數；未儲存密碼時仍會保留 CLI 互動式密碼提示。Oracle `sqlplus` 目前仍採互動式密碼輸入，避免把密碼放進連線字串。
     - 連線密碼會儲存在 Windows Credential Manager；舊版 `setting.ini` / profile JSON 中的加密 `pwd` 會在讀取時自動遷移到 credential，並重寫設定檔清空 `pwd`。編輯連線時若清空密碼欄位，會同步清除對應 credential。
     - 未儲存密碼時，MySQL、PostgreSQL、SQL Server 會在開啟 CLI 前顯示一次性密碼輸入框；輸入的密碼只放入本次 process environment，不會回寫到連線設定或設定檔。

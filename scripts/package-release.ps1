@@ -89,6 +89,64 @@ function Copy-ReleaseFiles {
     }
 }
 
+function Remove-BlockedReleaseFiles {
+    param([string]$TargetDirectory)
+
+    $blockedFiles = @(
+        "binary\sqlite3_ext\sqlite3.exe",
+        "binary\sqlite3_ext\libreadline8.dll",
+        "binary\sqlite3_ext\libtermcap-0.dll"
+    )
+
+    foreach ($relativePath in $blockedFiles) {
+        $path = Join-Path $TargetDirectory $relativePath
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Force
+        }
+    }
+}
+
+function Copy-ReleaseComplianceFiles {
+    param(
+        [string]$RepositoryRoot,
+        [string]$TargetDirectory
+    )
+
+    $thirdPartyNotices = Join-Path $RepositoryRoot "THIRD_PARTY_NOTICES.md"
+    if (-not (Test-Path -LiteralPath $thirdPartyNotices)) {
+        throw "THIRD_PARTY_NOTICES.md was not found: $thirdPartyNotices"
+    }
+    Copy-Item -LiteralPath $thirdPartyNotices -Destination (Join-Path $TargetDirectory "THIRD_PARTY_NOTICES.md") -Force
+
+    $packagesRoot = Join-Path $RepositoryRoot "packages"
+    if (-not (Test-Path -LiteralPath $packagesRoot)) {
+        throw "NuGet packages directory was not found: $packagesRoot"
+    }
+
+    $oracleLicense = Join-Path $packagesRoot "Oracle.ManagedDataAccess.23.26.200\LICENSE.txt"
+    if (-not (Test-Path -LiteralPath $oracleLicense)) {
+        throw "Oracle.ManagedDataAccess.23.26.200 LICENSE.txt was not found: $oracleLicense"
+    }
+
+    $licensesRoot = Join-Path $TargetDirectory "THIRD_PARTY_LICENSES\NuGet"
+    New-Item -ItemType Directory -Path $licensesRoot -Force | Out-Null
+
+    $licenseNamePattern = '^(LICENSE|LICENCE|NOTICE|THIRD-PARTY-NOTICES|COPYING)'
+    Get-ChildItem -LiteralPath $packagesRoot -Directory | ForEach-Object {
+        $packageDirectory = $_
+        $licenseFiles = Get-ChildItem -LiteralPath $packageDirectory.FullName -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match $licenseNamePattern }
+
+        foreach ($licenseFile in $licenseFiles) {
+            $relativePath = $licenseFile.FullName.Substring($packageDirectory.FullName.Length).TrimStart('\', '/')
+            $destinationPath = Join-Path (Join-Path $licensesRoot $packageDirectory.Name) $relativePath
+            $destinationDirectory = Split-Path -Parent $destinationPath
+            New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
+            Copy-Item -LiteralPath $licenseFile.FullName -Destination $destinationPath -Force
+        }
+    }
+}
+
 $repoRoot = Get-RepositoryRoot
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "dist"
@@ -120,6 +178,8 @@ if (-not (Test-Path -LiteralPath $projectOutput)) {
 
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 Copy-ReleaseFiles -SourceDirectory $projectOutput -TargetDirectory $packageDirectory
+Remove-BlockedReleaseFiles -TargetDirectory $packageDirectory
+Copy-ReleaseComplianceFiles -RepositoryRoot $repoRoot -TargetDirectory $packageDirectory
 
 if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force

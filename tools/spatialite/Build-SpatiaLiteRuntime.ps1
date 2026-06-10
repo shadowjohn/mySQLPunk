@@ -110,7 +110,6 @@ pacman -S --needed --noconfirm \
   mingw-w64-x86_64-libxml2 \
   mingw-w64-x86_64-minizip \
   mingw-w64-x86_64-curl \
-  mingw-w64-x86_64-readline \
   mingw-w64-x86_64-librttopo \
   make unzip
 "@
@@ -143,8 +142,8 @@ ldd "`$candidate" | awk '/\/mingw64\/bin\// { print `$3 }' | while read dll; do
   fi
 done
 
-cp -n /mingw64/bin/sqlite3.exe "$msysRuntime/" || true
 cp -n /mingw64/share/proj/proj.db "$msysRuntime/" || true
+rm -f "$msysRuntime/sqlite3.exe" "$msysRuntime"/libreadline*.dll "$msysRuntime"/libtermcap*.dll
 "@
 
 if (!$SkipPacman) {

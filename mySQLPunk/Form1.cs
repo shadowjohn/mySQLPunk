@@ -11917,12 +11917,7 @@ namespace mySQLPunk
                 case "mssql":
                 case "sqlserver":  return "sqlcmd.exe";
                 case "oracle":     return "sqlplus.exe";
-                case "sqlite":
-                    // 優先使用內建 sqlite3.exe，不需要偵測 PATH
-                    string bundled = Path.Combine(
-                        AppDomain.CurrentDomain.BaseDirectory,
-                        "binary", "sqlite3_ext", "sqlite3.exe");
-                    return File.Exists(bundled) ? null : "sqlite3.exe";
+                case "sqlite":     return "sqlite3.exe";
                 default:           return null;
             }
         }
@@ -12059,9 +12054,8 @@ namespace mySQLPunk
                            (string.IsNullOrWhiteSpace(initialDatabase) ? "" : " -d " + QuoteCommandArgument(initialDatabase));
                     return launch;
                 case "sqlite":
-                    string sqliteExe = Path.Combine(my.pwd(), "binary", "sqlite3_ext", "sqlite3.exe");
                     string sqlitePath = GetConnectionValue(conn, "path");
-                    string exe = GetCliCommand(kind, File.Exists(sqliteExe) ? sqliteExe : "sqlite3");
+                    string exe = GetCliCommand(kind, "sqlite3");
                     launch.Command = exe + " " + QuoteCommandArgument(sqlitePath);
                     return launch;
                 case "oracle":

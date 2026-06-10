@@ -873,7 +873,7 @@ namespace mySQLPunk
             Add("Options.Advanced", "進階", "Advanced");
             Add("Options.RestartNote", "* 部分已開啟視窗可能需要重新開啟才能完整套用。", "* Some open windows may need to be reopened to fully apply changes.");
             Add("Options.NoPrimaryKeyReadOnly", "沒有 Primary Key 的資料表以唯讀模式開啟", "Open tables without a primary key as read-only");
-            Add("Options.CliPathHint", "可指定各資料庫命令列工具的位置。留空時會使用 PATH，SQLite 會優先使用內建 sqlite3.exe。", "Set database CLI executable paths. Leave blank to use PATH; SQLite uses the bundled sqlite3.exe first.");
+            Add("Options.CliPathHint", "可指定各資料庫命令列工具的位置。留空時會使用 PATH。", "Set database CLI executable paths. Leave blank to use PATH.");
             Add("Options.CliPathMySql", "MySQL:", "MySQL:");
             Add("Options.CliPathPostgreSql", "PostgreSQL:", "PostgreSQL:");
             Add("Options.CliPathSqlServer", "SQL Server:", "SQL Server:");

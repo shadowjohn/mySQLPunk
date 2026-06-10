@@ -54,6 +54,7 @@ public static class SmokeTests
         Run("Application about message", TestApplicationAboutMessage, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
+        Run("Release third-party notices", TestReleaseThirdPartyNotices, ref passed);
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
@@ -4759,6 +4760,50 @@ public static class SmokeTests
         AssertContains(script, "SHA256", "Release packaging script should include a SHA-256 checksum.");
         AssertContains(script, "mySQLPunk.exe", "Release packaging script should package the application executable.");
         AssertContains(script, "MSBuild", "Release packaging script should build the Release configuration.");
+        AssertContains(script, "THIRD_PARTY_NOTICES.md", "Release packaging script should include third-party notices.");
+        AssertContains(script, "THIRD_PARTY_LICENSES", "Release packaging script should include bundled license files.");
+        AssertContains(script, "Oracle.ManagedDataAccess.23.26.200", "Release packaging script should require the Oracle license file.");
+        AssertContains(script, "libreadline8.dll", "Release packaging script should remove GPL Readline from the portable package.");
+        AssertContains(script, "libtermcap-0.dll", "Release packaging script should remove the Readline termcap dependency.");
+        AssertContains(script, "sqlite3.exe", "Release packaging script should remove the Readline-linked SQLite shell.");
+
+        string projectPath = Path.Combine(root, "mySQLPunk", "mySQLPunk.csproj");
+        string project = File.ReadAllText(projectPath, Encoding.UTF8);
+        AssertContains(project, "binary\\sqlite3_ext\\sqlite3.exe", "Project should exclude the SQLite shell from release output.");
+        AssertContains(project, "binary\\sqlite3_ext\\libreadline*.dll", "Project should exclude Readline from release output.");
+        AssertContains(project, "image\\ASSET_NOTICES.md", "Project should copy image asset notices to release output.");
+    }
+
+    private static void TestReleaseThirdPartyNotices()
+    {
+        string root = FindRepositoryRootForTest();
+        string noticesPath = Path.Combine(root, "THIRD_PARTY_NOTICES.md");
+        Assert(File.Exists(noticesPath), "Root third-party notices should exist.");
+
+        string notices = File.ReadAllText(noticesPath, Encoding.UTF8);
+        AssertContains(notices, "Oracle.ManagedDataAccess", "Third-party notices should document Oracle.ManagedDataAccess.");
+        AssertContains(notices, "GNU Readline", "Third-party notices should document the Readline exclusion.");
+        AssertContains(notices, "Devicon", "Third-party notices should document Devicon brand icons.");
+        AssertContains(notices, "OpenGameArt", "Third-party notices should document progress runner source.");
+
+        string assetNoticesPath = Path.Combine(root, "mySQLPunk", "image", "ASSET_NOTICES.md");
+        Assert(File.Exists(assetNoticesPath), "Image asset notices should exist.");
+        string assetNotices = File.ReadAllText(assetNoticesPath, Encoding.UTF8);
+        AssertContains(assetNotices, "brand_mysql.png", "Image asset notices should list database brand icons.");
+        AssertContains(assetNotices, "progress_runner.gif", "Image asset notices should list progress runner animation.");
+
+        string runtimeNoticesPath = Path.Combine(root, "mySQLPunk", "binary", "sqlite3_ext", "THIRD_PARTY_RUNTIME_NOTICES.md");
+        Assert(File.Exists(runtimeNoticesPath), "Native runtime notices should exist.");
+        string runtimeNotices = File.ReadAllText(runtimeNoticesPath, Encoding.UTF8);
+        AssertContains(runtimeNotices, "sqlite3.exe", "Native runtime notices should document the SQLite shell exclusion.");
+        AssertContains(runtimeNotices, "libreadline8.dll", "Native runtime notices should document Readline exclusion.");
+        AssertContains(runtimeNotices, "SPATIALITE_RUNTIME_MANIFEST.json", "Native runtime notices should require the runtime manifest.");
+
+        CliPathSettings.SetPath("sqlite", "");
+        MethodInfo availabilityMethod = typeof(Form1).GetMethod("GetCliAvailabilityTarget", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert(availabilityMethod != null, "CLI availability helper should exist.");
+        string sqliteAvailabilityTarget = (string)availabilityMethod.Invoke(null, new object[] { "sqlite" });
+        AssertEquals("sqlite3.exe", sqliteAvailabilityTarget, "SQLite CLI availability should use PATH instead of a bundled sqlite3.exe.");
     }
 
     private static void TestGitHubReleaseWorkflow()

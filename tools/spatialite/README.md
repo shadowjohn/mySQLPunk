@@ -20,7 +20,8 @@
 - 下載成功後把來源 zip 快取到 `tools/spatialite/cache/libspatialite-5.1.0.zip`
 - 透過 MSYS2 安裝 mingw64 相依套件
 - 執行 `configure`、`make`、`make install`
-- 複製 `mod_spatialite.dll` 或 `libspatialite.dll`、相依 DLL、`sqlite3.exe`、`proj.db`
+- 複製 `mod_spatialite.dll` 或 `libspatialite.dll`、相依 DLL、`proj.db`
+- 排除不屬於應用程式必要 runtime 的 `sqlite3.exe`、`libreadline8.dll`、`libtermcap-0.dll`
 - 產生 `SPATIALITE_RUNTIME_MANIFEST.json`，紀錄來源 URL、source SHA256 與輸出檔案 SHA256
 
 若要固定來源檔 hash，可加上：

@@ -276,7 +276,7 @@
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
-    <Content Include="binary\sqlite3_ext\**\*.*">
+    <Content Include="binary\sqlite3_ext\**\*.*" Exclude="binary\sqlite3_ext\sqlite3.exe;binary\sqlite3_ext\libreadline*.dll;binary\sqlite3_ext\libtermcap*.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\x64\SQLite.Interop.dll">
@@ -365,6 +365,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="image\progress_runner_LICENSE.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="image\ASSET_NOTICES.md">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="image\queries.png">
