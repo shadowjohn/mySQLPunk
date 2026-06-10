@@ -5021,6 +5021,13 @@ public static class SmokeTests
         Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Functions", 2, true), "Active-only should keep non-empty function group.");
         Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Backups", 0, true), "Active-only should keep action backup group.");
         Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Models", 0, true), "Active-only should keep synthetic model group.");
+        Assert(DatabaseGroupVisibilityService.IsKnownGroup("Tables"), "Tables should be a known database tree group.");
+        Assert(DatabaseGroupVisibilityService.IsObjectGroup("Views"), "Views should be treated as a database object group.");
+        Assert(!DatabaseGroupVisibilityService.IsObjectGroup("Backups"), "Backups should stay as an action group rather than a flattened object group.");
+        Assert(DatabaseGroupVisibilityService.ShouldFlattenGroup("Tables", true), "Hide-object-groups should flatten table nodes.");
+        Assert(DatabaseGroupVisibilityService.ShouldFlattenGroup("Queries", true), "Hide-object-groups should flatten query nodes.");
+        Assert(!DatabaseGroupVisibilityService.ShouldFlattenGroup("Backups", true), "Hide-object-groups should keep backup action nodes grouped.");
+        Assert(!DatabaseGroupVisibilityService.ShouldFlattenGroup("Tables", false), "Object groups should stay grouped when the option is disabled.");
     }
 
     private static void TestWindowsCredentialService()

@@ -2730,7 +2730,7 @@ namespace mySQLPunk
             ToolStripMenuItem hideObjectGroupsItem = CreateCheckedViewMenuItem(
                 Localization.T("View.HideObjectGroups"),
                 ApplicationOptionSettings.GetBool("ViewHideObjectGroups"),
-                value => SaveViewBoolOption("ViewHideObjectGroups", value, "View.ObjectGroupsChanged"));
+                value => SetHideObjectGroups(value));
 
             ToolStripMenuItem sortMenu = new ToolStripMenuItem(Localization.T("Menu.Sort"));
             AddSortMenuItem(sortMenu, "名稱");
@@ -2903,6 +2903,15 @@ namespace mySQLPunk
             ApplicationOptionSettings.Save();
             ConfigureMainMenu();
             UpdateMainStatus(Localization.T(statusKey));
+        }
+
+        private void SetHideObjectGroups(bool value)
+        {
+            ApplicationOptionSettings.SetBool("ViewHideObjectGroups", value);
+            ApplicationOptionSettings.Save();
+            RefreshCurrentObjectView();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("View.ObjectGroupsChanged"));
         }
 
         private void SetObjectFilterVisible(bool visible, bool save = true)
@@ -3442,6 +3451,16 @@ namespace mySQLPunk
 
         // ── end 連線群組 helpers ────────────────────────────────────────
 
+        private sealed class TreeObjectNodeTag
+        {
+            public TreeObjectNodeTag(string groupKey)
+            {
+                GroupKey = groupKey ?? string.Empty;
+            }
+
+            public string GroupKey { get; }
+        }
+
         private string[] GetTreePathParts(TreeNode node)
         {
             if (node == null) return new string[0];
@@ -3453,6 +3472,18 @@ namespace mySQLPunk
                 // 跳過連線群組節點，不納入路徑
                 if (IsConnectionGroupNode(current))
                 {
+                    current = current.Parent;
+                    continue;
+                }
+                TreeObjectNodeTag objectTag = current.Tag as TreeObjectNodeTag;
+                if (objectTag != null)
+                {
+                    parts.Insert(0, current.Text);
+                    string parentGroupKey = current.Parent == null ? string.Empty : GetTreeGroupKey(current.Parent);
+                    if (!string.Equals(parentGroupKey, objectTag.GroupKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        parts.Insert(0, objectTag.GroupKey);
+                    }
                     current = current.Parent;
                     continue;
                 }
@@ -3472,25 +3503,47 @@ namespace mySQLPunk
             return IsTreeGroupKey(tag) ? tag : string.Empty;
         }
 
+        private string GetTreeObjectGroupKey(TreeNode node)
+        {
+            TreeObjectNodeTag objectTag = node == null ? null : node.Tag as TreeObjectNodeTag;
+            return objectTag == null ? string.Empty : objectTag.GroupKey;
+        }
+
+        private bool TreeNodeBelongsToGroup(TreeNode node, string groupKey)
+        {
+            if (node == null || string.IsNullOrWhiteSpace(groupKey)) return false;
+            return string.Equals(GetTreeGroupKey(node), groupKey, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(GetTreeObjectGroupKey(node), groupKey, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private TreeNode FindDatabaseObjectNode(TreeNode databaseNode, string groupName, string objectName)
+        {
+            if (databaseNode == null || string.IsNullOrWhiteSpace(groupName) || string.IsNullOrWhiteSpace(objectName)) return null;
+
+            foreach (TreeNode child in databaseNode.Nodes)
+            {
+                if (string.Equals(GetTreeGroupKey(child), groupName, StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (TreeNode item in child.Nodes)
+                    {
+                        if (item.Text == objectName) return item;
+                    }
+                    continue;
+                }
+
+                if (string.Equals(GetTreeObjectGroupKey(child), groupName, StringComparison.OrdinalIgnoreCase) &&
+                    child.Text == objectName)
+                {
+                    return child;
+                }
+            }
+
+            return null;
+        }
+
         private static bool IsTreeGroupKey(string key)
         {
-            switch (key)
-            {
-                case "Tables":
-                case "Views":
-                case "Functions":
-                case "Users":
-                case "Models":
-                case "BI":
-                case "Other":
-                case "Events":
-                case "Queries":
-                case "Reports":
-                case "Backups":
-                    return true;
-                default:
-                    return false;
-            }
+            return DatabaseGroupVisibilityService.IsKnownGroup(key);
         }
 
         private static string GetTreeGroupText(string groupKey)
@@ -3509,14 +3562,35 @@ namespace mySQLPunk
             };
         }
 
+        private static TreeNode CreateTreeObjectNode(string objectName, string groupKey, int imageIndex)
+        {
+            return new TreeNode(objectName)
+            {
+                Tag = new TreeObjectNodeTag(groupKey),
+                ImageIndex = imageIndex,
+                SelectedImageIndex = imageIndex
+            };
+        }
+
         private void AddTreeGroupNodeIfVisible(TreeNode databaseNode, TreeNode groupNode)
         {
             if (databaseNode == null || groupNode == null) return;
             bool activeObjectsOnly = ApplicationOptionSettings.GetBool("ViewActiveObjectsOnly");
-            if (DatabaseGroupVisibilityService.ShouldShowGroup(GetTreeGroupKey(groupNode), groupNode.Nodes.Count, activeObjectsOnly))
+            string groupKey = GetTreeGroupKey(groupNode);
+            if (!DatabaseGroupVisibilityService.ShouldShowGroup(groupKey, groupNode.Nodes.Count, activeObjectsOnly)) return;
+
+            if (DatabaseGroupVisibilityService.ShouldFlattenGroup(groupKey, ApplicationOptionSettings.GetBool("ViewHideObjectGroups")))
             {
-                databaseNode.Nodes.Add(groupNode);
+                while (groupNode.Nodes.Count > 0)
+                {
+                    TreeNode child = groupNode.Nodes[0];
+                    groupNode.Nodes.RemoveAt(0);
+                    databaseNode.Nodes.Add(child);
+                }
+                return;
             }
+
+            databaseNode.Nodes.Add(groupNode);
         }
 
         private void LocalizeTreeGroupNodes()
@@ -6792,19 +6866,8 @@ namespace mySQLPunk
             TreeNode databaseNode = GetSelectedDatabaseNode();
             if (databaseNode == null) return;
 
-            foreach (TreeNode group in databaseNode.Nodes)
-            {
-                if (!string.Equals(GetTreeGroupKey(group), groupName, StringComparison.OrdinalIgnoreCase)) continue;
-
-                foreach (TreeNode node in group.Nodes)
-                {
-                    if (node.Text == objectName)
-                    {
-                        db_tree.SelectedNode = node;
-                        return;
-                    }
-                }
-            }
+            TreeNode node = FindDatabaseObjectNode(databaseNode, groupName, objectName);
+            if (node != null) db_tree.SelectedNode = node;
         }
 
         private void db_tree_KeyDown(object sender, KeyEventArgs e)
@@ -7215,19 +7278,10 @@ namespace mySQLPunk
         {
             if (databaseNode == null) return;
             string groupName = objectKind == "view" ? "Views" : "Tables";
-            foreach (TreeNode group in databaseNode.Nodes)
-            {
-                if (!string.Equals(GetTreeGroupKey(group), groupName, StringComparison.OrdinalIgnoreCase)) continue;
-                foreach (TreeNode item in group.Nodes)
-                {
-                    if (item.Text == objectName)
-                    {
-                        db_tree.SelectedNode = item;
-                        item.EnsureVisible();
-                        return;
-                    }
-                }
-            }
+            TreeNode item = FindDatabaseObjectNode(databaseNode, groupName, objectName);
+            if (item == null) return;
+            db_tree.SelectedNode = item;
+            item.EnsureVisible();
         }
 
         private void CloseConnection(int index)
@@ -9779,7 +9833,7 @@ namespace mySQLPunk
             RefreshDatabaseObjectNodes(databaseNode);
             foreach (TreeNode child in databaseNode.Nodes)
             {
-                if (!string.Equals(GetTreeGroupKey(child), groupName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!TreeNodeBelongsToGroup(child, groupName)) continue;
                 db_tree.SelectedNode = child;
                 child.EnsureVisible();
                 return;
@@ -12434,10 +12488,7 @@ namespace mySQLPunk
 
             foreach (string tableName in snapshot.Tables ?? new List<string>())
             {
-                TreeNode tN = new TreeNode(tableName);
-                tN.SelectedImageIndex = 12;
-                tN.ImageIndex = 12;
-                tablesNode.Nodes.Add(tN);
+                tablesNode.Nodes.Add(CreateTreeObjectNode(tableName, "Tables", 12));
             }
             AddTreeGroupNodeIfVisible(databaseNode, tablesNode);
 
@@ -12445,10 +12496,7 @@ namespace mySQLPunk
 
             foreach (string viewName in snapshot.Views ?? new List<string>())
             {
-                TreeNode vN = new TreeNode(viewName);
-                vN.SelectedImageIndex = 13;
-                vN.ImageIndex = 13;
-                viewsNode.Nodes.Add(vN);
+                viewsNode.Nodes.Add(CreateTreeObjectNode(viewName, "Views", 13));
             }
             AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
@@ -12458,10 +12506,7 @@ namespace mySQLPunk
             {
                 foreach (DataRow functionRow in snapshot.Functions.Rows)
                 {
-                    TreeNode functionNode = new TreeNode(functionRow["Name"].ToString());
-                    functionNode.ImageIndex = 14;
-                    functionNode.SelectedImageIndex = 14;
-                    newNode.Nodes.Add(functionNode);
+                    newNode.Nodes.Add(CreateTreeObjectNode(functionRow["Name"].ToString(), "Functions", 14));
                 }
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -12472,10 +12517,7 @@ namespace mySQLPunk
             {
                 foreach (DataRow userRow in snapshot.Users.Rows)
                 {
-                    TreeNode userNode = new TreeNode(userRow["Name"].ToString());
-                    userNode.ImageIndex = 19;
-                    userNode.SelectedImageIndex = 19;
-                    newNode.Nodes.Add(userNode);
+                    newNode.Nodes.Add(CreateTreeObjectNode(userRow["Name"].ToString(), "Users", 19));
                 }
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -12519,10 +12561,7 @@ namespace mySQLPunk
             {
                 foreach (DataRow eventRow in snapshot.Events.Rows)
                 {
-                    TreeNode eventNode = new TreeNode(eventRow["Name"].ToString());
-                    eventNode.ImageIndex = 15;
-                    eventNode.SelectedImageIndex = 15;
-                    newNode.Nodes.Add(eventNode);
+                    newNode.Nodes.Add(CreateTreeObjectNode(eventRow["Name"].ToString(), "Events", 15));
                 }
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -12551,10 +12590,7 @@ namespace mySQLPunk
 
             foreach (string tableName in GetTablesSafe(db, databaseName))
             {
-                TreeNode tN = new TreeNode(tableName);
-                tN.SelectedImageIndex = 12;
-                tN.ImageIndex = 12;
-                tablesNode.Nodes.Add(tN);
+                tablesNode.Nodes.Add(CreateTreeObjectNode(tableName, "Tables", 12));
             }
             AddTreeGroupNodeIfVisible(databaseNode, tablesNode);
 
@@ -12562,10 +12598,7 @@ namespace mySQLPunk
 
             foreach (string viewName in GetViewsSafe(db, databaseName))
             {
-                TreeNode vN = new TreeNode(viewName);
-                vN.SelectedImageIndex = 13;
-                vN.ImageIndex = 13;
-                viewsNode.Nodes.Add(vN);
+                viewsNode.Nodes.Add(CreateTreeObjectNode(viewName, "Views", 13));
             }
             AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
@@ -12573,10 +12606,7 @@ namespace mySQLPunk
 
             foreach (DataRow functionRow in GetDatabaseFunctions(db, databaseName).Rows)
             {
-                TreeNode functionNode = new TreeNode(functionRow["Name"].ToString());
-                functionNode.ImageIndex = 14;
-                functionNode.SelectedImageIndex = 14;
-                newNode.Nodes.Add(functionNode);
+                newNode.Nodes.Add(CreateTreeObjectNode(functionRow["Name"].ToString(), "Functions", 14));
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
@@ -12588,10 +12618,7 @@ namespace mySQLPunk
             Dictionary<string, object> connInfo = connIdxUsers >= 0 && connIdxUsers < myN.connections.Count ? myN.connections[connIdxUsers] : null;
             foreach (DataRow userRow in GetDatabaseUsers(db, databaseName, connInfo).Rows)
             {
-                TreeNode userNode = new TreeNode(userRow["Name"].ToString());
-                userNode.ImageIndex = 19;
-                userNode.SelectedImageIndex = 19;
-                newNode.Nodes.Add(userNode);
+                newNode.Nodes.Add(CreateTreeObjectNode(userRow["Name"].ToString(), "Users", 19));
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
@@ -12632,10 +12659,7 @@ namespace mySQLPunk
 
             foreach (DataRow eventRow in GetDatabaseEvents(db, databaseName).Rows)
             {
-                TreeNode eventNode = new TreeNode(eventRow["Name"].ToString());
-                eventNode.ImageIndex = 15;
-                eventNode.SelectedImageIndex = 15;
-                newNode.Nodes.Add(eventNode);
+                newNode.Nodes.Add(CreateTreeObjectNode(eventRow["Name"].ToString(), "Events", 15));
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
