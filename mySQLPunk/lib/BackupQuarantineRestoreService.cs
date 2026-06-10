@@ -153,13 +153,13 @@ namespace mySQLPunk.lib
             if (candidate == null) return string.Empty;
             if (!candidate.HasOriginalPath)
             {
-                return "目標差異：沒有 manifest 原始路徑，需手動選擇還原位置。";
+                return Localization.T("Backup.QuarantineRestoreTargetNoManifest");
             }
 
             string originalPath = candidate.OriginalPath;
             if (!File.Exists(originalPath))
             {
-                return "目標差異：原始路徑目前不存在，還原會重新建立檔案。";
+                return Localization.T("Backup.QuarantineRestoreTargetMissing");
             }
 
             FileInfo destination = new FileInfo(originalPath);
@@ -167,22 +167,21 @@ namespace mySQLPunk.lib
             long afterSize = candidate.SizeBytes;
             long delta = afterSize - beforeSize;
             string deltaText = delta == 0 ? "0" : (delta > 0 ? "+" : "") + delta.ToString();
-            return "目標差異：原始路徑已有檔案，大小 " +
-                   beforeSize + " -> " + afterSize + " bytes (" + deltaText + " bytes)，還原時需確認是否覆蓋。";
+            return Localization.Format("Backup.QuarantineRestoreTargetExists", beforeSize, afterSize, deltaText);
         }
 
         public static BackupQuarantineRestoreResult RestoreQuarantinedFile(string quarantinedPath, string destinationPath, bool overwrite)
         {
-            if (string.IsNullOrWhiteSpace(quarantinedPath)) throw new ArgumentException("Quarantined path is required.", nameof(quarantinedPath));
-            if (string.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentException("Destination path is required.", nameof(destinationPath));
-            if (!File.Exists(quarantinedPath)) throw new FileNotFoundException("Quarantined backup file does not exist.", quarantinedPath);
-            if (!IsSupportedBackupFile(quarantinedPath)) throw new InvalidOperationException("Unsupported backup file type.");
+            if (string.IsNullOrWhiteSpace(quarantinedPath)) throw new ArgumentException(Localization.T("Backup.QuarantineRestoreSourceRequired"), nameof(quarantinedPath));
+            if (string.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentException(Localization.T("Backup.QuarantineRestoreDestinationRequired"), nameof(destinationPath));
+            if (!File.Exists(quarantinedPath)) throw new FileNotFoundException(Localization.Format("Backup.QuarantineRestoreSourceMissing", quarantinedPath), quarantinedPath);
+            if (!IsSupportedBackupFile(quarantinedPath)) throw new InvalidOperationException(Localization.Format("Backup.QuarantineRestoreUnsupportedType", Path.GetExtension(quarantinedPath)));
 
             quarantinedPath = Path.GetFullPath(quarantinedPath);
             destinationPath = Path.GetFullPath(destinationPath);
             if (string.Equals(quarantinedPath, destinationPath, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Destination path must be different from the quarantined file path.");
+                throw new InvalidOperationException(Localization.T("Backup.QuarantineRestoreSamePath"));
             }
 
             string destinationDirectory = Path.GetDirectoryName(destinationPath);
@@ -193,7 +192,7 @@ namespace mySQLPunk.lib
 
             if (File.Exists(destinationPath))
             {
-                if (!overwrite) throw new IOException("Destination file already exists.");
+                if (!overwrite) throw new IOException(Localization.T("Backup.QuarantineRestoreDestinationExists"));
                 File.Delete(destinationPath);
             }
 
@@ -236,7 +235,7 @@ namespace mySQLPunk.lib
                 if (File.Exists(candidate.OriginalPath) && !overwrite)
                 {
                     result.SkippedExistingDestination++;
-                    result.Messages.Add("Skipped existing destination: " + candidate.OriginalPath);
+                    result.Messages.Add(Localization.Format("Backup.QuarantineBatchSkippedExistingDestination", candidate.OriginalPath));
                     continue;
                 }
 

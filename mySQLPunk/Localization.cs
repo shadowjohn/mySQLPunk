@@ -425,6 +425,16 @@ namespace mySQLPunk
             Add("Backup.QuarantineRestoreOverwrite", "目標檔案已存在：\n{0}\n\n是否覆蓋？", "The destination file already exists:\n{0}\n\nOverwrite it?");
             Add("Backup.QuarantineRestoreSuccess", "隔離備份已還原：\n{0}", "Quarantined backup restored:\n{0}");
             Add("Backup.QuarantineRestoreFailed", "還原隔離備份失敗：{0}", "Failed to restore quarantined backup: {0}");
+            Add("Backup.QuarantineRestoreTargetNoManifest", "目標差異：沒有 manifest 原始路徑，需手動選擇還原位置。", "Destination diff: no original path was found in the manifest; choose a restore location manually.");
+            Add("Backup.QuarantineRestoreTargetMissing", "目標差異：原始路徑目前不存在，還原會重新建立檔案。", "Destination diff: the original path does not exist; restore will recreate the file.");
+            Add("Backup.QuarantineRestoreTargetExists", "目標差異：原始路徑已有檔案，大小 {0} -> {1} bytes ({2} bytes)，還原時需確認是否覆蓋。", "Destination diff: the original path already has a file, size {0} -> {1} bytes ({2} bytes); confirm overwrite before restoring.");
+            Add("Backup.QuarantineRestoreSourceRequired", "隔離備份路徑不可為空。", "Quarantined backup path is required.");
+            Add("Backup.QuarantineRestoreDestinationRequired", "還原目標路徑不可為空。", "Destination path is required.");
+            Add("Backup.QuarantineRestoreSourceMissing", "隔離備份檔案不存在：{0}", "Quarantined backup file does not exist: {0}");
+            Add("Backup.QuarantineRestoreUnsupportedType", "不支援的隔離備份檔案類型：{0}", "Unsupported quarantined backup file type: {0}");
+            Add("Backup.QuarantineRestoreSamePath", "還原目標路徑必須和隔離備份檔案不同。", "Destination path must be different from the quarantined file path.");
+            Add("Backup.QuarantineRestoreDestinationExists", "還原目標檔案已存在。", "Destination file already exists.");
+            Add("Backup.QuarantineBatchSkippedExistingDestination", "已略過既有目標：{0}", "Skipped existing destination: {0}");
             Add("Backup.QuarantineBatchRestoreConfirm", "找到 {0} 個隔離備份，其中 {1} 個有原始路徑。\n\n將批次移回原始路徑；若目標檔案已存在會略過，不會覆蓋。是否繼續？", "{0} quarantined backups found; {1} have original paths.\n\nThey will be moved back to their original paths. Existing destination files will be skipped and not overwritten. Continue?");
             Add("Backup.QuarantineBatchRestoreResult", "批次還原隔離備份完成。\n已還原：{0}\n缺少原始路徑略過：{1}\n目標已存在略過：{2}\n失敗：{3}", "Batch quarantine restore completed.\nRestored: {0}\nSkipped without original path: {1}\nSkipped existing destination: {2}\nFailed: {3}");
             Add("Database.NewTitle", "新增資料庫", "New Database");

@@ -3200,6 +3200,38 @@ public static class SmokeTests
             };
             string diffSummary = BackupQuarantineRestoreService.BuildDestinationDiffSummary(changedCandidate);
             AssertContains(diffSummary, "大小", "Quarantine restore preview should compare destination file sizes.");
+            string unsupportedQuarantinePath = Path.Combine(quarantineDirectory, "unsupported.txt");
+            File.WriteAllText(unsupportedQuarantinePath, "not a backup", Encoding.UTF8);
+            oldLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                try
+                {
+                    BackupQuarantineRestoreService.RestoreQuarantinedFile(unsupportedQuarantinePath, Path.Combine(dir, "unsupported.txt"), false);
+                    Assert(false, "Unsupported quarantined backup type should fail before restore.");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    AssertContains(ex.Message, "不支援", "Unsupported quarantined backup type should return a Traditional Chinese validation message.");
+                    AssertContains(ex.Message, ".txt", "Unsupported quarantined backup type should include the rejected extension.");
+                }
+
+                Localization.SetLanguage(Localization.English, false);
+                string englishNoManifestDiff = BackupQuarantineRestoreService.BuildDestinationDiffSummary(
+                    new BackupQuarantineRestoreCandidate
+                    {
+                        QuarantinedPath = unsupportedQuarantinePath,
+                        OriginalPath = "",
+                        SizeBytes = new FileInfo(unsupportedQuarantinePath).Length,
+                        QuarantinedAtUtc = DateTime.UtcNow
+                    });
+                AssertContains(englishNoManifestDiff, "no original path", "Quarantine restore destination diff should support English.");
+            }
+            finally
+            {
+                Localization.SetLanguage(oldLanguage, false);
+            }
             string orphanQuarantinePath = Path.Combine(quarantineDirectory, "20240201_120000_orphan.sql");
             File.WriteAllText(orphanQuarantinePath, "SELECT 1;", Encoding.UTF8);
             BackupQuarantineBatchRestoreResult batchRestore = BackupQuarantineRestoreService.RestoreAllToOriginalPaths(
