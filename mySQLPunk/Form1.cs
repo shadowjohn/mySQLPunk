@@ -4805,7 +4805,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.Format("Object.SqlExportFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(BuildFormattedExceptionMessage("Object.SqlExportFailed", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -4993,7 +4993,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.Format("Object.SqlExportFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(BuildFormattedExceptionMessage("Object.SqlExportFailed", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -5025,7 +5025,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.Format("Object.SqlExportFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(BuildFormattedExceptionMessage("Object.SqlExportFailed", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -5118,7 +5118,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.Format("Object.SqlExportFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(BuildFormattedExceptionMessage("Object.SqlExportFailed", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -5643,8 +5643,9 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.T("Backup.Failed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    UpdateMainStatus(BuildBackupStatusText("Failed", ex.Message));
+                    string reason = BuildExceptionReason(ex);
+                    MessageBox.Show(Localization.Format("Backup.FailedMessage", reason), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateMainStatus(BuildBackupStatusText("Failed", reason));
                 }
             }
         }
@@ -5667,7 +5668,7 @@ namespace mySQLPunk
         private static string BuildBackupStatusText(string status, string detail)
         {
             if (string.Equals(status, "Created", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Backup.SuccessPath", detail ?? string.Empty);
-            if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Backup.FailedMessage", detail ?? string.Empty);
+            if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Backup.FailedMessage", string.IsNullOrWhiteSpace(detail) ? BuildExecutionUnknownErrorText() : detail.Trim());
             return detail ?? string.Empty;
         }
 
@@ -7103,8 +7104,9 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                UpdateMainStatus(Localization.Format("Object.RenameFailed", ex.Message));
-                MessageBox.Show(Localization.Format("Object.RenameFailed", ex.Message), Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string message = BuildFormattedExceptionMessage("Object.RenameFailed", ex);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -7177,8 +7179,9 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                UpdateMainStatus(Localization.Format("Object.CopyFailed", ex.Message));
-                MessageBox.Show(Localization.Format("Object.CopyFailed", ex.Message), Localization.T("Tool.PasteObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string message = BuildFormattedExceptionMessage("Object.CopyFailed", ex);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.PasteObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -9690,7 +9693,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                MessageBox.Show(Localization.Format("Database.DataGenerationLoadFailed", ex.Message), Localization.T("Tool.GenerateData"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(BuildFormattedExceptionMessage("Database.DataGenerationLoadFailed", ex), Localization.T("Tool.GenerateData"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -10202,7 +10205,7 @@ namespace mySQLPunk
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show(Localization.Format("Designer.AutoCommentsLoadFailed", ex.Message), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        MessageBox.Show(BuildFormattedExceptionMessage("Designer.AutoCommentsLoadFailed", ex), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
                     if (comments == null || comments.Count == 0)
@@ -10238,8 +10241,9 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    progressOverlay.SetProgress(1, 1, Localization.Format("Database.AutoCommentsFailed", ex.Message));
-                    MessageBox.Show(Localization.Format("Database.AutoCommentsFailed", ex.Message), Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    string message = BuildFormattedExceptionMessage("Database.AutoCommentsFailed", ex);
+                    progressOverlay.SetProgress(1, 1, message);
+                    MessageBox.Show(message, Localization.T("Tool.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 finally
                 {
@@ -10539,6 +10543,11 @@ namespace mySQLPunk
         private static string BuildStatusExceptionMessage(string statusKey, Exception ex)
         {
             return Localization.T(statusKey) + BuildExceptionReason(ex);
+        }
+
+        private static string BuildFormattedExceptionMessage(string messageKey, Exception ex)
+        {
+            return Localization.Format(messageKey, BuildExceptionReason(ex));
         }
 
         private static string BuildExecutionFailureReason(Dictionary<string, string> result)
