@@ -98,7 +98,7 @@ namespace mySQLPunk
             {
                 Ensure(5);
                 byte endian = ReadByte();
-                if (endian != 0 && endian != 1) throw new FormatException("Invalid WKB byte order.");
+                if (endian != 0 && endian != 1) throw new FormatException(Localization.T("Geometry.InvalidWkbByteOrder"));
                 littleEndian = endian == 1;
 
                 uint rawType = ReadUInt32();
@@ -115,7 +115,7 @@ namespace mySQLPunk
             private string ReadSpatiaLiteEntity()
             {
                 byte marker = ReadByte();
-                if (marker != 0x69) throw new FormatException("Invalid SpatiaLite collection entity marker.");
+                if (marker != 0x69) throw new FormatException(Localization.T("Geometry.InvalidSpatiaLiteMarker"));
 
                 uint rawType = ReadUInt32();
                 return ReadGeometryFromType(rawType);
@@ -129,7 +129,7 @@ namespace mySQLPunk
                 bool hasEwkbFlags = ewkbHasZ || ewkbHasM || ewkbHasSrid;
                 uint type = hasEwkbFlags ? rawType & EwkbTypeMask : rawType;
 
-                if (!hasEwkbFlags && rawType >= 1000000) throw new FormatException("Compressed SpatiaLite geometries are not supported.");
+                if (!hasEwkbFlags && rawType >= 1000000) throw new FormatException(Localization.T("Geometry.CompressedSpatiaLiteUnsupported"));
 
                 if (!hasEwkbFlags && rawType >= 3000 && rawType < 4000)
                 {
@@ -148,7 +148,7 @@ namespace mySQLPunk
                     ewkbHasZ = true;
                 }
 
-                if (type < 1 || type > 7) throw new FormatException("Unsupported WKB geometry type.");
+                if (type < 1 || type > 7) throw new FormatException(Localization.T("Geometry.UnsupportedWkbType"));
                 hasZ = ewkbHasZ;
                 hasM = ewkbHasM;
                 if (ewkbHasSrid) ReadUInt32();
@@ -175,14 +175,14 @@ namespace mySQLPunk
                     case 7:
                         return "GEOMETRYCOLLECTION " + FormatGeometryCollection(ReadGeometryList(null));
                     default:
-                        throw new FormatException("Unsupported WKB geometry type.");
+                        throw new FormatException(Localization.T("Geometry.UnsupportedWkbType"));
                 }
             }
 
             private List<string> ReadGeometryList(string expectedPrefix)
             {
                 uint count = ReadUInt32();
-                if (count > 100000) throw new FormatException("Geometry collection is too large.");
+                if (count > 100000) throw new FormatException(Localization.T("Geometry.CollectionTooLarge"));
 
                 List<string> items = new List<string>();
                 for (uint i = 0; i < count; i++)
@@ -193,7 +193,7 @@ namespace mySQLPunk
                         if (!string.IsNullOrWhiteSpace(expectedPrefix) &&
                             !entity.StartsWith(expectedPrefix + " ", StringComparison.OrdinalIgnoreCase))
                         {
-                            throw new FormatException("Unexpected nested geometry type.");
+                            throw new FormatException(Localization.T("Geometry.UnexpectedNestedType"));
                         }
                         items.Add(entity);
                         continue;
@@ -205,7 +205,7 @@ namespace mySQLPunk
                     if (!string.IsNullOrWhiteSpace(expectedPrefix) &&
                         !child.StartsWith(expectedPrefix + " ", StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new FormatException("Unexpected nested geometry type.");
+                        throw new FormatException(Localization.T("Geometry.UnexpectedNestedType"));
                     }
                     items.Add(child);
                 }
@@ -224,7 +224,7 @@ namespace mySQLPunk
             private List<Coordinate> ReadPointList()
             {
                 uint count = ReadUInt32();
-                if (count > 1000000) throw new FormatException("Point list is too large.");
+                if (count > 1000000) throw new FormatException(Localization.T("Geometry.PointListTooLarge"));
 
                 List<Coordinate> points = new List<Coordinate>();
                 for (uint i = 0; i < count; i++) points.Add(ReadPoint());
@@ -234,7 +234,7 @@ namespace mySQLPunk
             private List<List<Coordinate>> ReadPolygonRings()
             {
                 uint ringCount = ReadUInt32();
-                if (ringCount > 100000) throw new FormatException("Polygon has too many rings.");
+                if (ringCount > 100000) throw new FormatException(Localization.T("Geometry.PolygonTooManyRings"));
 
                 List<List<Coordinate>> rings = new List<List<Coordinate>>();
                 for (uint i = 0; i < ringCount; i++) rings.Add(ReadPointList());
@@ -269,7 +269,7 @@ namespace mySQLPunk
 
             private void Ensure(int count)
             {
-                if (position < 0 || position + count > bytes.Length) throw new FormatException("Unexpected end of WKB.");
+                if (position < 0 || position + count > bytes.Length) throw new FormatException(Localization.T("Geometry.UnexpectedEndOfWkb"));
             }
 
             private static string FormatPointBody(Coordinate point)

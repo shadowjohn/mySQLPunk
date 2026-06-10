@@ -90,6 +90,57 @@ public static class SmokeTests
         AssertEquals("POINT (121.5 25)", wkt, "Unexpected WKT point output.");
 
         Assert(!GeometryWktConverter.TryGeometryBytesToWkt(new byte[] { 1, 2, 3, 4 }, out wkt), "Invalid geometry bytes should fail cleanly.");
+
+        Type readerType = typeof(GeometryWktConverter).GetNestedType("WkbReader", BindingFlags.NonPublic);
+        MethodInfo readGeometryMethod = readerType.GetMethod("ReadGeometry", BindingFlags.Instance | BindingFlags.Public);
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            object invalidEndianReader = Activator.CreateInstance(readerType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new object[] { new byte[] { 2, 1, 0, 0, 0 }, 0 }, null);
+            try
+            {
+                readGeometryMethod.Invoke(invalidEndianReader, new object[0]);
+                Assert(false, "Invalid WKB byte order should throw.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                FormatException formatException = ex.InnerException as FormatException;
+                Assert(formatException != null, "Invalid WKB byte order should throw FormatException.");
+                AssertContains(formatException.Message, "WKB byte order 無效", "WKB byte-order errors should localize Traditional Chinese messages.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            object unsupportedTypeReader = Activator.CreateInstance(readerType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new object[] { new byte[] { 1, 8, 0, 0, 0 }, 0 }, null);
+            try
+            {
+                readGeometryMethod.Invoke(unsupportedTypeReader, new object[0]);
+                Assert(false, "Unsupported WKB geometry type should throw.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                FormatException formatException = ex.InnerException as FormatException;
+                Assert(formatException != null, "Unsupported WKB geometry type should throw FormatException.");
+                AssertContains(formatException.Message, "Unsupported WKB geometry type", "Unsupported WKB type errors should localize English messages.");
+            }
+
+            object truncatedReader = Activator.CreateInstance(readerType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new object[] { new byte[] { 1, 1, 0 }, 0 }, null);
+            try
+            {
+                readGeometryMethod.Invoke(truncatedReader, new object[0]);
+                Assert(false, "Truncated WKB should throw.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                FormatException formatException = ex.InnerException as FormatException;
+                Assert(formatException != null, "Truncated WKB should throw FormatException.");
+                AssertContains(formatException.Message, "Unexpected end of WKB", "Truncated WKB errors should localize English messages.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
     }
 
     private static byte[] BuildLittleEndianPointWkb(double x, double y)

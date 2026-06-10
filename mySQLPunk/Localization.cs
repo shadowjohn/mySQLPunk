@@ -722,6 +722,15 @@ namespace mySQLPunk
             Add("Query.CopyGeometryAsWkt", "複製 Geometry 為 WKT", "Copy Geometry as WKT");
             Add("Query.CopyWktAsGeometrySql", "複製 WKT 為 Geometry SQL", "Copy WKT as Geometry SQL");
             Add("Query.GeometryToWktFailed", "無法將選取的 Geometry 轉成 WKT。", "Cannot convert the selected geometry to WKT.");
+            Add("Geometry.InvalidWkbByteOrder", "WKB byte order 無效。", "Invalid WKB byte order.");
+            Add("Geometry.InvalidSpatiaLiteMarker", "SpatiaLite collection entity marker 無效。", "Invalid SpatiaLite collection entity marker.");
+            Add("Geometry.CompressedSpatiaLiteUnsupported", "目前不支援壓縮 SpatiaLite geometry。", "Compressed SpatiaLite geometries are not supported.");
+            Add("Geometry.UnsupportedWkbType", "不支援的 WKB geometry 類型。", "Unsupported WKB geometry type.");
+            Add("Geometry.CollectionTooLarge", "Geometry collection 太大。", "Geometry collection is too large.");
+            Add("Geometry.UnexpectedNestedType", "巢狀 geometry 類型不符合預期。", "Unexpected nested geometry type.");
+            Add("Geometry.PointListTooLarge", "Point 清單太大。", "Point list is too large.");
+            Add("Geometry.PolygonTooManyRings", "Polygon ring 數量過多。", "Polygon has too many rings.");
+            Add("Geometry.UnexpectedEndOfWkb", "WKB 資料提前結束。", "Unexpected end of WKB.");
             Add("Query.WktRequired", "請選取 WKT 文字。", "Select WKT text first.");
             Add("Query.ViewBlobHex", "檢視 BLOB 十六進位", "View BLOB Hex");
             Add("Query.CopyBlobHex", "複製 BLOB Hex", "Copy BLOB Hex");
