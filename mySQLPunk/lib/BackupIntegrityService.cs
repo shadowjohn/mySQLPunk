@@ -35,20 +35,20 @@ namespace mySQLPunk.lib
 
             if (string.IsNullOrWhiteSpace(sourcePath))
             {
-                result.Message = "Backup path is empty.";
+                result.Message = Localization.T("Backup.IntegrityPathEmpty");
                 return result;
             }
 
             if (!File.Exists(sourcePath))
             {
-                result.Message = "Backup file does not exist.";
+                result.Message = Localization.T("Backup.IntegrityFileMissing");
                 return result;
             }
 
             result.SizeBytes = new FileInfo(sourcePath).Length;
             if (result.SizeBytes <= 0)
             {
-                result.Message = "Backup file is empty.";
+                result.Message = Localization.T("Backup.IntegrityFileEmpty");
                 return result;
             }
 
@@ -69,7 +69,7 @@ namespace mySQLPunk.lib
             }
 
             result.Kind = "unknown";
-            result.Message = "Unsupported backup file type.";
+            result.Message = Localization.Format("Backup.IntegrityUnsupportedType", string.IsNullOrWhiteSpace(extension) ? Path.GetFileName(sourcePath) : extension);
             return result;
         }
 
@@ -89,7 +89,7 @@ namespace mySQLPunk.lib
 
                 if (selected == null)
                 {
-                    result.Message = "Zip backup does not contain a SQL or SQLite backup entry.";
+                    result.Message = Localization.T("Backup.IntegrityZipNoEntry");
                     return result;
                 }
 
@@ -129,7 +129,7 @@ namespace mySQLPunk.lib
             result.EntryName = entryName ?? "";
             if (string.IsNullOrWhiteSpace(script))
             {
-                result.Message = "SQL backup is empty.";
+                result.Message = Localization.T("Backup.IntegritySqlEmpty");
                 return result;
             }
 
@@ -137,12 +137,12 @@ namespace mySQLPunk.lib
             result.StatementCount = statements;
             if (statements <= 0)
             {
-                result.Message = "SQL backup has no executable statements.";
+                result.Message = Localization.T("Backup.IntegritySqlNoStatements");
                 return result;
             }
 
             result.IsValid = true;
-            result.Message = "SQL backup is readable.";
+            result.Message = Localization.T("Backup.IntegritySqlReadable");
             return result;
         }
 
@@ -158,13 +158,13 @@ namespace mySQLPunk.lib
                 string text = value == null || value == DBNull.Value ? "" : value.ToString();
                 if (!string.Equals(text, "ok", StringComparison.OrdinalIgnoreCase))
                 {
-                    result.Message = "SQLite integrity_check failed: " + text;
+                    result.Message = Localization.Format("Backup.IntegritySqliteFailed", text);
                     return result;
                 }
             }
 
             result.IsValid = true;
-            result.Message = "SQLite backup passed integrity_check.";
+            result.Message = Localization.T("Backup.IntegritySqlitePassed");
             return result;
         }
 

@@ -3130,6 +3130,28 @@ public static class SmokeTests
             File.WriteAllText(emptySqlPath, string.Empty, Encoding.UTF8);
             BackupIntegrityResult emptyIntegrity = BackupIntegrityService.VerifyBackup(emptySqlPath, countSqlStatements);
             Assert(!emptyIntegrity.IsValid, "Empty SQL backup should fail integrity verification.");
+            string oldLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                BackupIntegrityResult emptyPathIntegrity = BackupIntegrityService.VerifyBackup("", countSqlStatements);
+                AssertContains(emptyPathIntegrity.Message, "空", "Empty backup path should return a Traditional Chinese validation message.");
+
+                string unsupportedPath = Path.Combine(dir, "backup.txt");
+                File.WriteAllText(unsupportedPath, "not a supported backup", Encoding.UTF8);
+                BackupIntegrityResult unsupportedZh = BackupIntegrityService.VerifyBackup(unsupportedPath, countSqlStatements);
+                AssertContains(unsupportedZh.Message, "不支援", "Unsupported backup type should return a Traditional Chinese validation message.");
+
+                Localization.SetLanguage(Localization.English, false);
+                BackupIntegrityResult missingIntegrity = BackupIntegrityService.VerifyBackup(Path.Combine(dir, "missing.sql"), countSqlStatements);
+                AssertContains(missingIntegrity.Message, "does not exist", "Missing backup file should return an English validation message.");
+                BackupIntegrityResult unsupportedEn = BackupIntegrityService.VerifyBackup(unsupportedPath, countSqlStatements);
+                AssertContains(unsupportedEn.Message, ".txt", "Unsupported backup type should include the rejected extension.");
+            }
+            finally
+            {
+                Localization.SetLanguage(oldLanguage, false);
+            }
             string batchEmptySqlPath = Path.Combine(dir, "batch-empty.sql");
             File.WriteAllText(batchEmptySqlPath, string.Empty, Encoding.UTF8);
 
@@ -3161,7 +3183,9 @@ public static class SmokeTests
             AssertEquals(emptySqlPath, candidate.OriginalPath, "Quarantine restore candidate should keep the original backup path.");
             BackupQuarantineRestorePreview preview = BackupQuarantineRestoreService.BuildPreview(candidate, countSqlStatements);
             Assert(!preview.PassedIntegrityCheck, "Quarantine restore preview should rerun integrity verification before restore.");
-            AssertContains(preview.IntegrityResult.Message, "empty", "Quarantine restore preview should include the integrity failure reason.");
+            Assert(preview.IntegrityResult.Message.IndexOf("empty", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   preview.IntegrityResult.Message.Contains("空"),
+                "Quarantine restore preview should include the integrity failure reason.");
             AssertContains(preview.DestinationDiffSummary, "原始路徑目前不存在", "Quarantine restore preview should show destination diff for missing original path.");
             BackupQuarantineRestoreResult restoreResult = BackupQuarantineRestoreService.RestoreQuarantinedFile(candidate.QuarantinedPath, candidate.OriginalPath, false);
             Assert(File.Exists(restoreResult.RestoredPath), "Quarantined backup should be restored to the original folder.");

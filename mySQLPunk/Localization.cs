@@ -391,6 +391,16 @@ namespace mySQLPunk
             Add("Backup.SuccessWithRemoteMirror", "備份已建立並通過完整性驗證。\n遠端備份副本：{0}", "Backup created and passed integrity verification.\nRemote backup copy: {0}");
             Add("Backup.Failed", "建立備份失敗：", "Backup failed: ");
             Add("Backup.IntegrityFailed", "備份完整性驗證失敗：{0}\n原因：{1}", "Backup integrity verification failed: {0}\nReason: {1}");
+            Add("Backup.IntegrityPathEmpty", "備份路徑是空的。", "Backup path is empty.");
+            Add("Backup.IntegrityFileMissing", "備份檔案不存在。", "Backup file does not exist.");
+            Add("Backup.IntegrityFileEmpty", "備份檔案是空的。", "Backup file is empty.");
+            Add("Backup.IntegrityUnsupportedType", "不支援的備份檔案類型：{0}", "Unsupported backup file type: {0}");
+            Add("Backup.IntegrityZipNoEntry", "ZIP 備份內沒有 SQL 或 SQLite 備份項目。", "Zip backup does not contain a SQL or SQLite backup entry.");
+            Add("Backup.IntegritySqlEmpty", "SQL 備份是空的。", "SQL backup is empty.");
+            Add("Backup.IntegritySqlNoStatements", "SQL 備份沒有可執行的語句。", "SQL backup has no executable statements.");
+            Add("Backup.IntegritySqlReadable", "SQL 備份可讀取。", "SQL backup is readable.");
+            Add("Backup.IntegritySqliteFailed", "SQLite integrity_check 失敗：{0}", "SQLite integrity_check failed: {0}");
+            Add("Backup.IntegritySqlitePassed", "SQLite 備份已通過 integrity_check。", "SQLite backup passed integrity_check.");
             Add("Backup.RestoreTitle", "還原備份", "Restore Backup");
             Add("Backup.RestoreFileFilter", "SQL / ZIP 備份 (*.sql;*.zip)|*.sql;*.zip|SQL 檔案 (*.sql)|*.sql|ZIP 備份 (*.zip)|*.zip|所有檔案 (*.*)|*.*", "SQL / ZIP backups (*.sql;*.zip)|*.sql;*.zip|SQL files (*.sql)|*.sql|ZIP backups (*.zip)|*.zip|All files (*.*)|*.*");
             Add("Backup.RestoreConfirm", "即將還原備份：\n{0}\n\nSQL 語句數：{1}\n大小：{2}\n目標資料庫：{3}\n\n還原會直接執行 SQL，可能覆蓋或刪除現有資料。是否繼續？", "Restore backup:\n{0}\n\nSQL statements: {1}\nSize: {2}\nTarget database: {3}\n\nRestore executes SQL directly and may overwrite or delete existing data. Continue?");
