@@ -124,9 +124,7 @@ namespace mySQLPunk.lib
                     UsedProxy = settings != null && settings.Enabled && settings.IsHttpProxy && !string.IsNullOrWhiteSpace(settings.Host),
                     TargetUrl = uri.ToString(),
                     StatusCode = statusCode,
-                    Message = statusCode > 0
-                        ? Localization.Format("Options.ProxyConnectivityFailedHttp", statusCode, ex.Message)
-                        : Localization.Format("Options.ProxyConnectivityFailed", ex.Message)
+                    Message = BuildConnectivityFailureMessage(statusCode, ex)
                 };
             }
             catch (Exception ex)
@@ -137,9 +135,26 @@ namespace mySQLPunk.lib
                     AttemptedRequest = true,
                     UsedProxy = settings != null && settings.Enabled && settings.IsHttpProxy && !string.IsNullOrWhiteSpace(settings.Host),
                     TargetUrl = uri.ToString(),
-                    Message = Localization.Format("Options.ProxyConnectivityFailed", ex.Message)
+                    Message = BuildConnectivityFailureMessage(0, ex)
                 };
             }
+        }
+
+        public static string BuildConnectivityFailureMessage(int statusCode, Exception ex)
+        {
+            string reason = ex == null ? null : ex.Message;
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                reason = Localization.T("Object.UnknownError");
+            }
+            else
+            {
+                reason = reason.Trim();
+            }
+
+            return statusCode > 0
+                ? Localization.Format("Options.ProxyConnectivityFailedHttp", statusCode, reason)
+                : Localization.Format("Options.ProxyConnectivityFailed", reason);
         }
 
         public static ConnectionProxyTestResult ValidateConnectivityTest(ConnectionProxySettings settings, Uri targetUri)

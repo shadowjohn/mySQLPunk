@@ -6474,10 +6474,13 @@ public static class SmokeTests
             Assert(!socksPreflight.Success, "SOCKS5 should fail WebRequest connectivity preflight.");
             AssertContains(socksPreflight.Message, "SOCKS5", "SOCKS5 preflight should explain limitation.");
             AssertContains(socksPreflight.Message, "HTTP/HTTPS", "SOCKS5 preflight should name the supported proxy types.");
+            AssertEquals("連線測試失敗：未知錯誤", ConnectionProxySettingsService.BuildConnectivityFailureMessage(0, new Exception("")), "Blank proxy connectivity errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("連線測試失敗，HTTP 502：閘道錯誤", ConnectionProxySettingsService.BuildConnectivityFailureMessage(502, new WebException(" 閘道錯誤 ")), "HTTP proxy connectivity failures should preserve explicit Traditional Chinese reasons.");
 
             Localization.SetLanguage(Localization.English, false);
             AssertContains(ConnectionProxySettingsService.BuildStatusText(socks), "not supported", "SOCKS5 status should support English.");
             AssertContains(ConnectionProxySettingsService.ValidateConnectivityTest(emptyHost, new Uri("https://example.test/")).Message, "Proxy host is empty", "Empty proxy host should support English.");
+            AssertEquals("Connectivity test failed: Unknown error", ConnectionProxySettingsService.BuildConnectivityFailureMessage(0, new Exception("   ")), "Blank proxy connectivity errors should localize English unknown errors.");
         }
         finally
         {
