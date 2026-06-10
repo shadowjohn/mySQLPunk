@@ -128,6 +128,10 @@ Smoke test harness：
   - 現況：`其它 > 連線診斷` 會列出 provider、連線狀態、資料庫、物件數量、備份來源與 SQLite/SpatiaLite runtime 狀態。
   - 完成內容：診斷項目、就緒/警告狀態與 SpatiaLite 載入狀態已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **模型總覽表 ✅ 已語系化**
+  - 現況：`模型 > Schema Overview` 會列出資料表與檢視的欄位數、索引數、列數與狀態。
+  - 完成內容：物件類型與就緒狀態已改用語系字串，繁中會顯示「資料表 / 檢視 / 就緒」，英文維持 `Table / View / Ready`。
+
 - **命令列介面依賴本機 CLI ✅ 偵測、匯入預覽與匯入後補密碼已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
   - 完成內容：

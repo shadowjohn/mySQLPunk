@@ -7907,16 +7907,19 @@ namespace mySQLPunk
             dt.Columns.Add("索引數");
             dt.Columns.Add("列數");
             dt.Columns.Add("狀態");
+            string ready = Localization.T("Diagnostic.StatusReady");
+            string tableType = Localization.T("DatabaseModel.ObjectTypeTable");
+            string viewType = Localization.T("DatabaseModel.ObjectTypeView");
 
             foreach (string tableName in GetTablesSafe(db, dbName))
             {
                 DataRow row = dt.NewRow();
                 row["名稱"] = tableName;
-                row["類型"] = "Table";
+                row["類型"] = tableType;
                 row["欄位數"] = GetColumnsSafe(db, dbName, tableName).Rows.Count.ToString();
                 row["索引數"] = GetDistinctIndexCount(GetIndexesSafe(db, dbName, tableName)).ToString();
                 row["列數"] = GetObjectRowCountText(db, dbName, tableName);
-                row["狀態"] = "Ready";
+                row["狀態"] = ready;
                 dt.Rows.Add(row);
             }
 
@@ -7924,11 +7927,11 @@ namespace mySQLPunk
             {
                 DataRow row = dt.NewRow();
                 row["名稱"] = viewName;
-                row["類型"] = "View";
+                row["類型"] = viewType;
                 row["欄位數"] = GetColumnsSafe(db, dbName, viewName).Rows.Count.ToString();
                 row["索引數"] = "0";
                 row["列數"] = GetObjectRowCountText(db, dbName, viewName);
-                row["狀態"] = "Ready";
+                row["狀態"] = ready;
                 dt.Rows.Add(row);
             }
 

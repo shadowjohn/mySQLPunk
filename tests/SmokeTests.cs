@@ -4709,6 +4709,7 @@ public static class SmokeTests
         Assert(ObjectVisibilityService.FilterNames(new[] { "pg_class", "public.users" }, "postgresql", "table", false).SequenceEqual(new[] { "public.users" }), "Object visibility should hide PostgreSQL pg_* objects.");
 
         object form = FormatterServices.GetUninitializedObject(typeof(Form1));
+        MethodInfo schemaOverviewMethod = typeof(Form1).GetMethod("BuildSchemaOverviewModel", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4716,6 +4717,12 @@ public static class SmokeTests
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            DataTable zhSchemaOverview = (DataTable)schemaOverviewMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow zhSchemaTable = FindDataRow(zhSchemaOverview, "名稱", "public.users");
+            Assert(zhSchemaTable != null, "Schema overview should include fake table metadata.");
+            AssertContains(zhSchemaTable["類型"].ToString(), "資料表", "Schema overview should localize Traditional Chinese table type.");
+            AssertContains(zhSchemaTable["狀態"].ToString(), "就緒", "Schema overview should localize Traditional Chinese ready status.");
+
             DataTable zhDiagnostics = (DataTable)diagnosticsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow zhConnectionState = FindDataRow(zhDiagnostics, "項目", "連線狀態");
             Assert(zhConnectionState != null, "Connection diagnostics should localize Traditional Chinese connection state item.");
@@ -4753,6 +4760,12 @@ public static class SmokeTests
             DataRow enProvider = FindDataRow(enDiagnostics, "項目", "Provider");
             Assert(enProvider != null, "Connection diagnostics should support English provider item.");
             AssertContains(enProvider["狀態"].ToString(), "Ready", "Connection diagnostics should support English ready status.");
+
+            DataTable enSchemaOverview = (DataTable)schemaOverviewMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow enSchemaView = FindDataRow(enSchemaOverview, "名稱", "public.active_users");
+            Assert(enSchemaView != null, "Schema overview should include fake view metadata.");
+            AssertEquals("View", enSchemaView["類型"].ToString(), "Schema overview should support English view type.");
+            AssertEquals("Ready", enSchemaView["狀態"].ToString(), "Schema overview should support English ready status.");
 
             DataTable enMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow enLargestTable = FindDataRow(enMaintenance, "項目", "Largest Table");
