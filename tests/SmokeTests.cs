@@ -49,6 +49,7 @@ public static class SmokeTests
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Connection profile service", TestConnectionProfileService, ref passed);
         Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
@@ -4953,6 +4954,75 @@ public static class SmokeTests
         {
             db.Dispose();
             if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
+    private static void TestConnectionProfileService()
+    {
+        Type profileType = typeof(Form1).Assembly.GetType("mySQLPunk.entity.mySQLPunk_main");
+        Assert(profileType != null, "Connection profile service type should exist.");
+        object service = Activator.CreateInstance(profileType, true);
+        MethodInfo copyProfileMethod = profileType.GetMethod("CopyProfile");
+        MethodInfo renameProfileMethod = profileType.GetMethod("RenameProfile");
+        MethodInfo deleteProfileMethod = profileType.GetMethod("DeleteProfile");
+        Assert(copyProfileMethod != null && renameProfileMethod != null && deleteProfileMethod != null, "Connection profile service should expose profile operations.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                copyProfileMethod.Invoke(service, new object[] { "default", "default" });
+                Assert(false, "Copying over the default profile should fail.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                InvalidOperationException operationException = ex.InnerException as InvalidOperationException;
+                Assert(operationException != null, "Copying over the default profile should throw InvalidOperationException.");
+                AssertContains(operationException.Message, "預設連線設定檔已存在", "Default profile copy errors should localize Traditional Chinese messages.");
+            }
+
+            try
+            {
+                renameProfileMethod.Invoke(service, new object[] { "default", "renamed" });
+                Assert(false, "Renaming the default profile should fail.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                InvalidOperationException operationException = ex.InnerException as InvalidOperationException;
+                Assert(operationException != null, "Renaming the default profile should throw InvalidOperationException.");
+                AssertContains(operationException.Message, "預設連線設定檔不可重新命名", "Default profile rename errors should localize Traditional Chinese messages.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                deleteProfileMethod.Invoke(service, new object[] { "default" });
+                Assert(false, "Deleting the default profile should fail.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                InvalidOperationException operationException = ex.InnerException as InvalidOperationException;
+                Assert(operationException != null, "Deleting the default profile should throw InvalidOperationException.");
+                AssertContains(operationException.Message, "Default connection profile cannot be deleted", "Default profile delete errors should localize English messages.");
+            }
+
+            try
+            {
+                renameProfileMethod.Invoke(service, new object[] { "team", "default" });
+                Assert(false, "Renaming a profile to the default profile name should fail.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                InvalidOperationException operationException = ex.InnerException as InvalidOperationException;
+                Assert(operationException != null, "Renaming to an existing profile should throw InvalidOperationException.");
+                AssertContains(operationException.Message, "Connection profile already exists", "Profile exists errors should localize English messages.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
         }
     }
 

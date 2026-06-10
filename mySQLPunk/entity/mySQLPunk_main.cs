@@ -130,11 +130,11 @@ namespace mySQLPunk.entity
             string target = NormalizeProfileName(targetProfileName);
             if (string.Equals(target, DefaultProfileName, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Default profile already exists.");
+                throw new InvalidOperationException(Localization.T("Connection.ProfileDefaultAlreadyExists"));
             }
             if (ProfileExists(target))
             {
-                throw new InvalidOperationException("Profile already exists.");
+                throw new InvalidOperationException(Localization.Format("Connection.ProfileExists", target));
             }
 
             Directory.CreateDirectory(GetProfilesDirectory());
@@ -149,11 +149,11 @@ namespace mySQLPunk.entity
             string newName = NormalizeProfileName(newProfileName);
             if (string.Equals(oldName, DefaultProfileName, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Default profile cannot be renamed.");
+                throw new InvalidOperationException(Localization.T("Connection.ProfileDefaultCannotRename"));
             }
             if (string.Equals(newName, DefaultProfileName, StringComparison.OrdinalIgnoreCase) || ProfileExists(newName))
             {
-                throw new InvalidOperationException("Profile already exists.");
+                throw new InvalidOperationException(Localization.Format("Connection.ProfileExists", newName));
             }
 
             string oldPath = GetProfileSettingPath(oldName);
@@ -177,7 +177,7 @@ namespace mySQLPunk.entity
             string normalized = NormalizeProfileName(profileName);
             if (string.Equals(normalized, DefaultProfileName, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Default profile cannot be deleted.");
+                throw new InvalidOperationException(Localization.T("Connection.ProfileDefaultCannotDelete"));
             }
 
             string path = GetProfileSettingPath(normalized);

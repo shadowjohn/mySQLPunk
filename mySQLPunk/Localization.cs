@@ -412,6 +412,9 @@ namespace mySQLPunk
             Add("Connection.ProfileRenamed", "已重新命名連線設定檔：{0} → {1}", "Connection profile renamed: {0} → {1}");
             Add("Connection.ProfileDeleted", "已刪除連線設定檔：{0}，並切換回預設設定檔。", "Connection profile deleted: {0}. Switched back to the default profile.");
             Add("Connection.ConfirmDeleteProfile", "確定要刪除連線設定檔「{0}」嗎？此操作不會刪除預設 setting.ini。", "Delete connection profile \"{0}\"? This does not delete the default setting.ini.");
+            Add("Connection.ProfileDefaultAlreadyExists", "預設連線設定檔已存在。", "Default connection profile already exists.");
+            Add("Connection.ProfileDefaultCannotRename", "預設連線設定檔不可重新命名。", "Default connection profile cannot be renamed.");
+            Add("Connection.ProfileDefaultCannotDelete", "預設連線設定檔不可刪除。", "Default connection profile cannot be deleted.");
             Add("Connection.CommandLineUnavailable", "命令列介面目前尚未支援此連線類型。", "Command line interface is not supported for this connection type yet.");
             Add("Connection.CommandLineOpened", "已開啟命令列介面。", "Command line interface opened.");
             Add("Connection.CommandLineOpenFailed", "開啟命令列介面失敗：{0}", "Open command line interface failed: {0}");
