@@ -26,6 +26,11 @@ These components have separate upstream licenses and notices. Release packages
 must include the root `THIRD_PARTY_NOTICES.md` and bundled license files under
 `THIRD_PARTY_LICENSES/` when available.
 
+The current MSYS2 rebuild includes RTTOPO-related runtime dependencies. The
+libspatialite configure output treats RTTOPO/GCP-enabled builds as GPLv2+
+compatible, so packages that ship this runtime must keep the corresponding
+license notices and `SPATIALITE_RUNTIME_MANIFEST.json` alongside the DLLs.
+
 ## GPL Readline Exclusion
 
 `sqlite3.exe`, `libreadline8.dll`, and `libtermcap-0.dll` are intentionally not

@@ -46,6 +46,11 @@ For compliance-sensitive releases, rebuild the runtime with
 `tools/spatialite/Build-SpatiaLiteRuntime.ps1` and include the generated
 `SPATIALITE_RUNTIME_MANIFEST.json`.
 
+The current MSYS2 rebuild includes RTTOPO-related runtime dependencies. The
+libspatialite configure output treats RTTOPO/GCP-enabled builds as GPLv2+
+compatible, so releases that ship those files must keep the corresponding
+license notices and the runtime manifest with the package.
+
 ## Devicon Icons
 
 The database brand icons in `mySQLPunk/image/brand_*.png` are derived from SVG files in the Devicon project:

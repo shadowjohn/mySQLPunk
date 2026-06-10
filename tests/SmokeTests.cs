@@ -456,6 +456,36 @@ public static class SmokeTests
         AssertContains(sqliteJsonTableSql, "'jt.item_id' AS literal_name", "Converted SQLite SQL should not rewrite string literals that look like JSON_TABLE references.");
         AssertNotContains(sqliteJsonTableSql, "JSON_TABLE", "Converted SQLite SQL should remove JSON_TABLE.");
 
+        object pgJsonTableOrdinalityPreview = BuildViewSqlPreview(
+            "SELECT jt.seq_no, jt.item_name FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (seq_no FOR ORDINALITY, item_name VARCHAR(80) PATH '$.name')) AS jt",
+            "mysql",
+            "postgresql");
+        Assert((bool)GetProperty(pgJsonTableOrdinalityPreview, "CanConvert"), "MySQL JSON_TABLE FOR ORDINALITY should convert to PostgreSQL.");
+        string pgJsonTableOrdinalitySql = (string)GetProperty(pgJsonTableOrdinalityPreview, "ConvertedSql");
+        AssertContains(pgJsonTableOrdinalitySql, "WITH ORDINALITY AS json_item(value, ordinality)", "Converted PostgreSQL SQL should preserve JSON_TABLE ordinality.");
+        AssertContains(pgJsonTableOrdinalitySql, "json_item.ordinality AS seq_no", "Converted PostgreSQL SQL should project ordinality columns.");
+        AssertContains(pgJsonTableOrdinalitySql, "json_item.value #>> '{name}' AS item_name", "Converted PostgreSQL SQL should still project PATH columns with ordinality.");
+        AssertNotContains(pgJsonTableOrdinalitySql, "JSON_TABLE", "Converted PostgreSQL SQL should remove JSON_TABLE with ordinality.");
+
+        object sqliteJsonTableOrdinalityPreview = BuildViewSqlPreview(
+            "SELECT jt.seq_no, jt.item_id FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (seq_no FOR ORDINALITY, item_id INT PATH '$.id')) AS jt WHERE jt.seq_no > 1",
+            "mysql",
+            "sqlite");
+        Assert((bool)GetProperty(sqliteJsonTableOrdinalityPreview, "CanConvert"), "MySQL JSON_TABLE FOR ORDINALITY should convert to SQLite.");
+        string sqliteJsonTableOrdinalitySql = (string)GetProperty(sqliteJsonTableOrdinalityPreview, "ConvertedSql");
+        AssertContains(sqliteJsonTableOrdinalitySql, "(CAST(jt.key AS INTEGER) + 1)", "Converted SQLite SQL should derive one-based ordinality from json_each key.");
+        AssertContains(sqliteJsonTableOrdinalitySql, "CAST(json_extract(jt.value, '$.id') AS INTEGER)", "Converted SQLite SQL should keep PATH column rewrite with ordinality.");
+        AssertNotContains(sqliteJsonTableOrdinalitySql, "jt.seq_no", "Converted SQLite SQL should rewrite ordinality column references.");
+        AssertNotContains(sqliteJsonTableOrdinalitySql, "JSON_TABLE", "Converted SQLite SQL should remove JSON_TABLE with ordinality.");
+
+        object mssqlJsonTableOrdinalityPreview = BuildViewSqlPreview(
+            "SELECT jt.seq_no FROM orders o CROSS JOIN JSON_TABLE(o.payload, '$.items[*]' COLUMNS (seq_no FOR ORDINALITY)) jt",
+            "mysql",
+            "mssql");
+        Assert(!(bool)GetProperty(mssqlJsonTableOrdinalityPreview, "CanConvert"), "JSON_TABLE FOR ORDINALITY should be rejected for SQL Server until OPENJSON ordinality is safely modeled.");
+        string mssqlJsonTableOrdinalityReason = (string)GetProperty(mssqlJsonTableOrdinalityPreview, "Reason");
+        AssertContains(mssqlJsonTableOrdinalityReason, "JSON_TABLE", "Unsupported SQL Server ordinality conversion should explain JSON_TABLE fallback.");
+
         object sqliteNowPreview = BuildViewSqlPreview(
             "SELECT NOW() AS created_at FROM users",
             "mysql",
@@ -4772,6 +4802,21 @@ public static class SmokeTests
         AssertContains(project, "binary\\sqlite3_ext\\sqlite3.exe", "Project should exclude the SQLite shell from release output.");
         AssertContains(project, "binary\\sqlite3_ext\\libreadline*.dll", "Project should exclude Readline from release output.");
         AssertContains(project, "image\\ASSET_NOTICES.md", "Project should copy image asset notices to release output.");
+
+        string spatialiteScriptPath = Path.Combine(root, "tools", "spatialite", "Build-SpatiaLiteRuntime.ps1");
+        string spatialiteScript = File.ReadAllText(spatialiteScriptPath, Encoding.UTF8);
+        AssertContains(spatialiteScript, "mingw-w64-x86_64-libfreexl", "SpatiaLite rebuild should install the MSYS2 libfreexl package.");
+        AssertContains(spatialiteScript, "diffutils make unzip", "SpatiaLite rebuild should install configure-time diff utilities.");
+        AssertContains(spatialiteScript, "--host=x86_64-w64-mingw32", "SpatiaLite rebuild should force the MinGW host for libtool.");
+        AssertContains(spatialiteScript, "x86_64-w64-mingw32-gcc", "SpatiaLite rebuild should use the MinGW compiler explicitly.");
+        AssertContains(spatialiteScript, "LDFLAGS=-no-undefined", "SpatiaLite rebuild should pass the Windows DLL no-undefined linker flag.");
+        AssertContains(spatialiteScript, "sed -i 's/ -ldl//g' src/Makefile", "SpatiaLite rebuild should remove the Unix dl library from the MinGW Makefile.");
+        AssertContains(spatialiteScript, "make -C src", "SpatiaLite rebuild should build only the runtime source directory and skip examples.");
+        AssertContains(spatialiteScript, "/mingw64/lib/mod_spatialite*.dll", "SpatiaLite rebuild should accept libtool's versioned loadable extension output.");
+        AssertContains(spatialiteScript, "$msysRuntime/mod_spatialite.dll", "SpatiaLite rebuild should normalize the loadable extension filename for the app runtime.");
+        AssertContains(spatialiteScript, "MSYS2 pacman dependency installation failed", "SpatiaLite rebuild should stop when dependency installation fails.");
+        AssertContains(spatialiteScript, "Runtime 仍包含不應散布的檔案", "SpatiaLite rebuild should reject blocked runtime files before writing the manifest.");
+        AssertContains(spatialiteScript, "Runtime 缺少 mod_spatialite.dll", "SpatiaLite rebuild should require a loadable SpatiaLite extension.");
     }
 
     private static void TestReleaseThirdPartyNotices()
@@ -4798,6 +4843,8 @@ public static class SmokeTests
         AssertContains(runtimeNotices, "sqlite3.exe", "Native runtime notices should document the SQLite shell exclusion.");
         AssertContains(runtimeNotices, "libreadline8.dll", "Native runtime notices should document Readline exclusion.");
         AssertContains(runtimeNotices, "SPATIALITE_RUNTIME_MANIFEST.json", "Native runtime notices should require the runtime manifest.");
+        AssertContains(runtimeNotices, "RTTOPO", "Native runtime notices should document RTTOPO-related runtime dependencies.");
+        AssertContains(runtimeNotices, "GPLv2+", "Native runtime notices should document the RTTOPO/GCP compatibility note.");
 
         CliPathSettings.SetPath("sqlite", "");
         MethodInfo availabilityMethod = typeof(Form1).GetMethod("GetCliAvailabilityTarget", BindingFlags.Static | BindingFlags.NonPublic);

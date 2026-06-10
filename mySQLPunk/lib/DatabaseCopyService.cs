@@ -261,6 +261,7 @@ namespace mySQLPunk.lib
             public string Name { get; set; }
             public string SqlType { get; set; }
             public string JsonPath { get; set; }
+            public bool IsOrdinality { get; set; }
         }
 
         public static ViewSqlConversionPreview BuildPreview(string sourceViewSql, string sourceProvider, string targetProvider)
@@ -3981,6 +3982,25 @@ namespace mySQLPunk.lib
         private static bool TryParseJsonTableColumn(string columnText, out JsonTableColumn column)
         {
             column = null;
+            Match ordinalityMatch = Regex.Match(
+                columnText ?? "",
+                @"^\s*(?<name>[A-Za-z_][A-Za-z0-9_]*|""[^""]+""|`[^`]+`|\[[^\]]+\])\s+FOR\s+ORDINALITY\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (ordinalityMatch.Success)
+            {
+                string ordinalityName = NormalizeJsonTableIdentifier(ordinalityMatch.Groups["name"].Value);
+                if (string.IsNullOrWhiteSpace(ordinalityName)) return false;
+
+                column = new JsonTableColumn
+                {
+                    Name = ordinalityName,
+                    SqlType = "integer",
+                    JsonPath = "$",
+                    IsOrdinality = true
+                };
+                return true;
+            }
+
             Match match = Regex.Match(
                 columnText ?? "",
                 @"^\s*(?<name>[A-Za-z_][A-Za-z0-9_]*|""[^""]+""|`[^`]+`|\[[^\]]+\])\s+(?<type>[A-Za-z][A-Za-z0-9_]*(?:\s*\([^)]*\))?)\s+PATH\s+'(?<path>(?:''|[^'])*)'\s*$",
@@ -4005,16 +4025,22 @@ namespace mySQLPunk.lib
             string rowSource = BuildPostgreSqlJsonTableRowSource(sourceExpr, arrayPath);
             if (string.IsNullOrWhiteSpace(rowSource)) return "";
 
+            bool includeOrdinality = HasJsonTableOrdinalityColumn(columns);
             List<string> projections = new List<string>();
             foreach (JsonTableColumn column in columns)
             {
-                string expression = BuildPostgreSqlJsonTableColumnExpression("json_item.value", column);
+                string expression = column.IsOrdinality
+                    ? "json_item.ordinality"
+                    : BuildPostgreSqlJsonTableColumnExpression("json_item.value", column);
                 if (string.IsNullOrWhiteSpace(expression)) return "";
                 projections.Add(expression + " AS " + column.Name);
             }
 
+            string rowFunction = includeOrdinality
+                ? "jsonb_array_elements(" + rowSource + ") WITH ORDINALITY AS json_item(value, ordinality)"
+                : "jsonb_array_elements(" + rowSource + ") AS json_item(value)";
             return "LATERAL (SELECT " + string.Join(", ", projections.ToArray()) +
-                   " FROM jsonb_array_elements(" + rowSource + ") AS json_item(value)) AS " + alias;
+                   " FROM " + rowFunction + ") AS " + alias;
         }
 
         private static string BuildPostgreSqlJsonTableRowSource(string sourceExpr, string arrayPath)
@@ -4045,6 +4071,8 @@ namespace mySQLPunk.lib
 
         private static string BuildSqlServerJsonTableExpression(string sourceExpr, string arrayPath, List<JsonTableColumn> columns, string alias)
         {
+            if (HasJsonTableOrdinalityColumn(columns)) return "";
+
             string path = NormalizeJsonTableArrayPath(arrayPath);
             if (string.IsNullOrWhiteSpace(path)) return "";
 
@@ -4090,10 +4118,26 @@ namespace mySQLPunk.lib
 
         private static string BuildSqliteJsonTableColumnExpression(string alias, JsonTableColumn column)
         {
+            if (column.IsOrdinality)
+            {
+                return "(CAST(" + alias + ".key AS INTEGER) + 1)";
+            }
+
             string expression = "json_extract(" + alias + ".value, '" + EscapeSqlString(column.JsonPath) + "')";
             string type = MapJsonTableTypeForSqlite(column.SqlType);
             if (string.IsNullOrWhiteSpace(type)) return expression;
             return "CAST(" + expression + " AS " + type + ")";
+        }
+
+        private static bool HasJsonTableOrdinalityColumn(List<JsonTableColumn> columns)
+        {
+            if (columns == null) return false;
+            foreach (JsonTableColumn column in columns)
+            {
+                if (column != null && column.IsOrdinality) return true;
+            }
+
+            return false;
         }
 
         private static string MapJsonTableTypeForSqlite(string sqlType)
