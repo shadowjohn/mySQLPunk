@@ -2558,7 +2558,12 @@ namespace mySQLPunk
                        string.Join(",\n  ", changes) + ";";
             }
 
-            return "-- No changes detected.";
+            return BuildNoChangesSqlPreview();
+        }
+
+        private static string BuildNoChangesSqlPreview()
+        {
+            return "-- " + Localization.T("Designer.NoChangesDetected");
         }
 
         private string BuildMySqlAddIndexChange(DataRow row)

@@ -3181,11 +3181,29 @@ public static class SmokeTests
             string sqliteUnsupportedZh = BuildSqliteAlterColumnUnsupportedMessage();
             AssertContains(sqliteUnsupportedZh, "SQLite 修改既有欄位型別", "SQLite unsupported ALTER detail should localize Traditional Chinese messages.");
             AssertContains(sqliteUnsupportedZh, "display_name", "SQLite unsupported ALTER detail should include the column name.");
+            DataTable unchangedOriginalZh = CreateOriginalColumnsForAlter(includeRemovedColumn: false);
+            string mysqlNoChangesZh = BuildExistingAlterSql(
+                new my_mysql(),
+                "main",
+                "demo_table",
+                unchangedOriginalZh,
+                unchangedOriginalZh.Copy(),
+                "BuildMySqlAlterTableSql");
+            AssertEquals("-- 沒有偵測到變更。", mysqlNoChangesZh.Trim(), "MySQL no-change ALTER preview should localize Traditional Chinese messages.");
 
             Localization.SetLanguage(Localization.English, false);
             string sqliteUnsupportedEn = BuildSqliteAlterColumnUnsupportedMessage();
             AssertContains(sqliteUnsupportedEn, "SQLite requires a table rebuild", "SQLite unsupported ALTER detail should localize English messages.");
             AssertContains(sqliteUnsupportedEn, "display_name", "SQLite unsupported ALTER English detail should include the column name.");
+            DataTable unchangedOriginalEn = CreateOriginalColumnsForAlter(includeRemovedColumn: false);
+            string mysqlNoChangesEn = BuildExistingAlterSql(
+                new my_mysql(),
+                "main",
+                "demo_table",
+                unchangedOriginalEn,
+                unchangedOriginalEn.Copy(),
+                "BuildMySqlAlterTableSql");
+            AssertEquals("-- No changes detected.", mysqlNoChangesEn.Trim(), "MySQL no-change ALTER preview should support English messages.");
         }
         finally
         {
