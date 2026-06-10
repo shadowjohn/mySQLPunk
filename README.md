@@ -192,6 +192,10 @@ Smoke test harness：
   - 現況：連線開啟 service 會透過 provider factory 建立資料庫物件；Table/View 複製服務會檢查來源/目標連線、物件類型、來源欄位與 View DDL。
   - 完成內容：資料庫建立器未回傳連線物件、來源或目標資料庫未連線、只支援複製 Table/View、來源資料表沒有可複製欄位、View DDL 無法取得，以及複製流程進度與 fallback 訊息已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **Metadata 載入與匯入審核紀錄錯誤 ✅ 已語系化**
+  - 現況：資料庫展開時會分段載入 Tables、Views、Functions、Users 與 Events；連線匯入完成後會寫入本機 JSONL 審核紀錄。
+  - 完成內容：各 metadata 分類載入失敗與匯入審核紀錄路徑缺失等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字，並保留 provider 原始錯誤訊息方便排查。
+
 - **Geometry / WKB 解析錯誤 ✅ 已語系化**
   - 現況：資料表結果中的 geometry 欄位可轉成 WKT，底層 WKB / SpatiaLite 解析器會檢查 byte order、geometry type、collection、polygon ring 與資料長度。
   - 完成內容：WKB byte order 無效、不支援 geometry 類型、SpatiaLite marker 無效、資料提前結束與集合/點/環數量過大等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。

@@ -1767,7 +1767,7 @@ namespace mySQLPunk
             string reviewLogPath)
         {
             if (preview == null) throw new ArgumentNullException(nameof(preview));
-            if (string.IsNullOrWhiteSpace(reviewLogPath)) throw new ArgumentException("Review log path is required.", nameof(reviewLogPath));
+            if (string.IsNullOrWhiteSpace(reviewLogPath)) throw new ArgumentException(Localization.T("Connection.ImportReviewLogPathRequired"), nameof(reviewLogPath));
 
             ConnectionImportReviewLogEntry entry = BuildConnectionImportReviewLogEntry(preview, action, selectedImportedIndexes);
             string dir = Path.GetDirectoryName(reviewLogPath);

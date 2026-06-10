@@ -40,15 +40,15 @@ namespace mySQLPunk.lib
 
             DatabaseMetadataSnapshot snapshot = new DatabaseMetadataSnapshot();
             try { snapshot.Tables = ObjectVisibilityService.FilterNames(db.GetTables(databaseName), db.ProviderName, "table", includeHiddenObjects); }
-            catch (Exception ex) { throw new Exception("載入 Tables 失敗：" + ex.Message, ex); }
+            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadTablesFailed", ex.Message), ex); }
             try { snapshot.Views = ObjectVisibilityService.FilterNames(db.GetViews(databaseName), db.ProviderName, "view", includeHiddenObjects); }
-            catch (Exception ex) { throw new Exception("載入 Views 失敗：" + ex.Message, ex); }
+            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadViewsFailed", ex.Message), ex); }
             try { snapshot.Functions = _functionLoader(db, databaseName); }
-            catch (Exception ex) { throw new Exception("載入 Functions 失敗：" + ex.Message, ex); }
+            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadFunctionsFailed", ex.Message), ex); }
             try { snapshot.Users = _userLoader(db, databaseName, connInfo); }
-            catch (Exception ex) { throw new Exception("載入 Users 失敗：" + ex.Message, ex); }
+            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadUsersFailed", ex.Message), ex); }
             try { snapshot.Events = _eventLoader(db, databaseName); }
-            catch (Exception ex) { throw new Exception("載入 Events 失敗：" + ex.Message, ex); }
+            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadEventsFailed", ex.Message), ex); }
             return snapshot;
         }
     }

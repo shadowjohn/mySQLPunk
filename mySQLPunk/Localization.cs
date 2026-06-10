@@ -377,6 +377,11 @@ namespace mySQLPunk
             Add("DatabaseSearch.TypeViewColumn", "檢視欄位", "View Column");
             Add("DatabaseSearch.LocationTables", "資料表", "Tables");
             Add("DatabaseSearch.LocationViews", "檢視", "Views");
+            Add("Metadata.LoadTablesFailed", "載入 Tables 失敗：{0}", "Load Tables failed: {0}");
+            Add("Metadata.LoadViewsFailed", "載入 Views 失敗：{0}", "Load Views failed: {0}");
+            Add("Metadata.LoadFunctionsFailed", "載入 Functions 失敗：{0}", "Load Functions failed: {0}");
+            Add("Metadata.LoadUsersFailed", "載入 Users 失敗：{0}", "Load Users failed: {0}");
+            Add("Metadata.LoadEventsFailed", "載入 Events 失敗：{0}", "Load Events failed: {0}");
             Add("MaintenanceChecklist.ConnectionOpen", "連線已開啟", "Connection Open");
             Add("MaintenanceChecklist.TablesLoaded", "已載入資料表", "Tables Loaded");
             Add("MaintenanceChecklist.ViewsLoaded", "已載入檢視", "Views Loaded");
@@ -479,6 +484,7 @@ namespace mySQLPunk
             Add("Connection.ImportReviewNoGroups", "無", "none");
             Add("Connection.ImportReviewNoTargets", "無新增或更新", "no added or updated targets");
             Add("Connection.ImportReviewLogWritten", "匯入審核紀錄：{0}", "Import review log: {0}");
+            Add("Connection.ImportReviewLogPathRequired", "請指定匯入審核紀錄路徑。", "Import review log path is required.");
             Add("Connection.ImportPreviewInclude", "合併", "Merge");
             Add("Connection.ImportPreviewStatus", "狀態", "Status");
             Add("Connection.ImportPreviewAdded", "新增", "Added");

@@ -5577,6 +5577,43 @@ public static class SmokeTests
         Assert(hiddenSnapshot.Tables.Contains("sqlite_sequence") && hiddenSnapshot.Tables.Contains("__mysqlpunk_column_comments"), "MetadataLoadService should keep hidden objects when requested.");
         Assert(ObjectVisibilityService.FilterNames(new[] { "pg_class", "public.users" }, "postgresql", "table", false).SequenceEqual(new[] { "public.users" }), "Object visibility should hide PostgreSQL pg_* objects.");
 
+        string metadataLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                FakeDumpDatabase throwingTablesDb = new FakeDumpDatabase { ThrowOnGetTables = true };
+                metadataService.Load(throwingTablesDb, "main", new Dictionary<string, object>());
+                Assert(false, "Metadata loader should wrap table load failures.");
+            }
+            catch (Exception ex)
+            {
+                AssertContains(ex.Message, "載入 Tables 失敗", "Metadata table load failures should localize Traditional Chinese messages.");
+                AssertContains(ex.Message, "table timeout", "Metadata table load failure should keep the provider error message.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            MetadataLoadService functionFailingMetadataService = new MetadataLoadService(
+                (db, name) => { throw new InvalidOperationException("function denied"); },
+                (db, name, connInfo) => CreateNamedRowsTable("Name", "tester"),
+                (db, name) => CreateNamedRowsTable("Name", "ev_daily"));
+            try
+            {
+                functionFailingMetadataService.Load(openedDb, "main", new Dictionary<string, object>());
+                Assert(false, "Metadata loader should wrap function load failures.");
+            }
+            catch (Exception ex)
+            {
+                AssertContains(ex.Message, "Load Functions failed", "Metadata function load failures should localize English messages.");
+                AssertContains(ex.Message, "function denied", "Metadata function load failure should keep the provider error message.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(metadataLanguage, false);
+        }
+
         object form = FormatterServices.GetUninitializedObject(typeof(Form1));
         MethodInfo schemaOverviewMethod = typeof(Form1).GetMethod("BuildSchemaOverviewModel", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo columnCatalogMethod = typeof(Form1).GetMethod("BuildColumnCatalogModel", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -6457,6 +6494,26 @@ public static class SmokeTests
             Assert(reviewLog["Groups"] != null && reviewLog["Groups"].Values<string>().Contains("signed-group"), "Import review log should preserve imported groups.");
             Assert(reviewLog["Targets"] != null && reviewLog["Targets"].HasValues, "Import review log should include changed targets.");
             Assert((bool)reviewLog["Targets"][0]["Selected"], "Import review log should mark selected targets.");
+            string reviewLogLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                try
+                {
+                    writeReviewLogMethod.Invoke(null, new object[] { previewReport, "mergeSelected", new[] { 0 }, "" });
+                    Assert(false, "Import review log writer should require a target path.");
+                }
+                catch (TargetInvocationException ex)
+                {
+                    ArgumentException argumentException = ex.InnerException as ArgumentException;
+                    Assert(argumentException != null, "Import review log writer should throw ArgumentException for empty paths.");
+                    AssertContains(argumentException.Message, "請指定匯入審核紀錄路徑", "Import review log path validation should localize Traditional Chinese messages.");
+                }
+            }
+            finally
+            {
+                Localization.SetLanguage(reviewLogLanguage, false);
+            }
 
             Assert(!(bool)isTrustedMethod.Invoke(null, new object[] { sourceId, trustedSourcesPath }), "New source should not be trusted before whitelisting.");
             trustSourceMethod.Invoke(null, new object[] { sourceId, signature, trustedSourcesPath });
@@ -6928,6 +6985,7 @@ public static class SmokeTests
         public string Provider = "postgresql";
         public List<string> Tables = new List<string> { "public.users" };
         public List<string> Views = new List<string> { "public.active_users" };
+        public bool ThrowOnGetTables;
         public string ProviderName => Provider;
         public string ConnectionString;
         public bool WasOpened;
@@ -6942,7 +7000,11 @@ public static class SmokeTests
         public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
         public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
         public List<string> GetDatabases() { return new List<string> { "main" }; }
-        public List<string> GetTables(string databaseName) { return Tables; }
+        public List<string> GetTables(string databaseName)
+        {
+            if (ThrowOnGetTables) throw new InvalidOperationException("table timeout");
+            return Tables;
+        }
         public List<string> GetViews(string databaseName) { return Views; }
         public DataTable GetColumns(string databaseName, string tableName)
         {
