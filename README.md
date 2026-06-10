@@ -192,6 +192,10 @@ Smoke test harness：
   - 現況：連線開啟 service 會透過 provider factory 建立資料庫物件；Table/View 複製服務會檢查來源/目標連線、物件類型、來源欄位與 View DDL。
   - 完成內容：資料庫建立器未回傳連線物件、來源或目標資料庫未連線、只支援複製 Table/View、來源資料表沒有可複製欄位、View DDL 無法取得，以及複製流程進度與 fallback 訊息已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **Provider View DDL 解析錯誤 ✅ 已語系化**
+  - 現況：MySQL、PostgreSQL、SQL Server、Oracle 與 SQLite provider 會在複製 View、重新命名 View 或跨 provider 建立 View 時解析來源 View DDL。
+  - 完成內容：空 View DDL 與各 provider View DDL 解析失敗已改用語系字串，繁中與英文介面都會顯示一致文字，並已納入 smoke test 覆蓋壞 DDL 的實際例外路徑。
+
 - **Metadata 載入與匯入審核紀錄錯誤 ✅ 已語系化**
   - 現況：資料庫展開時會分段載入 Tables、Views、Functions、Users 與 Events；連線匯入完成後會寫入本機 JSONL 審核紀錄。
   - 完成內容：各 metadata 分類載入失敗與匯入審核紀錄路徑缺失等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字，並保留 provider 原始錯誤訊息方便排查。

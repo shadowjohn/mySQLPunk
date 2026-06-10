@@ -563,7 +563,7 @@ namespace mySQLPunk.lib
             string selectSql = ExtractViewSelectSql(sourceViewSql);
             if (string.IsNullOrWhiteSpace(selectSql))
             {
-                throw new Exception("無法解析 Oracle View DDL");
+                throw new Exception(Localization.Format("Object.ViewDdlParseFailed", "Oracle"));
             }
 
             ExecOrThrow("CREATE OR REPLACE VIEW " + QualifiedName(databaseName, viewName) + " AS " + selectSql);

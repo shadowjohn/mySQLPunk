@@ -5372,6 +5372,19 @@ public static class SmokeTests
         }
     }
 
+    private static void AssertViewDdlParseError(IDatabase database, string providerName, string expectedMessage)
+    {
+        try
+        {
+            database.CreateViewFromStatement("main", "broken_view", "CREATE VIEW broken_view");
+            Assert(false, providerName + " should reject malformed View DDL before executing SQL.");
+        }
+        catch (Exception ex)
+        {
+            AssertContains(ex.Message, expectedMessage, providerName + " View DDL parse errors should localize.");
+        }
+    }
+
     private static void TestConnectionProfileService()
     {
         Type profileType = typeof(Form1).Assembly.GetType("mySQLPunk.entity.mySQLPunk_main");
@@ -5545,6 +5558,16 @@ public static class SmokeTests
             {
                 AssertContains(ex.Message, "Cannot get View DDL", "Database copy missing view DDL errors should localize English messages.");
             }
+
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertViewDdlParseError(new my_mysql(), "MySQL", "無法解析 MySQL View DDL");
+            AssertViewDdlParseError(new my_postgresql(), "PostgreSQL", "無法解析 PostgreSQL View DDL");
+            AssertViewDdlParseError(new my_sqlite(), "SQLite", "無法解析 SQLite View DDL");
+
+            Localization.SetLanguage(Localization.English, false);
+            AssertViewDdlParseError(new my_mssql(), "SQL Server", "Cannot parse SQL Server View DDL");
+            AssertViewDdlParseError(new my_oracle(), "Oracle", "Cannot parse Oracle View DDL");
+            AssertContains(Localization.T("Object.ViewDdlUnavailable"), "Cannot get View DDL", "Empty View DDL provider errors should localize English messages.");
         }
         finally
         {

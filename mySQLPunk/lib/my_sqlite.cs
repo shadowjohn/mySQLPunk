@@ -482,7 +482,7 @@ namespace mySQLPunk.lib
         public void RenameView(string databaseName, string oldViewName, string newViewName)
         {
             string sql = GetViewCreateStatement(databaseName, oldViewName);
-            if (string.IsNullOrWhiteSpace(sql)) throw new Exception("無法取得 View DDL");
+            if (string.IsNullOrWhiteSpace(sql)) throw new Exception(Localization.T("Object.ViewDdlUnavailable"));
             CreateViewFromStatement(databaseName, newViewName, sql);
             ExecOrThrow("DROP VIEW " + QuoteSqlite(oldViewName) + ";");
         }
@@ -659,7 +659,7 @@ namespace mySQLPunk.lib
             string selectSql = ViewSqlDialectConverter.ExtractSelectSql(sourceViewSql);
             if (string.IsNullOrWhiteSpace(selectSql))
             {
-                throw new Exception("無法解析 SQLite View DDL");
+                throw new Exception(Localization.Format("Object.ViewDdlParseFailed", "SQLite"));
             }
 
             string sql = "CREATE VIEW " + QuoteSqlite(viewName) + " AS " + selectSql.Trim().TrimEnd(';') + ";";

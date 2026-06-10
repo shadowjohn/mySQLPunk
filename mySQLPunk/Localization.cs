@@ -646,6 +646,8 @@ namespace mySQLPunk
             Add("Object.CopyViewCreateFallback", "View 建立失敗，改用 table snapshot：{0}", "View creation failed; using table snapshot: {0}");
             Add("Object.CopyReadViewDdl", "讀取 View DDL...", "Reading View DDL...");
             Add("Object.CopyViewDdlUnavailable", "無法取得 View DDL。", "Cannot get View DDL.");
+            Add("Object.ViewDdlUnavailable", "無法取得 View DDL。", "Cannot get View DDL.");
+            Add("Object.ViewDdlParseFailed", "無法解析 {0} View DDL。", "Cannot parse {0} View DDL.");
             Add("Object.ViewCopyTitle", "跨 Provider 複製 View", "Cross-provider View Copy");
             Add("Object.ViewCopyPrompt", "來源（{0}）View：{1}\n目標 Provider：{2}\n\n選擇複製方式：", "Source ({0}) view: {1}\nTarget provider: {2}\n\nSelect copy mode:");
             Add("Object.ViewCopyAutoConvert", "嘗試轉換 View SQL（無法轉換時改用 table snapshot）", "Try converting View SQL (fall back to table snapshot if conversion fails)");

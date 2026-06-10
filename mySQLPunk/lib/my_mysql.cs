@@ -500,7 +500,7 @@ namespace mySQLPunk.lib
             string selectSql = ViewSqlDialectConverter.ExtractSelectSql(sourceViewSql);
             if (string.IsNullOrWhiteSpace(selectSql))
             {
-                throw new Exception("無法解析 MySQL View DDL");
+                throw new Exception(Localization.Format("Object.ViewDdlParseFailed", "MySQL"));
             }
 
             string sql = "CREATE VIEW `" + safeDB + "`.`" + safeView + "` AS " + selectSql.Trim().TrimEnd(';') + ";";

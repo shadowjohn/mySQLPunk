@@ -580,7 +580,7 @@ namespace mySQLPunk.lib
             string selectSql = ViewSqlDialectConverter.ExtractSelectSql(sourceViewSql);
             if (string.IsNullOrWhiteSpace(selectSql))
             {
-                throw new Exception("無法解析 SQL Server View DDL");
+                throw new Exception(Localization.Format("Object.ViewDdlParseFailed", "SQL Server"));
             }
 
             SqlServerObjectName target = ParseSqlServerObjectName(viewName);

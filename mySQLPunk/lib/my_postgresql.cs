@@ -479,7 +479,7 @@ namespace mySQLPunk.lib
             string selectSql = ViewSqlDialectConverter.ExtractSelectSql(sourceViewSql);
             if (string.IsNullOrWhiteSpace(selectSql))
             {
-                throw new Exception("無法解析 PostgreSQL View DDL");
+                throw new Exception(Localization.Format("Object.ViewDdlParseFailed", "PostgreSQL"));
             }
 
             ExecOrThrow("CREATE VIEW " + QualifiedName(viewName) + " AS " + selectSql.Trim().TrimEnd(';') + ";");
