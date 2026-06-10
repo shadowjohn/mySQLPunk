@@ -3004,6 +3004,14 @@ public static class SmokeTests
             string indexLoadFailedMessage = TableDesignerForm.BuildIndexMetadataLoadFailedMessage(new InvalidOperationException("metadata timeout"));
             AssertContains(indexLoadFailedMessage, "metadata timeout", "Index metadata load failure should include the provider error.");
             AssertContains(indexLoadFailedMessage, "索引頁", "Index metadata load failure should explain that the index page remains usable.");
+            string columnLoadFailedMessage = TableDesignerForm.BuildColumnMetadataLoadFailedMessage(new InvalidOperationException("columns timeout"));
+            AssertContains(columnLoadFailedMessage, "無法載入欄位資訊", "Column metadata load failure should localize Traditional Chinese messages.");
+            AssertContains(columnLoadFailedMessage, "columns timeout", "Column metadata load failure should include the provider error.");
+
+            Localization.SetLanguage(Localization.English, false);
+            string englishColumnLoadFailedMessage = TableDesignerForm.BuildColumnMetadataLoadFailedMessage(new InvalidOperationException("columns timeout"));
+            AssertContains(englishColumnLoadFailedMessage, "Cannot load column metadata", "Column metadata load failure should localize English messages.");
+            AssertContains(englishColumnLoadFailedMessage, "columns timeout", "English column metadata load failure should include the provider error.");
         }
         finally
         {
@@ -5572,6 +5580,12 @@ public static class SmokeTests
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            MethodInfo metadataLoadFailedMethod = typeof(Form1).GetMethod("BuildDatabaseMetadataLoadFailedMessage", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(metadataLoadFailedMethod != null, "Database metadata load failure helper should be testable.");
+            string zhMetadataLoadFailed = (string)metadataLoadFailedMethod.Invoke(null, new object[] { "PostgreSQL", "sales", new InvalidOperationException("schema timeout") });
+            AssertContains(zhMetadataLoadFailed, "PostgreSQL metadata 載入失敗（sales）", "Database metadata load failure should localize Traditional Chinese messages.");
+            AssertContains(zhMetadataLoadFailed, "schema timeout", "Database metadata load failure should include provider errors.");
+
             try
             {
                 ConnectionOpenService.Open(() => null, "Host=localhost");
@@ -5621,6 +5635,10 @@ public static class SmokeTests
             }
 
             Localization.SetLanguage(Localization.English, false);
+            string enMetadataLoadFailed = (string)metadataLoadFailedMethod.Invoke(null, new object[] { "SQL Server", "warehouse", new InvalidOperationException("permission denied") });
+            AssertContains(enMetadataLoadFailed, "SQL Server metadata load failed (warehouse)", "Database metadata load failure should localize English messages.");
+            AssertContains(enMetadataLoadFailed, "permission denied", "English database metadata load failure should include provider errors.");
+
             DatabaseCopyItem unsupportedSource = new DatabaseCopyItem
             {
                 Database = new FakeCopyDatabase("mysql", includeCopyColumns: true),

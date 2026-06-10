@@ -283,6 +283,14 @@ namespace mySQLPunk
             return Localization.Format("Connection.RetryPrompt", BuildConnectionFailureMessage(providerName, ex));
         }
 
+        private static string BuildDatabaseMetadataLoadFailedMessage(string providerName, string databaseName, Exception ex)
+        {
+            string provider = string.IsNullOrWhiteSpace(providerName) ? "database" : providerName;
+            string database = databaseName ?? string.Empty;
+            string reason = string.IsNullOrWhiteSpace(ex?.Message) ? Localization.T("Object.UnknownError") : ex.Message;
+            return Localization.Format("Metadata.DatabaseLoadFailed", provider, database, reason);
+        }
+
         private bool TryEnterConnectionOpenScope(int index)
         {
             lock (_openingConnectionIndices)
@@ -12634,8 +12642,7 @@ namespace mySQLPunk
                     db_tree?.EndUpdate();
                 }
 
-                string providerName = db?.ProviderName ?? "database";
-                string message = $"{providerName} metadata 載入失敗（{databaseName}）：{ex.Message}";
+                string message = BuildDatabaseMetadataLoadFailedMessage(db?.ProviderName, databaseName, ex);
                 Console.WriteLine(message);
                 UpdateMainStatus(message);
                 MessageBox.Show(message, "Metadata", MessageBoxButtons.OK, MessageBoxIcon.Error);

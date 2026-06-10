@@ -515,7 +515,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"無法載入欄位資訊: {ex.Message}");
+                MessageBox.Show(BuildColumnMetadataLoadFailedMessage(ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -5432,6 +5432,13 @@ namespace mySQLPunk
             string message = ex == null ? "" : ex.Message;
             if (string.IsNullOrWhiteSpace(message)) message = ex == null ? "Unknown error" : ex.GetType().Name;
             return Localization.Format("Designer.IndexMetadataLoadFailed", message);
+        }
+
+        public static string BuildColumnMetadataLoadFailedMessage(Exception ex)
+        {
+            string message = ex == null ? "" : ex.Message;
+            if (string.IsNullOrWhiteSpace(message)) message = ex == null ? Localization.T("Object.UnknownError") : ex.GetType().Name;
+            return Localization.Format("Designer.ColumnMetadataLoadFailed", message);
         }
 
         private static string GetDesignerIndexType(string keyName, string nonUnique, string indexType)

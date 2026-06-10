@@ -395,6 +395,7 @@ namespace mySQLPunk
             Add("Metadata.LoadFunctionsFailed", "載入 Functions 失敗：{0}", "Load Functions failed: {0}");
             Add("Metadata.LoadUsersFailed", "載入 Users 失敗：{0}", "Load Users failed: {0}");
             Add("Metadata.LoadEventsFailed", "載入 Events 失敗：{0}", "Load Events failed: {0}");
+            Add("Metadata.DatabaseLoadFailed", "{0} metadata 載入失敗（{1}）：{2}", "{0} metadata load failed ({1}): {2}");
             Add("MaintenanceChecklist.ConnectionOpen", "連線已開啟", "Connection Open");
             Add("MaintenanceChecklist.TablesLoaded", "已載入資料表", "Tables Loaded");
             Add("MaintenanceChecklist.ViewsLoaded", "已載入檢視", "Views Loaded");
@@ -908,6 +909,7 @@ namespace mySQLPunk
             Add("Designer.IndexType", "索引類型", "Index Type");
             Add("Designer.IndexMethod", "索引方法", "Index Method");
             Add("Designer.SelectIndexColumns", "選擇索引欄位", "Select Index Columns");
+            Add("Designer.ColumnMetadataLoadFailed", "無法載入欄位資訊：{0}", "Cannot load column metadata: {0}");
             Add("Designer.IndexMetadataLoadFailed", "無法載入索引資訊：{0}\n\n索引頁已改以空白狀態開啟，欄位設計仍可繼續使用。", "Cannot load index metadata: {0}\n\nThe index page was opened empty. Column design can still be used.");
             Add("Designer.ConfirmCloseChanges", "你要儲存對 {0} 的變更嗎？", "Save changes to {0}?");
             Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
