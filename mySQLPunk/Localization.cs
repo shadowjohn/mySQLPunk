@@ -20,6 +20,7 @@ namespace mySQLPunk
             Add("App.Title", "羽山的 mySQLPunk", "mySQLPunk");
             Add("Common.TargetPathRequired", "請指定輸出目標路徑。", "Target path is required.");
             Add("Common.SqlRequired", "請輸入 SQL。", "SQL is required.");
+            Add("Common.SqlExecutionFailed", "SQL 執行失敗", "SQL execution failed.");
             Add("Common.DownloadDirectoryRequired", "請指定下載資料夾。", "Download directory is required.");
             Add("Common.FilePathRequired", "請指定檔案路徑。", "File path is required.");
             Add("AppUpdate.GitHubOwnerRequired", "請指定 GitHub owner。", "GitHub owner is required.");

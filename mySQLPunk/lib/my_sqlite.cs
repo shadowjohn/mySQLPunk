@@ -670,7 +670,7 @@ namespace mySQLPunk.lib
         {
             var res = ExecSQL(sql, parameters);
             if (!res.ContainsKey("status") || res["status"] != "OK")
-                throw new Exception(res.ContainsKey("reason") ? res["reason"] : "SQL 執行失敗");
+                throw new Exception(DatabaseExecutionResultService.GetFailureReason(res));
         }
 
         private static string QuoteSqlite(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";

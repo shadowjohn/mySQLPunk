@@ -180,6 +180,10 @@ Smoke test harness：
   - 現況：備份建立 / 失敗與 SQL 執行未知錯誤 fallback 會顯示在狀態列或例外訊息中。
   - 完成內容：備份建立含路徑、備份失敗與未知錯誤 fallback 已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **Provider SQL 執行失敗 fallback ✅ 已語系化**
+  - 現況：MySQL、PostgreSQL、SQL Server、Oracle 與 SQLite provider 執行 SQL 失敗但底層沒有回傳 reason 時，會以通用錯誤訊息回報前端。
+  - 完成內容：五個 provider 已改用共用 SQL 執行結果 helper，保留 provider 原始 reason；缺少 reason 或 reason 為空白時會依目前語系顯示 fallback 訊息，並已納入 smoke test 覆蓋。
+
 - **備份服務層錯誤訊息 ✅ 已語系化**
   - 現況：還原備份、遠端備份副本與刪除前備份封存服務會檢查備份檔案是否存在，以及 SQL / ZIP 備份是否可還原。
   - 完成內容：備份來源路徑缺失、SQLite 刪除前備份輸出路徑缺失、找不到備份檔案、空 SQL 備份與 ZIP 內沒有 SQL 項目的錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。

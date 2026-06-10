@@ -49,6 +49,7 @@ public static class SmokeTests
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Provider SQL 執行 fallback", TestDatabaseExecutionResultService, ref passed);
         Run("Connection profile service", TestConnectionProfileService, ref passed);
         Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
@@ -5957,6 +5958,40 @@ public static class SmokeTests
         finally
         {
             Localization.SetLanguage(oldLanguage, false);
+        }
+    }
+
+    private static void TestDatabaseExecutionResultService()
+    {
+        Localization.SetLanguage(Localization.TraditionalChinese, false);
+        Dictionary<string, string> failedWithoutReason = new Dictionary<string, string>
+        {
+            { "status", "error" }
+        };
+        AssertContains(DatabaseExecutionResultService.GetFailureReason(failedWithoutReason), "SQL 執行失敗", "SQL execution fallback should localize Traditional Chinese messages.");
+
+        Dictionary<string, string> failedWithEmptyReason = new Dictionary<string, string>
+        {
+            { "status", "error" },
+            { "reason", "  " }
+        };
+        AssertContains(DatabaseExecutionResultService.GetFailureReason(failedWithEmptyReason), "SQL 執行失敗", "Empty provider reasons should fall back to localized messages.");
+
+        Dictionary<string, string> failedWithReason = new Dictionary<string, string>
+        {
+            { "status", "error" },
+            { "reason", "duplicate key value violates unique constraint" }
+        };
+        AssertContains(DatabaseExecutionResultService.GetFailureReason(failedWithReason), "duplicate key", "Provider SQL failure reason should be preserved when available.");
+
+        Localization.SetLanguage(Localization.English, false);
+        try
+        {
+            AssertContains(DatabaseExecutionResultService.GetFailureReason(failedWithoutReason), "SQL execution failed", "SQL execution fallback should localize English messages.");
+        }
+        finally
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
         }
     }
 
