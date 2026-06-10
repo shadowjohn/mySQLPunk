@@ -908,6 +908,17 @@ namespace mySQLPunk
             Add("Options.CliPathSqlServer", "SQL Server:", "SQL Server:");
             Add("Options.CliPathOracle", "Oracle:", "Oracle:");
             Add("Options.CliPathSqlite", "SQLite:", "SQLite:");
+            Add("Options.ProxyDisabledStatus", "代理已停用", "Proxy disabled");
+            Add("Options.ProxyDirectConnectivity", "代理已停用；連線測試將使用直接連線。", "Proxy disabled; connectivity test will use the direct connection.");
+            Add("Options.ProxyHostEmptyStatus", "代理已啟用，但主機是空的", "Proxy enabled but host is empty");
+            Add("Options.ProxyHostEmpty", "代理主機是空的。", "Proxy host is empty.");
+            Add("Options.ProxySocksUnsupportedStatus", "SOCKS5 代理設定已保存，但 WebRequest 不支援。", "SOCKS5 proxy settings are saved but not supported by WebRequest.");
+            Add("Options.ProxySocksUnsupportedConnectivity", "SOCKS5 代理設定已保存，但 WebRequest 連線測試目前只支援 HTTP/HTTPS 代理。", "SOCKS5 proxy settings are saved, but WebRequest connectivity tests currently support HTTP/HTTPS proxies only.");
+            Add("Options.ProxyHttpStatus", "HTTP 代理 {0}:{1}", "HTTP proxy {0}:{1}");
+            Add("Options.ProxyConnectivitySucceeded", "連線測試成功（{0}）。", "Connectivity test succeeded ({0}).");
+            Add("Options.ProxyConnectivityReturnedHttp", "連線測試回傳 HTTP {0}。", "Connectivity test returned HTTP {0}.");
+            Add("Options.ProxyConnectivityFailedHttp", "連線測試失敗，HTTP {0}：{1}", "Connectivity test failed with HTTP {0}: {1}");
+            Add("Options.ProxyConnectivityFailed", "連線測試失敗：{0}", "Connectivity test failed: {0}");
             Add("Options.BackupMirrorHint", "可指定備份完成後要同步複製的遠端或共享資料夾，例如 NAS、雲端同步資料夾或團隊共享磁碟。留空時不會建立遠端副本。", "Set a remote or shared folder to copy backups after they are created, such as a NAS, cloud-synced folder, or team share. Leave blank to skip remote copies.");
             Add("Options.BackupMirrorDirectory", "遠端備份資料夾:", "Remote backup folder:");
             Add("Options.BackupMirrorRetainCount", "遠端保留份數:", "Remote copies to keep:");

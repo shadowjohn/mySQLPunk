@@ -4733,36 +4733,53 @@ public static class SmokeTests
         Assert(proxy != null, "HTTP proxy settings should create a WebProxy.");
         Uri proxyUri = proxy.GetProxy(new Uri("http://example.test/"));
         AssertEquals("http://proxy.local:3128/", proxyUri.ToString(), "HTTP proxy URI should include host and port.");
-        AssertContains(ConnectionProxySettingsService.BuildStatusText(http), "proxy.local:3128", "Proxy status should describe host and port.");
-
-        ConnectionProxySettings socks = new ConnectionProxySettings
+        string oldLanguage = Localization.CurrentLanguage;
+        try
         {
-            Enabled = true,
-            Type = "socks5",
-            Host = "proxy.local",
-            Port = 1080
-        };
-        Assert(ConnectionProxySettingsService.CreateWebProxy(socks) == null, "SOCKS5 should be stored but not applied to WebRequest.");
-        AssertContains(ConnectionProxySettingsService.BuildStatusText(socks), "not supported", "SOCKS5 status should explain WebRequest limitation.");
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertContains(ConnectionProxySettingsService.BuildStatusText(http), "HTTP 代理 proxy.local:3128", "Proxy status should support Traditional Chinese.");
+            AssertContains(ConnectionProxySettingsService.BuildStatusText(disabled), "停用", "Disabled proxy status should support Traditional Chinese.");
 
-        ConnectionProxyTestResult directPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(disabled, new Uri("https://example.test/"));
-        Assert(directPreflight.Success, "Disabled proxy should allow direct connectivity preflight.");
-        Assert(!directPreflight.UsedProxy, "Disabled proxy preflight should not use proxy.");
+            ConnectionProxySettings socks = new ConnectionProxySettings
+            {
+                Enabled = true,
+                Type = "socks5",
+                Host = "proxy.local",
+                Port = 1080
+            };
+            Assert(ConnectionProxySettingsService.CreateWebProxy(socks) == null, "SOCKS5 should be stored but not applied to WebRequest.");
+            AssertContains(ConnectionProxySettingsService.BuildStatusText(socks), "不支援", "SOCKS5 status should explain WebRequest limitation in Traditional Chinese.");
 
-        ConnectionProxySettings emptyHost = new ConnectionProxySettings
+            ConnectionProxyTestResult directPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(disabled, new Uri("https://example.test/"));
+            Assert(directPreflight.Success, "Disabled proxy should allow direct connectivity preflight.");
+            Assert(!directPreflight.UsedProxy, "Disabled proxy preflight should not use proxy.");
+            AssertContains(directPreflight.Message, "直接連線", "Disabled proxy preflight should describe direct connectivity in Traditional Chinese.");
+
+            ConnectionProxySettings emptyHost = new ConnectionProxySettings
+            {
+                Enabled = true,
+                Type = "http",
+                Host = "",
+                Port = 8080
+            };
+            ConnectionProxyTestResult emptyHostPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(emptyHost, new Uri("https://example.test/"));
+            Assert(!emptyHostPreflight.Success, "Empty proxy host should fail connectivity preflight.");
+            Assert(!emptyHostPreflight.AttemptedRequest, "Invalid proxy settings should not attempt a request.");
+            AssertContains(emptyHostPreflight.Message, "主機", "Empty proxy host should return a Traditional Chinese validation message.");
+
+            ConnectionProxyTestResult socksPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(socks, new Uri("https://example.test/"));
+            Assert(!socksPreflight.Success, "SOCKS5 should fail WebRequest connectivity preflight.");
+            AssertContains(socksPreflight.Message, "SOCKS5", "SOCKS5 preflight should explain limitation.");
+            AssertContains(socksPreflight.Message, "HTTP/HTTPS", "SOCKS5 preflight should name the supported proxy types.");
+
+            Localization.SetLanguage(Localization.English, false);
+            AssertContains(ConnectionProxySettingsService.BuildStatusText(socks), "not supported", "SOCKS5 status should support English.");
+            AssertContains(ConnectionProxySettingsService.ValidateConnectivityTest(emptyHost, new Uri("https://example.test/")).Message, "Proxy host is empty", "Empty proxy host should support English.");
+        }
+        finally
         {
-            Enabled = true,
-            Type = "http",
-            Host = "",
-            Port = 8080
-        };
-        ConnectionProxyTestResult emptyHostPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(emptyHost, new Uri("https://example.test/"));
-        Assert(!emptyHostPreflight.Success, "Empty proxy host should fail connectivity preflight.");
-        Assert(!emptyHostPreflight.AttemptedRequest, "Invalid proxy settings should not attempt a request.");
-
-        ConnectionProxyTestResult socksPreflight = ConnectionProxySettingsService.ValidateConnectivityTest(socks, new Uri("https://example.test/"));
-        Assert(!socksPreflight.Success, "SOCKS5 should fail WebRequest connectivity preflight.");
-        AssertContains(socksPreflight.Message, "SOCKS5", "SOCKS5 preflight should explain limitation.");
+            Localization.SetLanguage(oldLanguage, false);
+        }
 
         HttpWebRequest request = ConnectionProxySettingsService.CreateConnectivityTestRequest(http, new Uri("https://example.test/"), 5000);
         AssertEquals("HEAD", request.Method, "Connectivity test should use HEAD.");

@@ -107,8 +107,8 @@ namespace mySQLPunk.lib
                         TargetUrl = uri.ToString(),
                         StatusCode = statusCode,
                         Message = ok
-                            ? "Connectivity test succeeded (" + statusCode + ")."
-                            : "Connectivity test returned HTTP " + statusCode + "."
+                            ? Localization.Format("Options.ProxyConnectivitySucceeded", statusCode)
+                            : Localization.Format("Options.ProxyConnectivityReturnedHttp", statusCode)
                     };
                 }
             }
@@ -125,8 +125,8 @@ namespace mySQLPunk.lib
                     TargetUrl = uri.ToString(),
                     StatusCode = statusCode,
                     Message = statusCode > 0
-                        ? "Connectivity test failed with HTTP " + statusCode + ": " + ex.Message
-                        : "Connectivity test failed: " + ex.Message
+                        ? Localization.Format("Options.ProxyConnectivityFailedHttp", statusCode, ex.Message)
+                        : Localization.Format("Options.ProxyConnectivityFailed", ex.Message)
                 };
             }
             catch (Exception ex)
@@ -137,7 +137,7 @@ namespace mySQLPunk.lib
                     AttemptedRequest = true,
                     UsedProxy = settings != null && settings.Enabled && settings.IsHttpProxy && !string.IsNullOrWhiteSpace(settings.Host),
                     TargetUrl = uri.ToString(),
-                    Message = "Connectivity test failed: " + ex.Message
+                    Message = Localization.Format("Options.ProxyConnectivityFailed", ex.Message)
                 };
             }
         }
@@ -153,7 +153,7 @@ namespace mySQLPunk.lib
                     AttemptedRequest = false,
                     UsedProxy = false,
                     TargetUrl = uri.ToString(),
-                    Message = "Proxy disabled; connectivity test will use the direct connection."
+                    Message = Localization.T("Options.ProxyDirectConnectivity")
                 };
             }
 
@@ -165,7 +165,7 @@ namespace mySQLPunk.lib
                     AttemptedRequest = false,
                     UsedProxy = false,
                     TargetUrl = uri.ToString(),
-                    Message = "Proxy host is empty."
+                    Message = Localization.T("Options.ProxyHostEmpty")
                 };
             }
 
@@ -177,7 +177,7 @@ namespace mySQLPunk.lib
                     AttemptedRequest = false,
                     UsedProxy = false,
                     TargetUrl = uri.ToString(),
-                    Message = "SOCKS5 proxy settings are saved, but WebRequest connectivity tests currently support HTTP/HTTPS proxies only."
+                    Message = Localization.T("Options.ProxySocksUnsupportedConnectivity")
                 };
             }
 
@@ -199,11 +199,11 @@ namespace mySQLPunk.lib
 
         public static string BuildStatusText(ConnectionProxySettings settings)
         {
-            if (settings == null || !settings.Enabled) return "Proxy disabled";
-            if (string.IsNullOrWhiteSpace(settings.Host)) return "Proxy enabled but host is empty";
-            if (!settings.IsHttpProxy) return "SOCKS5 proxy settings are saved but not supported by WebRequest";
+            if (settings == null || !settings.Enabled) return Localization.T("Options.ProxyDisabledStatus");
+            if (string.IsNullOrWhiteSpace(settings.Host)) return Localization.T("Options.ProxyHostEmptyStatus");
+            if (!settings.IsHttpProxy) return Localization.T("Options.ProxySocksUnsupportedStatus");
             int port = settings.Port <= 0 ? 8080 : settings.Port;
-            return "HTTP proxy " + settings.Host.Trim() + ":" + port;
+            return Localization.Format("Options.ProxyHttpStatus", settings.Host.Trim(), port);
         }
     }
 }
