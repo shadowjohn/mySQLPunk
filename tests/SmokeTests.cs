@@ -3156,6 +3156,16 @@ public static class SmokeTests
                 Localization.SetLanguage(Localization.TraditionalChinese, false);
                 try
                 {
+                    PreDeleteBackupArchiveService.ArchiveBackupFile("");
+                    Assert(false, "Pre-delete backup archive should require a source path.");
+                }
+                catch (ArgumentException ex)
+                {
+                    AssertContains(ex.Message, "請指定備份來源路徑", "Pre-delete archive source path validation should localize Traditional Chinese messages.");
+                }
+
+                try
+                {
                     PreDeleteBackupArchiveService.ArchiveBackupFile(Path.Combine(dir, "missing.sql"));
                     Assert(false, "Missing pre-delete backup source should throw.");
                 }
@@ -3165,6 +3175,16 @@ public static class SmokeTests
                 }
 
                 Localization.SetLanguage(Localization.English, false);
+                try
+                {
+                    BackupRemoteMirrorService.MirrorBackup("", remoteDir);
+                    Assert(false, "Remote mirror should require a source path.");
+                }
+                catch (ArgumentException ex)
+                {
+                    AssertContains(ex.Message, "Backup source path is required", "Remote mirror source path validation should localize English messages.");
+                }
+
                 try
                 {
                     BackupRemoteMirrorService.MirrorBackup(Path.Combine(dir, "missing.sql"), remoteDir);
@@ -3272,6 +3292,16 @@ public static class SmokeTests
 
                 try
                 {
+                    BackupRestoreService.LoadRestorePackage("", countSqlStatements);
+                    Assert(false, "Restore package should require a source path.");
+                }
+                catch (ArgumentException ex)
+                {
+                    AssertContains(ex.Message, "Backup source path is required", "Restore package source path validation should localize English messages.");
+                }
+
+                try
+                {
                     BackupIntegrityScheduleService.WriteReport(new BackupIntegrityScheduleReport(), "");
                     Assert(false, "Backup integrity report should require a report directory.");
                 }
@@ -3298,6 +3328,19 @@ public static class SmokeTests
                 catch (InvalidOperationException ex)
                 {
                     AssertContains(ex.Message, "does not contain executable SQL", "Restore package should localize English empty SQL errors.");
+                }
+
+                MethodInfo createSqlitePreDeleteBackupMethod = typeof(Form1).GetMethod("CreateSqlitePreDeleteBackup", BindingFlags.Static | BindingFlags.NonPublic);
+                try
+                {
+                    createSqlitePreDeleteBackupMethod.Invoke(null, new object[] { new my_sqlite(), sqlitePath, "" });
+                    Assert(false, "SQLite pre-delete backup should require an output path.");
+                }
+                catch (TargetInvocationException ex)
+                {
+                    ArgumentException argumentException = ex.InnerException as ArgumentException;
+                    Assert(argumentException != null, "SQLite pre-delete backup should throw ArgumentException for missing output paths.");
+                    AssertContains(argumentException.Message, "Backup output path is required", "SQLite pre-delete backup output path validation should localize English messages.");
                 }
 
                 string noSqlZipPath = Path.Combine(dir, "no-sql.zip");

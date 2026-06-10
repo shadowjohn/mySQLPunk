@@ -19,7 +19,7 @@ namespace mySQLPunk.lib
     {
         public static BackupRestorePackage LoadRestorePackage(string sourcePath, Func<string, int> countStatements)
         {
-            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException(Localization.T("Backup.SourcePathRequired"), nameof(sourcePath));
             if (!File.Exists(sourcePath)) throw new FileNotFoundException(Localization.T("Backup.FileNotFound"), sourcePath);
 
             string extension = Path.GetExtension(sourcePath);

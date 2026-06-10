@@ -497,6 +497,8 @@ namespace mySQLPunk
             Add("Backup.Failed", "建立備份失敗：", "Backup failed: ");
             Add("Backup.FailedMessage", "建立備份失敗：{0}", "Backup failed: {0}");
             Add("Backup.FileNotFound", "找不到備份檔案。", "Backup file not found.");
+            Add("Backup.SourcePathRequired", "請指定備份來源路徑。", "Backup source path is required.");
+            Add("Backup.BackupPathRequired", "請指定備份輸出路徑。", "Backup output path is required.");
             Add("Backup.RestoreSqlEmpty", "備份檔案沒有可執行的 SQL。", "Backup file does not contain executable SQL.");
             Add("Backup.RestoreZipNoSqlEntry", "ZIP 備份內沒有 .sql 項目。", "Zip backup does not contain a .sql entry.");
             Add("Backup.IntegrityFailed", "備份完整性驗證失敗：{0}\n原因：{1}", "Backup integrity verification failed: {0}\nReason: {1}");

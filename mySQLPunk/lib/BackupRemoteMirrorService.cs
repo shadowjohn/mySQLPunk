@@ -15,7 +15,7 @@ namespace mySQLPunk.lib
 
         public static string MirrorBackup(string sourcePath, string destinationDirectory, int retainCount)
         {
-            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException(Localization.T("Backup.SourcePathRequired"), nameof(sourcePath));
             if (!File.Exists(sourcePath)) throw new FileNotFoundException(Localization.T("Backup.FileNotFound"), sourcePath);
             if (string.IsNullOrWhiteSpace(destinationDirectory)) return string.Empty;
 

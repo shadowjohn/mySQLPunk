@@ -11129,7 +11129,7 @@ namespace mySQLPunk
         {
             if (sqlite == null) throw new InvalidOperationException(Localization.T("Database.SqliteBackupBeforeDeleteConnectionMissing"));
             if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath)) throw new FileNotFoundException(Localization.Format("Database.SqliteFileMissing", fullPath), fullPath);
-            if (string.IsNullOrWhiteSpace(backupPath)) throw new ArgumentException("backupPath");
+            if (string.IsNullOrWhiteSpace(backupPath)) throw new ArgumentException(Localization.T("Backup.BackupPathRequired"), nameof(backupPath));
 
             string backupDir = Path.GetDirectoryName(backupPath);
             if (!string.IsNullOrWhiteSpace(backupDir) && !Directory.Exists(backupDir))
