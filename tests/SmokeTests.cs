@@ -4727,6 +4727,7 @@ public static class SmokeTests
         MethodInfo detailObjectTypeMethod = typeof(Form1).GetMethod("LocalizeDetailObjectType", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailLoadErrorMethod = typeof(Form1).GetMethod("BuildDetailLoadErrorText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailNotFoundMethod = typeof(Form1).GetMethod("BuildDetailNotFoundText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo favoriteStatusMethod = typeof(Form1).GetMethod("BuildFavoriteStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4803,6 +4804,10 @@ public static class SmokeTests
             AssertContains((string)detailLoadErrorMethod.Invoke(null, new object[] { "Function", "boom" }), "載入函式細節失敗", "Detail panel should localize Traditional Chinese function load errors.");
             AssertContains((string)detailNotFoundMethod.Invoke(null, new object[] { "Event", "nightly" }), "找不到事件", "Detail panel should localize Traditional Chinese event not-found message.");
             AssertContains((string)detailNotFoundMethod.Invoke(null, new object[] { "User", "alice" }), "找不到使用者", "Detail panel should localize Traditional Chinese user not-found message.");
+            AssertEquals("已加入我的最愛：Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Added", "Root\\main" }), "Favorites should localize Traditional Chinese added status.");
+            AssertEquals("已移出我的最愛：Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Removed", "Root\\main" }), "Favorites should localize Traditional Chinese removed status.");
+            AssertEquals("找不到我的最愛：Missing\\Node", (string)favoriteStatusMethod.Invoke(null, new object[] { "NotFound", "Missing\\Node" }), "Favorites should localize Traditional Chinese not-found status.");
+            AssertEquals("已清除我的最愛。", (string)favoriteStatusMethod.Invoke(null, new object[] { "Cleared", "" }), "Favorites should localize Traditional Chinese cleared status.");
 
             SeedQueryHistory(form);
             MethodInfo queryHistoryMethod = typeof(Form1).GetMethod("BuildQueryHistoryTable", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4910,6 +4915,11 @@ public static class SmokeTests
             AssertEquals("Error loading user details: boom", (string)detailLoadErrorMethod.Invoke(null, new object[] { "User", "boom" }), "Detail panel should support English user load errors.");
             AssertEquals("Function not found: nightly", (string)detailNotFoundMethod.Invoke(null, new object[] { "Function", "nightly" }), "Detail panel should support English function not-found message.");
             AssertEquals("User not found: alice", (string)detailNotFoundMethod.Invoke(null, new object[] { "User", "alice" }), "Detail panel should support English user not-found message.");
+            AssertEquals("Favorite added: Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Added", "Root\\main" }), "Favorites should support English added status.");
+            AssertEquals("Favorite removed: Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Removed", "Root\\main" }), "Favorites should support English removed status.");
+            AssertEquals("Favorite opened: Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Opened", "Root\\main" }), "Favorites should support English opened status.");
+            AssertEquals("Favorite not found: Missing\\Node", (string)favoriteStatusMethod.Invoke(null, new object[] { "NotFound", "Missing\\Node" }), "Favorites should support English not-found status.");
+            AssertEquals("Favorites cleared.", (string)favoriteStatusMethod.Invoke(null, new object[] { "Cleared", "" }), "Favorites should support English cleared status.");
 
             DataTable enQueryHistory = (DataTable)queryHistoryMethod.Invoke(form, new object[] { "main" });
             DataRow enQueryHistoryQuery = FindDataRow(enQueryHistory, "SQL", "SELECT 1");

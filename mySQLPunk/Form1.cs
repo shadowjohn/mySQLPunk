@@ -3193,7 +3193,7 @@ namespace mySQLPunk
                 ConfigureMainMenu();
             }
 
-            UpdateMainStatus("Favorite added: " + path);
+            UpdateMainStatus(BuildFavoriteStatusText("Added", path));
         }
 
         private void ClearFavorites()
@@ -3201,7 +3201,7 @@ namespace mySQLPunk
             _favoriteNodePaths.Clear();
             SaveFavoriteNodePaths();
             ConfigureMainMenu();
-            UpdateMainStatus("Favorites cleared.");
+            UpdateMainStatus(BuildFavoriteStatusText("Cleared", string.Empty));
         }
 
         private void OpenFavoriteNodePath(string path)
@@ -3209,14 +3209,14 @@ namespace mySQLPunk
             TreeNode node = FindFavoriteNode(path);
             if (node == null)
             {
-                UpdateMainStatus("Favorite not found: " + path);
+                UpdateMainStatus(BuildFavoriteStatusText("NotFound", path));
                 return;
             }
 
             db_tree.SelectedNode = node;
             node.EnsureVisible();
             db_tree_AfterSelect(db_tree, new TreeViewEventArgs(node));
-            UpdateMainStatus("Favorite opened: " + path);
+            UpdateMainStatus(BuildFavoriteStatusText("Opened", path));
         }
 
         private TreeNode FindFavoriteNode(string path)
@@ -3298,6 +3298,16 @@ namespace mySQLPunk
             string[] parts = path.Split('\\');
             if (parts.Length <= 1) return parts[0];
             return parts[parts.Length - 1] + " (" + parts[0] + ")";
+        }
+
+        private static string BuildFavoriteStatusText(string action, string path)
+        {
+            if (string.Equals(action, "Added", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Favorite.StatusAdded", path ?? string.Empty);
+            if (string.Equals(action, "Removed", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Favorite.StatusRemoved", path ?? string.Empty);
+            if (string.Equals(action, "Opened", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Favorite.StatusOpened", path ?? string.Empty);
+            if (string.Equals(action, "NotFound", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Favorite.StatusNotFound", path ?? string.Empty);
+            if (string.Equals(action, "Cleared", StringComparison.OrdinalIgnoreCase)) return Localization.T("Favorite.StatusCleared");
+            return path ?? string.Empty;
         }
 
         // ── 連線群組 helpers ────────────────────────────────────────────
@@ -11917,7 +11927,7 @@ namespace mySQLPunk
 
             SaveFavoriteNodePaths();
             ConfigureMainMenu();
-            UpdateMainStatus(existing == null ? "Favorite added: " + path : "Favorite removed: " + path);
+            UpdateMainStatus(BuildFavoriteStatusText(existing == null ? "Added" : "Removed", path));
         }
 
         private void AddConnectionColorMenu(ContextMenuStrip menu, TreeNode node)

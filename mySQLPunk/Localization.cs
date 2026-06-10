@@ -57,6 +57,11 @@ namespace mySQLPunk
             Add("Menu.ColorGreen", "綠色", "Green");
             Add("Menu.ColorBlue", "藍色", "Blue");
             Add("Menu.ColorPurple", "紫色", "Purple");
+            Add("Favorite.StatusAdded", "已加入我的最愛：{0}", "Favorite added: {0}");
+            Add("Favorite.StatusRemoved", "已移出我的最愛：{0}", "Favorite removed: {0}");
+            Add("Favorite.StatusOpened", "已開啟我的最愛：{0}", "Favorite opened: {0}");
+            Add("Favorite.StatusNotFound", "找不到我的最愛：{0}", "Favorite not found: {0}");
+            Add("Favorite.StatusCleared", "已清除我的最愛。", "Favorites cleared.");
             Add("Menu.ManageGroups", "管理群組", "Manage Groups");
             Add("Menu.GroupName", "群組名稱", "Group Name");
             Add("Menu.GroupNamePrompt", "請輸入群組名稱：", "Enter a group name:");
