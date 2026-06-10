@@ -5053,6 +5053,13 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString("RecordRowHeightMode", "comfortable");
 
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            MethodInfo queryExceptionMessageMethod = typeof(QueryForm).GetMethod("BuildQueryExceptionMessage", BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo queryFailureReasonMethod = typeof(QueryForm).GetMethod("BuildQueryFailureReason", BindingFlags.Static | BindingFlags.NonPublic);
+            AssertEquals("未知錯誤", (string)queryExceptionMessageMethod.Invoke(null, new object[] { new Exception("") }), "Query form empty exceptions should localize Traditional Chinese unknown errors.");
+            AssertEquals("provider timeout", (string)queryFailureReasonMethod.Invoke(null, new object[] { "provider timeout" }), "Query form failure reason should preserve provider messages.");
+            Localization.SetLanguage(Localization.English, false);
+            AssertEquals("Unknown error", (string)queryFailureReasonMethod.Invoke(null, new object[] { "   " }), "Query form blank provider reasons should localize English unknown errors.");
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
             using (QueryForm form = new QueryForm(new FakeDumpDatabase(), "main"))
             {
                 ToolStripTextBox pageSize = GetPrivateField<ToolStripTextBox>(form, "txtPageSize");

@@ -1609,8 +1609,9 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 if (!CanUpdateUi()) return;
-                UpdateStatus(Localization.Format("Query.LoadFailed", ex.Message));
-                ShowResultFeedback(Localization.T("Query.QueryError"), Localization.Format("Query.LoadTableFailed", ex.Message));
+                string reason = BuildQueryExceptionMessage(ex);
+                UpdateStatus(Localization.Format("Query.LoadFailed", reason));
+                ShowResultFeedback(Localization.T("Query.QueryError"), Localization.Format("Query.LoadTableFailed", reason));
             }
             finally
             {
@@ -1830,8 +1831,7 @@ namespace mySQLPunk
                     }
                     else
                     {
-                        string reason = GetResultValue(result, "reason");
-                        if (string.IsNullOrWhiteSpace(reason)) reason = Localization.T("Query.UnknownError");
+                        string reason = BuildQueryFailureReason(GetResultValue(result, "reason"));
                         string status = Localization.Format("Query.ErrorStatus", reason);
                         UpdateStatus(status);
                         ShowResultFeedback(Localization.T("Query.ExecuteError"), reason);
@@ -1849,9 +1849,10 @@ namespace mySQLPunk
             {
                 if (!CanUpdateUi()) return;
                 sw.Stop();
-                string status = Localization.Format("Query.ErrorStatus", ex.Message);
+                string reason = BuildQueryExceptionMessage(ex);
+                string status = Localization.Format("Query.ErrorStatus", reason);
                 UpdateStatus(status);
-                ShowResultFeedback(Localization.T("Query.QueryError"), ex.Message);
+                ShowResultFeedback(Localization.T("Query.QueryError"), reason);
                 _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
             }
             finally
@@ -1953,6 +1954,17 @@ namespace mySQLPunk
         {
             string value;
             return result != null && result.TryGetValue(key, out value) ? value : string.Empty;
+        }
+
+        private static string BuildQueryExceptionMessage(Exception ex)
+        {
+            string message = ex == null ? null : ex.Message;
+            return BuildQueryFailureReason(message);
+        }
+
+        private static string BuildQueryFailureReason(string reason)
+        {
+            return string.IsNullOrWhiteSpace(reason) ? Localization.T("Query.UnknownError") : reason;
         }
 
         public void ApplyLanguage()
@@ -3240,8 +3252,9 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 if (!CanUpdateUi()) return;
-                UpdateStatus(Localization.Format("Query.SaveFailed", ex.Message));
-                MessageBox.Show(Localization.Format("Query.SaveFailed", ex.Message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string reason = BuildQueryExceptionMessage(ex);
+                UpdateStatus(Localization.Format("Query.SaveFailed", reason));
+                MessageBox.Show(Localization.Format("Query.SaveFailed", reason), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -3694,7 +3707,7 @@ namespace mySQLPunk
             Dictionary<string, string> result = _db.ExecSQL(sql, parameters);
             if (!result.ContainsKey("status") || result["status"] != "OK")
             {
-                string reason = result.ContainsKey("reason") ? result["reason"] : Localization.T("Query.UnknownError");
+                string reason = BuildQueryFailureReason(GetResultValue(result, "reason"));
                 throw new Exception(reason);
             }
 
@@ -4191,7 +4204,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(ex.Message, Localization.T("Query.ExportError"),
+                    MessageBox.Show(BuildQueryExceptionMessage(ex), Localization.T("Query.ExportError"),
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
