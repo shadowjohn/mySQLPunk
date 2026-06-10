@@ -5862,6 +5862,7 @@ public static class SmokeTests
         MethodInfo detailObjectTypeMethod = typeof(Form1).GetMethod("LocalizeDetailObjectType", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo sidebarObjectTitleMethod = typeof(Form1).GetMethod("BuildSidebarObjectTitle", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo sidebarTitleMethod = typeof(Form1).GetMethod("BuildSidebarTitle", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo sidebarButtonTextMethod = typeof(Form1).GetMethod("BuildSidebarButtonText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailGridColumnHeaderMethod = typeof(Form1).GetMethod("BuildDetailGridColumnHeader", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailPropertyNameMethod = typeof(Form1).GetMethod("BuildDetailPropertyName", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailLoadErrorMethod = typeof(Form1).GetMethod("BuildDetailLoadErrorText", BindingFlags.Static | BindingFlags.NonPublic);
@@ -5970,6 +5971,8 @@ public static class SmokeTests
             AssertEquals("資料庫：main", (string)sidebarObjectTitleMethod.Invoke(null, new object[] { "Database", "main" }), "Sidebar title should localize Traditional Chinese database title.");
             AssertEquals("檢視：public.active_users", (string)sidebarObjectTitleMethod.Invoke(null, new object[] { "View", "public.active_users" }), "Sidebar title should localize Traditional Chinese view title.");
             AssertEquals("在資料庫中尋找：main", (string)sidebarTitleMethod.Invoke(null, new object[] { Localization.T("Database.SearchTitle"), "main" }), "Sidebar title should localize Traditional Chinese custom labels.");
+            AssertEquals("資訊", (string)sidebarButtonTextMethod.Invoke(null, new object[] { "Info" }), "Sidebar Info button should localize Traditional Chinese.");
+            AssertEquals("DDL", (string)sidebarButtonTextMethod.Invoke(null, new object[] { "DDL" }), "Sidebar DDL button should keep the standard label in Traditional Chinese.");
             AssertEquals("屬性", (string)detailGridColumnHeaderMethod.Invoke(null, new object[] { "Key" }), "Detail grid property header should localize Traditional Chinese.");
             AssertEquals("值", (string)detailGridColumnHeaderMethod.Invoke(null, new object[] { "Value" }), "Detail grid value header should localize Traditional Chinese.");
             AssertEquals("字元集", (string)detailPropertyNameMethod.Invoke(null, new object[] { "CharacterSet" }), "Detail property names should localize Traditional Chinese character set.");
@@ -6107,6 +6110,8 @@ public static class SmokeTests
             AssertEquals("Database: main", (string)sidebarObjectTitleMethod.Invoke(null, new object[] { "Database", "main" }), "Sidebar title should support English database title.");
             AssertEquals("View: public.active_users", (string)sidebarObjectTitleMethod.Invoke(null, new object[] { "View", "public.active_users" }), "Sidebar title should support English view title.");
             AssertEquals("Find in Database: main", (string)sidebarTitleMethod.Invoke(null, new object[] { Localization.T("Database.SearchTitle"), "main" }), "Sidebar title should support English custom labels.");
+            AssertEquals("Info", (string)sidebarButtonTextMethod.Invoke(null, new object[] { "Info" }), "Sidebar Info button should support English.");
+            AssertEquals("DDL", (string)sidebarButtonTextMethod.Invoke(null, new object[] { "DDL" }), "Sidebar DDL button should support English.");
             AssertEquals("Property", (string)detailGridColumnHeaderMethod.Invoke(null, new object[] { "Key" }), "Detail grid property header should support English.");
             AssertEquals("Value", (string)detailGridColumnHeaderMethod.Invoke(null, new object[] { "Value" }), "Detail grid value header should support English.");
             AssertEquals("Character Set", (string)detailPropertyNameMethod.Invoke(null, new object[] { "CharacterSet" }), "Detail property names should support English character set.");

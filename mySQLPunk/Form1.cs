@@ -3753,7 +3753,7 @@ namespace mySQLPunk
             ConfigureMainMenu();
             ConfigureMainToolbar(Path.Combine(Application.StartupPath, "image"));
             label1.Text = Localization.T("Sidebar.Connections");
-            if (lblSidebarTitle != null) lblSidebarTitle.Text = Localization.T("Sidebar.ObjectDetails");
+            ApplySidebarLanguage();
             if (pnlObjectFilter != null && pnlObjectFilter.Controls.OfType<Label>().Any())
             {
                 pnlObjectFilter.Controls.OfType<Label>().First().Text = Localization.T("View.TopFilterLabel");
@@ -3918,11 +3918,11 @@ namespace mySQLPunk
             string imgPath = Path.Combine(Application.StartupPath, "image");
             tsSidebar = new ToolStrip() { Dock = DockStyle.Top, GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.Professional };
             
-            btnInfo = new ToolStripButton("Info") { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            btnInfo = new ToolStripButton(BuildSidebarButtonText("Info")) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             if (File.Exists(Path.Combine(imgPath, "database.png"))) btnInfo.Image = Image.FromFile(Path.Combine(imgPath, "database.png"));
             else btnInfo.Image = global::mySQLPunk.Properties.Resources.database;
 
-            btnDDL = new ToolStripButton("DDL") { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            btnDDL = new ToolStripButton(BuildSidebarButtonText("DDL")) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             if (File.Exists(Path.Combine(imgPath, "queries.png"))) btnDDL.Image = Image.FromFile(Path.Combine(imgPath, "queries.png"));
             else if (File.Exists(Path.Combine(imgPath, "query.png"))) btnDDL.Image = Image.FromFile(Path.Combine(imgPath, "query.png"));
             
@@ -9240,6 +9240,25 @@ namespace mySQLPunk
         private static string BuildSidebarTitle(string label, string objectName)
         {
             return Localization.Format("Detail.SidebarTitle", label ?? string.Empty, objectName ?? string.Empty);
+        }
+
+        private void ApplySidebarLanguage()
+        {
+            if (lblSidebarTitle != null) lblSidebarTitle.Text = Localization.T("Sidebar.ObjectDetails");
+            if (btnInfo != null) btnInfo.Text = BuildSidebarButtonText("Info");
+            if (btnDDL != null) btnDDL.Text = BuildSidebarButtonText("DDL");
+            if (dgvDetails != null)
+            {
+                if (dgvDetails.Columns.Contains("Key")) dgvDetails.Columns["Key"].HeaderText = BuildDetailGridColumnHeader("Key");
+                if (dgvDetails.Columns.Contains("Value")) dgvDetails.Columns["Value"].HeaderText = BuildDetailGridColumnHeader("Value");
+            }
+        }
+
+        private static string BuildSidebarButtonText(string buttonName)
+        {
+            if (string.Equals(buttonName, "Info", StringComparison.OrdinalIgnoreCase)) return Localization.T("Sidebar.Info");
+            if (string.Equals(buttonName, "DDL", StringComparison.OrdinalIgnoreCase)) return Localization.T("Sidebar.DDL");
+            return buttonName ?? string.Empty;
         }
 
         private void AddDetailRow(string propertyName, object value)

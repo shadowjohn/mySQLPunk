@@ -277,6 +277,8 @@ namespace mySQLPunk
 
             Add("Sidebar.Connections", "連線", "Connections");
             Add("Sidebar.ObjectDetails", "物件詳細資料", "Object Details");
+            Add("Sidebar.Info", "資訊", "Info");
+            Add("Sidebar.DDL", "DDL", "DDL");
             Add("Status.Ready", "就緒", "Ready");
             Add("Status.LoadingData", "資料載入中...", "Loading data...");
             Add("Status.ReleaseToDock", "釋放滑鼠以嵌入視窗", "Release mouse to dock the window");
