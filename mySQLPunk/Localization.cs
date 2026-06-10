@@ -293,6 +293,9 @@ namespace mySQLPunk
             Add("Connection.SpatiaLiteDllMissing", "找不到 mod_spatialite.dll：{0}", "Cannot find mod_spatialite.dll: {0}");
             Add("Connection.InitSpatialMetadataTitle", "初始化 geospatial", "Initialize geospatial");
             Add("Connection.InitSpatialMetadataPrompt", "此 SQLite 檔尚未偵測到 SpatiaLite metadata，是否要初始化？", "This SQLite file does not have SpatiaLite metadata yet. Initialize it?");
+            Add("Diagnostic.StatusReady", "就緒", "Ready");
+            Add("Diagnostic.StatusWarning", "警告", "Warning");
+            Add("Diagnostic.StatusInfo", "資訊", "Info");
             Add("Connection.UnsupportedEdit", "此連線類型尚未支援編輯：{0}", "Editing this connection type is not supported yet: {0}");
             Add("Connection.ConfirmDelete", "確定要刪除連線「{0}」嗎？", "Delete connection \"{0}\"?");
             Add("Connection.DeleteTitle", "刪除連線", "Delete Connection");

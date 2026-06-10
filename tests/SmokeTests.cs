@@ -3816,9 +3816,11 @@ public static class SmokeTests
             Path.Combine(runtimeDir, "SPATIALITE_RUNTIME_MANIFEST.json"),
             "{\"source_url\":\"https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip\",\"source_sha256\":\"abc123\",\"built_at_utc\":\"2026-05-24T00:00:00Z\",\"files\":[{\"name\":\"libspatialite.dll\",\"sha256\":\"" + runtimeDllHash + "\",\"bytes\":" + new FileInfo(runtimeDllPath).Length + "},{\"name\":\"missing_dependency.dll\",\"sha256\":\"deadbeef\",\"bytes\":12},{\"name\":\"../outside.dll\",\"sha256\":\"deadbeef\",\"bytes\":12}]}",
             Encoding.UTF8);
+        string oldLanguage = Localization.CurrentLanguage;
 
         try
         {
+            Localization.SetLanguage(Localization.English, false);
             string foundRoot = SpatiaLiteRuntimeDiagnosticService.FindRepositoryRoot(Path.Combine(root, "tools"));
             AssertEquals(root, foundRoot, "SpatiaLite diagnostics should locate the repository root from a child directory.");
 
@@ -3840,6 +3842,14 @@ public static class SmokeTests
             AssertContains(details, "SpatiaLite Repair Log|Info", "SpatiaLite diagnostics should show the repair log path.");
             AssertContains(details, "SpatiaLite Missing DLL|Warning", "SpatiaLite diagnostics should warn when mod_spatialite.dll is missing.");
             AssertContains(details, "missing mod_spatialite", "SpatiaLite diagnostics should keep the load error.");
+
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            List<SpatiaLiteDiagnosticRow> zhRows = SpatiaLiteRuntimeDiagnosticService.BuildRows(runtimeDir, "missing mod_spatialite", root);
+            string zhDetails = string.Join("\n", zhRows.Select(r => r.Item + "|" + r.Status + "|" + r.Detail).ToArray());
+            AssertContains(zhDetails, "SpatiaLite Repair Script|就緒", "SpatiaLite diagnostics should localize ready status in Traditional Chinese.");
+            AssertContains(zhDetails, "SpatiaLite Repair Log|資訊", "SpatiaLite diagnostics should localize info status in Traditional Chinese.");
+            AssertContains(zhDetails, "SpatiaLite Missing DLL|警告", "SpatiaLite diagnostics should localize warning status in Traditional Chinese.");
+            Localization.SetLanguage(Localization.English, false);
 
             System.Diagnostics.ProcessStartInfo startInfo = SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(root);
             AssertEquals("powershell.exe", startInfo.FileName, "SpatiaLite repair should launch PowerShell.");
@@ -3863,7 +3873,7 @@ public static class SmokeTests
 
             using (my_sqlite sqlite = new my_sqlite())
             {
-                string oldLanguage = Localization.CurrentLanguage;
+                string sqliteLanguage = Localization.CurrentLanguage;
                 try
                 {
                     Localization.SetLanguage(Localization.TraditionalChinese, false);
@@ -3876,12 +3886,13 @@ public static class SmokeTests
                 }
                 finally
                 {
-                    Localization.SetLanguage(oldLanguage, false);
+                    Localization.SetLanguage(sqliteLanguage, false);
                 }
             }
         }
         finally
         {
+            Localization.SetLanguage(oldLanguage, false);
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }
