@@ -6498,11 +6498,6 @@ public static class SmokeTests
         MethodInfo method = typeof(Form1).GetMethod("BuildAboutMessage", BindingFlags.Public | BindingFlags.Static);
         Assert(method != null, "About message builder should be exposed for smoke tests.");
 
-        string message = (string)method.Invoke(null, new object[] { "1.0.0.0" });
-
-        AssertContains(message, "版本：1.0.0.0", "About message should include the current version.");
-        AssertContains(message, "作者：\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin\r\nCodex 協作", "About message should list authors on separate lines.");
-
         Type programType = typeof(Form1).Assembly.GetType("mySQLPunk.Program");
         Assert(programType != null, "Program type should be available for smoke tests.");
         MethodInfo unexpectedTitleMethod = programType.GetMethod("BuildUnexpectedErrorTitle", BindingFlags.Static | BindingFlags.NonPublic);
@@ -6514,12 +6509,23 @@ public static class SmokeTests
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            string message = (string)method.Invoke(null, new object[] { "1.0.0.0" });
+            AssertContains(message, "mySQLPunk", "About message should include the product name.");
+            AssertContains(message, "版本：1.0.0.0", "About message should include the current version.");
+            AssertContains(message, "支援連線：MySQL、PostgreSQL、SQLite、SQL Server、Oracle", "About message should include supported providers.");
+            AssertContains(message, "作者：\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin\r\nCodex 協作", "About message should list authors on separate lines.");
+
             AssertEquals("未預期錯誤", (string)unexpectedTitleMethod.Invoke(null, new object[0]), "Unexpected error title should localize Traditional Chinese.");
             AssertContains((string)unexpectedUiMethod.Invoke(null, new object[] { new InvalidOperationException("boom") }), "執行時發生未預期的錯誤", "UI thread unexpected error should localize Traditional Chinese.");
             AssertContains((string)unexpectedBackgroundMethod.Invoke(null, new object[] { "背景錯誤" }), "背景執行緒發生未預期的錯誤", "Background unexpected error should localize Traditional Chinese.");
             AssertEquals("BLOB 串流匯出中：2 KB / 4 KB", (string)blobProgressMethod.Invoke(null, new object[] { 2048L, 4096L }), "BLOB streaming progress should localize Traditional Chinese.");
 
             Localization.SetLanguage(Localization.English, false);
+            string englishMessage = (string)method.Invoke(null, new object[] { "1.0.0.0" });
+            AssertContains(englishMessage, "Version: 1.0.0.0", "About message should support English version text.");
+            AssertContains(englishMessage, "Supported connections: MySQL, PostgreSQL, SQLite, SQL Server, Oracle", "About message should support English provider text.");
+            AssertContains(englishMessage, "Authors:\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin\r\nCodex collaboration", "About message should support English author label.");
+
             AssertEquals("Unexpected Error", (string)unexpectedTitleMethod.Invoke(null, new object[0]), "Unexpected error title should support English.");
             AssertContains((string)unexpectedUiMethod.Invoke(null, new object[] { new InvalidOperationException("boom") }), "An unexpected error occurred while running", "UI thread unexpected error should support English.");
             AssertContains((string)unexpectedBackgroundMethod.Invoke(null, new object[] { "background failure" }), "An unexpected background error occurred", "Background unexpected error should support English.");
