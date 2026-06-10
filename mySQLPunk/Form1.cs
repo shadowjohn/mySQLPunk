@@ -5433,7 +5433,7 @@ namespace mySQLPunk
                 Dictionary<string, string> result = db.ExecSQL(sql);
                 if (!result.ContainsKey("status") || result["status"] != "OK")
                 {
-                    string reason = result.ContainsKey("reason") ? result["reason"] : "unknown error";
+                    string reason = result.ContainsKey("reason") ? result["reason"] : BuildExecutionUnknownErrorText();
                     throw new Exception(reason + Environment.NewLine + sql);
                 }
 
@@ -5581,7 +5581,7 @@ namespace mySQLPunk
                 catch (Exception ex)
                 {
                     MessageBox.Show(Localization.T("Backup.Failed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    UpdateMainStatus("Backup failed: " + ex.Message);
+                    UpdateMainStatus(BuildBackupStatusText("Failed", ex.Message));
                 }
             }
         }
@@ -5596,9 +5596,16 @@ namespace mySQLPunk
 
             string remoteMirrorPath = CreateDatabaseBackup(target, targetPath);
             UpdateMainStatus(string.IsNullOrWhiteSpace(remoteMirrorPath)
-                ? "Backup created: " + targetPath
+                ? BuildBackupStatusText("Created", targetPath)
                 : Localization.Format("Backup.SuccessWithRemoteMirror", remoteMirrorPath));
             return true;
+        }
+
+        private static string BuildBackupStatusText(string status, string detail)
+        {
+            if (string.Equals(status, "Created", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Backup.SuccessPath", detail ?? string.Empty);
+            if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase)) return Localization.Format("Backup.FailedMessage", detail ?? string.Empty);
+            return detail ?? string.Empty;
         }
 
         private string CreateDatabaseBackup(TreeDatabaseTarget target, string targetPath)
@@ -10381,8 +10388,13 @@ namespace mySQLPunk
             Dictionary<string, string> result = db.ExecSQL(update.Sql);
             if (result != null && result.ContainsKey("status") && string.Equals(result["status"], "OK", StringComparison.OrdinalIgnoreCase)) return;
 
-            string reason = result != null && result.ContainsKey("reason") ? result["reason"] : "unknown error";
+            string reason = result != null && result.ContainsKey("reason") ? result["reason"] : BuildExecutionUnknownErrorText();
             throw new Exception(update.TableName + "." + update.ColumnName + ": " + reason);
+        }
+
+        private static string BuildExecutionUnknownErrorText()
+        {
+            return Localization.T("Query.UnknownError");
         }
 
         private void CloseDatabaseNode(TreeNode databaseNode)

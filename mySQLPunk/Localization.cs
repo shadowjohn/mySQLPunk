@@ -476,9 +476,11 @@ namespace mySQLPunk
             Add("Backup.Title", "建立備份", "Create Backup");
             Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
             Add("Backup.Success", "備份已建立。", "Backup created.");
+            Add("Backup.SuccessPath", "備份已建立：{0}", "Backup created: {0}");
             Add("Backup.SuccessVerified", "備份已建立並通過完整性驗證。", "Backup created and passed integrity verification.");
             Add("Backup.SuccessWithRemoteMirror", "備份已建立並通過完整性驗證。\n遠端備份副本：{0}", "Backup created and passed integrity verification.\nRemote backup copy: {0}");
             Add("Backup.Failed", "建立備份失敗：", "Backup failed: ");
+            Add("Backup.FailedMessage", "建立備份失敗：{0}", "Backup failed: {0}");
             Add("Backup.IntegrityFailed", "備份完整性驗證失敗：{0}\n原因：{1}", "Backup integrity verification failed: {0}\nReason: {1}");
             Add("Backup.IntegrityPathEmpty", "備份路徑是空的。", "Backup path is empty.");
             Add("Backup.IntegrityFileMissing", "備份檔案不存在。", "Backup file does not exist.");
@@ -611,7 +613,7 @@ namespace mySQLPunk
             Add("Object.ViewCopyConvertedSql", "轉換後 SQL 預覽", "Converted SQL Preview");
             Add("Object.ViewCopyPreviewUnavailable", "無法產生安全轉換預覽：{0}", "Cannot generate a safe conversion preview: {0}");
             Add("Object.DeleteFailed", "刪除失敗：{0}", "Delete failed: {0}");
-            Add("Object.UnknownError", "unknown error", "unknown error");
+            Add("Object.UnknownError", "未知錯誤", "Unknown error");
             Add("Query.ConflictOperation", "操作類型：{0}", "Operation: {0}");
             Add("Query.ConflictWhere", "比對條件：{0}", "Match condition: {0}");
             Add("Query.ConflictValues", "比對/異動值：{0}", "Matched/changed values: {0}");

@@ -4728,6 +4728,8 @@ public static class SmokeTests
         MethodInfo detailLoadErrorMethod = typeof(Form1).GetMethod("BuildDetailLoadErrorText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailNotFoundMethod = typeof(Form1).GetMethod("BuildDetailNotFoundText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo favoriteStatusMethod = typeof(Form1).GetMethod("BuildFavoriteStatusText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo backupStatusMethod = typeof(Form1).GetMethod("BuildBackupStatusText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo unknownErrorMethod = typeof(Form1).GetMethod("BuildExecutionUnknownErrorText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4808,6 +4810,9 @@ public static class SmokeTests
             AssertEquals("已移出我的最愛：Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Removed", "Root\\main" }), "Favorites should localize Traditional Chinese removed status.");
             AssertEquals("找不到我的最愛：Missing\\Node", (string)favoriteStatusMethod.Invoke(null, new object[] { "NotFound", "Missing\\Node" }), "Favorites should localize Traditional Chinese not-found status.");
             AssertEquals("已清除我的最愛。", (string)favoriteStatusMethod.Invoke(null, new object[] { "Cleared", "" }), "Favorites should localize Traditional Chinese cleared status.");
+            AssertEquals("備份已建立：C:\\backup.sql", (string)backupStatusMethod.Invoke(null, new object[] { "Created", "C:\\backup.sql" }), "Backup status should localize Traditional Chinese created status.");
+            AssertEquals("建立備份失敗：disk full", (string)backupStatusMethod.Invoke(null, new object[] { "Failed", "disk full" }), "Backup status should localize Traditional Chinese failed status.");
+            AssertEquals("未知錯誤", (string)unknownErrorMethod.Invoke(null, new object[0]), "Execution fallback should localize Traditional Chinese unknown errors.");
 
             SeedQueryHistory(form);
             MethodInfo queryHistoryMethod = typeof(Form1).GetMethod("BuildQueryHistoryTable", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4920,6 +4925,9 @@ public static class SmokeTests
             AssertEquals("Favorite opened: Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Opened", "Root\\main" }), "Favorites should support English opened status.");
             AssertEquals("Favorite not found: Missing\\Node", (string)favoriteStatusMethod.Invoke(null, new object[] { "NotFound", "Missing\\Node" }), "Favorites should support English not-found status.");
             AssertEquals("Favorites cleared.", (string)favoriteStatusMethod.Invoke(null, new object[] { "Cleared", "" }), "Favorites should support English cleared status.");
+            AssertEquals("Backup created: C:\\backup.sql", (string)backupStatusMethod.Invoke(null, new object[] { "Created", "C:\\backup.sql" }), "Backup status should support English created status.");
+            AssertEquals("Backup failed: disk full", (string)backupStatusMethod.Invoke(null, new object[] { "Failed", "disk full" }), "Backup status should support English failed status.");
+            AssertEquals("Unknown error", (string)unknownErrorMethod.Invoke(null, new object[0]), "Execution fallback should support English unknown errors.");
 
             DataTable enQueryHistory = (DataTable)queryHistoryMethod.Invoke(form, new object[] { "main" });
             DataRow enQueryHistoryQuery = FindDataRow(enQueryHistory, "SQL", "SELECT 1");
