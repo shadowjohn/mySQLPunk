@@ -4717,6 +4717,7 @@ public static class SmokeTests
         MethodInfo objectDistributionBIMethod = typeof(Form1).GetMethod("BuildObjectDistributionBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo rowCountRankingBIMethod = typeof(Form1).GetMethod("BuildRowCountRankingBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo groupListMethod = typeof(Form1).GetMethod("BuildDatabaseGroupList", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo searchResultsMethod = typeof(Form1).GetMethod("BuildDatabaseSearchResults", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4775,6 +4776,15 @@ public static class SmokeTests
             DataRow zhUnknownRow = FindDataRow(zhUnknownGroup, "名稱", "Unknown");
             Assert(zhUnknownRow != null, "Unknown database group should include a fallback row.");
             AssertContains(zhUnknownRow["狀態"].ToString(), "空白", "Unknown database group should localize Traditional Chinese empty status.");
+
+            DataTable zhSearch = (DataTable)searchResultsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "users" });
+            DataRow zhSearchTable = FindDataRow(zhSearch, "名稱", "public.users");
+            Assert(zhSearchTable != null, "Database search should include matching fake table metadata.");
+            AssertContains(zhSearchTable["類型"].ToString(), "資料表", "Database search should localize Traditional Chinese table type.");
+            AssertContains(zhSearchTable["位置"].ToString(), "資料表", "Database search should localize Traditional Chinese table location.");
+            DataRow zhSearchColumn = FindDataRow(zhSearch, "欄位", "id");
+            Assert(zhSearchColumn != null, "Database search should include matching fake column metadata.");
+            AssertContains(zhSearchColumn["類型"].ToString(), "欄位", "Database search should localize Traditional Chinese column type.");
 
             DataTable zhDiagnostics = (DataTable)diagnosticsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow zhConnectionState = FindDataRow(zhDiagnostics, "項目", "連線狀態");
@@ -4857,6 +4867,12 @@ public static class SmokeTests
             AssertEquals("SQL Dump", enBackupRow["類型"].ToString(), "Database backups group should support English SQL dump type.");
             AssertEquals("Ready", enBackupRow["狀態"].ToString(), "Database backups group should support English ready status.");
             AssertEquals("(logical backup)", enBackupRow["路徑"].ToString(), "Database backups group should support English logical backup path.");
+
+            DataTable enSearch = (DataTable)searchResultsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "active" });
+            DataRow enSearchView = FindDataRow(enSearch, "名稱", "public.active_users");
+            Assert(enSearchView != null, "Database search should include matching fake view metadata.");
+            AssertEquals("View", enSearchView["類型"].ToString(), "Database search should support English view type.");
+            AssertEquals("Views", enSearchView["位置"].ToString(), "Database search should support English view location.");
 
             DataTable enMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow enLargestTable = FindDataRow(enMaintenance, "項目", "Largest Table");

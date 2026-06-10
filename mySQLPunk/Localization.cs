@@ -328,6 +328,12 @@ namespace mySQLPunk
             Add("DatabaseGroup.StatusMissingSource", "缺少來源", "Missing source");
             Add("DatabaseGroup.StatusEmpty", "空白", "Empty");
             Add("DatabaseGroup.LogicalBackupPath", "（邏輯備份）", "(logical backup)");
+            Add("DatabaseSearch.TypeTable", "資料表", "Table");
+            Add("DatabaseSearch.TypeView", "檢視", "View");
+            Add("DatabaseSearch.TypeTableColumn", "資料表欄位", "Table Column");
+            Add("DatabaseSearch.TypeViewColumn", "檢視欄位", "View Column");
+            Add("DatabaseSearch.LocationTables", "資料表", "Tables");
+            Add("DatabaseSearch.LocationViews", "檢視", "Views");
             Add("MaintenanceChecklist.ConnectionOpen", "連線已開啟", "Connection Open");
             Add("MaintenanceChecklist.TablesLoaded", "已載入資料表", "Tables Loaded");
             Add("MaintenanceChecklist.ViewsLoaded", "已載入檢視", "Views Loaded");

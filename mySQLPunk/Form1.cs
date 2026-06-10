@@ -9851,26 +9851,28 @@ namespace mySQLPunk
 
             foreach (string tableName in GetTablesSafe(db, databaseName))
             {
-                AddSearchResultIfMatches(results, "Table", tableName, "", "Tables", keyword);
-                AddColumnSearchResults(results, db, databaseName, tableName, "Table", keyword);
+                AddSearchResultIfMatches(results, Localization.T("DatabaseSearch.TypeTable"), tableName, "", Localization.T("DatabaseSearch.LocationTables"), keyword);
+                AddColumnSearchResults(results, db, databaseName, tableName, false, keyword);
             }
 
             foreach (string viewName in GetViewsSafe(db, databaseName))
             {
-                AddSearchResultIfMatches(results, "View", viewName, "", "Views", keyword);
-                AddColumnSearchResults(results, db, databaseName, viewName, "View", keyword);
+                AddSearchResultIfMatches(results, Localization.T("DatabaseSearch.TypeView"), viewName, "", Localization.T("DatabaseSearch.LocationViews"), keyword);
+                AddColumnSearchResults(results, db, databaseName, viewName, true, keyword);
             }
 
             return results;
         }
 
-        private void AddColumnSearchResults(DataTable results, IDatabase db, string databaseName, string objectName, string objectType, string keyword)
+        private void AddColumnSearchResults(DataTable results, IDatabase db, string databaseName, string objectName, bool isView, string keyword)
         {
             DataTable columns = GetColumnsSafe(db, databaseName, objectName);
+            string type = Localization.T(isView ? "DatabaseSearch.TypeViewColumn" : "DatabaseSearch.TypeTableColumn");
+            string location = Localization.T(isView ? "DatabaseSearch.LocationViews" : "DatabaseSearch.LocationTables");
             foreach (DataRow column in columns.Rows)
             {
                 string columnName = GetModelColumnName(column);
-                AddSearchResultIfMatches(results, objectType + " Column", objectName, columnName, objectType == "View" ? "Views" : "Tables", keyword);
+                AddSearchResultIfMatches(results, type, objectName, columnName, location, keyword);
             }
         }
 
