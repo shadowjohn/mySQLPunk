@@ -4009,7 +4009,18 @@ public static class SmokeTests
             Assert(loadedFromCache.ContainsKey("CACHE_ONLY"), "Auto comment dictionary should fall back to local cache when remote load fails.");
             AssertContains(TableDesignerForm.GetAutoColumnCommentLastError(), "已改用本機快取", "Auto comment dictionary cache fallback should localize Traditional Chinese status.");
 
+            Dictionary<string, string> loadedFromCacheAfterEmptyError = (Dictionary<string, string>)loadCoreMethod.Invoke(null, new object[]
+            {
+                new Func<string>(() => { throw new Exception(""); }),
+                new Action<Dictionary<string, string>>(_ => { }),
+                new Func<Dictionary<string, string>>(() => cachedDictionary)
+            });
+            Assert(loadedFromCacheAfterEmptyError.ContainsKey("CACHE_ONLY"), "Auto comment dictionary should fall back to local cache when remote error text is empty.");
+            AssertContains(TableDesignerForm.GetAutoColumnCommentLastError(), "未知錯誤", "Auto comment dictionary empty remote errors should localize Traditional Chinese fallback text.");
+
             Localization.SetLanguage(Localization.English, false);
+            MethodInfo autoCommentErrorMethod = typeof(TableDesignerForm).GetMethod("GetAutoColumnCommentErrorMessage", BindingFlags.Static | BindingFlags.NonPublic);
+            AssertEquals("Unknown error", (string)autoCommentErrorMethod.Invoke(null, new object[] { new Exception("") }), "Auto comment dictionary empty errors should localize English fallback text.");
             try
             {
                 TableDesignerForm.PreviewAutoColumnCommentDictionaryImportFile("");

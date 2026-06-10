@@ -816,7 +816,7 @@ namespace mySQLPunk
                     lastException = ex;
                     lock (AutoColumnCommentSync)
                     {
-                        AutoColumnCommentLastError = ex.Message;
+                        AutoColumnCommentLastError = GetAutoColumnCommentErrorMessage(ex);
                         AutoColumnCommentLastErrorUtc = DateTime.UtcNow;
                         AutoColumnCommentLastSource = null;
                         AutoColumnCommentLastSourceName = null;
@@ -838,7 +838,7 @@ namespace mySQLPunk
                     {
                         AutoColumnCommentLastError = Localization.Format(
                             "Designer.AutoCommentsRemoteCacheFallback",
-                            lastException?.Message ?? Localization.T("Designer.AutoCommentsUnknownError"));
+                            GetAutoColumnCommentErrorMessage(lastException));
                         AutoColumnCommentLastErrorUtc = DateTime.UtcNow;
                         AutoColumnCommentLastSource = "cache";
                         AutoColumnCommentLastSourceName = null;
@@ -854,7 +854,15 @@ namespace mySQLPunk
 
             throw new Exception(Localization.Format(
                 "Designer.AutoCommentsLoadFailed",
-                lastException?.Message ?? Localization.T("Designer.AutoCommentsUnknownError")), lastException);
+                GetAutoColumnCommentErrorMessage(lastException)), lastException);
+        }
+
+        private static string GetAutoColumnCommentErrorMessage(Exception ex)
+        {
+            string message = ex == null ? null : ex.Message;
+            return string.IsNullOrWhiteSpace(message)
+                ? Localization.T("Designer.AutoCommentsUnknownError")
+                : message;
         }
 
         private static string DownloadAutoColumnCommentJson()
