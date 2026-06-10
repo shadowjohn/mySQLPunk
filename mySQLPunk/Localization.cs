@@ -313,6 +313,14 @@ namespace mySQLPunk
             Add("DatabaseModel.ObjectTypeTable", "資料表", "Table");
             Add("DatabaseModel.ObjectTypeView", "檢視", "View");
             Add("DatabaseModel.NoExplicitIndexes", "（沒有明確索引）", "(no explicit indexes)");
+            Add("Detail.ErrorLoadingTableDetails", "載入資料表細節失敗：{0}", "Error loading details: {0}");
+            Add("Detail.ErrorLoadingViewDetails", "載入檢視細節失敗：{0}", "Error loading view details: {0}");
+            Add("Detail.ErrorLoadingEventDetails", "載入事件細節失敗：{0}", "Error loading event details: {0}");
+            Add("Detail.ErrorLoadingFunctionDetails", "載入函式細節失敗：{0}", "Error loading function details: {0}");
+            Add("Detail.ErrorLoadingUserDetails", "載入使用者細節失敗：{0}", "Error loading user details: {0}");
+            Add("Detail.EventNotFound", "找不到事件：{0}", "Event not found: {0}");
+            Add("Detail.FunctionNotFound", "找不到函式：{0}", "Function not found: {0}");
+            Add("Detail.UserNotFound", "找不到使用者：{0}", "User not found: {0}");
             Add("DatabaseReport.SqliteBackupSource", "SQLite 備份來源", "SQLite Backup Source");
             Add("DatabaseReport.SqlBackupTarget", "SQL 備份目標", "SQL Backup Target");
             Add("DatabaseBI.CategoryTables", "資料表", "Tables");

@@ -4720,6 +4720,8 @@ public static class SmokeTests
         MethodInfo groupListMethod = typeof(Form1).GetMethod("BuildDatabaseGroupList", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo searchResultsMethod = typeof(Form1).GetMethod("BuildDatabaseSearchResults", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo detailObjectTypeMethod = typeof(Form1).GetMethod("LocalizeDetailObjectType", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo detailLoadErrorMethod = typeof(Form1).GetMethod("BuildDetailLoadErrorText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo detailNotFoundMethod = typeof(Form1).GetMethod("BuildDetailNotFoundText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4792,6 +4794,10 @@ public static class SmokeTests
             AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Model" }), "模型", "Detail panel should localize Traditional Chinese model type.");
             AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Other" }), "其它", "Detail panel should localize Traditional Chinese other type.");
             AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Report" }), "報表", "Detail panel should localize Traditional Chinese report type.");
+            AssertContains((string)detailLoadErrorMethod.Invoke(null, new object[] { "View", "boom" }), "載入檢視細節失敗", "Detail panel should localize Traditional Chinese view load errors.");
+            AssertContains((string)detailLoadErrorMethod.Invoke(null, new object[] { "Function", "boom" }), "載入函式細節失敗", "Detail panel should localize Traditional Chinese function load errors.");
+            AssertContains((string)detailNotFoundMethod.Invoke(null, new object[] { "Event", "nightly" }), "找不到事件", "Detail panel should localize Traditional Chinese event not-found message.");
+            AssertContains((string)detailNotFoundMethod.Invoke(null, new object[] { "User", "alice" }), "找不到使用者", "Detail panel should localize Traditional Chinese user not-found message.");
 
             SeedQueryHistory(form);
             MethodInfo queryHistoryMethod = typeof(Form1).GetMethod("BuildQueryHistoryTable", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4895,6 +4901,10 @@ public static class SmokeTests
             AssertEquals("Model", (string)detailObjectTypeMethod.Invoke(null, new object[] { "Model" }), "Detail panel should support English model type.");
             AssertEquals("BI", (string)detailObjectTypeMethod.Invoke(null, new object[] { "BI" }), "Detail panel should support English BI type.");
             AssertEquals("Report", (string)detailObjectTypeMethod.Invoke(null, new object[] { "Report" }), "Detail panel should support English report type.");
+            AssertEquals("Error loading view details: boom", (string)detailLoadErrorMethod.Invoke(null, new object[] { "View", "boom" }), "Detail panel should support English view load errors.");
+            AssertEquals("Error loading user details: boom", (string)detailLoadErrorMethod.Invoke(null, new object[] { "User", "boom" }), "Detail panel should support English user load errors.");
+            AssertEquals("Function not found: nightly", (string)detailNotFoundMethod.Invoke(null, new object[] { "Function", "nightly" }), "Detail panel should support English function not-found message.");
+            AssertEquals("User not found: alice", (string)detailNotFoundMethod.Invoke(null, new object[] { "User", "alice" }), "Detail panel should support English user not-found message.");
 
             DataTable enQueryHistory = (DataTable)queryHistoryMethod.Invoke(form, new object[] { "main" });
             DataRow enQueryHistoryQuery = FindDataRow(enQueryHistory, "SQL", "SELECT 1");

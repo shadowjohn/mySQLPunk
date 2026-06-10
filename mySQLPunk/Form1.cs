@@ -8969,7 +8969,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                rtbDDL.Text = "Error loading details: " + ex.Message;
+                rtbDDL.Text = BuildDetailLoadErrorText("Table", ex.Message);
             }
         }
 
@@ -8998,7 +8998,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                rtbDDL.Text = "Error loading view details: " + ex.Message;
+                rtbDDL.Text = BuildDetailLoadErrorText("View", ex.Message);
             }
         }
 
@@ -9015,7 +9015,7 @@ namespace mySQLPunk
 
                 if (match == null)
                 {
-                    rtbDDL.Text = "Event not found: " + eventName;
+                    rtbDDL.Text = BuildDetailNotFoundText("Event", eventName);
                     return;
                 }
 
@@ -9026,7 +9026,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                rtbDDL.Text = "Error loading event details: " + ex.Message;
+                rtbDDL.Text = BuildDetailLoadErrorText("Event", ex.Message);
             }
         }
 
@@ -9043,7 +9043,7 @@ namespace mySQLPunk
 
                 if (match == null)
                 {
-                    rtbDDL.Text = "Function not found: " + functionName;
+                    rtbDDL.Text = BuildDetailNotFoundText("Function", functionName);
                     return;
                 }
 
@@ -9055,7 +9055,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                rtbDDL.Text = "Error loading function details: " + ex.Message;
+                rtbDDL.Text = BuildDetailLoadErrorText("Function", ex.Message);
             }
         }
 
@@ -9072,7 +9072,7 @@ namespace mySQLPunk
 
                 if (match == null)
                 {
-                    rtbDDL.Text = "User not found: " + userName;
+                    rtbDDL.Text = BuildDetailNotFoundText("User", userName);
                     return;
                 }
 
@@ -9087,7 +9087,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                rtbDDL.Text = "Error loading user details: " + ex.Message;
+                rtbDDL.Text = BuildDetailLoadErrorText("User", ex.Message);
             }
         }
 
@@ -9152,6 +9152,24 @@ namespace mySQLPunk
             if (string.Equals(objectType, "Other", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeOther");
             if (string.Equals(objectType, "Report", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeReport");
             return objectType ?? string.Empty;
+        }
+
+        private static string BuildDetailLoadErrorText(string objectType, string errorMessage)
+        {
+            string key = "Detail.ErrorLoadingTableDetails";
+            if (string.Equals(objectType, "View", StringComparison.OrdinalIgnoreCase)) key = "Detail.ErrorLoadingViewDetails";
+            else if (string.Equals(objectType, "Event", StringComparison.OrdinalIgnoreCase)) key = "Detail.ErrorLoadingEventDetails";
+            else if (string.Equals(objectType, "Function", StringComparison.OrdinalIgnoreCase)) key = "Detail.ErrorLoadingFunctionDetails";
+            else if (string.Equals(objectType, "User", StringComparison.OrdinalIgnoreCase)) key = "Detail.ErrorLoadingUserDetails";
+            return Localization.Format(key, errorMessage ?? string.Empty);
+        }
+
+        private static string BuildDetailNotFoundText(string objectType, string objectName)
+        {
+            string key = "Detail.EventNotFound";
+            if (string.Equals(objectType, "Function", StringComparison.OrdinalIgnoreCase)) key = "Detail.FunctionNotFound";
+            else if (string.Equals(objectType, "User", StringComparison.OrdinalIgnoreCase)) key = "Detail.UserNotFound";
+            return Localization.Format(key, objectName ?? string.Empty);
         }
 
         private string FormatBytes(long bytes)
