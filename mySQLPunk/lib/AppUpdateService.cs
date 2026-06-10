@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Net;
+using System.Security.Cryptography;
 using Newtonsoft.Json.Linq;
 
 namespace mySQLPunk.lib
@@ -13,6 +14,7 @@ namespace mySQLPunk.lib
         public string ReleasePageUrl { get; set; }
         public string InstallerDownloadUrl { get; set; }
         public string PortableZipDownloadUrl { get; set; }
+        public string ReleaseManifestDownloadUrl { get; set; }
         public string ReleaseNotes { get; set; }
         public bool IsPrerelease { get; set; }
 
@@ -82,7 +84,8 @@ namespace mySQLPunk.lib
                 ReleaseNotes = (string)release["body"] ?? "",
                 IsPrerelease = (bool?)release["prerelease"] ?? false,
                 InstallerDownloadUrl = FindInstallerAssetUrl(assets),
-                PortableZipDownloadUrl = FindPortableZipAssetUrl(assets)
+                PortableZipDownloadUrl = FindPortableZipAssetUrl(assets),
+                ReleaseManifestDownloadUrl = FindReleaseManifestAssetUrl(assets)
             };
 
             return result;
@@ -190,6 +193,89 @@ namespace mySQLPunk.lib
             }
 
             return fallbackZipUrl;
+        }
+
+        private static string FindReleaseManifestAssetUrl(JArray assets)
+        {
+            if (assets == null) return "";
+
+            foreach (JToken asset in assets)
+            {
+                string name = ((string)asset["name"] ?? "").ToLowerInvariant();
+                string url = (string)asset["browser_download_url"] ?? "";
+                if (string.IsNullOrWhiteSpace(url)) continue;
+                if (name == "release-manifest.json" || name.EndsWith("-manifest.json"))
+                {
+                    return url;
+                }
+            }
+
+            return "";
+        }
+
+        public static string FindExpectedSha256InReleaseManifest(string manifestJson, string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(manifestJson) || string.IsNullOrWhiteSpace(fileName)) return "";
+
+            JObject manifest = JObject.Parse(manifestJson);
+            string normalizedFileName = SanitizeFileName(Path.GetFileName(fileName));
+
+            string packageName = SanitizeFileName((string)manifest["package"] ?? "");
+            string packageSha256 = NormalizeSha256((string)manifest["sha256"] ?? "");
+            if (!string.IsNullOrWhiteSpace(packageName) &&
+                string.Equals(packageName, normalizedFileName, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(packageSha256))
+            {
+                return packageSha256;
+            }
+
+            string arrayMatch = FindExpectedSha256InManifestArray(manifest["files"] as JArray, normalizedFileName);
+            if (!string.IsNullOrWhiteSpace(arrayMatch)) return arrayMatch;
+
+            arrayMatch = FindExpectedSha256InManifestArray(manifest["assets"] as JArray, normalizedFileName);
+            if (!string.IsNullOrWhiteSpace(arrayMatch)) return arrayMatch;
+
+            return FindExpectedSha256InManifestArray(manifest["packages"] as JArray, normalizedFileName);
+        }
+
+        public static string ComputeFileSha256(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("File path is required.", nameof(path));
+            using (FileStream stream = File.OpenRead(path))
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                return BitConverter.ToString(sha256.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        public static bool VerifyFileSha256(string path, string expectedSha256, out string actualSha256)
+        {
+            actualSha256 = ComputeFileSha256(path);
+            string normalizedExpected = NormalizeSha256(expectedSha256);
+            return !string.IsNullOrWhiteSpace(normalizedExpected) &&
+                   string.Equals(actualSha256, normalizedExpected, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string FindExpectedSha256InManifestArray(JArray items, string normalizedFileName)
+        {
+            if (items == null) return "";
+
+            foreach (JToken item in items)
+            {
+                string name = SanitizeFileName((string)item["name"] ?? (string)item["fileName"] ?? (string)item["package"] ?? "");
+                if (!string.Equals(name, normalizedFileName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                string sha256 = NormalizeSha256((string)item["sha256"] ?? (string)item["SHA256"] ?? (string)item["hash"] ?? "");
+                if (!string.IsNullOrWhiteSpace(sha256)) return sha256;
+            }
+
+            return "";
+        }
+
+        private static string NormalizeSha256(string value)
+        {
+            string normalized = (value ?? "").Trim().Replace("-", "").ToLowerInvariant();
+            return normalized.Length == 64 ? normalized : "";
         }
 
         private static string GetFileNameFromUrl(string url)

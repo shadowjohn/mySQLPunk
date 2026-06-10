@@ -322,6 +322,9 @@ namespace mySQLPunk
             Add("Update.Available", "發現新版本 {0}。\n目前版本：{1}\n\n是否下載更新？", "Version {0} is available.\nCurrent version: {1}\n\nDownload the update?");
             Add("Update.OpenReleasePage", "找不到可直接下載的更新檔。\n是否開啟下載頁？", "No direct update package was found.\nOpen the release page?");
             Add("Update.Downloading", "正在下載更新：{0}", "Downloading update: {0}");
+            Add("Update.Verifying", "正在校驗更新檔：{0}", "Verifying update package: {0}");
+            Add("Update.Verified", "更新檔校驗完成：{0}", "Update package verified: {0}");
+            Add("Update.HashMismatch", "更新檔 {0} 的 SHA-256 與 release manifest 不符。\n預期：{1}...\n實際：{2}...\n已停止開啟此更新檔。", "The SHA-256 for update package {0} does not match the release manifest.\nExpected: {1}...\nActual: {2}...\nOpening this update package was stopped.");
             Add("Update.Downloaded", "更新安裝程式已下載：{0}", "Update installer downloaded: {0}");
             Add("Update.PortableDownloaded", "可攜版更新壓縮檔已下載：{0}", "Portable update zip downloaded: {0}");
             Add("Update.NotAvailable", "目前已是最新版本。", "You are already on the latest version.");

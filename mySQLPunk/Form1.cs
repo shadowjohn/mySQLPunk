@@ -1301,6 +1301,7 @@ namespace mySQLPunk
                 System.Net.IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();
                 if (proxy != null) client.Proxy = proxy;
                 await client.DownloadFileTaskAsync(new Uri(result.InstallerDownloadUrl), targetPath);
+                await VerifyDownloadedUpdatePackageAsync(client, result, targetPath);
             }
 
             UpdateMainStatus(Localization.Format("Update.Downloaded", targetPath));
@@ -1320,10 +1321,41 @@ namespace mySQLPunk
                 System.Net.IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();
                 if (proxy != null) client.Proxy = proxy;
                 await client.DownloadFileTaskAsync(new Uri(result.PortableZipDownloadUrl), targetPath);
+                await VerifyDownloadedUpdatePackageAsync(client, result, targetPath);
             }
 
             UpdateMainStatus(Localization.Format("Update.PortableDownloaded", targetPath));
             Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
+        }
+
+        private async Task VerifyDownloadedUpdatePackageAsync(System.Net.WebClient client, AppUpdateCheckResult result, string targetPath)
+        {
+            if (client == null || result == null || string.IsNullOrWhiteSpace(result.ReleaseManifestDownloadUrl)) return;
+            if (string.IsNullOrWhiteSpace(targetPath) || !File.Exists(targetPath)) return;
+
+            string fileName = Path.GetFileName(targetPath);
+            UpdateMainStatus(Localization.Format("Update.Verifying", fileName));
+            string manifestJson = await client.DownloadStringTaskAsync(new Uri(result.ReleaseManifestDownloadUrl));
+            string expectedSha256 = AppUpdateService.FindExpectedSha256InReleaseManifest(manifestJson, fileName);
+            if (string.IsNullOrWhiteSpace(expectedSha256)) return;
+
+            string actualSha256;
+            if (!AppUpdateService.VerifyFileSha256(targetPath, expectedSha256, out actualSha256))
+            {
+                throw new InvalidDataException(Localization.Format(
+                    "Update.HashMismatch",
+                    fileName,
+                    ShortHash(expectedSha256),
+                    ShortHash(actualSha256)));
+            }
+
+            UpdateMainStatus(Localization.Format("Update.Verified", fileName));
+        }
+
+        private static string ShortHash(string hash)
+        {
+            string value = (hash ?? string.Empty).Trim();
+            return value.Length <= 12 ? value : value.Substring(0, 12);
         }
 
         private void OpenConnectionToolStripMenuItem_Click(object sender, EventArgs e)

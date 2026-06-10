@@ -4775,8 +4775,34 @@ public static class SmokeTests
         AppUpdateCheckResult portableZip = AppUpdateService.ParseGitHubLatestRelease(portableZipJson, "1.0.0.0");
         AssertEquals("", portableZip.InstallerDownloadUrl, "Portable release assets should not be launched as an installer.");
         AssertContains(portableZip.PortableZipDownloadUrl, "mySQLPunk-1.2.5-win-x64-portable.zip", "Portable release assets should be available as downloadable update packages.");
+        AssertContains(portableZip.ReleaseManifestDownloadUrl, "release-manifest.json", "Update check should keep the release manifest asset URL.");
         AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", AppUpdateService.GetPortableZipFileName(portableZip), "Portable update filename should keep the release asset name.");
         AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", Path.GetFileName(AppUpdateService.BuildPortableZipDownloadPath(portableZip, Path.GetTempPath())), "Portable update download path should keep the zip asset file name.");
+
+        string updatePackagePath = Path.Combine(Path.GetTempPath(), "mysqlpunk_update_hash_" + Guid.NewGuid().ToString("N") + ".zip");
+        try
+        {
+            File.WriteAllText(updatePackagePath, "portable-content", Encoding.UTF8);
+            string packageHash = AppUpdateService.ComputeFileSha256(updatePackagePath);
+            string manifestJson = @"{
+  ""app"": ""mySQLPunk"",
+  ""version"": ""1.2.5"",
+  ""package"": ""mySQLPunk-1.2.5-win-x64-portable.zip"",
+  ""sha256"": """ + packageHash.ToUpperInvariant() + @""",
+  ""sizeBytes"": 16
+}";
+            string expectedHash = AppUpdateService.FindExpectedSha256InReleaseManifest(manifestJson, "mySQLPunk-1.2.5-win-x64-portable.zip");
+            AssertEquals(packageHash, expectedHash, "Release manifest parser should return the package SHA-256 for the matching portable zip.");
+
+            string actualHash;
+            Assert(AppUpdateService.VerifyFileSha256(updatePackagePath, expectedHash, out actualHash), "Downloaded update package should verify against the release manifest hash.");
+            AssertEquals(packageHash, actualHash, "Update package verification should expose the actual SHA-256.");
+            Assert(!AppUpdateService.VerifyFileSha256(updatePackagePath, new string('0', 64), out actualHash), "Update package verification should reject mismatched hashes.");
+        }
+        finally
+        {
+            if (File.Exists(updatePackagePath)) File.Delete(updatePackagePath);
+        }
 
         AssertEquals(
             "https://api.github.com/repos/shadowjohn/mySQLPunk/releases/latest",

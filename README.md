@@ -78,7 +78,7 @@ Smoke test harness：
 | 匯出 / Dump / Backup service | 可用 | 查詢結果多格式匯出、SQL dump 與邏輯 SQL 備份已抽出 service，Form UI 只負責觸發、檔案對話框與狀態呈現。 |
 | 連線與 metadata service | 可用 | 連線開啟、retry 判斷與 database metadata snapshot 已抽出 service，Form UI 保留 TreeView 呈現與錯誤提示。 |
 | 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、大型 SQL 停用編輯器輔助、資料表儲存自動交易、SQL 檔案位置、匯出位置、還原差異抽樣列數、結果網格字型與列高度、日期/時間與數字格式、工具提示顯示開關、診斷記錄、自動復原草稿、索引標籤開啟偏好、HTTP 代理與進階註冊設定。 |
-| 應用程式更新 | 部分可用 | 已支援從 GitHub Releases 檢查最新版本，說明選單可手動檢查，並可依選項在啟動時背景檢查；若 release 附帶 installer asset，可從程式內下載並啟動安裝程式；若只有 portable zip，可從程式內下載並開啟壓縮檔；`scripts/package-release.ps1` 可產生 portable zip 與 manifest，正式無縫套用更新仍待接 installer/updater。 |
+| 應用程式更新 | 部分可用 | 已支援從 GitHub Releases 檢查最新版本，說明選單可手動檢查，並可依選項在啟動時背景檢查；若 release 附帶 installer asset，可從程式內下載並啟動安裝程式；若只有 portable zip，可從程式內下載並開啟壓縮檔；若 release 附帶 `release-manifest.json` 且包含下載檔 SHA-256，開啟前會先校驗雜湊；`scripts/package-release.ps1` 可產生 portable zip 與 manifest，正式無縫套用更新仍待接 installer/updater。 |
 
 ## 未完成功能與已知限制
 
@@ -93,7 +93,7 @@ Smoke test harness：
 
 - **應用程式打包與更新 ⚠️ 更新檢查與 portable 打包已補第一階段**
   - 現況：`AppUpdateService` 可讀取 GitHub Releases latest API，解析 `tag_name`、版本、release notes、下載頁、installer asset 與 portable zip asset；主選單「說明 > 檢查更新...」可手動檢查，選項「啟動時自動檢查更新」會在啟動後背景檢查。
-  - 完成內容：版本比較會支援 `v1.2.3` 這類 release tag，若發現新版且 release 內有 `.exe` / `.msi` / `.msix` / `.appinstaller` asset，會下載到暫存更新資料夾並啟動安裝程式；若沒有 installer 但有 `mySQLPunk` portable zip，會下載到暫存更新資料夾並用系統 shell 開啟壓縮檔；若 release 沒有可直接下載的更新檔，才會提示開啟 release 下載頁；尚未發布 release 或網路失敗時會在手動檢查顯示錯誤，背景檢查只更新狀態列避免干擾使用者；更新檢查與下載會套用選項中心的 HTTP/HTTPS 代理設定；`scripts/package-release.ps1` 可用 Release 組態建置並產生 portable zip 與 `release-manifest.json`，manifest 包含 SHA-256 與檔案大小，可作為 GitHub Releases 上傳素材。
+  - 完成內容：版本比較會支援 `v1.2.3` 這類 release tag，若發現新版且 release 內有 `.exe` / `.msi` / `.msix` / `.appinstaller` asset，會下載到暫存更新資料夾並啟動安裝程式；若沒有 installer 但有 `mySQLPunk` portable zip，會下載到暫存更新資料夾並用系統 shell 開啟壓縮檔；若 release 同時附帶 `release-manifest.json` 且 manifest 內有對應檔名的 SHA-256，會在開啟更新檔前先比對下載檔雜湊，不符時停止開啟並顯示錯誤；若 release 沒有可直接下載的更新檔，才會提示開啟 release 下載頁；尚未發布 release 或網路失敗時會在手動檢查顯示錯誤，背景檢查只更新狀態列避免干擾使用者；更新檢查與下載會套用選項中心的 HTTP/HTTPS 代理設定；`scripts/package-release.ps1` 可用 Release 組態建置並產生 portable zip 與 `release-manifest.json`，manifest 包含 SHA-256 與檔案大小，可作為 GitHub Releases 上傳素材。
   - 後續方向：正式打包可接 Velopack 或其他 installer 流程，讓更新進一步變成程式內下載、安裝並重啟套用。
 
 - **連線群組與物件群組顯示 ✅ 已完成**
