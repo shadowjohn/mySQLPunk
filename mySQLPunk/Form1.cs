@@ -8354,14 +8354,18 @@ namespace mySQLPunk
         private DataTable BuildProviderCapabilitiesTool(IDatabase db, string dbName)
         {
             DataTable dt = CreateOtherToolTable();
-            AddOtherToolRow(dt, "Tables", "Supported", GetTablesSafe(db, dbName).Count + " loaded");
-            AddOtherToolRow(dt, "Views", "Supported", GetViewsSafe(db, dbName).Count + " loaded");
-            AddOtherToolRow(dt, "Editable Table Data", "Supported", "QueryForm table mode");
-            AddOtherToolRow(dt, "SQL Import", "Supported", "ExecSQL pipeline");
-            AddOtherToolRow(dt, "SQL Export", "Supported", "Dump SQL tool");
-            AddOtherToolRow(dt, "Backup", "Supported", db is my_sqlite ? "SQLite file copy" : "Logical SQL dump");
-            AddOtherToolRow(dt, "Stored Functions", db is my_sqlite ? "Unavailable" : "Supported", db is my_sqlite ? "SQLite does not store database routines" : "Routine metadata available when permissions allow");
-            AddOtherToolRow(dt, "Triggers/Events", "Supported", "Metadata available when permissions allow");
+            string supported = Localization.T("ProviderCapability.Supported");
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.Tables"), supported, Localization.Format("ProviderCapability.LoadedCount", GetTablesSafe(db, dbName).Count));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.Views"), supported, Localization.Format("ProviderCapability.LoadedCount", GetViewsSafe(db, dbName).Count));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.EditableTableData"), supported, Localization.T("ProviderCapability.QueryFormTableMode"));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.SqlImport"), supported, Localization.T("ProviderCapability.ExecSqlPipeline"));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.SqlExport"), supported, Localization.T("ProviderCapability.DumpSqlTool"));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.Backup"), supported, db is my_sqlite ? Localization.T("ProviderCapability.SqliteFileCopy") : Localization.T("ProviderCapability.LogicalSqlDump"));
+            AddOtherToolRow(dt,
+                Localization.T("ProviderCapability.StoredFunctions"),
+                db is my_sqlite ? Localization.T("ProviderCapability.Unavailable") : supported,
+                db is my_sqlite ? Localization.T("ProviderCapability.SqliteNoRoutines") : Localization.T("ProviderCapability.RoutineMetadataPermission"));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.TriggersEvents"), supported, Localization.T("ProviderCapability.MetadataPermission"));
             return dt;
         }
 

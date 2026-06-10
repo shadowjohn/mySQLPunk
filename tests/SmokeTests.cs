@@ -4696,6 +4696,33 @@ public static class SmokeTests
         DatabaseMetadataSnapshot hiddenSnapshot = metadataService.Load(sqliteMetadataDb, "main", new Dictionary<string, object> { { "user", "tester" } }, true);
         Assert(hiddenSnapshot.Tables.Contains("sqlite_sequence") && hiddenSnapshot.Tables.Contains("__mysqlpunk_column_comments"), "MetadataLoadService should keep hidden objects when requested.");
         Assert(ObjectVisibilityService.FilterNames(new[] { "pg_class", "public.users" }, "postgresql", "table", false).SequenceEqual(new[] { "public.users" }), "Object visibility should hide PostgreSQL pg_* objects.");
+
+        object form = FormatterServices.GetUninitializedObject(typeof(Form1));
+        MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
+        string oldLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            using (my_sqlite sqlite = new my_sqlite())
+            {
+                DataTable sqliteCapabilities = (DataTable)capabilitiesMethod.Invoke(form, new object[] { sqlite, "main" });
+                DataRow storedFunctions = FindDataRow(sqliteCapabilities, "項目", "Stored Functions");
+                Assert(storedFunctions != null, "Provider capabilities should include stored functions.");
+                AssertContains(storedFunctions["狀態"].ToString(), "不支援", "SQLite stored functions capability should localize unavailable status.");
+                AssertContains(storedFunctions["說明"].ToString(), "SQLite", "SQLite stored functions capability should explain the provider limitation.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            DataTable postgresCapabilities = (DataTable)capabilitiesMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow tablesCapability = FindDataRow(postgresCapabilities, "項目", "Tables");
+            Assert(tablesCapability != null, "Provider capabilities should include tables.");
+            AssertContains(tablesCapability["狀態"].ToString(), "Supported", "Provider capabilities should support English status labels.");
+            AssertContains(tablesCapability["說明"].ToString(), "loaded", "Provider capabilities should support English detail labels.");
+        }
+        finally
+        {
+            Localization.SetLanguage(oldLanguage, false);
+        }
     }
 
     private static void TestMySqlGuidFormatNone()
@@ -5634,6 +5661,19 @@ public static class SmokeTests
         {
             throw new Exception(message + " Unexpected fragment: " + unexpected + " Actual: " + value);
         }
+    }
+
+    private static DataRow FindDataRow(DataTable table, string columnName, string value)
+    {
+        if (table == null || !table.Columns.Contains(columnName)) return null;
+        foreach (DataRow row in table.Rows)
+        {
+            if (string.Equals(row[columnName].ToString(), value, StringComparison.OrdinalIgnoreCase))
+            {
+                return row;
+            }
+        }
+        return null;
     }
 
     private static string ReadZipEntryText(ZipArchive archive, string entryName)

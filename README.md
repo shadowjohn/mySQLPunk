@@ -116,6 +116,10 @@ Smoke test harness：
 
 ### Provider 與資料庫操作限制
 
+- **Provider 功能支援表 ✅ 已語系化**
+  - 現況：`其它 > 功能支援` 會依目前連線列出資料表、檢視、可編輯資料表資料、SQL 匯入/匯出、備份、Stored Functions 與 Triggers/Events 的支援狀態。
+  - 完成內容：功能名稱、支援/不支援狀態、已載入數量、SQLite 備份方式、邏輯 SQL dump 與 SQLite 不儲存 database routines 等說明已改用繁中/英文語系字串。
+
 - **命令列介面依賴本機 CLI ✅ 偵測、匯入預覽與匯入後補密碼已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
   - 完成內容：
