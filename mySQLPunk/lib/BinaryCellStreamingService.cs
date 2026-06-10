@@ -63,7 +63,7 @@ namespace mySQLPunk.lib
             DbConnection connection = GetConnection(database);
             if (connection == null)
             {
-                throw new NotSupportedException("This provider does not expose a streaming connection.");
+                throw new NotSupportedException(Localization.T("Query.StreamingConnectionUnavailable"));
             }
 
             if (connection.State != ConnectionState.Open)

@@ -62,7 +62,7 @@ namespace mySQLPunk.lib
         public static void Apply(AdvancedRegistrationPlan plan)
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
-            if (string.IsNullOrWhiteSpace(plan.ApplicationPath)) throw new InvalidOperationException("Application path is required.");
+            if (string.IsNullOrWhiteSpace(plan.ApplicationPath)) throw new InvalidOperationException(Localization.T("AdvancedRegistration.ApplicationPathRequired"));
 
             if (plan.RegisterSqlOpenWith) RegisterSqlOpenWith(plan);
             else UnregisterSqlOpenWith();

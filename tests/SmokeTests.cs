@@ -4173,6 +4173,16 @@ public static class SmokeTests
             {
                 AssertContains(ex.Message, "Target path is required", "Query export summary should localize English target path errors.");
             }
+
+            try
+            {
+                QueryResultExportService.WriteStreaming(new my_sqlite(), "SELECT 1;", null, "result.xlsx", QueryResultExportFormat.Xlsx);
+                Assert(false, "Streaming query export should reject unsupported formats.");
+            }
+            catch (NotSupportedException ex)
+            {
+                AssertContains(ex.Message, "Streaming export only supports", "Streaming query export should localize English unsupported format errors.");
+            }
         }
         finally
         {
@@ -4892,6 +4902,16 @@ public static class SmokeTests
                 {
                     AssertContains(ex.Message, "Target path is required", "Binary streaming export should localize English target path errors.");
                 }
+
+                try
+                {
+                    BinaryCellStreamingService.WriteFirstColumnToFile(new FakeDumpDatabase(), "SELECT payload FROM stream_test;", null, tempPath);
+                    Assert(false, "Binary streaming export should require a provider with a streaming connection.");
+                }
+                catch (NotSupportedException ex)
+                {
+                    AssertContains(ex.Message, "does not expose a streaming connection", "Binary streaming export should localize English unsupported provider errors.");
+                }
             }
             finally
             {
@@ -5319,6 +5339,36 @@ public static class SmokeTests
         Assert(!disabled.RegisterSqlOpenWith, "Disabled plan should not register SQL Open With.");
         Assert(!disabled.RegisterUrlProtocol, "Disabled plan should not register URL protocol.");
         AssertEquals(0.ToString(), disabled.RegistryPaths.Count.ToString(), "Disabled plan should not report registry paths.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                AdvancedRegistrationService.Apply(AdvancedRegistrationService.BuildPlan("", true, false));
+                Assert(false, "Advanced registration should require an application path.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "請指定應用程式路徑", "Advanced registration should localize Traditional Chinese application path errors.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                AdvancedRegistrationService.Apply(AdvancedRegistrationService.BuildPlan("", true, false));
+                Assert(false, "Advanced registration should require an application path in English.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "Application path is required", "Advanced registration should localize English application path errors.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
     }
 
     private static void TestApplicationUpdateCheckService()
@@ -5409,6 +5459,66 @@ public static class SmokeTests
             "https://api.github.com/repos/shadowjohn/mySQLPunk/releases/latest",
             AppUpdateService.BuildGitHubLatestReleaseApiUrl("shadowjohn", "mySQLPunk"),
             "Update check should build the GitHub latest release endpoint.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                AppUpdateService.BuildGitHubLatestReleaseApiUrl("", "mySQLPunk");
+                Assert(false, "Update check should require a GitHub owner.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請指定 GitHub owner", "Update check should localize Traditional Chinese GitHub owner validation.");
+            }
+
+            try
+            {
+                AppUpdateService.ParseGitHubLatestRelease("", "1.0.0.0");
+                Assert(false, "Update check should require release JSON.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "Release JSON 不可為空", "Update check should localize Traditional Chinese release JSON validation.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                AppUpdateService.BuildGitHubLatestReleaseApiUrl("shadowjohn", "");
+                Assert(false, "Update check should require a GitHub repository.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "GitHub repository is required", "Update check should localize English GitHub repository validation.");
+            }
+
+            try
+            {
+                AppUpdateService.BuildInstallerDownloadPath(update, "");
+                Assert(false, "Update installer download path should require a download directory.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "Download directory is required", "Update check should localize English download directory validation.");
+            }
+
+            try
+            {
+                AppUpdateService.ComputeFileSha256("");
+                Assert(false, "Update package hash should require a file path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "File path is required", "Update check should localize English file path validation.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
     }
 
     private static void TestApplicationAboutMessage()

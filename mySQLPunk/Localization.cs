@@ -20,6 +20,14 @@ namespace mySQLPunk
             Add("App.Title", "羽山的 mySQLPunk", "mySQLPunk");
             Add("Common.TargetPathRequired", "請指定輸出目標路徑。", "Target path is required.");
             Add("Common.SqlRequired", "請輸入 SQL。", "SQL is required.");
+            Add("Common.DownloadDirectoryRequired", "請指定下載資料夾。", "Download directory is required.");
+            Add("Common.FilePathRequired", "請指定檔案路徑。", "File path is required.");
+            Add("AppUpdate.GitHubOwnerRequired", "請指定 GitHub owner。", "GitHub owner is required.");
+            Add("AppUpdate.GitHubRepositoryRequired", "請指定 GitHub repository。", "GitHub repository is required.");
+            Add("AppUpdate.ReleaseJsonRequired", "Release JSON 不可為空。", "Release JSON is required.");
+            Add("AdvancedRegistration.ApplicationPathRequired", "請指定應用程式路徑。", "Application path is required.");
+            Add("Query.StreamingUnsupportedFormat", "串流匯出只支援 CSV、TSV、JSON、XML、HTML、Markdown 與 SQL。", "Streaming export only supports CSV, TSV, JSON, XML, HTML, Markdown, and SQL.");
+            Add("Query.StreamingConnectionUnavailable", "目前連線類型未提供串流連線。", "This provider does not expose a streaming connection.");
             Add("Menu.File", "檔案", "File");
             Add("Menu.Edit", "編輯", "Edit");
             Add("Menu.View", "檢視", "View");

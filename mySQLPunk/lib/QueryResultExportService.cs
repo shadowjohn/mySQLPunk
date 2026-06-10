@@ -160,7 +160,7 @@ namespace mySQLPunk.lib
             if (database == null) throw new ArgumentNullException(nameof(database));
             if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException(Localization.T("Common.SqlRequired"), nameof(sql));
             if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(Localization.T("Common.TargetPathRequired"), nameof(path));
-            if (!CanStreamFormat(format)) throw new NotSupportedException("Streaming export only supports CSV, TSV, JSON, XML, HTML, Markdown, and SQL.");
+            if (!CanStreamFormat(format)) throw new NotSupportedException(Localization.T("Query.StreamingUnsupportedFormat"));
 
             DbConnection connection = BinaryCellStreamingService.GetOpenConnection(database);
             using (DbCommand command = connection.CreateCommand())

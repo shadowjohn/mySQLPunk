@@ -45,8 +45,8 @@ namespace mySQLPunk.lib
 
         public static string BuildGitHubLatestReleaseApiUrl(string owner, string repository)
         {
-            if (string.IsNullOrWhiteSpace(owner)) throw new ArgumentException("GitHub owner is required.", nameof(owner));
-            if (string.IsNullOrWhiteSpace(repository)) throw new ArgumentException("GitHub repository is required.", nameof(repository));
+            if (string.IsNullOrWhiteSpace(owner)) throw new ArgumentException(Localization.T("AppUpdate.GitHubOwnerRequired"), nameof(owner));
+            if (string.IsNullOrWhiteSpace(repository)) throw new ArgumentException(Localization.T("AppUpdate.GitHubRepositoryRequired"), nameof(repository));
             return "https://api.github.com/repos/" + owner.Trim() + "/" + repository.Trim() + "/releases/latest";
         }
 
@@ -70,7 +70,7 @@ namespace mySQLPunk.lib
 
         public static AppUpdateCheckResult ParseGitHubLatestRelease(string json, string currentVersion)
         {
-            if (string.IsNullOrWhiteSpace(json)) throw new ArgumentException("Release JSON is required.", nameof(json));
+            if (string.IsNullOrWhiteSpace(json)) throw new ArgumentException(Localization.T("AppUpdate.ReleaseJsonRequired"), nameof(json));
 
             JObject release = JObject.Parse(json);
             string tagName = (string)release["tag_name"] ?? "";
@@ -106,7 +106,7 @@ namespace mySQLPunk.lib
         public static string BuildInstallerDownloadPath(AppUpdateCheckResult result, string directory)
         {
             if (result == null) throw new ArgumentNullException(nameof(result));
-            if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException("Download directory is required.", nameof(directory));
+            if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException(Localization.T("Common.DownloadDirectoryRequired"), nameof(directory));
 
             string fileName = GetInstallerFileName(result);
             return Path.Combine(directory, fileName);
@@ -115,7 +115,7 @@ namespace mySQLPunk.lib
         public static string BuildPortableZipDownloadPath(AppUpdateCheckResult result, string directory)
         {
             if (result == null) throw new ArgumentNullException(nameof(result));
-            if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException("Download directory is required.", nameof(directory));
+            if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException(Localization.T("Common.DownloadDirectoryRequired"), nameof(directory));
 
             string fileName = GetPortableZipFileName(result);
             return Path.Combine(directory, fileName);
@@ -240,7 +240,7 @@ namespace mySQLPunk.lib
 
         public static string ComputeFileSha256(string path)
         {
-            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("File path is required.", nameof(path));
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(path));
             using (FileStream stream = File.OpenRead(path))
             using (SHA256 sha256 = SHA256.Create())
             {

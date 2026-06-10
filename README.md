@@ -180,6 +180,10 @@ Smoke test harness：
   - 現況：資料庫備份匯出、查詢結果匯出、BLOB 串流匯出、SpatiaLite runtime 修復與 SQLite 欄位註解 XLSX 匯入會在缺少必要路徑或來源檔時回報錯誤。
   - 完成內容：輸出目標路徑必填、SQL 必填、SpatiaLite 修復腳本不存在與 SQLite 欄位註解 XLSX 檔案不存在等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **更新、註冊與串流匯出錯誤 ✅ 已語系化**
+  - 現況：應用程式更新檢查、進階註冊與串流匯出會在缺少 GitHub/release/下載路徑參數、應用程式路徑或遇到不支援格式/provider 時回報錯誤。
+  - 完成內容：GitHub owner / repository、Release JSON、下載資料夾、檔案路徑、應用程式路徑、串流匯出格式與 provider 不支援等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。
+
 - **命令列介面依賴本機 CLI ✅ 偵測、匯入預覽與匯入後補密碼已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
   - 完成內容：
