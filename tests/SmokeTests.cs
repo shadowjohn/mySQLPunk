@@ -5584,6 +5584,41 @@ public static class SmokeTests
             readMethod.Invoke(null, new object[] { importPath, tamperedReport });
             Assert((bool)GetProperty(tamperedReport, "SourceSignaturePresent"), "Tampered import should still report the stored signature.");
             Assert(!(bool)GetProperty(tamperedReport, "SourceSignatureValid"), "Tampered import should fail signature validation.");
+
+            string missingImportPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_missing_import_" + Guid.NewGuid().ToString("N") + ".json");
+            string previousLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                try
+                {
+                    previewMethod.Invoke(null, new object[] { missingImportPath, new List<Dictionary<string, object>>() });
+                    Assert(false, "Missing connection import preview should throw.");
+                }
+                catch (TargetInvocationException ex)
+                {
+                    FileNotFoundException fileEx = ex.InnerException as FileNotFoundException;
+                    Assert(fileEx != null, "Missing connection import preview should throw FileNotFoundException.");
+                    AssertContains(fileEx.Message, "找不到連線匯入檔案", "Connection import preview should localize Traditional Chinese missing file errors.");
+                }
+
+                Localization.SetLanguage(Localization.English, false);
+                try
+                {
+                    previewMethod.Invoke(null, new object[] { missingImportPath, new List<Dictionary<string, object>>() });
+                    Assert(false, "Missing connection import preview should throw in English.");
+                }
+                catch (TargetInvocationException ex)
+                {
+                    FileNotFoundException fileEx = ex.InnerException as FileNotFoundException;
+                    Assert(fileEx != null, "Missing connection import preview should throw FileNotFoundException in English.");
+                    AssertContains(fileEx.Message, "Connection import file not found", "Connection import preview should localize English missing file errors.");
+                }
+            }
+            finally
+            {
+                Localization.SetLanguage(previousLanguage, false);
+            }
         }
         finally
         {

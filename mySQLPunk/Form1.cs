@@ -10608,7 +10608,7 @@ namespace mySQLPunk
         {
             if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
             {
-                throw new FileNotFoundException(sourcePath);
+                throw new FileNotFoundException(Localization.Format("Connection.ImportFileNotFound", sourcePath ?? string.Empty), sourcePath);
             }
 
             ConnectionImportPreviewReport report = new ConnectionImportPreviewReport();

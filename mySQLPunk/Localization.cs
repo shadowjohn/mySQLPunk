@@ -473,6 +473,7 @@ namespace mySQLPunk
             Add("Connection.ImportPreviewReplaceAll", "取代全部", "Replace All");
             Add("Connection.ImportPreviewMergeSelected", "合併勾選項目", "Merge Selected");
             Add("Connection.ImportPreviewSelectAtLeastOne", "請至少勾選一筆要合併的匯入連線。", "Select at least one imported connection to merge.");
+            Add("Connection.ImportFileNotFound", "找不到連線匯入檔案：{0}", "Connection import file not found: {0}");
             Add("Backup.Title", "建立備份", "Create Backup");
             Add("Backup.SelectDatabase", "請先選取一個已展開的資料庫或 Backups 節點。", "Select an expanded database or Backups node first.");
             Add("Backup.Success", "備份已建立。", "Backup created.");
