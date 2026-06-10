@@ -203,7 +203,7 @@ namespace mySQLPunk.lib
                 {
                     SourceName = source.ObjectName,
                     TargetName = targetName,
-                    Message = Localization.Format("Object.CopyViewCreateFallback", ex.Message)
+                    Message = ExceptionMessageService.Format("Object.CopyViewCreateFallback", ex)
                 });
                 return false;
             }

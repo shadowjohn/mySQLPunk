@@ -3772,7 +3772,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                return Localization.Format("Query.ConflictDatabaseDiff", Localization.Format("Query.ConflictDatabaseDiffReadFailed", ex.Message));
+                return Localization.Format("Query.ConflictDatabaseDiff", ExceptionMessageService.Format("Query.ConflictDatabaseDiffReadFailed", ex));
             }
         }
 

@@ -202,7 +202,7 @@ namespace mySQLPunk.lib
             }
             catch (Exception ex)
             {
-                return Localization.Format("SpatiaLiteDiagnostics.ManifestParseFailed", manifestPath, ex.Message);
+                return ExceptionMessageService.Format("SpatiaLiteDiagnostics.ManifestParseFailed", manifestPath, ex);
             }
         }
 
@@ -287,7 +287,7 @@ namespace mySQLPunk.lib
             }
             catch (Exception ex)
             {
-                return CreateRow("SpatiaLite Runtime File Verification", StatusWarning(), Localization.Format("SpatiaLiteDiagnostics.ManifestVerificationFailed", ex.Message));
+                return CreateRow("SpatiaLite Runtime File Verification", StatusWarning(), ExceptionMessageService.Format("SpatiaLiteDiagnostics.ManifestVerificationFailed", ex));
             }
         }
 

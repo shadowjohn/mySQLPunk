@@ -249,7 +249,7 @@ namespace mySQLPunk.lib
                 catch (Exception ex)
                 {
                     result.FailedFiles++;
-                    result.Messages.Add(candidate.QuarantinedPath + ": " + ex.Message);
+                    result.Messages.Add(candidate.QuarantinedPath + ": " + ExceptionMessageService.GetReason(ex));
                 }
             }
 

@@ -40,15 +40,15 @@ namespace mySQLPunk.lib
 
             DatabaseMetadataSnapshot snapshot = new DatabaseMetadataSnapshot();
             try { snapshot.Tables = ObjectVisibilityService.FilterNames(db.GetTables(databaseName), db.ProviderName, "table", includeHiddenObjects); }
-            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadTablesFailed", ex.Message), ex); }
+            catch (Exception ex) { throw new Exception(ExceptionMessageService.Format("Metadata.LoadTablesFailed", ex), ex); }
             try { snapshot.Views = ObjectVisibilityService.FilterNames(db.GetViews(databaseName), db.ProviderName, "view", includeHiddenObjects); }
-            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadViewsFailed", ex.Message), ex); }
+            catch (Exception ex) { throw new Exception(ExceptionMessageService.Format("Metadata.LoadViewsFailed", ex), ex); }
             try { snapshot.Functions = _functionLoader(db, databaseName); }
-            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadFunctionsFailed", ex.Message), ex); }
+            catch (Exception ex) { throw new Exception(ExceptionMessageService.Format("Metadata.LoadFunctionsFailed", ex), ex); }
             try { snapshot.Users = _userLoader(db, databaseName, connInfo); }
-            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadUsersFailed", ex.Message), ex); }
+            catch (Exception ex) { throw new Exception(ExceptionMessageService.Format("Metadata.LoadUsersFailed", ex), ex); }
             try { snapshot.Events = _eventLoader(db, databaseName); }
-            catch (Exception ex) { throw new Exception(Localization.Format("Metadata.LoadEventsFailed", ex.Message), ex); }
+            catch (Exception ex) { throw new Exception(ExceptionMessageService.Format("Metadata.LoadEventsFailed", ex), ex); }
             return snapshot;
         }
     }

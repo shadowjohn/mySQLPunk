@@ -5793,6 +5793,20 @@ public static class SmokeTests
 
             try
             {
+                MetadataLoadService blankErrorMetadataService = new MetadataLoadService(
+                    (db, databaseName) => new DataTable(),
+                    (db, databaseName, connInfo) => new DataTable(),
+                    (db, databaseName) => new DataTable());
+                blankErrorMetadataService.Load(new FakeDumpDatabase { ThrowOnGetTables = true, GetTablesExceptionMessage = "" }, "main", new Dictionary<string, object>());
+                Assert(false, "Metadata loader should report table load failures.");
+            }
+            catch (Exception ex)
+            {
+                AssertContains(ex.Message, "載入 Tables 失敗：未知錯誤", "Metadata loader blank table errors should localize Traditional Chinese unknown errors.");
+            }
+
+            try
+            {
                 ConnectionOpenService.Open(() => null, "Host=localhost");
                 Assert(false, "ConnectionOpenService should reject null database factory results.");
             }
@@ -6431,11 +6445,17 @@ public static class SmokeTests
             { "reason", "duplicate key value violates unique constraint" }
         };
         AssertContains(DatabaseExecutionResultService.GetFailureReason(failedWithReason), "duplicate key", "Provider SQL failure reason should be preserved when available.");
+        AssertEquals("未知錯誤", ExceptionMessageService.GetReason(new Exception("")), "Blank service exceptions should localize Traditional Chinese unknown errors.");
+        AssertEquals("metadata timeout", ExceptionMessageService.GetReason(new InvalidOperationException(" metadata timeout ")), "Service exception helper should trim explicit reasons.");
+        AssertEquals("載入 Tables 失敗：未知錯誤", ExceptionMessageService.Format("Metadata.LoadTablesFailed", new Exception("   ")), "Service exception helper should format blank Traditional Chinese reasons.");
+        AssertEquals("C:\\runtime\\manifest.json（manifest 無法解析：未知錯誤）", ExceptionMessageService.Format("SpatiaLiteDiagnostics.ManifestParseFailed", @"C:\runtime\manifest.json", new Exception("")), "Service exception helper should format messages with leading arguments.");
 
         Localization.SetLanguage(Localization.English, false);
         try
         {
             AssertContains(DatabaseExecutionResultService.GetFailureReason(failedWithoutReason), "SQL execution failed", "SQL execution fallback should localize English messages.");
+            AssertEquals("Unknown error", ExceptionMessageService.GetReason(new Exception("")), "Blank service exceptions should localize English unknown errors.");
+            AssertEquals("Load Views failed: Unknown error", ExceptionMessageService.Format("Metadata.LoadViewsFailed", new Exception("   ")), "Service exception helper should format blank English reasons.");
         }
         finally
         {
@@ -7711,6 +7731,7 @@ public static class SmokeTests
         public List<string> Tables = new List<string> { "public.users" };
         public List<string> Views = new List<string> { "public.active_users" };
         public bool ThrowOnGetTables;
+        public string GetTablesExceptionMessage = "table timeout";
         public string ProviderName => Provider;
         public string ConnectionString;
         public bool WasOpened;
@@ -7727,7 +7748,7 @@ public static class SmokeTests
         public List<string> GetDatabases() { return new List<string> { "main" }; }
         public List<string> GetTables(string databaseName)
         {
-            if (ThrowOnGetTables) throw new InvalidOperationException("table timeout");
+            if (ThrowOnGetTables) throw new InvalidOperationException(GetTablesExceptionMessage);
             return Tables;
         }
         public List<string> GetViews(string databaseName) { return Views; }

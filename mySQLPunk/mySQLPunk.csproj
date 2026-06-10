@@ -180,6 +180,7 @@
     <Compile Include="lib\ConnectionOpenService.cs" />
     <Compile Include="lib\ConnectionProxySettingsService.cs" />
     <Compile Include="lib\BinaryCellStreamingService.cs" />
+    <Compile Include="lib\ExceptionMessageService.cs" />
     <Compile Include="lib\crypto.cs" />
     <Compile Include="lib\DataViewFilterService.cs" />
     <Compile Include="lib\DataViewSortService.cs" />
