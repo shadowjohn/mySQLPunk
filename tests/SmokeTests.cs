@@ -5860,6 +5860,8 @@ public static class SmokeTests
         MethodInfo groupListMethod = typeof(Form1).GetMethod("BuildDatabaseGroupList", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo searchResultsMethod = typeof(Form1).GetMethod("BuildDatabaseSearchResults", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo detailObjectTypeMethod = typeof(Form1).GetMethod("LocalizeDetailObjectType", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo sidebarObjectTitleMethod = typeof(Form1).GetMethod("BuildSidebarObjectTitle", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo sidebarTitleMethod = typeof(Form1).GetMethod("BuildSidebarTitle", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailLoadErrorMethod = typeof(Form1).GetMethod("BuildDetailLoadErrorText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailNotFoundMethod = typeof(Form1).GetMethod("BuildDetailNotFoundText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo favoriteStatusMethod = typeof(Form1).GetMethod("BuildFavoriteStatusText", BindingFlags.Static | BindingFlags.NonPublic);
@@ -5958,9 +5960,14 @@ public static class SmokeTests
             AssertContains(zhSearchColumn["類型"].ToString(), "欄位", "Database search should localize Traditional Chinese column type.");
 
             AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "View" }), "檢視", "Detail panel should localize Traditional Chinese view type.");
+            AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Function" }), "函式", "Detail panel should localize Traditional Chinese function type.");
+            AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "User" }), "使用者", "Detail panel should localize Traditional Chinese user type.");
             AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Model" }), "模型", "Detail panel should localize Traditional Chinese model type.");
             AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Other" }), "其它", "Detail panel should localize Traditional Chinese other type.");
             AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Report" }), "報表", "Detail panel should localize Traditional Chinese report type.");
+            AssertEquals("資料庫：main", (string)sidebarObjectTitleMethod.Invoke(null, new object[] { "Database", "main" }), "Sidebar title should localize Traditional Chinese database title.");
+            AssertEquals("檢視：public.active_users", (string)sidebarObjectTitleMethod.Invoke(null, new object[] { "View", "public.active_users" }), "Sidebar title should localize Traditional Chinese view title.");
+            AssertEquals("在資料庫中尋找：main", (string)sidebarTitleMethod.Invoke(null, new object[] { Localization.T("Database.SearchTitle"), "main" }), "Sidebar title should localize Traditional Chinese custom labels.");
             AssertContains((string)detailLoadErrorMethod.Invoke(null, new object[] { "View", "boom" }), "載入檢視細節失敗", "Detail panel should localize Traditional Chinese view load errors.");
             AssertContains((string)detailLoadErrorMethod.Invoke(null, new object[] { "Function", "boom" }), "載入函式細節失敗", "Detail panel should localize Traditional Chinese function load errors.");
             AssertContains((string)detailNotFoundMethod.Invoke(null, new object[] { "Event", "nightly" }), "找不到事件", "Detail panel should localize Traditional Chinese event not-found message.");
@@ -6085,9 +6092,14 @@ public static class SmokeTests
             AssertEquals("Views", enSearchView["位置"].ToString(), "Database search should support English view location.");
 
             AssertEquals("View", (string)detailObjectTypeMethod.Invoke(null, new object[] { "View" }), "Detail panel should support English view type.");
+            AssertEquals("Function", (string)detailObjectTypeMethod.Invoke(null, new object[] { "Function" }), "Detail panel should support English function type.");
+            AssertEquals("User", (string)detailObjectTypeMethod.Invoke(null, new object[] { "User" }), "Detail panel should support English user type.");
             AssertEquals("Model", (string)detailObjectTypeMethod.Invoke(null, new object[] { "Model" }), "Detail panel should support English model type.");
             AssertEquals("BI", (string)detailObjectTypeMethod.Invoke(null, new object[] { "BI" }), "Detail panel should support English BI type.");
             AssertEquals("Report", (string)detailObjectTypeMethod.Invoke(null, new object[] { "Report" }), "Detail panel should support English report type.");
+            AssertEquals("Database: main", (string)sidebarObjectTitleMethod.Invoke(null, new object[] { "Database", "main" }), "Sidebar title should support English database title.");
+            AssertEquals("View: public.active_users", (string)sidebarObjectTitleMethod.Invoke(null, new object[] { "View", "public.active_users" }), "Sidebar title should support English view title.");
+            AssertEquals("Find in Database: main", (string)sidebarTitleMethod.Invoke(null, new object[] { Localization.T("Database.SearchTitle"), "main" }), "Sidebar title should support English custom labels.");
             AssertEquals("Error loading view details: boom", (string)detailLoadErrorMethod.Invoke(null, new object[] { "View", "boom" }), "Detail panel should support English view load errors.");
             AssertEquals("Error loading user details: boom", (string)detailLoadErrorMethod.Invoke(null, new object[] { "User", "boom" }), "Detail panel should support English user load errors.");
             AssertEquals("Function not found: nightly", (string)detailNotFoundMethod.Invoke(null, new object[] { "Function", "nightly" }), "Detail panel should support English function not-found message.");

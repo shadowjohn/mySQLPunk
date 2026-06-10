@@ -425,6 +425,11 @@ namespace mySQLPunk
             Add("Detail.EventNotFound", "找不到事件：{0}", "Event not found: {0}");
             Add("Detail.FunctionNotFound", "找不到函式：{0}", "Function not found: {0}");
             Add("Detail.UserNotFound", "找不到使用者：{0}", "User not found: {0}");
+            Add("Detail.SidebarTitle", "{0}：{1}", "{0}: {1}");
+            Add("Detail.ObjectTypeDatabase", "資料庫", "Database");
+            Add("Detail.ObjectTypeEvent", "事件", "Event");
+            Add("Detail.ObjectTypeFunction", "函式", "Function");
+            Add("Detail.ObjectTypeUser", "使用者", "User");
             Add("DatabaseReport.SqliteBackupSource", "SQLite 備份來源", "SQLite Backup Source");
             Add("DatabaseReport.SqlBackupTarget", "SQL 備份目標", "SQL Backup Target");
             Add("DatabaseReport.DescriptionDatabaseSummary", "彙整資料庫物件數量與目前開啟狀態", "Summarizes database object counts and current open state.");

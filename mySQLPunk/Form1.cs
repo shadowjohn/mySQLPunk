@@ -4383,7 +4383,7 @@ namespace mySQLPunk
                 return;
             }
 
-            lblSidebarTitle.Text = "View: " + selection.ObjectName;
+            lblSidebarTitle.Text = BuildSidebarObjectTitle("View", selection.ObjectName);
             ShowDatabaseGroupList(selection.Database, selection.DatabaseName, "Views");
             ShowViewDetails(selection.Database, selection.DatabaseName, selection.ObjectName);
             btnDDL.PerformClick();
@@ -4425,7 +4425,7 @@ namespace mySQLPunk
                 return;
             }
 
-            lblSidebarTitle.Text = "Function: " + selection.ObjectName;
+            lblSidebarTitle.Text = BuildSidebarObjectTitle("Function", selection.ObjectName);
             ShowDatabaseGroupList(selection.Database, selection.DatabaseName, "Functions");
             ShowFunctionDetails(selection.Database, selection.DatabaseName, selection.ObjectName);
             btnDDL.PerformClick();
@@ -6430,7 +6430,7 @@ namespace mySQLPunk
                 // 如果是 Database 節點或物件分類節點，依分類顯示清單
                 if (pathParts.Length == 2)
                 {
-                    lblSidebarTitle.Text = $"Database: {dbName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("Database", dbName);
                     ShowDatabaseObjectList(db, dbName);
                     ShowDatabaseInfo(db, dbName);
                     showTools("點到展開的資料庫");
@@ -6438,7 +6438,7 @@ namespace mySQLPunk
                 else if (pathParts.Length == 3)
                 {
                     string groupName = pathParts[2];
-                    lblSidebarTitle.Text = $"{GetTreeGroupText(groupName)}: {dbName}";
+                    lblSidebarTitle.Text = BuildSidebarTitle(GetTreeGroupText(groupName), dbName);
                     ShowDatabaseGroupList(db, dbName, groupName, connInfo);
                     ShowDatabaseInfo(db, dbName);
                     if (groupName == "Tables") showTools("點到Tables");
@@ -6450,7 +6450,7 @@ namespace mySQLPunk
                 if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                 {
                     string tableName = pathParts[3];
-                    lblSidebarTitle.Text = $"Table: {tableName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("Table", tableName);
                     // 只有當 table_top 還沒載入過或是不同 DB 時才重載列表
                     ShowDatabaseObjectList(db, dbName); 
                     ShowTableDetails(db, dbName, tableName);
@@ -6459,7 +6459,7 @@ namespace mySQLPunk
                 if (pathParts.Length >= 4 && pathParts[2] == "Views")
                 {
                     string viewName = pathParts[3];
-                    lblSidebarTitle.Text = $"View: {viewName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("View", viewName);
                     ShowDatabaseGroupList(db, dbName, "Views", connInfo);
                     ShowViewDetails(db, dbName, viewName);
                     showTools("點到View本身");
@@ -6467,14 +6467,14 @@ namespace mySQLPunk
                 if (pathParts.Length >= 4 && pathParts[2] == "Events")
                 {
                     string eventName = pathParts[3];
-                    lblSidebarTitle.Text = $"Event: {eventName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("Event", eventName);
                     ShowDatabaseGroupList(db, dbName, "Events", connInfo);
                     ShowEventDetails(db, dbName, eventName);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Functions")
                 {
                     string functionName = pathParts[3];
-                    lblSidebarTitle.Text = $"Function: {functionName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("Function", functionName);
                     ShowDatabaseGroupList(db, dbName, "Functions", connInfo);
                     ShowFunctionDetails(db, dbName, functionName);
                     showTools("點到Function本身");
@@ -6482,32 +6482,32 @@ namespace mySQLPunk
                 if (pathParts.Length >= 4 && pathParts[2] == "Users")
                 {
                     string userName = pathParts[3];
-                    lblSidebarTitle.Text = $"User: {userName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("User", userName);
                     ShowDatabaseGroupList(db, dbName, "Users", connInfo);
                     ShowUserDetails(db, dbName, userName, connInfo);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Models")
                 {
                     string modelName = pathParts[3];
-                    lblSidebarTitle.Text = $"Model: {modelName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("Model", modelName);
                     ShowDatabaseModel(db, dbName, modelName);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "BI")
                 {
                     string biName = pathParts[3];
-                    lblSidebarTitle.Text = $"BI: {biName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("BI", biName);
                     ShowDatabaseBIReport(db, dbName, biName, connInfo);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Other")
                 {
                     string toolName = pathParts[3];
-                    lblSidebarTitle.Text = $"Other: {toolName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("Other", toolName);
                     ShowDatabaseOtherTool(db, dbName, toolName, connInfo);
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Reports")
                 {
                     string reportName = pathParts[3];
-                    lblSidebarTitle.Text = $"Report: {reportName}";
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("Report", reportName);
                     ShowDatabaseReport(db, dbName, reportName, connInfo);
                 }
             }
@@ -9219,13 +9219,27 @@ namespace mySQLPunk
 
         private static string LocalizeDetailObjectType(string objectType)
         {
+            if (string.Equals(objectType, "Database", StringComparison.OrdinalIgnoreCase)) return Localization.T("Detail.ObjectTypeDatabase");
             if (string.Equals(objectType, "Table", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseModel.ObjectTypeTable");
             if (string.Equals(objectType, "View", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseModel.ObjectTypeView");
+            if (string.Equals(objectType, "Event", StringComparison.OrdinalIgnoreCase)) return Localization.T("Detail.ObjectTypeEvent");
+            if (string.Equals(objectType, "Function", StringComparison.OrdinalIgnoreCase)) return Localization.T("Detail.ObjectTypeFunction");
+            if (string.Equals(objectType, "User", StringComparison.OrdinalIgnoreCase)) return Localization.T("Detail.ObjectTypeUser");
             if (string.Equals(objectType, "Model", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeModel");
             if (string.Equals(objectType, "BI", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeBI");
             if (string.Equals(objectType, "Other", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeOther");
             if (string.Equals(objectType, "Report", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeReport");
             return objectType ?? string.Empty;
+        }
+
+        private static string BuildSidebarObjectTitle(string objectType, string objectName)
+        {
+            return BuildSidebarTitle(LocalizeDetailObjectType(objectType), objectName);
+        }
+
+        private static string BuildSidebarTitle(string label, string objectName)
+        {
+            return Localization.Format("Detail.SidebarTitle", label ?? string.Empty, objectName ?? string.Empty);
         }
 
         private static string BuildDetailLoadErrorText(string objectType, string errorMessage)
@@ -9937,7 +9951,7 @@ namespace mySQLPunk
             table_top.BringToFront();
             UpdateObjectFilterVisibility();
             table_top.DataSource = results;
-            lblSidebarTitle.Text = Localization.T("Database.SearchTitle") + ": " + target.DatabaseName;
+            lblSidebarTitle.Text = BuildSidebarTitle(Localization.T("Database.SearchTitle"), target.DatabaseName);
             dgvDetails.DataSource = null;
             rtbDDL.Text = "-- " + Localization.T("Database.SearchTitle") + Environment.NewLine +
                           "-- " + keyword;
