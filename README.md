@@ -140,6 +140,10 @@ Smoke test harness：
   - 現況：`查詢 > Object Inventory`、`Table Row Counts`、`BI > Object Distribution` 與 `BI > Row Count Ranking` 會顯示物件類型、分類與就緒狀態。
   - 完成內容：資料表/檢視類型、就緒狀態、物件分布分類與備份來源/目標類型已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **資料庫群組清單 ✅ 已修正並語系化**
+  - 現況：左側資料庫底下的 Views、Backups、Models、BI、Other、Queries、Reports 等群組會在右側清單顯示對應項目。
+  - 完成內容：群組清單會正確指定到右側資料表資料來源；檢視、模型、其它、查詢、報表、SQL 備份、缺少來源、空白與就緒狀態已改用語系字串。
+
 - **命令列介面依賴本機 CLI ✅ 偵測、匯入預覽與匯入後補密碼已補齊**
   - 現況：右鍵選單會依 provider 產生 `mysql`、`psql`、`sqlcmd`、`sqlite3` 或 `sqlplus` 指令並開啟命令提示字元。
   - 完成內容：

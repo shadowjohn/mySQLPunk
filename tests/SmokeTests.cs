@@ -4716,6 +4716,7 @@ public static class SmokeTests
         MethodInfo objectInventoryReportMethod = typeof(Form1).GetMethod("BuildObjectInventoryReport", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo objectDistributionBIMethod = typeof(Form1).GetMethod("BuildObjectDistributionBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo rowCountRankingBIMethod = typeof(Form1).GetMethod("BuildRowCountRankingBI", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo groupListMethod = typeof(Form1).GetMethod("BuildDatabaseGroupList", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4758,6 +4759,22 @@ public static class SmokeTests
             Assert(zhRankingTable != null, "Row count ranking BI should include fake table metadata.");
             AssertContains(zhRankingTable["類型"].ToString(), "資料表", "Row count ranking BI should localize Traditional Chinese table type.");
             AssertContains(zhRankingTable["狀態"].ToString(), "就緒", "Row count ranking BI should localize Traditional Chinese ready status.");
+
+            DataTable zhViewsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Views", new Dictionary<string, object>() });
+            DataRow zhViewGroupRow = FindDataRow(zhViewsGroup, "名稱", "public.active_users");
+            Assert(zhViewGroupRow != null, "Database views group should include fake view metadata.");
+            AssertContains(zhViewGroupRow["類型"].ToString(), "檢視", "Database views group should localize Traditional Chinese view type.");
+            AssertContains(zhViewGroupRow["狀態"].ToString(), "就緒", "Database views group should localize Traditional Chinese ready status.");
+
+            DataTable zhModelsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Models", new Dictionary<string, object>() });
+            DataRow zhModelRow = FindDataRow(zhModelsGroup, "名稱", "Schema Overview");
+            Assert(zhModelRow != null, "Database models group should include schema overview.");
+            AssertContains(zhModelRow["類型"].ToString(), "模型", "Database models group should localize Traditional Chinese model type.");
+
+            DataTable zhUnknownGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Unknown", new Dictionary<string, object>() });
+            DataRow zhUnknownRow = FindDataRow(zhUnknownGroup, "名稱", "Unknown");
+            Assert(zhUnknownRow != null, "Unknown database group should include a fallback row.");
+            AssertContains(zhUnknownRow["狀態"].ToString(), "空白", "Unknown database group should localize Traditional Chinese empty status.");
 
             DataTable zhDiagnostics = (DataTable)diagnosticsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow zhConnectionState = FindDataRow(zhDiagnostics, "項目", "連線狀態");
@@ -4827,6 +4844,19 @@ public static class SmokeTests
             Assert(enRankingView != null, "Row count ranking BI should include fake view metadata.");
             AssertEquals("View", enRankingView["類型"].ToString(), "Row count ranking BI should support English view type.");
             AssertEquals("Ready", enRankingView["狀態"].ToString(), "Row count ranking BI should support English ready status.");
+
+            DataTable enReportsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Reports", new Dictionary<string, object>() });
+            DataRow enReportRow = FindDataRow(enReportsGroup, "名稱", "Database Summary");
+            Assert(enReportRow != null, "Database reports group should include database summary.");
+            AssertEquals("Report", enReportRow["類型"].ToString(), "Database reports group should support English report type.");
+            AssertEquals("Ready", enReportRow["狀態"].ToString(), "Database reports group should support English ready status.");
+
+            DataTable enBackupsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Backups", new Dictionary<string, object>() });
+            DataRow enBackupRow = FindDataRow(enBackupsGroup, "名稱", "main");
+            Assert(enBackupRow != null, "Database backups group should include a backup row.");
+            AssertEquals("SQL Dump", enBackupRow["類型"].ToString(), "Database backups group should support English SQL dump type.");
+            AssertEquals("Ready", enBackupRow["狀態"].ToString(), "Database backups group should support English ready status.");
+            AssertEquals("(logical backup)", enBackupRow["路徑"].ToString(), "Database backups group should support English logical backup path.");
 
             DataTable enMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow enLargestTable = FindDataRow(enMaintenance, "項目", "Largest Table");

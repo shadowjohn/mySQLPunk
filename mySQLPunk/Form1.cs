@@ -7450,10 +7450,23 @@ namespace mySQLPunk
                 return;
             }
 
+            DataTable displayDt = BuildDatabaseGroupList(db, dbName, groupName, connInfo);
+            table_top.DataSource = displayDt;
+            ApplyCurrentColumnPreferences(groupName);
+            ApplyGridSortPreference();
+            if (table_top.Columns.Contains("分頁索引"))
+            {
+                table_top.Columns["分頁索引"].Visible = false;
+            }
+        }
+
+        private DataTable BuildDatabaseGroupList(IDatabase db, string dbName, string groupName, Dictionary<string, object> connInfo = null)
+        {
             DataTable displayDt = new DataTable();
             displayDt.Columns.Add("名稱");
             displayDt.Columns.Add("類型");
             displayDt.Columns.Add("狀態");
+            string ready = Localization.T("Diagnostic.StatusReady");
 
             if (string.Equals(groupName, "Views", StringComparison.OrdinalIgnoreCase))
             {
@@ -7461,8 +7474,8 @@ namespace mySQLPunk
                 {
                     DataRow row = displayDt.NewRow();
                     row["名稱"] = viewName;
-                    row["類型"] = "View";
-                    row["狀態"] = "Ready";
+                    row["類型"] = Localization.T("DatabaseModel.ObjectTypeView");
+                    row["狀態"] = ready;
                     displayDt.Rows.Add(row);
                 }
             }
@@ -7471,10 +7484,10 @@ namespace mySQLPunk
                 displayDt.Columns.Add("路徑");
                 DataRow row = displayDt.NewRow();
                 row["名稱"] = dbName;
-                row["類型"] = db is my_sqlite ? "SQLite File" : "SQL Dump";
+                row["類型"] = db is my_sqlite ? Localization.T("Common.SQLiteFile") : Localization.T("DatabaseGroup.TypeSqlDump");
                 string sqlitePath = GetSQLiteDatabasePath(connInfo, db);
-                row["狀態"] = db is my_sqlite && !File.Exists(sqlitePath) ? "Missing source" : "Ready";
-                row["路徑"] = string.IsNullOrWhiteSpace(sqlitePath) ? "(logical backup)" : sqlitePath;
+                row["狀態"] = db is my_sqlite && !File.Exists(sqlitePath) ? Localization.T("DatabaseGroup.StatusMissingSource") : ready;
+                row["路徑"] = string.IsNullOrWhiteSpace(sqlitePath) ? Localization.T("DatabaseGroup.LogicalBackupPath") : sqlitePath;
                 displayDt.Rows.Add(row);
             }
             else if (string.Equals(groupName, "Events", StringComparison.OrdinalIgnoreCase))
@@ -7523,8 +7536,8 @@ namespace mySQLPunk
                 {
                     DataRow row = displayDt.NewRow();
                     row["名稱"] = modelName;
-                    row["類型"] = "Model";
-                    row["狀態"] = "Ready";
+                    row["類型"] = Localization.T("DatabaseGroup.TypeModel");
+                    row["狀態"] = ready;
                     row["描述"] = GetDatabaseModelDescription(modelName);
                     displayDt.Rows.Add(row);
                 }
@@ -7536,8 +7549,8 @@ namespace mySQLPunk
                 {
                     DataRow row = displayDt.NewRow();
                     row["名稱"] = biName;
-                    row["類型"] = "BI";
-                    row["狀態"] = "Ready";
+                    row["類型"] = Localization.T("DatabaseGroup.TypeBI");
+                    row["狀態"] = ready;
                     row["描述"] = GetDatabaseBIDescription(biName);
                     displayDt.Rows.Add(row);
                 }
@@ -7549,8 +7562,8 @@ namespace mySQLPunk
                 {
                     DataRow row = displayDt.NewRow();
                     row["名稱"] = toolName;
-                    row["類型"] = "Other";
-                    row["狀態"] = "Ready";
+                    row["類型"] = Localization.T("DatabaseGroup.TypeOther");
+                    row["狀態"] = ready;
                     row["描述"] = GetDatabaseOtherToolDescription(toolName);
                     displayDt.Rows.Add(row);
                 }
@@ -7565,8 +7578,8 @@ namespace mySQLPunk
                 {
                     DataRow row = displayDt.NewRow();
                     row["名稱"] = queryInfo.Page.Text;
-                    row["類型"] = "Query";
-                    row["狀態"] = string.IsNullOrWhiteSpace(queryInfo.Query.CurrentStatus) ? "Ready" : queryInfo.Query.CurrentStatus;
+                    row["類型"] = Localization.T("DatabaseGroup.TypeQuery");
+                    row["狀態"] = string.IsNullOrWhiteSpace(queryInfo.Query.CurrentStatus) ? ready : queryInfo.Query.CurrentStatus;
                     row["資料庫"] = queryInfo.Query.DatabaseName;
                     row["編號"] = queryInfo.DisplayIndex;
                     row["分頁索引"] = queryInfo.TabIndex;
@@ -7581,8 +7594,8 @@ namespace mySQLPunk
                 {
                     DataRow row = displayDt.NewRow();
                     row["名稱"] = reportName;
-                    row["類型"] = "Report";
-                    row["狀態"] = "Ready";
+                    row["類型"] = Localization.T("DatabaseGroup.TypeReport");
+                    row["狀態"] = ready;
                     row["描述"] = GetDatabaseReportDescription(reportName);
                     displayDt.Rows.Add(row);
                 }
@@ -7592,16 +7605,11 @@ namespace mySQLPunk
                 DataRow row = displayDt.NewRow();
                 row["名稱"] = groupName;
                 row["類型"] = groupName;
-                row["狀態"] = "Empty";
+                row["狀態"] = Localization.T("DatabaseGroup.StatusEmpty");
                 displayDt.Rows.Add(row);
             }
 
-            ApplyCurrentColumnPreferences(groupName);
-            ApplyGridSortPreference();
-            if (table_top.Columns.Contains("分頁索引"))
-            {
-                table_top.Columns["分頁索引"].Visible = false;
-            }
+            return displayDt;
         }
 
         private List<OpenQueryTabInfo> GetOpenQueryTabs(string databaseName)

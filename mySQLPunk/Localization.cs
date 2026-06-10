@@ -319,6 +319,15 @@ namespace mySQLPunk
             Add("DatabaseBI.CategoryViews", "檢視", "Views");
             Add("DatabaseBI.CategoryFunctions", "函式", "Functions");
             Add("DatabaseBI.CategoryEvents", "事件", "Events");
+            Add("DatabaseGroup.TypeModel", "模型", "Model");
+            Add("DatabaseGroup.TypeBI", "BI", "BI");
+            Add("DatabaseGroup.TypeOther", "其它", "Other");
+            Add("DatabaseGroup.TypeQuery", "查詢", "Query");
+            Add("DatabaseGroup.TypeReport", "報表", "Report");
+            Add("DatabaseGroup.TypeSqlDump", "SQL 備份", "SQL Dump");
+            Add("DatabaseGroup.StatusMissingSource", "缺少來源", "Missing source");
+            Add("DatabaseGroup.StatusEmpty", "空白", "Empty");
+            Add("DatabaseGroup.LogicalBackupPath", "（邏輯備份）", "(logical backup)");
             Add("MaintenanceChecklist.ConnectionOpen", "連線已開啟", "Connection Open");
             Add("MaintenanceChecklist.TablesLoaded", "已載入資料表", "Tables Loaded");
             Add("MaintenanceChecklist.ViewsLoaded", "已載入檢視", "Views Loaded");
