@@ -3943,8 +3943,8 @@ namespace mySQLPunk
                 ReadOnly = true,
                 AllowUserToAddRows = false
             };
-            dgvDetails.Columns.Add("Key", "Property");
-            dgvDetails.Columns.Add("Value", "Value");
+            dgvDetails.Columns.Add("Key", BuildDetailGridColumnHeader("Key"));
+            dgvDetails.Columns.Add("Value", BuildDetailGridColumnHeader("Value"));
             dgvDetails.Columns[0].FillWeight = 40;
             dgvDetails.SelectionMode = DataGridViewSelectionMode.CellSelect;
             dgvDetails.GridColor = Color.FromArgb(245, 245, 245);
@@ -9005,8 +9005,8 @@ namespace mySQLPunk
             var info = db.GetDatabaseInfo(dbName);
             if (info.ContainsKey("character_set"))
             {
-                dgvDetails.Rows.Add("字符集", info["character_set"]);
-                dgvDetails.Rows.Add("定序", info["collation"]);
+                AddDetailRow("CharacterSet", info["character_set"]);
+                AddDetailRow("Collation", info["collation"]);
             }
         }
 
@@ -9022,20 +9022,20 @@ namespace mySQLPunk
                 DataRow r = FindTableStatusRow(dt, tableName);
                 if (r != null)
                 {
-                    dgvDetails.Rows.Add("列", FirstColumnValue(r, "Rows", "ROWS", "NUM_ROWS"));
-                    dgvDetails.Rows.Add("引擎", FirstColumnValue(r, "Engine", "ENGINE"));
-                    dgvDetails.Rows.Add("自動遞增", FirstColumnValue(r, "Auto_increment", "AUTO_INCREMENT"));
-                    dgvDetails.Rows.Add("列格式", FirstColumnValue(r, "Row_format", "ROW_FORMAT"));
-                    dgvDetails.Rows.Add("修改日期", FirstColumnValue(r, "Update_time", "UPDATE_TIME"));
-                    dgvDetails.Rows.Add("建立日期", FirstColumnValue(r, "Create_time", "CREATE_TIME"));
-                    dgvDetails.Rows.Add("檢查時間", FirstColumnValue(r, "Check_time", "CHECK_TIME"));
-                    dgvDetails.Rows.Add("索引長度", FormatBytesValue(FirstColumnValue(r, "Index_length", "INDEX_LENGTH")));
-                    dgvDetails.Rows.Add("資料長度", FormatBytesValue(FirstColumnValue(r, "Data_length", "DATA_LENGTH")));
-                    dgvDetails.Rows.Add("最大資料長度", FormatBytesValue(FirstColumnValue(r, "Max_data_length", "MAX_DATA_LENGTH")));
-                    dgvDetails.Rows.Add("資料可用空間", FormatBytesValue(FirstColumnValue(r, "Data_free", "DATA_FREE")));
-                    dgvDetails.Rows.Add("定序", FirstColumnValue(r, "Collation", "COLLATION"));
-                    dgvDetails.Rows.Add("建立選項", FirstColumnValue(r, "Create_options", "CREATE_OPTIONS"));
-                    dgvDetails.Rows.Add("註解", FirstColumnValue(r, "Comment", "COMMENTS"));
+                    AddDetailRow("Rows", FirstColumnValue(r, "Rows", "ROWS", "NUM_ROWS"));
+                    AddDetailRow("Engine", FirstColumnValue(r, "Engine", "ENGINE"));
+                    AddDetailRow("AutoIncrement", FirstColumnValue(r, "Auto_increment", "AUTO_INCREMENT"));
+                    AddDetailRow("RowFormat", FirstColumnValue(r, "Row_format", "ROW_FORMAT"));
+                    AddDetailRow("UpdateTime", FirstColumnValue(r, "Update_time", "UPDATE_TIME"));
+                    AddDetailRow("CreateTime", FirstColumnValue(r, "Create_time", "CREATE_TIME"));
+                    AddDetailRow("CheckTime", FirstColumnValue(r, "Check_time", "CHECK_TIME"));
+                    AddDetailRow("IndexLength", FormatBytesValue(FirstColumnValue(r, "Index_length", "INDEX_LENGTH")));
+                    AddDetailRow("DataLength", FormatBytesValue(FirstColumnValue(r, "Data_length", "DATA_LENGTH")));
+                    AddDetailRow("MaxDataLength", FormatBytesValue(FirstColumnValue(r, "Max_data_length", "MAX_DATA_LENGTH")));
+                    AddDetailRow("DataFree", FormatBytesValue(FirstColumnValue(r, "Data_free", "DATA_FREE")));
+                    AddDetailRow("Collation", FirstColumnValue(r, "Collation", "COLLATION"));
+                    AddDetailRow("CreateOptions", FirstColumnValue(r, "Create_options", "CREATE_OPTIONS"));
+                    AddDetailRow("Comment", FirstColumnValue(r, "Comment", "COMMENTS"));
                 }
 
                 // 取得 DDL
@@ -9066,8 +9066,8 @@ namespace mySQLPunk
 
             try
             {
-                dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("View"));
-                dgvDetails.Rows.Add("名稱", viewName);
+                AddDetailRow("Type", LocalizeDetailObjectType("View"));
+                AddDetailRow("Name", viewName);
                 rtbDDL.Text = db.GetViewCreateStatement(dbName, viewName);
             }
             catch (Exception ex)
@@ -9093,9 +9093,9 @@ namespace mySQLPunk
                     return;
                 }
 
-                dgvDetails.Rows.Add("類型", match["Type"]);
-                dgvDetails.Rows.Add("名稱", match["Name"]);
-                dgvDetails.Rows.Add("狀態", match["Status"]);
+                AddDetailRow("Type", match["Type"]);
+                AddDetailRow("Name", match["Name"]);
+                AddDetailRow("Status", match["Status"]);
                 rtbDDL.Text = match["DDL"].ToString();
             }
             catch (Exception ex)
@@ -9121,10 +9121,10 @@ namespace mySQLPunk
                     return;
                 }
 
-                dgvDetails.Rows.Add("類型", match["Type"]);
-                dgvDetails.Rows.Add("名稱", match["Name"]);
-                dgvDetails.Rows.Add("回傳型別", match["ReturnType"]);
-                dgvDetails.Rows.Add("狀態", match["Status"]);
+                AddDetailRow("Type", match["Type"]);
+                AddDetailRow("Name", match["Name"]);
+                AddDetailRow("ReturnType", match["ReturnType"]);
+                AddDetailRow("Status", match["Status"]);
                 rtbDDL.Text = match["DDL"].ToString();
             }
             catch (Exception ex)
@@ -9150,11 +9150,11 @@ namespace mySQLPunk
                     return;
                 }
 
-                dgvDetails.Rows.Add("類型", match["Type"]);
-                dgvDetails.Rows.Add("名稱", match["Name"]);
-                dgvDetails.Rows.Add("主機", match["Host"]);
-                dgvDetails.Rows.Add("狀態", match["Status"]);
-                dgvDetails.Rows.Add("來源", match["Source"]);
+                AddDetailRow("Type", match["Type"]);
+                AddDetailRow("Name", match["Name"]);
+                AddDetailRow("Host", match["Host"]);
+                AddDetailRow("Status", match["Status"]);
+                AddDetailRow("Source", match["Source"]);
                 rtbDDL.Text = "-- User: " + match["Name"] + Environment.NewLine +
                               "-- Source: " + match["Source"] + Environment.NewLine +
                               "-- Status: " + match["Status"];
@@ -9170,10 +9170,10 @@ namespace mySQLPunk
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
 
-            dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("Model"));
-            dgvDetails.Rows.Add("名稱", modelName);
-            dgvDetails.Rows.Add("資料庫", dbName);
-            dgvDetails.Rows.Add("Provider", db.ProviderName);
+            AddDetailRow("Type", LocalizeDetailObjectType("Model"));
+            AddDetailRow("Name", modelName);
+            AddDetailRow("Database", dbName);
+            AddDetailRow("Provider", db.ProviderName);
             rtbDDL.Text = "-- Model: " + modelName + Environment.NewLine +
                           "-- " + GetDatabaseModelDescription(modelName);
         }
@@ -9183,10 +9183,10 @@ namespace mySQLPunk
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
 
-            dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("BI"));
-            dgvDetails.Rows.Add("名稱", biName);
-            dgvDetails.Rows.Add("資料庫", dbName);
-            dgvDetails.Rows.Add("Provider", db.ProviderName);
+            AddDetailRow("Type", LocalizeDetailObjectType("BI"));
+            AddDetailRow("Name", biName);
+            AddDetailRow("Database", dbName);
+            AddDetailRow("Provider", db.ProviderName);
             rtbDDL.Text = "-- BI: " + biName + Environment.NewLine +
                           "-- " + GetDatabaseBIDescription(biName);
         }
@@ -9196,10 +9196,10 @@ namespace mySQLPunk
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
 
-            dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("Other"));
-            dgvDetails.Rows.Add("名稱", toolName);
-            dgvDetails.Rows.Add("資料庫", dbName);
-            dgvDetails.Rows.Add("Provider", db.ProviderName);
+            AddDetailRow("Type", LocalizeDetailObjectType("Other"));
+            AddDetailRow("Name", toolName);
+            AddDetailRow("Database", dbName);
+            AddDetailRow("Provider", db.ProviderName);
             rtbDDL.Text = "-- Other: " + toolName + Environment.NewLine +
                           "-- " + GetDatabaseOtherToolDescription(toolName);
         }
@@ -9209,10 +9209,10 @@ namespace mySQLPunk
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
 
-            dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("Report"));
-            dgvDetails.Rows.Add("名稱", reportName);
-            dgvDetails.Rows.Add("資料庫", dbName);
-            dgvDetails.Rows.Add("Provider", db.ProviderName);
+            AddDetailRow("Type", LocalizeDetailObjectType("Report"));
+            AddDetailRow("Name", reportName);
+            AddDetailRow("Database", dbName);
+            AddDetailRow("Provider", db.ProviderName);
             rtbDDL.Text = "-- Report: " + reportName + Environment.NewLine +
                           "-- " + GetDatabaseReportDescription(reportName);
         }
@@ -9240,6 +9240,24 @@ namespace mySQLPunk
         private static string BuildSidebarTitle(string label, string objectName)
         {
             return Localization.Format("Detail.SidebarTitle", label ?? string.Empty, objectName ?? string.Empty);
+        }
+
+        private void AddDetailRow(string propertyName, object value)
+        {
+            dgvDetails.Rows.Add(BuildDetailPropertyName(propertyName), value);
+        }
+
+        private static string BuildDetailGridColumnHeader(string columnName)
+        {
+            if (string.Equals(columnName, "Key", StringComparison.OrdinalIgnoreCase)) return Localization.T("Detail.GridProperty");
+            if (string.Equals(columnName, "Value", StringComparison.OrdinalIgnoreCase)) return Localization.T("Detail.GridValue");
+            return columnName ?? string.Empty;
+        }
+
+        private static string BuildDetailPropertyName(string propertyName)
+        {
+            if (string.IsNullOrWhiteSpace(propertyName)) return string.Empty;
+            return Localization.T("Detail.Property." + propertyName);
         }
 
         private static string BuildDetailLoadErrorText(string objectType, string errorMessage)
