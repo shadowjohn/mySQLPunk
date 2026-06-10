@@ -6675,8 +6675,10 @@ public static class SmokeTests
             Assert(defaults.Count >= 10, "Table column chooser should provide a rich default column list.");
             Assert(defaults.Any(p => p.Name == "名稱") == false, "Table column chooser defaults should match the object metadata columns, not inject grid-only names.");
             Assert(defaults.Any(p => p.Name == "註解" && p.Visible), "Table column chooser should show comments by default.");
+            Assert(defaults.First(p => p.Name == "註解").DisplayName == "註解", "Traditional Chinese column chooser should display localized column labels.");
             AssertEquals("mssql", ViewColumnPreferenceService.NormalizeProvider("SQL Server"), "SQL Server provider alias should normalize to mssql.");
             AssertEquals("Views", ViewColumnPreferenceService.NormalizeGroup("View"), "Singular view group should normalize to Views.");
+            AssertEquals("資料表空間", ViewColumnPreferenceService.GetGroupDisplayName("Tablespaces"), "Traditional Chinese group labels should be localized.");
 
             ViewColumnPreferenceService.Save(provider, group, new[]
             {
@@ -6687,12 +6689,28 @@ public static class SmokeTests
 
             List<ViewColumnPreference> saved = ViewColumnPreferenceService.Load(provider, group);
             AssertEquals("註解", saved[0].Name, "Saved column order should be preserved.");
+            AssertEquals("註解", saved[0].DisplayName, "Saved column preferences should include localized display names.");
             Assert(saved.First(p => p.Name == "資料長度").Visible == false, "Saved column visibility should be preserved.");
             Assert(saved.Any(p => p.Name == "修改日期"), "Saved preferences should merge newly supported default columns.");
 
             ViewColumnPreferenceService.Reset(provider, group);
             List<ViewColumnPreference> reset = ViewColumnPreferenceService.Load(provider, group);
             Assert(reset.First(p => p.Name == "資料長度").Visible, "Reset should restore default visible columns.");
+
+            string oldLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.English, false);
+                List<ViewColumnPreference> englishDefaults = ViewColumnPreferenceService.Load(provider, group);
+                AssertEquals("Tablespaces", ViewColumnPreferenceService.GetGroupDisplayName("Tablespaces"), "English group labels should be localized.");
+                AssertEquals("Data Length", englishDefaults.First(p => p.Name == "資料長度").DisplayName, "English column chooser should show localized column labels.");
+                AssertEquals("Comment", englishDefaults.First(p => p.Name == "註解").DisplayName, "English column chooser should localize comment labels.");
+                AssertEquals("資料長度", englishDefaults.First(p => p.Name == "資料長度").Name, "Localized display labels should not replace internal column keys.");
+            }
+            finally
+            {
+                Localization.SetLanguage(oldLanguage, false);
+            }
         }
         finally
         {

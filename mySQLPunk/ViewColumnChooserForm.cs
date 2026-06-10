@@ -198,7 +198,7 @@ namespace mySQLPunk
             columnList.Items.Clear();
             foreach (ViewColumnPreference pref in ViewColumnPreferenceService.Load(provider, groupKey))
             {
-                columnList.Items.Add(pref.Name, pref.Visible);
+                columnList.Items.Add(pref, pref.Visible);
             }
         }
 
@@ -208,9 +208,11 @@ namespace mySQLPunk
             List<ViewColumnPreference> prefs = new List<ViewColumnPreference>();
             for (int i = 0; i < columnList.Items.Count; i++)
             {
+                ViewColumnPreference item = columnList.Items[i] as ViewColumnPreference;
+                if (item == null) continue;
                 prefs.Add(new ViewColumnPreference
                 {
-                    Name = columnList.Items[i].ToString(),
+                    Name = item.Name,
                     Visible = columnList.GetItemChecked(i)
                 });
             }
