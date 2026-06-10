@@ -5986,6 +5986,7 @@ public static class SmokeTests
         MethodInfo failureReasonMethod = typeof(Form1).GetMethod("BuildExecutionFailureReason", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo statusExceptionMessageMethod = typeof(Form1).GetMethod("BuildStatusExceptionMessage", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo formattedExceptionMessageMethod = typeof(Form1).GetMethod("BuildFormattedExceptionMessage", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo backupIntegrityExceptionStatusMethod = typeof(Form1).GetMethod("BuildBackupIntegrityExceptionStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -6130,6 +6131,13 @@ public static class SmokeTests
             AssertEquals("還原隔離備份失敗：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Backup.QuarantineRestoreFailed", new Exception("") }), "Blank quarantine restore errors should localize Traditional Chinese unknown errors.");
             AssertEquals("還原內容掃描報表建立失敗：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Backup.RestoreContentScanReportFailed", new Exception("") }), "Blank restore content scan report errors should localize Traditional Chinese unknown errors.");
             AssertEquals("建立還原前快照失敗，已取消還原：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Backup.RestoreSafetyBackupFailedCancelled", new Exception("") }), "Blank pre-restore snapshot errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("資料寫入失敗：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Database.DataGenerationExecuteFailed", new Exception("") }), "Blank generated data execution errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("刪除資料庫失敗：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Database.DeleteFailed", new Exception("") }), "Blank database delete errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("刪除前備份失敗，已取消刪除：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Database.PreDeleteBackupFailedCancelled", new Exception("") }), "Blank pre-delete backup errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("新增資料庫失敗：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Database.CreateFailed", new Exception("   ") }), "Blank database create errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("分享連線失敗：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Connection.ShareFailed", new Exception("") }), "Blank share connection errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("開啟命令列介面失敗：未知錯誤", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Connection.CommandLineOpenFailed", new Exception("") }), "Blank command line open errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("備份完整性定期驗證發現 1 個異常檔案。 未知錯誤", (string)backupIntegrityExceptionStatusMethod.Invoke(null, new object[] { new Exception("") }), "Blank backup integrity exceptions should localize Traditional Chinese unknown errors.");
             string zhSqliteFunctionTemplate = (string)functionTemplateMethod.Invoke(null, new object[] { new my_sqlite(), "main", "" });
             AssertContains(zhSqliteFunctionTemplate, "SQLite 不會把函式儲存在資料庫 schema", "SQLite function template should localize Traditional Chinese schema limitation comments.");
             AssertContains(zhSqliteFunctionTemplate, "應用程式自訂 SQLite 函式必須由用戶端連線註冊", "SQLite function template should localize Traditional Chinese client-defined comments.");
@@ -6291,6 +6299,12 @@ public static class SmokeTests
             AssertEquals("Export SQLite column comments failed: Unknown error", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Object.SqliteColumnCommentsExportFailed", new Exception("") }), "Blank SQLite column comment export errors should support English unknown errors.");
             AssertEquals("Backup restore failed: restore denied", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Backup.RestoreFailed", new InvalidOperationException(" restore denied ") }), "Restore errors should preserve explicit English reasons.");
             AssertEquals("Failed to restore quarantined backup: Unknown error", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Backup.QuarantineRestoreFailed", new Exception("") }), "Blank quarantine restore errors should support English unknown errors.");
+            AssertEquals("Data generation execution failed: Unknown error", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Database.DataGenerationExecuteFailed", new Exception("   ") }), "Blank generated data execution errors should support English unknown errors.");
+            AssertEquals("Delete database failed: drop denied", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Database.DeleteFailed", new InvalidOperationException(" drop denied ") }), "Database delete errors should preserve explicit English reasons.");
+            AssertEquals("Create database failed: Unknown error", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Database.CreateFailed", new Exception("") }), "Blank database create errors should support English unknown errors.");
+            AssertEquals("Share connection failed: Unknown error", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Connection.ShareFailed", new Exception("") }), "Blank share connection errors should support English unknown errors.");
+            AssertEquals("Open command line interface failed: Unknown error", (string)formattedExceptionMessageMethod.Invoke(null, new object[] { "Connection.CommandLineOpenFailed", new Exception("") }), "Blank command line open errors should support English unknown errors.");
+            AssertEquals("Scheduled backup integrity check found 1 invalid files. Unknown error", (string)backupIntegrityExceptionStatusMethod.Invoke(null, new object[] { new Exception("   ") }), "Blank backup integrity exceptions should support English unknown errors.");
 
             DataTable enQueryHistory = (DataTable)queryHistoryMethod.Invoke(form, new object[] { "main" });
             DataRow enQueryHistoryQuery = FindDataRow(enQueryHistory, "SQL", "SELECT 1");

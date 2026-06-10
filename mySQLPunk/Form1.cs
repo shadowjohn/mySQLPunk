@@ -6286,7 +6286,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                UpdateMainStatus(Localization.Format("Status.BackupIntegrityFailed", 1) + " " + ex.Message);
+                UpdateMainStatus(BuildBackupIntegrityExceptionStatusText(ex));
             }
             finally
             {
@@ -6790,7 +6790,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(BuildExceptionReason(ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
             return true;
@@ -8153,7 +8153,7 @@ namespace mySQLPunk
         private static string GetObjectRowCountText(IDatabase db, string dbName, string objectName)
         {
             try { return db.CountRows(dbName, objectName).ToString(); }
-            catch (Exception ex) { return ex.Message; }
+            catch (Exception ex) { return BuildExceptionReason(ex); }
         }
 
         private static string GetModelColumnName(DataRow row)
@@ -9804,7 +9804,7 @@ namespace mySQLPunk
                     }
                     catch (Exception ex)
                     {
-                        string message = Localization.Format("Database.DataGenerationExecuteFailed", ex.Message);
+                        string message = BuildFormattedExceptionMessage("Database.DataGenerationExecuteFailed", ex);
                         UpdateMainStatus(message);
                         MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
@@ -10550,6 +10550,11 @@ namespace mySQLPunk
             return Localization.Format(messageKey, BuildExceptionReason(ex));
         }
 
+        private static string BuildBackupIntegrityExceptionStatusText(Exception ex)
+        {
+            return Localization.Format("Status.BackupIntegrityFailed", 1) + " " + BuildExceptionReason(ex);
+        }
+
         private static string BuildExecutionFailureReason(Dictionary<string, string> result)
         {
             string reason = null;
@@ -10637,7 +10642,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                string message = Localization.Format("Database.DeleteFailed", ex.Message);
+                string message = BuildFormattedExceptionMessage("Database.DeleteFailed", ex);
                 UpdateMainStatus(message);
                 MessageBox.Show(message, Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -10720,7 +10725,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                string message = Localization.Format("Database.PreDeleteBackupFailedCancelled", ex.Message);
+                string message = BuildFormattedExceptionMessage("Database.PreDeleteBackupFailedCancelled", ex);
                 UpdateMainStatus(message);
                 MessageBox.Show(message, Localization.T("Tool.DeleteDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
@@ -11804,7 +11809,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                string message = Localization.Format("Database.CreateFailed", ex.Message);
+                string message = BuildFormattedExceptionMessage("Database.CreateFailed", ex);
                 UpdateMainStatus(message);
                 MessageBox.Show(message, Localization.T("Database.NewTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -11833,7 +11838,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                string message = Localization.Format("Database.CreateFailed", ex.Message);
+                string message = BuildFormattedExceptionMessage("Database.CreateFailed", ex);
                 UpdateMainStatus(message);
                 MessageBox.Show(message, Localization.T("Database.OracleCreateTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -12146,7 +12151,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    string message = Localization.Format("Connection.ShareFailed", ex.Message);
+                    string message = BuildFormattedExceptionMessage("Connection.ShareFailed", ex);
                     UpdateMainStatus(message);
                     MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
@@ -12239,7 +12244,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                string message = Localization.Format("Connection.CommandLineOpenFailed", ex.Message);
+                string message = BuildFormattedExceptionMessage("Connection.CommandLineOpenFailed", ex);
                 UpdateMainStatus(message);
                 MessageBox.Show(message, Localization.T("Tool.CommandLine"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
