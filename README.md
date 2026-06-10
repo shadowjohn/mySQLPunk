@@ -228,6 +228,10 @@ Smoke test harness：
   - 現況：SQLite FTS / RTree / SpatiaLite 精靈會檢查 virtual table 名稱、欄位、RTree min/max 維度欄位與 spatial index 目標。
   - 完成內容：欄位必填、物件名稱必填與 RTree 維度欄位需成對等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。
 
+- **SQLite 專用物件精靈執行失敗 fallback ✅ 已語系化**
+  - 現況：SQLite FTS / RTree / SpatiaLite 精靈直接執行 SQL 時，若 provider 沒有回傳 reason，會顯示通用錯誤原因。
+  - 完成內容：精靈執行失敗已改用共用 SQL 執行結果 helper，保留 provider 原始 reason；缺少 reason 時會依目前語系顯示 fallback 訊息，並已納入 smoke test 覆蓋。
+
 - **備份排程與還原報表資料夾錯誤 ✅ 已語系化**
   - 現況：備份完整性排程會輸出驗證報表並可隔離異常備份，還原差異檢查會輸出內容掃描報表。
   - 完成內容：備份完整性報表資料夾、備份隔離資料夾與還原內容掃描報表資料夾缺失等錯誤已改用語系字串，繁中與英文介面都會顯示一致文字。

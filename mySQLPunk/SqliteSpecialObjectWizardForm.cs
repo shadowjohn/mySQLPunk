@@ -222,13 +222,18 @@ namespace mySQLPunk
                     return;
                 }
 
-                string reason = result.ContainsKey("reason") ? result["reason"] : "Unknown error";
+                string reason = BuildExecutionFailureReason(result);
                 MessageBox.Show(Localization.Format("SqliteWizard.ExecuteFailed", reason), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch (Exception ex)
             {
                 MessageBox.Show(Localization.Format("SqliteWizard.ExecuteFailed", ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private static string BuildExecutionFailureReason(Dictionary<string, string> result)
+        {
+            return DatabaseExecutionResultService.GetFailureReason(result);
         }
     }
 }

@@ -27,6 +27,7 @@ public static class SmokeTests
         Run("View SQL 跨 provider 轉換", TestViewSqlConversion, ref passed);
         Run("View SQL 進階轉換案例", TestAdvancedViewSqlConversion, ref passed);
         Run("SQLite 專用物件 SQL builder", TestSqliteSpecialObjectSqlBuilder, ref passed);
+        Run("SQLite 專用物件精靈執行 fallback", TestSqliteSpecialObjectWizardExecutionFallback, ref passed);
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
         Run("Table Designer ALTER provider matrix", TestTableDesignerAlterProviderMatrix, ref passed);
         Run("Table Designer comment dictionary diff", TestTableDesignerCommentDictionaryDiff, ref passed);
@@ -2916,6 +2917,37 @@ public static class SmokeTests
             {
                 AssertContains(ex.Message, "tableName is required", "SQLite special object name validation should localize English messages.");
             }
+        }
+        finally
+        {
+            Localization.SetLanguage(reviewLanguage, false);
+        }
+    }
+
+    private static void TestSqliteSpecialObjectWizardExecutionFallback()
+    {
+        MethodInfo reasonMethod = typeof(SqliteSpecialObjectWizardForm).GetMethod("BuildExecutionFailureReason", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert(reasonMethod != null, "SQLite special object wizard should expose a testable execution fallback helper.");
+
+        string reviewLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            Dictionary<string, string> failedWithoutReason = new Dictionary<string, string>
+            {
+                { "status", "error" }
+            };
+            AssertContains((string)reasonMethod.Invoke(null, new object[] { failedWithoutReason }), "SQL 執行失敗", "SQLite wizard execution fallback should localize Traditional Chinese messages.");
+
+            Dictionary<string, string> failedWithReason = new Dictionary<string, string>
+            {
+                { "status", "error" },
+                { "reason", "virtual table already exists" }
+            };
+            AssertContains((string)reasonMethod.Invoke(null, new object[] { failedWithReason }), "virtual table already exists", "SQLite wizard execution fallback should preserve provider reasons.");
+
+            Localization.SetLanguage(Localization.English, false);
+            AssertContains((string)reasonMethod.Invoke(null, new object[] { failedWithoutReason }), "SQL execution failed", "SQLite wizard execution fallback should localize English messages.");
         }
         finally
         {
