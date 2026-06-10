@@ -5984,6 +5984,7 @@ public static class SmokeTests
         MethodInfo backupStatusMethod = typeof(Form1).GetMethod("BuildBackupStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo unknownErrorMethod = typeof(Form1).GetMethod("BuildExecutionUnknownErrorText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo failureReasonMethod = typeof(Form1).GetMethod("BuildExecutionFailureReason", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo statusExceptionMessageMethod = typeof(Form1).GetMethod("BuildStatusExceptionMessage", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -6111,6 +6112,8 @@ public static class SmokeTests
             AssertEquals("未知錯誤", (string)unknownErrorMethod.Invoke(null, new object[0]), "Execution fallback should localize Traditional Chinese unknown errors.");
             AssertEquals("未知錯誤", (string)failureReasonMethod.Invoke(null, new object[] { new Dictionary<string, string> { { "reason", "   " } } }), "Blank execution reasons should fall back to Traditional Chinese unknown errors.");
             AssertEquals("provider denied", (string)failureReasonMethod.Invoke(null, new object[] { new Dictionary<string, string> { { "reason", "provider denied" } } }), "Execution failure reasons should preserve provider messages.");
+            AssertEquals("匯出失敗：未知錯誤", (string)statusExceptionMessageMethod.Invoke(null, new object[] { "Status.ExportFailed", new Exception("") }), "Blank export exceptions should localize Traditional Chinese unknown errors.");
+            AssertEquals("匯入 SQL 失敗：語法錯誤", (string)statusExceptionMessageMethod.Invoke(null, new object[] { "ImportSql.Failed", new InvalidOperationException(" 語法錯誤 ") }), "SQL import exception messages should preserve explicit Traditional Chinese reasons.");
             string zhSqliteFunctionTemplate = (string)functionTemplateMethod.Invoke(null, new object[] { new my_sqlite(), "main", "" });
             AssertContains(zhSqliteFunctionTemplate, "SQLite 不會把函式儲存在資料庫 schema", "SQLite function template should localize Traditional Chinese schema limitation comments.");
             AssertContains(zhSqliteFunctionTemplate, "應用程式自訂 SQLite 函式必須由用戶端連線註冊", "SQLite function template should localize Traditional Chinese client-defined comments.");
@@ -6263,6 +6266,7 @@ public static class SmokeTests
             AssertEquals("Backup failed: disk full", (string)backupStatusMethod.Invoke(null, new object[] { "Failed", "disk full" }), "Backup status should support English failed status.");
             AssertEquals("Unknown error", (string)unknownErrorMethod.Invoke(null, new object[0]), "Execution fallback should support English unknown errors.");
             AssertEquals("Unknown error", (string)failureReasonMethod.Invoke(null, new object[] { new Dictionary<string, string>() }), "Missing execution reasons should fall back to English unknown errors.");
+            AssertEquals("Import failed: Unknown error", (string)statusExceptionMessageMethod.Invoke(null, new object[] { "Status.ImportFailed", new Exception("   ") }), "Blank import exceptions should localize English unknown errors.");
 
             DataTable enQueryHistory = (DataTable)queryHistoryMethod.Invoke(form, new object[] { "main" });
             DataRow enQueryHistoryQuery = FindDataRow(enQueryHistory, "SQL", "SELECT 1");

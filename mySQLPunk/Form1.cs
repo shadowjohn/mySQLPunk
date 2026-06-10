@@ -1463,7 +1463,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.T("Status.ExportFailed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(BuildStatusExceptionMessage("Status.ExportFailed", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -1505,7 +1505,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.T("Status.ImportFailed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(BuildStatusExceptionMessage("Status.ImportFailed", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -5172,8 +5172,9 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.T("ImportSql.Failed") + ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    UpdateMainStatus(Localization.T("ImportSql.Failed") + ex.Message);
+                    string message = BuildStatusExceptionMessage("ImportSql.Failed", ex);
+                    MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateMainStatus(message);
                 }
             }
         }
@@ -10523,6 +10524,21 @@ namespace mySQLPunk
         private static string BuildExecutionUnknownErrorText()
         {
             return Localization.T("Query.UnknownError");
+        }
+
+        private static string BuildExceptionReason(Exception ex)
+        {
+            if (ex != null && !string.IsNullOrWhiteSpace(ex.Message))
+            {
+                return ex.Message.Trim();
+            }
+
+            return BuildExecutionUnknownErrorText();
+        }
+
+        private static string BuildStatusExceptionMessage(string statusKey, Exception ex)
+        {
+            return Localization.T(statusKey) + BuildExceptionReason(ex);
         }
 
         private static string BuildExecutionFailureReason(Dictionary<string, string> result)
