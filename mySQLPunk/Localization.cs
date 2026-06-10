@@ -312,6 +312,7 @@ namespace mySQLPunk
             Add("ConnectionDiagnostics.ExtensionLoaded", "Extension 已載入", "Extension loaded");
             Add("DatabaseModel.ObjectTypeTable", "資料表", "Table");
             Add("DatabaseModel.ObjectTypeView", "檢視", "View");
+            Add("DatabaseModel.NoExplicitIndexes", "（沒有明確索引）", "(no explicit indexes)");
             Add("MaintenanceChecklist.ConnectionOpen", "連線已開啟", "Connection Open");
             Add("MaintenanceChecklist.TablesLoaded", "已載入資料表", "Tables Loaded");
             Add("MaintenanceChecklist.ViewsLoaded", "已載入檢視", "Views Loaded");

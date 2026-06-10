@@ -4710,6 +4710,8 @@ public static class SmokeTests
 
         object form = FormatterServices.GetUninitializedObject(typeof(Form1));
         MethodInfo schemaOverviewMethod = typeof(Form1).GetMethod("BuildSchemaOverviewModel", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo columnCatalogMethod = typeof(Form1).GetMethod("BuildColumnCatalogModel", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo indexCatalogMethod = typeof(Form1).GetMethod("BuildIndexCatalogModel", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4722,6 +4724,16 @@ public static class SmokeTests
             Assert(zhSchemaTable != null, "Schema overview should include fake table metadata.");
             AssertContains(zhSchemaTable["類型"].ToString(), "資料表", "Schema overview should localize Traditional Chinese table type.");
             AssertContains(zhSchemaTable["狀態"].ToString(), "就緒", "Schema overview should localize Traditional Chinese ready status.");
+
+            DataTable zhColumnCatalog = (DataTable)columnCatalogMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow zhColumn = FindDataRow(zhColumnCatalog, "物件", "public.users");
+            Assert(zhColumn != null, "Column catalog should include fake table column metadata.");
+            AssertContains(zhColumn["類型"].ToString(), "資料表", "Column catalog should localize Traditional Chinese table type.");
+
+            DataTable zhIndexCatalog = (DataTable)indexCatalogMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow zhNoIndex = FindDataRow(zhIndexCatalog, "資料表", "public.users");
+            Assert(zhNoIndex != null, "Index catalog should include fake table metadata.");
+            AssertContains(zhNoIndex["索引"].ToString(), "沒有明確索引", "Index catalog should localize Traditional Chinese empty-index fallback.");
 
             DataTable zhDiagnostics = (DataTable)diagnosticsMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow zhConnectionState = FindDataRow(zhDiagnostics, "項目", "連線狀態");
@@ -4766,6 +4778,16 @@ public static class SmokeTests
             Assert(enSchemaView != null, "Schema overview should include fake view metadata.");
             AssertEquals("View", enSchemaView["類型"].ToString(), "Schema overview should support English view type.");
             AssertEquals("Ready", enSchemaView["狀態"].ToString(), "Schema overview should support English ready status.");
+
+            DataTable enColumnCatalog = (DataTable)columnCatalogMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow enColumn = FindDataRow(enColumnCatalog, "物件", "public.active_users");
+            Assert(enColumn != null, "Column catalog should include fake view column metadata.");
+            AssertEquals("View", enColumn["類型"].ToString(), "Column catalog should support English view type.");
+
+            DataTable enIndexCatalog = (DataTable)indexCatalogMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
+            DataRow enNoIndex = FindDataRow(enIndexCatalog, "資料表", "public.users");
+            Assert(enNoIndex != null, "Index catalog should include fake table metadata.");
+            AssertEquals("(no explicit indexes)", enNoIndex["索引"].ToString(), "Index catalog should support English empty-index fallback.");
 
             DataTable enMaintenance = (DataTable)maintenanceMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow enLargestTable = FindDataRow(enMaintenance, "項目", "Largest Table");
@@ -5763,7 +5785,18 @@ public static class SmokeTests
         public List<string> GetDatabases() { return new List<string> { "main" }; }
         public List<string> GetTables(string databaseName) { return Tables; }
         public List<string> GetViews(string databaseName) { return Views; }
-        public DataTable GetColumns(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetColumns(string databaseName, string tableName)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Field");
+            table.Columns.Add("Type");
+            table.Columns.Add("Null");
+            table.Columns.Add("Key");
+            table.Columns.Add("Default");
+            table.Rows.Add("id", "integer", "NO", "PRI", "");
+            table.Rows.Add("name", "text", "YES", "", "");
+            return table;
+        }
         public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
         public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }

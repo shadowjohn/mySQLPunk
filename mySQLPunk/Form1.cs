@@ -7949,8 +7949,8 @@ namespace mySQLPunk
             dt.Columns.Add("鍵");
             dt.Columns.Add("預設值");
 
-            AppendColumnCatalogRows(dt, db, dbName, GetTablesSafe(db, dbName), "Table");
-            AppendColumnCatalogRows(dt, db, dbName, GetViewsSafe(db, dbName), "View");
+            AppendColumnCatalogRows(dt, db, dbName, GetTablesSafe(db, dbName), Localization.T("DatabaseModel.ObjectTypeTable"));
+            AppendColumnCatalogRows(dt, db, dbName, GetViewsSafe(db, dbName), Localization.T("DatabaseModel.ObjectTypeView"));
             return dt;
         }
 
@@ -7991,7 +7991,7 @@ namespace mySQLPunk
                 {
                     DataRow row = dt.NewRow();
                     row["資料表"] = tableName;
-                    row["索引"] = "(no explicit indexes)";
+                    row["索引"] = Localization.T("DatabaseModel.NoExplicitIndexes");
                     row["欄位"] = "";
                     row["唯一"] = "";
                     row["順序"] = "";
