@@ -2929,6 +2929,8 @@ public static class SmokeTests
     {
         MethodInfo reasonMethod = typeof(SqliteSpecialObjectWizardForm).GetMethod("BuildExecutionFailureReason", BindingFlags.NonPublic | BindingFlags.Static);
         Assert(reasonMethod != null, "SQLite special object wizard should expose a testable execution fallback helper.");
+        MethodInfo exceptionReasonMethod = typeof(SqliteSpecialObjectWizardForm).GetMethod("BuildExceptionFailureReason", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert(exceptionReasonMethod != null, "SQLite special object wizard should expose a testable exception fallback helper.");
 
         string reviewLanguage = Localization.CurrentLanguage;
         try
@@ -2946,9 +2948,12 @@ public static class SmokeTests
                 { "reason", "virtual table already exists" }
             };
             AssertContains((string)reasonMethod.Invoke(null, new object[] { failedWithReason }), "virtual table already exists", "SQLite wizard execution fallback should preserve provider reasons.");
+            AssertEquals("未知錯誤", (string)exceptionReasonMethod.Invoke(null, new object[] { new Exception("") }), "SQLite wizard blank exceptions should localize Traditional Chinese unknown errors.");
 
             Localization.SetLanguage(Localization.English, false);
             AssertContains((string)reasonMethod.Invoke(null, new object[] { failedWithoutReason }), "SQL execution failed", "SQLite wizard execution fallback should localize English messages.");
+            AssertEquals("Unknown error", (string)exceptionReasonMethod.Invoke(null, new object[] { new Exception("   ") }), "SQLite wizard blank exceptions should localize English unknown errors.");
+            AssertEquals("parser failed", (string)exceptionReasonMethod.Invoke(null, new object[] { new InvalidOperationException(" parser failed ") }), "SQLite wizard exception fallback should preserve explicit exception messages.");
         }
         finally
         {

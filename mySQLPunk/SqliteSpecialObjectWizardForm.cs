@@ -170,7 +170,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                rtbPreview.Text = "-- " + ex.Message;
+                rtbPreview.Text = "-- " + BuildExceptionFailureReason(ex);
                 if (btnExecute != null) btnExecute.Enabled = false;
             }
         }
@@ -227,13 +227,23 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                MessageBox.Show(Localization.Format("SqliteWizard.ExecuteFailed", ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.Format("SqliteWizard.ExecuteFailed", BuildExceptionFailureReason(ex)), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         private static string BuildExecutionFailureReason(Dictionary<string, string> result)
         {
             return DatabaseExecutionResultService.GetFailureReason(result);
+        }
+
+        private static string BuildExceptionFailureReason(Exception ex)
+        {
+            if (ex != null && !string.IsNullOrWhiteSpace(ex.Message))
+            {
+                return ex.Message.Trim();
+            }
+
+            return Localization.T("Object.UnknownError");
         }
     }
 }

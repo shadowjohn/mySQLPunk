@@ -266,7 +266,7 @@ Smoke test harness：
 
 - **SQLite 專用物件精靈執行失敗 fallback ✅ 已語系化**
   - 現況：SQLite FTS / RTree / SpatiaLite 精靈直接執行 SQL 時，若 provider 沒有回傳 reason，會顯示通用錯誤原因。
-  - 完成內容：精靈執行失敗已改用共用 SQL 執行結果 helper，保留 provider 原始 reason；缺少 reason 時會依目前語系顯示 fallback 訊息，並已納入 smoke test 覆蓋。
+  - 完成內容：精靈執行失敗已改用共用 SQL 執行結果 helper，保留 provider 原始 reason；缺少 reason 或 SQL 預覽/執行例外沒有明確訊息時，會依目前語系顯示「未知錯誤 / Unknown error」，並已納入 smoke test 覆蓋。
 
 - **備份排程與還原報表資料夾錯誤 ✅ 已語系化**
   - 現況：備份完整性排程會輸出驗證報表並可隔離異常備份，還原差異檢查會輸出內容掃描報表。
