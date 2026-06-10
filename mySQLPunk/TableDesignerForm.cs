@@ -4693,7 +4693,7 @@ namespace mySQLPunk
         private static string FormatDesignerSaveError(string providerName, string databaseName, string tableName, Dictionary<string, string> result)
         {
             string reason = GetResultValue(result, "reason");
-            if (string.IsNullOrWhiteSpace(reason)) reason = "unknown error";
+            if (string.IsNullOrWhiteSpace(reason)) reason = Localization.T("Object.UnknownError");
 
             List<string> lines = new List<string>();
             lines.Add(Localization.Format("Designer.SaveFailedReason", reason));
@@ -5435,7 +5435,7 @@ namespace mySQLPunk
         public static string BuildIndexMetadataLoadFailedMessage(Exception ex)
         {
             string message = ex == null ? "" : ex.Message;
-            if (string.IsNullOrWhiteSpace(message)) message = ex == null ? "Unknown error" : ex.GetType().Name;
+            if (string.IsNullOrWhiteSpace(message)) message = ex == null ? Localization.T("Object.UnknownError") : ex.GetType().Name;
             return Localization.Format("Designer.IndexMetadataLoadFailed", message);
         }
 

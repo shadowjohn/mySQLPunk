@@ -3002,14 +3002,23 @@ public static class SmokeTests
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            MethodInfo saveErrorMethod = typeof(TableDesignerForm).GetMethod("FormatDesignerSaveError", BindingFlags.Static | BindingFlags.NonPublic);
+            string saveErrorMessage = (string)saveErrorMethod.Invoke(null, new object[] { "mysql", "main", "codex_smoke_mysql", new Dictionary<string, string>() });
+            AssertContains(saveErrorMessage, "儲存失敗：未知錯誤", "Table designer save failure should localize missing reasons in Traditional Chinese.");
             string indexLoadFailedMessage = TableDesignerForm.BuildIndexMetadataLoadFailedMessage(new InvalidOperationException("metadata timeout"));
             AssertContains(indexLoadFailedMessage, "metadata timeout", "Index metadata load failure should include the provider error.");
             AssertContains(indexLoadFailedMessage, "索引頁", "Index metadata load failure should explain that the index page remains usable.");
+            string unknownIndexLoadFailedMessage = TableDesignerForm.BuildIndexMetadataLoadFailedMessage(null);
+            AssertContains(unknownIndexLoadFailedMessage, "未知錯誤", "Index metadata fallback should localize missing errors in Traditional Chinese.");
             string columnLoadFailedMessage = TableDesignerForm.BuildColumnMetadataLoadFailedMessage(new InvalidOperationException("columns timeout"));
             AssertContains(columnLoadFailedMessage, "無法載入欄位資訊", "Column metadata load failure should localize Traditional Chinese messages.");
             AssertContains(columnLoadFailedMessage, "columns timeout", "Column metadata load failure should include the provider error.");
 
             Localization.SetLanguage(Localization.English, false);
+            string englishSaveErrorMessage = (string)saveErrorMethod.Invoke(null, new object[] { "mysql", "main", "codex_smoke_mysql", new Dictionary<string, string>() });
+            AssertContains(englishSaveErrorMessage, "Save failed: Unknown error", "Table designer save failure should localize missing reasons in English.");
+            string englishUnknownIndexLoadFailedMessage = TableDesignerForm.BuildIndexMetadataLoadFailedMessage(null);
+            AssertContains(englishUnknownIndexLoadFailedMessage, "Unknown error", "Index metadata fallback should localize missing errors in English.");
             string englishColumnLoadFailedMessage = TableDesignerForm.BuildColumnMetadataLoadFailedMessage(new InvalidOperationException("columns timeout"));
             AssertContains(englishColumnLoadFailedMessage, "Cannot load column metadata", "Column metadata load failure should localize English messages.");
             AssertContains(englishColumnLoadFailedMessage, "columns timeout", "English column metadata load failure should include the provider error.");
