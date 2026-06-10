@@ -162,7 +162,7 @@ Smoke test harness：
 
 - **資料庫與 Table Designer metadata 載入失敗 ✅ 已語系化**
   - 現況：展開資料庫載入 metadata、Table Designer 載入既有資料表欄位 metadata 時，失敗訊息會顯示在狀態列或錯誤對話框。
-  - 完成內容：database metadata 載入失敗與欄位 metadata 載入失敗已改用語系字串，繁中與英文介面都會顯示一致文字，並保留 provider 原始錯誤方便排查。
+  - 完成內容：database metadata 載入失敗、欄位 metadata 載入失敗與 metadata 錯誤對話框標題已改用語系字串，繁中與英文介面都會顯示一致文字，並保留 provider 原始錯誤方便排查。
 
 - **我的最愛狀態列訊息 ✅ 已語系化**
   - 現況：加入、移除、開啟、找不到與清除我的最愛時會在主視窗狀態列顯示操作結果。

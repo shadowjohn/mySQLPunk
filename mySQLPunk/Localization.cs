@@ -395,6 +395,7 @@ namespace mySQLPunk
             Add("Metadata.LoadFunctionsFailed", "載入 Functions 失敗：{0}", "Load Functions failed: {0}");
             Add("Metadata.LoadUsersFailed", "載入 Users 失敗：{0}", "Load Users failed: {0}");
             Add("Metadata.LoadEventsFailed", "載入 Events 失敗：{0}", "Load Events failed: {0}");
+            Add("Metadata.Title", "Metadata 載入", "Metadata Load");
             Add("Metadata.DatabaseLoadFailed", "{0} metadata 載入失敗（{1}）：{2}", "{0} metadata load failed ({1}): {2}");
             Add("MaintenanceChecklist.ConnectionOpen", "連線已開啟", "Connection Open");
             Add("MaintenanceChecklist.TablesLoaded", "已載入資料表", "Tables Loaded");

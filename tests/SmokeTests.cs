@@ -5585,6 +5585,7 @@ public static class SmokeTests
             string zhMetadataLoadFailed = (string)metadataLoadFailedMethod.Invoke(null, new object[] { "PostgreSQL", "sales", new InvalidOperationException("schema timeout") });
             AssertContains(zhMetadataLoadFailed, "PostgreSQL metadata 載入失敗（sales）", "Database metadata load failure should localize Traditional Chinese messages.");
             AssertContains(zhMetadataLoadFailed, "schema timeout", "Database metadata load failure should include provider errors.");
+            AssertEquals("Metadata 載入", Localization.T("Metadata.Title"), "Database metadata error dialog title should localize Traditional Chinese messages.");
 
             try
             {
@@ -5638,6 +5639,7 @@ public static class SmokeTests
             string enMetadataLoadFailed = (string)metadataLoadFailedMethod.Invoke(null, new object[] { "SQL Server", "warehouse", new InvalidOperationException("permission denied") });
             AssertContains(enMetadataLoadFailed, "SQL Server metadata load failed (warehouse)", "Database metadata load failure should localize English messages.");
             AssertContains(enMetadataLoadFailed, "permission denied", "English database metadata load failure should include provider errors.");
+            AssertEquals("Metadata Load", Localization.T("Metadata.Title"), "Database metadata error dialog title should localize English messages.");
 
             DatabaseCopyItem unsupportedSource = new DatabaseCopyItem
             {

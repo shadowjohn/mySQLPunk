@@ -12645,7 +12645,7 @@ namespace mySQLPunk
                 string message = BuildDatabaseMetadataLoadFailedMessage(db?.ProviderName, databaseName, ex);
                 Console.WriteLine(message);
                 UpdateMainStatus(message);
-                MessageBox.Show(message, "Metadata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(message, Localization.T("Metadata.Title"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
