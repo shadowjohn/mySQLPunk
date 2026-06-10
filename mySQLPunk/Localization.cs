@@ -31,6 +31,9 @@ namespace mySQLPunk
             Add("AdvancedRegistration.ApplicationPathRequired", "請指定應用程式路徑。", "Application path is required.");
             Add("Query.StreamingUnsupportedFormat", "串流匯出只支援 CSV、TSV、JSON、XML、HTML、Markdown 與 SQL。", "Streaming export only supports CSV, TSV, JSON, XML, HTML, Markdown, and SQL.");
             Add("Query.StreamingConnectionUnavailable", "目前連線類型未提供串流連線。", "This provider does not expose a streaming connection.");
+            Add("Program.UnexpectedErrorTitle", "未預期錯誤", "Unexpected Error");
+            Add("Program.UnexpectedUiError", "執行時發生未預期的錯誤：\r\n\r\n{0}", "An unexpected error occurred while running:\r\n\r\n{0}");
+            Add("Program.UnexpectedBackgroundError", "背景執行緒發生未預期的錯誤：\r\n\r\n{0}", "An unexpected background error occurred:\r\n\r\n{0}");
             Add("Menu.File", "檔案", "File");
             Add("Menu.Edit", "編輯", "Edit");
             Add("Menu.View", "檢視", "View");
@@ -794,6 +797,7 @@ namespace mySQLPunk
             Add("Query.Export", "匯出", "Export");
             Add("Query.ExportFileFilter", "CSV UTF-8 (*.csv)|*.csv|Excel 活頁簿 (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML 表格 (*.html)|*.html|Markdown (*.md)|*.md|SQL INSERT (*.sql)|*.sql", "CSV UTF-8 (*.csv)|*.csv|Excel Workbook (*.xlsx)|*.xlsx|TSV (*.tsv)|*.tsv|JSON (*.json)|*.json|XML (*.xml)|*.xml|HTML Table (*.html)|*.html|Markdown (*.md)|*.md|SQL INSERT (*.sql)|*.sql");
             Add("Query.ExportCompleted", "已匯出 {0} 筆資料到 {1}", "Exported {0} rows to {1}");
+            Add("Query.BlobStreamingProgress", "BLOB 串流匯出中：{0} / {1}", "Streaming BLOB export: {0} / {1}");
             Add("Query.StreamingExporting", "正在串流匯出查詢結果...", "Streaming query results...");
             Add("Query.StreamingExportCompleted", "已串流匯出 {0} 筆資料（{1}）到 {2}", "Streamed {0} rows ({1}) to {2}");
             Add("Query.ExportSummaryTitle", "匯出完成", "Export Completed");

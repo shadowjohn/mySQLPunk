@@ -2429,8 +2429,14 @@ namespace mySQLPunk
             if (lblStatus == null) return;
 
             string totalText = total >= 0 ? FormatByteCount(total) : "?";
-            lblStatus.Text = "BLOB 串流匯出中：" + FormatByteCount(written) + " / " + totalText;
+            lblStatus.Text = BuildBlobStreamingProgressText(written, total);
             Application.DoEvents();
+        }
+
+        private static string BuildBlobStreamingProgressText(long written, long total)
+        {
+            string totalText = total >= 0 ? FormatByteCount(total) : "?";
+            return Localization.Format("Query.BlobStreamingProgress", FormatByteCount(written), totalText);
         }
 
         private static string FormatByteCount(long bytes)

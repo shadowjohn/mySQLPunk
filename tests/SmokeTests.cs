@@ -6236,6 +6236,33 @@ public static class SmokeTests
 
         AssertContains(message, "版本：1.0.0.0", "About message should include the current version.");
         AssertContains(message, "作者：\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin\r\nCodex 協作", "About message should list authors on separate lines.");
+
+        Type programType = typeof(Form1).Assembly.GetType("mySQLPunk.Program");
+        Assert(programType != null, "Program type should be available for smoke tests.");
+        MethodInfo unexpectedTitleMethod = programType.GetMethod("BuildUnexpectedErrorTitle", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo unexpectedUiMethod = programType.GetMethod("BuildUnexpectedUiErrorMessage", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo unexpectedBackgroundMethod = programType.GetMethod("BuildUnexpectedBackgroundErrorMessage", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo blobProgressMethod = typeof(QueryForm).GetMethod("BuildBlobStreamingProgressText", BindingFlags.Static | BindingFlags.NonPublic);
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertEquals("未預期錯誤", (string)unexpectedTitleMethod.Invoke(null, new object[0]), "Unexpected error title should localize Traditional Chinese.");
+            AssertContains((string)unexpectedUiMethod.Invoke(null, new object[] { new InvalidOperationException("boom") }), "執行時發生未預期的錯誤", "UI thread unexpected error should localize Traditional Chinese.");
+            AssertContains((string)unexpectedBackgroundMethod.Invoke(null, new object[] { "背景錯誤" }), "背景執行緒發生未預期的錯誤", "Background unexpected error should localize Traditional Chinese.");
+            AssertEquals("BLOB 串流匯出中：2 KB / 4 KB", (string)blobProgressMethod.Invoke(null, new object[] { 2048L, 4096L }), "BLOB streaming progress should localize Traditional Chinese.");
+
+            Localization.SetLanguage(Localization.English, false);
+            AssertEquals("Unexpected Error", (string)unexpectedTitleMethod.Invoke(null, new object[0]), "Unexpected error title should support English.");
+            AssertContains((string)unexpectedUiMethod.Invoke(null, new object[] { new InvalidOperationException("boom") }), "An unexpected error occurred while running", "UI thread unexpected error should support English.");
+            AssertContains((string)unexpectedBackgroundMethod.Invoke(null, new object[] { "background failure" }), "An unexpected background error occurred", "Background unexpected error should support English.");
+            AssertEquals("Streaming BLOB export: 2 KB / ?", (string)blobProgressMethod.Invoke(null, new object[] { 2048L, -1L }), "BLOB streaming progress should support English.");
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
     }
 
     private static void TestReleasePackagingScript()
