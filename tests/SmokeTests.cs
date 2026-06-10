@@ -4775,6 +4775,7 @@ public static class SmokeTests
         AssertContains(workflow, "nuget restore", "Release workflow should restore packages before building.");
         AssertContains(workflow, "scripts\\package-release.ps1", "Release workflow should use the repository packaging script.");
         AssertContains(workflow, "api.github.com/repos/$env:REPOSITORY/releases", "Release workflow should create or update a GitHub Release through the API.");
+        AssertContains(workflow, "${uploadBaseUrl}?name=$assetName", "Release workflow should preserve the upload host when appending asset query parameters.");
     }
 
     private static string FindRepositoryRootForTest()
