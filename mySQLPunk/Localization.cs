@@ -698,6 +698,7 @@ namespace mySQLPunk
             Add("Designer.IndexType", "索引類型", "Index Type");
             Add("Designer.IndexMethod", "索引方法", "Index Method");
             Add("Designer.SelectIndexColumns", "選擇索引欄位", "Select Index Columns");
+            Add("Designer.IndexMetadataLoadFailed", "無法載入索引資訊：{0}\n\n索引頁已改以空白狀態開啟，欄位設計仍可繼續使用。", "Cannot load index metadata: {0}\n\nThe index page was opened empty. Column design can still be used.");
             Add("Designer.ConfirmCloseChanges", "你要儲存對 {0} 的變更嗎？", "Save changes to {0}?");
             Add("Designer.UnsupportedExistingChanges", "目前不支援以下既有資料表變更：", "The following existing table changes are not currently supported:");
             Add("Designer.NoChangesDetected", "沒有偵測到變更。", "No changes detected.");

@@ -5410,7 +5410,24 @@ namespace mySQLPunk
                 _originalIdxDt = displayIdx.Copy();
                 BindIndexes(displayIdx);
             }
-            catch { /* 暫時不處理錯誤 */ }
+            catch (Exception ex)
+            {
+                DataTable displayIdx = CreateIndexesDisplayTable();
+                _originalIdxDt = displayIdx.Copy();
+                BindIndexes(displayIdx);
+                MessageBox.Show(
+                    BuildIndexMetadataLoadFailedMessage(ex),
+                    Localization.T("Designer.Indexes"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
+        public static string BuildIndexMetadataLoadFailedMessage(Exception ex)
+        {
+            string message = ex == null ? "" : ex.Message;
+            if (string.IsNullOrWhiteSpace(message)) message = ex == null ? "Unknown error" : ex.GetType().Name;
+            return Localization.Format("Designer.IndexMetadataLoadFailed", message);
         }
 
         private static string GetDesignerIndexType(string keyName, string nonUnique, string indexType)

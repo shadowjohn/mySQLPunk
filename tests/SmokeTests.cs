@@ -2816,6 +2816,19 @@ public static class SmokeTests
             advancedIndexes);
         AssertContains(oracleIndexSql, "INDEXTYPE IS CTXSYS.CONTEXT", "Oracle FULLTEXT index should use CTXSYS.CONTEXT.");
         AssertContains(oracleIndexSql, "INDEXTYPE IS MDSYS.SPATIAL_INDEX", "Oracle SPATIAL index should use MDSYS.SPATIAL_INDEX.");
+
+        string oldLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            string indexLoadFailedMessage = TableDesignerForm.BuildIndexMetadataLoadFailedMessage(new InvalidOperationException("metadata timeout"));
+            AssertContains(indexLoadFailedMessage, "metadata timeout", "Index metadata load failure should include the provider error.");
+            AssertContains(indexLoadFailedMessage, "索引頁", "Index metadata load failure should explain that the index page remains usable.");
+        }
+        finally
+        {
+            Localization.SetLanguage(oldLanguage, false);
+        }
     }
 
     private static string BuildCreateTableSql(IDatabase db, string tableName)
