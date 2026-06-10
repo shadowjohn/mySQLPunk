@@ -3830,16 +3830,17 @@ public static class SmokeTests
             AssertContains(details, "SpatiaLite Repair Script|Ready", "SpatiaLite diagnostics should detect the rebuild script.");
             AssertContains(details, "Build-SpatiaLiteRuntime.ps1", "SpatiaLite diagnostics should show the rebuild script path.");
             AssertContains(details, "powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should show a runnable repair command.");
-            AssertContains(details, "SpatiaLite Manifest Source|Info|來源：https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip", "SpatiaLite diagnostics should summarize the runtime manifest source.");
-            AssertContains(details, "SHA-256：abc123", "SpatiaLite diagnostics should show the manifest source checksum.");
-            AssertContains(details, "SpatiaLite Runtime File Verification|Warning|已校驗 1，缺少 1", "SpatiaLite diagnostics should verify manifest files and report missing runtime dependencies.");
-            AssertContains(details, "missing_dependency.dll 缺少", "SpatiaLite manifest verification should name missing runtime files.");
-            AssertContains(details, "../outside.dll 檔名不安全", "SpatiaLite manifest verification should reject paths outside the runtime directory.");
+            AssertContains(details, "SpatiaLite Manifest Source|Info|Source: https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip", "SpatiaLite diagnostics should summarize the runtime manifest source.");
+            AssertContains(details, "SHA-256: abc123", "SpatiaLite diagnostics should show the manifest source checksum.");
+            AssertContains(details, "SpatiaLite Runtime File Verification|Warning|Verified 1, missing 1", "SpatiaLite diagnostics should verify manifest files and report missing runtime dependencies.");
+            AssertContains(details, "missing_dependency.dll is missing", "SpatiaLite manifest verification should name missing runtime files.");
+            AssertContains(details, "../outside.dll has an unsafe file name", "SpatiaLite manifest verification should reject paths outside the runtime directory.");
             AssertContains(details, "SpatiaLite Source Cache|Ready|" + sourceArchivePath, "SpatiaLite diagnostics should detect the cached source archive.");
             AssertContains(details, "SpatiaLite Offline Package|Ready|" + offlineArchivePath, "SpatiaLite diagnostics should detect the offline source package.");
             AssertContains(details, "SpatiaLite Cached Repair Command|Info|powershell -ExecutionPolicy Bypass -File", "SpatiaLite diagnostics should expose a cached repair command.");
             AssertContains(details, "-PreferCachedSource", "SpatiaLite cached repair command should prefer the cached source archive.");
             AssertContains(details, "-OfflinePackagePath", "SpatiaLite cached repair command should use a detected offline package.");
+            AssertContains(details, "The repair command rebuilds the runtime from the official Gaia-SINS libspatialite 5.1.0 source", "SpatiaLite diagnostics should localize the English repair guide.");
             AssertContains(details, "SpatiaLite Repair Log|Info", "SpatiaLite diagnostics should show the repair log path.");
             AssertContains(details, "SpatiaLite Missing DLL|Warning", "SpatiaLite diagnostics should warn when mod_spatialite.dll is missing.");
             AssertContains(details, "missing mod_spatialite", "SpatiaLite diagnostics should keep the load error.");
@@ -3850,6 +3851,10 @@ public static class SmokeTests
             AssertContains(zhDetails, "SpatiaLite Repair Script|就緒", "SpatiaLite diagnostics should localize ready status in Traditional Chinese.");
             AssertContains(zhDetails, "SpatiaLite Repair Log|資訊", "SpatiaLite diagnostics should localize info status in Traditional Chinese.");
             AssertContains(zhDetails, "SpatiaLite Missing DLL|警告", "SpatiaLite diagnostics should localize warning status in Traditional Chinese.");
+            AssertContains(zhDetails, "SpatiaLite Manifest Source|資訊|來源：https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip", "SpatiaLite diagnostics should localize Traditional Chinese manifest source details.");
+            AssertContains(zhDetails, "SpatiaLite Runtime File Verification|警告|已校驗 1，缺少 1", "SpatiaLite diagnostics should localize Traditional Chinese manifest verification summary.");
+            AssertContains(zhDetails, "../outside.dll 檔名不安全", "SpatiaLite diagnostics should localize Traditional Chinese unsafe manifest file details.");
+            AssertContains(zhDetails, "執行修復命令會從 Gaia-SINS 官方 libspatialite 5.1.0 原始碼重建 runtime", "SpatiaLite diagnostics should localize Traditional Chinese repair guide.");
             Localization.SetLanguage(Localization.English, false);
 
             System.Diagnostics.ProcessStartInfo startInfo = SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(root);
@@ -3870,7 +3875,7 @@ public static class SmokeTests
                 Encoding.UTF8);
             List<SpatiaLiteDiagnosticRow> verifiedRows = SpatiaLiteRuntimeDiagnosticService.BuildRows(runtimeDir, "", root);
             string verifiedDetails = string.Join("\n", verifiedRows.Select(r => r.Item + "|" + r.Status + "|" + r.Detail).ToArray());
-            AssertContains(verifiedDetails, "SpatiaLite Runtime File Verification|Ready|已校驗 1 個 runtime 檔案。", "SpatiaLite diagnostics should report ready when every manifest file matches.");
+            AssertContains(verifiedDetails, "SpatiaLite Runtime File Verification|Ready|Verified 1 runtime file(s).", "SpatiaLite diagnostics should report ready when every manifest file matches.");
 
             using (my_sqlite sqlite = new my_sqlite())
             {
