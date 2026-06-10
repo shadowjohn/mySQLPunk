@@ -8992,7 +8992,7 @@ namespace mySQLPunk
 
             try
             {
-                dgvDetails.Rows.Add("類型", "View");
+                dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("View"));
                 dgvDetails.Rows.Add("名稱", viewName);
                 rtbDDL.Text = db.GetViewCreateStatement(dbName, viewName);
             }
@@ -9096,7 +9096,7 @@ namespace mySQLPunk
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
 
-            dgvDetails.Rows.Add("類型", "Model");
+            dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("Model"));
             dgvDetails.Rows.Add("名稱", modelName);
             dgvDetails.Rows.Add("資料庫", dbName);
             dgvDetails.Rows.Add("Provider", db.ProviderName);
@@ -9109,7 +9109,7 @@ namespace mySQLPunk
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
 
-            dgvDetails.Rows.Add("類型", "BI");
+            dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("BI"));
             dgvDetails.Rows.Add("名稱", biName);
             dgvDetails.Rows.Add("資料庫", dbName);
             dgvDetails.Rows.Add("Provider", db.ProviderName);
@@ -9122,7 +9122,7 @@ namespace mySQLPunk
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
 
-            dgvDetails.Rows.Add("類型", "Other");
+            dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("Other"));
             dgvDetails.Rows.Add("名稱", toolName);
             dgvDetails.Rows.Add("資料庫", dbName);
             dgvDetails.Rows.Add("Provider", db.ProviderName);
@@ -9135,12 +9135,23 @@ namespace mySQLPunk
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
 
-            dgvDetails.Rows.Add("類型", "Report");
+            dgvDetails.Rows.Add("類型", LocalizeDetailObjectType("Report"));
             dgvDetails.Rows.Add("名稱", reportName);
             dgvDetails.Rows.Add("資料庫", dbName);
             dgvDetails.Rows.Add("Provider", db.ProviderName);
             rtbDDL.Text = "-- Report: " + reportName + Environment.NewLine +
                           "-- " + GetDatabaseReportDescription(reportName);
+        }
+
+        private static string LocalizeDetailObjectType(string objectType)
+        {
+            if (string.Equals(objectType, "Table", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseModel.ObjectTypeTable");
+            if (string.Equals(objectType, "View", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseModel.ObjectTypeView");
+            if (string.Equals(objectType, "Model", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeModel");
+            if (string.Equals(objectType, "BI", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeBI");
+            if (string.Equals(objectType, "Other", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeOther");
+            if (string.Equals(objectType, "Report", StringComparison.OrdinalIgnoreCase)) return Localization.T("DatabaseGroup.TypeReport");
+            return objectType ?? string.Empty;
         }
 
         private string FormatBytes(long bytes)

@@ -4719,6 +4719,7 @@ public static class SmokeTests
         MethodInfo rowCountRankingBIMethod = typeof(Form1).GetMethod("BuildRowCountRankingBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo groupListMethod = typeof(Form1).GetMethod("BuildDatabaseGroupList", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo searchResultsMethod = typeof(Form1).GetMethod("BuildDatabaseSearchResults", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo detailObjectTypeMethod = typeof(Form1).GetMethod("LocalizeDetailObjectType", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4786,6 +4787,11 @@ public static class SmokeTests
             DataRow zhSearchColumn = FindDataRow(zhSearch, "欄位", "id");
             Assert(zhSearchColumn != null, "Database search should include matching fake column metadata.");
             AssertContains(zhSearchColumn["類型"].ToString(), "欄位", "Database search should localize Traditional Chinese column type.");
+
+            AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "View" }), "檢視", "Detail panel should localize Traditional Chinese view type.");
+            AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Model" }), "模型", "Detail panel should localize Traditional Chinese model type.");
+            AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Other" }), "其它", "Detail panel should localize Traditional Chinese other type.");
+            AssertContains((string)detailObjectTypeMethod.Invoke(null, new object[] { "Report" }), "報表", "Detail panel should localize Traditional Chinese report type.");
 
             SeedQueryHistory(form);
             MethodInfo queryHistoryMethod = typeof(Form1).GetMethod("BuildQueryHistoryTable", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4884,6 +4890,11 @@ public static class SmokeTests
             Assert(enSearchView != null, "Database search should include matching fake view metadata.");
             AssertEquals("View", enSearchView["類型"].ToString(), "Database search should support English view type.");
             AssertEquals("Views", enSearchView["位置"].ToString(), "Database search should support English view location.");
+
+            AssertEquals("View", (string)detailObjectTypeMethod.Invoke(null, new object[] { "View" }), "Detail panel should support English view type.");
+            AssertEquals("Model", (string)detailObjectTypeMethod.Invoke(null, new object[] { "Model" }), "Detail panel should support English model type.");
+            AssertEquals("BI", (string)detailObjectTypeMethod.Invoke(null, new object[] { "BI" }), "Detail panel should support English BI type.");
+            AssertEquals("Report", (string)detailObjectTypeMethod.Invoke(null, new object[] { "Report" }), "Detail panel should support English report type.");
 
             DataTable enQueryHistory = (DataTable)queryHistoryMethod.Invoke(form, new object[] { "main" });
             DataRow enQueryHistoryQuery = FindDataRow(enQueryHistory, "SQL", "SELECT 1");
