@@ -3870,7 +3870,7 @@ namespace mySQLPunk
                 return true;
             }
 
-            MessageBox.Show(Localization.Format("Object.DeleteFailed", res.ContainsKey("reason") ? res["reason"] : Localization.T("Object.UnknownError")), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(Localization.Format("Object.DeleteFailed", BuildExecutionFailureReason(res)), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
         }
 
@@ -4489,7 +4489,7 @@ namespace mySQLPunk
                 return true;
             }
 
-            MessageBox.Show(Localization.Format("Object.DeleteFailed", res.ContainsKey("reason") ? res["reason"] : Localization.T("Object.UnknownError")), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(Localization.Format("Object.DeleteFailed", BuildExecutionFailureReason(res)), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
         }
 
@@ -4525,7 +4525,7 @@ namespace mySQLPunk
             }
             else
             {
-                MessageBox.Show(Localization.Format("Object.DeleteFailed", res.ContainsKey("reason") ? res["reason"] : Localization.T("Object.UnknownError")), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(Localization.Format("Object.DeleteFailed", BuildExecutionFailureReason(res)), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
         }
@@ -5495,7 +5495,7 @@ namespace mySQLPunk
                 Dictionary<string, string> result = db.ExecSQL(sql);
                 if (!result.ContainsKey("status") || result["status"] != "OK")
                 {
-                    string reason = result.ContainsKey("reason") ? result["reason"] : BuildExecutionUnknownErrorText();
+                    string reason = BuildExecutionFailureReason(result);
                     throw new Exception(reason + Environment.NewLine + sql);
                 }
 
@@ -9864,7 +9864,7 @@ namespace mySQLPunk
                     Dictionary<string, string> result = db.ExecSQL(statements[i]);
                     if (result == null || !result.ContainsKey("status") || !string.Equals(result["status"], "OK", StringComparison.OrdinalIgnoreCase))
                     {
-                        string reason = result != null && result.ContainsKey("reason") ? result["reason"] : Localization.T("Common.Error");
+                        string reason = BuildExecutionFailureReason(result);
                         throw new InvalidOperationException(reason);
                     }
                     progressOverlay.SetProgress(i + 1, statements.Count, Localization.Format("Database.DataGenerationExecuting", i + 1, statements.Count));
@@ -10516,13 +10516,20 @@ namespace mySQLPunk
             Dictionary<string, string> result = db.ExecSQL(update.Sql);
             if (result != null && result.ContainsKey("status") && string.Equals(result["status"], "OK", StringComparison.OrdinalIgnoreCase)) return;
 
-            string reason = result != null && result.ContainsKey("reason") ? result["reason"] : BuildExecutionUnknownErrorText();
+            string reason = BuildExecutionFailureReason(result);
             throw new Exception(update.TableName + "." + update.ColumnName + ": " + reason);
         }
 
         private static string BuildExecutionUnknownErrorText()
         {
             return Localization.T("Query.UnknownError");
+        }
+
+        private static string BuildExecutionFailureReason(Dictionary<string, string> result)
+        {
+            string reason = null;
+            if (result != null) result.TryGetValue("reason", out reason);
+            return string.IsNullOrWhiteSpace(reason) ? BuildExecutionUnknownErrorText() : reason;
         }
 
         private void CloseDatabaseNode(TreeNode databaseNode)
@@ -10591,7 +10598,7 @@ namespace mySQLPunk
                 Dictionary<string, string> execResult = target.Database.ExecSQL(sql);
                 if (!execResult.ContainsKey("status") || execResult["status"] != "OK")
                 {
-                    string reason = execResult.ContainsKey("reason") ? execResult["reason"] : Localization.T("Object.UnknownError");
+                    string reason = BuildExecutionFailureReason(execResult);
                     throw new Exception(reason);
                 }
 
@@ -11762,7 +11769,7 @@ namespace mySQLPunk
                 Dictionary<string, string> result = db.ExecSQL(sql);
                 if (!result.ContainsKey("status") || result["status"] != "OK")
                 {
-                    string reason = result.ContainsKey("reason") ? result["reason"] : Localization.T("Object.UnknownError");
+                    string reason = BuildExecutionFailureReason(result);
                     throw new Exception(reason);
                 }
 
@@ -11790,7 +11797,7 @@ namespace mySQLPunk
                     Dictionary<string, string> result = db.ExecSQL(statement);
                     if (!result.ContainsKey("status") || result["status"] != "OK")
                     {
-                        string reason = result.ContainsKey("reason") ? result["reason"] : Localization.T("Object.UnknownError");
+                        string reason = BuildExecutionFailureReason(result);
                         throw new Exception(reason);
                     }
                 }

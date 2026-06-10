@@ -214,7 +214,7 @@ Smoke test harness：
 
 - **備份狀態列與未知錯誤 fallback ✅ 已語系化**
   - 現況：備份建立 / 失敗與 SQL 執行未知錯誤 fallback 會顯示在狀態列或例外訊息中。
-  - 完成內容：備份建立含路徑、備份失敗與未知錯誤 fallback 已改用語系字串，繁中與英文介面都會顯示一致文字。
+  - 完成內容：備份建立含路徑、備份失敗與未知錯誤 fallback 已改用語系字串，繁中與英文介面都會顯示一致文字；主視窗刪除 Table/View/Function、刪除資料庫、建立資料庫與資料產生執行失敗時，也會把缺少或空白的 provider reason 回退成語系化未知錯誤，避免前端只顯示空白原因。
 
 - **Provider SQL 執行失敗 fallback ✅ 已語系化**
   - 現況：MySQL、PostgreSQL、SQL Server、Oracle 與 SQLite provider 執行 SQL 失敗但底層沒有回傳 reason 時，會以通用錯誤訊息回報前端。
