@@ -274,8 +274,13 @@ namespace mySQLPunk
         private static string BuildConnectionFailureMessage(string providerName, Exception ex)
         {
             string provider = string.IsNullOrWhiteSpace(providerName) ? "Database" : providerName;
-            string reason = ex == null ? "Unknown error" : ex.Message;
-            return provider + " 連線失敗：" + reason;
+            string reason = string.IsNullOrWhiteSpace(ex?.Message) ? Localization.T("Object.UnknownError") : ex.Message;
+            return Localization.Format("Connection.TestFailed", provider, reason);
+        }
+
+        private static string BuildConnectionRetryPromptMessage(string providerName, Exception ex)
+        {
+            return Localization.Format("Connection.RetryPrompt", BuildConnectionFailureMessage(providerName, ex));
         }
 
         private bool TryEnterConnectionOpenScope(int index)
@@ -425,7 +430,7 @@ namespace mySQLPunk
                         if (canRetry)
                         {
                             DialogResult retry = MessageBox.Show(
-                                "MySQL 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                BuildConnectionRetryPromptMessage("MySQL", ex),
                                 "MySQL",
                                 MessageBoxButtons.YesNo,
                                 MessageBoxIcon.Warning);
@@ -494,7 +499,7 @@ namespace mySQLPunk
                         if (canRetry)
                         {
                             DialogResult retry = MessageBox.Show(
-                                "PostgreSQL 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                BuildConnectionRetryPromptMessage("PostgreSQL", ex),
                                 "PostgreSQL",
                                 MessageBoxButtons.YesNo,
                                 MessageBoxIcon.Warning);
@@ -566,7 +571,7 @@ namespace mySQLPunk
                         if (canRetry)
                         {
                             DialogResult retry = MessageBox.Show(
-                                "SQLite 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                BuildConnectionRetryPromptMessage("SQLite", ex),
                                 "SQLite",
                                 MessageBoxButtons.YesNo,
                                 MessageBoxIcon.Warning);
@@ -635,7 +640,7 @@ namespace mySQLPunk
                         if (canRetry)
                         {
                             DialogResult retry = MessageBox.Show(
-                                "Oracle 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                BuildConnectionRetryPromptMessage("Oracle", ex),
                                 "Oracle",
                                 MessageBoxButtons.YesNo,
                                 MessageBoxIcon.Warning);
@@ -704,7 +709,7 @@ namespace mySQLPunk
                         if (canRetry)
                         {
                             DialogResult retry = MessageBox.Show(
-                                "SQL Server 連線失敗：" + ex.Message + "\n\n是否要重試一次？",
+                                BuildConnectionRetryPromptMessage("SQL Server", ex),
                                 "SQL Server",
                                 MessageBoxButtons.YesNo,
                                 MessageBoxIcon.Warning);

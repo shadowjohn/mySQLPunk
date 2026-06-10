@@ -5656,6 +5656,8 @@ public static class SmokeTests
         MethodInfo diagnosticsMethod = typeof(Form1).GetMethod("BuildConnectionDiagnosticsTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo capabilitiesMethod = typeof(Form1).GetMethod("BuildProviderCapabilitiesTool", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo maintenanceMethod = typeof(Form1).GetMethod("BuildMaintenanceChecklistTool", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo connectionFailureMethod = typeof(Form1).GetMethod("BuildConnectionFailureMessage", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo connectionRetryPromptMethod = typeof(Form1).GetMethod("BuildConnectionRetryPromptMessage", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo spatiaLiteReadyStatusMethod = typeof(Form1).GetMethod("BuildSpatiaLiteReadyStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo spatiaLiteRepairStatusMethod = typeof(Form1).GetMethod("BuildSpatiaLiteRepairStartedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo queryHistoryLoadedStatusMethod = typeof(Form1).GetMethod("BuildQueryHistoryLoadedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
@@ -5665,6 +5667,8 @@ public static class SmokeTests
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertEquals("MySQL 連線失敗：timeout", (string)connectionFailureMethod.Invoke(null, new object[] { "MySQL", new TimeoutException("timeout") }), "Connection failure messages should localize Traditional Chinese.");
+            AssertContains((string)connectionRetryPromptMethod.Invoke(null, new object[] { "PostgreSQL", new TimeoutException("timeout") }), "是否要重試一次？", "Connection retry prompts should localize Traditional Chinese.");
             AssertEquals("SQLite + SpatiaLite 就緒", (string)spatiaLiteReadyStatusMethod.Invoke(null, new object[0]), "SpatiaLite ready status should localize Traditional Chinese.");
             AssertEquals("SpatiaLite runtime 修復腳本已啟動。", (string)spatiaLiteRepairStatusMethod.Invoke(null, new object[0]), "SpatiaLite repair status should localize Traditional Chinese.");
             AssertEquals("查詢歷程已載入：main", (string)queryHistoryLoadedStatusMethod.Invoke(null, new object[] { "main" }), "Query history status should localize Traditional Chinese.");
@@ -5785,6 +5789,8 @@ public static class SmokeTests
             AssertContains(zhOpenTabs["說明"].ToString(), "分頁", "Maintenance checklist should localize query tab count detail.");
 
             Localization.SetLanguage(Localization.English, false);
+            AssertEquals("MySQL connection failed: timeout", (string)connectionFailureMethod.Invoke(null, new object[] { "MySQL", new TimeoutException("timeout") }), "Connection failure messages should support English.");
+            AssertContains((string)connectionRetryPromptMethod.Invoke(null, new object[] { "PostgreSQL", new TimeoutException("timeout") }), "Retry once?", "Connection retry prompts should support English.");
             AssertEquals("SQLite + SpatiaLite ready", (string)spatiaLiteReadyStatusMethod.Invoke(null, new object[0]), "SpatiaLite ready status should support English.");
             AssertEquals("SpatiaLite runtime repair script started.", (string)spatiaLiteRepairStatusMethod.Invoke(null, new object[0]), "SpatiaLite repair status should support English.");
             AssertEquals("Query history loaded: main", (string)queryHistoryLoadedStatusMethod.Invoke(null, new object[] { "main" }), "Query history status should support English.");

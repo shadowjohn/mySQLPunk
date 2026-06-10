@@ -304,6 +304,7 @@ namespace mySQLPunk
             Add("Connection.MainWindowNotInitialized", "主視窗未初始化。", "The main window is not initialized.");
             Add("Connection.TestSucceeded", "{0} 連線成功。", "{0} connection succeeded.");
             Add("Connection.TestFailed", "{0} 連線失敗：{1}", "{0} connection failed: {1}");
+            Add("Connection.RetryPrompt", "{0}\n\n是否要重試一次？", "{0}\n\nRetry once?");
             Add("Connection.InitializationFailed", "{0} 初始化失敗：{1}", "{0} initialization failed: {1}");
             Add("Connection.SelectOrCreateSqliteFile", "請選擇或建立 SQLite 檔案。", "Select or create a SQLite file.");
             Add("Connection.SqliteFileFilter", "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*", "SQLite database (*.sqlite;*.db;*.sqlite3)|*.sqlite;*.db;*.sqlite3|All files (*.*)|*.*");
