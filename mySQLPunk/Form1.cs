@@ -1213,12 +1213,20 @@ namespace mySQLPunk
         }
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            string message =
+            MessageBox.Show(BuildAboutMessage(Application.ProductVersion), Localization.T("Menu.Help"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        public static string BuildAboutMessage(string productVersion)
+        {
+            return
                 "mySQLPunk\r\n\r\n" +
-                "版本：" + Application.ProductVersion + "\r\n" +
+                "版本：" + productVersion + "\r\n" +
                 "平台：.NET Framework WinForms\r\n" +
-                "支援連線：MySQL、PostgreSQL、SQLite、SQL Server、Oracle";
-            MessageBox.Show(message, Localization.T("Menu.Help"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "支援連線：MySQL、PostgreSQL、SQLite、SQL Server、Oracle\r\n\r\n" +
+                "作者：\r\n" +
+                "羽山秋人 ( https://3wa.tw )\r\n" +
+                "NickYCLin\r\n" +
+                "Codex 協作";
         }
 
         private async void CheckForUpdatesAsync(bool silent)
