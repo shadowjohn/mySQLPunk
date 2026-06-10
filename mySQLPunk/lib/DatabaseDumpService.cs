@@ -10,7 +10,7 @@ namespace mySQLPunk.lib
     {
         public static void WriteDatabaseDump(IDatabase db, string databaseName, string targetPath)
         {
-            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("Target path is required.", nameof(targetPath));
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException(Localization.T("Common.TargetPathRequired"), nameof(targetPath));
 
             string dir = Path.GetDirectoryName(targetPath);
             if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))

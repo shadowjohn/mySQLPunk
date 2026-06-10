@@ -666,7 +666,7 @@ namespace mySQLPunk.lib
         public static Dictionary<string, Dictionary<string, string>> ParseExchangeXlsx(string sourcePath, string tableNameFilter = null)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
-            if (!File.Exists(sourcePath)) throw new FileNotFoundException("SQLite column comment XLSX file does not exist.", sourcePath);
+            if (!File.Exists(sourcePath)) throw new FileNotFoundException(Localization.Format("Designer.SqliteColumnCommentXlsxFileMissing", sourcePath ?? string.Empty), sourcePath);
 
             List<List<string>> rows = ReadXlsxRows(sourcePath);
             return ParseExchangeRows(rows, "XLSX", tableNameFilter);

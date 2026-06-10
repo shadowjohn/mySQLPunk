@@ -107,7 +107,7 @@ namespace mySQLPunk.lib
             string scriptPath = GetBuildScriptPath(repositoryRoot);
             if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath))
             {
-                throw new FileNotFoundException("SpatiaLite rebuild script not found.", scriptPath);
+                throw new FileNotFoundException(Localization.Format("SpatiaLiteDiagnostics.BuildScriptFileNotFound", scriptPath ?? string.Empty), scriptPath);
             }
 
             string logPath = BuildRepairLogPath();

@@ -19,8 +19,8 @@ namespace mySQLPunk.lib
             int bufferSize = DefaultBufferSize)
         {
             if (database == null) throw new ArgumentNullException(nameof(database));
-            if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException("SQL is required.", nameof(sql));
-            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("Target path is required.", nameof(targetPath));
+            if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException(Localization.T("Common.SqlRequired"), nameof(sql));
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException(Localization.T("Common.TargetPathRequired"), nameof(targetPath));
             if (bufferSize <= 0) bufferSize = DefaultBufferSize;
 
             DbConnection connection = GetOpenConnection(database);

@@ -3662,6 +3662,67 @@ public static class SmokeTests
 
         AssertEquals("\"public\".\"users\"", DatabaseDumpService.BuildQualifiedObjectName(db, "main", "public.users"), "PostgreSQL qualified table name should preserve schema.");
         AssertEquals("'\\x0A0B'", DatabaseDumpService.ToSqlLiteral(db, new byte[] { 0x0A, 0x0B }), "PostgreSQL byte literal should be hex escaped.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                DatabaseDumpService.WriteDatabaseDump(db, "main", "");
+                Assert(false, "Database dump should require a target path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請指定輸出目標路徑", "Database dump target path validation should localize Traditional Chinese errors.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                DatabaseDumpService.WriteDatabaseDump(db, "main", "");
+                Assert(false, "Database dump should require a target path in English.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "Target path is required", "Database dump target path validation should localize English errors.");
+            }
+
+            Type treeDatabaseTargetType = typeof(Form1).GetNestedType("TreeDatabaseTarget", BindingFlags.NonPublic);
+            MethodInfo createDatabaseBackupMethod = typeof(Form1).GetMethod("CreateDatabaseBackup", BindingFlags.Instance | BindingFlags.NonPublic);
+            object form = FormatterServices.GetUninitializedObject(typeof(Form1));
+            object target = FormatterServices.GetUninitializedObject(treeDatabaseTargetType);
+
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                createDatabaseBackupMethod.Invoke(form, new object[] { target, "" });
+                Assert(false, "Form database backup should require a target path.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                ArgumentException argumentException = ex.InnerException as ArgumentException;
+                Assert(argumentException != null, "Form database backup should throw ArgumentException for missing target paths.");
+                AssertContains(argumentException.Message, "請指定輸出目標路徑", "Form database backup target path validation should localize Traditional Chinese errors.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                createDatabaseBackupMethod.Invoke(form, new object[] { target, "" });
+                Assert(false, "Form database backup should require a target path in English.");
+            }
+            catch (TargetInvocationException ex)
+            {
+                ArgumentException argumentException = ex.InnerException as ArgumentException;
+                Assert(argumentException != null, "Form database backup should throw ArgumentException for missing target paths in English.");
+                AssertContains(argumentException.Message, "Target path is required", "Form database backup target path validation should localize English errors.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
     }
 
     private static void TestSqliteColumnCommentExchangeService()
@@ -3757,6 +3818,37 @@ public static class SmokeTests
         Assert(aliasYamlPlan.TableCount == 1 && aliasYamlPlan.CommentCount == 1, "SQLite comment YAML import should support entity/attribute/note aliases.");
         AssertContains(aliasYamlSql, "'BIO'", "SQLite comment YAML alias import should include selected column.");
         AssertNotContains(aliasYamlSql, "MESSAGE", "SQLite comment YAML alias import should honor table filters.");
+
+        string missingXlsxPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_missing_" + Guid.NewGuid().ToString("N") + ".xlsx");
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                SqliteColumnCommentExchangeService.ParseExchangeXlsx(missingXlsxPath);
+                Assert(false, "SQLite comment XLSX import should fail when the file is missing.");
+            }
+            catch (FileNotFoundException ex)
+            {
+                AssertContains(ex.Message, "找不到 SQLite 欄位註解 XLSX 檔案", "SQLite comment XLSX missing file errors should localize Traditional Chinese messages.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                SqliteColumnCommentExchangeService.ParseExchangeXlsx(missingXlsxPath);
+                Assert(false, "SQLite comment XLSX import should fail when the file is missing in English.");
+            }
+            catch (FileNotFoundException ex)
+            {
+                AssertContains(ex.Message, "SQLite column comment XLSX file does not exist", "SQLite comment XLSX missing file errors should localize English messages.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
 
         SqliteColumnCommentExportResult yamlExportResult;
         string exportYaml = SqliteColumnCommentExchangeService.BuildExportYaml(db, "main", "users", out yamlExportResult);
@@ -3938,6 +4030,34 @@ public static class SmokeTests
             AssertContains(watchedStartInfo.Arguments, "Tee-Object", "Watched SpatiaLite repair should still tee progress output to a log.");
             Assert(watchedStartInfo.UseShellExecute, "Watched SpatiaLite repair should still open a PowerShell window.");
 
+            string missingScriptRoot = Path.Combine(Path.GetTempPath(), "mysqlpunk_spatialite_missing_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(missingScriptRoot);
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(missingScriptRoot, false);
+                Assert(false, "SpatiaLite repair process should require the rebuild script.");
+            }
+            catch (FileNotFoundException ex)
+            {
+                AssertContains(ex.Message, "找不到 SpatiaLite runtime 修復腳本", "SpatiaLite repair missing script errors should localize Traditional Chinese messages.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                SpatiaLiteRuntimeDiagnosticService.BuildRepairProcessStartInfo(missingScriptRoot, false);
+                Assert(false, "SpatiaLite repair process should require the rebuild script in English.");
+            }
+            catch (FileNotFoundException ex)
+            {
+                AssertContains(ex.Message, "SpatiaLite rebuild script was not found", "SpatiaLite repair missing script errors should localize English messages.");
+            }
+            finally
+            {
+                if (Directory.Exists(missingScriptRoot)) Directory.Delete(missingScriptRoot, true);
+            }
+
             File.WriteAllText(
                 Path.Combine(runtimeDir, "SPATIALITE_RUNTIME_MANIFEST.json"),
                 "{\"source_url\":\"https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip\",\"source_sha256\":\"abc123\",\"built_at_utc\":\"2026-05-24T00:00:00Z\",\"files\":[{\"name\":\"libspatialite.dll\",\"sha256\":\"" + runtimeDllHash + "\",\"bytes\":" + new FileInfo(runtimeDllPath).Length + "}]}",
@@ -4013,6 +4133,51 @@ public static class SmokeTests
         Assert(QueryResultExportService.ResolveFormat("result", 8) == QueryResultExportFormat.Sql, "SQL export filter should select SQL insert format.");
         Assert(QueryResultExportService.CanStreamFormat(QueryResultExportFormat.Sql), "SQL insert export should support streaming query results.");
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                QueryResultExportService.BuildSummary("", QueryResultExportFormat.Csv, 0);
+                Assert(false, "Query export summary should require a target path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請指定輸出目標路徑", "Query export summary should localize Traditional Chinese target path errors.");
+            }
+
+            my_sqlite validationDb = new my_sqlite();
+            try
+            {
+                QueryResultExportService.WriteStreaming(validationDb, "", null, "result.csv", QueryResultExportFormat.Csv);
+                Assert(false, "Streaming query export should require SQL text.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請輸入 SQL", "Streaming query export should localize Traditional Chinese SQL validation errors.");
+            }
+            finally
+            {
+                validationDb.Dispose();
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            try
+            {
+                QueryResultExportService.BuildSummary("", QueryResultExportFormat.Csv, 0);
+                Assert(false, "Query export summary should require a target path in English.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "Target path is required", "Query export summary should localize English target path errors.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
 
         string xlsxPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_query_export_" + Guid.NewGuid().ToString("N") + ".xlsx");
         string summaryPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_query_export_summary_" + Guid.NewGuid().ToString("N") + ".csv");
@@ -4703,6 +4868,36 @@ public static class SmokeTests
         my_sqlite db = new my_sqlite();
         try
         {
+            string previousLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                try
+                {
+                    BinaryCellStreamingService.WriteFirstColumnToFile(db, "", null, tempPath);
+                    Assert(false, "Binary streaming export should require SQL text.");
+                }
+                catch (ArgumentException ex)
+                {
+                    AssertContains(ex.Message, "請輸入 SQL", "Binary streaming export should localize Traditional Chinese SQL validation errors.");
+                }
+
+                Localization.SetLanguage(Localization.English, false);
+                try
+                {
+                    BinaryCellStreamingService.WriteFirstColumnToFile(db, "SELECT payload FROM stream_test;", null, "");
+                    Assert(false, "Binary streaming export should require a target path.");
+                }
+                catch (ArgumentException ex)
+                {
+                    AssertContains(ex.Message, "Target path is required", "Binary streaming export should localize English target path errors.");
+                }
+            }
+            finally
+            {
+                Localization.SetLanguage(previousLanguage, false);
+            }
+
             db.SetConn("Data Source=:memory:;Version=3;New=True;");
             db.Open();
             Dictionary<string, string> createResult = db.ExecSQL("CREATE TABLE stream_test (id INTEGER PRIMARY KEY, payload BLOB);");

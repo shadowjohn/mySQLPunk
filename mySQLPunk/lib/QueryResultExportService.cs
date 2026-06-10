@@ -106,7 +106,7 @@ namespace mySQLPunk.lib
 
         public static QueryResultExportSummary BuildSummary(string path, QueryResultExportFormat format, long rows, long? bytesWritten = null)
         {
-            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Target path is required.", nameof(path));
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(Localization.T("Common.TargetPathRequired"), nameof(path));
 
             FileInfo file = new FileInfo(path);
             long bytes = bytesWritten.HasValue ? bytesWritten.Value : (file.Exists ? file.Length : 0);
@@ -158,8 +158,8 @@ namespace mySQLPunk.lib
             Action<long> progress = null)
         {
             if (database == null) throw new ArgumentNullException(nameof(database));
-            if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException("SQL is required.", nameof(sql));
-            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Target path is required.", nameof(path));
+            if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException(Localization.T("Common.SqlRequired"), nameof(sql));
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(Localization.T("Common.TargetPathRequired"), nameof(path));
             if (!CanStreamFormat(format)) throw new NotSupportedException("Streaming export only supports CSV, TSV, JSON, XML, HTML, Markdown, and SQL.");
 
             DbConnection connection = BinaryCellStreamingService.GetOpenConnection(database);

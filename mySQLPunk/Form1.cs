@@ -5611,7 +5611,7 @@ namespace mySQLPunk
         private string CreateDatabaseBackup(TreeDatabaseTarget target, string targetPath)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
-            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("Target path is required.", nameof(targetPath));
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException(Localization.T("Common.TargetPathRequired"), nameof(targetPath));
 
             string dir = Path.GetDirectoryName(targetPath);
             if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))

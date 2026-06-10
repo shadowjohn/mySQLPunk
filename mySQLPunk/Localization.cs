@@ -18,6 +18,8 @@ namespace mySQLPunk
         static Localization()
         {
             Add("App.Title", "羽山的 mySQLPunk", "mySQLPunk");
+            Add("Common.TargetPathRequired", "請指定輸出目標路徑。", "Target path is required.");
+            Add("Common.SqlRequired", "請輸入 SQL。", "SQL is required.");
             Add("Menu.File", "檔案", "File");
             Add("Menu.Edit", "編輯", "Edit");
             Add("Menu.View", "檢視", "View");
@@ -304,6 +306,7 @@ namespace mySQLPunk
             Add("SpatiaLiteDiagnostics.OrJoiner", " 或 ", " or ");
             Add("SpatiaLiteDiagnostics.RepairGuide", "執行修復命令會從 Gaia-SINS 官方 libspatialite 5.1.0 原始碼重建 runtime，並輸出到 {0}；可使用來源快取或 -OfflinePackagePath 指向離線 zip。", "The repair command rebuilds the runtime from the official Gaia-SINS libspatialite 5.1.0 source and outputs it to {0}; it can use the source cache or -OfflinePackagePath for an offline zip.");
             Add("SpatiaLiteDiagnostics.BuildScriptMissing", "找不到 tools\\spatialite\\Build-SpatiaLiteRuntime.ps1，請重新取得完整 source tree 或參考 tools\\spatialite\\README.md。", "Cannot find tools\\spatialite\\Build-SpatiaLiteRuntime.ps1. Restore the full source tree or see tools\\spatialite\\README.md.");
+            Add("SpatiaLiteDiagnostics.BuildScriptFileNotFound", "找不到 SpatiaLite runtime 修復腳本：{0}", "SpatiaLite rebuild script was not found: {0}");
             Add("SpatiaLiteDiagnostics.ManifestSourceUrl", "來源：{0}", "Source: {0}");
             Add("SpatiaLiteDiagnostics.ManifestSourceSha256", "SHA-256：{0}", "SHA-256: {0}");
             Add("SpatiaLiteDiagnostics.ManifestBuiltAtUtc", "建置時間：{0}", "Built at: {0}");
@@ -891,6 +894,7 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsDictionaryDeleteFailed", "刪除註解字典失敗：{0}", "Delete comment dictionary failed: {0}");
             Add("Designer.AutoCommentsDictionaryAlreadyExists", "註解字典「{0}」已存在。", "Comment dictionary \"{0}\" already exists.");
             Add("Designer.AutoCommentsDictionaryNotFound", "找不到指定的註解字典。", "The specified comment dictionary was not found.");
+            Add("Designer.SqliteColumnCommentXlsxFileMissing", "找不到 SQLite 欄位註解 XLSX 檔案：{0}", "SQLite column comment XLSX file does not exist: {0}");
             Add("Designer.AutoCommentsDictionaryVersionRequired", "註解字典版本代號不可空白或包含特殊字元。", "Comment dictionary version id cannot be blank or contain special characters.");
             Add("Designer.AutoCommentsDictionaryVersionNotFound", "找不到指定的註解字典版本。", "The specified comment dictionary version was not found.");
             Add("Designer.AutoCommentsDictionaryNoVersions", "註解字典「{0}」目前沒有可比較或回復的歷史版本。", "Comment dictionary \"{0}\" does not have any saved versions to compare or restore.");
