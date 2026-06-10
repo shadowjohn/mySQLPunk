@@ -2816,7 +2816,7 @@ public static class SmokeTests
         string spatialSql = SqliteSpecialObjectSqlBuilder.BuildSpatiaLiteSpatialIndex("places", "geom");
         AssertEquals("SELECT CreateSpatialIndex('places', 'geom');", spatialSql, "SpatiaLite spatial index SQL should call CreateSpatialIndex.");
 
-        string previousLanguage = Localization.CurrentLanguage;
+        string reviewLanguage = Localization.CurrentLanguage;
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
@@ -2853,7 +2853,7 @@ public static class SmokeTests
         }
         finally
         {
-            Localization.SetLanguage(previousLanguage, false);
+            Localization.SetLanguage(reviewLanguage, false);
         }
     }
 
@@ -3254,11 +3254,31 @@ public static class SmokeTests
                 BackupIntegrityResult unsupportedZh = BackupIntegrityService.VerifyBackup(unsupportedPath, countSqlStatements);
                 AssertContains(unsupportedZh.Message, "不支援", "Unsupported backup type should return a Traditional Chinese validation message.");
 
+                try
+                {
+                    BackupIntegrityScheduleService.QuarantineFailedBackups(new BackupIntegrityScheduleReport(), "");
+                    Assert(false, "Backup quarantine should require a quarantine directory.");
+                }
+                catch (ArgumentException ex)
+                {
+                    AssertContains(ex.Message, "請指定備份隔離資料夾", "Backup quarantine directory validation should localize Traditional Chinese messages.");
+                }
+
                 Localization.SetLanguage(Localization.English, false);
                 BackupIntegrityResult missingIntegrity = BackupIntegrityService.VerifyBackup(Path.Combine(dir, "missing.sql"), countSqlStatements);
                 AssertContains(missingIntegrity.Message, "does not exist", "Missing backup file should return an English validation message.");
                 BackupIntegrityResult unsupportedEn = BackupIntegrityService.VerifyBackup(unsupportedPath, countSqlStatements);
                 AssertContains(unsupportedEn.Message, ".txt", "Unsupported backup type should include the rejected extension.");
+
+                try
+                {
+                    BackupIntegrityScheduleService.WriteReport(new BackupIntegrityScheduleReport(), "");
+                    Assert(false, "Backup integrity report should require a report directory.");
+                }
+                catch (ArgumentException ex)
+                {
+                    AssertContains(ex.Message, "Backup integrity report directory is required", "Backup integrity report directory validation should localize English messages.");
+                }
 
                 try
                 {
@@ -3566,6 +3586,25 @@ public static class SmokeTests
             Assert((bool)restoreReportJson["Tables"][0]["IsChanged"], "Restore content scan JSON should include table change details.");
             Assert((int)restoreReportJson["Tables"][0]["BeforeSampledRows"] == 120, "Restore content scan JSON should include sampled row coverage.");
 
+            oldLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.English, false);
+                try
+                {
+                    BackupRestoreDiffService.WriteContentScanReport(largeBefore, largeAfter, "");
+                    Assert(false, "Restore content scan report should require a report directory.");
+                }
+                catch (ArgumentException ex)
+                {
+                    AssertContains(ex.Message, "Restore content scan report directory is required", "Restore content scan report directory validation should localize English messages.");
+                }
+            }
+            finally
+            {
+                Localization.SetLanguage(oldLanguage, false);
+            }
+
             Assert(BackupRestoreDiffService.ResolveMaxContentSnapshotRows(0) == BackupRestoreDiffService.MaxContentSnapshotRows, "Restore content snapshot should use the default row limit when unset.");
             Assert(BackupRestoreDiffService.ResolveMaxContentSnapshotRows(BackupRestoreDiffService.MaxConfigurableContentSnapshotRows + 10) == BackupRestoreDiffService.MaxConfigurableContentSnapshotRows, "Restore content snapshot should clamp oversized row limits.");
             BackupMirrorSettings.RestoreContentSnapshotMaxRows = 75;
@@ -3847,6 +3886,24 @@ public static class SmokeTests
         finally
         {
             if (Directory.Exists(reviewDirectory)) Directory.Delete(reviewDirectory, true);
+        }
+        string reviewReportLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            try
+            {
+                SqliteColumnCommentExchangeService.WriteImportReviewReport(filteredReview, "");
+                Assert(false, "SQLite comment import review should require a report directory.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請指定 SQLite 欄位註解審核報表資料夾", "SQLite comment review report directory validation should localize Traditional Chinese messages.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(reviewReportLanguage, false);
         }
 
         string flatArrayJson = "[{\"table\":\"users\",\"column\":\"EMAIL\",\"comment\":\"電子郵件\"},{\"table\":\"logs\",\"column\":\"MESSAGE\",\"comment\":\"訊息\"}]";

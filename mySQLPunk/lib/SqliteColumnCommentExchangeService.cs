@@ -466,7 +466,7 @@ namespace mySQLPunk.lib
         public static string WriteImportReviewReport(SqliteColumnCommentImportReviewReport report, string reportDirectory)
         {
             if (report == null) throw new ArgumentNullException(nameof(report));
-            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException("Report directory is required.", nameof(reportDirectory));
+            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException(Localization.T("Designer.SqliteColumnCommentReviewReportDirectoryRequired"), nameof(reportDirectory));
 
             Directory.CreateDirectory(reportDirectory);
             string fileName = "sqlite-column-comments-review_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss") + ".json";

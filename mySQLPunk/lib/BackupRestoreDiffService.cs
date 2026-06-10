@@ -393,7 +393,7 @@ namespace mySQLPunk.lib
 
         public static string WriteContentScanReport(DatabaseRestoreSnapshot before, DatabaseRestoreSnapshot after, string reportDirectory)
         {
-            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException("Report directory is required.", nameof(reportDirectory));
+            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException(Localization.T("Backup.RestoreContentScanReportDirectoryRequired"), nameof(reportDirectory));
 
             DatabaseRestoreContentScanReport report = BuildContentScanReport(before, after);
             Directory.CreateDirectory(reportDirectory);

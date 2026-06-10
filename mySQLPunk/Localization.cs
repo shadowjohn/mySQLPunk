@@ -508,6 +508,8 @@ namespace mySQLPunk
             Add("Backup.IntegritySqlEmpty", "SQL 備份是空的。", "SQL backup is empty.");
             Add("Backup.IntegritySqlNoStatements", "SQL 備份沒有可執行的語句。", "SQL backup has no executable statements.");
             Add("Backup.IntegritySqlReadable", "SQL 備份可讀取。", "SQL backup is readable.");
+            Add("Backup.IntegrityReportDirectoryRequired", "請指定備份完整性報表資料夾。", "Backup integrity report directory is required.");
+            Add("Backup.QuarantineDirectoryRequired", "請指定備份隔離資料夾。", "Backup quarantine directory is required.");
             Add("Backup.IntegritySqliteFailed", "SQLite integrity_check 失敗：{0}", "SQLite integrity_check failed: {0}");
             Add("Backup.IntegritySqlitePassed", "SQLite 備份已通過 integrity_check。", "SQLite backup passed integrity_check.");
             Add("Backup.RestoreTitle", "還原備份", "Restore Backup");
@@ -518,6 +520,7 @@ namespace mySQLPunk
             Add("Backup.RestoreSuccessWithSnapshotAndDiff", "備份還原完成。執行語句數：{0}\n還原前快照：{1}\n\n還原後差異檢查：\n{2}", "Backup restore completed. Statements executed: {0}\nPre-restore snapshot: {1}\n\nPost-restore diff check:\n{2}");
             Add("Backup.RestoreContentScanReportCreated", "還原內容掃描報表：{0}", "Restore content scan report: {0}");
             Add("Backup.RestoreContentScanReportFailed", "還原內容掃描報表建立失敗：{0}", "Failed to create restore content scan report: {0}");
+            Add("Backup.RestoreContentScanReportDirectoryRequired", "請指定還原內容掃描報表資料夾。", "Restore content scan report directory is required.");
             Add("Backup.RestoreFailed", "還原備份失敗：{0}", "Backup restore failed: {0}");
             Add("Backup.RestoreSafetyBackupCreated", "還原前快照已建立：{0}", "Pre-restore snapshot created: {0}");
             Add("Backup.RestoreSafetyBackupFailedCancelled", "建立還原前快照失敗，已取消還原：{0}", "Failed to create pre-restore snapshot; restore canceled: {0}");
@@ -915,6 +918,7 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsDictionaryAlreadyExists", "註解字典「{0}」已存在。", "Comment dictionary \"{0}\" already exists.");
             Add("Designer.AutoCommentsDictionaryNotFound", "找不到指定的註解字典。", "The specified comment dictionary was not found.");
             Add("Designer.SqliteColumnCommentXlsxFileMissing", "找不到 SQLite 欄位註解 XLSX 檔案：{0}", "SQLite column comment XLSX file does not exist: {0}");
+            Add("Designer.SqliteColumnCommentReviewReportDirectoryRequired", "請指定 SQLite 欄位註解審核報表資料夾。", "SQLite column comment review report directory is required.");
             Add("Designer.AutoCommentsDictionaryVersionRequired", "註解字典版本代號不可空白或包含特殊字元。", "Comment dictionary version id cannot be blank or contain special characters.");
             Add("Designer.AutoCommentsDictionaryVersionNotFound", "找不到指定的註解字典版本。", "The specified comment dictionary version was not found.");
             Add("Designer.AutoCommentsDictionaryNoVersions", "註解字典「{0}」目前沒有可比較或回復的歷史版本。", "Comment dictionary \"{0}\" does not have any saved versions to compare or restore.");

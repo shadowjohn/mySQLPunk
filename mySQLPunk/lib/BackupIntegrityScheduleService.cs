@@ -137,7 +137,7 @@ namespace mySQLPunk.lib
             int retainCount)
         {
             if (report == null) throw new ArgumentNullException(nameof(report));
-            if (string.IsNullOrWhiteSpace(quarantineDirectory)) throw new ArgumentException("Quarantine directory is required.", nameof(quarantineDirectory));
+            if (string.IsNullOrWhiteSpace(quarantineDirectory)) throw new ArgumentException(Localization.T("Backup.QuarantineDirectoryRequired"), nameof(quarantineDirectory));
 
             BackupIntegrityQuarantineResult result = new BackupIntegrityQuarantineResult
             {
@@ -235,7 +235,7 @@ namespace mySQLPunk.lib
         public static string WriteReport(BackupIntegrityScheduleReport report, string reportDirectory)
         {
             if (report == null) throw new ArgumentNullException(nameof(report));
-            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException("Report directory is required.", nameof(reportDirectory));
+            if (string.IsNullOrWhiteSpace(reportDirectory)) throw new ArgumentException(Localization.T("Backup.IntegrityReportDirectoryRequired"), nameof(reportDirectory));
 
             Directory.CreateDirectory(reportDirectory);
             string fileName = "backup-integrity-report_" + report.VerifiedAtUtc.ToString("yyyyMMdd_HHmmss") + ".json";
