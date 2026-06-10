@@ -4719,15 +4719,29 @@ public static class SmokeTests
         table.Columns.Add("Payload", typeof(byte[]));
         table.Rows.Add("A, B", 12.5m, new byte[] { 0xAA, 0xBB, 0xCC });
 
-        string csv = QueryResultExportService.BuildText(table, QueryResultExportFormat.Csv);
-        AssertContains(csv, "\"A, B\",12.5,[BLOB 3 bytes] 0xAABBCC", "CSV export should escape commas and format BLOB values.");
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            string zhCsv = QueryResultExportService.BuildText(table, QueryResultExportFormat.Csv);
+            AssertContains(zhCsv, "\"A, B\",12.5,[BLOB 3 位元組] 0xAABBCC", "CSV export should localize BLOB previews in Traditional Chinese.");
 
-        string json = QueryResultExportService.BuildText(table, QueryResultExportFormat.Json);
-        AssertContains(json, "\"Name\": \"A, B\"", "JSON export should include string values.");
-        AssertContains(json, "[BLOB 3 bytes] 0xAABBCC", "JSON export should use the shared BLOB preview.");
+            Localization.SetLanguage(Localization.English, false);
+            string csv = QueryResultExportService.BuildText(table, QueryResultExportFormat.Csv);
+            AssertContains(csv, "\"A, B\",12.5,[BLOB 3 bytes] 0xAABBCC", "CSV export should escape commas and format BLOB values.");
 
-        string markdown = QueryResultExportService.BuildText(table, QueryResultExportFormat.Markdown);
-        AssertContains(markdown, "| Name | Amount | Payload |", "Markdown export should include headers.");
+            string json = QueryResultExportService.BuildText(table, QueryResultExportFormat.Json);
+            AssertContains(json, "\"Name\": \"A, B\"", "JSON export should include string values.");
+            AssertContains(json, "[BLOB 3 bytes] 0xAABBCC", "JSON export should use the shared BLOB preview.");
+
+            string markdown = QueryResultExportService.BuildText(table, QueryResultExportFormat.Markdown);
+            AssertContains(markdown, "| Name | Amount | Payload |", "Markdown export should include headers.");
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
+
         string sqlScript = QueryResultExportService.BuildText(table, QueryResultExportFormat.Sql);
         AssertContains(sqlScript, "INSERT INTO \"query_result\" (\"Name\", \"Amount\", \"Payload\") VALUES ('A, B', 12.5, X'AABBCC');", "SQL export should write insert statements with escaped identifiers and BLOB literals.");
         Assert(QueryResultExportService.ResolveFormat("result.json", 2) == QueryResultExportFormat.Json, "Extension should determine query export format.");
@@ -4738,7 +4752,6 @@ public static class SmokeTests
         Assert(QueryResultExportService.CanStreamFormat(QueryResultExportFormat.Sql), "SQL insert export should support streaming query results.");
         Assert(QueryResultExportService.CountExportRows(table) == 1, "Query export service should count non-deleted rows.");
 
-        string previousLanguage = Localization.CurrentLanguage;
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
@@ -4858,6 +4871,7 @@ public static class SmokeTests
                 Assert(dialog.Controls.Count > 0, "Export completed dialog should initialize its layout.");
             }
 
+            Localization.SetLanguage(Localization.English, false);
             long lastProgress = 0;
             QueryResultStreamingExportResult streamCsv = QueryResultExportService.WriteStreaming(
                 db,
@@ -4935,6 +4949,7 @@ public static class SmokeTests
         }
         finally
         {
+            Localization.SetLanguage(previousLanguage, false);
             db.Dispose();
             if (File.Exists(xlsxPath)) File.Delete(xlsxPath);
             if (File.Exists(summaryPath)) File.Delete(summaryPath);
@@ -5060,6 +5075,14 @@ public static class SmokeTests
             AssertEquals("03:04:05", FormatQueryResultValue(new TimeSpan(3, 4, 5)), "Query result time formatting should honor RecordTimeFormat.");
             AssertEquals("1,234.56", FormatQueryResultValue(1234.56m), "Query result numeric formatting should honor thousands and invariant number options.");
             AssertEquals("9,876", FormatQueryResultValue(9876), "Query result integer formatting should honor thousands option.");
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertEquals("[BLOB 3 位元組] 0xAABBCC", FormatQueryResultValue(new byte[] { 0xAA, 0xBB, 0xCC }), "Query result binary previews should localize Traditional Chinese units.");
+            AssertEquals("[BLOB 3 位元組] 0xAABBCC", FormatMainBinaryGridValue(new byte[] { 0xAA, 0xBB, 0xCC }), "Main grid binary previews should localize Traditional Chinese units.");
+            AssertEquals("[BLOB 3 位元組]", FormatQueryConflictParameterValue(new byte[] { 0xAA, 0xBB, 0xCC }), "Conflict binary previews should localize Traditional Chinese units.");
+            Localization.SetLanguage(Localization.English, false);
+            AssertEquals("[BLOB 3 bytes] 0xAABBCC", FormatQueryResultValue(new byte[] { 0xAA, 0xBB, 0xCC }), "Query result binary previews should support English units.");
+            AssertEquals("[BLOB 3 bytes] 0xAABBCC", FormatMainBinaryGridValue(new byte[] { 0xAA, 0xBB, 0xCC }), "Main grid binary previews should support English units.");
+            AssertEquals("[BLOB 3 bytes]", FormatQueryConflictParameterValue(new byte[] { 0xAA, 0xBB, 0xCC }), "Conflict binary previews should support English units.");
             Assert(QueryEditorHelpersEnabled("SELECT 1"), "Editor helpers should remain enabled below the large SQL limit.");
             Assert(!QueryEditorHelpersEnabled(new string('x', 1024 * 1024 + 1)), "Editor helpers should be disabled above the configured large SQL limit.");
 
@@ -5163,6 +5186,18 @@ public static class SmokeTests
         bool applied = (bool)method.Invoke(null, args);
         Assert(applied, "Query result value should be formatted.");
         return Convert.ToString(args[1]);
+    }
+
+    private static string FormatMainBinaryGridValue(byte[] value)
+    {
+        MethodInfo method = typeof(Form1).GetMethod("FormatBinaryGridCellValue", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { value });
+    }
+
+    private static string FormatQueryConflictParameterValue(object value)
+    {
+        MethodInfo method = typeof(QueryForm).GetMethod("FormatConflictParameterValue", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { value });
     }
 
     private static void TestQueryTableEditOptimisticWhere()

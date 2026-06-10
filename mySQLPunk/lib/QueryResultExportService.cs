@@ -886,7 +886,7 @@ namespace mySQLPunk.lib
             string wkt;
             if (GeometryWktConverter.TryGeometryBytesToWkt(bytes, out wkt))
             {
-                return "[Geometry] " + wkt;
+                return Localization.Format("Grid.GeometryPreview", wkt);
             }
 
             int previewLength = Math.Min(bytes.Length, 12);
@@ -897,7 +897,7 @@ namespace mySQLPunk.lib
             }
             if (bytes.Length > previewLength) preview.Append("...");
 
-            return "[BLOB " + bytes.Length + " bytes] 0x" + preview;
+            return Localization.Format("Grid.BinaryPreview", bytes.Length, preview.ToString());
         }
 
         private static string CsvEscape(string value)

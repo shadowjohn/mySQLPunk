@@ -920,6 +920,9 @@ namespace mySQLPunk
             Add("Query.BlobSaved", "BLOB 已匯出：{0}", "BLOB exported: {0}");
             Add("Query.BlobImported", "BLOB 已匯入：{0}", "BLOB imported: {0}");
             Add("Grid.BinaryFormatFallback", "二進位欄位已改用文字方式顯示。", "Binary column displayed as text.");
+            Add("Grid.GeometryPreview", "[幾何] {0}", "[Geometry] {0}");
+            Add("Grid.BinaryPreview", "[BLOB {0} 位元組] 0x{1}", "[BLOB {0} bytes] 0x{1}");
+            Add("Grid.BinarySizePreview", "[BLOB {0} 位元組]", "[BLOB {0} bytes]");
             Add("Query.BlobPreviewTruncated", "僅顯示前 {0} bytes，完整大小：{1} bytes。", "Showing first {0} bytes only. Full size: {1} bytes.");
             Add("Query.BlobCopyPageHex", "複製本頁 Hex", "Copy Page Hex");
             Add("Query.BlobFirstPage", "首頁", "First");

@@ -2785,7 +2785,7 @@ namespace mySQLPunk
             if (bytes == null) return "";
             if (GeometryWktConverter.TryGeometryBytesToWkt(bytes, out string wkt))
             {
-                return "[Geometry] " + wkt;
+                return Localization.Format("Grid.GeometryPreview", wkt);
             }
 
             int previewLength = Math.Min(bytes.Length, 12);
@@ -2796,7 +2796,7 @@ namespace mySQLPunk
             }
             if (bytes.Length > previewLength) preview.Append("...");
 
-            return "[BLOB " + bytes.Length + " bytes] 0x" + preview;
+            return Localization.Format("Grid.BinaryPreview", bytes.Length, preview.ToString());
         }
 
         private static bool TryFormatConfiguredResultCellValue(object value, out object formattedValue)
@@ -3897,7 +3897,7 @@ namespace mySQLPunk
         {
             if (IsDbNull(value)) return "NULL";
             byte[] bytes = value as byte[];
-            if (bytes != null) return "[BLOB " + bytes.Length.ToString(CultureInfo.InvariantCulture) + " bytes]";
+            if (bytes != null) return Localization.Format("Grid.BinarySizePreview", bytes.Length.ToString(CultureInfo.InvariantCulture));
             if (value is DateTime)
             {
                 return ((DateTime)value).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);

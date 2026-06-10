@@ -6604,7 +6604,7 @@ namespace mySQLPunk
             if (bytes == null) return "";
             if (GeometryWktConverter.TryGeometryBytesToWkt(bytes, out string wkt))
             {
-                return "[Geometry] " + wkt;
+                return Localization.Format("Grid.GeometryPreview", wkt);
             }
 
             int previewLength = Math.Min(bytes.Length, 12);
@@ -6615,7 +6615,7 @@ namespace mySQLPunk
             }
             if (bytes.Length > previewLength) preview.Append("...");
 
-            return "[BLOB " + bytes.Length + " bytes] 0x" + preview;
+            return Localization.Format("Grid.BinaryPreview", bytes.Length, preview.ToString());
         }
 
         private ContextMenuStrip BuildGridContextMenu(string groupName)
