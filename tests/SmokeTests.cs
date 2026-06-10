@@ -5961,6 +5961,7 @@ public static class SmokeTests
         MethodInfo biDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseBIDescription", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo otherDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseOtherToolDescription", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo reportDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseReportDescription", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo functionTemplateMethod = typeof(Form1).GetMethod("BuildFunctionTemplate", BindingFlags.Static | BindingFlags.NonPublic);
         string oldLanguage = Localization.CurrentLanguage;
         try
         {
@@ -6070,6 +6071,10 @@ public static class SmokeTests
             AssertEquals("備份已建立：C:\\backup.sql", (string)backupStatusMethod.Invoke(null, new object[] { "Created", "C:\\backup.sql" }), "Backup status should localize Traditional Chinese created status.");
             AssertEquals("建立備份失敗：disk full", (string)backupStatusMethod.Invoke(null, new object[] { "Failed", "disk full" }), "Backup status should localize Traditional Chinese failed status.");
             AssertEquals("未知錯誤", (string)unknownErrorMethod.Invoke(null, new object[0]), "Execution fallback should localize Traditional Chinese unknown errors.");
+            string zhSqliteFunctionTemplate = (string)functionTemplateMethod.Invoke(null, new object[] { new my_sqlite(), "main", "" });
+            AssertContains(zhSqliteFunctionTemplate, "SQLite 不會把函式儲存在資料庫 schema", "SQLite function template should localize Traditional Chinese schema limitation comments.");
+            AssertContains(zhSqliteFunctionTemplate, "應用程式自訂 SQLite 函式必須由用戶端連線註冊", "SQLite function template should localize Traditional Chinese client-defined comments.");
+            AssertContains(zhSqliteFunctionTemplate, "SELECT 1;", "SQLite function template should keep executable fallback SQL.");
 
             SeedQueryHistory(form);
             MethodInfo queryHistoryMethod = typeof(Form1).GetMethod("BuildQueryHistoryTable", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -6120,6 +6125,9 @@ public static class SmokeTests
             AssertContains((string)biDescriptionMethod.Invoke(null, new object[] { "Table Size Summary" }), "data length", "BI descriptions should support English text.");
             AssertContains((string)otherDescriptionMethod.Invoke(null, new object[] { "Provider Capabilities" }), "capabilities", "Other tool descriptions should support English text.");
             AssertContains((string)reportDescriptionMethod.Invoke(null, new object[] { "Object Inventory" }), "backup targets", "Report descriptions should support English text.");
+            string enSqliteFunctionTemplate = (string)functionTemplateMethod.Invoke(null, new object[] { new my_sqlite(), "main", "" });
+            AssertContains(enSqliteFunctionTemplate, "SQLite does not store functions in the database schema", "SQLite function template should support English schema limitation comments.");
+            AssertContains(enSqliteFunctionTemplate, "Application-defined SQLite functions must be registered by the client connection", "SQLite function template should support English client-defined comments.");
 
             DataTable postgresCapabilities = (DataTable)capabilitiesMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main" });
             DataRow tablesCapability = FindDataRow(postgresCapabilities, "項目", "Tables");

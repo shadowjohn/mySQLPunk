@@ -827,6 +827,8 @@ namespace mySQLPunk
             Add("Object.ViewDeleted", "檢視已刪除。", "View deleted.");
             Add("Object.FunctionDeleted", "函式或程序已刪除。", "Function or procedure deleted.");
             Add("Object.SqliteNoStoredFunction", "SQLite 不支援資料庫內建 stored function。", "SQLite does not support built-in stored functions.");
+            Add("Object.SqliteFunctionTemplateNoSchema", "SQLite 不會把函式儲存在資料庫 schema。", "SQLite does not store functions in the database schema.");
+            Add("Object.SqliteFunctionTemplateClientDefined", "應用程式自訂 SQLite 函式必須由用戶端連線註冊。", "Application-defined SQLite functions must be registered by the client connection.");
             Add("Object.TableDeletedStatus", "資料表已刪除：{0}", "Table deleted: {0}");
             Add("Object.ViewDeletedStatus", "檢視已刪除：{0}", "View deleted: {0}");
             Add("Object.FunctionDeletedStatus", "函式或程序已刪除：{0}", "Function deleted: {0}");

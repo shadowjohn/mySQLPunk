@@ -118,7 +118,7 @@ Smoke test harness：
 
 - **Provider 功能支援表 ✅ 已語系化**
   - 現況：`其它 > 功能支援` 會依目前連線列出資料表、檢視、可編輯資料表資料、SQL 匯入/匯出、備份、Stored Functions 與 Triggers/Events 的支援狀態。
-  - 完成內容：功能名稱、支援/不支援狀態、已載入數量、SQLite 備份方式、邏輯 SQL dump、SQLite 不儲存 database routines 等說明，以及 Other 清單中的工具描述已改用繁中/英文語系字串。
+  - 完成內容：功能名稱、支援/不支援狀態、已載入數量、SQLite 備份方式、邏輯 SQL dump、SQLite 不儲存 database routines 等說明，以及 Other 清單中的工具描述已改用繁中/英文語系字串；SQLite 新增函式 SQL 範本中的限制註解也會依目前語系顯示，保留 `SELECT 1;` 作為可執行 fallback。
 
 - **維護檢查表 ✅ 已語系化**
   - 現況：`其它 > 維護檢查` 會列出連線狀態、資料表/檢視載入數、備份目標、開啟中的查詢分頁與最大資料表。

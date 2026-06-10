@@ -6048,8 +6048,8 @@ namespace mySQLPunk
         {
             if (db is my_sqlite)
             {
-                return "-- SQLite does not store functions in the database schema." + Environment.NewLine +
-                       "-- Application-defined SQLite functions must be registered by the client connection." + Environment.NewLine +
+                return "-- " + Localization.T("Object.SqliteFunctionTemplateNoSchema") + Environment.NewLine +
+                       "-- " + Localization.T("Object.SqliteFunctionTemplateClientDefined") + Environment.NewLine +
                        "SELECT 1;";
             }
 
