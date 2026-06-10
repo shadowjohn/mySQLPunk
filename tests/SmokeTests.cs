@@ -6515,6 +6515,8 @@ public static class SmokeTests
         try
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertEquals("套用進階註冊設定失敗：未知錯誤", OptionsForm.BuildAdvancedRegistrationApplyFailedMessage(new Exception("")), "Blank advanced registration apply errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("套用進階註冊設定失敗：登錄權限不足", OptionsForm.BuildAdvancedRegistrationApplyFailedMessage(new InvalidOperationException(" 登錄權限不足 ")), "Advanced registration apply errors should preserve explicit Traditional Chinese reasons.");
             try
             {
                 AdvancedRegistrationService.Apply(AdvancedRegistrationService.BuildPlan("", true, false));
@@ -6526,6 +6528,7 @@ public static class SmokeTests
             }
 
             Localization.SetLanguage(Localization.English, false);
+            AssertEquals("Failed to apply advanced registration settings: Unknown error", OptionsForm.BuildAdvancedRegistrationApplyFailedMessage(new Exception("   ")), "Blank advanced registration apply errors should localize English unknown errors.");
             try
             {
                 AdvancedRegistrationService.Apply(AdvancedRegistrationService.BuildPlan("", true, false));

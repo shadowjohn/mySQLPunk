@@ -959,11 +959,28 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    T("套用進階註冊設定失敗：", "Failed to apply advanced registration settings: ") + ex.Message,
+                    BuildAdvancedRegistrationApplyFailedMessage(ex),
                     Localization.T("Common.Error"),
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
+        }
+
+        public static string BuildAdvancedRegistrationApplyFailedMessage(Exception ex)
+        {
+            string reason = ex == null ? null : ex.Message;
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                reason = Localization.T("Object.UnknownError");
+            }
+            else
+            {
+                reason = reason.Trim();
+            }
+
+            return (Localization.IsEnglish
+                ? "Failed to apply advanced registration settings: "
+                : "套用進階註冊設定失敗：") + reason;
         }
 
         private void UpdateSelection()
