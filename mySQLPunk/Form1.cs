@@ -1292,7 +1292,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                string message = Localization.Format("Update.CheckFailed", ex.Message);
+                string message = BuildFormattedExceptionMessage("Update.CheckFailed", ex);
                 UpdateMainStatus(message);
                 if (!silent)
                 {
@@ -1697,7 +1697,7 @@ namespace mySQLPunk
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show(Localization.Format("Connection.ImportTrustSourceFailed", ex.Message), dialog.Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBox.Show(BuildFormattedExceptionMessage("Connection.ImportTrustSourceFailed", ex), dialog.Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 };
 
@@ -4841,7 +4841,7 @@ namespace mySQLPunk
                 catch (Exception ex)
                 {
                     MessageBox.Show(
-                        Localization.Format("Object.SqliteColumnCommentsExportFailed", ex.Message),
+                        BuildFormattedExceptionMessage("Object.SqliteColumnCommentsExportFailed", ex),
                         Localization.T("Tool.ExportSqliteColumnComments"),
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
@@ -4912,7 +4912,7 @@ namespace mySQLPunk
                 catch (Exception ex)
                 {
                     MessageBox.Show(
-                        Localization.Format("Object.SqliteColumnCommentsImportFailed", ex.Message),
+                        BuildFormattedExceptionMessage("Object.SqliteColumnCommentsImportFailed", ex),
                         Localization.T("Tool.ImportSqliteColumnComments"),
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
@@ -5227,7 +5227,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    string message = Localization.Format("Backup.RestoreFailed", ex.Message);
+                    string message = BuildFormattedExceptionMessage("Backup.RestoreFailed", ex);
                     MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                     UpdateMainStatus(message);
                 }
@@ -5318,7 +5318,7 @@ namespace mySQLPunk
                     }
                     catch (Exception ex)
                     {
-                        string message = Localization.Format("Backup.QuarantineRestoreFailed", ex.Message);
+                        string message = BuildFormattedExceptionMessage("Backup.QuarantineRestoreFailed", ex);
                         MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                         UpdateMainStatus(message);
                     }
@@ -5420,7 +5420,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                return Localization.Format("Backup.RestoreContentScanReportFailed", ex.Message);
+                return BuildFormattedExceptionMessage("Backup.RestoreContentScanReportFailed", ex);
             }
         }
 
@@ -5456,7 +5456,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException(Localization.Format("Backup.RestoreSafetyBackupFailedCancelled", ex.Message), ex);
+                throw new InvalidOperationException(BuildFormattedExceptionMessage("Backup.RestoreSafetyBackupFailedCancelled", ex), ex);
             }
         }
 
