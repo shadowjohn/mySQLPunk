@@ -949,6 +949,8 @@ namespace mySQLPunk
             Add("Query.ExportError", "匯出錯誤", "Export Error");
             Add("Query.Float", "浮動", "Float");
             Add("Query.Dock", "嵌入", "Dock");
+            Add("Query.Undock", "取消停靠", "Undock");
+            Add("Query.FloatUndock", "{0} / {1}", "{0} / {1}");
             Add("Query.Results", "結果", "Results");
             Add("Query.Limit", " 筆數限制：", " Limit: ");
             Add("Query.Records", " 筆 ", " records ");

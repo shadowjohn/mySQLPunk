@@ -5879,6 +5879,7 @@ public static class SmokeTests
         MethodInfo spatiaLiteRepairStatusMethod = typeof(Form1).GetMethod("BuildSpatiaLiteRepairStartedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo queryHistoryLoadedStatusMethod = typeof(Form1).GetMethod("BuildQueryHistoryLoadedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo queryTabOpenedStatusMethod = typeof(Form1).GetMethod("BuildQueryTabOpenedStatusText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo floatUndockMenuTextMethod = typeof(Form1).GetMethod("BuildFloatUndockMenuText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo databaseGroupMissingStatusMethod = typeof(Form1).GetMethod("BuildDatabaseGroupMissingStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo modelDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseModelDescription", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo biDescriptionMethod = typeof(Form1).GetMethod("GetDatabaseBIDescription", BindingFlags.Static | BindingFlags.NonPublic);
@@ -5894,6 +5895,7 @@ public static class SmokeTests
             AssertEquals("SpatiaLite runtime 修復腳本已啟動。", (string)spatiaLiteRepairStatusMethod.Invoke(null, new object[0]), "SpatiaLite repair status should localize Traditional Chinese.");
             AssertEquals("查詢歷程已載入：main", (string)queryHistoryLoadedStatusMethod.Invoke(null, new object[] { "main" }), "Query history status should localize Traditional Chinese.");
             AssertEquals("查詢分頁已開啟：Query 1", (string)queryTabOpenedStatusMethod.Invoke(null, new object[] { "Query 1" }), "Query tab status should localize Traditional Chinese.");
+            AssertEquals("浮動 / 取消停靠", (string)floatUndockMenuTextMethod.Invoke(null, new object[0]), "Query tab float/undock menu should localize Traditional Chinese.");
             AssertEquals("目前資料庫沒有 Reports 節點。", (string)databaseGroupMissingStatusMethod.Invoke(null, new object[] { "Reports" }), "Missing database group status should localize Traditional Chinese.");
             AssertContains((string)modelDescriptionMethod.Invoke(null, new object[] { "Column Catalog" }), "欄位", "Model descriptions should localize Traditional Chinese text.");
             AssertContains((string)biDescriptionMethod.Invoke(null, new object[] { "Table Size Summary" }), "資料長度", "BI descriptions should localize Traditional Chinese text.");
@@ -6033,6 +6035,7 @@ public static class SmokeTests
             AssertEquals("SpatiaLite runtime repair script started.", (string)spatiaLiteRepairStatusMethod.Invoke(null, new object[0]), "SpatiaLite repair status should support English.");
             AssertEquals("Query history loaded: main", (string)queryHistoryLoadedStatusMethod.Invoke(null, new object[] { "main" }), "Query history status should support English.");
             AssertEquals("Query tab opened: Query 1", (string)queryTabOpenedStatusMethod.Invoke(null, new object[] { "Query 1" }), "Query tab status should support English.");
+            AssertEquals("Float / Undock", (string)floatUndockMenuTextMethod.Invoke(null, new object[0]), "Query tab float/undock menu should support English.");
             AssertEquals("Current database has no Reports node.", (string)databaseGroupMissingStatusMethod.Invoke(null, new object[] { "Reports" }), "Missing database group status should support English.");
             AssertContains((string)modelDescriptionMethod.Invoke(null, new object[] { "Column Catalog" }), "columns", "Model descriptions should support English text.");
             AssertContains((string)biDescriptionMethod.Invoke(null, new object[] { "Table Size Summary" }), "data length", "BI descriptions should support English text.");

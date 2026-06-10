@@ -1410,6 +1410,11 @@ namespace mySQLPunk
             return Localization.Format("Status.QueryTabOpened", tabTitle);
         }
 
+        private static string BuildFloatUndockMenuText()
+        {
+            return Localization.Format("Query.FloatUndock", Localization.T("Query.Float"), Localization.T("Query.Undock"));
+        }
+
         private static string BuildDatabaseGroupMissingStatusText(string groupName)
         {
             return Localization.Format("Status.DatabaseGroupMissing", groupName);
@@ -3879,7 +3884,7 @@ namespace mySQLPunk
                     {
                         queryTabs.SelectedIndex = i;
                         var cms = new ContextMenuStrip();
-                        var itemFloat = new ToolStripMenuItem(Localization.T("Query.Float") + " / Undock");
+                        var itemFloat = new ToolStripMenuItem(BuildFloatUndockMenuText());
                         itemFloat.Click += (s, ev) => {
                             if (queryTabs.SelectedTab?.Tag is IDockableForm dockable)
                                 FloatDockableForm(dockable);
