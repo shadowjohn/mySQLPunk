@@ -9160,9 +9160,9 @@ namespace mySQLPunk
                 AddDetailRow("Host", match["Host"]);
                 AddDetailRow("Status", match["Status"]);
                 AddDetailRow("Source", match["Source"]);
-                rtbDDL.Text = "-- User: " + match["Name"] + Environment.NewLine +
-                              "-- Source: " + match["Source"] + Environment.NewLine +
-                              "-- Status: " + match["Status"];
+                rtbDDL.Text = BuildDetailDdlHeaderLine("User", Convert.ToString(match["Name"])) + Environment.NewLine +
+                              BuildDetailDdlCommentLine("Source", Convert.ToString(match["Source"])) + Environment.NewLine +
+                              BuildDetailDdlCommentLine("Status", Convert.ToString(match["Status"]));
             }
             catch (Exception ex)
             {
@@ -9179,8 +9179,8 @@ namespace mySQLPunk
             AddDetailRow("Name", modelName);
             AddDetailRow("Database", dbName);
             AddDetailRow("Provider", db.ProviderName);
-            rtbDDL.Text = "-- Model: " + modelName + Environment.NewLine +
-                          "-- " + GetDatabaseModelDescription(modelName);
+            rtbDDL.Text = BuildDetailDdlHeaderLine("Model", modelName) + Environment.NewLine +
+                          BuildDetailDdlDescriptionLine(GetDatabaseModelDescription(modelName));
         }
 
         private void ShowBIDetails(IDatabase db, string dbName, string biName)
@@ -9192,8 +9192,8 @@ namespace mySQLPunk
             AddDetailRow("Name", biName);
             AddDetailRow("Database", dbName);
             AddDetailRow("Provider", db.ProviderName);
-            rtbDDL.Text = "-- BI: " + biName + Environment.NewLine +
-                          "-- " + GetDatabaseBIDescription(biName);
+            rtbDDL.Text = BuildDetailDdlHeaderLine("BI", biName) + Environment.NewLine +
+                          BuildDetailDdlDescriptionLine(GetDatabaseBIDescription(biName));
         }
 
         private void ShowOtherToolDetails(IDatabase db, string dbName, string toolName)
@@ -9205,8 +9205,8 @@ namespace mySQLPunk
             AddDetailRow("Name", toolName);
             AddDetailRow("Database", dbName);
             AddDetailRow("Provider", db.ProviderName);
-            rtbDDL.Text = "-- Other: " + toolName + Environment.NewLine +
-                          "-- " + GetDatabaseOtherToolDescription(toolName);
+            rtbDDL.Text = BuildDetailDdlHeaderLine("Other", toolName) + Environment.NewLine +
+                          BuildDetailDdlDescriptionLine(GetDatabaseOtherToolDescription(toolName));
         }
 
         private void ShowReportDetails(IDatabase db, string dbName, string reportName)
@@ -9218,8 +9218,8 @@ namespace mySQLPunk
             AddDetailRow("Name", reportName);
             AddDetailRow("Database", dbName);
             AddDetailRow("Provider", db.ProviderName);
-            rtbDDL.Text = "-- Report: " + reportName + Environment.NewLine +
-                          "-- " + GetDatabaseReportDescription(reportName);
+            rtbDDL.Text = BuildDetailDdlHeaderLine("Report", reportName) + Environment.NewLine +
+                          BuildDetailDdlDescriptionLine(GetDatabaseReportDescription(reportName));
         }
 
         private static string LocalizeDetailObjectType(string objectType)
@@ -9300,6 +9300,21 @@ namespace mySQLPunk
             if (string.Equals(objectType, "Function", StringComparison.OrdinalIgnoreCase)) key = "Detail.FunctionNotFound";
             else if (string.Equals(objectType, "User", StringComparison.OrdinalIgnoreCase)) key = "Detail.UserNotFound";
             return Localization.Format(key, objectName ?? string.Empty);
+        }
+
+        private static string BuildDetailDdlHeaderLine(string objectType, string objectName)
+        {
+            return Localization.Format("Detail.DdlHeaderLine", LocalizeDetailObjectType(objectType), objectName ?? string.Empty);
+        }
+
+        private static string BuildDetailDdlCommentLine(string propertyName, string value)
+        {
+            return Localization.Format("Detail.DdlCommentLine", BuildDetailPropertyName(propertyName), value ?? string.Empty);
+        }
+
+        private static string BuildDetailDdlDescriptionLine(string description)
+        {
+            return Localization.Format("Detail.DdlDescriptionLine", description ?? string.Empty);
         }
 
         private string FormatBytes(long bytes)

@@ -432,6 +432,9 @@ namespace mySQLPunk
             Add("Detail.ObjectTypeEvent", "事件", "Event");
             Add("Detail.ObjectTypeFunction", "函式", "Function");
             Add("Detail.ObjectTypeUser", "使用者", "User");
+            Add("Detail.DdlHeaderLine", "-- {0}：{1}", "-- {0}: {1}");
+            Add("Detail.DdlCommentLine", "-- {0}：{1}", "-- {0}: {1}");
+            Add("Detail.DdlDescriptionLine", "-- {0}", "-- {0}");
             Add("Detail.GridProperty", "屬性", "Property");
             Add("Detail.GridValue", "值", "Value");
             Add("Detail.Property.CharacterSet", "字元集", "Character Set");

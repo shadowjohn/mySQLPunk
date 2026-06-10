@@ -5886,6 +5886,9 @@ public static class SmokeTests
         MethodInfo detailPropertyNameMethod = typeof(Form1).GetMethod("BuildDetailPropertyName", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailLoadErrorMethod = typeof(Form1).GetMethod("BuildDetailLoadErrorText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo detailNotFoundMethod = typeof(Form1).GetMethod("BuildDetailNotFoundText", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo detailDdlHeaderLineMethod = typeof(Form1).GetMethod("BuildDetailDdlHeaderLine", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo detailDdlCommentLineMethod = typeof(Form1).GetMethod("BuildDetailDdlCommentLine", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo detailDdlDescriptionLineMethod = typeof(Form1).GetMethod("BuildDetailDdlDescriptionLine", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo favoriteStatusMethod = typeof(Form1).GetMethod("BuildFavoriteStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo backupStatusMethod = typeof(Form1).GetMethod("BuildBackupStatusText", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo unknownErrorMethod = typeof(Form1).GetMethod("BuildExecutionUnknownErrorText", BindingFlags.Static | BindingFlags.NonPublic);
@@ -6003,6 +6006,9 @@ public static class SmokeTests
             AssertContains((string)detailLoadErrorMethod.Invoke(null, new object[] { "Function", "boom" }), "載入函式細節失敗", "Detail panel should localize Traditional Chinese function load errors.");
             AssertContains((string)detailNotFoundMethod.Invoke(null, new object[] { "Event", "nightly" }), "找不到事件", "Detail panel should localize Traditional Chinese event not-found message.");
             AssertContains((string)detailNotFoundMethod.Invoke(null, new object[] { "User", "alice" }), "找不到使用者", "Detail panel should localize Traditional Chinese user not-found message.");
+            AssertEquals("-- 模型：Schema Overview", (string)detailDdlHeaderLineMethod.Invoke(null, new object[] { "Model", "Schema Overview" }), "Detail DDL header should localize Traditional Chinese object type and separator.");
+            AssertEquals("-- 來源：metadata", (string)detailDdlCommentLineMethod.Invoke(null, new object[] { "Source", "metadata" }), "Detail DDL comment labels should localize Traditional Chinese properties.");
+            AssertEquals("-- 彙整資料表與檢視的欄位數、索引數與列數", (string)detailDdlDescriptionLineMethod.Invoke(null, new object[] { (string)modelDescriptionMethod.Invoke(null, new object[] { "Schema Overview" }) }), "Detail DDL description comments should preserve localized Traditional Chinese descriptions.");
             AssertEquals("已加入我的最愛：Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Added", "Root\\main" }), "Favorites should localize Traditional Chinese added status.");
             AssertEquals("已移出我的最愛：Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Removed", "Root\\main" }), "Favorites should localize Traditional Chinese removed status.");
             AssertEquals("找不到我的最愛：Missing\\Node", (string)favoriteStatusMethod.Invoke(null, new object[] { "NotFound", "Missing\\Node" }), "Favorites should localize Traditional Chinese not-found status.");
@@ -6143,6 +6149,9 @@ public static class SmokeTests
             AssertEquals("Error loading user details: boom", (string)detailLoadErrorMethod.Invoke(null, new object[] { "User", "boom" }), "Detail panel should support English user load errors.");
             AssertEquals("Function not found: nightly", (string)detailNotFoundMethod.Invoke(null, new object[] { "Function", "nightly" }), "Detail panel should support English function not-found message.");
             AssertEquals("User not found: alice", (string)detailNotFoundMethod.Invoke(null, new object[] { "User", "alice" }), "Detail panel should support English user not-found message.");
+            AssertEquals("-- Model: Schema Overview", (string)detailDdlHeaderLineMethod.Invoke(null, new object[] { "Model", "Schema Overview" }), "Detail DDL header should support English object type and separator.");
+            AssertEquals("-- Source: metadata", (string)detailDdlCommentLineMethod.Invoke(null, new object[] { "Source", "metadata" }), "Detail DDL comment labels should support English properties.");
+            AssertEquals("-- Summarizes table and view column counts, index counts, and row counts.", (string)detailDdlDescriptionLineMethod.Invoke(null, new object[] { (string)modelDescriptionMethod.Invoke(null, new object[] { "Schema Overview" }) }), "Detail DDL description comments should preserve localized English descriptions.");
             AssertEquals("Favorite added: Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Added", "Root\\main" }), "Favorites should support English added status.");
             AssertEquals("Favorite removed: Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Removed", "Root\\main" }), "Favorites should support English removed status.");
             AssertEquals("Favorite opened: Root\\main", (string)favoriteStatusMethod.Invoke(null, new object[] { "Opened", "Root\\main" }), "Favorites should support English opened status.");
