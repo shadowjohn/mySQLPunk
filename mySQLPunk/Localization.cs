@@ -919,6 +919,18 @@ namespace mySQLPunk
             Add("Designer.AutoCommentsDictionaryNotFound", "找不到指定的註解字典。", "The specified comment dictionary was not found.");
             Add("Designer.SqliteColumnCommentXlsxFileMissing", "找不到 SQLite 欄位註解 XLSX 檔案：{0}", "SQLite column comment XLSX file does not exist: {0}");
             Add("Designer.SqliteColumnCommentReviewReportDirectoryRequired", "請指定 SQLite 欄位註解審核報表資料夾。", "SQLite column comment review report directory is required.");
+            Add("Designer.SqliteColumnCommentMissingOptionValue", "請提供 {0} 的參數值。", "Missing value for {0}.");
+            Add("Designer.SqliteColumnCommentRequiredOptionMissing", "請提供必要參數 {0}。", "Missing required option {0}.");
+            Add("Designer.SqliteColumnCommentDatabasePathRequired", "請指定 SQLite 資料庫路徑。", "SQLite database path is required.");
+            Add("Designer.SqliteColumnCommentExchangeJsonEmpty", "SQLite 欄位註解交換檔案是空的。", "SQLite column comment exchange file is empty.");
+            Add("Designer.SqliteColumnCommentExchangeNoUsableComments", "SQLite 欄位註解交換檔案沒有可用註解。", "SQLite column comment exchange file has no usable comments.");
+            Add("Designer.SqliteColumnCommentUnsupportedJsonObject", "SQLite 欄位註解交換檔案不是支援的 JSON 物件。", "SQLite column comment exchange file is not a supported JSON object.");
+            Add("Designer.SqliteColumnCommentCsvEmpty", "SQLite 欄位註解 CSV 是空的。", "SQLite column comment CSV is empty.");
+            Add("Designer.SqliteColumnCommentYamlEmpty", "SQLite 欄位註解 YAML 是空的。", "SQLite column comment YAML is empty.");
+            Add("Designer.SqliteColumnCommentSourceNoRows", "SQLite 欄位註解 {0} 沒有資料列。", "SQLite column comment {0} has no rows.");
+            Add("Designer.SqliteColumnCommentSourceMissingHeaders", "SQLite 欄位註解 {0} 必須包含 table、column 與 comment 欄位標題。", "SQLite column comment {0} requires table, column and comment headers.");
+            Add("Designer.SqliteColumnCommentSourceNoUsableComments", "SQLite 欄位註解 {0} 沒有可用註解。", "SQLite column comment {0} has no usable comments.");
+            Add("Designer.SqliteColumnCommentXlsxNoFirstWorksheet", "SQLite 欄位註解 XLSX 沒有第一個工作表。", "SQLite column comment XLSX has no first worksheet.");
             Add("Designer.AutoCommentsDictionaryVersionRequired", "註解字典版本代號不可空白或包含特殊字元。", "Comment dictionary version id cannot be blank or contain special characters.");
             Add("Designer.AutoCommentsDictionaryVersionNotFound", "找不到指定的註解字典版本。", "The specified comment dictionary version was not found.");
             Add("Designer.AutoCommentsDictionaryNoVersions", "註解字典「{0}」目前沒有可比較或回復的歷史版本。", "Comment dictionary \"{0}\" does not have any saved versions to compare or restore.");

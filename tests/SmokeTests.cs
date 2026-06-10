@@ -3906,6 +3906,155 @@ public static class SmokeTests
             Localization.SetLanguage(reviewReportLanguage, false);
         }
 
+        string sqliteCommentErrorLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            SqliteColumnCommentCliResult missingValueResult = SqliteColumnCommentCliService.TryRun(new[]
+            {
+                "--sqlite-comments-export",
+                "--database"
+            });
+            Assert(missingValueResult.Handled && missingValueResult.ExitCode == 1, "SQLite comment CLI should reject options without values.");
+            AssertContains(missingValueResult.Message, "請提供 --database 的參數值", "SQLite comment CLI missing option values should localize Traditional Chinese messages.");
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildImportPlan("");
+                Assert(false, "SQLite comment JSON import should reject empty content.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "SQLite 欄位註解交換檔案是空的", "SQLite comment empty JSON errors should localize Traditional Chinese messages.");
+            }
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildImportPlanFromCsv("table,column\r\nusers,NAME\r\n");
+                Assert(false, "SQLite comment CSV import should require comment headers.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "必須包含 table、column 與 comment 欄位標題", "SQLite comment CSV header errors should localize Traditional Chinese messages.");
+            }
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildImportPlanFromFile("");
+                Assert(false, "SQLite comment import from file should require a source path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "請指定檔案路徑", "SQLite comment source path validation should localize Traditional Chinese messages.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            SqliteColumnCommentCliResult missingRequiredResult = SqliteColumnCommentCliService.TryRun(new[]
+            {
+                "--sqlite-comments-export"
+            });
+            Assert(missingRequiredResult.Handled && missingRequiredResult.ExitCode == 1, "SQLite comment CLI should reject missing required options.");
+            AssertContains(missingRequiredResult.Message, "Missing required option --database", "SQLite comment CLI missing required options should localize English messages.");
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildImportPlan("[]");
+                Assert(false, "SQLite comment JSON import should reject empty arrays.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "has no usable comments", "SQLite comment empty JSON arrays should localize English messages.");
+            }
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildImportPlan("123");
+                Assert(false, "SQLite comment JSON import should reject unsupported roots.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "is not a supported JSON object", "SQLite comment unsupported JSON errors should localize English messages.");
+            }
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildImportPlanFromCsv("");
+                Assert(false, "SQLite comment CSV import should reject empty content.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "SQLite column comment CSV is empty", "SQLite comment empty CSV errors should localize English messages.");
+            }
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildImportPlanFromYaml("");
+                Assert(false, "SQLite comment YAML import should reject empty content.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "SQLite column comment YAML is empty", "SQLite comment empty YAML errors should localize English messages.");
+            }
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildImportPlanFromYaml("comments:\n- table: logs\n  column: MESSAGE\n  comment: text\n", "users");
+                Assert(false, "SQLite comment YAML import should reject filters with no usable comments.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "YAML has no usable comments", "SQLite comment YAML no-usable-comment errors should localize English messages.");
+            }
+
+            string invalidXlsxPath = Path.Combine(Path.GetTempPath(), "sqlite_comments_invalid_" + Guid.NewGuid().ToString("N") + ".xlsx");
+            try
+            {
+                using (ZipArchive archive = ZipFile.Open(invalidXlsxPath, ZipArchiveMode.Create))
+                {
+                    ZipArchiveEntry entry = archive.CreateEntry("[Content_Types].xml");
+                    using (StreamWriter writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)))
+                    {
+                        writer.Write("<Types />");
+                    }
+                }
+
+                SqliteColumnCommentExchangeService.ParseExchangeXlsx(invalidXlsxPath);
+                Assert(false, "SQLite comment XLSX import should reject workbooks without a first worksheet.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "XLSX has no first worksheet", "SQLite comment XLSX worksheet errors should localize English messages.");
+            }
+            finally
+            {
+                if (File.Exists(invalidXlsxPath)) File.Delete(invalidXlsxPath);
+            }
+
+            try
+            {
+                SqliteColumnCommentExchangeService.WriteExportFile(db, "main", "users", "");
+                Assert(false, "SQLite comment export should require a target path.");
+            }
+            catch (ArgumentException ex)
+            {
+                AssertContains(ex.Message, "Target path is required", "SQLite comment target path validation should localize English messages.");
+            }
+
+            try
+            {
+                SqliteColumnCommentExchangeService.BuildExportJson(new FakeDumpDatabase(), "main", "users", out result);
+                Assert(false, "SQLite comment export should reject non-SQLite connections.");
+            }
+            catch (NotSupportedException ex)
+            {
+                AssertContains(ex.Message, "only supports SQLite connections", "SQLite comment provider validation should localize English messages.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(sqliteCommentErrorLanguage, false);
+        }
+
         string flatArrayJson = "[{\"table\":\"users\",\"column\":\"EMAIL\",\"comment\":\"電子郵件\"},{\"table\":\"logs\",\"column\":\"MESSAGE\",\"comment\":\"訊息\"}]";
         SqliteColumnCommentImportPlan flatArrayPlan = SqliteColumnCommentExchangeService.BuildImportPlan(flatArrayJson, "users");
         string flatArraySql = string.Join("\n", flatArrayPlan.Statements.ToArray());

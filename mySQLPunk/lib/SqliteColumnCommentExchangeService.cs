@@ -141,7 +141,7 @@ namespace mySQLPunk.lib
                 if (!key.StartsWith("--", StringComparison.Ordinal)) continue;
                 if (i + 1 >= args.Length || (args[i + 1] ?? string.Empty).StartsWith("--", StringComparison.Ordinal))
                 {
-                    throw new ArgumentException("Missing value for " + key + ".");
+                    throw new ArgumentException(Localization.Format("Designer.SqliteColumnCommentMissingOptionValue", key));
                 }
                 options[key] = args[++i];
             }
@@ -151,7 +151,7 @@ namespace mySQLPunk.lib
         private static string RequireOption(Dictionary<string, string> options, string key)
         {
             string value = GetOption(options, key);
-            if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException("Missing required option " + key + ".");
+            if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException(Localization.Format("Designer.SqliteColumnCommentRequiredOptionMissing", key));
             return value;
         }
 
@@ -169,7 +169,7 @@ namespace mySQLPunk.lib
 
         private static string BuildSqliteConnectionString(string databasePath)
         {
-            if (string.IsNullOrWhiteSpace(databasePath)) throw new ArgumentException("SQLite database path is required.");
+            if (string.IsNullOrWhiteSpace(databasePath)) throw new ArgumentException(Localization.T("Designer.SqliteColumnCommentDatabasePathRequired"));
             System.Data.SQLite.SQLiteConnectionStringBuilder builder = new System.Data.SQLite.SQLiteConnectionStringBuilder
             {
                 DataSource = databasePath,
@@ -185,7 +185,7 @@ namespace mySQLPunk.lib
 
         public static SqliteColumnCommentExportResult WriteExportFile(IDatabase db, string databaseName, string tableName, string targetPath)
         {
-            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("targetPath");
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException(Localization.T("Common.TargetPathRequired"), nameof(targetPath));
 
             string dir = Path.GetDirectoryName(targetPath);
             if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
@@ -334,7 +334,7 @@ namespace mySQLPunk.lib
 
         public static SqliteColumnCommentImportPlan BuildImportPlanFromFile(string sourcePath, string tableNameFilter = null)
         {
-            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(sourcePath));
             if (IsXlsxPath(sourcePath)) return BuildImportPlanFromXlsx(sourcePath, tableNameFilter);
 
             string text = File.ReadAllText(sourcePath, Encoding.UTF8);
@@ -500,7 +500,7 @@ namespace mySQLPunk.lib
 
         public static Dictionary<string, Dictionary<string, string>> ParseExchangeJson(string json, string tableNameFilter = null)
         {
-            if (string.IsNullOrWhiteSpace(json)) throw new InvalidOperationException("SQLite column comment exchange file is empty.");
+            if (string.IsNullOrWhiteSpace(json)) throw new InvalidOperationException(Localization.T("Designer.SqliteColumnCommentExchangeJsonEmpty"));
 
             Dictionary<string, Dictionary<string, string>> tables =
                 new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
@@ -509,12 +509,12 @@ namespace mySQLPunk.lib
             if (rootArray != null)
             {
                 AddParsedCommentRows(tables, rootArray, tableNameFilter);
-                if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment exchange file has no usable comments.");
+                if (tables.Count == 0) throw new InvalidOperationException(Localization.T("Designer.SqliteColumnCommentExchangeNoUsableComments"));
                 return tables;
             }
 
             JObject root = rootToken as JObject;
-            if (root == null) throw new InvalidOperationException("SQLite column comment exchange file is not a supported JSON object.");
+            if (root == null) throw new InvalidOperationException(Localization.T("Designer.SqliteColumnCommentUnsupportedJsonObject"));
 
             JArray commentArray = root["comments"] as JArray;
             if (commentArray != null)
@@ -548,13 +548,13 @@ namespace mySQLPunk.lib
                 }
             }
 
-            if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment exchange file has no usable comments.");
+            if (tables.Count == 0) throw new InvalidOperationException(Localization.T("Designer.SqliteColumnCommentExchangeNoUsableComments"));
             return tables;
         }
 
         public static Dictionary<string, Dictionary<string, string>> ParseExchangeCsv(string csv, string tableNameFilter = null)
         {
-            if (string.IsNullOrWhiteSpace(csv)) throw new InvalidOperationException("SQLite column comment CSV is empty.");
+            if (string.IsNullOrWhiteSpace(csv)) throw new InvalidOperationException(Localization.T("Designer.SqliteColumnCommentCsvEmpty"));
 
             List<List<string>> rows = ParseCsvRows(csv);
             return ParseExchangeRows(rows, "CSV", tableNameFilter);
@@ -565,14 +565,14 @@ namespace mySQLPunk.lib
             string sourceName,
             string tableNameFilter)
         {
-            if (rows == null || rows.Count == 0) throw new InvalidOperationException("SQLite column comment " + sourceName + " has no rows.");
+            if (rows == null || rows.Count == 0) throw new InvalidOperationException(Localization.Format("Designer.SqliteColumnCommentSourceNoRows", sourceName));
             Dictionary<string, int> header = BuildCsvHeaderMap(rows[0]);
             int tableIndex = FindCsvIndex(header, "table", "tablename", "table_name", "object", "objectname", "object_name", "entity", "entityname");
             int columnIndex = FindCsvIndex(header, "column", "columnname", "column_name", "field", "fieldname", "field_name", "attribute", "attributename", "name");
             int commentIndex = FindCsvIndex(header, "comment", "commenttext", "comment_text", "description", "column_description", "columndescription", "remarks", "remark", "memo", "note");
             if (tableIndex < 0 || columnIndex < 0 || commentIndex < 0)
             {
-                throw new InvalidOperationException("SQLite column comment " + sourceName + " requires table, column and comment headers.");
+                throw new InvalidOperationException(Localization.Format("Designer.SqliteColumnCommentSourceMissingHeaders", sourceName));
             }
 
             Dictionary<string, Dictionary<string, string>> tables =
@@ -604,13 +604,13 @@ namespace mySQLPunk.lib
                 columns[columnName.Trim()] = comment.Trim();
             }
 
-            if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment " + sourceName + " has no usable comments.");
+            if (tables.Count == 0) throw new InvalidOperationException(Localization.Format("Designer.SqliteColumnCommentSourceNoUsableComments", sourceName));
             return tables;
         }
 
         public static Dictionary<string, Dictionary<string, string>> ParseExchangeYaml(string yaml, string tableNameFilter = null)
         {
-            if (string.IsNullOrWhiteSpace(yaml)) throw new InvalidOperationException("SQLite column comment YAML is empty.");
+            if (string.IsNullOrWhiteSpace(yaml)) throw new InvalidOperationException(Localization.T("Designer.SqliteColumnCommentYamlEmpty"));
 
             Dictionary<string, Dictionary<string, string>> tables =
                 new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
@@ -659,13 +659,13 @@ namespace mySQLPunk.lib
             }
             AddYamlCommentRow(tables, current, tableNameFilter);
 
-            if (tables.Count == 0) throw new InvalidOperationException("SQLite column comment YAML has no usable comments.");
+            if (tables.Count == 0) throw new InvalidOperationException(Localization.Format("Designer.SqliteColumnCommentSourceNoUsableComments", "YAML"));
             return tables;
         }
 
         public static Dictionary<string, Dictionary<string, string>> ParseExchangeXlsx(string sourcePath, string tableNameFilter = null)
         {
-            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(sourcePath));
             if (!File.Exists(sourcePath)) throw new FileNotFoundException(Localization.Format("Designer.SqliteColumnCommentXlsxFileMissing", sourcePath ?? string.Empty), sourcePath);
 
             List<List<string>> rows = ReadXlsxRows(sourcePath);
@@ -1064,7 +1064,7 @@ namespace mySQLPunk.lib
             {
                 List<string> sharedStrings = LoadSharedStrings(archive);
                 ZipArchiveEntry sheet = archive.GetEntry("xl/worksheets/sheet1.xml");
-                if (sheet == null) throw new InvalidOperationException("SQLite column comment XLSX has no first worksheet.");
+                if (sheet == null) throw new InvalidOperationException(Localization.T("Designer.SqliteColumnCommentXlsxNoFirstWorksheet"));
 
                 XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
                 XDocument document;
@@ -1298,7 +1298,7 @@ namespace mySQLPunk.lib
             if (db == null) throw new ArgumentNullException(nameof(db));
             if (!string.Equals(db.ProviderName, "sqlite", StringComparison.OrdinalIgnoreCase))
             {
-                throw new NotSupportedException("SQLite column comment exchange only supports SQLite connections.");
+                throw new NotSupportedException(Localization.T("Object.SqliteColumnCommentExchangeRequiresSqlite"));
             }
         }
 
