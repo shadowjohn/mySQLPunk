@@ -20,7 +20,7 @@ namespace mySQLPunk.lib
         public static BackupRestorePackage LoadRestorePackage(string sourcePath, Func<string, int> countStatements)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
-            if (!File.Exists(sourcePath)) throw new FileNotFoundException("Backup file not found.", sourcePath);
+            if (!File.Exists(sourcePath)) throw new FileNotFoundException(Localization.T("Backup.FileNotFound"), sourcePath);
 
             string extension = Path.GetExtension(sourcePath);
             string script;
@@ -37,7 +37,7 @@ namespace mySQLPunk.lib
                 script = File.ReadAllText(sourcePath, Encoding.UTF8);
             }
 
-            if (string.IsNullOrWhiteSpace(script)) throw new InvalidOperationException("Backup file does not contain executable SQL.");
+            if (string.IsNullOrWhiteSpace(script)) throw new InvalidOperationException(Localization.T("Backup.RestoreSqlEmpty"));
 
             return new BackupRestorePackage
             {
@@ -62,7 +62,7 @@ namespace mySQLPunk.lib
                     if (selected == null || entry.Length > selected.Length) selected = entry;
                 }
 
-                if (selected == null) throw new InvalidOperationException("Zip backup does not contain a .sql entry.");
+                if (selected == null) throw new InvalidOperationException(Localization.T("Backup.RestoreZipNoSqlEntry"));
 
                 entryName = selected.FullName;
                 sizeBytes = selected.Length;

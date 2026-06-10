@@ -26,7 +26,7 @@ namespace mySQLPunk.lib
         public static string ArchiveBackupFile(string sourcePath)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("sourcePath");
-            if (!File.Exists(sourcePath)) throw new FileNotFoundException("Backup file not found.", sourcePath);
+            if (!File.Exists(sourcePath)) throw new FileNotFoundException(Localization.T("Backup.FileNotFound"), sourcePath);
             if (sourcePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) return sourcePath;
 
             string archivePath = BuildUniqueArchivePath(sourcePath);

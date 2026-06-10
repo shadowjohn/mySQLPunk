@@ -3068,6 +3068,36 @@ public static class SmokeTests
             Assert(pruned >= 2, "Remote mirror retention should prune old managed backup files.");
             Assert(remoteManagedCount == 2, "Remote mirror retention should keep configured managed backup count.");
             Assert(File.Exists(unrelatedPath), "Remote mirror retention should not delete unrelated files.");
+
+            string oldLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                try
+                {
+                    PreDeleteBackupArchiveService.ArchiveBackupFile(Path.Combine(dir, "missing.sql"));
+                    Assert(false, "Missing pre-delete backup source should throw.");
+                }
+                catch (FileNotFoundException ex)
+                {
+                    AssertContains(ex.Message, "找不到備份檔案", "Pre-delete archive should localize Traditional Chinese missing file errors.");
+                }
+
+                Localization.SetLanguage(Localization.English, false);
+                try
+                {
+                    BackupRemoteMirrorService.MirrorBackup(Path.Combine(dir, "missing.sql"), remoteDir);
+                    Assert(false, "Missing remote mirror source should throw.");
+                }
+                catch (FileNotFoundException ex)
+                {
+                    AssertContains(ex.Message, "Backup file not found", "Remote mirror should localize English missing file errors.");
+                }
+            }
+            finally
+            {
+                Localization.SetLanguage(oldLanguage, false);
+            }
         }
         finally
         {
@@ -3148,6 +3178,45 @@ public static class SmokeTests
                 AssertContains(missingIntegrity.Message, "does not exist", "Missing backup file should return an English validation message.");
                 BackupIntegrityResult unsupportedEn = BackupIntegrityService.VerifyBackup(unsupportedPath, countSqlStatements);
                 AssertContains(unsupportedEn.Message, ".txt", "Unsupported backup type should include the rejected extension.");
+
+                try
+                {
+                    BackupRestoreService.LoadRestorePackage(Path.Combine(dir, "missing-restore.sql"), countSqlStatements);
+                    Assert(false, "Missing restore package should throw.");
+                }
+                catch (FileNotFoundException ex)
+                {
+                    AssertContains(ex.Message, "Backup file not found", "Restore package should localize English missing file errors.");
+                }
+
+                try
+                {
+                    BackupRestoreService.LoadRestorePackage(emptySqlPath, countSqlStatements);
+                    Assert(false, "Empty restore package should throw.");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    AssertContains(ex.Message, "does not contain executable SQL", "Restore package should localize English empty SQL errors.");
+                }
+
+                string noSqlZipPath = Path.Combine(dir, "no-sql.zip");
+                using (ZipArchive archive = ZipFile.Open(noSqlZipPath, ZipArchiveMode.Create))
+                {
+                    ZipArchiveEntry entry = archive.CreateEntry("notes.txt");
+                    using (StreamWriter writer = new StreamWriter(entry.Open(), Encoding.UTF8))
+                    {
+                        writer.Write("not sql");
+                    }
+                }
+                try
+                {
+                    BackupRestoreService.LoadRestorePackage(noSqlZipPath, countSqlStatements);
+                    Assert(false, "Zip restore package without SQL should throw.");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    AssertContains(ex.Message, "does not contain a .sql entry", "Restore package should localize English zip-without-SQL errors.");
+                }
             }
             finally
             {
