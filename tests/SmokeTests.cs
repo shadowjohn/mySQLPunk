@@ -4876,11 +4876,16 @@ public static class SmokeTests
                 AssertContains(zhSummaryDetail, "格式： CSV", "Export summary detail text should localize Traditional Chinese labels.");
                 AssertContains(zhSummaryDetail, "列數： 1", "Export summary detail text should include localized row count.");
                 Assert(!zhSummaryDetail.Contains("Format:"), "Traditional Chinese export summary detail should not keep hardcoded English labels.");
+                MethodInfo openFailedMethod = typeof(ExportCompletedDialog).GetMethod("BuildOpenTargetFailedMessage", BindingFlags.Static | BindingFlags.NonPublic);
+                string zhOpenFailedMessage = (string)openFailedMethod.Invoke(null, new object[] { new Exception("") });
+                AssertContains(zhOpenFailedMessage, "開啟匯出目標失敗：未知錯誤", "Export completed dialog should localize empty open-target errors in Traditional Chinese.");
 
                 Localization.SetLanguage(Localization.English, false);
                 string enSummaryDetail = summary.BuildDetailText();
                 AssertContains(enSummaryDetail, "Format: CSV", "Export summary detail text should support English labels.");
                 AssertContains(enSummaryDetail, "Rows: 1", "English export summary detail should include row count.");
+                string enOpenFailedMessage = (string)openFailedMethod.Invoke(null, new object[] { new Exception("") });
+                AssertContains(enOpenFailedMessage, "Failed to open export target: Unknown error", "Export completed dialog should localize empty open-target errors in English.");
             }
             finally
             {

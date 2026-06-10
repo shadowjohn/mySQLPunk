@@ -954,6 +954,7 @@ namespace mySQLPunk
             Add("Query.ExportSummaryPath", "路徑：", "Path:");
             Add("Query.OpenExportedFile", "開啟檔案", "Open File");
             Add("Query.OpenExportFolder", "開啟資料夾", "Open Folder");
+            Add("Query.OpenExportTargetFailed", "開啟匯出目標失敗：{0}", "Failed to open export target: {0}");
             Add("Query.ExportError", "匯出錯誤", "Export Error");
             Add("Query.Float", "浮動", "Float");
             Add("Query.Dock", "嵌入", "Dock");

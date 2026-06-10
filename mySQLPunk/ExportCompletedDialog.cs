@@ -148,8 +148,15 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(BuildOpenTargetFailedMessage(ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private static string BuildOpenTargetFailedMessage(Exception ex)
+        {
+            string reason = ex == null ? null : ex.Message;
+            if (string.IsNullOrWhiteSpace(reason)) reason = Localization.T("Object.UnknownError");
+            return Localization.Format("Query.OpenExportTargetFailed", reason);
         }
     }
 }
