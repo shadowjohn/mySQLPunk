@@ -4890,6 +4890,7 @@ public static class SmokeTests
         bool oldUseSystemNumberFormat = ApplicationOptionSettings.GetBool("RecordUseSystemNumberFormat");
         string oldRowHeightMode = ApplicationOptionSettings.GetString("RecordRowHeightMode");
         string oldExportDirectory = ApplicationOptionSettings.GetString("FileExportDirectory");
+        string oldLanguage = Localization.CurrentLanguage;
 
         try
         {
@@ -4968,9 +4969,21 @@ public static class SmokeTests
             RememberQueryFormConfiguredDirectory("FileExportDirectory", "");
             AssertEquals(rememberedExportDirectory, ApplicationOptionSettings.GetString("FileExportDirectory"), "Empty export paths should not clear the remembered folder.");
             Directory.Delete(rememberedExportDirectory);
+
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertEquals("自動完成資料已清除。", OptionsForm.BuildAutoCompleteCacheClearedMessage(), "Auto-complete cache clear message should localize Traditional Chinese text.");
+            Localization.SetLanguage(Localization.English, false);
+            AssertEquals("Completion data cleared.", OptionsForm.BuildAutoCompleteCacheClearedMessage(), "Auto-complete cache clear message should localize English text.");
+
+            string cachePath = Path.Combine(Application.UserAppDataPath, "autocomplete-cache.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(cachePath));
+            File.WriteAllText(cachePath, "{}", Encoding.UTF8);
+            ApplicationOptionSettings.ClearAutoCompleteCache();
+            Assert(!File.Exists(cachePath), "ClearAutoCompleteCache should delete the auto-complete cache file.");
         }
         finally
         {
+            Localization.SetLanguage(oldLanguage, false);
             ApplicationOptionSettings.SetBool("RecordLimitEnabled", oldRecordLimitEnabled);
             ApplicationOptionSettings.SetInt("RecordLimit", oldRecordLimit);
             ApplicationOptionSettings.SetString("EditorFontName", oldEditorFontName);

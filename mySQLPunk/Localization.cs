@@ -1098,6 +1098,7 @@ namespace mySQLPunk
             Add("Options.Dark", "深色", "Dark");
             Add("Options.Navigation", "導覽", "Navigation");
             Add("Options.AutoComplete", "自動完成程式碼", "Code Completion");
+            Add("Options.AutoCompleteCacheCleared", "自動完成資料已清除。", "Completion data cleared.");
             Add("Options.Editor", "編輯器", "Editor");
             Add("Options.Record", "記錄", "Log");
             Add("Options.AI", "AI", "AI");

@@ -332,9 +332,14 @@ namespace mySQLPunk
             clearButton.Click += (s, e) =>
             {
                 ApplicationOptionSettings.ClearAutoCompleteCache();
-                MessageBox.Show(T("自動完成資料已清除。", "Completion data cleared."), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(BuildAutoCompleteCacheClearedMessage(), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
             contentPanel.Controls.Add(clearButton);
+        }
+
+        public static string BuildAutoCompleteCacheClearedMessage()
+        {
+            return Localization.T("Options.AutoCompleteCacheCleared");
         }
 
         private void RenderEditorPage()
