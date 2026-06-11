@@ -1,147 +1,138 @@
-﻿{
-    "source_url":  "https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip",
-    "source_sha256":  "9fe124cc5f4f9ea06a6e876e7d098788409a09719723fc9bce34e7a1faf2566e",
-    "generated_at_utc":  "2026-06-10T11:56:08Z",
-    "files":  [
-                  {
-                      "name":  "libcrypto-3-x64.dll",
-                      "sha256":  "2942b467a9d6e87b75d615c70883aa59c9b9aebb9693cb5eceff933743cecc23",
-                      "size":  6086563
-                  },
-                  {
-                      "name":  "libcurl-4.dll",
-                      "sha256":  "e82a3da3b2fdbe8d150016bee347a23a1c42ff8d14cd6582e6c47c9f2ccba284",
-                      "size":  611759
-                  },
-                  {
-                      "name":  "libexpat-1.dll",
-                      "sha256":  "6f87806d3bcd6572433a0a1f8cfbe4be9bfe1b1f1e92641d1fc3ae5e5cd5b4f9",
-                      "size":  732480
-                  },
-                  {
-                      "name":  "libfreexl-1.dll",
-                      "sha256":  "3b4f3ab35ff528438d8fbfb4a1062a91915b78235e81ab5b7308b84b408aadb9",
-                      "size":  89328
-                  },
-                  {
-                      "name":  "libgcc_s_seh-1.dll",
-                      "sha256":  "ed0b395f66f2965117de34ca2821135c48e0d8866193c43cc6799a93cdb9012d",
-                      "size":  117427
-                  },
-                  {
-                      "name":  "libgeos.dll",
-                      "sha256":  "d2eff4bbdaf306243c7e7a9ca35eadd5a1d7d90e9246c9e41def6c7016744734",
-                      "size":  2705920
-                  },
-                  {
-                      "name":  "libgeos_c.dll",
-                      "sha256":  "067bd4797146b1b8198a8913ee1ec3aaccd9522b5bc05f5d49386bdd8e94b215",
-                      "size":  268800
-                  },
-                  {
-                      "name":  "libiconv-2.dll",
-                      "sha256":  "0403d8b64b01bb6a06f09ec9385d45164216edb104e067b7502a450e8913f3fb",
-                      "size":  1570911
-                  },
-                  {
-                      "name":  "libjpeg-62.dll",
-                      "sha256":  "efa8f40651015e011dc7e3548eb2a845357fc74adbcf97b4e54869bc8857c19e",
-                      "size":  1061376
-                  },
-                  {
-                      "name":  "liblzma-5.dll",
-                      "sha256":  "1c5252245b7df689db68e16d8f0742231b3a7a6f6ad1f4f2018649a5c72bbc83",
-                      "size":  180404
-                  },
-                  {
-                      "name":  "libminizip-1.dll",
-                      "sha256":  "2cea47e278942c5e31c0f01bb19d45bee42d5dcba92c516c664e7ecf607d7421",
-                      "size":  50343
-                  },
-                  {
-                      "name":  "libproj_9_2.dll",
-                      "sha256":  "364fc7ec8a83c474df443fdbb8b70cef3a8def87b31b75ad7414a7884830f7e2",
-                      "size":  3970048
-                  },
-                  {
-                      "name":  "librttopo-1.dll",
-                      "sha256":  "ba8674a2d64572740ee7867f5a2d7516f8191bf451450608387f286c6f5095e3",
-                      "size":  468676
-                  },
-                  {
-                      "name":  "libsharpyuv-0.dll",
-                      "sha256":  "9db9a72767d17927260b8fb625ed57dcf7c1f910395c83d4da983df92211c784",
-                      "size":  29324
-                  },
-                  {
-                      "name":  "libspatialite-8.dll",
-                      "sha256":  "b4e8d42e8f8bee4b8a6ce1787970f88e9534a53e607c9b5cb22e43ee016683ee",
-                      "size":  23105549
-                  },
-                  {
-                      "name":  "libsqlite3-0.dll",
-                      "sha256":  "fddf9566173dc2b9a7999b88c021c3b87601ad6b541dd65a55764206494637d2",
-                      "size":  1306245
-                  },
-                  {
-                      "name":  "libssl-3-x64.dll",
-                      "sha256":  "4b959115d7b0ccdafefe25dcb62ea09347ee8735f68641d8b6c018ffbf08a55d",
-                      "size":  979451
-                  },
-                  {
-                      "name":  "libstdc++-6.dll",
-                      "sha256":  "5716f0f5356b4662378ab95d6d218896ee7e77a6076b9016c75defc4b6e2d187",
-                      "size":  2264558
-                  },
-                  {
-                      "name":  "libtiff-6.dll",
-                      "sha256":  "52e77bb264583f081dcd83f161211671a9f139b5d14221abd569cb7dd8bdc550",
-                      "size":  555296
-                  },
-                  {
-                      "name":  "libwebp-7.dll",
-                      "sha256":  "f25fe29d2bcaf2deef7169e4799949ca4c02801202b0787efda1f07f3a8bd98d",
-                      "size":  452454
-                  },
-                  {
-                      "name":  "libwinpthread-1.dll",
-                      "sha256":  "0ce15909fdf6691750616463a90b662e3694efb507e67f71e566d21a07531dbc",
-                      "size":  60356
-                  },
-                  {
-                      "name":  "libxml2.dll",
-                      "sha256":  "4712db27e4c56d93091150637cc488f8ffe6578842272070748d2e6a2e20309c",
-                      "size":  1658880
-                  },
-                  {
-                      "name":  "libzstd.dll",
-                      "sha256":  "115c758cbac7dea8081ba1042ab75f9d503684b68e8db5a7f615ceb98b39b29b",
-                      "size":  1181184
-                  },
-                  {
-                      "name":  "mod_spatialite.dll",
-                      "sha256":  "2944869f3cd170189fe3830afd3b830177175d5651d5d64ad7d62718408f960c",
-                      "size":  24136305
-                  },
-                  {
-                      "name":  "proj.db",
-                      "sha256":  "98ca1bd2484d4625230a4cfe4b98ace0ef4569724c23228fbeb803b34c4632bf",
-                      "size":  8544256
-                  },
-                  {
-                      "name":  "README.md",
-                      "sha256":  "8ec5ec5053c454a975fa5d30b06c0e8cfbcf472f408e63eee584f46c8cbca236",
-                      "size":  971
-                  },
-                  {
-                      "name":  "THIRD_PARTY_RUNTIME_NOTICES.md",
-                      "sha256":  "21637f9fd7d8807133dacbb8e3a51db36a5ca60de19743646a405543c0b8ff22",
-                      "size":  1755
-                  },
-                  {
-                      "name":  "zlib1.dll",
-                      "sha256":  "2e2386d8402cf52052f2d931bd669be6ee1d6d894a02bdf757ab0d1287fd275d",
-                      "size":  138752
-                  }
-              ]
+{
+  "source_url": "https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-5.1.0.zip",
+  "source_sha256": "9fe124cc5f4f9ea06a6e876e7d098788409a09719723fc9bce34e7a1faf2566e",
+  "built_at_utc": "2026-06-11T01:21:10Z",
+  "build_tool": "MSYS2 mingw64",
+  "files": [
+    {
+      "name": "libcrypto-3-x64.dll",
+      "sha256": "2942b467a9d6e87b75d615c70883aa59c9b9aebb9693cb5eceff933743cecc23",
+      "bytes": 6086563
+    },
+    {
+      "name": "libcurl-4.dll",
+      "sha256": "e82a3da3b2fdbe8d150016bee347a23a1c42ff8d14cd6582e6c47c9f2ccba284",
+      "bytes": 611759
+    },
+    {
+      "name": "libexpat-1.dll",
+      "sha256": "6f87806d3bcd6572433a0a1f8cfbe4be9bfe1b1f1e92641d1fc3ae5e5cd5b4f9",
+      "bytes": 732480
+    },
+    {
+      "name": "libfreexl-1.dll",
+      "sha256": "3b4f3ab35ff528438d8fbfb4a1062a91915b78235e81ab5b7308b84b408aadb9",
+      "bytes": 89328
+    },
+    {
+      "name": "libgcc_s_seh-1.dll",
+      "sha256": "ed0b395f66f2965117de34ca2821135c48e0d8866193c43cc6799a93cdb9012d",
+      "bytes": 117427
+    },
+    {
+      "name": "libgeos.dll",
+      "sha256": "d2eff4bbdaf306243c7e7a9ca35eadd5a1d7d90e9246c9e41def6c7016744734",
+      "bytes": 2705920
+    },
+    {
+      "name": "libgeos_c.dll",
+      "sha256": "067bd4797146b1b8198a8913ee1ec3aaccd9522b5bc05f5d49386bdd8e94b215",
+      "bytes": 268800
+    },
+    {
+      "name": "libiconv-2.dll",
+      "sha256": "0403d8b64b01bb6a06f09ec9385d45164216edb104e067b7502a450e8913f3fb",
+      "bytes": 1570911
+    },
+    {
+      "name": "libjpeg-62.dll",
+      "sha256": "efa8f40651015e011dc7e3548eb2a845357fc74adbcf97b4e54869bc8857c19e",
+      "bytes": 1061376
+    },
+    {
+      "name": "liblzma-5.dll",
+      "sha256": "1c5252245b7df689db68e16d8f0742231b3a7a6f6ad1f4f2018649a5c72bbc83",
+      "bytes": 180404
+    },
+    {
+      "name": "libminizip-1.dll",
+      "sha256": "2cea47e278942c5e31c0f01bb19d45bee42d5dcba92c516c664e7ecf607d7421",
+      "bytes": 50343
+    },
+    {
+      "name": "libproj_9_2.dll",
+      "sha256": "364fc7ec8a83c474df443fdbb8b70cef3a8def87b31b75ad7414a7884830f7e2",
+      "bytes": 3970048
+    },
+    {
+      "name": "librttopo-1.dll",
+      "sha256": "ba8674a2d64572740ee7867f5a2d7516f8191bf451450608387f286c6f5095e3",
+      "bytes": 468676
+    },
+    {
+      "name": "libsharpyuv-0.dll",
+      "sha256": "9db9a72767d17927260b8fb625ed57dcf7c1f910395c83d4da983df92211c784",
+      "bytes": 29324
+    },
+    {
+      "name": "libspatialite-8.dll",
+      "sha256": "b4e8d42e8f8bee4b8a6ce1787970f88e9534a53e607c9b5cb22e43ee016683ee",
+      "bytes": 23105549
+    },
+    {
+      "name": "libsqlite3-0.dll",
+      "sha256": "fddf9566173dc2b9a7999b88c021c3b87601ad6b541dd65a55764206494637d2",
+      "bytes": 1306245
+    },
+    {
+      "name": "libssl-3-x64.dll",
+      "sha256": "4b959115d7b0ccdafefe25dcb62ea09347ee8735f68641d8b6c018ffbf08a55d",
+      "bytes": 979451
+    },
+    {
+      "name": "libstdc++-6.dll",
+      "sha256": "5716f0f5356b4662378ab95d6d218896ee7e77a6076b9016c75defc4b6e2d187",
+      "bytes": 2264558
+    },
+    {
+      "name": "libtiff-6.dll",
+      "sha256": "52e77bb264583f081dcd83f161211671a9f139b5d14221abd569cb7dd8bdc550",
+      "bytes": 555296
+    },
+    {
+      "name": "libwebp-7.dll",
+      "sha256": "f25fe29d2bcaf2deef7169e4799949ca4c02801202b0787efda1f07f3a8bd98d",
+      "bytes": 452454
+    },
+    {
+      "name": "libwinpthread-1.dll",
+      "sha256": "0ce15909fdf6691750616463a90b662e3694efb507e67f71e566d21a07531dbc",
+      "bytes": 60356
+    },
+    {
+      "name": "libxml2.dll",
+      "sha256": "4712db27e4c56d93091150637cc488f8ffe6578842272070748d2e6a2e20309c",
+      "bytes": 1658880
+    },
+    {
+      "name": "libzstd.dll",
+      "sha256": "115c758cbac7dea8081ba1042ab75f9d503684b68e8db5a7f615ceb98b39b29b",
+      "bytes": 1181184
+    },
+    {
+      "name": "mod_spatialite.dll",
+      "sha256": "2944869f3cd170189fe3830afd3b830177175d5651d5d64ad7d62718408f960c",
+      "bytes": 24136305
+    },
+    {
+      "name": "proj.db",
+      "sha256": "98ca1bd2484d4625230a4cfe4b98ace0ef4569724c23228fbeb803b34c4632bf",
+      "bytes": 8544256
+    },
+    {
+      "name": "zlib1.dll",
+      "sha256": "2e2386d8402cf52052f2d931bd669be6ee1d6d894a02bdf757ab0d1287fd275d",
+      "bytes": 138752
+    }
+  ]
 }

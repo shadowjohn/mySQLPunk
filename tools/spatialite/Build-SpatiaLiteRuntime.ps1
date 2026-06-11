@@ -205,8 +205,14 @@ foreach ($blockedRuntimeFile in $blockedRuntimeFiles) {
     }
 }
 
+$manifestExcludedFiles = @(
+    "SPATIALITE_RUNTIME_MANIFEST.json",
+    "README.md",
+    "THIRD_PARTY_RUNTIME_NOTICES.md"
+)
+
 $files = Get-ChildItem -LiteralPath $runtime -File |
-    Where-Object { $_.Name -ne "SPATIALITE_RUNTIME_MANIFEST.json" } |
+    Where-Object { $manifestExcludedFiles -notcontains $_.Name } |
     Sort-Object Name |
     ForEach-Object {
     [pscustomobject]@{

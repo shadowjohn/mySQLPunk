@@ -4647,6 +4647,8 @@ public static class SmokeTests
 
     private static void TestSpatiaLiteRuntimeDiagnostics()
     {
+        AssertCommittedSpatiaLiteRuntimeManifest();
+
         string root = Path.Combine(Path.GetTempPath(), "mysqlpunk_spatialite_" + Guid.NewGuid().ToString("N"));
         string toolsDir = Path.Combine(root, "tools", "spatialite");
         string cacheDir = Path.Combine(toolsDir, "cache");
@@ -4780,6 +4782,68 @@ public static class SmokeTests
             Localization.SetLanguage(oldLanguage, false);
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
+    }
+
+    private static void AssertCommittedSpatiaLiteRuntimeManifest()
+    {
+        string root = FindRepositoryRootForTest();
+        string runtimeDir = Path.Combine(root, "mySQLPunk", "binary", "sqlite3_ext");
+        string manifestPath = Path.Combine(runtimeDir, "SPATIALITE_RUNTIME_MANIFEST.json");
+        Assert(File.Exists(manifestPath), "Committed SpatiaLite runtime manifest should exist.");
+
+        JObject manifest = JObject.Parse(File.ReadAllText(manifestPath, Encoding.UTF8));
+        Assert(!string.IsNullOrWhiteSpace((string)manifest["source_url"]), "SpatiaLite runtime manifest should include source_url.");
+        Assert(!string.IsNullOrWhiteSpace((string)manifest["source_sha256"]), "SpatiaLite runtime manifest should include source_sha256.");
+        Assert(!string.IsNullOrWhiteSpace((string)manifest["built_at_utc"]), "SpatiaLite runtime manifest should include built_at_utc.");
+        Assert(!string.IsNullOrWhiteSpace((string)manifest["build_tool"]), "SpatiaLite runtime manifest should include build_tool.");
+        Assert(manifest["generated_at_utc"] == null, "SpatiaLite runtime manifest should use built_at_utc instead of generated_at_utc.");
+
+        JArray files = manifest["files"] as JArray;
+        Assert(files != null && files.Count > 0, "SpatiaLite runtime manifest should include files.");
+
+        HashSet<string> blocked = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "sqlite3.exe",
+            "libreadline8.dll",
+            "libtermcap-0.dll"
+        };
+        HashSet<string> manifestExcludedTextFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "README.md",
+            "THIRD_PARTY_RUNTIME_NOTICES.md"
+        };
+
+        foreach (string blockedName in blocked)
+        {
+            Assert(!File.Exists(Path.Combine(runtimeDir, blockedName)), "SpatiaLite runtime directory should not include blocked file: " + blockedName);
+        }
+
+        bool hasModSpatialite = false;
+        foreach (JObject file in files.OfType<JObject>())
+        {
+            string name = (string)file["name"];
+            string expectedHash = ((string)file["sha256"] ?? string.Empty).Trim().ToLowerInvariant();
+            long? expectedBytes = (long?)file["bytes"];
+
+            Assert(!string.IsNullOrWhiteSpace(name), "SpatiaLite runtime manifest file entries should include name.");
+            Assert(!blocked.Contains(name), "SpatiaLite runtime manifest should not include blocked file: " + name);
+            Assert(!manifestExcludedTextFiles.Contains(name), "SpatiaLite runtime manifest should not include line-ending-sensitive text file: " + name);
+            Assert(file["size"] == null, "SpatiaLite runtime manifest file entries should use bytes instead of size.");
+            Assert(!string.IsNullOrWhiteSpace(expectedHash), "SpatiaLite runtime manifest file entries should include sha256: " + name);
+            Assert(expectedBytes.HasValue, "SpatiaLite runtime manifest file entries should include bytes: " + name);
+
+            string path = Path.Combine(runtimeDir, name);
+            Assert(File.Exists(path), "SpatiaLite runtime manifest file should exist: " + name);
+            AssertEquals(expectedBytes.Value.ToString(), new FileInfo(path).Length.ToString(), "SpatiaLite runtime manifest bytes should match: " + name);
+            AssertEquals(expectedHash, ComputeFileSha256ForTest(path), "SpatiaLite runtime manifest hash should match: " + name);
+
+            if (string.Equals(name, "mod_spatialite.dll", StringComparison.OrdinalIgnoreCase))
+            {
+                hasModSpatialite = true;
+            }
+        }
+
+        Assert(hasModSpatialite, "SpatiaLite runtime manifest should include mod_spatialite.dll.");
     }
 
     private static string ComputeFileSha256ForTest(string path)
