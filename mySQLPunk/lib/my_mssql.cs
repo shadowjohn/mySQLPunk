@@ -92,7 +92,7 @@ namespace mySQLPunk.lib
             catch (Exception ex)
             {
                 output["status"] = "NO";
-                output["reason"] = ex.Message;
+                output["reason"] = ExceptionMessageService.GetReason(ex);
                 return output;
             }
         }
@@ -139,7 +139,7 @@ namespace mySQLPunk.lib
             catch (Exception ex)
             {
                 output["status"] = "NO";
-                output["reason"] = ex.Message;
+                output["reason"] = ExceptionMessageService.GetReason(ex);
                 return output;
             }
         }
@@ -752,7 +752,7 @@ namespace mySQLPunk.lib
             catch (Exception ex)
             {
                 output["status"] = "NO";
-                output["reason"] = ex.Message;
+                output["reason"] = ExceptionMessageService.GetReason(ex);
                 return output;
             }
         }
@@ -793,7 +793,7 @@ namespace mySQLPunk.lib
             catch (Exception ex)
             {
                 output["status"] = "NO";
-                output["reason"] = ex.Message;
+                output["reason"] = ExceptionMessageService.GetReason(ex);
                 return output;
             }
         }

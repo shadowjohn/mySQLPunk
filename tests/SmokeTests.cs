@@ -6556,6 +6556,20 @@ public static class SmokeTests
         AssertEquals("metadata timeout", ExceptionMessageService.GetReason(new InvalidOperationException(" metadata timeout ")), "Service exception helper should trim explicit reasons.");
         AssertEquals("載入 Tables 失敗：未知錯誤", ExceptionMessageService.Format("Metadata.LoadTablesFailed", new Exception("   ")), "Service exception helper should format blank Traditional Chinese reasons.");
         AssertEquals("C:\\runtime\\manifest.json（manifest 無法解析：未知錯誤）", ExceptionMessageService.Format("SpatiaLiteDiagnostics.ManifestParseFailed", @"C:\runtime\manifest.json", new Exception("")), "Service exception helper should format messages with leading arguments.");
+        AssertProviderSourcesUseExceptionReasonFallback();
+
+        using (my_sqlite sqlite = new my_sqlite())
+        {
+            sqlite.SetConn("Data Source=:memory:;Version=3;New=True;");
+            sqlite.Open();
+            Dictionary<string, string> failedSqliteExec = sqlite.ExecSQL("INSERT INTO missing_table VALUES (1);");
+            AssertEquals("NO", failedSqliteExec["status"], "SQLite provider should return failed execution status for invalid SQL.");
+            Assert(!string.IsNullOrWhiteSpace(failedSqliteExec["reason"]), "SQLite provider execution failures should include a readable reason.");
+
+            DataTable failedSqliteSelect = sqlite.SelectSQL("SELECT * FROM missing_table;");
+            Assert(failedSqliteSelect.ExtendedProperties.ContainsKey(my_sqlite.QueryErrorExtendedProperty), "SQLite provider select failures should expose the query error property.");
+            Assert(!string.IsNullOrWhiteSpace(failedSqliteSelect.ExtendedProperties[my_sqlite.QueryErrorExtendedProperty].ToString()), "SQLite provider select failures should include a readable query error.");
+        }
 
         Localization.SetLanguage(Localization.English, false);
         try
@@ -6568,6 +6582,30 @@ public static class SmokeTests
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
         }
+    }
+
+    private static void AssertProviderSourcesUseExceptionReasonFallback()
+    {
+        string root = FindRepositoryRootForTest();
+        string[] providerFiles =
+        {
+            Path.Combine(root, "mySQLPunk", "lib", "my_mysql.cs"),
+            Path.Combine(root, "mySQLPunk", "lib", "my_postgresql.cs"),
+            Path.Combine(root, "mySQLPunk", "lib", "my_mssql.cs"),
+            Path.Combine(root, "mySQLPunk", "lib", "my_oracle.cs"),
+            Path.Combine(root, "mySQLPunk", "lib", "my_sqlite.cs")
+        };
+
+        foreach (string providerFile in providerFiles)
+        {
+            string source = File.ReadAllText(providerFile, Encoding.UTF8);
+            Assert(!source.Contains("output[\"reason\"] = ex.Message;"), Path.GetFileName(providerFile) + " should not expose raw exception messages as provider reasons.");
+            AssertContains(source, "ExceptionMessageService.GetReason(ex)", Path.GetFileName(providerFile) + " should use the shared exception reason fallback.");
+        }
+
+        string sqliteSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "lib", "my_sqlite.cs"), Encoding.UTF8);
+        Assert(!sqliteSource.Contains("output.ExtendedProperties[QueryErrorExtendedProperty] = ex.Message;"), "SQLite query errors should not expose raw exception messages.");
+        Assert(!sqliteSource.Contains("SpatiaLiteLoadError = ex.Message;"), "SpatiaLite load errors should not expose raw exception messages.");
     }
 
     private static void TestMySqlGuidFormatNone()
