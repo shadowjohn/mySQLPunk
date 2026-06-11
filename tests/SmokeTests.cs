@@ -3168,6 +3168,8 @@ public static class SmokeTests
         AssertContains(oracleQuotaRepair, "DBA 最小授權範本", "Oracle repair suggestions should include a DBA policy template.");
         AssertContains(oracleQuotaRepair, "dba_users", "Oracle quota repair suggestions should include a DBA user/tablespace check.");
         AssertContains(oracleQuotaRepair, "ALTER USER <SESSION_USER> QUOTA <SIZE> ON <TABLESPACE_NAME>;", "Oracle quota repair suggestions should include a quota grant template.");
+        AssertEquals("權限查詢結果無法解析：未知錯誤", BuildOracleDiagnosticFailureMessage("Designer.OraclePrivilegeDiagnosticFailed", new Exception("")), "Oracle privilege diagnostic blank errors should localize Traditional Chinese unknown errors.");
+        AssertEquals("修復建議無法產生：permission query timeout", BuildOracleDiagnosticFailureMessage("Designer.OracleRepairSuggestionFailed", new InvalidOperationException(" permission query timeout ")), "Oracle repair diagnostic errors should preserve explicit Traditional Chinese reasons.");
         string highRiskOracleMessage = BuildOracleHighRiskConfirmationMessage(
             "ALTER TABLE \"MAIN\".\"DEMO_TABLE\" DROP COLUMN \"legacy_code\";\nDROP INDEX \"MAIN\".\"IX_DEMO\";");
         AssertContains(highRiskOracleMessage, "高風險 Oracle DDL", "Oracle high-risk confirmation should explain the second confirmation.");
@@ -3175,6 +3177,17 @@ public static class SmokeTests
         AssertContains(highRiskOracleMessage, "會刪除索引", "Oracle high-risk confirmation should include drop index warnings.");
         string normalOracleMessage = BuildOracleHighRiskConfirmationMessage("COMMENT ON COLUMN \"MAIN\".\"DEMO_TABLE\".\"name\" IS '姓名';");
         AssertEquals("", normalOracleMessage, "Oracle high-risk confirmation should stay empty for non-destructive comments.");
+        string oracleDiagnosticLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.English, false);
+            AssertEquals("Privilege query result could not be parsed: Unknown error", BuildOracleDiagnosticFailureMessage("Designer.OraclePrivilegeDiagnosticFailed", new Exception("   ")), "Oracle privilege diagnostic blank errors should localize English unknown errors.");
+            AssertEquals("Repair suggestions could not be generated: ORA-01031", BuildOracleDiagnosticFailureMessage("Designer.OracleRepairSuggestionFailed", new InvalidOperationException(" ORA-01031 ")), "Oracle repair diagnostic errors should preserve explicit English reasons.");
+        }
+        finally
+        {
+            Localization.SetLanguage(oracleDiagnosticLanguage, false);
+        }
 
         string sqliteSql = BuildExistingAlterSql(
             new my_sqlite(),
@@ -7501,6 +7514,12 @@ public static class SmokeTests
     {
         MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOracleRepairSuggestions", BindingFlags.Static | BindingFlags.NonPublic);
         return (string)method.Invoke(null, new object[] { reason, databaseName, tableName, sql, objectPrivileges, sessionPrivileges });
+    }
+
+    private static string BuildOracleDiagnosticFailureMessage(string messageKey, Exception ex)
+    {
+        MethodInfo method = typeof(TableDesignerForm).GetMethod("BuildOracleDiagnosticFailureMessage", BindingFlags.Static | BindingFlags.NonPublic);
+        return (string)method.Invoke(null, new object[] { messageKey, ex });
     }
 
     private static string BuildOracleErrorHints(string reason, string databaseName, string tableName)

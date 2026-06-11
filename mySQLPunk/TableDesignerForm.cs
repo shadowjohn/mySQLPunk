@@ -4656,7 +4656,7 @@ namespace mySQLPunk
                 Dictionary<string, string> errorResult = new Dictionary<string, string>
                 {
                     { "status", "ERROR" },
-                    { "reason", ex.Message },
+                    { "reason", ExceptionMessageService.GetReason(ex) },
                     { "statement", currentStatement }
                 };
                 AddOraclePrivilegeDiagnosticResult(errorResult, sql);
@@ -4684,7 +4684,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                return Localization.Format("Designer.OraclePrivilegeDiagnosticFailed", ex.Message);
+                return BuildOracleDiagnosticFailureMessage("Designer.OraclePrivilegeDiagnosticFailed", ex);
             }
         }
 
@@ -4699,8 +4699,13 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                return Localization.Format("Designer.OracleRepairSuggestionFailed", ex.Message);
+                return BuildOracleDiagnosticFailureMessage("Designer.OracleRepairSuggestionFailed", ex);
             }
+        }
+
+        private static string BuildOracleDiagnosticFailureMessage(string messageKey, Exception ex)
+        {
+            return ExceptionMessageService.Format(messageKey, ex);
         }
 
         private static string FormatDesignerSaveError(string providerName, string databaseName, string tableName, Dictionary<string, string> result)
