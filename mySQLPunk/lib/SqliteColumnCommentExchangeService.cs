@@ -90,9 +90,14 @@ namespace mySQLPunk.lib
                 {
                     Handled = true,
                     ExitCode = 1,
-                    Message = ex.Message
+                    Message = BuildCliFailureMessage(ex)
                 };
             }
+        }
+
+        public static string BuildCliFailureMessage(Exception ex)
+        {
+            return ExceptionMessageService.GetReason(ex);
         }
 
         private static SqliteColumnCommentCliResult RunCommand(string[] args)

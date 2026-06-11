@@ -135,7 +135,7 @@ namespace mySQLPunk.lib
                     Kind = Path.GetExtension(candidate.QuarantinedPath).TrimStart('.').ToLowerInvariant(),
                     EntryName = candidate.QuarantinedPath,
                     SourcePath = candidate.QuarantinedPath,
-                    Message = ex.Message,
+                    Message = ExceptionMessageService.GetReason(ex),
                     SizeBytes = candidate.SizeBytes
                 };
             }

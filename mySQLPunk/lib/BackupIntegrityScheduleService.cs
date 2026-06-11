@@ -115,7 +115,7 @@ namespace mySQLPunk.lib
                         Kind = Path.GetExtension(file.Name).TrimStart('.').ToLowerInvariant(),
                         EntryName = file.FullName,
                         SourcePath = file.FullName,
-                        Message = ex.Message,
+                        Message = ExceptionMessageService.GetReason(ex),
                         SizeBytes = file.Exists ? file.Length : 0
                     });
                 }

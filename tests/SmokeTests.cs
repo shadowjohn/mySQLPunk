@@ -3530,6 +3530,38 @@ public static class SmokeTests
             Assert(!BackupIntegrityScheduleService.IsDue(true, DateTime.UtcNow.AddHours(-2), 24, DateTime.UtcNow), "Backup integrity schedule should wait for the configured interval.");
             Assert(!BackupIntegrityScheduleService.IsDue(false, DateTime.MinValue, 24, DateTime.UtcNow), "Disabled backup integrity schedule should not run.");
 
+            string blankFailureDirectory = Path.Combine(dir, "blank-failure");
+            Directory.CreateDirectory(blankFailureDirectory);
+            string blankFailureSqlPath = Path.Combine(blankFailureDirectory, "blank-failure.sql");
+            File.WriteAllText(blankFailureSqlPath, "SELECT 1;", Encoding.UTF8);
+            oldLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                Func<string, int> blankFailureCounter = script => { throw new Exception(""); };
+                BackupIntegrityScheduleReport blankFailureReport = BackupIntegrityScheduleService.VerifyDirectories(new[] { blankFailureDirectory }, blankFailureCounter, 10);
+                Assert(blankFailureReport.FailedFiles == 1, "Backup integrity schedule should report callback exceptions as failures.");
+                AssertEquals("未知錯誤", blankFailureReport.FailedResults[0].Message, "Backup integrity schedule blank callback errors should localize Traditional Chinese unknown errors.");
+                BackupQuarantineRestorePreview blankFailurePreview = BackupQuarantineRestoreService.BuildPreview(
+                    new BackupQuarantineRestoreCandidate
+                    {
+                        QuarantinedPath = blankFailureSqlPath,
+                        OriginalPath = "",
+                        SizeBytes = new FileInfo(blankFailureSqlPath).Length,
+                        QuarantinedAtUtc = DateTime.UtcNow
+                    },
+                    blankFailureCounter);
+                AssertEquals("未知錯誤", blankFailurePreview.IntegrityResult.Message, "Quarantine restore preview blank verification errors should localize Traditional Chinese unknown errors.");
+
+                Localization.SetLanguage(Localization.English, false);
+                BackupIntegrityScheduleReport englishBlankFailureReport = BackupIntegrityScheduleService.VerifyDirectories(new[] { blankFailureDirectory }, blankFailureCounter, 10);
+                AssertEquals("Unknown error", englishBlankFailureReport.FailedResults[0].Message, "Backup integrity schedule blank callback errors should localize English unknown errors.");
+            }
+            finally
+            {
+                Localization.SetLanguage(oldLanguage, false);
+            }
+
             BackupIntegrityScheduleReport scheduleReport = BackupIntegrityScheduleService.VerifyDirectories(new[] { dir }, countSqlStatements, 10);
             Assert(scheduleReport.TotalFiles >= 4, "Backup integrity schedule should scan supported backup files.");
             Assert(scheduleReport.VerifiedFiles >= 3, "Backup integrity schedule should verify readable SQL, ZIP, and SQLite backups.");
@@ -4272,6 +4304,7 @@ public static class SmokeTests
             });
             Assert(missingValueResult.Handled && missingValueResult.ExitCode == 1, "SQLite comment CLI should reject options without values.");
             AssertContains(missingValueResult.Message, "請提供 --database 的參數值", "SQLite comment CLI missing option values should localize Traditional Chinese messages.");
+            AssertEquals("未知錯誤", SqliteColumnCommentCliService.BuildCliFailureMessage(new Exception("")), "SQLite comment CLI blank errors should localize Traditional Chinese unknown errors.");
 
             try
             {
@@ -4310,6 +4343,8 @@ public static class SmokeTests
             });
             Assert(missingRequiredResult.Handled && missingRequiredResult.ExitCode == 1, "SQLite comment CLI should reject missing required options.");
             AssertContains(missingRequiredResult.Message, "Missing required option --database", "SQLite comment CLI missing required options should localize English messages.");
+            AssertEquals("Unknown error", SqliteColumnCommentCliService.BuildCliFailureMessage(new Exception("   ")), "SQLite comment CLI blank errors should localize English unknown errors.");
+            AssertEquals("database locked", SqliteColumnCommentCliService.BuildCliFailureMessage(new InvalidOperationException(" database locked ")), "SQLite comment CLI should preserve explicit English reasons.");
 
             try
             {
