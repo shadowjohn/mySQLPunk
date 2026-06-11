@@ -138,7 +138,7 @@ Smoke test harness：
 
 - **報表與 BI 物件類型 ✅ 已語系化**
   - 現況：`查詢 > Object Inventory`、`Table Row Counts`、`BI > Object Distribution` 與 `BI > Row Count Ranking` 會顯示物件類型、分類與就緒狀態。
-  - 完成內容：資料表/檢視類型、就緒狀態、物件分布分類、備份來源/目標類型，以及 BI / Reports 清單描述已改用語系字串，繁中與英文介面都會顯示一致文字。
+  - 完成內容：資料表/檢視類型、就緒狀態、物件分布分類、備份來源/目標類型，以及 BI / Reports 清單描述已改用語系字串，繁中與英文介面都會顯示一致文字；列數查詢失敗時也會用目前語系顯示未知錯誤 fallback，避免空白例外讓狀態欄沒有可讀回饋。
 
 - **資料庫群組清單 ✅ 已修正並語系化**
   - 現況：左側資料庫底下的 Views、Backups、Models、BI、Other、Queries、Reports 等群組會在右側清單顯示對應項目。

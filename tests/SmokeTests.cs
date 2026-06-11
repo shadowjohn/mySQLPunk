@@ -6115,6 +6115,11 @@ public static class SmokeTests
             Assert(zhRowCount != null, "Table row count report should include fake table metadata.");
             AssertContains(zhRowCount["狀態"].ToString(), "就緒", "Table row count report should localize Traditional Chinese ready status.");
 
+            DataTable zhFailedRowCounts = (DataTable)tableRowCountReportMethod.Invoke(form, new object[] { new FakeDumpDatabase { ThrowOnCountRows = true, CountRowsExceptionMessage = "" }, "main" });
+            DataRow zhFailedRowCount = FindDataRow(zhFailedRowCounts, "資料表", "public.users");
+            Assert(zhFailedRowCount != null, "Table row count report should keep rows when count fails.");
+            AssertEquals("未知錯誤", zhFailedRowCount["狀態"].ToString(), "Blank table row count errors should localize Traditional Chinese unknown fallback.");
+
             DataTable zhInventory = (DataTable)objectInventoryReportMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", new Dictionary<string, object>() });
             DataRow zhInventoryTable = FindDataRow(zhInventory, "名稱", "public.users");
             Assert(zhInventoryTable != null, "Object inventory should include fake table metadata.");
@@ -6129,6 +6134,11 @@ public static class SmokeTests
             Assert(zhRankingTable != null, "Row count ranking BI should include fake table metadata.");
             AssertContains(zhRankingTable["類型"].ToString(), "資料表", "Row count ranking BI should localize Traditional Chinese table type.");
             AssertContains(zhRankingTable["狀態"].ToString(), "就緒", "Row count ranking BI should localize Traditional Chinese ready status.");
+
+            DataTable zhFailedRanking = (DataTable)rowCountRankingBIMethod.Invoke(form, new object[] { new FakeDumpDatabase { ThrowOnCountRows = true, CountRowsExceptionMessage = " " }, "main" });
+            DataRow zhFailedRankingTable = FindDataRow(zhFailedRanking, "名稱", "public.users");
+            Assert(zhFailedRankingTable != null, "Row count ranking BI should keep rows when count fails.");
+            AssertEquals("未知錯誤", zhFailedRankingTable["狀態"].ToString(), "Blank ranking row count errors should localize Traditional Chinese unknown fallback.");
 
             DataTable zhViewsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Views", new Dictionary<string, object>() });
             DataRow zhViewGroupRow = FindDataRow(zhViewsGroup, "名稱", "public.active_users");
@@ -6311,6 +6321,16 @@ public static class SmokeTests
             Assert(enRankingView != null, "Row count ranking BI should include fake view metadata.");
             AssertEquals("View", enRankingView["類型"].ToString(), "Row count ranking BI should support English view type.");
             AssertEquals("Ready", enRankingView["狀態"].ToString(), "Row count ranking BI should support English ready status.");
+
+            DataTable enFailedRowCounts = (DataTable)tableRowCountReportMethod.Invoke(form, new object[] { new FakeDumpDatabase { ThrowOnCountRows = true, CountRowsExceptionMessage = "" }, "main" });
+            DataRow enFailedRowCount = FindDataRow(enFailedRowCounts, "資料表", "public.users");
+            Assert(enFailedRowCount != null, "Table row count report should keep rows when count fails in English.");
+            AssertEquals("Unknown error", enFailedRowCount["狀態"].ToString(), "Blank table row count errors should localize English unknown fallback.");
+
+            DataTable enFailedRanking = (DataTable)rowCountRankingBIMethod.Invoke(form, new object[] { new FakeDumpDatabase { ThrowOnCountRows = true, CountRowsExceptionMessage = " row count timeout " }, "main" });
+            DataRow enFailedRankingTable = FindDataRow(enFailedRanking, "名稱", "public.users");
+            Assert(enFailedRankingTable != null, "Row count ranking BI should keep table rows when count fails in English.");
+            AssertEquals("row count timeout", enFailedRankingTable["狀態"].ToString(), "Explicit ranking row count errors should be trimmed and preserved.");
 
             DataTable enReportsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Reports", new Dictionary<string, object>() });
             DataRow enReportRow = FindDataRow(enReportsGroup, "名稱", "Database Summary");
@@ -7798,6 +7818,8 @@ public static class SmokeTests
         public List<string> Views = new List<string> { "public.active_users" };
         public bool ThrowOnGetTables;
         public string GetTablesExceptionMessage = "table timeout";
+        public bool ThrowOnCountRows;
+        public string CountRowsExceptionMessage = "row count timeout";
         public string ProviderName => Provider;
         public string ConnectionString;
         public bool WasOpened;
@@ -7838,7 +7860,11 @@ public static class SmokeTests
         public bool ViewExists(string databaseName, string viewName) { return true; }
         public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
         public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
-        public long CountRows(string databaseName, string tableName) { return 1; }
+        public long CountRows(string databaseName, string tableName)
+        {
+            if (ThrowOnCountRows) throw new InvalidOperationException(CountRowsExceptionMessage);
+            return 1;
+        }
         public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
         public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }

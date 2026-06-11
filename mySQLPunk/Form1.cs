@@ -7870,7 +7870,7 @@ namespace mySQLPunk
                 catch (Exception ex)
                 {
                     row["列數"] = "";
-                    row["狀態"] = ex.Message;
+                    row["狀態"] = BuildExceptionReason(ex);
                 }
                 dt.Rows.Add(row);
             }
@@ -8356,7 +8356,7 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                return Tuple.Create(objectName, objectType, 0L, ex.Message);
+                return Tuple.Create(objectName, objectType, 0L, BuildExceptionReason(ex));
             }
         }
 
