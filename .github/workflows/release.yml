@@ -86,13 +86,28 @@ jobs:
       - name: Write release notes
         shell: pwsh
         run: |
-          $notes = @"
-          mySQLPunk ${{ steps.release_version.outputs.version }}
+          $version = "${{ steps.release_version.outputs.version }}"
+          $notes = $null
+          $changelogPath = ".\CHANGELOG.md"
+          if (Test-Path -LiteralPath $changelogPath) {
+            $changelog = Get-Content -LiteralPath $changelogPath -Raw -Encoding UTF8
+            $escapedVersion = [regex]::Escape($version)
+            $match = [regex]::Match($changelog, "(?ms)^## \[(?:v)?$escapedVersion\][^\r\n]*(?:\r?\n)(.*?)(?=^## \[|\z)")
+            if ($match.Success) {
+              $notes = "mySQLPunk $version`r`n`r`n" + $match.Groups[1].Value.Trim()
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            $notes = @"
+          mySQLPunk $version
 
           Assets:
           - Portable ZIP
           - release-manifest.json
           "@
+          }
+
           $notes.Trim() | Set-Content -LiteralPath ".\dist\release-notes.md" -Encoding UTF8
 
       - name: Upload workflow artifact
