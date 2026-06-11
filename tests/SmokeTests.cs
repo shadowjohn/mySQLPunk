@@ -5846,6 +5846,9 @@ public static class SmokeTests
             Localization.SetLanguage(Localization.TraditionalChinese, false);
             MethodInfo metadataLoadFailedMethod = typeof(Form1).GetMethod("BuildDatabaseMetadataLoadFailedMessage", BindingFlags.Static | BindingFlags.NonPublic);
             Assert(metadataLoadFailedMethod != null, "Database metadata load failure helper should be testable.");
+            MethodInfo viewCopyPreviewMethod = typeof(Form1).GetMethod("BuildViewCopyPreview", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert(viewCopyPreviewMethod != null, "View copy preview helper should be testable.");
+            object copyPreviewForm = FormatterServices.GetUninitializedObject(typeof(Form1));
             string zhMetadataLoadFailed = (string)metadataLoadFailedMethod.Invoke(null, new object[] { "PostgreSQL", "sales", new InvalidOperationException("schema timeout") });
             AssertContains(zhMetadataLoadFailed, "PostgreSQL metadata 載入失敗（sales）", "Database metadata load failure should localize Traditional Chinese messages.");
             AssertContains(zhMetadataLoadFailed, "schema timeout", "Database metadata load failure should include provider errors.");
@@ -5903,6 +5906,18 @@ public static class SmokeTests
                 AssertContains(ex.Message, "來源或目標資料庫尚未連線", "Database copy connection validation should localize Traditional Chinese messages.");
             }
 
+            DatabaseCopyItem blankViewPreviewSource = new DatabaseCopyItem
+            {
+                Database = new FakeCopyDatabase("mysql") { ThrowOnViewCreateStatement = true, ViewCreateStatementExceptionMessage = "" },
+                DatabaseName = "main",
+                ObjectName = "active_users",
+                ObjectKind = "view",
+                ProviderName = "mysql"
+            };
+            ViewSqlConversionPreview zhBlankPreview = (ViewSqlConversionPreview)viewCopyPreviewMethod.Invoke(copyPreviewForm, new object[] { blankViewPreviewSource, connectedTableTarget });
+            Assert(!zhBlankPreview.CanConvert, "View copy preview should mark blank DDL errors as not convertible.");
+            AssertEquals("未知錯誤", zhBlankPreview.Reason, "Blank View copy preview errors should localize Traditional Chinese unknown fallback.");
+
             try
             {
                 copyService.Copy(connectedTableSource, connectedTableTarget, null);
@@ -5918,6 +5933,18 @@ public static class SmokeTests
             AssertContains(enMetadataLoadFailed, "SQL Server metadata load failed (warehouse)", "Database metadata load failure should localize English messages.");
             AssertContains(enMetadataLoadFailed, "permission denied", "English database metadata load failure should include provider errors.");
             AssertEquals("Metadata Load", Localization.T("Metadata.Title"), "Database metadata error dialog title should localize English messages.");
+
+            DatabaseCopyItem explicitViewPreviewSource = new DatabaseCopyItem
+            {
+                Database = new FakeCopyDatabase("postgresql") { ThrowOnViewCreateStatement = true, ViewCreateStatementExceptionMessage = " ddl unavailable " },
+                DatabaseName = "main",
+                ObjectName = "active_users",
+                ObjectKind = "view",
+                ProviderName = "postgresql"
+            };
+            ViewSqlConversionPreview enExplicitPreview = (ViewSqlConversionPreview)viewCopyPreviewMethod.Invoke(copyPreviewForm, new object[] { explicitViewPreviewSource, connectedTableTarget });
+            Assert(!enExplicitPreview.CanConvert, "View copy preview should mark explicit DDL errors as not convertible.");
+            AssertEquals("ddl unavailable", enExplicitPreview.Reason, "Explicit View copy preview errors should be trimmed and preserved.");
 
             DatabaseCopyItem unsupportedSource = new DatabaseCopyItem
             {
@@ -7945,6 +7972,8 @@ public static class SmokeTests
         private readonly string providerName;
         private readonly bool includeCopyColumns;
         private readonly string viewSql;
+        public bool ThrowOnViewCreateStatement;
+        public string ViewCreateStatementExceptionMessage = "view ddl unavailable";
 
         public FakeCopyDatabase(string providerName, bool includeCopyColumns = false, string viewSql = "CREATE VIEW active_users AS SELECT id FROM users")
         {
@@ -7989,7 +8018,11 @@ public static class SmokeTests
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { }
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { }
-        public string GetViewCreateStatement(string databaseName, string viewName) { return viewSql; }
+        public string GetViewCreateStatement(string databaseName, string viewName)
+        {
+            if (ThrowOnViewCreateStatement) throw new InvalidOperationException(ViewCreateStatementExceptionMessage);
+            return viewSql;
+        }
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { }
     }
 

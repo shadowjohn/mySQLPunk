@@ -7296,7 +7296,7 @@ namespace mySQLPunk
                     SourceSql = "",
                     ConvertedSql = "",
                     CanConvert = false,
-                    Reason = ex.Message
+                    Reason = BuildExceptionReason(ex)
                 };
             }
         }
