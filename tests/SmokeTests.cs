@@ -4022,10 +4022,22 @@ public static class SmokeTests
             });
             Assert(loadedFromCacheAfterEmptyError.ContainsKey("CACHE_ONLY"), "Auto comment dictionary should fall back to local cache when remote error text is empty.");
             AssertContains(TableDesignerForm.GetAutoColumnCommentLastError(), "未知錯誤", "Auto comment dictionary empty remote errors should localize Traditional Chinese fallback text.");
+            MethodInfo autoCommentExceptionMessageMethod = typeof(TableDesignerForm).GetMethod("BuildAutoColumnCommentExceptionMessage", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(autoCommentExceptionMessageMethod != null, "Auto comment dictionary exception message helper should be testable.");
+            AssertEquals("匯入自動註解字典失敗：未知錯誤", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsImportFailed", new Exception("") }), "Blank auto comment import errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("匯出自動註解字典失敗：disk full", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsExportFailed", new IOException(" disk full ") }), "Auto comment export errors should preserve explicit Traditional Chinese reasons.");
+            AssertEquals("保存註解字典失敗：未知錯誤", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsDictionarySaveFailed", new Exception("   ") }), "Blank auto comment dictionary save errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("切換註解字典失敗：未知錯誤", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsDictionarySwitchFailed", new Exception("") }), "Blank auto comment dictionary switch errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("重新命名註解字典失敗：未知錯誤", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsDictionaryRenameFailed", new Exception("") }), "Blank auto comment dictionary rename errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("刪除註解字典失敗：未知錯誤", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsDictionaryDeleteFailed", new Exception("") }), "Blank auto comment dictionary delete errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("比較註解字典版本失敗：未知錯誤", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsDictionaryVersionCompareFailed", new Exception("") }), "Blank auto comment dictionary version compare errors should localize Traditional Chinese unknown errors.");
+            AssertEquals("回復註解字典版本失敗：未知錯誤", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsDictionaryVersionRestoreFailed", new Exception("") }), "Blank auto comment dictionary version restore errors should localize Traditional Chinese unknown errors.");
 
             Localization.SetLanguage(Localization.English, false);
             MethodInfo autoCommentErrorMethod = typeof(TableDesignerForm).GetMethod("GetAutoColumnCommentErrorMessage", BindingFlags.Static | BindingFlags.NonPublic);
             AssertEquals("Unknown error", (string)autoCommentErrorMethod.Invoke(null, new object[] { new Exception("") }), "Auto comment dictionary empty errors should localize English fallback text.");
+            AssertEquals("Import auto comment dictionary failed: Unknown error", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsImportFailed", new Exception("") }), "Blank auto comment import errors should localize English unknown errors.");
+            AssertEquals("Restore comment dictionary version failed: version missing", (string)autoCommentExceptionMessageMethod.Invoke(null, new object[] { "Designer.AutoCommentsDictionaryVersionRestoreFailed", new InvalidOperationException(" version missing ") }), "Auto comment dictionary version restore errors should preserve explicit English reasons.");
             try
             {
                 TableDesignerForm.PreviewAutoColumnCommentDictionaryImportFile("");

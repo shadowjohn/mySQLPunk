@@ -862,7 +862,12 @@ namespace mySQLPunk
             string message = ex == null ? null : ex.Message;
             return string.IsNullOrWhiteSpace(message)
                 ? Localization.T("Designer.AutoCommentsUnknownError")
-                : message;
+                : message.Trim();
+        }
+
+        private static string BuildAutoColumnCommentExceptionMessage(string messageKey, Exception ex)
+        {
+            return Localization.Format(messageKey, GetAutoColumnCommentErrorMessage(ex));
         }
 
         private static string DownloadAutoColumnCommentJson()
@@ -1411,7 +1416,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.Format("Designer.AutoCommentsImportFailed", ex.Message), Localization.T("Designer.ImportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsImportFailed", ex), Localization.T("Designer.ImportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -1656,7 +1661,7 @@ namespace mySQLPunk
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(Localization.Format("Designer.AutoCommentsExportFailed", ex.Message), Localization.T("Designer.ExportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsExportFailed", ex), Localization.T("Designer.ExportAutoCommentsDictionary"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -1683,7 +1688,7 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    Localization.Format("Designer.AutoCommentsDictionarySaveFailed", ex.Message),
+                    BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsDictionarySaveFailed", ex),
                     Localization.T("Designer.SaveAutoCommentsDictionaryAs"),
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -1719,7 +1724,7 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    Localization.Format("Designer.AutoCommentsDictionarySwitchFailed", ex.Message),
+                    BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsDictionarySwitchFailed", ex),
                     Localization.T("Designer.SwitchAutoCommentsDictionary"),
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -1758,7 +1763,7 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    Localization.Format("Designer.AutoCommentsDictionaryRenameFailed", ex.Message),
+                    BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsDictionaryRenameFailed", ex),
                     Localization.T("Designer.RenameAutoCommentsDictionary"),
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -1802,7 +1807,7 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    Localization.Format("Designer.AutoCommentsDictionaryDeleteFailed", ex.Message),
+                    BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsDictionaryDeleteFailed", ex),
                     Localization.T("Designer.DeleteAutoCommentsDictionary"),
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -1834,7 +1839,7 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    Localization.Format("Designer.AutoCommentsDictionaryVersionCompareFailed", ex.Message),
+                    BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsDictionaryVersionCompareFailed", ex),
                     Localization.T("Designer.CompareAutoCommentsDictionaryVersion"),
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -1877,7 +1882,7 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    Localization.Format("Designer.AutoCommentsDictionaryVersionRestoreFailed", ex.Message),
+                    BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsDictionaryVersionRestoreFailed", ex),
                     Localization.T("Designer.RestoreAutoCommentsDictionaryVersion"),
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -2159,7 +2164,7 @@ namespace mySQLPunk
                     {
                         if (showMessage)
                         {
-                            MessageBox.Show(Localization.Format("Designer.AutoCommentsLoadFailed", ex.Message), Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            MessageBox.Show(BuildAutoColumnCommentExceptionMessage("Designer.AutoCommentsLoadFailed", ex), Localization.T("Designer.FillAutoComments"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         }
                         return 0;
                     }
