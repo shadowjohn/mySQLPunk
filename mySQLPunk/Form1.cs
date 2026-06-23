@@ -11613,16 +11613,20 @@ namespace mySQLPunk
             if (string.IsNullOrWhiteSpace(text)) text = "database";
 
             char[] invalidChars = Path.GetInvalidFileNameChars();
+            const string WindowsInvalidFileNameChars = "<>:\"/\\|?*";
             StringBuilder builder = new StringBuilder();
             foreach (char ch in text)
             {
-                bool invalid = false;
-                foreach (char invalidChar in invalidChars)
+                bool invalid = char.IsControl(ch) || WindowsInvalidFileNameChars.IndexOf(ch) >= 0;
+                if (!invalid)
                 {
-                    if (ch == invalidChar)
+                    foreach (char invalidChar in invalidChars)
                     {
-                        invalid = true;
-                        break;
+                        if (ch == invalidChar)
+                        {
+                            invalid = true;
+                            break;
+                        }
                     }
                 }
 
