@@ -25,6 +25,18 @@ namespace mySQLPunk.lib
         public static string BuildDatabaseDump(IDatabase db, string databaseName)
         {
             if (db == null) throw new ArgumentNullException(nameof(db));
+            if (IsProvider(db, "mysql"))
+            {
+                return MySqlExportService.BuildExportSql(db, databaseName, new MySqlExportOptions
+                {
+                    IncludeCreateDatabase = true,
+                    IncludeUseDatabase = true,
+                    IncludeDropStatements = true,
+                    DisableForeignKeyChecks = true,
+                    RemoveDefiner = true,
+                    InsertBatchSize = 1000
+                });
+            }
 
             StringBuilder builder = new StringBuilder();
             builder.AppendLine("-- mySQLPunk Database Backup");

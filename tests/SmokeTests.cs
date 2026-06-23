@@ -36,6 +36,7 @@ public static class SmokeTests
         Run("Pre-delete backup archive service", TestPreDeleteBackupArchiveService, ref passed);
         Run("Backup restore service", TestBackupRestoreService, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
+        Run("MySQL export/import service", TestMySqlExportImportService, ref passed);
         Run("Database rename service", TestDatabaseRenameService, ref passed);
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("SpatiaLite runtime diagnostics", TestSpatiaLiteRuntimeDiagnostics, ref passed);
@@ -4235,6 +4236,56 @@ public static class SmokeTests
         }
     }
 
+    private static void TestMySqlExportImportService()
+    {
+        FakeMySqlExportDatabase db = new FakeMySqlExportDatabase();
+        MySqlExportOptions options = new MySqlExportOptions
+        {
+            IncludeCreateDatabase = true,
+            IncludeUseDatabase = true,
+            IncludeDropStatements = true,
+            DisableForeignKeyChecks = true,
+            RemoveDefiner = true,
+            InsertBatchSize = 500
+        };
+        MySqlExportResult result = MySqlExportService.BuildExport(db, "main", options, null);
+        string sql = result.Sql;
+
+        AssertContains(sql, "SET NAMES utf8mb4;", "MySQL export should initialize utf8mb4 client encoding.");
+        AssertContains(sql, "CREATE DATABASE IF NOT EXISTS `main` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", "MySQL export should include CREATE DATABASE with charset/collation when requested.");
+        AssertContains(sql, "DROP TRIGGER IF EXISTS `trg_users_before_insert`;", "MySQL export should drop triggers before recreating objects.");
+        AssertContains(sql, "DROP FUNCTION IF EXISTS `fn_label`;", "MySQL export should drop functions when drop-before-create is enabled.");
+        AssertContains(sql, "DROP PROCEDURE IF EXISTS `sp_touch`;", "MySQL export should drop procedures when drop-before-create is enabled.");
+        AssertContains(sql, "CREATE TABLE `users`", "MySQL export should include SHOW CREATE TABLE output.");
+        AssertContains(sql, "INSERT INTO `users` (`id`, `name`, `payload`, `note`) VALUES", "MySQL export should emit batch INSERT column lists.");
+        AssertContains(sql, "O\\'Reilly\\\\path\\n中文", "MySQL export should escape quotes, backslashes, and newlines in data.");
+        AssertContains(sql, "0xAABB", "MySQL export should emit binary values as hex literals.");
+        AssertContains(sql, "VIEW `v_users` AS SELECT `id` FROM `users`;", "MySQL export should include views after tables/data.");
+        AssertContains(sql, "DELIMITER ;;", "MySQL export should wrap routines and triggers with delimiter blocks.");
+        AssertContains(sql, "CREATE FUNCTION `fn_label`", "MySQL export should include function DDL.");
+        AssertContains(sql, "CREATE PROCEDURE `sp_touch`", "MySQL export should include procedure DDL.");
+        AssertContains(sql, "CREATE TRIGGER `trg_users_before_insert`", "MySQL export should include trigger DDL.");
+        AssertNotContains(sql, "DEFINER", "MySQL export should remove DEFINER by default for cross-environment imports.");
+        Assert(result.TableCount == 1 && result.ViewCount == 1 && result.RoutineCount == 2 && result.TriggerCount == 1 && result.RowCount == 1, "MySQL export result should count exported objects and rows.");
+
+        string databaseDump = DatabaseDumpService.BuildDatabaseDump(db, "main");
+        AssertContains(databaseDump, "-- mySQLPunk MySQL Export", "Generic database dump should use the MySQL-specific export path for MySQL connections.");
+
+        string importSql = "CREATE TABLE t(id int);\n" +
+                           "DELIMITER ;;\n" +
+                           "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW BEGIN SET NEW.id=NEW.id; END;;\n" +
+                           "DELIMITER ;\n" +
+                           "INSERT INTO t VALUES(1);";
+        List<MySqlImportStatement> statements = MySqlImportService.ParseStatements(new StringReader(importSql));
+        Assert(statements.Count == 3, "MySQL import parser should split regular and DELIMITER-based statements.");
+        AssertContains(statements[1].Sql, "BEGIN SET NEW.id=NEW.id; END", "MySQL import parser should preserve semicolons inside DELIMITER blocks.");
+
+        FakeExecDatabase execDb = new FakeExecDatabase("mysql", "1");
+        MySqlImportResult importResult = MySqlImportService.Execute(execDb, new StringReader(importSql), new MySqlImportOptions(), null);
+        Assert(importResult.ExecutedStatements == 3 && importResult.FailedStatements == 0, "MySQL import service should execute parsed statements successfully.");
+        Assert(execDb.ExecutedSql.Count == 3, "MySQL import service should execute each parsed statement exactly once.");
+    }
+
     private static void TestDatabaseRenameService()
     {
         FakeRenameDatabase pg = new FakeRenameDatabase("postgresql");
@@ -8023,6 +8074,103 @@ public static class SmokeTests
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
         public string GetViewCreateStatement(string databaseName, string viewName) { return ""; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
+    }
+
+    private sealed class FakeMySqlExportDatabase : IDatabase
+    {
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => "mysql";
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            if (sql.IndexOf("information_schema.ROUTINES", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("ROUTINE_NAME");
+                table.Columns.Add("ROUTINE_TYPE");
+                table.Rows.Add("fn_label", "FUNCTION");
+                table.Rows.Add("sp_touch", "PROCEDURE");
+                return table;
+            }
+            if (sql.IndexOf("information_schema.TRIGGERS", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("TRIGGER_NAME");
+                table.Rows.Add("trg_users_before_insert");
+                return table;
+            }
+            if (sql.IndexOf("SHOW CREATE FUNCTION", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("Function");
+                table.Columns.Add("sql_mode");
+                table.Columns.Add("Create Function");
+                table.Rows.Add("fn_label", "", "CREATE DEFINER=`root`@`localhost` FUNCTION `fn_label`(`p_id` int) RETURNS varchar(20) DETERMINISTIC BEGIN RETURN CONCAT('u', p_id); END");
+                return table;
+            }
+            if (sql.IndexOf("SHOW CREATE PROCEDURE", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("Procedure");
+                table.Columns.Add("sql_mode");
+                table.Columns.Add("Create Procedure");
+                table.Rows.Add("sp_touch", "", "CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_touch`() BEGIN SELECT 1; END");
+                return table;
+            }
+            if (sql.IndexOf("SHOW CREATE TRIGGER", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("Trigger");
+                table.Columns.Add("sql_mode");
+                table.Columns.Add("SQL Original Statement");
+                table.Rows.Add("trg_users_before_insert", "", "CREATE DEFINER=`root`@`localhost` TRIGGER `trg_users_before_insert` BEFORE INSERT ON `users` FOR EACH ROW BEGIN SET NEW.name = TRIM(NEW.name); END");
+                return table;
+            }
+            return new DataTable();
+        }
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null) { return new Dictionary<string, string> { { "status", "OK" } }; }
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public List<string> GetDatabases() { return new List<string> { "main" }; }
+        public List<string> GetTables(string databaseName) { return new List<string> { "users" }; }
+        public List<string> GetViews(string databaseName) { return new List<string> { "v_users" }; }
+        public DataTable GetColumns(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName)
+        {
+            return new Dictionary<string, string>
+            {
+                { "character_set", "utf8mb4" },
+                { "collation", "utf8mb4_unicode_ci" }
+            };
+        }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return "CREATE TABLE `users` (`id` int NOT NULL, `name` varchar(100), `payload` blob, `note` text, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='使用者'"; }
+        public bool TableExists(string databaseName, string tableName) { return true; }
+        public bool ViewExists(string databaseName, string viewName) { return true; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 1; }
+        public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("id", typeof(int));
+            table.Columns.Add("name", typeof(string));
+            table.Columns.Add("payload", typeof(byte[]));
+            table.Columns.Add("note", typeof(string));
+            table.Rows.Add(1, "O'Reilly\\path\n中文", new byte[] { 0xAA, 0xBB }, DBNull.Value);
+            return table;
+        }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v_users` AS SELECT `id` FROM `users`"; }
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
     }
 
