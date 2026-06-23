@@ -205,6 +205,8 @@ namespace mySQLPunk.lib
                 return "0x" + hex;
             }
             if (value is bool) return ((bool)value) ? "1" : "0";
+            string mysqlDateTimeLiteral;
+            if (TryFormatMySqlDateTime(value, out mysqlDateTimeLiteral)) return mysqlDateTimeLiteral;
             if (value is DateTime)
             {
                 return "'" + ((DateTime)value).ToString("yyyy-MM-dd HH:mm:ss.fffffff", System.Globalization.CultureInfo.InvariantCulture).TrimEnd('0').TrimEnd('.') + "'";
@@ -215,6 +217,51 @@ namespace mySQLPunk.lib
                 return formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
             }
             return "'" + EscapeMySqlString(value.ToString()) + "'";
+        }
+
+        private static bool TryFormatMySqlDateTime(object value, out string literal)
+        {
+            literal = null;
+            if (value == null) return false;
+            Type type = value.GetType();
+            if (!string.Equals(type.FullName, "MySqlConnector.MySqlDateTime", StringComparison.Ordinal)) return false;
+
+            try
+            {
+                object isValid = type.GetProperty("IsValidDateTime")?.GetValue(value, null);
+                if (isValid is bool && (bool)isValid)
+                {
+                    object dateTimeValue = type.GetMethod("GetDateTime", Type.EmptyTypes)?.Invoke(value, null);
+                    if (dateTimeValue is DateTime)
+                    {
+                        literal = "'" + ((DateTime)dateTimeValue).ToString("yyyy-MM-dd HH:mm:ss.fffffff", System.Globalization.CultureInfo.InvariantCulture).TrimEnd('0').TrimEnd('.') + "'";
+                        return true;
+                    }
+                }
+
+                int year = GetIntProperty(type, value, "Year");
+                int month = GetIntProperty(type, value, "Month");
+                int day = GetIntProperty(type, value, "Day");
+                int hour = GetIntProperty(type, value, "Hour");
+                int minute = GetIntProperty(type, value, "Minute");
+                int second = GetIntProperty(type, value, "Second");
+                int microsecond = GetIntProperty(type, value, "Microsecond");
+                string formatted = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "{0:0000}-{1:00}-{2:00} {3:00}:{4:00}:{5:00}", year, month, day, hour, minute, second);
+                if (microsecond > 0) formatted += "." + microsecond.ToString("000000", System.Globalization.CultureInfo.InvariantCulture).TrimEnd('0');
+                literal = "'" + formatted + "'";
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static int GetIntProperty(Type type, object value, string propertyName)
+        {
+            object result = type.GetProperty(propertyName)?.GetValue(value, null);
+            return result == null ? 0 : Convert.ToInt32(result, System.Globalization.CultureInfo.InvariantCulture);
         }
 
         public static string EscapeMySqlString(string value)

@@ -4259,6 +4259,7 @@ public static class SmokeTests
         AssertContains(sql, "CREATE TABLE `users`", "MySQL export should include SHOW CREATE TABLE output.");
         AssertContains(sql, "INSERT INTO `users` (`id`, `name`, `payload`, `note`) VALUES", "MySQL export should emit batch INSERT column lists.");
         AssertContains(sql, "O\\'Reilly\\\\path\\n中文", "MySQL export should escape quotes, backslashes, and newlines in data.");
+        AssertEquals("'2026-06-23 04:48:57'", MySqlExportService.ToMySqlLiteral(new MySqlConnector.MySqlDateTime(2026, 6, 23, 4, 48, 57, 0)), "MySQL export should format MySqlConnector date/time values using invariant MySQL syntax.");
         AssertContains(sql, "0xAABB", "MySQL export should emit binary values as hex literals.");
         AssertContains(sql, "VIEW `v_users` AS SELECT `id` FROM `users`;", "MySQL export should include views after tables/data.");
         AssertContains(sql, "DELIMITER ;;", "MySQL export should wrap routines and triggers with delimiter blocks.");
@@ -4284,6 +4285,15 @@ public static class SmokeTests
         MySqlImportResult importResult = MySqlImportService.Execute(execDb, new StringReader(importSql), new MySqlImportOptions(), null);
         Assert(importResult.ExecutedStatements == 3 && importResult.FailedStatements == 0, "MySQL import service should execute parsed statements successfully.");
         Assert(execDb.ExecutedSql.Count == 3, "MySQL import service should execute each parsed statement exactly once.");
+
+        FakeExecDatabase streamingDb = new FakeExecDatabase("mysql", "1");
+        MySqlImportResult streamingResult = MySqlImportService.Execute(
+            streamingDb,
+            new StreamingGateTextReader(() => streamingDb.ExecutedSql.Count > 0),
+            new MySqlImportOptions(),
+            null);
+        Assert(streamingResult.ExecutedStatements == 2, "MySQL import should execute streaming statements successfully.");
+        Assert(streamingDb.ExecutedSql.Count == 2, "MySQL import should execute the first statement before reading the rest of the file.");
     }
 
     private static void TestDatabaseRenameService()
@@ -8245,6 +8255,30 @@ public static class SmokeTests
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
         public string GetViewCreateStatement(string databaseName, string viewName) { return "CREATE VIEW \"public\".\"active_users\" AS SELECT * FROM \"public\".\"users\""; }
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
+    }
+
+    private sealed class StreamingGateTextReader : TextReader
+    {
+        private readonly Func<bool> canReadPastFirstStatement;
+        private int readCount;
+
+        public StreamingGateTextReader(Func<bool> canReadPastFirstStatement)
+        {
+            this.canReadPastFirstStatement = canReadPastFirstStatement;
+        }
+
+        public override string ReadLine()
+        {
+            readCount++;
+            if (readCount == 1) return "CREATE TABLE t(id int);";
+            if (readCount == 2)
+            {
+                if (canReadPastFirstStatement == null || !canReadPastFirstStatement())
+                    throw new InvalidOperationException("Import reader advanced before executing the first statement.");
+                return "INSERT INTO t VALUES(1);";
+            }
+            return null;
+        }
     }
 
     private sealed class FakeExecDatabase : IDatabase

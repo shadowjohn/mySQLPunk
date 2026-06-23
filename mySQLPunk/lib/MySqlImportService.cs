@@ -54,7 +54,7 @@ namespace mySQLPunk.lib
             if (reader == null) throw new ArgumentNullException("reader");
             options = options ?? new MySqlImportOptions();
             MySqlImportResult result = new MySqlImportResult();
-            foreach (MySqlImportStatement statement in ParseStatements(reader))
+            foreach (MySqlImportStatement statement in EnumerateStatements(reader))
             {
                 if (string.IsNullOrWhiteSpace(statement.Sql)) continue;
                 if (progress != null) progress("Import SQL line " + statement.StartLine + ": " + BuildPreview(statement.Sql));
@@ -82,7 +82,12 @@ namespace mySQLPunk.lib
         public static List<MySqlImportStatement> ParseStatements(TextReader reader)
         {
             if (reader == null) throw new ArgumentNullException("reader");
-            List<MySqlImportStatement> result = new List<MySqlImportStatement>();
+            return new List<MySqlImportStatement>(EnumerateStatements(reader));
+        }
+
+        public static IEnumerable<MySqlImportStatement> EnumerateStatements(TextReader reader)
+        {
+            if (reader == null) throw new ArgumentNullException("reader");
             StringBuilder current = new StringBuilder();
             string delimiter = ";";
             string line;
@@ -107,7 +112,7 @@ namespace mySQLPunk.lib
                     string sql = RemoveTrailingDelimiter(current.ToString(), delimiter).Trim();
                     if (!string.IsNullOrWhiteSpace(sql))
                     {
-                        result.Add(new MySqlImportStatement { Sql = sql, StartLine = statementStartLine });
+                        yield return new MySqlImportStatement { Sql = sql, StartLine = statementStartLine };
                     }
                     current.Length = 0;
                     statementStartLine = lineNumber + 1;
@@ -117,9 +122,8 @@ namespace mySQLPunk.lib
             string tail = current.ToString().Trim();
             if (!string.IsNullOrWhiteSpace(tail))
             {
-                result.Add(new MySqlImportStatement { Sql = tail, StartLine = statementStartLine });
+                yield return new MySqlImportStatement { Sql = tail, StartLine = statementStartLine };
             }
-            return result;
         }
 
         public static string BuildPreview(string sql)
