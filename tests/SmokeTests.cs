@@ -36,6 +36,7 @@ public static class SmokeTests
         Run("Pre-delete backup archive service", TestPreDeleteBackupArchiveService, ref passed);
         Run("Backup restore service", TestBackupRestoreService, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
+        Run("Database rename service", TestDatabaseRenameService, ref passed);
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("SpatiaLite runtime diagnostics", TestSpatiaLiteRuntimeDiagnostics, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
@@ -4234,6 +4235,43 @@ public static class SmokeTests
         }
     }
 
+    private static void TestDatabaseRenameService()
+    {
+        FakeRenameDatabase pg = new FakeRenameDatabase("postgresql");
+        DatabaseRenameResult pgResult = DatabaseRenameService.Rename(pg, "old_db", "new_db", null, null);
+        AssertEquals("ALTER DATABASE \"old_db\" RENAME TO \"new_db\";", pg.ExecutedSql[0], "PostgreSQL database rename should use quoted ALTER DATABASE syntax.");
+        Assert(!pgResult.OldDatabaseRetained, "Native rename should not retain the old database.");
+
+        FakeRenameDatabase sqlServer = new FakeRenameDatabase("mssql");
+        DatabaseRenameService.Rename(sqlServer, "old]db", "new]db", null, null);
+        AssertEquals("ALTER DATABASE [old]]db] MODIFY NAME = [new]]db];", sqlServer.ExecutedSql[0], "SQL Server database rename should bracket-quote names.");
+
+        FakeRenameDatabase mysql = new FakeRenameDatabase("mysql");
+        DatabaseRenameResult mysqlResult = DatabaseRenameService.Rename(mysql, "old_db", "new_db", new DatabaseRenameOptions(), null);
+        AssertContains(string.Join("\n", mysql.ExecutedSql.ToArray()), "CREATE DATABASE `new_db`;", "MySQL database rename should create the target database.");
+        Assert(mysqlResult.OldDatabaseRetained, "MySQL copy-based rename should retain the old database.");
+
+        try
+        {
+            DatabaseRenameService.ValidateDatabaseName("mysql", "bad/name");
+            Assert(false, "MySQL database rename validation should reject slash characters.");
+        }
+        catch (ArgumentException ex)
+        {
+            AssertContains(ex.Message, "MySQL", "MySQL validation error should explain the provider rule.");
+        }
+
+        try
+        {
+            DatabaseRenameService.Rename(new FakeRenameDatabase("postgresql") { Databases = new List<string> { "new_db" } }, "old_db", "new_db", null, null);
+            Assert(false, "Database rename should reject duplicate target database names.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            AssertContains(ex.Message, "new_db", "Duplicate target validation should include the target name.");
+        }
+    }
+
     private static void TestSqliteColumnCommentExchangeService()
     {
         FakeSqliteCommentDatabase db = new FakeSqliteCommentDatabase();
@@ -7938,6 +7976,54 @@ public static class SmokeTests
         {
             return reader.ReadToEnd();
         }
+    }
+
+    private sealed class FakeRenameDatabase : IDatabase
+    {
+        private readonly string providerName;
+        public List<string> Databases = new List<string> { "old_db" };
+        public List<string> ExecutedSql = new List<string>();
+
+        public FakeRenameDatabase(string providerName)
+        {
+            this.providerName = providerName;
+        }
+
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => providerName;
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { return new DataTable(); }
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            ExecutedSql.Add(sql);
+            return new Dictionary<string, string> { { "status", "OK" } };
+        }
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public List<string> GetDatabases() { return Databases; }
+        public List<string> GetTables(string databaseName) { return new List<string>(); }
+        public List<string> GetViews(string databaseName) { return new List<string>(); }
+        public DataTable GetColumns(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return ""; }
+        public bool TableExists(string databaseName, string tableName) { return false; }
+        public bool ViewExists(string databaseName, string viewName) { return false; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 0; }
+        public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return ""; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
     }
 
     private sealed class FakeDumpDatabase : IDatabase

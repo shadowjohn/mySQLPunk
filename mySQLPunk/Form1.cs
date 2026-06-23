@@ -7033,7 +7033,7 @@ namespace mySQLPunk
         {
             if (!IsRenameableObjectNode(db_tree.SelectedNode))
             {
-                MessageBox.Show(Localization.T("Object.SelectTableOrView"), Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(Localization.T("Object.SelectDatabaseTableOrView"), Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -7070,11 +7070,23 @@ namespace mySQLPunk
         {
             if (node == null) return false;
             var pathParts = GetTreePathParts(node);
+            if (pathParts.Length == 2) return true;
             return pathParts.Length >= 4 && (pathParts[2] == "Tables" || pathParts[2] == "Views");
+        }
+
+        private bool IsDatabaseNode(TreeNode node)
+        {
+            return node != null && GetTreePathParts(node).Length == 2;
         }
 
         private void RenameDatabaseObjectNode(TreeNode node, string oldName, string newName)
         {
+            if (IsDatabaseNode(node))
+            {
+                RenameDatabaseNodeAsync(node, oldName, newName);
+                return;
+            }
+
             DatabaseCopyItem item = BuildCopyItemFromNode(node);
             if (item == null)
             {
@@ -7111,6 +7123,110 @@ namespace mySQLPunk
             finally
             {
                 Cursor = Cursors.Default;
+            }
+        }
+
+        private async void RenameDatabaseNodeAsync(TreeNode node, string oldName, string newName)
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(node);
+            if (target != null)
+            {
+                target.DatabaseName = oldName;
+                target.DatabaseNode = node;
+            }
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Object.SelectionConnectionUnavailable"), Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = db_tree.Enabled;
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                db_tree.Enabled = false;
+                UpdateMainStatus(Localization.Format("DatabaseRename.NativeRenameDone", oldName, newName));
+
+                DatabaseRenameOptions options = new DatabaseRenameOptions();
+                DatabaseRenameResult result = await Task.Run(() => DatabaseRenameService.Rename(
+                    target.Database,
+                    oldName,
+                    newName,
+                    options,
+                    message =>
+                    {
+                        if (string.IsNullOrWhiteSpace(message)) return;
+                        try
+                        {
+                            if (!IsDisposed && IsHandleCreated)
+                            {
+                                BeginInvoke(new Action(() => UpdateMainStatus(message)));
+                            }
+                        }
+                        catch { }
+                    }));
+
+                TreeNode selectedNode;
+                if (result.OldDatabaseRetained)
+                {
+                    TreeNode parent = node.Parent;
+                    selectedNode = null;
+                    if (parent != null)
+                    {
+                        foreach (TreeNode sibling in parent.Nodes)
+                        {
+                            if (string.Equals(sibling.Text, newName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                selectedNode = sibling;
+                                break;
+                            }
+                        }
+
+                        if (selectedNode == null)
+                        {
+                            selectedNode = new TreeNode(newName)
+                            {
+                                ImageIndex = node.ImageIndex,
+                                SelectedImageIndex = node.SelectedImageIndex
+                            };
+                            parent.Nodes.Add(selectedNode);
+                        }
+                    }
+                    else
+                    {
+                        selectedNode = node;
+                    }
+                }
+                else
+                {
+                    node.Text = newName;
+                    selectedNode = node;
+                }
+
+                if (selectedNode != null)
+                {
+                    selectedNode.EnsureVisible();
+                    db_tree.SelectedNode = selectedNode;
+                    RefreshDatabaseObjectNodes(selectedNode);
+                }
+
+                string status = result.Messages.Count > 0
+                    ? result.Messages[result.Messages.Count - 1]
+                    : Localization.Format("Object.RenamedStatus", "database", oldName, newName);
+                UpdateMainStatus(status);
+                db_tree_AfterSelect(db_tree, new TreeViewEventArgs(selectedNode ?? node));
+            }
+            catch (Exception ex)
+            {
+                string message = DatabaseRenameService.BuildFailureMessage(target.ProviderName, oldName, newName, ex);
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                db_tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
             }
         }
 
@@ -10104,6 +10220,10 @@ namespace mySQLPunk
             ToolStripMenuItem deleteItem = new ToolStripMenuItem(Localization.T("Tool.DeleteDatabase"));
             deleteItem.Click += (s, ev) => DeleteSelectedDatabase();
             menu.Items.Add(deleteItem);
+
+            ToolStripMenuItem renameItem = new ToolStripMenuItem(Localization.T("Tool.RenameObject"));
+            renameItem.Click += (s, ev) => BeginRenameSelectedDatabaseObject();
+            menu.Items.Add(renameItem);
 
             menu.Items.Add(new ToolStripSeparator());
 

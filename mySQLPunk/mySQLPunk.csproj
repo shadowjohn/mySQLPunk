@@ -188,6 +188,7 @@
     <Compile Include="lib\DatabaseCopyService.cs" />
     <Compile Include="lib\DatabaseDumpService.cs" />
     <Compile Include="lib\DatabaseExecutionResultService.cs" />
+    <Compile Include="lib\DatabaseRenameService.cs" />
     <Compile Include="lib\DiagnosticLogService.cs" />
     <Compile Include="lib\DockableTabOptionService.cs" />
     <Compile Include="lib\IDatabase.cs" />
