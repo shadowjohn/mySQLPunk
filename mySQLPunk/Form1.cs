@@ -4998,13 +4998,21 @@ namespace mySQLPunk
             }
         }
 
-        private void DumpCurrentSelectionSqlWithDialog(bool dataOnlyForTable)
+        private async void DumpCurrentSelectionSqlWithDialog(bool dataOnlyForTable)
         {
             TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 MessageBox.Show(Localization.T("Backup.SelectDatabase"), Localization.T("Tool.ExportWizard"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
+            }
+
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            MySqlExportOptions mysqlOptions = null;
+            if (!dataOnlyForTable && selection == null && IsMySqlTarget(target))
+            {
+                mysqlOptions = ShowMySqlExportOptionsDialog();
+                if (mysqlOptions == null) return;
             }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
@@ -5020,8 +5028,25 @@ namespace mySQLPunk
 
                 try
                 {
-                    DumpCurrentSelectionSqlToFile(dialog.FileName, dataOnlyForTable);
-                    MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    if (mysqlOptions != null)
+                    {
+                        MySqlExportResult result = await ExportMySqlDatabaseWithProgress(target, dialog.FileName, mysqlOptions);
+                        string message = Localization.Format(
+                            "MySqlExport.Success",
+                            result.TableCount,
+                            result.ViewCount,
+                            result.RoutineCount,
+                            result.TriggerCount,
+                            result.RowCount,
+                            dialog.FileName);
+                        UpdateMainStatus(message);
+                        MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        DumpCurrentSelectionSqlToFile(dialog.FileName, dataOnlyForTable);
+                        MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -5091,6 +5116,148 @@ namespace mySQLPunk
             return true;
         }
 
+        private static bool IsMySqlTarget(TreeDatabaseTarget target)
+        {
+            return target != null && string.Equals(target.ProviderName, "mysql", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task<MySqlExportResult> ExportMySqlDatabaseWithProgress(TreeDatabaseTarget target, string targetPath, MySqlExportOptions options)
+        {
+            if (target == null) throw new ArgumentNullException("target");
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("Target path is required.", "targetPath");
+
+            UpdateMainStatus(Localization.T("MySqlExport.Running"));
+            return await Task.Run(() =>
+            {
+                MySqlExportResult result = MySqlExportService.BuildExport(
+                    target.Database,
+                    target.DatabaseName,
+                    options,
+                    message => UpdateMainStatus(message));
+
+                string dir = Path.GetDirectoryName(targetPath);
+                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                File.WriteAllText(targetPath, result.Sql, new UTF8Encoding(false));
+                return result;
+            });
+        }
+
+        private MySqlExportOptions ShowMySqlExportOptionsDialog()
+        {
+            using (Form dialog = new Form())
+            using (TableLayoutPanel layout = new TableLayoutPanel())
+            using (CheckBox includeStructure = new CheckBox())
+            using (CheckBox includeData = new CheckBox())
+            using (CheckBox includeDrop = new CheckBox())
+            using (CheckBox includeCreateDatabase = new CheckBox())
+            using (CheckBox includeUseDatabase = new CheckBox())
+            using (CheckBox includeViews = new CheckBox())
+            using (CheckBox includeRoutines = new CheckBox())
+            using (CheckBox includeTriggers = new CheckBox())
+            using (CheckBox removeDefiner = new CheckBox())
+            using (CheckBox disableForeignKeys = new CheckBox())
+            using (Label batchLabel = new Label())
+            using (NumericUpDown batchSize = new NumericUpDown())
+            using (FlowLayoutPanel buttons = new FlowLayoutPanel())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = Localization.T("MySqlExport.OptionsTitle");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.ClientSize = new Size(440, 380);
+
+                layout.Dock = DockStyle.Fill;
+                layout.Padding = new Padding(12);
+                layout.ColumnCount = 2;
+                layout.RowCount = 12;
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+
+                ConfigureMySqlOptionCheckBox(includeStructure, "MySqlExport.IncludeStructure", true);
+                ConfigureMySqlOptionCheckBox(includeData, "MySqlExport.IncludeData", true);
+                ConfigureMySqlOptionCheckBox(includeDrop, "MySqlExport.IncludeDrop", true);
+                ConfigureMySqlOptionCheckBox(includeCreateDatabase, "MySqlExport.IncludeCreateDatabase", true);
+                ConfigureMySqlOptionCheckBox(includeUseDatabase, "MySqlExport.IncludeUseDatabase", true);
+                ConfigureMySqlOptionCheckBox(includeViews, "MySqlExport.IncludeViews", true);
+                ConfigureMySqlOptionCheckBox(includeRoutines, "MySqlExport.IncludeRoutines", true);
+                ConfigureMySqlOptionCheckBox(includeTriggers, "MySqlExport.IncludeTriggers", true);
+                ConfigureMySqlOptionCheckBox(removeDefiner, "MySqlExport.RemoveDefiner", true);
+                ConfigureMySqlOptionCheckBox(disableForeignKeys, "MySqlExport.DisableForeignKeys", true);
+
+                layout.Controls.Add(includeStructure, 0, 0);
+                layout.Controls.Add(includeData, 1, 0);
+                layout.Controls.Add(includeDrop, 0, 1);
+                layout.Controls.Add(includeCreateDatabase, 1, 1);
+                layout.Controls.Add(includeUseDatabase, 0, 2);
+                layout.Controls.Add(includeViews, 1, 2);
+                layout.Controls.Add(includeRoutines, 0, 3);
+                layout.Controls.Add(includeTriggers, 1, 3);
+                layout.Controls.Add(removeDefiner, 0, 4);
+                layout.Controls.Add(disableForeignKeys, 1, 4);
+
+                batchLabel.Text = Localization.T("MySqlExport.InsertBatchSize");
+                batchLabel.TextAlign = ContentAlignment.MiddleLeft;
+                batchLabel.Dock = DockStyle.Fill;
+                batchSize.Minimum = 1;
+                batchSize.Maximum = 100000;
+                batchSize.Value = 1000;
+                batchSize.Dock = DockStyle.Fill;
+                layout.Controls.Add(batchLabel, 0, 5);
+                layout.Controls.Add(batchSize, 1, 5);
+
+                buttons.FlowDirection = FlowDirection.RightToLeft;
+                buttons.Dock = DockStyle.Fill;
+                buttons.Padding = new Padding(0, 12, 0, 0);
+                okButton.Text = Localization.T("Common.OK");
+                okButton.DialogResult = DialogResult.OK;
+                okButton.AutoSize = true;
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.AutoSize = true;
+                buttons.Controls.Add(okButton);
+                buttons.Controls.Add(cancelButton);
+                layout.Controls.Add(buttons, 0, 11);
+                layout.SetColumnSpan(buttons, 2);
+
+                dialog.Controls.Add(layout);
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = cancelButton;
+
+                if (dialog.ShowDialog(this) != DialogResult.OK) return null;
+
+                return new MySqlExportOptions
+                {
+                    IncludeStructure = includeStructure.Checked,
+                    IncludeData = includeData.Checked,
+                    IncludeDropStatements = includeDrop.Checked,
+                    IncludeCreateDatabase = includeCreateDatabase.Checked,
+                    IncludeUseDatabase = includeUseDatabase.Checked,
+                    DisableForeignKeyChecks = disableForeignKeys.Checked,
+                    IncludeTables = true,
+                    IncludeViews = includeViews.Checked,
+                    IncludeRoutines = includeRoutines.Checked,
+                    IncludeTriggers = includeTriggers.Checked,
+                    RemoveDefiner = removeDefiner.Checked,
+                    InsertBatchSize = (int)batchSize.Value
+                };
+            }
+        }
+
+        private static void ConfigureMySqlOptionCheckBox(CheckBox checkBox, string localizationKey, bool defaultValue)
+        {
+            checkBox.Text = Localization.T(localizationKey);
+            checkBox.Checked = defaultValue;
+            checkBox.Dock = DockStyle.Fill;
+            checkBox.AutoSize = true;
+        }
+
         private void DumpSelectedDatabaseSqlWithDialog()
         {
             TreeDatabaseTarget target = GetTargetFromCurrentSelection();
@@ -5142,13 +5309,20 @@ namespace mySQLPunk
             return true;
         }
 
-        private void ImportSqlWithDialog()
+        private async void ImportSqlWithDialog()
         {
             TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
             {
                 MessageBox.Show(Localization.T("ImportSql.SelectDatabase"), Localization.T("ImportSql.Title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
+            }
+
+            MySqlImportOptions mysqlOptions = null;
+            if (IsMySqlTarget(target))
+            {
+                mysqlOptions = ShowMySqlImportOptionsDialog();
+                if (mysqlOptions == null) return;
             }
 
             using (OpenFileDialog dialog = new OpenFileDialog())
@@ -5164,11 +5338,28 @@ namespace mySQLPunk
 
                 try
                 {
-                    string script = File.ReadAllText(dialog.FileName, Encoding.UTF8);
-                    int executed = ImportSqlScript(target, script);
-                    string message = string.Format(Localization.T("ImportSql.Success"), executed);
-                    MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    UpdateMainStatus(message);
+                    if (mysqlOptions != null)
+                    {
+                        MySqlImportResult result = await ImportMySqlSqlFileWithProgress(target, dialog.FileName, mysqlOptions);
+                        string message = Localization.Format("MySqlImport.Success", result.ExecutedStatements, result.FailedStatements);
+                        if (result.Errors.Count > 0)
+                        {
+                            message += Environment.NewLine + Localization.Format(
+                                "MySqlImport.FirstError",
+                                result.Errors[0].LineNumber,
+                                result.Errors[0].Message);
+                        }
+                        MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        UpdateMainStatus(message.Replace(Environment.NewLine, " "));
+                    }
+                    else
+                    {
+                        string script = File.ReadAllText(dialog.FileName, Encoding.UTF8);
+                        int executed = ImportSqlScript(target, script);
+                        string message = string.Format(Localization.T("ImportSql.Success"), executed);
+                        MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        UpdateMainStatus(message);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -5176,6 +5367,78 @@ namespace mySQLPunk
                     MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                     UpdateMainStatus(message);
                 }
+            }
+        }
+
+        private async Task<MySqlImportResult> ImportMySqlSqlFileWithProgress(TreeDatabaseTarget target, string sqlPath, MySqlImportOptions options)
+        {
+            if (target == null) throw new ArgumentNullException("target");
+            if (string.IsNullOrWhiteSpace(sqlPath)) throw new ArgumentException("SQL file path is required.", "sqlPath");
+
+            UpdateMainStatus(Localization.T("MySqlImport.Running"));
+            MySqlImportResult result = await Task.Run(() =>
+                MySqlImportService.Execute(
+                    target.Database,
+                    sqlPath,
+                    options,
+                    message => UpdateMainStatus(message)));
+
+            RefreshDatabaseObjectNodes(target.DatabaseNode);
+            db_tree.SelectedNode = target.DatabaseNode;
+            return result;
+        }
+
+        private MySqlImportOptions ShowMySqlImportOptionsDialog()
+        {
+            using (Form dialog = new Form())
+            using (TableLayoutPanel layout = new TableLayoutPanel())
+            using (Label description = new Label())
+            using (CheckBox continueOnError = new CheckBox())
+            using (FlowLayoutPanel buttons = new FlowLayoutPanel())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = Localization.T("MySqlImport.OptionsTitle");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.ClientSize = new Size(420, 180);
+
+                layout.Dock = DockStyle.Fill;
+                layout.Padding = new Padding(12);
+                layout.RowCount = 3;
+                layout.ColumnCount = 1;
+
+                description.Text = Localization.T("MySqlImport.OptionsDescription");
+                description.Dock = DockStyle.Fill;
+                description.Height = 64;
+                continueOnError.Text = Localization.T("MySqlImport.ContinueOnError");
+                continueOnError.Checked = false;
+                continueOnError.AutoSize = true;
+                continueOnError.Dock = DockStyle.Fill;
+
+                buttons.FlowDirection = FlowDirection.RightToLeft;
+                buttons.Dock = DockStyle.Fill;
+                buttons.Padding = new Padding(0, 12, 0, 0);
+                okButton.Text = Localization.T("Common.OK");
+                okButton.DialogResult = DialogResult.OK;
+                okButton.AutoSize = true;
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.AutoSize = true;
+                buttons.Controls.Add(okButton);
+                buttons.Controls.Add(cancelButton);
+
+                layout.Controls.Add(description, 0, 0);
+                layout.Controls.Add(continueOnError, 0, 1);
+                layout.Controls.Add(buttons, 0, 2);
+                dialog.Controls.Add(layout);
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = cancelButton;
+
+                if (dialog.ShowDialog(this) != DialogResult.OK) return null;
+                return new MySqlImportOptions { ContinueOnError = continueOnError.Checked };
             }
         }
 

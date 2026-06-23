@@ -901,6 +901,26 @@ namespace mySQLPunk
             Add("ImportSql.SelectDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
             Add("ImportSql.Success", "SQL 匯入完成。執行語句數：{0}", "SQL import completed. Statements executed: {0}");
             Add("ImportSql.Failed", "匯入 SQL 失敗：", "SQL import failed: ");
+            Add("MySqlExport.OptionsTitle", "MySQL 匯出選項", "MySQL Export Options");
+            Add("MySqlExport.IncludeStructure", "包含結構", "Include structure");
+            Add("MySqlExport.IncludeData", "包含資料", "Include data");
+            Add("MySqlExport.IncludeDrop", "包含 DROP", "Include DROP statements");
+            Add("MySqlExport.IncludeCreateDatabase", "包含 CREATE DATABASE", "Include CREATE DATABASE");
+            Add("MySqlExport.IncludeUseDatabase", "包含 USE database", "Include USE database");
+            Add("MySqlExport.IncludeViews", "包含 View", "Include views");
+            Add("MySqlExport.IncludeRoutines", "包含 Function / Procedure", "Include functions / procedures");
+            Add("MySqlExport.IncludeTriggers", "包含 Trigger", "Include triggers");
+            Add("MySqlExport.RemoveDefiner", "移除 DEFINER", "Remove DEFINER");
+            Add("MySqlExport.DisableForeignKeys", "匯入期間關閉外鍵檢查", "Disable foreign key checks");
+            Add("MySqlExport.InsertBatchSize", "INSERT batch size", "INSERT batch size");
+            Add("MySqlExport.Running", "正在匯出 MySQL database...", "Exporting MySQL database...");
+            Add("MySqlExport.Success", "MySQL 匯出完成。Tables {0}、Views {1}、Routines {2}、Triggers {3}、Rows {4}。檔案：{5}", "MySQL export completed. Tables {0}, Views {1}, Routines {2}, Triggers {3}, Rows {4}. File: {5}");
+            Add("MySqlImport.OptionsTitle", "MySQL 匯入選項", "MySQL Import Options");
+            Add("MySqlImport.OptionsDescription", "MySQL SQL 匯入會以串流方式逐段解析，支援 DELIMITER 區塊與 Routine / Trigger。", "MySQL SQL import streams and parses statements with DELIMITER blocks for routines and triggers.");
+            Add("MySqlImport.ContinueOnError", "發生錯誤時繼續執行後續 statement", "Continue after statement errors");
+            Add("MySqlImport.Running", "正在匯入 MySQL SQL 檔案...", "Importing MySQL SQL file...");
+            Add("MySqlImport.Success", "MySQL 匯入完成。執行：{0}，失敗：{1}", "MySQL import completed. Executed: {0}, failed: {1}");
+            Add("MySqlImport.FirstError", "第一個錯誤位於第 {0} 行：{1}", "First error at line {0}: {1}");
 
             Add("Query.Query", "查詢", "Query");
             Add("Query.Command", "命令", "Command");
