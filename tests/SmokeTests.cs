@@ -4309,8 +4309,43 @@ public static class SmokeTests
 
         FakeRenameDatabase mysql = new FakeRenameDatabase("mysql");
         DatabaseRenameResult mysqlResult = DatabaseRenameService.Rename(mysql, "old_db", "new_db", new DatabaseRenameOptions(), null);
-        AssertContains(string.Join("\n", mysql.ExecutedSql.ToArray()), "CREATE DATABASE `new_db`;", "MySQL database rename should create the target database.");
+        string mysqlSql = string.Join("\n", mysql.ExecutedSql.ToArray());
+        AssertContains(mysqlSql, "CREATE DATABASE `new_db`;", "MySQL database rename should create the target database.");
+        AssertContains(mysqlSql, "USE `new_db`", "MySQL copy-based rename should import routines and triggers into the target database.");
+        AssertContains(mysqlSql, "CREATE FUNCTION `fn_label`", "MySQL copy-based rename should copy functions.");
+        AssertContains(mysqlSql, "CREATE PROCEDURE `sp_touch`", "MySQL copy-based rename should copy procedures.");
+        AssertContains(mysqlSql, "CREATE TRIGGER `trg_users_before_insert`", "MySQL copy-based rename should copy triggers.");
+        Assert(!mysqlSql.Contains("DEFINER="), "MySQL copy-based rename should remove DEFINER clauses from copied routines and triggers.");
+        Assert(mysqlResult.RoutinesCopied == 2, "MySQL copy-based rename should report copied routines.");
+        Assert(mysqlResult.TriggersCopied == 1, "MySQL copy-based rename should report copied triggers.");
         Assert(mysqlResult.OldDatabaseRetained, "MySQL copy-based rename should retain the old database.");
+        AssertContains(string.Join("\n", mysqlResult.Messages.ToArray()), Localization.T("DatabaseRename.MySqlOldDatabaseRetained"), "MySQL copy-based rename should tell the user the old database was retained.");
+
+        string sqliteDir = Path.Combine(Path.GetTempPath(), "mysqlpunk-rename-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(sqliteDir);
+        string sqliteOldPath = Path.Combine(sqliteDir, "old_db.sqlite");
+        File.WriteAllText(sqliteOldPath, "");
+        try
+        {
+            FakeRenameDatabase sqlite = new FakeRenameDatabase("sqlite");
+            DatabaseRenameResult sqliteResult = DatabaseRenameService.Rename(
+                sqlite,
+                "main",
+                "renamed_db",
+                new DatabaseRenameOptions { SqliteFilePath = sqliteOldPath },
+                null);
+            string expectedSqlitePath = Path.Combine(sqliteDir, "renamed_db.sqlite");
+            Assert(!File.Exists(sqliteOldPath), "SQLite database rename should move the old file.");
+            Assert(File.Exists(expectedSqlitePath), "SQLite database rename should create the renamed file path.");
+            AssertEquals(sqliteOldPath, sqliteResult.OldSqlitePath, "SQLite database rename should report the old file path.");
+            AssertEquals(expectedSqlitePath, sqliteResult.NewSqlitePath, "SQLite database rename should report the new file path.");
+            AssertContains(sqlite.LastConnectionString, expectedSqlitePath, "SQLite database rename should reopen the database with the new path.");
+            Assert(sqlite.CloseCount > 0 && sqlite.OpenCount > 0, "SQLite database rename should close and reopen the database connection.");
+        }
+        finally
+        {
+            if (Directory.Exists(sqliteDir)) Directory.Delete(sqliteDir, true);
+        }
 
         try
         {
@@ -6090,6 +6125,26 @@ public static class SmokeTests
             {
                 AssertContains(ex.Message, "來源資料表沒有可複製的欄位", "Database copy empty column errors should localize Traditional Chinese messages.");
             }
+
+            DatabaseCopyResult explicitTableNameResult = copyService.Copy(
+                new DatabaseCopyItem
+                {
+                    Database = new FakeCopyDatabase("mysql", includeCopyColumns: true),
+                    DatabaseName = "main",
+                    ObjectName = "users",
+                    ObjectKind = "table",
+                    ProviderName = "mysql"
+                },
+                new DatabaseCopyItem
+                {
+                    Database = new FakeCopyDatabase("mysql", includeCopyColumns: true),
+                    DatabaseName = "renamed",
+                    ObjectName = "users",
+                    ObjectKind = "table",
+                    ProviderName = "mysql"
+                },
+                null);
+            AssertEquals("users", explicitTableNameResult.TargetName, "Database copy should honor explicit target table names.");
 
             Localization.SetLanguage(Localization.English, false);
             string enMetadataLoadFailed = (string)metadataLoadFailedMethod.Invoke(null, new object[] { "SQL Server", "warehouse", new InvalidOperationException("permission denied") });
@@ -8044,6 +8099,9 @@ public static class SmokeTests
         private readonly string providerName;
         public List<string> Databases = new List<string> { "old_db" };
         public List<string> ExecutedSql = new List<string>();
+        public string LastConnectionString = "";
+        public int OpenCount;
+        public int CloseCount;
 
         public FakeRenameDatabase(string providerName)
         {
@@ -8052,11 +8110,57 @@ public static class SmokeTests
 
         public ConnectionState State => ConnectionState.Open;
         public string ProviderName => providerName;
-        public void SetConn(string connectionString) { }
-        public void Open() { }
-        public void Close() { }
+        public void SetConn(string connectionString) { LastConnectionString = connectionString; }
+        public void Open() { OpenCount++; }
+        public void Close() { CloseCount++; }
         public void Dispose() { }
-        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { return new DataTable(); }
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            if (providerName == "mysql" && sql.IndexOf("information_schema.ROUTINES", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("ROUTINE_NAME");
+                table.Columns.Add("ROUTINE_TYPE");
+                table.Rows.Add("fn_label", "FUNCTION");
+                table.Rows.Add("sp_touch", "PROCEDURE");
+                return table;
+            }
+            if (providerName == "mysql" && sql.IndexOf("information_schema.TRIGGERS", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("TRIGGER_NAME");
+                table.Rows.Add("trg_users_before_insert");
+                return table;
+            }
+            if (providerName == "mysql" && sql.IndexOf("SHOW CREATE FUNCTION", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("Function");
+                table.Columns.Add("sql_mode");
+                table.Columns.Add("Create Function");
+                table.Rows.Add("fn_label", "", "CREATE DEFINER=`root`@`localhost` FUNCTION `fn_label`(`p_id` int) RETURNS varchar(20) DETERMINISTIC BEGIN RETURN CONCAT('u', p_id); END");
+                return table;
+            }
+            if (providerName == "mysql" && sql.IndexOf("SHOW CREATE PROCEDURE", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("Procedure");
+                table.Columns.Add("sql_mode");
+                table.Columns.Add("Create Procedure");
+                table.Rows.Add("sp_touch", "", "CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_touch`() BEGIN SELECT 1; END");
+                return table;
+            }
+            if (providerName == "mysql" && sql.IndexOf("SHOW CREATE TRIGGER", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable table = new DataTable();
+                table.Columns.Add("Trigger");
+                table.Columns.Add("sql_mode");
+                table.Columns.Add("SQL Original Statement");
+                table.Rows.Add("trg_users_before_insert", "", "CREATE DEFINER=`root`@`localhost` TRIGGER `trg_users_before_insert` BEFORE INSERT ON `users` FOR EACH ROW BEGIN SET NEW.name = TRIM(NEW.name); END");
+                return table;
+            }
+            return new DataTable();
+        }
         public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
         {
             ExecutedSql.Add(sql);

@@ -7412,6 +7412,10 @@ namespace mySQLPunk
                 UpdateMainStatus(Localization.Format("DatabaseRename.NativeRenameDone", oldName, newName));
 
                 DatabaseRenameOptions options = new DatabaseRenameOptions();
+                if (target.Database is my_sqlite)
+                {
+                    options.SqliteFilePath = GetSQLiteDatabasePath(target.ConnectionInfo, target.Database);
+                }
                 DatabaseRenameResult result = await Task.Run(() => DatabaseRenameService.Rename(
                     target.Database,
                     oldName,
@@ -7465,6 +7469,12 @@ namespace mySQLPunk
                 {
                     node.Text = newName;
                     selectedNode = node;
+                }
+
+                if (target.Database is my_sqlite && !string.IsNullOrWhiteSpace(result.NewSqlitePath) && target.ConnectionInfo != null)
+                {
+                    target.ConnectionInfo["path"] = result.NewSqlitePath;
+                    myN.setSettingINI();
                 }
 
                 if (selectedNode != null)

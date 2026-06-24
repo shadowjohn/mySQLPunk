@@ -381,6 +381,8 @@ namespace mySQLPunk.lib
                     NUMERIC_SCALE AS NumericScale,
                     COLUMN_DEFAULT AS DefaultValue,
                     COLUMN_COMMENT AS Comment,
+                    COLUMN_KEY AS ColumnKey,
+                    EXTRA AS Extra,
                     ORDINAL_POSITION AS OrdinalPosition
                 FROM information_schema.columns
                 WHERE table_schema = ?db AND table_name = ?name
@@ -415,15 +417,26 @@ namespace mySQLPunk.lib
             string safeDB = databaseName.Replace("`", "``");
             string safeTable = tableName.Replace("`", "``");
             List<string> defs = new List<string>();
+            List<string> primaryKeys = new List<string>();
             foreach (DataRow row in sourceColumns.Rows)
             {
                 string name = row["Name"].ToString().Replace("`", "``");
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
                 string defaultValue = GetMySqlCopyDefaultValue(row, sourceProvider);
+                string extra = GetOptionalString(row, "Extra");
+                string autoIncrement = extra.IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0 ? " AUTO_INCREMENT" : "";
                 string comment = "";
                 if (row.Table.Columns.Contains("Comment") && row["Comment"] != DBNull.Value && row["Comment"].ToString().Length > 0)
                     comment = " COMMENT '" + row["Comment"].ToString().Replace("'", "''") + "'";
-                defs.Add("`" + name + "` " + MapCopyTypeToMySql(row) + (string.IsNullOrWhiteSpace(defaultValue) ? "" : " DEFAULT " + defaultValue) + " " + nullable + comment);
+                defs.Add("`" + name + "` " + MapCopyTypeToMySql(row) + (string.IsNullOrWhiteSpace(defaultValue) ? "" : " DEFAULT " + defaultValue) + " " + nullable + autoIncrement + comment);
+                if (string.Equals(GetOptionalString(row, "ColumnKey"), "PRI", StringComparison.OrdinalIgnoreCase))
+                {
+                    primaryKeys.Add("`" + name + "`");
+                }
+            }
+            if (primaryKeys.Count > 0)
+            {
+                defs.Add("PRIMARY KEY (" + string.Join(",", primaryKeys.ToArray()) + ")");
             }
             return new List<string> { "CREATE TABLE `" + safeDB + "`.`" + safeTable + "` (" + string.Join(", ", defs.ToArray()) + ");" };
         }

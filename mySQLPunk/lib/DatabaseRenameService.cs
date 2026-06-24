@@ -10,6 +10,7 @@ namespace mySQLPunk.lib
     {
         public bool CopyMySqlObjects { get; set; }
         public int BatchSize { get; set; }
+        public string SqliteFilePath { get; set; }
 
         public DatabaseRenameOptions()
         {
@@ -26,6 +27,10 @@ namespace mySQLPunk.lib
         public bool OldDatabaseRetained { get; set; }
         public int TablesCopied { get; set; }
         public int ViewsCopied { get; set; }
+        public int RoutinesCopied { get; set; }
+        public int TriggersCopied { get; set; }
+        public string OldSqlitePath { get; set; }
+        public string NewSqlitePath { get; set; }
         public readonly List<string> Messages = new List<string>();
     }
 
@@ -44,7 +49,10 @@ namespace mySQLPunk.lib
             {
                 throw new InvalidOperationException(Localization.T("DatabaseRename.SameName"));
             }
-            EnsureTargetDatabaseDoesNotExist(db, newName);
+            if (provider != "sqlite")
+            {
+                EnsureTargetDatabaseDoesNotExist(db, newName);
+            }
 
             DatabaseRenameResult result = new DatabaseRenameResult
             {
@@ -76,7 +84,8 @@ namespace mySQLPunk.lib
 
             if (provider == "sqlite")
             {
-                throw new NotSupportedException(Localization.T("DatabaseRename.SqliteRequiresConnectionPath"));
+                RenameSqliteFile(db, newName, options, progress, result);
+                return result;
             }
 
             throw new NotSupportedException(Localization.Format("DatabaseRename.ProviderUnsupported", db.ProviderName));
@@ -116,7 +125,10 @@ namespace mySQLPunk.lib
 
             if (providerName == "sqlite")
             {
-                char[] invalid = Path.GetInvalidFileNameChars();
+                char[] invalid = Path.GetInvalidFileNameChars()
+                    .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' })
+                    .Distinct()
+                    .ToArray();
                 if (name.IndexOfAny(invalid) >= 0) throw new ArgumentException(Localization.T("DatabaseRename.SqliteInvalidName"));
             }
         }
@@ -153,6 +165,7 @@ namespace mySQLPunk.lib
                 {
                     Database = db,
                     DatabaseName = newName,
+                    ObjectName = tableName,
                     ObjectKind = "table",
                     ProviderName = db.ProviderName
                 };
@@ -174,6 +187,7 @@ namespace mySQLPunk.lib
                 {
                     Database = db,
                     DatabaseName = newName,
+                    ObjectName = viewName,
                     ObjectKind = "view",
                     ProviderName = db.ProviderName
                 };
@@ -181,8 +195,131 @@ namespace mySQLPunk.lib
                 result.ViewsCopied++;
             }
 
+            CopyMySqlRoutinesAndTriggers(db, oldName, newName, result, progress);
+
             result.OldDatabaseRetained = true;
-            AddMessage(result, progress, Localization.Format("DatabaseRename.MySqlCopyDone", result.TablesCopied, result.ViewsCopied));
+            AddMessage(result, progress, Localization.Format(
+                "DatabaseRename.MySqlCopyDone",
+                result.TablesCopied,
+                result.ViewsCopied,
+                result.RoutinesCopied,
+                result.TriggersCopied));
+            AddMessage(result, progress, Localization.T("DatabaseRename.MySqlOldDatabaseRetained"));
+        }
+
+        private static void CopyMySqlRoutinesAndTriggers(IDatabase db, string oldName, string newName, DatabaseRenameResult result, Action<string> progress)
+        {
+            MySqlExportOptions exportOptions = new MySqlExportOptions
+            {
+                IncludeStructure = true,
+                IncludeData = false,
+                IncludeDropStatements = false,
+                IncludeCreateDatabase = false,
+                IncludeUseDatabase = false,
+                DisableForeignKeyChecks = false,
+                IncludeTables = false,
+                IncludeViews = false,
+                IncludeRoutines = true,
+                IncludeTriggers = true,
+                RemoveDefiner = true
+            };
+
+            MySqlExportResult export = MySqlExportService.BuildExport(db, oldName, exportOptions, message => AddMessage(result, progress, message));
+            result.RoutinesCopied = export.RoutineCount;
+            result.TriggersCopied = export.TriggerCount;
+            if (result.RoutinesCopied + result.TriggersCopied == 0) return;
+
+            string script = "USE " + QuoteMySqlIdentifier(newName) + ";\r\n" + export.Sql;
+            using (StringReader reader = new StringReader(script))
+            {
+                MySqlImportService.Execute(db, reader, new MySqlImportOptions(), message => AddMessage(result, progress, message));
+            }
+        }
+
+        private static void RenameSqliteFile(IDatabase db, string newName, DatabaseRenameOptions options, Action<string> progress, DatabaseRenameResult result)
+        {
+            string oldPath = options == null ? string.Empty : options.SqliteFilePath;
+            if (string.IsNullOrWhiteSpace(oldPath))
+            {
+                throw new NotSupportedException(Localization.T("DatabaseRename.SqliteRequiresConnectionPath"));
+            }
+
+            oldPath = Path.GetFullPath(oldPath);
+            if (!File.Exists(oldPath))
+            {
+                throw new FileNotFoundException(Localization.Format("Database.SqliteFileMissing", oldPath), oldPath);
+            }
+
+            string newPath = BuildSqliteRenamePath(oldPath, newName);
+            if (File.Exists(newPath))
+            {
+                throw new InvalidOperationException(Localization.Format("Object.TargetNameExists", newPath));
+            }
+
+            string oldConnectionString = "";
+            my_sqlite sqlite = db as my_sqlite;
+            if (sqlite != null && sqlite.MCT != null)
+            {
+                oldConnectionString = sqlite.MCT.ConnectionString;
+            }
+
+            db.Close();
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            File.Move(oldPath, newPath);
+
+            string newConnectionString = BuildSqliteConnectionString(oldConnectionString, newPath);
+            try
+            {
+                db.SetConn(newConnectionString);
+                db.Open();
+            }
+            catch
+            {
+                try
+                {
+                    db.Close();
+                    System.Data.SQLite.SQLiteConnection.ClearAllPools();
+                    if (File.Exists(newPath) && !File.Exists(oldPath)) File.Move(newPath, oldPath);
+                    if (!string.IsNullOrWhiteSpace(oldConnectionString)) db.SetConn(oldConnectionString);
+                }
+                catch { }
+                throw;
+            }
+
+            result.OldSqlitePath = oldPath;
+            result.NewSqlitePath = newPath;
+            AddMessage(result, progress, Localization.Format("DatabaseRename.SqliteFileRenamed", oldPath, newPath));
+        }
+
+        private static string BuildSqliteRenamePath(string oldPath, string newName)
+        {
+            string fileName = (newName ?? string.Empty).Trim();
+            ValidateDatabaseName("sqlite", fileName);
+            if (string.IsNullOrEmpty(Path.GetExtension(fileName)))
+            {
+                fileName += Path.GetExtension(oldPath);
+            }
+
+            string directory = Path.GetDirectoryName(oldPath);
+            if (string.IsNullOrEmpty(directory)) directory = Directory.GetCurrentDirectory();
+            return Path.Combine(directory, fileName);
+        }
+
+        private static string BuildSqliteConnectionString(string oldConnectionString, string newPath)
+        {
+            try
+            {
+                System.Data.SQLite.SQLiteConnectionStringBuilder builder =
+                    string.IsNullOrWhiteSpace(oldConnectionString)
+                        ? new System.Data.SQLite.SQLiteConnectionStringBuilder()
+                        : new System.Data.SQLite.SQLiteConnectionStringBuilder(oldConnectionString);
+                builder.DataSource = newPath;
+                return builder.ConnectionString;
+            }
+            catch
+            {
+                return "Data Source=" + newPath + ";Version=3;";
+            }
         }
 
         private static void EnsureTargetDatabaseDoesNotExist(IDatabase db, string newName)

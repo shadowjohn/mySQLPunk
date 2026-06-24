@@ -67,7 +67,7 @@ namespace mySQLPunk.lib
             bool crossProviderView = kind == "view" &&
                 !string.Equals(source.ProviderName, target.ProviderName, StringComparison.OrdinalIgnoreCase);
             string targetKind = crossProviderView ? "view" : kind;
-            string targetName = GenerateTargetName(target.Database, target.DatabaseName, source.ObjectName, targetKind);
+            string targetName = ResolveTargetName(target, source.ObjectName, targetKind);
 
             if (kind == "table")
                 return CopyTable(source, target, targetName, progress);
@@ -84,7 +84,7 @@ namespace mySQLPunk.lib
                             TargetName = targetName,
                             Message = Localization.T("Object.CopyForceTableSnapshot")
                         });
-                        targetName = GenerateTargetName(target.Database, target.DatabaseName, source.ObjectName, "table");
+                        targetName = ResolveTargetName(target, source.ObjectName, "table");
                         return CopyTable(source, target, targetName, progress);
                     }
 
@@ -94,7 +94,7 @@ namespace mySQLPunk.lib
                         return convertedView;
                     }
 
-                    targetName = GenerateTargetName(target.Database, target.DatabaseName, source.ObjectName, "table");
+                    targetName = ResolveTargetName(target, source.ObjectName, "table");
                     return CopyTable(source, target, targetName, progress);
                 }
 
@@ -229,6 +229,15 @@ namespace mySQLPunk.lib
                 ObjectKind = "view",
                 CopiedRows = 0
             };
+        }
+
+        private string ResolveTargetName(DatabaseCopyItem target, string sourceName, string kind)
+        {
+            if (!string.IsNullOrWhiteSpace(target.ObjectName))
+            {
+                return target.ObjectName.Trim();
+            }
+            return GenerateTargetName(target.Database, target.DatabaseName, sourceName, kind);
         }
 
         private string GenerateTargetName(IDatabase targetDb, string databaseName, string sourceName, string kind)

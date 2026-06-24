@@ -790,9 +790,11 @@ namespace mySQLPunk
             Add("DatabaseRename.SqliteRequiresConnectionPath", "SQLite database 重新命名需要連線檔案路徑更新；請先在連線設定中重新指定檔案名稱。", "SQLite database rename requires updating the connection file path; rename it from connection settings first.");
             Add("DatabaseRename.ProviderUnsupported", "尚未支援此 provider 的 database rename：{0}", "Database rename is not supported for provider: {0}");
             Add("DatabaseRename.MySqlNativeUnsupported", "MySQL 不支援原生 RENAME DATABASE。", "MySQL does not support native RENAME DATABASE.");
-            Add("DatabaseRename.MySqlCopyNotice", "MySQL 不支援原生 database rename，將建立新 database 並複製 Table / View；原 database 會保留。", "MySQL does not support native database rename. A new database will be created and Table / View objects will be copied; the old database is retained.");
+            Add("DatabaseRename.MySqlCopyNotice", "MySQL 不支援原生 database rename，將建立新 database 並複製 Table / View / Routine / Trigger；原 database 會保留。", "MySQL does not support native database rename. A new database will be created and Table / View / Routine / Trigger objects will be copied; the old database is retained.");
             Add("DatabaseRename.DatabaseCreated", "已建立目標 database：{0}", "Created target database: {0}");
-            Add("DatabaseRename.MySqlCopyDone", "MySQL database rename copy 完成：Tables {0}、Views {1}；原 database 已保留。", "MySQL database rename copy completed: Tables {0}, Views {1}; old database retained.");
+            Add("DatabaseRename.MySqlCopyDone", "MySQL database rename copy 完成：Tables {0}、Views {1}、Routines {2}、Triggers {3}。", "MySQL database rename copy completed: Tables {0}, Views {1}, Routines {2}, Triggers {3}.");
+            Add("DatabaseRename.MySqlOldDatabaseRetained", "原 MySQL database 已保留；如需刪除請由使用者另行確認後手動刪除。", "The original MySQL database was retained; delete it manually only after user confirmation.");
+            Add("DatabaseRename.SqliteFileRenamed", "SQLite 檔案已重新命名：{0} -> {1}", "SQLite file renamed: {0} -> {1}");
             Add("DatabaseRename.NativeRenameDone", "database rename 完成：{0} -> {1}", "Database rename completed: {0} -> {1}");
             Add("DatabaseRename.FailedDetail", "Rename failed.\r\n\r\nProvider: {0}\r\nDatabase: {1}\r\nNew Name: {2}\r\n\r\nReason:\r\n{3}", "Rename failed.\r\n\r\nProvider: {0}\r\nDatabase: {1}\r\nNew Name: {2}\r\n\r\nReason:\r\n{3}");
             Add("Object.CopyFailed", "複製失敗：{0}", "Copy failed: {0}");
