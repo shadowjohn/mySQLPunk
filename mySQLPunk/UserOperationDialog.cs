@@ -20,6 +20,8 @@ namespace mySQLPunk
     {
         private readonly MySqlUserOperationMode mode;
         private readonly string initialDatabaseName;
+        private readonly List<string> privilegeDatabaseChoices;
+        private readonly List<string> privilegeObjectChoices;
 
         private TextBox txtUser;
         private TextBox txtHost;
@@ -45,10 +47,12 @@ namespace mySQLPunk
         private TextBox txtMaxConnectionsPerHour;
         private TextBox txtMaxUserConnections;
 
-        private TextBox txtPrivilegeDatabase;
-        private TextBox txtPrivilegeObject;
+        private ComboBox cboPrivilegeDatabase;
+        private ComboBox cboPrivilegeObject;
+        private ComboBox cboPrivilegeObjectType;
         private CheckedListBox lstPrivileges;
         private CheckBox chkWithGrantOption;
+        private Label lblPrivilegeTargetPreview;
 
         private RichTextBox txtPreview;
         private Label lblHint;
@@ -58,13 +62,21 @@ namespace mySQLPunk
         private GroupBox privilegeGroup;
 
         public UserOperationDialog(MySqlUserOperationMode mode, string databaseName, string user, string host)
+            : this(mode, databaseName, user, host, null, null)
+        {
+        }
+
+        public UserOperationDialog(MySqlUserOperationMode mode, string databaseName, string user, string host, IEnumerable<string> privilegeDatabases, IEnumerable<string> privilegeObjects)
         {
             this.mode = mode;
             initialDatabaseName = databaseName ?? string.Empty;
+            privilegeDatabaseChoices = BuildChoiceList(initialDatabaseName, privilegeDatabases);
+            privilegeObjectChoices = BuildChoiceList(string.Empty, privilegeObjects);
             Statements = new List<string>();
 
             InitializeComponent(user, host);
             ApplyOperationMode();
+            UpdatePrivilegeTargetPreview();
             TryUpdatePreview(false);
         }
 
@@ -170,22 +182,39 @@ namespace mySQLPunk
             limitsGroup.Controls.Add(limitsLayout);
             content.Controls.Add(limitsGroup);
 
-            privilegeGroup = CreateGroupBox(Localization.T("User.PrivilegeSection"), 206);
-            TableLayoutPanel privilegeLayout = CreateTwoColumnLayout(4);
-            txtPrivilegeDatabase = CreateTextBox(initialDatabaseName);
-            txtPrivilegeObject = CreateTextBox(string.Empty);
+            privilegeGroup = CreateGroupBox(Localization.T("User.PrivilegeSection"), 260);
+            TableLayoutPanel privilegeLayout = CreateTwoColumnLayout(6);
+            cboPrivilegeDatabase = CreateComboBox(initialDatabaseName, privilegeDatabaseChoices);
+            cboPrivilegeObject = CreateComboBox(string.Empty, privilegeObjectChoices);
+            cboPrivilegeObjectType = CreateComboBox(Localization.T("User.ObjectTypeTableOrView"), new[]
+            {
+                Localization.T("User.ObjectTypeTableOrView"),
+                Localization.T("User.ObjectTypeFunction"),
+                Localization.T("User.ObjectTypeProcedure")
+            });
+            cboPrivilegeObjectType.DropDownStyle = ComboBoxStyle.DropDownList;
             lstPrivileges = new CheckedListBox();
             lstPrivileges.CheckOnClick = true;
             lstPrivileges.Height = 92;
             lstPrivileges.Dock = DockStyle.Fill;
             foreach (string privilege in BuildPrivilegeList()) lstPrivileges.Items.Add(privilege);
             chkWithGrantOption = new CheckBox { Text = Localization.T("User.WithGrantOption"), AutoSize = true };
-            AddLabeledControl(privilegeLayout, 0, Localization.T("Detail.Property.Database"), txtPrivilegeDatabase);
-            AddLabeledControl(privilegeLayout, 1, Localization.T("User.ObjectName"), txtPrivilegeObject);
+            lblPrivilegeTargetPreview = new Label();
+            lblPrivilegeTargetPreview.Dock = DockStyle.Fill;
+            lblPrivilegeTargetPreview.TextAlign = ContentAlignment.MiddleLeft;
+            lblPrivilegeTargetPreview.AutoEllipsis = true;
+            AddLabeledControl(privilegeLayout, 0, Localization.T("Detail.Property.Database"), cboPrivilegeDatabase);
+            AddLabeledControl(privilegeLayout, 1, Localization.T("User.ObjectName"), cboPrivilegeObject);
             AddLabeledControl(privilegeLayout, 2, Localization.T("Detail.Property.Privileges"), lstPrivileges);
-            AddLabeledControl(privilegeLayout, 3, Localization.T("User.Options"), chkWithGrantOption);
+            AddLabeledControl(privilegeLayout, 3, Localization.T("User.ObjectType"), cboPrivilegeObjectType);
+            AddLabeledControl(privilegeLayout, 4, Localization.T("User.Options"), chkWithGrantOption);
+            AddLabeledControl(privilegeLayout, 5, Localization.T("User.TargetPreview"), lblPrivilegeTargetPreview);
             privilegeGroup.Controls.Add(privilegeLayout);
             content.Controls.Add(privilegeGroup);
+
+            cboPrivilegeDatabase.TextChanged += (s, e) => UpdatePrivilegeTargetPreview();
+            cboPrivilegeObject.TextChanged += (s, e) => UpdatePrivilegeTargetPreview();
+            cboPrivilegeObjectType.SelectedIndexChanged += (s, e) => UpdatePrivilegeTargetPreview();
 
             GroupBox previewGroup = CreateGroupBox(Localization.T("User.SqlPreview"), 208);
             txtPreview = new RichTextBox();
@@ -336,26 +365,91 @@ namespace mySQLPunk
                 return MySqlUserManagerService.BuildDropUserSqlStatements(user, host);
             }
 
-            string databaseName = TrimOrEmpty(txtPrivilegeDatabase.Text);
-            string objectName = TrimOrEmpty(txtPrivilegeObject.Text);
+            string databaseName = TrimOrEmpty(cboPrivilegeDatabase.Text);
+            string objectName = TrimOrEmpty(cboPrivilegeObject.Text);
+            MySqlPrivilegeTargetType targetType = GetSelectedPrivilegeTargetType();
+            if ((targetType == MySqlPrivilegeTargetType.Function || targetType == MySqlPrivilegeTargetType.Procedure) && objectName.Length == 0)
+            {
+                throw new InvalidOperationException(Localization.Format("User.FieldRequired", Localization.T("User.ObjectName")));
+            }
             List<string> privileges = lstPrivileges.CheckedItems.Cast<string>().ToList();
             if (mode == MySqlUserOperationMode.Grant)
             {
                 return new List<string>
                 {
-                    MySqlUserManagerService.BuildGrantSql(privileges, databaseName, objectName, user, host, chkWithGrantOption.Checked)
+                    MySqlUserManagerService.BuildGrantSql(privileges, databaseName, objectName, user, host, chkWithGrantOption.Checked, targetType)
                 };
             }
 
             return new List<string>
             {
-                MySqlUserManagerService.BuildRevokeSql(privileges, databaseName, objectName, user, host)
+                MySqlUserManagerService.BuildRevokeSql(privileges, databaseName, objectName, user, host, targetType)
             };
         }
 
         private static TextBox CreateTextBox(string text)
         {
             return new TextBox { Text = text ?? string.Empty, Dock = DockStyle.Fill };
+        }
+
+        private static ComboBox CreateComboBox(string text, IEnumerable<string> choices)
+        {
+            ComboBox combo = new ComboBox();
+            combo.Dock = DockStyle.Fill;
+            combo.DropDownStyle = ComboBoxStyle.DropDown;
+            combo.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+            combo.AutoCompleteSource = AutoCompleteSource.ListItems;
+            if (choices != null)
+            {
+                foreach (string choice in choices)
+                {
+                    if (!string.IsNullOrWhiteSpace(choice) && !combo.Items.Contains(choice)) combo.Items.Add(choice);
+                }
+            }
+            combo.Text = text ?? string.Empty;
+            return combo;
+        }
+
+        private static List<string> BuildChoiceList(string firstChoice, IEnumerable<string> choices)
+        {
+            List<string> result = new List<string>();
+            AddChoice(result, firstChoice);
+            if (choices != null)
+            {
+                foreach (string choice in choices) AddChoice(result, choice);
+            }
+            return result;
+        }
+
+        private static void AddChoice(List<string> result, string value)
+        {
+            string normalized = TrimOrEmpty(value);
+            if (normalized.Length == 0) return;
+            if (!result.Contains(normalized, StringComparer.OrdinalIgnoreCase)) result.Add(normalized);
+        }
+
+        private void UpdatePrivilegeTargetPreview()
+        {
+            if (lblPrivilegeTargetPreview == null) return;
+            try
+            {
+                lblPrivilegeTargetPreview.Text = MySqlUserManagerService.BuildPrivilegeTargetPreview(
+                    TrimOrEmpty(cboPrivilegeDatabase == null ? string.Empty : cboPrivilegeDatabase.Text),
+                    TrimOrEmpty(cboPrivilegeObject == null ? string.Empty : cboPrivilegeObject.Text),
+                    GetSelectedPrivilegeTargetType());
+            }
+            catch
+            {
+                lblPrivilegeTargetPreview.Text = string.Empty;
+            }
+        }
+
+        private MySqlPrivilegeTargetType GetSelectedPrivilegeTargetType()
+        {
+            string selected = TrimOrEmpty(cboPrivilegeObjectType == null ? string.Empty : cboPrivilegeObjectType.Text);
+            if (string.Equals(selected, Localization.T("User.ObjectTypeFunction"), StringComparison.OrdinalIgnoreCase)) return MySqlPrivilegeTargetType.Function;
+            if (string.Equals(selected, Localization.T("User.ObjectTypeProcedure"), StringComparison.OrdinalIgnoreCase)) return MySqlPrivilegeTargetType.Procedure;
+            return MySqlPrivilegeTargetType.TableOrView;
         }
 
         private static FlowLayoutPanel CreateInlineOptionsPanel()

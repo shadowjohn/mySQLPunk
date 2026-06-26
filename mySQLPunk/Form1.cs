@@ -10178,6 +10178,50 @@ namespace mySQLPunk
             menu.Items.Add(refreshItem);
         }
 
+        private IEnumerable<string> BuildUserPrivilegeDatabaseChoices(TreeDatabaseTarget target)
+        {
+            List<string> choices = new List<string>();
+            AddDistinctChoice(choices, target == null ? string.Empty : target.DatabaseName);
+
+            TreeNode root = target == null ? null : target.DatabaseNode;
+            while (root != null && root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            if (root != null)
+            {
+                foreach (TreeNode node in root.Nodes)
+                {
+                    AddDistinctChoice(choices, node == null ? string.Empty : node.Text);
+                }
+            }
+
+            return choices;
+        }
+
+        private IEnumerable<string> BuildUserPrivilegeObjectChoices(TreeDatabaseTarget target)
+        {
+            List<string> choices = new List<string>();
+            TreeNode databaseNode = target == null ? null : target.DatabaseNode;
+            if (databaseNode == null) return choices;
+
+            foreach (TreeNode group in databaseNode.Nodes)
+            {
+                if (group == null) continue;
+                if (group.Text != "Tables" && group.Text != "Views" && group.Text != "Functions") continue;
+                foreach (TreeNode item in group.Nodes)
+                {
+                    AddDistinctChoice(choices, item == null ? string.Empty : item.Text);
+                }
+            }
+
+            return choices;
+        }
+
+        private static void AddDistinctChoice(List<string> choices, string value)
+        {
+            string normalized = (value ?? string.Empty).Trim();
+            if (normalized.Length == 0) return;
+            if (!choices.Contains(normalized, StringComparer.OrdinalIgnoreCase)) choices.Add(normalized);
+        }
+
         private void OpenMySqlUserOperationDialog(MySqlUserOperationMode mode)
         {
             TreeDatabaseTarget target;
@@ -10187,7 +10231,7 @@ namespace mySQLPunk
 
             string user = identity == null ? string.Empty : identity.User;
             string host = identity == null ? "%" : identity.Host;
-            using (UserOperationDialog dialog = new UserOperationDialog(mode, target.DatabaseName, user, host))
+            using (UserOperationDialog dialog = new UserOperationDialog(mode, target.DatabaseName, user, host, BuildUserPrivilegeDatabaseChoices(target), BuildUserPrivilegeObjectChoices(target)))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
 

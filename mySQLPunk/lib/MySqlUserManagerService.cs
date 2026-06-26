@@ -6,6 +6,13 @@ using System.Text;
 
 namespace mySQLPunk.lib
 {
+    public enum MySqlPrivilegeTargetType
+    {
+        TableOrView,
+        Function,
+        Procedure
+    }
+
     public sealed class MySqlUserProviderAdapter
     {
         private readonly HashSet<string> userColumns;
@@ -449,8 +456,13 @@ namespace mySQLPunk.lib
 
         public static string BuildGrantSql(IEnumerable<string> privileges, string databaseName, string objectName, string user, string host, bool withGrantOption)
         {
+            return BuildGrantSql(privileges, databaseName, objectName, user, host, withGrantOption, MySqlPrivilegeTargetType.TableOrView);
+        }
+
+        public static string BuildGrantSql(IEnumerable<string> privileges, string databaseName, string objectName, string user, string host, bool withGrantOption, MySqlPrivilegeTargetType targetType)
+        {
             List<string> normalized = NormalizePrivileges(privileges);
-            return "GRANT " + string.Join(", ", normalized.ToArray()) + " ON " + BuildPrivilegeTarget(databaseName, objectName) + " TO " + QuoteAccount(user, host) + (withGrantOption ? " WITH GRANT OPTION" : string.Empty) + ";";
+            return "GRANT " + string.Join(", ", normalized.ToArray()) + " ON " + BuildPrivilegeTarget(databaseName, objectName, targetType) + " TO " + QuoteAccount(user, host) + (withGrantOption ? " WITH GRANT OPTION" : string.Empty) + ";";
         }
 
         public static string BuildRevokeSql(string privilege, string databaseName, string objectName, string user, string host)
@@ -460,8 +472,18 @@ namespace mySQLPunk.lib
 
         public static string BuildRevokeSql(IEnumerable<string> privileges, string databaseName, string objectName, string user, string host)
         {
+            return BuildRevokeSql(privileges, databaseName, objectName, user, host, MySqlPrivilegeTargetType.TableOrView);
+        }
+
+        public static string BuildRevokeSql(IEnumerable<string> privileges, string databaseName, string objectName, string user, string host, MySqlPrivilegeTargetType targetType)
+        {
             List<string> normalized = NormalizePrivileges(privileges);
-            return "REVOKE " + string.Join(", ", normalized.ToArray()) + " ON " + BuildPrivilegeTarget(databaseName, objectName) + " FROM " + QuoteAccount(user, host) + ";";
+            return "REVOKE " + string.Join(", ", normalized.ToArray()) + " ON " + BuildPrivilegeTarget(databaseName, objectName, targetType) + " FROM " + QuoteAccount(user, host) + ";";
+        }
+
+        public static string BuildPrivilegeTargetPreview(string databaseName, string objectName, MySqlPrivilegeTargetType targetType)
+        {
+            return BuildPrivilegeTarget(databaseName, objectName, targetType);
         }
 
         internal static DataTable TrySelect(IDatabase db, string sql)
@@ -706,9 +728,16 @@ namespace mySQLPunk.lib
 
         private static string BuildPrivilegeTarget(string databaseName, string objectName)
         {
+            return BuildPrivilegeTarget(databaseName, objectName, MySqlPrivilegeTargetType.TableOrView);
+        }
+
+        private static string BuildPrivilegeTarget(string databaseName, string objectName, MySqlPrivilegeTargetType targetType)
+        {
             if (string.IsNullOrWhiteSpace(databaseName)) return "*.*";
             string db = QuoteIdentifier(databaseName);
             if (string.IsNullOrWhiteSpace(objectName)) return db + ".*";
+            if (targetType == MySqlPrivilegeTargetType.Function) return "FUNCTION " + db + "." + QuoteIdentifier(objectName);
+            if (targetType == MySqlPrivilegeTargetType.Procedure) return "PROCEDURE " + db + "." + QuoteIdentifier(objectName);
             return db + "." + QuoteIdentifier(objectName);
         }
     }

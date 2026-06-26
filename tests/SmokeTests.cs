@@ -4370,6 +4370,12 @@ public static class SmokeTests
 
         string objectGrant = MySqlUserManagerService.BuildGrantSql(new[] { "select", "update" }, "sales`db", "orders", "app", "localhost", false);
         AssertEquals("GRANT SELECT, UPDATE ON `sales``db`.`orders` TO 'app'@'localhost';", objectGrant, "Privilege editor grant SQL should support object-scoped multi-privilege grants.");
+        string procedureGrant = MySqlUserManagerService.BuildGrantSql(new[] { "execute" }, "sales", "sp_sync", "app", "%", false, MySqlPrivilegeTargetType.Procedure);
+        AssertEquals("GRANT EXECUTE ON PROCEDURE `sales`.`sp_sync` TO 'app'@'%';", procedureGrant, "Privilege editor grant SQL should support procedure-scoped routine grants.");
+        string functionRevoke = MySqlUserManagerService.BuildRevokeSql(new[] { "execute" }, "sales", "fn_total", "app", "%", MySqlPrivilegeTargetType.Function);
+        AssertEquals("REVOKE EXECUTE ON FUNCTION `sales`.`fn_total` FROM 'app'@'%';", functionRevoke, "Privilege editor revoke SQL should support function-scoped routine revokes.");
+        AssertEquals("`sales`.*", MySqlUserManagerService.BuildPrivilegeTargetPreview("sales", "", MySqlPrivilegeTargetType.TableOrView), "Privilege target preview should show database-wide grants.");
+        AssertEquals("FUNCTION `sales`.`fn_total`", MySqlUserManagerService.BuildPrivilegeTargetPreview("sales", "fn_total", MySqlPrivilegeTargetType.Function), "Privilege target preview should show routine scope.");
 
         List<string> alterStatements = MySqlUserManagerService.BuildAlterUserSqlStatements(new MySqlAlterUserOptions
         {

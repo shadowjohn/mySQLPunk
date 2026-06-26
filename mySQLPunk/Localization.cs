@@ -305,6 +305,11 @@ namespace mySQLPunk
             Add("User.NewHost", "新 Host", "New Host");
             Add("User.AlterOptions", "動作", "Actions");
             Add("User.ObjectName", "物件名稱（空白代表整個 database）", "Object name (blank = whole database)");
+            Add("User.ObjectType", "物件類型", "Object Type");
+            Add("User.ObjectTypeTableOrView", "Table / View", "Table / View");
+            Add("User.ObjectTypeFunction", "Function", "Function");
+            Add("User.ObjectTypeProcedure", "Procedure", "Procedure");
+            Add("User.TargetPreview", "套用範圍", "Target Preview");
             Add("User.WithGrantOption", "WITH GRANT OPTION", "WITH GRANT OPTION");
             Add("User.SqlPreview", "SQL 預覽", "SQL Preview");
             Add("User.Execute", "執行", "Execute");
@@ -312,8 +317,8 @@ namespace mySQLPunk
             Add("User.CreateHint", "先預覽 CREATE USER SQL；按「執行」才會送出。", "Preview CREATE USER SQL first; Execute sends it.");
             Add("User.AlterHint", "可組合 Rename / 密碼 / Plugin / Lock / SSL / resource limits，所有 SQL 會先顯示預覽。", "Combine rename/password/plugin/lock/SSL/resource limits; SQL is previewed first.");
             Add("User.DropHint", "危險操作：刪除使用者不可復原，執行前會再確認。", "Dangerous operation: dropping a user cannot be undone; confirmation is required.");
-            Add("User.GrantHint", "選擇要授予的權限與目標範圍；物件空白時套用至 database.*。", "Choose privileges and target scope; blank object applies to database.*.");
-            Add("User.RevokeHint", "選擇要撤銷的權限與目標範圍；物件空白時套用至 database.*。", "Choose privileges and target scope; blank object applies to database.*.");
+            Add("User.GrantHint", "選擇要授予的權限與目標範圍；物件空白時套用至 database.*，Routine 請選 Function / Procedure。", "Choose privileges and target scope; blank object applies to database.*; choose Function / Procedure for routines.");
+            Add("User.RevokeHint", "選擇要撤銷的權限與目標範圍；物件空白時套用至 database.*，Routine 請選 Function / Procedure。", "Choose privileges and target scope; blank object applies to database.*; choose Function / Procedure for routines.");
             Add("User.FieldRequired", "請輸入 {0}。", "Enter {0}.");
             Add("User.NonNegativeIntegerRequired", "{0} 必須是 0 或正整數。", "{0} must be 0 or a positive integer.");
             Add("User.LockUnlockConflict", "不能同時選擇鎖定與解除鎖定。", "Lock and unlock cannot both be selected.");
