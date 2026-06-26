@@ -4370,6 +4370,33 @@ public static class SmokeTests
 
         string objectGrant = MySqlUserManagerService.BuildGrantSql(new[] { "select", "update" }, "sales`db", "orders", "app", "localhost", false);
         AssertEquals("GRANT SELECT, UPDATE ON `sales``db`.`orders` TO 'app'@'localhost';", objectGrant, "Privilege editor grant SQL should support object-scoped multi-privilege grants.");
+
+        List<string> alterStatements = MySqlUserManagerService.BuildAlterUserSqlStatements(new MySqlAlterUserOptions
+        {
+            User = "old",
+            Host = "%",
+            RenameUser = true,
+            NewUser = "new",
+            NewHost = "localhost",
+            ChangePassword = true,
+            Password = "n'pw",
+            Plugin = "mysql_native_password",
+            LockAccount = false,
+            ExpirePassword = true,
+            RequireSsl = true,
+            MaxQuestionsPerHour = 10,
+            MaxUpdatesPerHour = 20,
+            MaxConnectionsPerHour = 30,
+            MaxUserConnections = 4
+        });
+        AssertEquals("RENAME USER 'old'@'%' TO 'new'@'localhost';", alterStatements[0], "Alter user plan should rename first.");
+        AssertContains(MySqlUserManagerService.BuildUserOperationPreview(alterStatements), "ALTER USER 'new'@'localhost' IDENTIFIED WITH `mysql_native_password` BY 'n''pw';", "Alter user plan should retarget later statements after rename.");
+        AssertContains(MySqlUserManagerService.BuildUserOperationPreview(alterStatements), "ALTER USER 'new'@'localhost' ACCOUNT UNLOCK;", "Alter user plan should include unlock operations.");
+        AssertContains(MySqlUserManagerService.BuildUserOperationPreview(alterStatements), "ALTER USER 'new'@'localhost' WITH MAX_QUERIES_PER_HOUR 10 MAX_UPDATES_PER_HOUR 20 MAX_CONNECTIONS_PER_HOUR 30 MAX_USER_CONNECTIONS 4;", "Alter user plan should include resource limits.");
+        FakeExecDatabase execDb = new FakeExecDatabase("mysql", "1");
+        int executed = MySqlUserManagerService.ExecuteUserSqlStatements(execDb, alterStatements);
+        Assert(executed == alterStatements.Count, "User operation executor should return the executed statement count.");
+        Assert(execDb.ExecutedSql.Count == alterStatements.Count, "User operation executor should execute every statement once.");
     }
 
     private static void TestDatabaseRenameService()

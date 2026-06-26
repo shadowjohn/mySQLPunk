@@ -73,6 +73,26 @@ namespace mySQLPunk.lib
         public bool LockAccount { get; set; }
     }
 
+    public sealed class MySqlAlterUserOptions
+    {
+        public string User { get; set; }
+        public string Host { get; set; }
+        public bool RenameUser { get; set; }
+        public string NewUser { get; set; }
+        public string NewHost { get; set; }
+        public bool ChangePassword { get; set; }
+        public string Password { get; set; }
+        public string Plugin { get; set; }
+        public bool? LockAccount { get; set; }
+        public bool ExpirePassword { get; set; }
+        public bool RequireSsl { get; set; }
+        public bool ClearSslRequirement { get; set; }
+        public int? MaxQuestionsPerHour { get; set; }
+        public int? MaxUpdatesPerHour { get; set; }
+        public int? MaxConnectionsPerHour { get; set; }
+        public int? MaxUserConnections { get; set; }
+    }
+
     public static class MySqlUserManagerService
     {
         public const string NotSupported = "N/A";
@@ -316,6 +336,69 @@ namespace mySQLPunk.lib
             return sql.ToString();
         }
 
+        public static List<string> BuildCreateUserSqlStatements(MySqlCreateUserOptions options)
+        {
+            return new List<string> { BuildCreateUserSql(options) };
+        }
+
+        public static List<string> BuildAlterUserSqlStatements(MySqlAlterUserOptions options)
+        {
+            if (options == null) throw new ArgumentNullException("options");
+            List<string> statements = new List<string>();
+            string targetUser = options.User;
+            string targetHost = options.Host;
+
+            if (options.RenameUser)
+            {
+                string newUser = string.IsNullOrWhiteSpace(options.NewUser) ? options.User : options.NewUser;
+                string newHost = string.IsNullOrWhiteSpace(options.NewHost) ? options.Host : options.NewHost;
+                statements.Add(BuildRenameUserSql(options.User, options.Host, newUser, newHost));
+                targetUser = newUser;
+                targetHost = newHost;
+            }
+
+            if (options.ChangePassword || !string.IsNullOrEmpty(options.Plugin))
+            {
+                statements.Add(BuildAlterAuthenticationSql(targetUser, targetHost, options.Plugin, options.Password, options.ChangePassword));
+            }
+
+            if (options.LockAccount.HasValue) statements.Add(BuildAccountLockSql(targetUser, targetHost, options.LockAccount.Value));
+            if (options.ExpirePassword) statements.Add(BuildExpirePasswordSql(targetUser, targetHost));
+            if (options.RequireSsl) statements.Add(BuildSslRequirementSql(targetUser, targetHost, "SSL"));
+            if (options.ClearSslRequirement) statements.Add(BuildSslRequirementSql(targetUser, targetHost, "NONE"));
+
+            string limitSql = BuildResourceLimitSql(targetUser, targetHost, options.MaxQuestionsPerHour, options.MaxUpdatesPerHour, options.MaxConnectionsPerHour, options.MaxUserConnections);
+            if (limitSql.Length > 0) statements.Add(limitSql);
+
+            if (statements.Count == 0) throw new InvalidOperationException("No ALTER USER changes were requested.");
+            return statements;
+        }
+
+        public static List<string> BuildDropUserSqlStatements(string user, string host)
+        {
+            return new List<string> { BuildDropUserSql(user, host) };
+        }
+
+        public static string BuildUserOperationPreview(IEnumerable<string> statements)
+        {
+            if (statements == null) return string.Empty;
+            return string.Join(Environment.NewLine, statements.Where(s => !string.IsNullOrWhiteSpace(s)).ToArray());
+        }
+
+        public static int ExecuteUserSqlStatements(IDatabase db, IEnumerable<string> statements)
+        {
+            if (db == null) throw new ArgumentNullException("db");
+            if (statements == null) throw new ArgumentNullException("statements");
+            int executed = 0;
+            foreach (string statement in statements)
+            {
+                if (string.IsNullOrWhiteSpace(statement)) continue;
+                db.ExecSQL(statement);
+                executed++;
+            }
+            return executed;
+        }
+
         public static string BuildDropUserSql(string user, string host)
         {
             return "DROP USER " + QuoteAccount(user, host) + ";";
@@ -339,6 +422,24 @@ namespace mySQLPunk.lib
         public static string BuildExpirePasswordSql(string user, string host)
         {
             return "ALTER USER " + QuoteAccount(user, host) + " PASSWORD EXPIRE;";
+        }
+
+        public static string BuildSslRequirementSql(string user, string host, string sslRequirement)
+        {
+            string value = (sslRequirement ?? string.Empty).Trim().ToUpperInvariant();
+            if (value == "NONE" || value == "NO" || value == "DISABLED") return "ALTER USER " + QuoteAccount(user, host) + " REQUIRE NONE;";
+            return "ALTER USER " + QuoteAccount(user, host) + " REQUIRE " + NormalizeSslRequirement(sslRequirement) + ";";
+        }
+
+        public static string BuildResourceLimitSql(string user, string host, int? maxQuestionsPerHour, int? maxUpdatesPerHour, int? maxConnectionsPerHour, int? maxUserConnections)
+        {
+            List<string> limits = new List<string>();
+            AddResourceLimit(limits, "MAX_QUERIES_PER_HOUR", maxQuestionsPerHour);
+            AddResourceLimit(limits, "MAX_UPDATES_PER_HOUR", maxUpdatesPerHour);
+            AddResourceLimit(limits, "MAX_CONNECTIONS_PER_HOUR", maxConnectionsPerHour);
+            AddResourceLimit(limits, "MAX_USER_CONNECTIONS", maxUserConnections);
+            if (limits.Count == 0) return string.Empty;
+            return "ALTER USER " + QuoteAccount(user, host) + " WITH " + string.Join(" ", limits.ToArray()) + ";";
         }
 
         public static string BuildGrantSql(string privilege, string databaseName, string objectName, string user, string host)
@@ -522,7 +623,30 @@ namespace mySQLPunk.lib
             if (!IsMeaningful(value)) return;
             int parsed;
             if (!int.TryParse(value.Trim(), out parsed) || parsed < 0) return;
-            limits.Add(keyword + " " + parsed.ToString());
+            AddResourceLimit(limits, keyword, parsed);
+        }
+
+        private static void AddResourceLimit(List<string> limits, string keyword, int? value)
+        {
+            if (!value.HasValue || value.Value < 0) return;
+            limits.Add(keyword + " " + value.Value.ToString());
+        }
+
+        private static string BuildAlterAuthenticationSql(string user, string host, string plugin, string password, bool changePassword)
+        {
+            StringBuilder sql = new StringBuilder();
+            sql.Append("ALTER USER ").Append(QuoteAccount(user, host));
+            if (!string.IsNullOrEmpty(plugin))
+            {
+                sql.Append(" IDENTIFIED WITH ").Append(QuoteIdentifier(plugin));
+                if (changePassword || password != null) sql.Append(" BY ").Append(QuoteLiteral(password ?? string.Empty));
+            }
+            else
+            {
+                sql.Append(" IDENTIFIED BY ").Append(QuoteLiteral(password ?? string.Empty));
+            }
+            sql.Append(";");
+            return sql.ToString();
         }
 
         private static string BuildGrantSqlFromSummary(string privilegeSummary, string user, string host)
