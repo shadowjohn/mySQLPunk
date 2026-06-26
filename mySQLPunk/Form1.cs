@@ -7992,7 +7992,11 @@ namespace mySQLPunk
                 displayDt.Columns.Add("Plugin");
                 displayDt.Columns.Add("密碼");
                 displayDt.Columns.Add("SSL");
+                displayDt.Columns.Add("每小時查詢");
+                displayDt.Columns.Add("每小時更新");
+                displayDt.Columns.Add("每小時連線");
                 displayDt.Columns.Add("最大連線");
+                displayDt.Columns.Add("密碼上次變更");
                 displayDt.Columns.Add("來源");
                 foreach (DataRow userRow in GetDatabaseUsers(db, dbName, connInfo).Rows)
                 {
@@ -8004,7 +8008,11 @@ namespace mySQLPunk
                     row["Plugin"] = userRow["Plugin"];
                     row["密碼"] = userRow["PasswordExists"];
                     row["SSL"] = userRow["SSLRequired"];
+                    row["每小時查詢"] = userRow["MaxQuestionsPerHour"];
+                    row["每小時更新"] = userRow["MaxUpdatesPerHour"];
+                    row["每小時連線"] = userRow["MaxConnectionsPerHour"];
                     row["最大連線"] = userRow["MaxConnections"];
+                    row["密碼上次變更"] = userRow["PasswordLastChanged"];
                     row["來源"] = userRow["Source"];
                     displayDt.Rows.Add(row);
                 }
@@ -9561,8 +9569,12 @@ namespace mySQLPunk
                 AddDetailRow("AccountLocked", match["AccountLocked"]);
                 AddDetailRow("PasswordExpired", match["PasswordExpired"]);
                 AddDetailRow("SSLRequired", match["SSLRequired"]);
+                AddDetailRow("MaxQuestionsPerHour", match["MaxQuestionsPerHour"]);
+                AddDetailRow("MaxUpdatesPerHour", match["MaxUpdatesPerHour"]);
+                AddDetailRow("MaxConnectionsPerHour", match["MaxConnectionsPerHour"]);
                 AddDetailRow("MaxConnections", match["MaxConnections"]);
                 AddDetailRow("PasswordLifetime", match["PasswordLifetime"]);
+                AddDetailRow("PasswordLastChanged", match["PasswordLastChanged"]);
                 AddDetailRow("MustChangePassword", match["MustChangePassword"]);
                 AddDetailRow("CreateTime", match["CreateTime"]);
                 AddDetailRow("Comment", match["Comment"]);

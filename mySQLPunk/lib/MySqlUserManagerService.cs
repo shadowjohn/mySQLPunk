@@ -145,11 +145,15 @@ namespace mySQLPunk.lib
             dt.Columns.Add("AccountLocked");
             dt.Columns.Add("PasswordExpired");
             dt.Columns.Add("SSLRequired");
+            dt.Columns.Add("MaxQuestionsPerHour");
+            dt.Columns.Add("MaxUpdatesPerHour");
+            dt.Columns.Add("MaxConnectionsPerHour");
             dt.Columns.Add("MaxConnections");
             dt.Columns.Add("CreateTime");
             dt.Columns.Add("Comment");
             dt.Columns.Add("AuthenticationString");
             dt.Columns.Add("PasswordLifetime");
+            dt.Columns.Add("PasswordLastChanged");
             dt.Columns.Add("MustChangePassword");
             dt.Columns.Add("Privileges");
             return dt;
@@ -178,11 +182,15 @@ namespace mySQLPunk.lib
             string accountLocked = AccountLockedExpression(adapter);
             string passwordExpired = PasswordExpiredExpression(adapter);
             string sslRequired = SslRequiredExpression(adapter);
+            string maxQuestions = ColumnAsCharOrNotSupported(adapter, "max_questions");
+            string maxUpdates = ColumnAsCharOrNotSupported(adapter, "max_updates");
+            string maxConnectionsPerHour = ColumnAsCharOrNotSupported(adapter, "max_connections");
             string maxConnections = ColumnAsCharOrNotSupported(adapter, "max_user_connections");
             string createTime = ColumnAsCharOrNotSupported(adapter, "Create_time");
             string comment = ColumnOrNotSupported(adapter, "User_attributes");
             string authString = AuthenticationStringExpression(adapter);
             string passwordLifetime = ColumnAsCharOrNotSupported(adapter, "password_lifetime");
+            string passwordLastChanged = ColumnAsCharOrNotSupported(adapter, "password_last_changed");
             string mustChange = passwordExpired;
             string privileges = PrivilegeSummaryExpression(adapter);
             string status = adapter.HasUserColumn("account_locked")
@@ -196,11 +204,15 @@ namespace mySQLPunk.lib
                    accountLocked + " AS AccountLocked, " +
                    passwordExpired + " AS PasswordExpired, " +
                    sslRequired + " AS SSLRequired, " +
+                   maxQuestions + " AS MaxQuestionsPerHour, " +
+                   maxUpdates + " AS MaxUpdatesPerHour, " +
+                   maxConnectionsPerHour + " AS MaxConnectionsPerHour, " +
                    maxConnections + " AS MaxConnections, " +
                    createTime + " AS CreateTime, " +
                    comment + " AS Comment, " +
                    authString + " AS AuthenticationString, " +
                    passwordLifetime + " AS PasswordLifetime, " +
+                   passwordLastChanged + " AS PasswordLastChanged, " +
                    mustChange + " AS MustChangePassword, " +
                    privileges + " AS Privileges " +
                    "FROM mysql.user ORDER BY `User`, `Host`;";
@@ -213,9 +225,10 @@ namespace mySQLPunk.lib
                    "'N/A' AS Plugin, " +
                    "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Yes' END AS PasswordExists, " +
                    "'N/A' AS AccountLocked, 'N/A' AS PasswordExpired, 'N/A' AS SSLRequired, " +
+                   "'N/A' AS MaxQuestionsPerHour, 'N/A' AS MaxUpdatesPerHour, 'N/A' AS MaxConnectionsPerHour, " +
                    "'N/A' AS MaxConnections, 'N/A' AS CreateTime, 'N/A' AS Comment, " +
                    "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Set (hidden)' END AS AuthenticationString, " +
-                   "'N/A' AS PasswordLifetime, 'N/A' AS MustChangePassword, " +
+                   "'N/A' AS PasswordLifetime, 'N/A' AS PasswordLastChanged, 'N/A' AS MustChangePassword, " +
                    "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Stored in mysql.global_priv' END AS Privileges " +
                    "FROM mysql.global_priv ORDER BY `User`, `Host`;";
         }
@@ -226,8 +239,9 @@ namespace mySQLPunk.lib
                    "SUBSTRING_INDEX(CURRENT_USER(), '@', -1) AS Host, 'Active' AS Status, " +
                    "'CURRENT_USER()' AS Source, 'MySQL' AS ProviderFamily, " +
                    "'N/A' AS Plugin, 'N/A' AS PasswordExists, 'N/A' AS AccountLocked, 'N/A' AS PasswordExpired, " +
-                   "'N/A' AS SSLRequired, 'N/A' AS MaxConnections, 'N/A' AS CreateTime, 'N/A' AS Comment, " +
-                   "'N/A' AS AuthenticationString, 'N/A' AS PasswordLifetime, 'N/A' AS MustChangePassword, 'N/A' AS Privileges;";
+                   "'N/A' AS SSLRequired, 'N/A' AS MaxQuestionsPerHour, 'N/A' AS MaxUpdatesPerHour, " +
+                   "'N/A' AS MaxConnectionsPerHour, 'N/A' AS MaxConnections, 'N/A' AS CreateTime, 'N/A' AS Comment, " +
+                   "'N/A' AS AuthenticationString, 'N/A' AS PasswordLifetime, 'N/A' AS PasswordLastChanged, 'N/A' AS MustChangePassword, 'N/A' AS Privileges;";
         }
 
         public static string BuildUserDdlPreview(DataRow userRow)
@@ -246,7 +260,14 @@ namespace mySQLPunk.lib
             if (IsMeaningful(passwordExists)) sb.AppendLine("-- Password: " + passwordExists + (passwordExists == "Yes" ? " (hash hidden)" : string.Empty));
 
             string ssl = GetColumnValue(userRow, "SSLRequired");
-            if (IsMeaningful(ssl)) sb.AppendLine("-- SSL: " + ssl);
+            if (IsMeaningful(ssl))
+            {
+                sb.AppendLine("-- SSL: " + ssl);
+                if (!string.Equals(ssl, "No", StringComparison.OrdinalIgnoreCase))
+                {
+                    sb.AppendLine("ALTER USER " + account + " REQUIRE " + NormalizeSslRequirement(ssl) + ";");
+                }
+            }
 
             string locked = GetColumnValue(userRow, "AccountLocked");
             if (string.Equals(locked, "Locked", StringComparison.OrdinalIgnoreCase)) sb.AppendLine("ALTER USER " + account + " ACCOUNT LOCK;");
@@ -255,11 +276,18 @@ namespace mySQLPunk.lib
             string expired = GetColumnValue(userRow, "PasswordExpired");
             if (string.Equals(expired, "Expired", StringComparison.OrdinalIgnoreCase)) sb.AppendLine("ALTER USER " + account + " PASSWORD EXPIRE;");
 
-            string maxConnections = GetColumnValue(userRow, "MaxConnections");
-            if (IsMeaningful(maxConnections)) sb.AppendLine("-- Max connections: " + maxConnections);
+            string passwordLastChanged = GetColumnValue(userRow, "PasswordLastChanged");
+            if (IsMeaningful(passwordLastChanged)) sb.AppendLine("-- Password last changed: " + passwordLastChanged);
+
+            AppendResourceLimitDdl(sb, account, userRow);
 
             string privileges = GetColumnValue(userRow, "Privileges");
-            if (IsMeaningful(privileges)) sb.AppendLine("-- Privileges: " + privileges);
+            if (IsMeaningful(privileges))
+            {
+                sb.AppendLine("-- Privileges: " + privileges);
+                string grantSql = BuildGrantSqlFromSummary(privileges, user, host);
+                if (grantSql.Length > 0) sb.AppendLine(grantSql);
+            }
 
             string source = GetColumnValue(userRow, "Source");
             if (IsMeaningful(source)) sb.AppendLine("-- Source: " + source);
@@ -315,12 +343,24 @@ namespace mySQLPunk.lib
 
         public static string BuildGrantSql(string privilege, string databaseName, string objectName, string user, string host)
         {
-            return "GRANT " + NormalizePrivilege(privilege) + " ON " + BuildPrivilegeTarget(databaseName, objectName) + " TO " + QuoteAccount(user, host) + ";";
+            return BuildGrantSql(new[] { privilege }, databaseName, objectName, user, host, false);
+        }
+
+        public static string BuildGrantSql(IEnumerable<string> privileges, string databaseName, string objectName, string user, string host, bool withGrantOption)
+        {
+            List<string> normalized = NormalizePrivileges(privileges);
+            return "GRANT " + string.Join(", ", normalized.ToArray()) + " ON " + BuildPrivilegeTarget(databaseName, objectName) + " TO " + QuoteAccount(user, host) + (withGrantOption ? " WITH GRANT OPTION" : string.Empty) + ";";
         }
 
         public static string BuildRevokeSql(string privilege, string databaseName, string objectName, string user, string host)
         {
-            return "REVOKE " + NormalizePrivilege(privilege) + " ON " + BuildPrivilegeTarget(databaseName, objectName) + " FROM " + QuoteAccount(user, host) + ";";
+            return BuildRevokeSql(new[] { privilege }, databaseName, objectName, user, host);
+        }
+
+        public static string BuildRevokeSql(IEnumerable<string> privileges, string databaseName, string objectName, string user, string host)
+        {
+            List<string> normalized = NormalizePrivileges(privileges);
+            return "REVOKE " + string.Join(", ", normalized.ToArray()) + " ON " + BuildPrivilegeTarget(databaseName, objectName) + " FROM " + QuoteAccount(user, host) + ";";
         }
 
         internal static DataTable TrySelect(IDatabase db, string sql)
@@ -465,6 +505,68 @@ namespace mySQLPunk.lib
         private static bool IsMeaningful(string value)
         {
             return !string.IsNullOrWhiteSpace(value) && !string.Equals(value, NotSupported, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void AppendResourceLimitDdl(StringBuilder sb, string account, DataRow userRow)
+        {
+            List<string> limits = new List<string>();
+            AddResourceLimit(limits, "MAX_QUERIES_PER_HOUR", GetColumnValue(userRow, "MaxQuestionsPerHour"));
+            AddResourceLimit(limits, "MAX_UPDATES_PER_HOUR", GetColumnValue(userRow, "MaxUpdatesPerHour"));
+            AddResourceLimit(limits, "MAX_CONNECTIONS_PER_HOUR", GetColumnValue(userRow, "MaxConnectionsPerHour"));
+            AddResourceLimit(limits, "MAX_USER_CONNECTIONS", GetColumnValue(userRow, "MaxConnections"));
+            if (limits.Count > 0) sb.AppendLine("ALTER USER " + account + " WITH " + string.Join(" ", limits.ToArray()) + ";");
+        }
+
+        private static void AddResourceLimit(List<string> limits, string keyword, string value)
+        {
+            if (!IsMeaningful(value)) return;
+            int parsed;
+            if (!int.TryParse(value.Trim(), out parsed) || parsed < 0) return;
+            limits.Add(keyword + " " + parsed.ToString());
+        }
+
+        private static string BuildGrantSqlFromSummary(string privilegeSummary, string user, string host)
+        {
+            List<string> privileges = new List<string>();
+            bool withGrantOption = false;
+            foreach (string part in (privilegeSummary ?? string.Empty).Split(','))
+            {
+                string trimmed = part.Trim();
+                if (!IsMeaningful(trimmed)) continue;
+                if (string.Equals(trimmed, "Stored in mysql.global_priv", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(trimmed, "GRANT OPTION", StringComparison.OrdinalIgnoreCase))
+                {
+                    withGrantOption = true;
+                    continue;
+                }
+                privileges.Add(trimmed);
+            }
+            if (privileges.Count == 0) return string.Empty;
+            return BuildGrantSql(privileges, null, null, user, host, withGrantOption);
+        }
+
+        private static string NormalizeSslRequirement(string ssl)
+        {
+            string value = (ssl ?? string.Empty).Trim().ToUpperInvariant();
+            if (value == "SSL" || value == "X509") return value;
+            if (value == "ANY") return "SSL";
+            if (value == "SPECIFIED") return "X509";
+            return "SSL";
+        }
+
+        private static List<string> NormalizePrivileges(IEnumerable<string> privileges)
+        {
+            List<string> normalized = new List<string>();
+            if (privileges != null)
+            {
+                foreach (string privilege in privileges)
+                {
+                    string value = NormalizePrivilege(privilege);
+                    if (!normalized.Contains(value)) normalized.Add(value);
+                }
+            }
+            if (normalized.Count == 0) throw new ArgumentException("At least one privilege is required.", "privileges");
+            return normalized;
         }
 
         private static string NormalizePrivilege(string privilege)

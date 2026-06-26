@@ -4301,11 +4301,13 @@ public static class SmokeTests
     {
         MySqlUserProviderAdapter mysql8 = new MySqlUserProviderAdapter(
             "8.0.36",
-            new[] { "User", "Host", "plugin", "authentication_string", "account_locked", "password_expired", "ssl_type", "max_user_connections", "password_lifetime", "Select_priv", "Insert_priv" },
+            new[] { "User", "Host", "plugin", "authentication_string", "account_locked", "password_expired", "ssl_type", "max_questions", "max_updates", "max_connections", "max_user_connections", "password_lifetime", "password_last_changed", "Select_priv", "Insert_priv", "Grant_priv" },
             false);
         string mysql8Sql = MySqlUserManagerService.BuildMysqlUserListSql(mysql8);
         AssertContains(mysql8Sql, "`account_locked`", "MySQL 8 user list should include account_locked only when the column exists.");
         AssertContains(mysql8Sql, "`password_lifetime`", "MySQL 8 user list should include password_lifetime only when the column exists.");
+        AssertContains(mysql8Sql, "`password_last_changed`", "MySQL 8 user list should include password_last_changed only when the column exists.");
+        AssertContains(mysql8Sql, "`max_questions`", "MySQL 8 user list should include hourly resource limits only when the columns exist.");
         AssertContains(mysql8Sql, "CONCAT_WS", "MySQL user list should build a safe privilege summary from available privilege columns.");
 
         MySqlUserProviderAdapter mariaUserView = new MySqlUserProviderAdapter(
@@ -4348,14 +4350,26 @@ public static class SmokeTests
         row["AccountLocked"] = "Locked";
         row["PasswordExpired"] = "Expired";
         row["SSLRequired"] = "X509";
-        row["Privileges"] = "SELECT,INSERT";
+        row["MaxQuestionsPerHour"] = "12";
+        row["MaxUpdatesPerHour"] = "34";
+        row["MaxConnectionsPerHour"] = "56";
+        row["MaxConnections"] = "7";
+        row["PasswordLastChanged"] = "2026-06-26 08:00:00";
+        row["Privileges"] = "SELECT,INSERT,GRANT OPTION";
         row["Source"] = "mysql.user";
         table.Rows.Add(row);
         string preview = MySqlUserManagerService.BuildUserDdlPreview(row);
         AssertContains(preview, "CREATE USER 'root'@'%';", "User DDL preview should show the account identity.");
         AssertContains(preview, "ALTER USER 'root'@'%' ACCOUNT LOCK;", "User DDL preview should show account lock statements when applicable.");
         AssertContains(preview, "ALTER USER 'root'@'%' PASSWORD EXPIRE;", "User DDL preview should show password expiry statements when applicable.");
-        AssertContains(preview, "-- Privileges: SELECT,INSERT", "User DDL preview should include privilege summaries.");
+        AssertContains(preview, "ALTER USER 'root'@'%' REQUIRE X509;", "User DDL preview should emit SSL requirements when available.");
+        AssertContains(preview, "ALTER USER 'root'@'%' WITH MAX_QUERIES_PER_HOUR 12 MAX_UPDATES_PER_HOUR 34 MAX_CONNECTIONS_PER_HOUR 56 MAX_USER_CONNECTIONS 7;", "User DDL preview should emit resource limit statements when available.");
+        AssertContains(preview, "-- Password last changed: 2026-06-26 08:00:00", "User DDL preview should include password last changed metadata when available.");
+        AssertContains(preview, "-- Privileges: SELECT,INSERT,GRANT OPTION", "User DDL preview should include privilege summaries.");
+        AssertContains(preview, "GRANT SELECT, INSERT ON *.* TO 'root'@'%' WITH GRANT OPTION;", "User DDL preview should reconstruct global grants from privilege summaries.");
+
+        string objectGrant = MySqlUserManagerService.BuildGrantSql(new[] { "select", "update" }, "sales`db", "orders", "app", "localhost", false);
+        AssertEquals("GRANT SELECT, UPDATE ON `sales``db`.`orders` TO 'app'@'localhost';", objectGrant, "Privilege editor grant SQL should support object-scoped multi-privilege grants.");
     }
 
     private static void TestDatabaseRenameService()
