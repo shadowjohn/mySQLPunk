@@ -167,6 +167,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="ThemeManager.cs" />
+    <Compile Include="UserOperationDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="lib\BackupIntegrityService.cs" />
     <Compile Include="lib\BackupIntegrityScheduleService.cs" />
     <Compile Include="lib\BackupQuarantineRestoreService.cs" />

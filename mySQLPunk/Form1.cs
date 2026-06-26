@@ -90,6 +90,13 @@ namespace mySQLPunk
         ToolStripButton auto_run_btn = new ToolStripButton();
         ToolStripButton model_btn = new ToolStripButton();
         ToolStripButton bi_btn = new ToolStripButton();
+        ToolStripButton NewUser = new ToolStripButton();
+        ToolStripButton AlterUser = new ToolStripButton();
+        ToolStripButton DropUser = new ToolStripButton();
+        ToolStripButton GrantUser = new ToolStripButton();
+        ToolStripButton RevokeUser = new ToolStripButton();
+        ToolStripButton RefreshUsers = new ToolStripButton();
+        ToolStripButton UserSqlPreview = new ToolStripButton();
         private TabControl queryTabs;
         private int queryTabCounter = 1;
         private TabPage dragTab = null; // 用於拖拽頁籤
@@ -129,6 +136,12 @@ namespace mySQLPunk
             public string ProviderName;
             public TreeNode DatabaseNode;
             public Dictionary<string, object> ConnectionInfo;
+        }
+
+        private class UserIdentity
+        {
+            public string User;
+            public string Host;
         }
 
         private class ImportedConnectionPasswordTarget
@@ -1004,6 +1017,52 @@ namespace mySQLPunk
                         foreach (var k in displayTools.Keys)
                         {
                             if (k == "functions")
+                            {
+                                foreach (var item in displayTools[k])
+                                {
+                                    ((ToolStripButton)item).Visible = true;
+                                    ((ToolStripButton)item).Enabled = true;
+                                }
+                            }
+                            else
+                            {
+                                foreach (var item in displayTools[k])
+                                {
+                                    ((ToolStripButton)item).Visible = false;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                case "點到Users本身":
+                    {
+                        foreach (var k in displayTools.Keys)
+                        {
+                            if (k == "users")
+                            {
+                                foreach (var item in displayTools[k])
+                                {
+                                    ((ToolStripButton)item).Visible = true;
+                                    ((ToolStripButton)item).Enabled = false;
+                                }
+                                ((ToolStripButton)displayTools[k][0]).Enabled = true; // New User
+                                ((ToolStripButton)displayTools[k][5]).Enabled = true; // Refresh Users
+                            }
+                            else
+                            {
+                                foreach (var item in displayTools[k])
+                                {
+                                    ((ToolStripButton)item).Visible = false;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                case "點到User本身":
+                    {
+                        foreach (var k in displayTools.Keys)
+                        {
+                            if (k == "users")
                             {
                                 foreach (var item in displayTools[k])
                                 {
@@ -2385,6 +2444,16 @@ namespace mySQLPunk
             d.Add(DeleteFunction);
             d.Add(ExecuteFunction);
             displayTools.Add("functions", d);
+            ConfigureUserToolButtons();
+            d = new List<object>();
+            d.Add(NewUser);
+            d.Add(AlterUser);
+            d.Add(DropUser);
+            d.Add(GrantUser);
+            d.Add(RevokeUser);
+            d.Add(RefreshUsers);
+            d.Add(UserSqlPreview);
+            displayTools.Add("users", d);
             showTools("點到連線");
             table_top.Width = splitContainer5.Width;
             table_top.Height = splitContainer5.Height;
@@ -2409,6 +2478,13 @@ namespace mySQLPunk
             NewFunction.Click += (s, e) => CreateNewFunction();
             DeleteFunction.Click += (s, e) => DeleteSelectedFunction();
             ExecuteFunction.Click += (s, e) => ExecuteSelectedFunction();
+            NewUser.Click += (s, e) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Create);
+            AlterUser.Click += (s, e) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Alter);
+            DropUser.Click += (s, e) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Drop);
+            GrantUser.Click += (s, e) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Grant);
+            RevokeUser.Click += (s, e) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Revoke);
+            RefreshUsers.Click += (s, e) => RefreshSelectedUsers();
+            UserSqlPreview.Click += (s, e) => OpenSelectedUserSqlPreview();
 
             // 連結右鍵選單事件
             db_tree.NodeMouseClick += db_tree_NodeMouseClick;
@@ -2444,6 +2520,42 @@ namespace mySQLPunk
             closeToolStripMenuItem.Click -= CloseToolStripMenuItem_Click;
             closeToolStripMenuItem.Click += CloseToolStripMenuItem_Click;
 
+        }
+
+        private void ConfigureUserToolButtons()
+        {
+            ToolStripButton[] buttons = new[] { NewUser, AlterUser, DropUser, GrantUser, RevokeUser, RefreshUsers, UserSqlPreview };
+            foreach (ToolStripButton button in buttons)
+            {
+                button.AutoToolTip = false;
+                button.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+                button.TextImageRelation = TextImageRelation.ImageAboveText;
+                button.Image = global::mySQLPunk.Properties.Resources.user;
+                button.ImageTransparentColor = Color.Magenta;
+                button.Size = new Size(110, 58);
+                button.Visible = false;
+                if (!mTs.Items.Contains(button)) mTs.Items.Add(button);
+            }
+
+            NewUser.Name = "NewUser";
+            AlterUser.Name = "AlterUser";
+            DropUser.Name = "DropUser";
+            GrantUser.Name = "GrantUser";
+            RevokeUser.Name = "RevokeUser";
+            RefreshUsers.Name = "RefreshUsers";
+            UserSqlPreview.Name = "UserSqlPreview";
+            ApplyUserToolButtonText();
+        }
+
+        private void ApplyUserToolButtonText()
+        {
+            NewUser.Text = Localization.T("Tool.NewUser");
+            AlterUser.Text = Localization.T("Tool.AlterUser");
+            DropUser.Text = Localization.T("Tool.DropUser");
+            GrantUser.Text = Localization.T("Tool.GrantPrivileges");
+            RevokeUser.Text = Localization.T("Tool.RevokePrivileges");
+            RefreshUsers.Text = Localization.T("Tool.RefreshUsers");
+            UserSqlPreview.Text = Localization.T("Tool.UserSqlPreview");
         }
 
         private static bool LooksLikeSqliteExtension(string path)
@@ -3784,6 +3896,7 @@ namespace mySQLPunk
             NewFunction.Text = Localization.T("Tool.NewFunction");
             DeleteFunction.Text = Localization.T("Tool.DeleteFunction");
             ExecuteFunction.Text = Localization.T("Tool.ExecuteFunction");
+            ApplyUserToolButtonText();
             ApplyTheme();
         }
 
@@ -6714,6 +6827,7 @@ namespace mySQLPunk
                     if (groupName == "Tables") showTools("點到Tables");
                     else if (groupName == "Views") showTools("點到Views本身");
                     else if (groupName == "Functions") showTools("點到Functions本身");
+                    else if (groupName == "Users") showTools("點到Users本身");
                 }
                 
                 // 如果是 Table 節點，則側邊欄顯示 Table 詳情
@@ -6755,6 +6869,7 @@ namespace mySQLPunk
                     lblSidebarTitle.Text = BuildSidebarObjectTitle("User", userName);
                     ShowDatabaseGroupList(db, dbName, "Users", connInfo);
                     ShowUserDetails(db, dbName, userName, connInfo);
+                    showTools("點到User本身");
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Models")
                 {
@@ -6969,6 +7084,10 @@ namespace mySQLPunk
                 var itemClose = new ToolStripMenuItem(Localization.T("Tool.CloseQuery"));
                 itemClose.Click += (s, ev) => CloseSelectedQueryTabFromGrid();
                 cms.Items.Add(itemClose);
+            }
+            else if (groupName == "Users")
+            {
+                AddUserMenuItems(cms, true);
             }
             else if (IsDetailsOnlyGroup(groupName))
             {
@@ -9846,6 +9965,10 @@ namespace mySQLPunk
                 {
                     AddQueryGroupMenuItems(menu, node);
                 }
+                if (pathParts.Length == 3 && pathParts[2] == "Users")
+                {
+                    AddUserMenuItems(menu, false);
+                }
                 if (pathParts.Length == 3 && pathParts[2] == "Backups")
                 {
                     ToolStripMenuItem backupDatabaseItem = new ToolStripMenuItem(Localization.T("Tool.CreateBackup"));
@@ -9933,6 +10056,10 @@ namespace mySQLPunk
                     deleteFunctionItem.Click += (s, ev) => DeleteSelectedFunction();
                     menu.Items.Add(deleteFunctionItem);
                 }
+                else if (pathParts.Length >= 4 && pathParts[2] == "Users")
+                {
+                    AddUserMenuItems(menu, true);
+                }
                 else if (pathParts.Length >= 4 && IsDetailsOnlyGroup(pathParts[2]))
                 {
                     ToolStripMenuItem openDetailsItem = new ToolStripMenuItem(Localization.T("Tool.OpenDetails"));
@@ -10010,6 +10137,196 @@ namespace mySQLPunk
                 string sql = File.ReadAllText(dialog.FileName, Encoding.UTF8);
                 OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), sql, true);
                 UpdateMainStatus(Localization.Format("Query.ExternalOpened", dialog.FileName));
+            }
+        }
+
+        private void AddUserMenuItems(ContextMenuStrip menu, bool includeSelectedOperations)
+        {
+            ToolStripMenuItem newUserItem = new ToolStripMenuItem(Localization.T("Tool.NewUser"));
+            newUserItem.Click += (s, ev) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Create);
+            menu.Items.Add(newUserItem);
+
+            if (includeSelectedOperations)
+            {
+                ToolStripMenuItem alterUserItem = new ToolStripMenuItem(Localization.T("Tool.AlterUser"));
+                alterUserItem.Click += (s, ev) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Alter);
+                menu.Items.Add(alterUserItem);
+
+                ToolStripMenuItem dropUserItem = new ToolStripMenuItem(Localization.T("Tool.DropUser"));
+                dropUserItem.Click += (s, ev) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Drop);
+                menu.Items.Add(dropUserItem);
+
+                menu.Items.Add(new ToolStripSeparator());
+
+                ToolStripMenuItem grantItem = new ToolStripMenuItem(Localization.T("Tool.GrantPrivileges"));
+                grantItem.Click += (s, ev) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Grant);
+                menu.Items.Add(grantItem);
+
+                ToolStripMenuItem revokeItem = new ToolStripMenuItem(Localization.T("Tool.RevokePrivileges"));
+                revokeItem.Click += (s, ev) => OpenMySqlUserOperationDialog(MySqlUserOperationMode.Revoke);
+                menu.Items.Add(revokeItem);
+
+                ToolStripMenuItem previewItem = new ToolStripMenuItem(Localization.T("Tool.UserSqlPreview"));
+                previewItem.Click += (s, ev) => OpenSelectedUserSqlPreview();
+                menu.Items.Add(previewItem);
+            }
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Tool.RefreshUsers"));
+            refreshItem.Click += (s, ev) => RefreshSelectedUsers();
+            menu.Items.Add(refreshItem);
+        }
+
+        private void OpenMySqlUserOperationDialog(MySqlUserOperationMode mode)
+        {
+            TreeDatabaseTarget target;
+            UserIdentity identity;
+            bool needsUser = mode != MySqlUserOperationMode.Create;
+            if (!TryGetMySqlUserOperationTarget(needsUser, out target, out identity)) return;
+
+            string user = identity == null ? string.Empty : identity.User;
+            string host = identity == null ? "%" : identity.Host;
+            using (UserOperationDialog dialog = new UserOperationDialog(mode, target.DatabaseName, user, host))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                if (mode == MySqlUserOperationMode.Drop && MessageBox.Show(
+                    Localization.Format("User.DropConfirm", user, string.IsNullOrWhiteSpace(host) ? "%" : host),
+                    Localization.T("Common.Warning"),
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning) != DialogResult.Yes)
+                {
+                    return;
+                }
+
+                try
+                {
+                    int executed = MySqlUserManagerService.ExecuteUserSqlStatements(target.Database, dialog.Statements);
+                    RefreshUsersForTarget(target);
+                    UpdateMainStatus(Localization.Format("User.OperationCompleted", executed));
+                    MessageBox.Show(Localization.Format("User.OperationCompleted", executed), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    string message = BuildExceptionReason(ex);
+                    UpdateMainStatus(Localization.Format("User.OperationFailed", message));
+                    MessageBox.Show(Localization.Format("User.OperationFailed", message), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private bool TryGetMySqlUserOperationTarget(bool requireUser, out TreeDatabaseTarget target, out UserIdentity identity)
+        {
+            target = GetTargetFromCurrentSelection();
+            identity = null;
+            if (target == null || !(target.Database is my_mysql))
+            {
+                MessageBox.Show(Localization.T("User.SelectMySqlDatabase"), Localization.T("Toolbar.User"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            if (requireUser)
+            {
+                identity = GetSelectedUserIdentity(target);
+                if (identity == null || string.IsNullOrWhiteSpace(identity.User))
+                {
+                    MessageBox.Show(Localization.T("User.SelectUser"), Localization.T("Toolbar.User"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private UserIdentity GetSelectedUserIdentity(TreeDatabaseTarget target)
+        {
+            if (table_top != null && table_top.SelectedRows.Count > 0 && table_top.Columns.Contains("名稱"))
+            {
+                DataGridViewRow row = table_top.SelectedRows[0];
+                string userFromGrid = GetGridCellString(row, "名稱");
+                string hostFromGrid = GetGridCellString(row, "主機");
+                if (!string.IsNullOrWhiteSpace(userFromGrid))
+                {
+                    return new UserIdentity { User = userFromGrid, Host = string.IsNullOrWhiteSpace(hostFromGrid) ? "%" : hostFromGrid };
+                }
+            }
+
+            TreeNode selectedNode = db_tree == null ? null : db_tree.SelectedNode;
+            var pathParts = GetTreePathParts(selectedNode);
+            if (pathParts.Length >= 4 && pathParts[2] == "Users")
+            {
+                string userName = pathParts[3];
+                string host = "%";
+                try
+                {
+                    DataRow match = GetDatabaseUsers(target.Database, target.DatabaseName, target.ConnectionInfo).Rows
+                        .Cast<DataRow>()
+                        .FirstOrDefault(row => string.Equals(Convert.ToString(row["Name"]), userName, StringComparison.OrdinalIgnoreCase));
+                    if (match != null && match.Table.Columns.Contains("Host")) host = Convert.ToString(match["Host"]);
+                }
+                catch
+                {
+                }
+                return new UserIdentity { User = userName, Host = string.IsNullOrWhiteSpace(host) ? "%" : host };
+            }
+
+            return null;
+        }
+
+        private static string GetGridCellString(DataGridViewRow row, string columnName)
+        {
+            if (row == null || row.DataGridView == null || !row.DataGridView.Columns.Contains(columnName)) return string.Empty;
+            object value = row.Cells[columnName].Value;
+            return value == null || value == DBNull.Value ? string.Empty : Convert.ToString(value);
+        }
+
+        private void RefreshSelectedUsers()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null || !(target.Database is my_mysql))
+            {
+                MessageBox.Show(Localization.T("User.SelectMySqlDatabase"), Localization.T("Toolbar.User"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            RefreshUsersForTarget(target);
+            UpdateMainStatus(Localization.T("User.UsersRefreshed"));
+        }
+
+        private void RefreshUsersForTarget(TreeDatabaseTarget target)
+        {
+            if (target == null) return;
+            ShowDatabaseGroupList(target.Database, target.DatabaseName, "Users", target.ConnectionInfo);
+            ShowDatabaseInfo(target.Database, target.DatabaseName);
+            if (target.DatabaseNode != null) RefreshDatabaseObjectNodes(target.DatabaseNode);
+        }
+
+        private void OpenSelectedUserSqlPreview()
+        {
+            TreeDatabaseTarget target;
+            UserIdentity identity;
+            if (!TryGetMySqlUserOperationTarget(true, out target, out identity)) return;
+
+            try
+            {
+                DataRow match = GetDatabaseUsers(target.Database, target.DatabaseName, target.ConnectionInfo).Rows
+                    .Cast<DataRow>()
+                    .FirstOrDefault(row => string.Equals(Convert.ToString(row["Name"]), identity.User, StringComparison.OrdinalIgnoreCase) &&
+                                           string.Equals(Convert.ToString(row["Host"]), identity.Host, StringComparison.OrdinalIgnoreCase));
+                if (match == null)
+                {
+                    MessageBox.Show(Localization.T("User.SelectUser"), Localization.T("Tool.UserSqlPreview"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                string sql = MySqlUserManagerService.BuildUserDdlPreview(match);
+                OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), sql, true);
+                UpdateMainStatus(Localization.T("User.PreviewOpened"));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(BuildExceptionReason(ex), Localization.T("Tool.UserSqlPreview"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
