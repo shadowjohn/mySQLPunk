@@ -7989,6 +7989,10 @@ namespace mySQLPunk
             else if (string.Equals(groupName, "Users", StringComparison.OrdinalIgnoreCase))
             {
                 displayDt.Columns.Add("主機");
+                displayDt.Columns.Add("Plugin");
+                displayDt.Columns.Add("密碼");
+                displayDt.Columns.Add("SSL");
+                displayDt.Columns.Add("最大連線");
                 displayDt.Columns.Add("來源");
                 foreach (DataRow userRow in GetDatabaseUsers(db, dbName, connInfo).Rows)
                 {
@@ -7997,6 +8001,10 @@ namespace mySQLPunk
                     row["類型"] = userRow["Type"];
                     row["狀態"] = userRow["Status"];
                     row["主機"] = userRow["Host"];
+                    row["Plugin"] = userRow["Plugin"];
+                    row["密碼"] = userRow["PasswordExists"];
+                    row["SSL"] = userRow["SSLRequired"];
+                    row["最大連線"] = userRow["MaxConnections"];
                     row["來源"] = userRow["Source"];
                     displayDt.Rows.Add(row);
                 }
@@ -9184,16 +9192,7 @@ namespace mySQLPunk
 
             if (db is my_mysql)
             {
-                AppendDatabaseUsersFromQuery(users, db,
-                    "SELECT User AS Name, 'User' AS Type, Host AS Host, " +
-                    "CASE WHEN account_locked = 'Y' THEN 'Locked' ELSE 'Open' END AS Status, 'mysql.user' AS Source " +
-                    "FROM mysql.user ORDER BY User, Host;");
-                if (users.Rows.Count == 0)
-                {
-                    AppendDatabaseUsersFromQuery(users, db,
-                        "SELECT CURRENT_USER() AS Name, 'Current User' AS Type, '' AS Host, 'Active' AS Status, 'CURRENT_USER()' AS Source;");
-                }
-                return users;
+                return MySqlUserManagerService.LoadUsers(db);
             }
 
             if (db is my_postgresql)
@@ -9247,13 +9246,7 @@ namespace mySQLPunk
 
         private static DataTable CreateDatabaseUserTable()
         {
-            DataTable dt = new DataTable();
-            dt.Columns.Add("Name");
-            dt.Columns.Add("Type");
-            dt.Columns.Add("Host");
-            dt.Columns.Add("Status");
-            dt.Columns.Add("Source");
-            return dt;
+            return MySqlUserManagerService.CreateUserTable();
         }
 
         private static void AppendDatabaseEventsFromQuery(DataTable target, IDatabase db, string sql)
@@ -9327,13 +9320,23 @@ namespace mySQLPunk
             foreach (DataRow sourceRow in source.Rows)
             {
                 DataRow row = target.NewRow();
-                row["Name"] = GetColumnValue(sourceRow, "Name");
-                row["Type"] = GetColumnValue(sourceRow, "Type");
-                row["Host"] = GetColumnValue(sourceRow, "Host");
-                row["Status"] = GetColumnValue(sourceRow, "Status");
-                row["Source"] = GetColumnValue(sourceRow, "Source");
+                foreach (DataColumn column in target.Columns)
+                {
+                    string value = GetColumnValue(sourceRow, column.ColumnName);
+                    row[column.ColumnName] = string.IsNullOrEmpty(value) && !IsDatabaseUserIdentityColumn(column.ColumnName) ? MySqlUserManagerService.NotSupported : value;
+                }
                 if (row["Name"].ToString().Length > 0) target.Rows.Add(row);
             }
+        }
+
+        private static bool IsDatabaseUserIdentityColumn(string columnName)
+        {
+            return string.Equals(columnName, "Name", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "Type", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "Host", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "Status", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "Source", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "ProviderFamily", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string GetColumnValue(DataRow row, string name)
@@ -9552,10 +9555,29 @@ namespace mySQLPunk
                 AddDetailRow("Name", match["Name"]);
                 AddDetailRow("Host", match["Host"]);
                 AddDetailRow("Status", match["Status"]);
+                AddDetailRow("ProviderFamily", match["ProviderFamily"]);
+                AddDetailRow("Plugin", match["Plugin"]);
+                AddDetailRow("PasswordExists", match["PasswordExists"]);
+                AddDetailRow("AccountLocked", match["AccountLocked"]);
+                AddDetailRow("PasswordExpired", match["PasswordExpired"]);
+                AddDetailRow("SSLRequired", match["SSLRequired"]);
+                AddDetailRow("MaxConnections", match["MaxConnections"]);
+                AddDetailRow("PasswordLifetime", match["PasswordLifetime"]);
+                AddDetailRow("MustChangePassword", match["MustChangePassword"]);
+                AddDetailRow("CreateTime", match["CreateTime"]);
+                AddDetailRow("Comment", match["Comment"]);
+                AddDetailRow("Privileges", match["Privileges"]);
                 AddDetailRow("Source", match["Source"]);
-                rtbDDL.Text = BuildDetailDdlHeaderLine("User", Convert.ToString(match["Name"])) + Environment.NewLine +
-                              BuildDetailDdlCommentLine("Source", Convert.ToString(match["Source"])) + Environment.NewLine +
-                              BuildDetailDdlCommentLine("Status", Convert.ToString(match["Status"]));
+                if (db is my_mysql)
+                {
+                    rtbDDL.Text = MySqlUserManagerService.BuildUserDdlPreview(match);
+                }
+                else
+                {
+                    rtbDDL.Text = BuildDetailDdlHeaderLine("User", Convert.ToString(match["Name"])) + Environment.NewLine +
+                                  BuildDetailDdlCommentLine("Source", Convert.ToString(match["Source"])) + Environment.NewLine +
+                                  BuildDetailDdlCommentLine("Status", Convert.ToString(match["Status"]));
+                }
             }
             catch (Exception ex)
             {

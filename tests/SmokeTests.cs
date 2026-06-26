@@ -37,6 +37,7 @@ public static class SmokeTests
         Run("Backup restore service", TestBackupRestoreService, ref passed);
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("MySQL export/import service", TestMySqlExportImportService, ref passed);
+        Run("MySQL user manager service", TestMySqlUserManagerService, ref passed);
         Run("Database rename service", TestDatabaseRenameService, ref passed);
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("SpatiaLite runtime diagnostics", TestSpatiaLiteRuntimeDiagnostics, ref passed);
@@ -4294,6 +4295,67 @@ public static class SmokeTests
             null);
         Assert(streamingResult.ExecutedStatements == 2, "MySQL import should execute streaming statements successfully.");
         Assert(streamingDb.ExecutedSql.Count == 2, "MySQL import should execute the first statement before reading the rest of the file.");
+    }
+
+    private static void TestMySqlUserManagerService()
+    {
+        MySqlUserProviderAdapter mysql8 = new MySqlUserProviderAdapter(
+            "8.0.36",
+            new[] { "User", "Host", "plugin", "authentication_string", "account_locked", "password_expired", "ssl_type", "max_user_connections", "password_lifetime", "Select_priv", "Insert_priv" },
+            false);
+        string mysql8Sql = MySqlUserManagerService.BuildMysqlUserListSql(mysql8);
+        AssertContains(mysql8Sql, "`account_locked`", "MySQL 8 user list should include account_locked only when the column exists.");
+        AssertContains(mysql8Sql, "`password_lifetime`", "MySQL 8 user list should include password_lifetime only when the column exists.");
+        AssertContains(mysql8Sql, "CONCAT_WS", "MySQL user list should build a safe privilege summary from available privilege columns.");
+
+        MySqlUserProviderAdapter mariaUserView = new MySqlUserProviderAdapter(
+            "10.11.6-MariaDB",
+            new[] { "User", "Host", "Password", "ssl_type", "Select_priv" },
+            false);
+        string mariaUserSql = MySqlUserManagerService.BuildMysqlUserListSql(mariaUserView);
+        AssertNotContains(mariaUserSql, "account_locked", "MariaDB user list SQL must not select missing account_locked columns.");
+        AssertNotContains(mariaUserSql, "password_lifetime", "MariaDB user list SQL must not select missing password_lifetime columns.");
+        AssertContains(mariaUserSql, "CASE WHEN `Password`", "MariaDB-compatible user list should fall back to the legacy Password column when present.");
+
+        MySqlUserProviderAdapter mariaGlobal = new MySqlUserProviderAdapter(
+            "11.4.2-MariaDB",
+            new[] { "User", "Host" },
+            true);
+        List<string> candidates = MySqlUserManagerService.BuildUserListSqlCandidates(mariaGlobal).ToList();
+        AssertContains(candidates[0], "mysql.global_priv", "MariaDB global_priv should be the first read path when available.");
+        AssertNotContains(candidates[0], "CAST(`Priv` AS CHAR)", "MariaDB global_priv list must not expose raw authentication JSON in the UI summary.");
+        AssertContains(candidates[1], "mysql.user", "MariaDB user view should remain a fallback read path.");
+
+        string createUser = MySqlUserManagerService.BuildCreateUserSql(new MySqlCreateUserOptions
+        {
+            User = "u'ser",
+            Host = "%",
+            Password = "p\\w'1",
+            Plugin = "mysql_native_password",
+            RequireSsl = true,
+            ExpirePassword = true,
+            LockAccount = true
+        });
+        AssertContains(createUser, "CREATE USER 'u''ser'@'%'", "Create user SQL should quote user accounts safely.");
+        AssertContains(createUser, "IDENTIFIED WITH `mysql_native_password` BY 'p\\\\w''1' REQUIRE SSL PASSWORD EXPIRE ACCOUNT LOCK;", "Create user SQL should include authentication, SSL, expiry, and lock options.");
+
+        DataTable table = MySqlUserManagerService.CreateUserTable();
+        DataRow row = table.NewRow();
+        row["Name"] = "root";
+        row["Host"] = "%";
+        row["Plugin"] = "caching_sha2_password";
+        row["PasswordExists"] = "Yes";
+        row["AccountLocked"] = "Locked";
+        row["PasswordExpired"] = "Expired";
+        row["SSLRequired"] = "X509";
+        row["Privileges"] = "SELECT,INSERT";
+        row["Source"] = "mysql.user";
+        table.Rows.Add(row);
+        string preview = MySqlUserManagerService.BuildUserDdlPreview(row);
+        AssertContains(preview, "CREATE USER 'root'@'%';", "User DDL preview should show the account identity.");
+        AssertContains(preview, "ALTER USER 'root'@'%' ACCOUNT LOCK;", "User DDL preview should show account lock statements when applicable.");
+        AssertContains(preview, "ALTER USER 'root'@'%' PASSWORD EXPIRE;", "User DDL preview should show password expiry statements when applicable.");
+        AssertContains(preview, "-- Privileges: SELECT,INSERT", "User DDL preview should include privilege summaries.");
     }
 
     private static void TestDatabaseRenameService()

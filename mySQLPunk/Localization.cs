@@ -458,6 +458,17 @@ namespace mySQLPunk
             Add("Detail.Property.ReturnType", "回傳型別", "Return Type");
             Add("Detail.Property.Host", "主機", "Host");
             Add("Detail.Property.Source", "來源", "Source");
+            Add("Detail.Property.ProviderFamily", "Provider 類型", "Provider Family");
+            Add("Detail.Property.Plugin", "驗證 Plugin", "Authentication Plugin");
+            Add("Detail.Property.PasswordExists", "密碼狀態", "Password Exists");
+            Add("Detail.Property.AccountLocked", "帳號鎖定", "Account Locked");
+            Add("Detail.Property.PasswordExpired", "密碼過期", "Password Expired");
+            Add("Detail.Property.SSLRequired", "SSL 要求", "SSL Required");
+            Add("Detail.Property.MaxConnections", "最大連線數", "Max Connections");
+            Add("Detail.Property.AuthenticationString", "驗證字串", "Authentication String");
+            Add("Detail.Property.PasswordLifetime", "密碼生命週期", "Password Lifetime");
+            Add("Detail.Property.MustChangePassword", "需變更密碼", "Must Change Password");
+            Add("Detail.Property.Privileges", "權限", "Privileges");
             Add("Detail.Property.Database", "資料庫", "Database");
             Add("Detail.Property.Provider", "Provider", "Provider");
             Add("DatabaseReport.SqliteBackupSource", "SQLite 備份來源", "SQLite Backup Source");

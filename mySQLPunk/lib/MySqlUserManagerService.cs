@@ -1,0 +1,489 @@
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Text;
+
+namespace mySQLPunk.lib
+{
+    public sealed class MySqlUserProviderAdapter
+    {
+        private readonly HashSet<string> userColumns;
+
+        public MySqlUserProviderAdapter(string version, IEnumerable<string> userColumns, bool hasGlobalPrivTable)
+        {
+            Version = version ?? string.Empty;
+            this.userColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (userColumns != null)
+            {
+                foreach (string column in userColumns)
+                {
+                    if (!string.IsNullOrWhiteSpace(column)) this.userColumns.Add(column.Trim());
+                }
+            }
+            HasGlobalPrivTable = hasGlobalPrivTable;
+        }
+
+        public string Version { get; private set; }
+        public bool IsMariaDb { get { return Version.IndexOf("MariaDB", StringComparison.OrdinalIgnoreCase) >= 0; } }
+        public bool HasGlobalPrivTable { get; private set; }
+        public IEnumerable<string> UserColumns { get { return userColumns; } }
+
+        public bool HasUserColumn(string columnName)
+        {
+            return !string.IsNullOrWhiteSpace(columnName) && userColumns.Contains(columnName.Trim());
+        }
+
+        public static MySqlUserProviderAdapter Detect(IDatabase db)
+        {
+            string version = MySqlUserManagerService.TryReadScalar(db, "SELECT VERSION();");
+            List<string> columns = new List<string>();
+            DataTable columnTable = MySqlUserManagerService.TrySelect(db, "SHOW COLUMNS FROM mysql.user;");
+            if (columnTable != null)
+            {
+                foreach (DataRow row in columnTable.Rows)
+                {
+                    string field = MySqlUserManagerService.GetColumnValue(row, "Field");
+                    if (field.Length == 0 && columnTable.Columns.Count > 0 && row[0] != DBNull.Value) field = row[0].ToString();
+                    if (field.Length > 0) columns.Add(field);
+                }
+            }
+
+            bool hasGlobalPrivTable = false;
+            DataTable globalPriv = MySqlUserManagerService.TrySelect(db,
+                "SELECT COUNT(*) AS Cnt FROM information_schema.tables WHERE table_schema = 'mysql' AND table_name = 'global_priv';");
+            if (globalPriv != null && globalPriv.Rows.Count > 0)
+            {
+                long count;
+                if (long.TryParse(Convert.ToString(globalPriv.Rows[0][0]), out count)) hasGlobalPrivTable = count > 0;
+            }
+
+            return new MySqlUserProviderAdapter(version, columns, hasGlobalPrivTable);
+        }
+    }
+
+    public sealed class MySqlCreateUserOptions
+    {
+        public string User { get; set; }
+        public string Host { get; set; }
+        public string Password { get; set; }
+        public string Plugin { get; set; }
+        public bool RequireSsl { get; set; }
+        public bool ExpirePassword { get; set; }
+        public bool LockAccount { get; set; }
+    }
+
+    public static class MySqlUserManagerService
+    {
+        public const string NotSupported = "N/A";
+
+        private static readonly string[,] PrivilegeColumns = new string[,]
+        {
+            { "Select_priv", "SELECT" },
+            { "Insert_priv", "INSERT" },
+            { "Update_priv", "UPDATE" },
+            { "Delete_priv", "DELETE" },
+            { "Create_priv", "CREATE" },
+            { "Drop_priv", "DROP" },
+            { "Reload_priv", "RELOAD" },
+            { "Shutdown_priv", "SHUTDOWN" },
+            { "Process_priv", "PROCESS" },
+            { "File_priv", "FILE" },
+            { "Grant_priv", "GRANT OPTION" },
+            { "References_priv", "REFERENCES" },
+            { "Index_priv", "INDEX" },
+            { "Alter_priv", "ALTER" },
+            { "Show_db_priv", "SHOW DATABASES" },
+            { "Super_priv", "SUPER" },
+            { "Create_tmp_table_priv", "CREATE TEMPORARY TABLES" },
+            { "Lock_tables_priv", "LOCK TABLES" },
+            { "Execute_priv", "EXECUTE" },
+            { "Repl_slave_priv", "REPLICATION SLAVE" },
+            { "Repl_client_priv", "REPLICATION CLIENT" },
+            { "Create_view_priv", "CREATE VIEW" },
+            { "Show_view_priv", "SHOW VIEW" },
+            { "Create_routine_priv", "CREATE ROUTINE" },
+            { "Alter_routine_priv", "ALTER ROUTINE" },
+            { "Create_user_priv", "CREATE USER" },
+            { "Event_priv", "EVENT" },
+            { "Trigger_priv", "TRIGGER" },
+            { "Create_tablespace_priv", "CREATE TABLESPACE" }
+        };
+
+        public static DataTable LoadUsers(IDatabase db)
+        {
+            DataTable users = CreateUserTable();
+            if (db == null) return users;
+
+            MySqlUserProviderAdapter adapter = MySqlUserProviderAdapter.Detect(db);
+            foreach (string sql in BuildUserListSqlCandidates(adapter))
+            {
+                DataTable source = TrySelect(db, sql);
+                AppendUserRows(users, source);
+                if (users.Rows.Count > 0) break;
+            }
+
+            if (users.Rows.Count == 0)
+            {
+                AppendUserRows(users, TrySelect(db, BuildCurrentUserFallbackSql()));
+            }
+
+            return users;
+        }
+
+        public static DataTable CreateUserTable()
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("Name");
+            dt.Columns.Add("Type");
+            dt.Columns.Add("Host");
+            dt.Columns.Add("Status");
+            dt.Columns.Add("Source");
+            dt.Columns.Add("ProviderFamily");
+            dt.Columns.Add("Plugin");
+            dt.Columns.Add("PasswordExists");
+            dt.Columns.Add("AccountLocked");
+            dt.Columns.Add("PasswordExpired");
+            dt.Columns.Add("SSLRequired");
+            dt.Columns.Add("MaxConnections");
+            dt.Columns.Add("CreateTime");
+            dt.Columns.Add("Comment");
+            dt.Columns.Add("AuthenticationString");
+            dt.Columns.Add("PasswordLifetime");
+            dt.Columns.Add("MustChangePassword");
+            dt.Columns.Add("Privileges");
+            return dt;
+        }
+
+        public static IEnumerable<string> BuildUserListSqlCandidates(MySqlUserProviderAdapter adapter)
+        {
+            if (adapter == null) adapter = new MySqlUserProviderAdapter(string.Empty, null, false);
+            if (adapter.IsMariaDb && adapter.HasGlobalPrivTable)
+            {
+                yield return BuildMariaDbGlobalPrivUserListSql();
+                yield return BuildMysqlUserListSql(adapter);
+            }
+            else
+            {
+                yield return BuildMysqlUserListSql(adapter);
+            }
+        }
+
+        public static string BuildMysqlUserListSql(MySqlUserProviderAdapter adapter)
+        {
+            if (adapter == null) adapter = new MySqlUserProviderAdapter(string.Empty, null, false);
+            string providerFamily = adapter.IsMariaDb ? "MariaDB" : "MySQL";
+            string plugin = ColumnOrNotSupported(adapter, "plugin");
+            string passwordExists = PasswordExistsExpression(adapter);
+            string accountLocked = AccountLockedExpression(adapter);
+            string passwordExpired = PasswordExpiredExpression(adapter);
+            string sslRequired = SslRequiredExpression(adapter);
+            string maxConnections = ColumnAsCharOrNotSupported(adapter, "max_user_connections");
+            string createTime = ColumnAsCharOrNotSupported(adapter, "Create_time");
+            string comment = ColumnOrNotSupported(adapter, "User_attributes");
+            string authString = AuthenticationStringExpression(adapter);
+            string passwordLifetime = ColumnAsCharOrNotSupported(adapter, "password_lifetime");
+            string mustChange = passwordExpired;
+            string privileges = PrivilegeSummaryExpression(adapter);
+            string status = adapter.HasUserColumn("account_locked")
+                ? "CASE WHEN `account_locked` = 'Y' THEN 'Locked' ELSE 'Open' END"
+                : "'Active'";
+
+            return "SELECT `User` AS Name, 'User' AS Type, `Host` AS Host, " +
+                   status + " AS Status, 'mysql.user' AS Source, '" + providerFamily + "' AS ProviderFamily, " +
+                   plugin + " AS Plugin, " +
+                   passwordExists + " AS PasswordExists, " +
+                   accountLocked + " AS AccountLocked, " +
+                   passwordExpired + " AS PasswordExpired, " +
+                   sslRequired + " AS SSLRequired, " +
+                   maxConnections + " AS MaxConnections, " +
+                   createTime + " AS CreateTime, " +
+                   comment + " AS Comment, " +
+                   authString + " AS AuthenticationString, " +
+                   passwordLifetime + " AS PasswordLifetime, " +
+                   mustChange + " AS MustChangePassword, " +
+                   privileges + " AS Privileges " +
+                   "FROM mysql.user ORDER BY `User`, `Host`;";
+        }
+
+        public static string BuildMariaDbGlobalPrivUserListSql()
+        {
+            return "SELECT `User` AS Name, 'User' AS Type, `Host` AS Host, " +
+                   "'Active' AS Status, 'mysql.global_priv' AS Source, 'MariaDB' AS ProviderFamily, " +
+                   "'N/A' AS Plugin, " +
+                   "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Yes' END AS PasswordExists, " +
+                   "'N/A' AS AccountLocked, 'N/A' AS PasswordExpired, 'N/A' AS SSLRequired, " +
+                   "'N/A' AS MaxConnections, 'N/A' AS CreateTime, 'N/A' AS Comment, " +
+                   "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Set (hidden)' END AS AuthenticationString, " +
+                   "'N/A' AS PasswordLifetime, 'N/A' AS MustChangePassword, " +
+                   "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Stored in mysql.global_priv' END AS Privileges " +
+                   "FROM mysql.global_priv ORDER BY `User`, `Host`;";
+        }
+
+        public static string BuildCurrentUserFallbackSql()
+        {
+            return "SELECT SUBSTRING_INDEX(CURRENT_USER(), '@', 1) AS Name, 'Current User' AS Type, " +
+                   "SUBSTRING_INDEX(CURRENT_USER(), '@', -1) AS Host, 'Active' AS Status, " +
+                   "'CURRENT_USER()' AS Source, 'MySQL' AS ProviderFamily, " +
+                   "'N/A' AS Plugin, 'N/A' AS PasswordExists, 'N/A' AS AccountLocked, 'N/A' AS PasswordExpired, " +
+                   "'N/A' AS SSLRequired, 'N/A' AS MaxConnections, 'N/A' AS CreateTime, 'N/A' AS Comment, " +
+                   "'N/A' AS AuthenticationString, 'N/A' AS PasswordLifetime, 'N/A' AS MustChangePassword, 'N/A' AS Privileges;";
+        }
+
+        public static string BuildUserDdlPreview(DataRow userRow)
+        {
+            if (userRow == null) return string.Empty;
+            string user = GetColumnValue(userRow, "Name");
+            string host = GetColumnValue(userRow, "Host");
+            string account = QuoteAccount(user, host);
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("CREATE USER " + account + ";");
+
+            string plugin = GetColumnValue(userRow, "Plugin");
+            if (IsMeaningful(plugin)) sb.AppendLine("-- Plugin: " + plugin);
+
+            string passwordExists = GetColumnValue(userRow, "PasswordExists");
+            if (IsMeaningful(passwordExists)) sb.AppendLine("-- Password: " + passwordExists + (passwordExists == "Yes" ? " (hash hidden)" : string.Empty));
+
+            string ssl = GetColumnValue(userRow, "SSLRequired");
+            if (IsMeaningful(ssl)) sb.AppendLine("-- SSL: " + ssl);
+
+            string locked = GetColumnValue(userRow, "AccountLocked");
+            if (string.Equals(locked, "Locked", StringComparison.OrdinalIgnoreCase)) sb.AppendLine("ALTER USER " + account + " ACCOUNT LOCK;");
+            else if (string.Equals(locked, "Open", StringComparison.OrdinalIgnoreCase)) sb.AppendLine("-- Account: Open");
+
+            string expired = GetColumnValue(userRow, "PasswordExpired");
+            if (string.Equals(expired, "Expired", StringComparison.OrdinalIgnoreCase)) sb.AppendLine("ALTER USER " + account + " PASSWORD EXPIRE;");
+
+            string maxConnections = GetColumnValue(userRow, "MaxConnections");
+            if (IsMeaningful(maxConnections)) sb.AppendLine("-- Max connections: " + maxConnections);
+
+            string privileges = GetColumnValue(userRow, "Privileges");
+            if (IsMeaningful(privileges)) sb.AppendLine("-- Privileges: " + privileges);
+
+            string source = GetColumnValue(userRow, "Source");
+            if (IsMeaningful(source)) sb.AppendLine("-- Source: " + source);
+            return sb.ToString().TrimEnd();
+        }
+
+        public static string BuildCreateUserSql(MySqlCreateUserOptions options)
+        {
+            if (options == null) throw new ArgumentNullException("options");
+            string account = QuoteAccount(options.User, options.Host);
+            StringBuilder sql = new StringBuilder();
+            sql.Append("CREATE USER ").Append(account);
+            if (!string.IsNullOrEmpty(options.Plugin))
+            {
+                sql.Append(" IDENTIFIED WITH ").Append(QuoteIdentifier(options.Plugin));
+                if (!string.IsNullOrEmpty(options.Password)) sql.Append(" BY ").Append(QuoteLiteral(options.Password));
+            }
+            else if (!string.IsNullOrEmpty(options.Password))
+            {
+                sql.Append(" IDENTIFIED BY ").Append(QuoteLiteral(options.Password));
+            }
+            if (options.RequireSsl) sql.Append(" REQUIRE SSL");
+            if (options.ExpirePassword) sql.Append(" PASSWORD EXPIRE");
+            if (options.LockAccount) sql.Append(" ACCOUNT LOCK");
+            sql.Append(";");
+            return sql.ToString();
+        }
+
+        public static string BuildDropUserSql(string user, string host)
+        {
+            return "DROP USER " + QuoteAccount(user, host) + ";";
+        }
+
+        public static string BuildRenameUserSql(string user, string host, string newUser, string newHost)
+        {
+            return "RENAME USER " + QuoteAccount(user, host) + " TO " + QuoteAccount(newUser, newHost) + ";";
+        }
+
+        public static string BuildChangePasswordSql(string user, string host, string password)
+        {
+            return "ALTER USER " + QuoteAccount(user, host) + " IDENTIFIED BY " + QuoteLiteral(password ?? string.Empty) + ";";
+        }
+
+        public static string BuildAccountLockSql(string user, string host, bool locked)
+        {
+            return "ALTER USER " + QuoteAccount(user, host) + (locked ? " ACCOUNT LOCK;" : " ACCOUNT UNLOCK;");
+        }
+
+        public static string BuildExpirePasswordSql(string user, string host)
+        {
+            return "ALTER USER " + QuoteAccount(user, host) + " PASSWORD EXPIRE;";
+        }
+
+        public static string BuildGrantSql(string privilege, string databaseName, string objectName, string user, string host)
+        {
+            return "GRANT " + NormalizePrivilege(privilege) + " ON " + BuildPrivilegeTarget(databaseName, objectName) + " TO " + QuoteAccount(user, host) + ";";
+        }
+
+        public static string BuildRevokeSql(string privilege, string databaseName, string objectName, string user, string host)
+        {
+            return "REVOKE " + NormalizePrivilege(privilege) + " ON " + BuildPrivilegeTarget(databaseName, objectName) + " FROM " + QuoteAccount(user, host) + ";";
+        }
+
+        internal static DataTable TrySelect(IDatabase db, string sql)
+        {
+            try
+            {
+                return db == null || string.IsNullOrWhiteSpace(sql) ? null : db.SelectSQL(sql);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        internal static string TryReadScalar(IDatabase db, string sql)
+        {
+            DataTable table = TrySelect(db, sql);
+            if (table == null || table.Rows.Count == 0 || table.Columns.Count == 0 || table.Rows[0][0] == DBNull.Value) return string.Empty;
+            return Convert.ToString(table.Rows[0][0]);
+        }
+
+        internal static string GetColumnValue(DataRow row, string name)
+        {
+            if (row == null || row.Table == null || string.IsNullOrWhiteSpace(name)) return string.Empty;
+            if (row.Table.Columns.Contains(name) && row[name] != DBNull.Value) return Convert.ToString(row[name]);
+            foreach (DataColumn column in row.Table.Columns)
+            {
+                if (string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase) && row[column] != DBNull.Value)
+                    return Convert.ToString(row[column]);
+            }
+            return string.Empty;
+        }
+
+        private static void AppendUserRows(DataTable target, DataTable source)
+        {
+            if (target == null || source == null) return;
+            foreach (DataRow sourceRow in source.Rows)
+            {
+                DataRow row = target.NewRow();
+                foreach (DataColumn column in target.Columns)
+                {
+                    string value = GetColumnValue(sourceRow, column.ColumnName);
+                    row[column.ColumnName] = string.IsNullOrEmpty(value) && !IsIdentityColumn(column.ColumnName) ? NotSupported : value;
+                }
+                if (GetColumnValue(row, "Name").Length > 0) target.Rows.Add(row);
+            }
+        }
+
+        private static bool IsIdentityColumn(string columnName)
+        {
+            return string.Equals(columnName, "Name", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "Type", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "Host", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "Status", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "Source", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "ProviderFamily", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ColumnOrNotSupported(MySqlUserProviderAdapter adapter, string columnName)
+        {
+            return adapter.HasUserColumn(columnName) ? "COALESCE(CAST(`" + EscapeIdentifierPart(columnName) + "` AS CHAR), 'N/A')" : "'N/A'";
+        }
+
+        private static string ColumnAsCharOrNotSupported(MySqlUserProviderAdapter adapter, string columnName)
+        {
+            return ColumnOrNotSupported(adapter, columnName);
+        }
+
+        private static string PasswordExistsExpression(MySqlUserProviderAdapter adapter)
+        {
+            if (adapter.HasUserColumn("authentication_string"))
+                return "CASE WHEN `authentication_string` IS NULL OR `authentication_string` = '' THEN 'No' ELSE 'Yes' END";
+            if (adapter.HasUserColumn("Password"))
+                return "CASE WHEN `Password` IS NULL OR `Password` = '' THEN 'No' ELSE 'Yes' END";
+            return "'N/A'";
+        }
+
+        private static string AuthenticationStringExpression(MySqlUserProviderAdapter adapter)
+        {
+            if (adapter.HasUserColumn("authentication_string"))
+                return "CASE WHEN `authentication_string` IS NULL OR `authentication_string` = '' THEN 'N/A' ELSE 'Set (hidden)' END";
+            if (adapter.HasUserColumn("Password"))
+                return "CASE WHEN `Password` IS NULL OR `Password` = '' THEN 'N/A' ELSE 'Set (hidden)' END";
+            return "'N/A'";
+        }
+
+        private static string AccountLockedExpression(MySqlUserProviderAdapter adapter)
+        {
+            return adapter.HasUserColumn("account_locked")
+                ? "CASE WHEN `account_locked` = 'Y' THEN 'Locked' ELSE 'Open' END"
+                : "'N/A'";
+        }
+
+        private static string PasswordExpiredExpression(MySqlUserProviderAdapter adapter)
+        {
+            return adapter.HasUserColumn("password_expired")
+                ? "CASE WHEN `password_expired` = 'Y' THEN 'Expired' ELSE 'Active' END"
+                : "'N/A'";
+        }
+
+        private static string SslRequiredExpression(MySqlUserProviderAdapter adapter)
+        {
+            return adapter.HasUserColumn("ssl_type")
+                ? "CASE WHEN `ssl_type` IS NULL OR `ssl_type` = '' THEN 'No' ELSE `ssl_type` END"
+                : "'N/A'";
+        }
+
+        private static string PrivilegeSummaryExpression(MySqlUserProviderAdapter adapter)
+        {
+            List<string> pieces = new List<string>();
+            for (int i = 0; i < PrivilegeColumns.GetLength(0); i++)
+            {
+                string column = PrivilegeColumns[i, 0];
+                string label = PrivilegeColumns[i, 1];
+                if (adapter.HasUserColumn(column)) pieces.Add("CASE WHEN `" + EscapeIdentifierPart(column) + "` = 'Y' THEN '" + label + "' END");
+            }
+            if (pieces.Count == 0) return "'N/A'";
+            return "COALESCE(NULLIF(CONCAT_WS(',', " + string.Join(", ", pieces.ToArray()) + "), ''), 'N/A')";
+        }
+
+        private static string QuoteAccount(string user, string host)
+        {
+            string normalizedHost = string.IsNullOrWhiteSpace(host) || string.Equals(host, NotSupported, StringComparison.OrdinalIgnoreCase) ? "%" : host;
+            return QuoteLiteral(user ?? string.Empty) + "@" + QuoteLiteral(normalizedHost);
+        }
+
+        private static string QuoteLiteral(string value)
+        {
+            return "'" + (value ?? string.Empty).Replace("\\", "\\\\").Replace("'", "''") + "'";
+        }
+
+        private static string QuoteIdentifier(string value)
+        {
+            return "`" + EscapeIdentifierPart(value) + "`";
+        }
+
+        private static string EscapeIdentifierPart(string value)
+        {
+            return (value ?? string.Empty).Replace("`", "``");
+        }
+
+        private static bool IsMeaningful(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value) && !string.Equals(value, NotSupported, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizePrivilege(string privilege)
+        {
+            string value = (privilege ?? string.Empty).Trim().ToUpperInvariant();
+            if (value.Length == 0) throw new ArgumentException("Privilege is required.", "privilege");
+            foreach (char c in value)
+            {
+                if (!(char.IsLetter(c) || c == '_' || c == ' ')) throw new ArgumentException("Privilege contains unsupported characters.", "privilege");
+            }
+            return value.Replace('_', ' ');
+        }
+
+        private static string BuildPrivilegeTarget(string databaseName, string objectName)
+        {
+            if (string.IsNullOrWhiteSpace(databaseName)) return "*.*";
+            string db = QuoteIdentifier(databaseName);
+            if (string.IsNullOrWhiteSpace(objectName)) return db + ".*";
+            return db + "." + QuoteIdentifier(objectName);
+        }
+    }
+}

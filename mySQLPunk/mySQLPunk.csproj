@@ -193,6 +193,7 @@
     <Compile Include="lib\DockableTabOptionService.cs" />
     <Compile Include="lib\MySqlExportService.cs" />
     <Compile Include="lib\MySqlImportService.cs" />
+    <Compile Include="lib\MySqlUserManagerService.cs" />
     <Compile Include="lib\IDatabase.cs" />
     <Compile Include="lib\MetadataLoadService.cs" />
     <Compile Include="lib\include.cs" />
