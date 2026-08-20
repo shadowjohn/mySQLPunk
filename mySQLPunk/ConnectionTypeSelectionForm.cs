@@ -70,35 +70,42 @@ namespace mySQLPunk
                 Visible = false
             };
 
+            // ── 標題列 ────────────────────────────────────────────────
+            // 原本標題、檢視切換與搜尋框都用絕對座標 + Anchor 排版，
+            // 面板實際尺寸算出來之後這些控制項會被推出可視範圍，改成停駐排版。
+            Panel header = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 64,
+                Padding = new Padding(UiMetrics.Space5, UiMetrics.Space4, UiMetrics.Space5, UiMetrics.Space2)
+            };
+
             Label titleLabel = new Label
             {
                 Text = Localization.T("ConnectionWizard.SelectType"),
-                AutoSize = true,
-                Location = new Point(14, 14)
+                Dock = DockStyle.Fill,
+                Font = UiKit.Title,
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
+            // 原本用 ▦ / ☰ 這種字元當圖示，字型不同就會變成方框或被截斷，改用向量圖示
             gridButton = new Button
             {
-                Text = "▦",
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(590, 8),
-                Size = new Size(28, 28),
-                FlatStyle = FlatStyle.Flat
+                Size = new Size(34, UiMetrics.ControlHeight),
+                FlatStyle = FlatStyle.Flat,
+                Margin = new Padding(UiMetrics.Space1, 0, 0, 0)
             };
             listButton = new Button
             {
-                Text = "☰",
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(620, 8),
-                Size = new Size(28, 28),
-                FlatStyle = FlatStyle.Flat
+                Size = new Size(34, UiMetrics.ControlHeight),
+                FlatStyle = FlatStyle.Flat,
+                Margin = new Padding(UiMetrics.Space1, 0, 0, 0)
             };
 
             searchBox = new TextBox
             {
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(656, 10),
-                Width = 170
+                Width = 190,
+                Margin = new Padding(UiMetrics.Space3, UiMetrics.Space1, 0, 0)
             };
             searchBox.TextChanged += (s, e) => RenderCards();
             searchBox.GotFocus += (s, e) =>
@@ -111,76 +118,117 @@ namespace mySQLPunk
             };
             searchBox.LostFocus += (s, e) => ApplySearchPlaceholder();
 
+            FlowLayoutPanel headerTools = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                AutoSize = false,
+                Width = 290
+            };
+            headerTools.Controls.Add(searchBox);
+            headerTools.Controls.Add(listButton);
+            headerTools.Controls.Add(gridButton);
+
+            header.Controls.Add(titleLabel);
+            header.Controls.Add(headerTools);
+
+            // ── 內容區 ────────────────────────────────────────────────
+            Panel body = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(UiMetrics.Space5, 0, UiMetrics.Space5, UiMetrics.Space2)
+            };
+
             Label recentLabel = new Label
             {
                 Text = Localization.T("ConnectionWizard.Recent"),
-                AutoSize = true,
-                Location = new Point(14, 54)
+                Dock = DockStyle.Top,
+                Height = 26,
+                Font = UiKit.BodyBold,
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
             recentPanel = new FlowLayoutPanel
             {
-                Location = new Point(14, 78),
-                Size = new Size(810, 132),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Dock = DockStyle.Top,
+                Height = 124,
                 WrapContents = true
+            };
+
+            Panel sectionGap = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = UiMetrics.Space4
             };
 
             Label allLabel = new Label
             {
                 Text = Localization.T("ConnectionWizard.All"),
-                AutoSize = true,
-                Location = new Point(14, 222)
+                Dock = DockStyle.Top,
+                Height = 26,
+                Font = UiKit.BodyBold,
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
             allPanel = new FlowLayoutPanel
             {
-                Location = new Point(14, 248),
-                Size = new Size(810, 267),
-                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                Dock = DockStyle.Fill,
                 AutoScroll = true,
                 WrapContents = true
             };
 
+            // 停駐排版是反著堆的：Fill 先加，Top 由下往上加
+            body.Controls.Add(allPanel);
+            body.Controls.Add(allLabel);
+            body.Controls.Add(sectionGap);
+            body.Controls.Add(recentPanel);
+            body.Controls.Add(recentLabel);
+
+            // ── 動作列 ────────────────────────────────────────────────
             Panel footer = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 52
+                Height = 60,
+                Padding = new Padding(UiMetrics.Space5, UiMetrics.Space3, UiMetrics.Space5, UiMetrics.Space3)
             };
+            footer.Paint += (s, e) => UiKit.DrawHairline(e.Graphics, 0, footer.Width, 0, ThemeManager.BorderColor);
+
             Button cancelButton = new Button
             {
                 Text = Localization.T("Common.Cancel"),
                 DialogResult = DialogResult.Cancel,
-                Size = new Size(86, 30)
+                Size = new Size(96, UiMetrics.ControlHeight),
+                Margin = new Padding(UiMetrics.Space2, 0, 0, 0)
             };
             nextButton = new Button
             {
                 Text = Localization.T("Common.Next"),
                 DialogResult = DialogResult.OK,
-                Size = new Size(86, 30),
+                Size = new Size(96, UiMetrics.ControlHeight),
+                Margin = new Padding(UiMetrics.Space2, 0, 0, 0),
                 Enabled = false
             };
-            footer.Resize += (s, e) =>
+
+            FlowLayoutPanel footerButtons = new FlowLayoutPanel
             {
-                cancelButton.Location = new Point(footer.Width - 102, 11);
-                nextButton.Location = new Point(footer.Width - 196, 11);
+                Dock = DockStyle.Right,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
-            footer.Controls.Add(cancelButton);
-            footer.Controls.Add(nextButton);
+            footerButtons.Controls.Add(cancelButton);
+            footerButtons.Controls.Add(nextButton);
+            footer.Controls.Add(footerButtons);
 
             gridButton.Click += (s, e) => SetListMode(false);
             listButton.Click += (s, e) => SetListMode(true);
             nextButton.Click += (s, e) => ShowSelectedConnectionForm();
 
-            selectionPage.Controls.Add(titleLabel);
-            selectionPage.Controls.Add(gridButton);
-            selectionPage.Controls.Add(listButton);
-            selectionPage.Controls.Add(searchBox);
-            selectionPage.Controls.Add(recentLabel);
-            selectionPage.Controls.Add(recentPanel);
-            selectionPage.Controls.Add(allLabel);
-            selectionPage.Controls.Add(allPanel);
+            selectionPage.Controls.Add(body);
             selectionPage.Controls.Add(footer);
+            selectionPage.Controls.Add(header);
             Controls.Add(connectionFormPage);
             Controls.Add(selectionPage);
 
@@ -188,7 +236,21 @@ namespace mySQLPunk
             CancelButton = cancelButton;
 
             ThemeManager.ApplyTo(this);
+            ThemeManager.MarkAsPrimary(nextButton);
+            ThemeManager.SetGlyph(gridButton, UiGlyph.Columns);
+            ThemeManager.SetGlyph(listButton, UiGlyph.Filter);
+
+            ToolTip viewModeTip = new ToolTip();
+            viewModeTip.SetToolTip(gridButton, Localization.T("ConnectionWizard.GridView"));
+            viewModeTip.SetToolTip(listButton, Localization.T("ConnectionWizard.ListView"));
+            header.BackColor = ThemeManager.WindowBackColor;
+            body.BackColor = ThemeManager.WindowBackColor;
             footer.BackColor = ThemeManager.SurfaceColor;
+            footerButtons.BackColor = ThemeManager.SurfaceColor;
+            headerTools.BackColor = ThemeManager.WindowBackColor;
+            titleLabel.ForeColor = ThemeManager.TextColor;
+            recentLabel.ForeColor = ThemeManager.MutedTextColor;
+            allLabel.ForeColor = ThemeManager.MutedTextColor;
             ApplySearchPlaceholder();
             SetListMode(false);
             RenderCards();
@@ -217,8 +279,8 @@ namespace mySQLPunk
         private void SetListMode(bool value)
         {
             listMode = value;
-            gridButton.BackColor = listMode ? ThemeManager.ButtonBackColor : ThemeManager.SelectionColor;
-            listButton.BackColor = listMode ? ThemeManager.SelectionColor : ThemeManager.ButtonBackColor;
+            ThemeManager.SetToggled(gridButton, !listMode);
+            ThemeManager.SetToggled(listButton, listMode);
             RenderCards();
         }
 
@@ -448,6 +510,7 @@ namespace mySQLPunk
 
             private readonly bool listMode;
             private readonly Image iconImage;
+            private bool hovered;
 
             public ConnectionTypeCard(ConnectionTypeOption option, bool listMode)
             {
@@ -459,6 +522,10 @@ namespace mySQLPunk
                 Cursor = Cursors.Hand;
                 DoubleBuffered = true;
                 TabStop = true;
+
+                // 原本卡片完全沒有停留回饋，滑過去不知道自己指到哪一張
+                MouseEnter += (s, e) => { hovered = true; Invalidate(); };
+                MouseLeave += (s, e) => { hovered = false; Invalidate(); };
             }
 
             protected override void Dispose(bool disposing)
@@ -478,8 +545,12 @@ namespace mySQLPunk
                 e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
                 Rectangle bounds = new Rectangle(0, 0, Width - 1, Height - 1);
-                Color backColor = Selected ? ThemeManager.SelectionColor : ThemeManager.ElevatedColor;
-                Color borderColor = Selected ? ThemeManager.AccentColor : ThemeManager.BorderColor;
+                Color backColor = Selected
+                    ? ThemeManager.AccentSoftColor
+                    : (hovered ? ThemeManager.HoverColor : ThemeManager.ElevatedColor);
+                Color borderColor = Selected
+                    ? ThemeManager.AccentColor
+                    : (hovered ? ThemeManager.BorderStrongColor : ThemeManager.BorderColor);
                 using (GraphicsPath cardPath = RoundedRectangle(bounds, 8))
                 using (SolidBrush brush = new SolidBrush(backColor))
                 using (Pen pen = new Pen(borderColor, Selected ? 2 : 1))

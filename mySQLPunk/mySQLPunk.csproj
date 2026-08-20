@@ -170,6 +170,8 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="ThemeManager.cs" />
+    <Compile Include="UiKit.cs" />
+    <Compile Include="UiControls.cs" />
     <Compile Include="UserOperationDialog.cs">
       <SubType>Form</SubType>
     </Compile>

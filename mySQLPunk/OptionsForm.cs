@@ -11,6 +11,7 @@ namespace mySQLPunk
     public class OptionsForm : Form
     {
         private readonly ListBox navigationList;
+        private readonly Panel navigationHost;
         private readonly Panel contentPanel;
         private RadioButton lightThemeRadio;
         private RadioButton darkThemeRadio;
@@ -50,11 +51,19 @@ namespace mySQLPunk
 
             navigationList = new ListBox
             {
-                Dock = DockStyle.Left,
-                Width = 160,
-                BorderStyle = BorderStyle.FixedSingle,
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.None,
                 IntegralHeight = false
             };
+            navigationHost = new Panel
+            {
+                Dock = DockStyle.Left,
+                Width = 180,
+                Padding = new Padding(0, UiMetrics.Space2, 1, UiMetrics.Space2)
+            };
+            navigationHost.Paint += (s, e) =>
+                UiKit.DrawVerticalHairline(e.Graphics, navigationHost.Width - 1, 0, navigationHost.Height, ThemeManager.BorderColor);
+            navigationHost.Controls.Add(navigationList);
             navigationList.Items.AddRange(new object[]
             {
                 Localization.T("Options.General"),
@@ -75,37 +84,39 @@ namespace mySQLPunk
             contentPanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                Padding = new Padding(18),
+                Padding = new Padding(UiMetrics.Space5),
                 AutoScroll = true
             };
 
             Panel buttonPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 52,
-                Padding = new Padding(12, 8, 12, 8)
+                Height = 60,
+                Padding = new Padding(UiMetrics.Space5, UiMetrics.Space3, UiMetrics.Space5, UiMetrics.Space3)
             };
+            buttonPanel.Paint += (s, e) => UiKit.DrawHairline(e.Graphics, 0, buttonPanel.Width, 0, ThemeManager.BorderColor);
             okButton = new Button
             {
                 Text = Localization.T("Common.OK"),
                 DialogResult = DialogResult.OK,
-                Size = new Size(80, 28),
+                Size = new Size(96, UiMetrics.ControlHeight),
                 Anchor = AnchorStyles.Right | AnchorStyles.Bottom
             };
             Button cancelButton = new Button
             {
                 Text = Localization.T("Common.Cancel"),
                 DialogResult = DialogResult.Cancel,
-                Size = new Size(80, 28),
+                Size = new Size(96, UiMetrics.ControlHeight),
                 Anchor = AnchorStyles.Right | AnchorStyles.Bottom
             };
-            okButton.Location = new Point(buttonPanel.Width - 184, 12);
-            cancelButton.Location = new Point(buttonPanel.Width - 94, 12);
-            buttonPanel.Resize += (s, e) =>
+            Action layoutButtons = () =>
             {
-                okButton.Location = new Point(buttonPanel.Width - 184, 12);
-                cancelButton.Location = new Point(buttonPanel.Width - 94, 12);
+                int top = (buttonPanel.Height - UiMetrics.ControlHeight) / 2;
+                cancelButton.Location = new Point(buttonPanel.Width - UiMetrics.Space5 - cancelButton.Width, top);
+                okButton.Location = new Point(cancelButton.Left - UiMetrics.Space2 - okButton.Width, top);
             };
+            layoutButtons();
+            buttonPanel.Resize += (s, e) => layoutButtons();
             buttonPanel.Controls.Add(okButton);
             buttonPanel.Controls.Add(cancelButton);
             okButton.Click += (s, e) =>
@@ -121,15 +132,16 @@ namespace mySQLPunk
             RenderGeneralPage();
 
             Controls.Add(contentPanel);
-            Controls.Add(navigationList);
+            Controls.Add(navigationHost);
             Controls.Add(buttonPanel);
 
             AcceptButton = okButton;
             CancelButton = cancelButton;
 
             ThemeManager.ApplyTo(this);
-            navigationList.BackColor = ThemeManager.ElevatedColor;
-            navigationList.ForeColor = ThemeManager.TextColor;
+            ThemeManager.MarkAsPrimary(okButton);
+            ThemeManager.StyleNavigationList(navigationList);
+            navigationHost.BackColor = ThemeManager.SurfaceColor;
             contentPanel.BackColor = ThemeManager.WindowBackColor;
             buttonPanel.BackColor = ThemeManager.SurfaceColor;
             UpdateSelection();
@@ -195,8 +207,8 @@ namespace mySQLPunk
             {
                 Text = Localization.T("Options.General"),
                 AutoSize = true,
-                Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold),
-                Location = new Point(18, 18)
+                Font = UiKit.Title,
+                Location = new Point(18, 12)
             };
 
             Label themeLabel = new Label
@@ -261,7 +273,7 @@ namespace mySQLPunk
                 Text = Localization.T("Options.NoPrimaryKeyReadOnly"),
                 AutoSize = true,
                 Checked = TableEditSettings.NoPrimaryKeyReadOnly,
-                Location = new Point(105, 300),
+                Location = new Point(18, 300),
                 MaximumSize = new Size(600, 0)
             };
             AddOptionCheckBox("AllowDuplicateObjects", T("允許重複開啟相同的物件", "Allow opening the same object more than once"), 340);
@@ -525,8 +537,8 @@ namespace mySQLPunk
             {
                 Text = title,
                 AutoSize = true,
-                Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold),
-                Location = new Point(18, 18)
+                Font = UiKit.Title,
+                Location = new Point(18, 12)
             });
         }
 
@@ -654,8 +666,8 @@ namespace mySQLPunk
             {
                 Text = Localization.T("Options.Environment"),
                 AutoSize = true,
-                Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold),
-                Location = new Point(18, 18)
+                Font = UiKit.Title,
+                Location = new Point(18, 12)
             };
             Label hintLabel = new Label
             {
@@ -691,8 +703,8 @@ namespace mySQLPunk
             {
                 Text = Localization.T("Options.FileLocation"),
                 AutoSize = true,
-                Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold),
-                Location = new Point(18, 18)
+                Font = UiKit.Title,
+                Location = new Point(18, 12)
             };
             Label hintLabel = new Label
             {

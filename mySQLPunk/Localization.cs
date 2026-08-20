@@ -339,6 +339,18 @@ namespace mySQLPunk
             Add("Sidebar.ObjectDetails", "物件詳細資料", "Object Details");
             Add("Sidebar.Info", "資訊", "Info");
             Add("Sidebar.DDL", "DDL", "DDL");
+
+            // 空狀態文案
+            Add("Empty.NoConnectionTitle", "尚未建立連線", "No connections yet");
+            Add("Empty.NoConnectionDesc", "建立資料庫連線之後，這裡會列出所有資料庫與物件。", "Once you add a database connection, its databases and objects appear here.");
+            Add("Empty.NoConnectionHint", "點選上方工具列的「連線」開始", "Use \"Connection\" on the toolbar to get started");
+            Add("Empty.NoSelectionTitle", "尚未選取任何物件", "Nothing selected");
+            Add("Empty.NoSelectionDesc", "從左側樹狀清單選擇資料庫、資料表或檢視，內容會顯示在這裡。", "Pick a database, table or view on the left and its contents show up here.");
+            Add("Empty.NoSelectionHint", "雙擊資料表可直接開啟資料", "Double-click a table to open its data");
+            Add("Empty.NoDetailTitle", "沒有可顯示的詳細資料", "No details to show");
+            Add("Empty.NoDetailDesc", "選取一個物件即可查看它的屬性與 DDL。", "Select an object to inspect its properties and DDL.");
+            Add("Status.ConnectionCount", "{0} 個連線", "{0} connection(s)");
+            Add("Status.NoConnection", "尚未連線", "Not connected");
             Add("Status.Ready", "就緒", "Ready");
             Add("Status.LoadingData", "資料載入中...", "Loading data...");
             Add("Status.ReleaseToDock", "釋放滑鼠以嵌入視窗", "Release mouse to dock the window");
@@ -635,6 +647,8 @@ namespace mySQLPunk
             Add("ConnectionWizard.All", "全部", "All");
             Add("ConnectionWizard.Search", "搜尋", "Search");
             Add("ConnectionWizard.NoRecent", "尚無最近使用過的連線類型", "No recent connection types yet");
+            Add("ConnectionWizard.GridView", "格狀檢視", "Grid view");
+            Add("ConnectionWizard.ListView", "清單檢視", "List view");
             Add("Connection.ExportTitle", "匯出連線設定", "Export Connections");
             Add("Connection.ImportTitle", "匯入連線設定", "Import Connections");
             Add("Connection.JsonFilter", "JSON 檔案 (*.json)|*.json|所有檔案 (*.*)|*.*", "JSON files (*.json)|*.json|All files (*.*)|*.*");

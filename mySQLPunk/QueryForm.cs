@@ -463,6 +463,7 @@ namespace mySQLPunk
                 btnDataLast, btnDataNext, lblDataPagination, btnDataPrev, btnDataFirst
             });
             ApplyDataToolbarButtonTooltips();
+            ApplyToolbarGlyphs();
             btnDataNext.Alignment = ToolStripItemAlignment.Right;
             lblDataPagination.Alignment = ToolStripItemAlignment.Right;
             btnDataPrev.Alignment = ToolStripItemAlignment.Right;
@@ -1989,6 +1990,49 @@ namespace mySQLPunk
             UpdatePaginationUI();
             Localization.ApplyTo(this);
             ApplyTheme();
+        }
+
+        /// <summary>
+        /// 工具列原本混用文字符號（+、X、↻、|&lt;）與空白圖示，字型不同就會歪掉。
+        /// 這裡統一換成與主視窗同一套的向量圖示。
+        /// </summary>
+        private void ApplyToolbarGlyphs()
+        {
+            const int size = 16;
+
+            ThemeManager.SetGlyph(tsBtnExecute, UiGlyph.Play, size, ThemeManager.SuccessColor);
+            ThemeManager.SetGlyph(tsBtnCancel, UiGlyph.Stop, size);
+            ThemeManager.SetGlyph(tsBtnBeautify, UiGlyph.Code, size);
+            ThemeManager.SetGlyph(tsBtnSave, UiGlyph.Save, size);
+            ThemeManager.SetGlyph(tsBtnAdd, UiGlyph.Plus, size);
+            ThemeManager.SetGlyph(tsBtnDelete, UiGlyph.Trash, size);
+            ThemeManager.SetGlyph(tsBtnRefresh, UiGlyph.Refresh, size);
+            ThemeManager.SetGlyph(tsBtnExport, UiGlyph.Export, size);
+            ThemeManager.SetGlyph(tsBtnFloat, UiGlyph.Detach, size);
+            ThemeManager.SetGlyph(tsBtnDock, UiGlyph.Attach, size);
+
+            // 底部資料列工具列：改成純圖示，說明文字留在 tooltip
+            SetIconOnlyGlyph(btnDataAdd, UiGlyph.Plus, Color.Empty);
+            SetIconOnlyGlyph(btnDataDelete, UiGlyph.Minus, Color.Empty);
+            SetIconOnlyGlyph(btnDataApply, UiGlyph.Check, ThemeManager.SuccessColor);
+            SetIconOnlyGlyph(btnDataCancel, UiGlyph.Close, ThemeManager.DangerColor);
+            SetIconOnlyGlyph(btnDataRefresh, UiGlyph.Refresh, Color.Empty);
+            SetIconOnlyGlyph(btnDataFirst, UiGlyph.PageFirst, Color.Empty);
+            SetIconOnlyGlyph(btnDataPrev, UiGlyph.ChevronLeft, Color.Empty);
+            SetIconOnlyGlyph(btnDataNext, UiGlyph.ChevronRight, Color.Empty);
+            SetIconOnlyGlyph(btnDataLast, UiGlyph.PageLast, Color.Empty);
+        }
+
+        private static void SetIconOnlyGlyph(ToolStripButton button, UiGlyph glyph, Color tint)
+        {
+            if (button == null) return;
+
+            button.Text = string.Empty;
+            button.DisplayStyle = ToolStripItemDisplayStyle.Image;
+            button.Font = UiKit.Body;
+            button.AutoSize = false;
+            button.Size = new Size(30, 26);
+            ThemeManager.SetGlyph(button, glyph, 16, tint);
         }
 
         private void ApplyDataToolbarButtonTooltips()

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -29,7 +29,6 @@ namespace mySQLPunk
         private const int MainToolbarItemWidth = 76;
         private const int MainToolbarItemHeight = 84;
         private const int MainToolbarIconSize = 40;
-        private const int MainToolbarIconContentSize = 38;
 
         public Form dialog = new Form();
         public Label dialogLabel = new Label();
@@ -112,6 +111,14 @@ namespace mySQLPunk
         private ToolStripButton btnInfo;
         private ToolStripButton btnDDL;
         private Label lblSidebarTitle;
+        private UiSectionHeader sidebarHeader;
+        private UiSegmentedControl sidebarSwitch;
+        private UiEmptyState sidebarEmptyState;
+        private UiSectionHeader connectionsHeader;
+        private UiEmptyState treeEmptyState;
+        private UiEmptyState contentEmptyState;
+        private ToolStripStatusLabel lblConnectionSummary;
+        private readonly Timer _emptyStateTimer = new Timer();
         private ToolStripStatusLabel lblMainStatus; // 新增主程式狀態標籤
         private Panel _dockHintOverlay;
         private DatabaseCopyItem _treeClipboardItem;
@@ -1129,7 +1136,8 @@ namespace mySQLPunk
             // Assign the ImageList to the TreeView.
 
             db_tree.ShowRootLines = false;
-            db_tree.ShowLines = true;
+            // 虛線連接線在現代介面裡只是雜訊，縮排本身已經足以表達層級
+            db_tree.ShowLines = false;
             db_tree.ShowNodeToolTips = ShouldShowObjectTooltips();
 
             db_tree.ShowPlusMinus = true;
@@ -2426,6 +2434,7 @@ namespace mySQLPunk
 
             // 初始化側邊欄 (Sidebar) 在 Panel2
             InitSidebar();
+            InitShellChrome();
             ApplyViewPaneSettings();
             List<object> d = new List<object>();
             d.Add(OpenTable);
@@ -3942,15 +3951,47 @@ namespace mySQLPunk
             if (pnlSidebar != null) pnlSidebar.BackColor = ThemeManager.WindowBackColor;
             if (rtbDDL != null)
             {
-                rtbDDL.BackColor = ThemeManager.TextBoxBackColor;
+                rtbDDL.BackColor = ThemeManager.WindowBackColor;
                 rtbDDL.ForeColor = ThemeManager.TextColor;
+            }
+            if (dgvDetails != null && dgvDetails.Columns.Count > 0)
+            {
+                dgvDetails.Columns[0].DefaultCellStyle.ForeColor = ThemeManager.MutedTextColor;
             }
             if (lblSidebarTitle != null) lblSidebarTitle.ForeColor = ThemeManager.TextColor;
             if (lblMainStatus != null) lblMainStatus.ForeColor = ThemeManager.TextColor;
+            if (lblConnectionSummary != null) lblConnectionSummary.ForeColor = ThemeManager.MutedTextColor;
+
+            // 上方工具列橫帶：標題列與物件工具列共用同一個底色
+            if (splitContainer4 != null)
+            {
+                splitContainer4.Panel1.BackColor = ThemeManager.SurfaceColor;
+                splitContainer4.Panel2.BackColor = ThemeManager.SurfaceColor;
+            }
+            if (mTs != null) mTs.BackColor = ThemeManager.SurfaceColor;
+
+            RefreshChromeControl(connectionsHeader);
+            RefreshChromeControl(sidebarHeader);
+            RefreshChromeControl(sidebarSwitch);
+            RefreshChromeControl(treeEmptyState);
+            RefreshChromeControl(contentEmptyState);
+            RefreshChromeControl(sidebarEmptyState);
+
             ThemeManager.ApplyToolStrip(menuStrip1);
             ThemeManager.ApplyToolStrip(tool_Connection);
+            ThemeManager.ApplyToolStrip(mTs);
             ThemeManager.ApplyToolStrip(statusStrip1);
             if (tsSidebar != null) ThemeManager.ApplyToolStrip(tsSidebar);
+        }
+
+        /// <summary>換主題後讓自繪的外框元件重畫。</summary>
+        private static void RefreshChromeControl(Control control)
+        {
+            if (control == null) return;
+            control.BackColor = control is UiSectionHeader || control is UiSegmentedControl
+                ? ThemeManager.SurfaceColor
+                : ThemeManager.WindowBackColor;
+            control.Invalidate();
         }
 
         private void CreateNewTable()
@@ -4051,48 +4092,94 @@ namespace mySQLPunk
 
         private void InitSidebar()
         {
-            pnlSidebar = new Panel() { Dock = DockStyle.Fill, BackColor = Color.White };
-            
-            // 標題區
-            Panel pnlTitle = new Panel() { Dock = DockStyle.Top, Height = 40, Padding = new Padding(10, 5, 10, 0) };
-            lblSidebarTitle = new Label() { Text = Localization.T("Sidebar.ObjectDetails"), Font = new Font("Microsoft JhengHei", 10, FontStyle.Bold), AutoSize = true, Location = new Point(10, 10) };
-            pnlTitle.Controls.Add(lblSidebarTitle);
+            pnlSidebar = new Panel() { Dock = DockStyle.Fill, BackColor = ThemeManager.WindowBackColor };
 
-            // 切換按鈕 (Info / DDL)
-            string imgPath = Path.Combine(Application.StartupPath, "image");
-            tsSidebar = new ToolStrip() { Dock = DockStyle.Top, GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.Professional };
-            
-            btnInfo = new ToolStripButton(BuildSidebarButtonText("Info")) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
-            if (File.Exists(Path.Combine(imgPath, "database.png"))) btnInfo.Image = Image.FromFile(Path.Combine(imgPath, "database.png"));
-            else btnInfo.Image = global::mySQLPunk.Properties.Resources.database;
+            // 標題區：改用統一的區塊標題列，跟左側「連線」面板長得一樣
+            sidebarHeader = new UiSectionHeader
+            {
+                Dock = DockStyle.Top,
+                Title = Localization.T("Sidebar.ObjectDetails"),
+                Glyph = UiGlyph.Info
+            };
 
-            btnDDL = new ToolStripButton(BuildSidebarButtonText("DDL")) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
-            if (File.Exists(Path.Combine(imgPath, "queries.png"))) btnDDL.Image = Image.FromFile(Path.Combine(imgPath, "queries.png"));
-            else if (File.Exists(Path.Combine(imgPath, "query.png"))) btnDDL.Image = Image.FromFile(Path.Combine(imgPath, "query.png"));
-            
-            btnInfo.Click += (s, e) => { dgvDetails.Visible = true; rtbDDL.Visible = false; btnInfo.Checked = true; btnDDL.Checked = false; };
-            btnDDL.Click += (s, e) => { dgvDetails.Visible = false; rtbDDL.Visible = true; btnInfo.Checked = false; btnDDL.Checked = true; };
+            // lblSidebarTitle 已被程式各處拿來當標題的資料來源（超過 20 處會寫入 Text），
+            // 所以保留它當作「模型」，只是不再顯示，由 TextChanged 同步到新的標題列。
+            lblSidebarTitle = new Label
+            {
+                Text = Localization.T("Sidebar.ObjectDetails"),
+                AutoSize = true,
+                Visible = false
+            };
+            lblSidebarTitle.TextChanged += (s, e) =>
+            {
+                if (sidebarHeader != null) sidebarHeader.Title = lblSidebarTitle.Text;
+            };
+
+            // 切換控制項 (Info / DDL)：外觀換成分段控制項，
+            // 但底下仍沿用原本的 btnInfo / btnDDL，讓既有的 PerformClick / Checked 邏輯不用動。
+            tsSidebar = new ToolStrip { Visible = false };
+            btnInfo = new ToolStripButton(BuildSidebarButtonText("Info"));
+            btnDDL = new ToolStripButton(BuildSidebarButtonText("DDL"));
             tsSidebar.Items.AddRange(new ToolStripItem[] { btnInfo, btnDDL });
+
+            Panel sidebarSwitchHost = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = UiMetrics.ControlHeight + UiMetrics.Space2 * 2,
+                Padding = new Padding(UiMetrics.Space3, UiMetrics.Space2, UiMetrics.Space3, UiMetrics.Space2)
+            };
+
+            // 靠左排並貼齊內容寬度，避免整條軌道橫跨側欄看起來鬆散
+            sidebarSwitch = new UiSegmentedControl { Dock = DockStyle.Left };
+            sidebarSwitch.AddSegment(BuildSidebarButtonText("Info"), UiGlyph.Info);
+            sidebarSwitch.AddSegment(BuildSidebarButtonText("DDL"), UiGlyph.Code);
+            sidebarSwitch.SelectedIndexChanged += (s, e) =>
+            {
+                if (sidebarSwitch.SelectedIndex == 1) btnDDL.PerformClick();
+                else btnInfo.PerformClick();
+            };
+            sidebarSwitchHost.Controls.Add(sidebarSwitch);
+            sidebarSwitch.Width = sidebarSwitch.GetPreferredWidth();
+
+            btnInfo.Click += (s, e) =>
+            {
+                dgvDetails.Visible = true;
+                rtbDDL.Visible = false;
+                btnInfo.Checked = true;
+                btnDDL.Checked = false;
+                if (sidebarSwitch != null) sidebarSwitch.SelectedIndex = 0;
+            };
+            btnDDL.Click += (s, e) =>
+            {
+                dgvDetails.Visible = false;
+                rtbDDL.Visible = true;
+                btnInfo.Checked = false;
+                btnDDL.Checked = true;
+                if (sidebarSwitch != null) sidebarSwitch.SelectedIndex = 1;
+            };
             btnInfo.Checked = true;
 
             // 內容區 - 詳情表格
             dgvDetails = new DataGridView()
             {
                 Dock = DockStyle.Fill,
-                BackgroundColor = Color.White,
+                BackgroundColor = ThemeManager.WindowBackColor,
                 BorderStyle = BorderStyle.None,
                 RowHeadersVisible = false,
                 ColumnHeadersVisible = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 ReadOnly = true,
-                AllowUserToAddRows = false
+                AllowUserToAddRows = false,
+                AllowUserToResizeRows = false,
+                ScrollBars = ScrollBars.Vertical
             };
             dgvDetails.Columns.Add("Key", BuildDetailGridColumnHeader("Key"));
             dgvDetails.Columns.Add("Value", BuildDetailGridColumnHeader("Value"));
             dgvDetails.Columns[0].FillWeight = 40;
+            dgvDetails.Columns[0].DefaultCellStyle.ForeColor = ThemeManager.MutedTextColor;
             dgvDetails.SelectionMode = DataGridViewSelectionMode.CellSelect;
-            dgvDetails.GridColor = Color.FromArgb(245, 245, 245);
-            dgvDetails.DefaultCellStyle.Font = new Font("Microsoft JhengHei", 9);
+            dgvDetails.GridColor = ThemeManager.GridColor;
+            dgvDetails.RowTemplate.Height = UiMetrics.RowHeight;
 
             // 內容區 - DDL
             rtbDDL = new RichTextBox()
@@ -4100,20 +4187,168 @@ namespace mySQLPunk
                 Dock = DockStyle.Fill,
                 BorderStyle = BorderStyle.None,
                 ReadOnly = true,
-                BackColor = Color.White,
-                Font = new Font("Consolas", 10),
+                BackColor = ThemeManager.WindowBackColor,
+                Font = UiKit.GetMonoFont(9.5f),
                 Visible = false
             };
 
+            // 沒有選取任何物件時顯示的空狀態
+            sidebarEmptyState = new UiEmptyState
+            {
+                Dock = DockStyle.Fill,
+                Glyph = UiGlyph.Info,
+                Title = Localization.T("Empty.NoDetailTitle"),
+                Description = Localization.T("Empty.NoDetailDesc"),
+                Visible = false
+            };
+
+            pnlSidebar.Controls.Add(sidebarEmptyState);
             pnlSidebar.Controls.Add(dgvDetails);
             pnlSidebar.Controls.Add(rtbDDL);
-            pnlSidebar.Controls.Add(tsSidebar);
-            pnlSidebar.Controls.Add(pnlTitle);
+            pnlSidebar.Controls.Add(sidebarSwitchHost);
+            pnlSidebar.Controls.Add(sidebarHeader);
+            pnlSidebar.Controls.Add(lblSidebarTitle);
 
             splitContainer5.Panel2.Controls.Add(pnlSidebar);
             pnlSidebar.BringToFront();
         }
 
+
+        /// <summary>
+        /// 建立主視窗外框的視覺元件：面板標題列與各區塊的空狀態。
+        /// 這些都是純視覺層，不參與任何資料流程。
+        /// </summary>
+        private void InitShellChrome()
+        {
+            if (connectionsHeader != null) return;
+
+            // ── 左側「連線」面板的標題列 ──────────────────────────────
+            // 原本只是一個裸的 Label 浮在面板上，改成與側欄一致的區塊標題列。
+            connectionsHeader = new UiSectionHeader
+            {
+                Dock = DockStyle.Fill,
+                Title = Localization.T("Sidebar.Connections"),
+                Glyph = UiGlyph.Database
+            };
+            label1.Visible = false;
+            label1.TextChanged += (s, e) =>
+            {
+                if (connectionsHeader != null) connectionsHeader.Title = label1.Text;
+            };
+            splitContainer4.Panel1.Controls.Add(connectionsHeader);
+            connectionsHeader.BringToFront();
+
+            // 標題列與物件工具列同高，讓上方形成一條完整的橫帶
+            splitContainer4.Panel1.BackColor = ThemeManager.SurfaceColor;
+            splitContainer4.Panel2.BackColor = ThemeManager.SurfaceColor;
+            mTs.Dock = DockStyle.Fill;
+            TrySetSplitterDistance(splitContainer2, UiMetrics.SectionHeaderHeight);
+
+            // ── 樹狀清單的空狀態 ──────────────────────────────────────
+            treeEmptyState = new UiEmptyState
+            {
+                Dock = DockStyle.Fill,
+                Glyph = UiGlyph.Plug,
+                Title = Localization.T("Empty.NoConnectionTitle"),
+                Description = Localization.T("Empty.NoConnectionDesc"),
+                Hint = Localization.T("Empty.NoConnectionHint"),
+                Visible = false
+            };
+            splitContainer3.Panel1.Controls.Add(treeEmptyState);
+
+            // ── 中央內容區的空狀態 ────────────────────────────────────
+            contentEmptyState = new UiEmptyState
+            {
+                Dock = DockStyle.Fill,
+                Glyph = UiGlyph.Table,
+                Title = Localization.T("Empty.NoSelectionTitle"),
+                Description = Localization.T("Empty.NoSelectionDesc"),
+                Hint = Localization.T("Empty.NoSelectionHint"),
+                Visible = false
+            };
+            splitContainer5.Panel1.Controls.Add(contentEmptyState);
+
+            // ── 狀態列右側的連線摘要 ──────────────────────────────────
+            lblConnectionSummary = new ToolStripStatusLabel(Localization.T("Status.NoConnection"))
+            {
+                Alignment = ToolStripItemAlignment.Right,
+                ForeColor = ThemeManager.MutedTextColor
+            };
+            statusStrip1.Items.Add(lblConnectionSummary);
+
+            // WinForms 的 TreeView / DataGridView 沒有「內容數量變了」的通用事件，
+            // 與其在數十處呼叫點插入通知，用一個低頻計時器同步顯示狀態單純得多。
+            _emptyStateTimer.Interval = 400;
+            _emptyStateTimer.Tick += (s, e) => SyncEmptyStates();
+            _emptyStateTimer.Start();
+            SyncEmptyStates();
+        }
+
+        /// <summary>依目前畫面內容決定各區塊要不要顯示空狀態。</summary>
+        private void SyncEmptyStates()
+        {
+            try
+            {
+                if (treeEmptyState != null && db_tree != null)
+                {
+                    bool empty = db_tree.Nodes.Count == 0;
+                    if (treeEmptyState.Visible != empty)
+                    {
+                        treeEmptyState.Visible = empty;
+                        if (empty) treeEmptyState.BringToFront();
+                    }
+                }
+
+                if (contentEmptyState != null && table_top != null)
+                {
+                    bool tabsVisible = queryTabs != null && queryTabs.Visible && queryTabs.TabCount > 0;
+                    bool empty = !tabsVisible && table_top.Visible && table_top.Rows.Count == 0 && table_top.Columns.Count == 0;
+                    if (contentEmptyState.Visible != empty)
+                    {
+                        contentEmptyState.Visible = empty;
+                        if (empty) contentEmptyState.BringToFront();
+                        // 拖放提示是覆蓋層，必須永遠留在最上面
+                        if (_dockHintOverlay != null) _dockHintOverlay.BringToFront();
+                    }
+                }
+
+                if (sidebarEmptyState != null && dgvDetails != null && rtbDDL != null)
+                {
+                    bool empty = dgvDetails.Rows.Count == 0 && rtbDDL.TextLength == 0;
+                    if (sidebarEmptyState.Visible != empty)
+                    {
+                        sidebarEmptyState.Visible = empty;
+                        if (empty) sidebarEmptyState.BringToFront();
+                    }
+                }
+
+                if (lblConnectionSummary != null)
+                {
+                    int count = myN != null && myN.connections != null ? myN.connections.Count : 0;
+                    string text = count > 0
+                        ? Localization.Format("Status.ConnectionCount", count)
+                        : Localization.T("Status.NoConnection");
+                    if (lblConnectionSummary.Text != text) lblConnectionSummary.Text = text;
+                }
+            }
+            catch
+            {
+                // 空狀態同步純屬裝飾，出錯時不應該影響主流程
+            }
+        }
+
+        /// <summary>安全地設定分割位置：面板尺寸不足時 WinForms 會丟例外。</summary>
+        private static void TrySetSplitterDistance(SplitContainer container, int distance)
+        {
+            if (container == null) return;
+            try
+            {
+                container.SplitterDistance = distance;
+            }
+            catch
+            {
+            }
+        }
         private void InitObjectFilterPanel()
         {
             if (pnlObjectFilter != null) return;
@@ -4182,18 +4417,20 @@ namespace mySQLPunk
             connection_btn.Click += connection_btn_Click;
             ConfigureConnectionToolbarButton();
 
-            LoadIcon(connection_btn, Path.Combine(imgPath, "connection.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(query_btn, Path.Combine(imgPath, "new_query.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(table_btn, Path.Combine(imgPath, "table.png"), global::mySQLPunk.Properties.Resources.tables_32);
-            LoadIcon(view_btn, Path.Combine(imgPath, "view.png"), global::mySQLPunk.Properties.Resources.views_32);
-            LoadIcon(function_btn, Path.Combine(imgPath, "functions.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(user_btn, Path.Combine(imgPath, "user.png"), global::mySQLPunk.Properties.Resources.user);
-            LoadIcon(other_btn, Path.Combine(imgPath, "other.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(query_section_btn, Path.Combine(imgPath, "query_section.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(backup_btn, Path.Combine(imgPath, "backups.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(auto_run_btn, Path.Combine(imgPath, "auto_run.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(model_btn, Path.Combine(imgPath, "model.png"), global::mySQLPunk.Properties.Resources.database);
-            LoadIcon(bi_btn, Path.Combine(imgPath, "bi.png"), global::mySQLPunk.Properties.Resources.database);
+            // 主功能列改用同一套向量圖示：粗細、留白、視覺重量一致，
+            // 也不會再因為缺圖而出現破圖佔位符。
+            ThemeManager.SetGlyph(connection_btn, UiGlyph.Plug, MainToolbarIconSize);
+            ThemeManager.SetGlyph(query_btn, UiGlyph.Plus, MainToolbarIconSize);
+            ThemeManager.SetGlyph(table_btn, UiGlyph.Table, MainToolbarIconSize);
+            ThemeManager.SetGlyph(view_btn, UiGlyph.View, MainToolbarIconSize);
+            ThemeManager.SetGlyph(function_btn, UiGlyph.Function, MainToolbarIconSize);
+            ThemeManager.SetGlyph(user_btn, UiGlyph.User, MainToolbarIconSize);
+            ThemeManager.SetGlyph(other_btn, UiGlyph.More, MainToolbarIconSize);
+            ThemeManager.SetGlyph(query_section_btn, UiGlyph.Code, MainToolbarIconSize);
+            ThemeManager.SetGlyph(backup_btn, UiGlyph.Archive, MainToolbarIconSize);
+            ThemeManager.SetGlyph(auto_run_btn, UiGlyph.Clock, MainToolbarIconSize);
+            ThemeManager.SetGlyph(model_btn, UiGlyph.Model, MainToolbarIconSize);
+            ThemeManager.SetGlyph(bi_btn, UiGlyph.Chart, MainToolbarIconSize);
 
             tool_Connection.Items.Clear();
             tool_Connection.Items.AddRange(new ToolStripItem[]
@@ -4212,9 +4449,10 @@ namespace mySQLPunk
                 bi_btn
             });
 
+            ThemeManager.MarkAsRibbon(tool_Connection);
             tool_Connection.ImageScalingSize = new Size(MainToolbarIconSize, MainToolbarIconSize);
             tool_Connection.Height = MainToolbarHeight;
-            tool_Connection.Padding = new Padding(10, 8, 10, 4);
+            tool_Connection.Padding = new Padding(UiMetrics.Space3, UiMetrics.Space2, UiMetrics.Space3, UiMetrics.Space1);
 
             foreach (ToolStripItem item in tool_Connection.Items)
             {
@@ -4222,8 +4460,48 @@ namespace mySQLPunk
                 item.TextAlign = ContentAlignment.BottomCenter;
                 item.AutoSize = false;
                 item.Size = new Size(MainToolbarItemWidth, MainToolbarItemHeight);
-                item.Margin = new Padding(2, 2, 2, 0);
-                item.Padding = new Padding(0, 3, 0, 2);
+                item.Margin = new Padding(UiMetrics.Space1 / 2, UiMetrics.Space1, UiMetrics.Space1 / 2, UiMetrics.Space1);
+                item.Padding = new Padding(0, UiMetrics.Space2, 0, UiMetrics.Space1);
+            }
+
+            ConfigureObjectToolbar();
+        }
+
+        /// <summary>
+        /// 物件工具列（開啟/設計/新增/刪除/匯入匯出）原本掛的是 resx 內的預設佔位圖，
+        /// 顯示出來就是一格一格的破圖。這裡統一換成向量圖示。
+        /// </summary>
+        private void ConfigureObjectToolbar()
+        {
+            const int size = 16;
+
+            ThemeManager.SetGlyph(OpenTable, UiGlyph.TableOpen, size);
+            ThemeManager.SetGlyph(DesignTable, UiGlyph.Pencil, size);
+            ThemeManager.SetGlyph(NewTable, UiGlyph.Plus, size);
+            ThemeManager.SetGlyph(DeleteTable, UiGlyph.Trash, size);
+            ThemeManager.SetGlyph(ImportWizard, UiGlyph.Import, size);
+            ThemeManager.SetGlyph(ExportWizard, UiGlyph.Export, size);
+
+            ThemeManager.SetGlyph(OpenView, UiGlyph.View, size);
+            ThemeManager.SetGlyph(DesignView, UiGlyph.Pencil, size);
+            ThemeManager.SetGlyph(NewView, UiGlyph.Plus, size);
+            ThemeManager.SetGlyph(DeleteView, UiGlyph.Trash, size);
+            ThemeManager.SetGlyph(View_ExportWizard, UiGlyph.Export, size);
+
+            ThemeManager.SetGlyph(DesignFunction, UiGlyph.Pencil, size);
+            ThemeManager.SetGlyph(NewFunction, UiGlyph.Plus, size);
+            ThemeManager.SetGlyph(DeleteFunction, UiGlyph.Trash, size);
+            ThemeManager.SetGlyph(ExecuteFunction, UiGlyph.Play, size);
+
+            mTs.ImageScalingSize = new Size(size, size);
+            mTs.Padding = new Padding(UiMetrics.Space2, 0, UiMetrics.Space2, 0);
+
+            foreach (ToolStripItem item in mTs.Items)
+            {
+                item.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+                item.ImageScaling = ToolStripItemImageScaling.None;
+                item.Margin = new Padding(1, UiMetrics.Space1, 1, UiMetrics.Space1);
+                item.Padding = new Padding(UiMetrics.Space2, 0, UiMetrics.Space2, 0);
             }
         }
 
@@ -4250,56 +4528,6 @@ namespace mySQLPunk
         private static bool ShouldShowObjectTooltips()
         {
             return ApplicationOptionSettings.GetBool("ShowObjectTooltips");
-        }
-
-        private void LoadIcon(ToolStripItem btn, string path, Image defaultImg)
-        {
-            if (File.Exists(path))
-            {
-                try 
-                { 
-                    using (Image image = Image.FromFile(path))
-                    {
-                        btn.Image = CreateToolbarIcon(image);
-                    }
-                    btn.ImageScaling = ToolStripItemImageScaling.None;
-                }
-                catch { btn.Image = CreateToolbarIcon(defaultImg); }
-            }
-            else
-            {
-                btn.Image = CreateToolbarIcon(defaultImg);
-            }
-        }
-
-        private static Image CreateToolbarIcon(Image source)
-        {
-            Bitmap bitmap = new Bitmap(MainToolbarIconSize, MainToolbarIconSize);
-            try
-            {
-                bitmap.SetResolution(source.HorizontalResolution, source.VerticalResolution);
-            }
-            catch
-            {
-            }
-
-            using (Graphics graphics = Graphics.FromImage(bitmap))
-            {
-                graphics.Clear(Color.Transparent);
-                graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
-                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-
-                float scale = Math.Min((float)MainToolbarIconContentSize / source.Width, (float)MainToolbarIconContentSize / source.Height);
-                int width = Math.Max(1, (int)Math.Round(source.Width * scale));
-                int height = Math.Max(1, (int)Math.Round(source.Height * scale));
-                int x = (MainToolbarIconSize - width) / 2;
-                int y = (MainToolbarIconSize - height) / 2;
-                graphics.DrawImage(source, new Rectangle(x, y, width, height));
-            }
-
-            return bitmap;
         }
 
         private void DesignTable_Click(object sender, EventArgs e)
@@ -9987,6 +10215,28 @@ namespace mySQLPunk
             if (lblSidebarTitle != null) lblSidebarTitle.Text = Localization.T("Sidebar.ObjectDetails");
             if (btnInfo != null) btnInfo.Text = BuildSidebarButtonText("Info");
             if (btnDDL != null) btnDDL.Text = BuildSidebarButtonText("DDL");
+            if (sidebarSwitch != null)
+            {
+                sidebarSwitch.SetSegmentText(0, BuildSidebarButtonText("Info"));
+                sidebarSwitch.SetSegmentText(1, BuildSidebarButtonText("DDL"));
+            }
+            if (sidebarEmptyState != null)
+            {
+                sidebarEmptyState.Title = Localization.T("Empty.NoDetailTitle");
+                sidebarEmptyState.Description = Localization.T("Empty.NoDetailDesc");
+            }
+            if (treeEmptyState != null)
+            {
+                treeEmptyState.Title = Localization.T("Empty.NoConnectionTitle");
+                treeEmptyState.Description = Localization.T("Empty.NoConnectionDesc");
+                treeEmptyState.Hint = Localization.T("Empty.NoConnectionHint");
+            }
+            if (contentEmptyState != null)
+            {
+                contentEmptyState.Title = Localization.T("Empty.NoSelectionTitle");
+                contentEmptyState.Description = Localization.T("Empty.NoSelectionDesc");
+                contentEmptyState.Hint = Localization.T("Empty.NoSelectionHint");
+            }
             if (dgvDetails != null)
             {
                 if (dgvDetails.Columns.Contains("Key")) dgvDetails.Columns["Key"].HeaderText = BuildDetailGridColumnHeader("Key");
@@ -14426,31 +14676,53 @@ namespace mySQLPunk
         private void QueryTabs_DrawItem(object sender, DrawItemEventArgs e)
         {
             if (e.Index < 0 || e.Index >= queryTabs.TabPages.Count) return;
-            
+
             var tabRect = queryTabs.GetTabRect(e.Index);
             var title = queryTabs.TabPages[e.Index].Text;
             bool isSelected = (queryTabs.SelectedIndex == e.Index);
-            
-            // 背景
-            Color bgColor = isSelected ? ThemeManager.ElevatedColor : ThemeManager.SurfaceColor;
+            bool isHovered = tabRect.Contains(queryTabs.PointToClient(Cursor.Position));
+
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            // 底色：選取的分頁用內容區底色，讓它看起來與下方畫布連成一片
+            Color bgColor = isSelected
+                ? ThemeManager.WindowBackColor
+                : (isHovered ? ThemeManager.HoverColor : ThemeManager.SurfaceColor);
             using (var brush = new SolidBrush(bgColor))
             {
-                e.Graphics.FillRectangle(brush, tabRect);
+                e.Graphics.FillRectangle(brush, new Rectangle(tabRect.X, tabRect.Y, tabRect.Width, tabRect.Height + 2));
             }
 
-            // 文字 (置中偏左)
-            Rectangle textRect = new Rectangle(tabRect.X + 4, tabRect.Y, tabRect.Width - 25, tabRect.Height);
-            TextRenderer.DrawText(e.Graphics, title, queryTabs.Font, textRect, ThemeManager.TextColor, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
-
-            // 繪製關閉按鈕 (X)
-            var xRect = GetCloseButtonRect(tabRect);
-            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using (Pen p = new Pen(ThemeManager.MutedTextColor, 1.5f))
+            if (isSelected)
             {
-                // 畫兩條線組成 X
-                e.Graphics.DrawLine(p, xRect.X + 3, xRect.Y + 3, xRect.Right - 3, xRect.Bottom - 3);
-                e.Graphics.DrawLine(p, xRect.Right - 3, xRect.Y + 3, xRect.X + 3, xRect.Bottom - 3);
+                // 頂部一條強調色，是分頁最省事也最清楚的選取提示
+                using (var brush = new SolidBrush(ThemeManager.AccentColor))
+                {
+                    e.Graphics.FillRectangle(brush, new Rectangle(tabRect.X, tabRect.Y, tabRect.Width, 2));
+                }
             }
+            else
+            {
+                UiKit.DrawVerticalHairline(e.Graphics, tabRect.Right - 1, tabRect.Y + 7, tabRect.Bottom - 7, ThemeManager.BorderColor);
+            }
+
+            // 文字 (置中偏左，右側留給關閉鈕)
+            Rectangle textRect = new Rectangle(tabRect.X + UiMetrics.Space3, tabRect.Y, tabRect.Width - 32, tabRect.Height);
+            UiKit.DrawText(e.Graphics, title,
+                isSelected ? UiKit.BodyBold : UiKit.Body,
+                textRect,
+                isSelected ? ThemeManager.TextColor : ThemeManager.MutedTextColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+
+            // 關閉鈕：滑鼠移到分頁上才給圓形底，平常只是一個淡淡的叉
+            var xRect = GetCloseButtonRect(tabRect);
+            bool closeHovered = xRect.Contains(queryTabs.PointToClient(Cursor.Position));
+            if (closeHovered)
+            {
+                UiKit.FillRounded(e.Graphics, xRect, xRect.Width / 2f, ThemeManager.BorderColor);
+            }
+            UiKit.DrawGlyph(e.Graphics, UiGlyph.Close, Rectangle.Inflate(xRect, -3, -3),
+                closeHovered ? ThemeManager.TextColor : ThemeManager.SubtleTextColor, 0.9f);
         }
 
         private Rectangle GetCloseButtonRect(Rectangle tabRect)
