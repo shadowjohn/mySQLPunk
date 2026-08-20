@@ -2,6 +2,7 @@ param(
     [string]$Version = "",
     [string]$Configuration = "Release",
     [string]$OutputRoot = "",
+    [string]$InnoSetupCompiler = "",
     [switch]$SkipBuild
 )
 
@@ -62,6 +63,32 @@ function Get-AssemblyVersion {
     return "0.0.0.0"
 }
 
+function Get-InnoSetupCompiler {
+    param([string]$ExplicitPath)
+
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        $candidates += $ExplicitPath
+    }
+
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        $candidates += $command.Source
+    }
+
+    $candidates += Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+    $candidates += Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"
+    $candidates += Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"
+
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    throw "Inno Setup compiler ISCC.exe was not found. Install Inno Setup 6 or pass -InnoSetupCompiler."
+}
+
 function Copy-ReleaseFiles {
     param(
         [string]$SourceDirectory,
@@ -118,6 +145,12 @@ function Copy-ReleaseComplianceFiles {
     }
     Copy-Item -LiteralPath $thirdPartyNotices -Destination (Join-Path $TargetDirectory "THIRD_PARTY_NOTICES.md") -Force
 
+    $projectLicense = Join-Path $RepositoryRoot "LICENSE"
+    if (-not (Test-Path -LiteralPath $projectLicense)) {
+        throw "Project LICENSE was not found: $projectLicense"
+    }
+    Copy-Item -LiteralPath $projectLicense -Destination (Join-Path $TargetDirectory "LICENSE.txt") -Force
+
     $packagesRoot = Join-Path $RepositoryRoot "packages"
     if (-not (Test-Path -LiteralPath $packagesRoot)) {
         throw "NuGet packages directory was not found: $packagesRoot"
@@ -151,6 +184,7 @@ $repoRoot = Get-RepositoryRoot
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "dist"
 }
+$OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-AssemblyVersion -AssemblyInfoPath (Join-Path $repoRoot "mySQLPunk\Properties\AssemblyInfo.cs")
@@ -158,10 +192,10 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 
 $solution = Join-Path $repoRoot "mySQLPunk.sln"
 $projectOutput = Join-Path $repoRoot "mySQLPunk\bin\$Configuration"
-$packageName = "mySQLPunk-$Version-win-x64-portable"
-$packageDirectory = Join-Path $OutputRoot $packageName
-$zipPath = Join-Path $OutputRoot "$packageName.zip"
-$manifestPath = Join-Path $OutputRoot "release-manifest.json"
+$installerScript = Join-Path $repoRoot "installer\mySQLPunk.iss"
+$stagingRoot = Join-Path $OutputRoot ".release-staging"
+$packageDirectory = Join-Path $stagingRoot "mySQLPunk-$Version-win-x64"
+$setupPath = Join-Path $OutputRoot "mySQLPunk-$Version-win-x64-setup.exe"
 
 if (-not $SkipBuild) {
     $msbuild = Get-MSBuildPath
@@ -175,31 +209,45 @@ if (-not $SkipBuild) {
 if (-not (Test-Path -LiteralPath $projectOutput)) {
     throw "Release output directory was not found: $projectOutput"
 }
+if (-not (Test-Path -LiteralPath $installerScript)) {
+    throw "Inno Setup script was not found: $installerScript"
+}
 
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
-Copy-ReleaseFiles -SourceDirectory $projectOutput -TargetDirectory $packageDirectory
-Remove-BlockedReleaseFiles -TargetDirectory $packageDirectory
-Copy-ReleaseComplianceFiles -RepositoryRoot $repoRoot -TargetDirectory $packageDirectory
+$iscc = Get-InnoSetupCompiler -ExplicitPath $InnoSetupCompiler
 
-if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath -Force
+try {
+    Copy-ReleaseFiles -SourceDirectory $projectOutput -TargetDirectory $packageDirectory
+    Remove-BlockedReleaseFiles -TargetDirectory $packageDirectory
+    Copy-ReleaseComplianceFiles -RepositoryRoot $repoRoot -TargetDirectory $packageDirectory
+
+    if (Test-Path -LiteralPath $setupPath) {
+        Remove-Item -LiteralPath $setupPath -Force
+    }
+
+    Write-Host "Building single EXE installer with Inno Setup: $iscc"
+    & $iscc "/DAppVersion=$Version" "/DSourceDir=$packageDirectory" "/DOutputDir=$OutputRoot" $installerScript
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup failed with exit code $LASTEXITCODE."
+    }
+
+    if (-not (Test-Path -LiteralPath $setupPath)) {
+        throw "Setup EXE was not created: $setupPath"
+    }
 }
-Compress-Archive -Path (Join-Path $packageDirectory "*") -DestinationPath $zipPath -Force
-
-$hash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256
-$zipItem = Get-Item -LiteralPath $zipPath
-$manifest = [ordered]@{
-    app = "mySQLPunk"
-    version = $Version
-    package = $zipItem.Name
-    sha256 = $hash.Hash
-    sizeBytes = $zipItem.Length
-    createdAtUtc = (Get-Date).ToUniversalTime().ToString("o")
-    releaseAssetHint = "Upload this zip and installer assets to GitHub Releases."
+finally {
+    if (Test-Path -LiteralPath $stagingRoot) {
+        $resolvedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+        $resolvedStagingRoot = [System.IO.Path]::GetFullPath($stagingRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+        if (-not $resolvedStagingRoot.StartsWith($resolvedOutputRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a staging directory outside the output root: $resolvedStagingRoot"
+        }
+        Remove-Item -LiteralPath $stagingRoot -Recurse -Force
+    }
 }
 
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-
-Write-Host "Package directory: $packageDirectory"
-Write-Host "Package zip:       $zipPath"
-Write-Host "Manifest:          $manifestPath"
+$setupItem = Get-Item -LiteralPath $setupPath
+$hash = Get-FileHash -LiteralPath $setupPath -Algorithm SHA256
+Write-Host "Setup EXE: $($setupItem.FullName)"
+Write-Host "Size:      $($setupItem.Length) bytes"
+Write-Host "SHA-256:   $($hash.Hash)"

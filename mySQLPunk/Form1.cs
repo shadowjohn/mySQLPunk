@@ -1421,13 +1421,17 @@ namespace mySQLPunk
 
         private async Task VerifyDownloadedUpdatePackageAsync(System.Net.WebClient client, AppUpdateCheckResult result, string targetPath)
         {
-            if (client == null || result == null || string.IsNullOrWhiteSpace(result.ReleaseManifestDownloadUrl)) return;
+            if (client == null || result == null) return;
             if (string.IsNullOrWhiteSpace(targetPath) || !File.Exists(targetPath)) return;
 
             string fileName = Path.GetFileName(targetPath);
             UpdateMainStatus(Localization.Format("Update.Verifying", fileName));
-            string manifestJson = await client.DownloadStringTaskAsync(new Uri(result.ReleaseManifestDownloadUrl));
-            string expectedSha256 = AppUpdateService.FindExpectedSha256InReleaseManifest(manifestJson, fileName);
+            string expectedSha256 = AppUpdateService.GetExpectedAssetSha256(result, fileName);
+            if (string.IsNullOrWhiteSpace(expectedSha256) && !string.IsNullOrWhiteSpace(result.ReleaseManifestDownloadUrl))
+            {
+                string manifestJson = await client.DownloadStringTaskAsync(new Uri(result.ReleaseManifestDownloadUrl));
+                expectedSha256 = AppUpdateService.FindExpectedSha256InReleaseManifest(manifestJson, fileName);
+            }
             if (string.IsNullOrWhiteSpace(expectedSha256)) return;
 
             string actualSha256;

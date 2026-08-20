@@ -6,9 +6,9 @@ mySQLPunk 是一套 Windows WinForms 資料庫管理工具，目標是用同一�
 
 ## 最新版本
 
-目前發版版本：`v1.0.0.3`。
+目前發版版本：`v1.0.0.4`。
 
-本版重點是補齊可公開發版前的打包與授權清理：portable zip 不再包含未使用的 `sqlite3.exe`、`libreadline8.dll`、`libtermcap-0.dll`；SpatiaLite runtime manifest 改用 `built_at_utc`、`build_tool`、`files[].bytes` 並由 smoke test 驗證每個 runtime 檔案的 SHA-256/大小；release 包也會帶入 root notices、圖片素材 notices、native runtime notices 與 NuGet license/notice 檔案。完整變更請見 `CHANGELOG.md`。
+目前 GitHub Release 會只提供一個 `mySQLPunk-<version>-win-x64-setup.exe`。安裝程式內含程式運作所需的 managed DLL、SQLite／SpatiaLite 原生 runtime、素材與第三方授權檔；使用者不需要另外下載 ZIP 或 manifest。完整變更請見 `CHANGELOG.md`。
 
 ## 開發環境
 
@@ -34,21 +34,21 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 打包發布：
 
 ```powershell
-.\scripts\package-release.ps1 -Version 1.0.0.3
+.\scripts\package-release.ps1 -Version 1.0.0.4
 ```
 
-此腳本會使用 Release 組態建置專案，將 `mySQLPunk/bin/Release` 整理成 `dist/mySQLPunk-<version>-win-x64-portable`，產生 portable zip 與 `release-manifest.json`，manifest 會包含檔名、大小與 SHA-256，方便上傳 GitHub Releases 後供程式內更新檢查與下載使用。打包時會一併放入 `THIRD_PARTY_NOTICES.md` 與可取得的 NuGet license/notice 檔，並排除不屬於程式必要 runtime 的 `sqlite3.exe`、`libreadline8.dll`、`libtermcap-0.dll`。
+此腳本會使用 Release 組態建置專案，再以 Inno Setup 6 將 `mySQLPunk/bin/Release` 封裝成單一 `dist/mySQLPunk-<version>-win-x64-setup.exe`。安裝內容會帶入 `LICENSE`、`THIRD_PARTY_NOTICES.md` 與可取得的 NuGet license/notice 檔，並排除不屬於程式必要 runtime 的 `sqlite3.exe`、`libreadline8.dll`、`libtermcap-0.dll`。本機打包前需先安裝 Inno Setup 6，或用 `-InnoSetupCompiler` 指定 `ISCC.exe`。
 
 GitHub Actions 自動發版：
 
 ```powershell
 # 1. 先確認 mySQLPunk/Properties/AssemblyInfo.cs 的 AssemblyVersion / AssemblyFileVersion
-#    已更新成要發布的版本，例如 1.0.0.3。
-git tag v1.0.0.3
-git push origin v1.0.0.3
+#    已更新成要發布的版本，例如 1.0.0.4。
+git tag v1.0.0.4
+git push origin v1.0.0.4
 ```
 
-推送 `v*` tag 後，`.github/workflows/release.yml` 會在 GitHub 的 Windows runner 上還原 NuGet、用 MSBuild 編譯 Release、執行 `scripts/package-release.ps1`，並建立或更新 GitHub Release，上傳 portable zip 與 `release-manifest.json`。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。Workflow 會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；若 `CHANGELOG.md` 內有對應版本段落，GitHub Release notes 會優先使用該段內容。
+推送 `v*` tag 後，`.github/workflows/release.yml` 會在 GitHub 的 Windows runner 上還原 NuGet、用 MSBuild 編譯 Release、安裝固定版本且先驗證 SHA-256 的 Inno Setup、執行 `scripts/package-release.ps1`，並建立或更新 GitHub Release。Release 會先清除同版本舊的 ZIP／manifest 等資產，再只上傳一個 setup EXE。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。Workflow 會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；若 `CHANGELOG.md` 內有對應版本段落，GitHub Release notes 會優先使用該段內容。
 
 備註：
 
@@ -111,7 +111,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | 匯出 / Dump / Backup service | 可用 | 查詢結果多格式匯出、SQL dump 與邏輯 SQL 備份已抽出 service，Form UI 只負責觸發、檔案對話框與狀態呈現。 |
 | 連線與 metadata service | 可用 | 連線開啟、retry 判斷與 database metadata snapshot 已抽出 service，Form UI 保留 TreeView 呈現與錯誤提示。 |
 | 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、大型 SQL 停用編輯器輔助、資料表儲存自動交易、SQL 檔案位置、匯出位置、還原差異抽樣列數、結果網格字型與列高度、日期/時間與數字格式、工具提示顯示開關、診斷記錄、自動復原草稿、索引標籤開啟偏好、HTTP 代理與進階註冊設定。 |
-| 應用程式更新 | 部分可用 | 已支援從 GitHub Releases 檢查最新版本，說明選單可手動檢查，並可依選項在啟動時背景檢查；若 release 附帶 installer asset，可從程式內下載並啟動安裝程式；若只有 portable zip，可從程式內下載、校驗並產生套用腳本，關閉目前程式後解壓覆蓋並重新啟動；若 release 附帶 `release-manifest.json` 且包含下載檔 SHA-256，開啟或套用前會先校驗雜湊；`scripts/package-release.ps1` 可產生 portable zip 與 manifest，正式 installer/updater 體驗仍可再強化。 |
+| 應用程式更新 | 可用 | GitHub Release 只發布一個 setup EXE；說明選單可手動檢查，也可在啟動時背景檢查。程式會讀取 GitHub release asset 的 SHA-256 digest，下載後先校驗再啟動安裝程式；舊版 portable ZIP 更新仍保留相容處理。 |
 
 ## 未完成功能與已知限制
 
@@ -124,10 +124,10 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
   - 完成內容：`ApplicationOptionSettings` 會將通用選項保存到 `application-options.json`；查詢視窗已讀取並套用記錄限制、編輯器字型大小、換行、Tab 空格、自動完成啟用狀態、是否自動載入 metadata，且 SQL 文字超過「大型檔案停用門檻」時會停用語法上色與自動完成以降低卡頓；自動完成頁面的「清除自動完成資料」會刪除本機 `autocomplete-cache.json` 並依目前語系顯示完成提示；資料表資料模式儲存時可依「自動開始交易」把同批新增、修改、刪除包在 provider 對應的 BEGIN/COMMIT/ROLLBACK 流程中；匯出預設資料夾、SQL 開啟/儲存資料夾、結果網格字型大小、結果列高度、日期/時間格式、千分位與是否使用系統數字格式也已套用；檔案位置頁可設定還原差異內容指紋抽樣列數，用於控制還原前後大型資料表內容比對最多讀取幾列；一般頁的「顯示工具提示」會控制主要工具列、連線按鈕、收藏選單與 TreeView 節點提示是否顯示；一般頁的「啟動時自動檢查更新」會在啟動後背景查詢 GitHub Releases，說明選單也提供手動檢查更新；進階選項的「啟用診斷記錄」會把查詢歷程以 JSONL 寫入 `選項 > 檔案位置` 的記錄位置，內容保留 SQL 預覽與 SHA-256 指紋，不保存完整 SQL 原文；自動復原的查詢開關與間隔會啟動查詢草稿定時保存，草稿寫入查詢資料夾下的 `auto-recovery`；索引標籤設定可決定新查詢開在主視窗分頁、最後使用位置或新視窗，且「允許重複開啟相同的物件」關閉時會重用同名同型別分頁；檢視選單的導覽窗格（含僅顯示活躍物件）、資訊窗格、清單/詳細資料、欄位排序（含遞增/遞減）、欄位顯示、頂部即時篩選、「隱藏物件群組」與「顯示隱藏的項目」會保存並套用設定，其中欄位選擇視窗的 provider 群組與預設欄位名稱會依繁中/英文語系顯示，但仍保留原欄位 key 以相容既有偏好；僅顯示活躍物件會隱藏空的物件分類，隱藏物件群組會把 Tables / Views / Functions / Users / Events / Queries 的物件直接顯示在 database 節點下且保留右鍵與雙擊操作，隱藏項目會預設過濾 SQLite 系統表、SpatiaLite metadata、sidecar metadata 與常見 provider 系統物件；連線能力的 HTTP 代理設定會套用到 WebRequest/WebClient 路徑，例如自動補註解字典下載與共用 HTTP helper，且「測試連線能力」會以目前代理設定執行 HTTP 探測並依目前語系回報直接連線、代理模式、SOCKS5 限制與結果；進階註冊可在目前使用者層級註冊 SQL 檔案開啟方式與 `mysqlpunk://` URL 協定，關閉選項時只移除本程式建立的註冊項目。
   - 後續方向：部分選項仍需逐步接到實際行為，例如 SOCKS5/provider 原生資料庫連線代理。
 
-- **應用程式打包與更新 ⚠️ 更新檢查、portable 打包與可攜版套用腳本已補齊**
-  - 現況：`AppUpdateService` 可讀取 GitHub Releases latest API，解析 `tag_name`、版本、release notes、下載頁、installer asset 與 portable zip asset；主選單「說明 > 檢查更新...」可手動檢查，選項「啟動時自動檢查更新」會在啟動後背景檢查。
-  - 完成內容：版本比較會支援 `v1.2.3` 這類 release tag，若發現新版且 release 內有 `.exe` / `.msi` / `.msix` / `.appinstaller` asset，會下載到暫存更新資料夾並啟動安裝程式；若沒有 installer 但有 `mySQLPunk` portable zip，會下載到暫存更新資料夾並詢問是否立即套用，選擇套用時會產生 PowerShell 腳本，等待目前程式結束後解壓 zip、覆蓋應用程式資料夾並重新啟動 `mySQLPunk.exe`，選擇不套用則維持開啟壓縮檔供手動更新；若 release 同時附帶 `release-manifest.json` 且 manifest 內有對應檔名的 SHA-256，會在開啟或套用前先比對下載檔雜湊，不符時停止並顯示錯誤；若 release 沒有可直接下載的更新檔，才會提示開啟 release 下載頁；尚未發布 release 或網路失敗時會在手動檢查顯示錯誤，背景檢查只更新狀態列避免干擾使用者；更新檢查與下載會套用選項中心的 HTTP/HTTPS 代理設定；`scripts/package-release.ps1` 可用 Release 組態建置並產生 portable zip 與 `release-manifest.json`，manifest 包含 SHA-256 與檔案大小，可作為 GitHub Releases 上傳素材。
-  - 後續方向：正式打包仍可接 Velopack 或其他 installer 流程，讓安裝版更新支援更完整的差分、回復與版本控管。
+- **應用程式打包與更新 ✅ 單一安裝 EXE 與程式內更新已補齊**
+  - 現況：`AppUpdateService` 可讀取 GitHub Releases latest API，解析 `tag_name`、版本、release notes、下載頁、installer asset、GitHub asset SHA-256 digest 與舊版 portable zip asset；主選單「說明 > 檢查更新...」可手動檢查，選項「啟動時自動檢查更新」會在啟動後背景檢查。
+  - 完成內容：`scripts/package-release.ps1` 會整理完整 runtime 與授權檔，再由 Inno Setup 產生一個 `mySQLPunk-<version>-win-x64-setup.exe`；GitHub workflow 只發布這個 EXE，重跑同一版本時會先刪除舊資產。程式下載更新後會優先使用 GitHub release asset 的 SHA-256 digest 校驗，不需要第二個 manifest；安裝程式採目前使用者安裝，能關閉執行中的 mySQLPunk、覆蓋更新並提供開始功能表與選用桌面捷徑。舊版 portable ZIP 與 manifest 邏輯仍保留，讓已發布版本可繼續更新。
+  - 後續方向：可再加入 Windows 程式碼簽章與差分更新，降低 SmartScreen 提示並減少更新下載量。
 
 - **MySQL / MariaDB 使用者管理 Phase 2 ✅ 已完成**
   - Provider Adapter 會讀取 `SELECT VERSION()`、`SHOW COLUMNS FROM mysql.user` 與 MariaDB `mysql.global_priv`，不會直接假設 MySQL 8 欄位存在；MariaDB JSON metadata 只取需要的欄位，不顯示驗證雜湊。

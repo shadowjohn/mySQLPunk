@@ -7316,7 +7316,8 @@ public static class SmokeTests
   ""assets"": [
     {
       ""name"": ""mySQLPunk-Setup.exe"",
-      ""browser_download_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/download/v1.2.3/mySQLPunk-Setup.exe""
+      ""browser_download_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/download/v1.2.3/mySQLPunk-Setup.exe"",
+      ""digest"": ""sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa""
     }
   ]
 }";
@@ -7326,6 +7327,8 @@ public static class SmokeTests
         AssertEquals("1.2.3", update.LatestVersion.ToString(), "Update check should normalize v-prefixed release tags.");
         AssertContains(update.ReleasePageUrl, "/releases/tag/v1.2.3", "Update check should keep the release page URL.");
         AssertContains(update.InstallerDownloadUrl, "mySQLPunk-Setup.exe", "Update check should prefer installer assets.");
+        AssertEquals(new string('a', 64), update.InstallerSha256, "Update check should read the GitHub installer asset digest.");
+        AssertEquals(new string('a', 64), AppUpdateService.GetExpectedAssetSha256(update, "mySQLPunk-Setup.exe"), "Installer updates should use the GitHub asset SHA-256 without a separate manifest.");
         AssertContains(update.ReleaseNotes, "更新內容", "Update check should keep release notes.");
         string downloadPath = AppUpdateService.BuildInstallerDownloadPath(update, Path.GetTempPath());
         AssertEquals("mySQLPunk-Setup.exe", Path.GetFileName(downloadPath), "Update download path should keep the installer asset file name.");
@@ -7349,7 +7352,8 @@ public static class SmokeTests
   ""assets"": [
     {
       ""name"": ""mySQLPunk-1.2.5-win-x64-portable.zip"",
-      ""browser_download_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/download/v1.2.5/mySQLPunk-1.2.5-win-x64-portable.zip""
+      ""browser_download_url"": ""https://github.com/shadowjohn/mySQLPunk/releases/download/v1.2.5/mySQLPunk-1.2.5-win-x64-portable.zip"",
+      ""digest"": ""sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb""
     },
     {
       ""name"": ""release-manifest.json"",
@@ -7361,6 +7365,7 @@ public static class SmokeTests
         AssertEquals("", portableZip.InstallerDownloadUrl, "Portable release assets should not be launched as an installer.");
         AssertContains(portableZip.PortableZipDownloadUrl, "mySQLPunk-1.2.5-win-x64-portable.zip", "Portable release assets should be available as downloadable update packages.");
         AssertContains(portableZip.ReleaseManifestDownloadUrl, "release-manifest.json", "Update check should keep the release manifest asset URL.");
+        AssertEquals(new string('b', 64), portableZip.PortableZipSha256, "Portable updates should read the GitHub asset digest when available.");
         AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", AppUpdateService.GetPortableZipFileName(portableZip), "Portable update filename should keep the release asset name.");
         AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", Path.GetFileName(AppUpdateService.BuildPortableZipDownloadPath(portableZip, Path.GetTempPath())), "Portable update download path should keep the zip asset file name.");
 
@@ -7556,9 +7561,12 @@ public static class SmokeTests
         Assert(File.Exists(scriptPath), "Release packaging script should exist.");
 
         string script = File.ReadAllText(scriptPath, Encoding.UTF8);
-        AssertContains(script, "Compress-Archive", "Release packaging script should create a zip archive.");
-        AssertContains(script, "release-manifest.json", "Release packaging script should write a release manifest.");
-        AssertContains(script, "SHA256", "Release packaging script should include a SHA-256 checksum.");
+        AssertContains(script, "ISCC.exe", "Release packaging script should require the Inno Setup compiler.");
+        AssertContains(script, "installer\\mySQLPunk.iss", "Release packaging script should compile the repository installer definition.");
+        AssertContains(script, "win-x64-setup.exe", "Release packaging script should create one setup EXE.");
+        AssertContains(script, "SHA256", "Release packaging script should report the setup SHA-256 checksum.");
+        Assert(!script.Contains("Compress-Archive"), "Release packaging script should no longer publish a portable zip.");
+        Assert(!script.Contains("release-manifest.json"), "Release packaging script should not require a second manifest asset.");
         AssertContains(script, "mySQLPunk.exe", "Release packaging script should package the application executable.");
         AssertContains(script, "MSBuild", "Release packaging script should build the Release configuration.");
         AssertContains(script, "THIRD_PARTY_NOTICES.md", "Release packaging script should include third-party notices.");
@@ -7567,6 +7575,14 @@ public static class SmokeTests
         AssertContains(script, "libreadline8.dll", "Release packaging script should remove GPL Readline from the portable package.");
         AssertContains(script, "libtermcap-0.dll", "Release packaging script should remove the Readline termcap dependency.");
         AssertContains(script, "sqlite3.exe", "Release packaging script should remove the Readline-linked SQLite shell.");
+
+        string installerPath = Path.Combine(root, "installer", "mySQLPunk.iss");
+        Assert(File.Exists(installerPath), "Inno Setup installer definition should exist.");
+        string installer = File.ReadAllText(installerPath, Encoding.UTF8);
+        AssertContains(installer, "PrivilegesRequired=lowest", "Installer should support per-user installation without administrator privileges.");
+        AssertContains(installer, "CloseApplications=yes", "Installer updates should close the running application before replacing files.");
+        AssertContains(installer, "recursesubdirs", "Installer should include native database runtime subdirectories.");
+        AssertContains(installer, "LICENSE.txt", "Installer should display and install the project license.");
 
         string projectPath = Path.Combine(root, "mySQLPunk", "mySQLPunk.csproj");
         string project = File.ReadAllText(projectPath, Encoding.UTF8);
@@ -7637,6 +7653,12 @@ public static class SmokeTests
         AssertContains(workflow, "contents: write", "Release workflow should be allowed to create GitHub Releases.");
         AssertContains(workflow, "nuget restore", "Release workflow should restore packages before building.");
         AssertContains(workflow, "scripts\\package-release.ps1", "Release workflow should use the repository packaging script.");
+        AssertContains(workflow, "innosetup-6.7.3.exe", "Release workflow should install a pinned Inno Setup compiler.");
+        AssertContains(workflow, "dist/*-setup.exe", "Release workflow should upload the single setup EXE.");
+        AssertContains(workflow, "Exactly one setup EXE is required", "Release workflow should reject multiple downloadable setup files.");
+        AssertContains(workflow, "foreach ($existingAsset in @($release.assets))", "Release workflow should remove legacy assets before publishing the single EXE.");
+        Assert(!workflow.Contains("dist/*.zip"), "Release workflow should not upload a portable zip.");
+        Assert(!workflow.Contains("release-manifest.json"), "Release workflow should not upload a separate manifest.");
         AssertContains(workflow, "CHANGELOG.md", "Release workflow should prefer changelog entries for release notes.");
         AssertContains(workflow, "api.github.com/repos/$env:REPOSITORY/releases", "Release workflow should create or update a GitHub Release through the API.");
         AssertContains(workflow, "${uploadBaseUrl}?name=$assetName", "Release workflow should preserve the upload host when appending asset query parameters.");

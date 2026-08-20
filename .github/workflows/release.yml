@@ -79,6 +79,37 @@ jobs:
         shell: pwsh
         run: nuget restore .\mySQLPunk.sln -NonInteractive
 
+      - name: Setup Inno Setup
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          )
+          if ($candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1) {
+            exit 0
+          }
+
+          $installerPath = Join-Path $env:RUNNER_TEMP "innosetup-6.7.3.exe"
+          $installerUrl = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe"
+          $expectedSha256 = "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
+          Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+          $actualSha256 = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "Inno Setup installer SHA-256 mismatch. Expected $expectedSha256, got $actualSha256."
+          }
+
+          $process = Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Inno Setup installation failed with exit code $($process.ExitCode)."
+          }
+
+          $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            throw "ISCC.exe was not found after installing Inno Setup."
+          }
+
       - name: Build and package
         shell: pwsh
         run: .\scripts\package-release.ps1 -Version "${{ steps.release_version.outputs.version }}" -Configuration Release -OutputRoot .\dist
@@ -102,9 +133,7 @@ jobs:
             $notes = @"
           mySQLPunk $version
 
-          Assets:
-          - Portable ZIP
-          - release-manifest.json
+          下載並執行唯一的 setup EXE 即可安裝或更新。
           "@
           }
 
@@ -115,8 +144,7 @@ jobs:
         with:
           name: mySQLPunk-${{ steps.release_version.outputs.version }}-release-assets
           path: |
-            dist/*.zip
-            dist/release-manifest.json
+            dist/*-setup.exe
             dist/release-notes.md
 
       - name: Create or update GitHub Release
@@ -158,17 +186,17 @@ jobs:
           }
 
           $uploadBaseUrl = $release.upload_url -replace '\{.*\}$', ''
-          $assets = @(
-            Get-ChildItem -LiteralPath ".\dist" -Filter "*.zip" | Select-Object -First 1
-            Get-Item -LiteralPath ".\dist\release-manifest.json"
-          )
+          $assets = @(Get-ChildItem -LiteralPath ".\dist" -Filter "*-setup.exe")
+          if ($assets.Count -ne 1) {
+            throw "Exactly one setup EXE is required, but found $($assets.Count)."
+          }
+
+          # A release intentionally has one downloadable file. Remove assets left by older runs.
+          foreach ($existingAsset in @($release.assets)) {
+            Invoke-RestMethod -Method Delete -Uri $existingAsset.url -Headers $headers | Out-Null
+          }
 
           foreach ($asset in $assets) {
-            $existingAssets = @($release.assets | Where-Object { $_.name -eq $asset.Name })
-            foreach ($existingAsset in $existingAssets) {
-              Invoke-RestMethod -Method Delete -Uri $existingAsset.url -Headers $headers | Out-Null
-            }
-
             $assetName = [uri]::EscapeDataString($asset.Name)
             $uploadUrl = "${uploadBaseUrl}?name=$assetName"
             Invoke-RestMethod -Method Post -Uri $uploadUrl -Headers $headers -InFile $asset.FullName -ContentType "application/octet-stream" | Out-Null

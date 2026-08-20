@@ -15,7 +15,9 @@ namespace mySQLPunk.lib
         public string ReleaseName { get; set; }
         public string ReleasePageUrl { get; set; }
         public string InstallerDownloadUrl { get; set; }
+        public string InstallerSha256 { get; set; }
         public string PortableZipDownloadUrl { get; set; }
+        public string PortableZipSha256 { get; set; }
         public string ReleaseManifestDownloadUrl { get; set; }
         public string ReleaseNotes { get; set; }
         public bool IsPrerelease { get; set; }
@@ -77,6 +79,8 @@ namespace mySQLPunk.lib
             JObject release = JObject.Parse(json);
             string tagName = (string)release["tag_name"] ?? "";
             JArray assets = release["assets"] as JArray;
+            JToken installerAsset = FindInstallerAsset(assets);
+            JToken portableZipAsset = FindPortableZipAsset(assets);
             AppUpdateCheckResult result = new AppUpdateCheckResult
             {
                 CurrentVersion = ParseVersion(currentVersion),
@@ -85,8 +89,10 @@ namespace mySQLPunk.lib
                 ReleasePageUrl = (string)release["html_url"] ?? "",
                 ReleaseNotes = (string)release["body"] ?? "",
                 IsPrerelease = (bool?)release["prerelease"] ?? false,
-                InstallerDownloadUrl = FindInstallerAssetUrl(assets),
-                PortableZipDownloadUrl = FindPortableZipAssetUrl(assets),
+                InstallerDownloadUrl = GetAssetDownloadUrl(installerAsset),
+                InstallerSha256 = GetAssetSha256(installerAsset),
+                PortableZipDownloadUrl = GetAssetDownloadUrl(portableZipAsset),
+                PortableZipSha256 = GetAssetSha256(portableZipAsset),
                 ReleaseManifestDownloadUrl = FindReleaseManifestAssetUrl(assets)
             };
 
@@ -215,9 +221,29 @@ namespace mySQLPunk.lib
             return SanitizeFileName(fileName);
         }
 
-        private static string FindInstallerAssetUrl(JArray assets)
+        public static string GetExpectedAssetSha256(AppUpdateCheckResult result, string fileName)
         {
-            if (assets == null) return "";
+            if (result == null || string.IsNullOrWhiteSpace(fileName)) return "";
+
+            string normalizedFileName = SanitizeFileName(Path.GetFileName(fileName));
+            if (!string.IsNullOrWhiteSpace(result.InstallerDownloadUrl) &&
+                string.Equals(normalizedFileName, GetInstallerFileName(result), StringComparison.OrdinalIgnoreCase))
+            {
+                return NormalizeSha256(result.InstallerSha256);
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.PortableZipDownloadUrl) &&
+                string.Equals(normalizedFileName, GetPortableZipFileName(result), StringComparison.OrdinalIgnoreCase))
+            {
+                return NormalizeSha256(result.PortableZipSha256);
+            }
+
+            return "";
+        }
+
+        private static JToken FindInstallerAsset(JArray assets)
+        {
+            if (assets == null) return null;
 
             foreach (JToken asset in assets)
             {
@@ -226,18 +252,18 @@ namespace mySQLPunk.lib
                 if (string.IsNullOrWhiteSpace(url)) continue;
                 if (name.EndsWith(".exe") || name.EndsWith(".msi") || name.EndsWith(".msix") || name.EndsWith(".appinstaller"))
                 {
-                    return url;
+                    return asset;
                 }
             }
 
-            return "";
+            return null;
         }
 
-        private static string FindPortableZipAssetUrl(JArray assets)
+        private static JToken FindPortableZipAsset(JArray assets)
         {
-            if (assets == null) return "";
+            if (assets == null) return null;
 
-            string fallbackZipUrl = "";
+            JToken fallbackZipAsset = null;
             foreach (JToken asset in assets)
             {
                 string name = ((string)asset["name"] ?? "").ToLowerInvariant();
@@ -247,16 +273,26 @@ namespace mySQLPunk.lib
 
                 if (name.Contains("portable") && name.Contains("mysqlpunk"))
                 {
-                    return url;
+                    return asset;
                 }
 
-                if (string.IsNullOrWhiteSpace(fallbackZipUrl) && name.Contains("mysqlpunk"))
+                if (fallbackZipAsset == null && name.Contains("mysqlpunk"))
                 {
-                    fallbackZipUrl = url;
+                    fallbackZipAsset = asset;
                 }
             }
 
-            return fallbackZipUrl;
+            return fallbackZipAsset;
+        }
+
+        private static string GetAssetDownloadUrl(JToken asset)
+        {
+            return asset == null ? "" : ((string)asset["browser_download_url"] ?? "");
+        }
+
+        private static string GetAssetSha256(JToken asset)
+        {
+            return asset == null ? "" : NormalizeSha256((string)asset["digest"] ?? "");
         }
 
         private static string FindReleaseManifestAssetUrl(JArray assets)
@@ -339,6 +375,10 @@ namespace mySQLPunk.lib
         private static string NormalizeSha256(string value)
         {
             string normalized = (value ?? "").Trim().Replace("-", "").ToLowerInvariant();
+            if (normalized.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring("sha256:".Length);
+            }
             return normalized.Length == 64 ? normalized : "";
         }
 
