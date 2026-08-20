@@ -22,6 +22,8 @@ namespace mySQLPunk
         private readonly string initialDatabaseName;
         private readonly List<string> privilegeDatabaseChoices;
         private readonly List<string> privilegeObjectChoices;
+        private readonly MySqlUserProviderAdapter providerAdapter;
+        private readonly List<string> existingGrantStatements;
 
         private TextBox txtUser;
         private TextBox txtHost;
@@ -53,6 +55,7 @@ namespace mySQLPunk
         private CheckedListBox lstPrivileges;
         private CheckBox chkWithGrantOption;
         private Label lblPrivilegeTargetPreview;
+        private TextBox txtExistingGrants;
 
         private RichTextBox txtPreview;
         private Label lblHint;
@@ -62,16 +65,23 @@ namespace mySQLPunk
         private GroupBox privilegeGroup;
 
         public UserOperationDialog(MySqlUserOperationMode mode, string databaseName, string user, string host)
-            : this(mode, databaseName, user, host, null, null)
+            : this(mode, databaseName, user, host, null, null, null, null)
         {
         }
 
         public UserOperationDialog(MySqlUserOperationMode mode, string databaseName, string user, string host, IEnumerable<string> privilegeDatabases, IEnumerable<string> privilegeObjects)
+            : this(mode, databaseName, user, host, privilegeDatabases, privilegeObjects, null, null)
+        {
+        }
+
+        public UserOperationDialog(MySqlUserOperationMode mode, string databaseName, string user, string host, IEnumerable<string> privilegeDatabases, IEnumerable<string> privilegeObjects, MySqlUserProviderAdapter adapter, IEnumerable<string> existingGrants)
         {
             this.mode = mode;
             initialDatabaseName = databaseName ?? string.Empty;
             privilegeDatabaseChoices = BuildChoiceList(initialDatabaseName, privilegeDatabases);
             privilegeObjectChoices = BuildChoiceList(string.Empty, privilegeObjects);
+            providerAdapter = adapter ?? new MySqlUserProviderAdapter("8.0.0", null, false);
+            existingGrantStatements = existingGrants == null ? new List<string>() : existingGrants.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
             Statements = new List<string>();
 
             InitializeComponent(user, host);
@@ -182,8 +192,9 @@ namespace mySQLPunk
             limitsGroup.Controls.Add(limitsLayout);
             content.Controls.Add(limitsGroup);
 
-            privilegeGroup = CreateGroupBox(Localization.T("User.PrivilegeSection"), 260);
-            TableLayoutPanel privilegeLayout = CreateTwoColumnLayout(6);
+            privilegeGroup = CreateGroupBox(Localization.T("User.PrivilegeSection"), 350);
+            TableLayoutPanel privilegeLayout = CreateTwoColumnLayout(7);
+            privilegeLayout.RowStyles[6].Height = 80;
             cboPrivilegeDatabase = CreateComboBox(initialDatabaseName, privilegeDatabaseChoices);
             cboPrivilegeObject = CreateComboBox(string.Empty, privilegeObjectChoices);
             cboPrivilegeObjectType = CreateComboBox(Localization.T("User.ObjectTypeTableOrView"), new[]
@@ -203,12 +214,18 @@ namespace mySQLPunk
             lblPrivilegeTargetPreview.Dock = DockStyle.Fill;
             lblPrivilegeTargetPreview.TextAlign = ContentAlignment.MiddleLeft;
             lblPrivilegeTargetPreview.AutoEllipsis = true;
+            txtExistingGrants = CreateTextBox(string.Join(Environment.NewLine, existingGrantStatements.ToArray()));
+            txtExistingGrants.Multiline = true;
+            txtExistingGrants.ReadOnly = true;
+            txtExistingGrants.ScrollBars = ScrollBars.Both;
+            txtExistingGrants.WordWrap = false;
             AddLabeledControl(privilegeLayout, 0, Localization.T("Detail.Property.Database"), cboPrivilegeDatabase);
             AddLabeledControl(privilegeLayout, 1, Localization.T("User.ObjectName"), cboPrivilegeObject);
             AddLabeledControl(privilegeLayout, 2, Localization.T("Detail.Property.Privileges"), lstPrivileges);
             AddLabeledControl(privilegeLayout, 3, Localization.T("User.ObjectType"), cboPrivilegeObjectType);
             AddLabeledControl(privilegeLayout, 4, Localization.T("User.Options"), chkWithGrantOption);
             AddLabeledControl(privilegeLayout, 5, Localization.T("User.TargetPreview"), lblPrivilegeTargetPreview);
+            AddLabeledControl(privilegeLayout, 6, Localization.T("User.ExistingGrants"), txtExistingGrants);
             privilegeGroup.Controls.Add(privilegeLayout);
             content.Controls.Add(privilegeGroup);
 
@@ -268,6 +285,7 @@ namespace mySQLPunk
             txtUser.ReadOnly = !isCreate;
             txtHost.ReadOnly = !isCreate;
             chkWithGrantOption.Visible = mode == MySqlUserOperationMode.Grant;
+            ApplyProviderCapabilities();
 
             if (isDrop)
             {
@@ -285,6 +303,20 @@ namespace mySQLPunk
             {
                 lblHint.Text = Localization.T(mode == MySqlUserOperationMode.Grant ? "User.GrantHint" : "User.RevokeHint");
             }
+            lblHint.Text += "  " + Localization.Format("User.ProviderDetected", DescribeProvider());
+        }
+
+        private void ApplyProviderCapabilities()
+        {
+            bool supportsLock = providerAdapter.SupportsAccountLock;
+            bool supportsExpire = providerAdapter.SupportsPasswordExpiration;
+            bool supportsAlter = providerAdapter.SupportsAlterUser;
+            chkCreateLockAccount.Enabled = supportsLock;
+            chkAlterLockAccount.Enabled = supportsLock;
+            chkUnlockAccount.Enabled = supportsLock;
+            chkCreateExpirePassword.Enabled = supportsExpire;
+            chkAlterExpirePassword.Enabled = supportsExpire;
+            txtAlterPlugin.Enabled = supportsAlter;
         }
 
         private void ExecuteButtonClicked()
@@ -326,7 +358,7 @@ namespace mySQLPunk
                     RequireSsl = chkCreateRequireSsl.Checked,
                     ExpirePassword = chkCreateExpirePassword.Checked,
                     LockAccount = chkCreateLockAccount.Checked
-                });
+                }, providerAdapter);
             }
 
             if (mode == MySqlUserOperationMode.Alter)
@@ -357,7 +389,7 @@ namespace mySQLPunk
                     MaxUpdatesPerHour = ParseOptionalLimit(txtMaxUpdates, Localization.T("Detail.Property.MaxUpdatesPerHour")),
                     MaxConnectionsPerHour = ParseOptionalLimit(txtMaxConnectionsPerHour, Localization.T("Detail.Property.MaxConnectionsPerHour")),
                     MaxUserConnections = ParseOptionalLimit(txtMaxUserConnections, Localization.T("Detail.Property.MaxConnections"))
-                });
+                }, providerAdapter);
             }
 
             if (mode == MySqlUserOperationMode.Drop)
@@ -437,10 +469,32 @@ namespace mySQLPunk
                     TrimOrEmpty(cboPrivilegeDatabase == null ? string.Empty : cboPrivilegeDatabase.Text),
                     TrimOrEmpty(cboPrivilegeObject == null ? string.Empty : cboPrivilegeObject.Text),
                     GetSelectedPrivilegeTargetType());
+                ApplyExistingPrivilegesForTarget();
             }
             catch
             {
                 lblPrivilegeTargetPreview.Text = string.Empty;
+            }
+        }
+
+        private void ApplyExistingPrivilegesForTarget()
+        {
+            if (lstPrivileges == null || existingGrantStatements.Count == 0) return;
+            string databaseName = TrimOrEmpty(cboPrivilegeDatabase == null ? string.Empty : cboPrivilegeDatabase.Text);
+            string objectName = TrimOrEmpty(cboPrivilegeObject == null ? string.Empty : cboPrivilegeObject.Text);
+            MySqlPrivilegeTargetType targetType = GetSelectedPrivilegeTargetType();
+            List<string> granted = MySqlUserManagerService.GetGrantedPrivilegesForTarget(existingGrantStatements, databaseName, objectName, targetType);
+            bool allPrivileges = granted.Contains("ALL PRIVILEGES", StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < lstPrivileges.Items.Count; i++)
+            {
+                string privilege = Convert.ToString(lstPrivileges.Items[i]);
+                lstPrivileges.SetItemChecked(i, allPrivileges
+                    ? string.Equals(privilege, "ALL PRIVILEGES", StringComparison.OrdinalIgnoreCase)
+                    : granted.Contains(privilege, StringComparer.OrdinalIgnoreCase));
+            }
+            if (chkWithGrantOption != null && mode == MySqlUserOperationMode.Grant)
+            {
+                chkWithGrantOption.Checked = MySqlUserManagerService.HasGrantOptionForTarget(existingGrantStatements, databaseName, objectName, targetType);
             }
         }
 
@@ -509,10 +563,17 @@ namespace mySQLPunk
         {
             return new[]
             {
-                "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX",
-                "REFERENCES", "CREATE VIEW", "SHOW VIEW", "CREATE ROUTINE", "ALTER ROUTINE",
-                "EXECUTE", "EVENT", "TRIGGER", "PROCESS", "RELOAD", "SUPER", "CREATE USER"
+                "ALL PRIVILEGES", "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX",
+                "REFERENCES", "CREATE VIEW", "SHOW VIEW", "CREATE ROUTINE", "ALTER ROUTINE", "CREATE TEMPORARY TABLES",
+                "LOCK TABLES", "EXECUTE", "EVENT", "TRIGGER", "PROCESS", "RELOAD", "SHUTDOWN", "FILE", "SUPER",
+                "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT", "CREATE USER", "CREATE TABLESPACE"
             };
+        }
+
+        private string DescribeProvider()
+        {
+            string family = providerAdapter.IsMariaDb ? "MariaDB" : "MySQL";
+            return string.IsNullOrWhiteSpace(providerAdapter.Version) ? family : family + " " + providerAdapter.Version;
         }
 
         private static string BuildDialogTitle(MySqlUserOperationMode mode)

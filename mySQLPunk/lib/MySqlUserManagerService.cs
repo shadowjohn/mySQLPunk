@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace mySQLPunk.lib
 {
@@ -11,6 +12,14 @@ namespace mySQLPunk.lib
         TableOrView,
         Function,
         Procedure
+    }
+
+    public enum MySqlUserProviderFamily
+    {
+        Unknown,
+        MySql5,
+        MySql8,
+        MariaDb
     }
 
     public sealed class MySqlUserProviderAdapter
@@ -35,6 +44,54 @@ namespace mySQLPunk.lib
         public bool IsMariaDb { get { return Version.IndexOf("MariaDB", StringComparison.OrdinalIgnoreCase) >= 0; } }
         public bool HasGlobalPrivTable { get; private set; }
         public IEnumerable<string> UserColumns { get { return userColumns; } }
+        public Version ParsedVersion { get { return ParseServerVersion(Version); } }
+        public MySqlUserProviderFamily Family
+        {
+            get
+            {
+                if (IsMariaDb) return MySqlUserProviderFamily.MariaDb;
+                Version parsed = ParsedVersion;
+                if (parsed.Major >= 8) return MySqlUserProviderFamily.MySql8;
+                if (parsed.Major == 5) return MySqlUserProviderFamily.MySql5;
+                return MySqlUserProviderFamily.Unknown;
+            }
+        }
+        public bool SupportsAlterUser
+        {
+            get
+            {
+                Version parsed = ParsedVersion;
+                if (IsMariaDb) return parsed.Major > 10 || (parsed.Major == 10 && parsed.Minor >= 2);
+                return parsed.Major > 5 || (parsed.Major == 5 && (parsed.Minor > 7 || (parsed.Minor == 7 && parsed.Build >= 6)));
+            }
+        }
+        public bool SupportsAccountLock
+        {
+            get
+            {
+                Version parsed = ParsedVersion;
+                if (IsMariaDb) return parsed.Major > 10 || (parsed.Major == 10 && parsed.Minor >= 4);
+                return parsed.Major > 5 || (parsed.Major == 5 && (parsed.Minor > 7 || (parsed.Minor == 7 && parsed.Build >= 6)));
+            }
+        }
+        public bool SupportsPasswordExpiration
+        {
+            get
+            {
+                Version parsed = ParsedVersion;
+                if (IsMariaDb) return parsed.Major > 10 || (parsed.Major == 10 && parsed.Minor >= 4);
+                return parsed.Major > 5 || (parsed.Major == 5 && parsed.Minor >= 7);
+            }
+        }
+        public bool SupportsShowCreateUser
+        {
+            get
+            {
+                Version parsed = ParsedVersion;
+                if (IsMariaDb) return parsed.Major > 10 || (parsed.Major == 10 && parsed.Minor >= 2);
+                return parsed.Major > 5 || (parsed.Major == 5 && parsed.Minor >= 7);
+            }
+        }
 
         public bool HasUserColumn(string columnName)
         {
@@ -66,6 +123,20 @@ namespace mySQLPunk.lib
             }
 
             return new MySqlUserProviderAdapter(version, columns, hasGlobalPrivTable);
+        }
+
+        private static Version ParseServerVersion(string value)
+        {
+            Match match = Regex.Match(value ?? string.Empty, @"(?<major>\d+)\.(?<minor>\d+)(?:\.(?<build>\d+))?");
+            if (!match.Success) return new Version(0, 0, 0);
+
+            int major;
+            int minor;
+            int build;
+            int.TryParse(match.Groups["major"].Value, out major);
+            int.TryParse(match.Groups["minor"].Value, out minor);
+            int.TryParse(match.Groups["build"].Value, out build);
+            return new Version(major, minor, build);
         }
     }
 
@@ -155,6 +226,8 @@ namespace mySQLPunk.lib
                 AppendUserRows(users, TrySelect(db, BuildCurrentUserFallbackSql()));
             }
 
+            EnrichUsersFromShowStatements(db, users, adapter);
+
             return users;
         }
 
@@ -167,6 +240,7 @@ namespace mySQLPunk.lib
             dt.Columns.Add("Status");
             dt.Columns.Add("Source");
             dt.Columns.Add("ProviderFamily");
+            dt.Columns.Add("ProviderVersion");
             dt.Columns.Add("Plugin");
             dt.Columns.Add("PasswordExists");
             dt.Columns.Add("AccountLocked");
@@ -183,6 +257,8 @@ namespace mySQLPunk.lib
             dt.Columns.Add("PasswordLastChanged");
             dt.Columns.Add("MustChangePassword");
             dt.Columns.Add("Privileges");
+            dt.Columns.Add("CreateStatement");
+            dt.Columns.Add("GrantStatements");
             return dt;
         }
 
@@ -248,15 +324,23 @@ namespace mySQLPunk.lib
         public static string BuildMariaDbGlobalPrivUserListSql()
         {
             return "SELECT `User` AS Name, 'User' AS Type, `Host` AS Host, " +
-                   "'Active' AS Status, 'mysql.global_priv' AS Source, 'MariaDB' AS ProviderFamily, " +
-                   "'N/A' AS Plugin, " +
-                   "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Yes' END AS PasswordExists, " +
-                   "'N/A' AS AccountLocked, 'N/A' AS PasswordExpired, 'N/A' AS SSLRequired, " +
-                   "'N/A' AS MaxQuestionsPerHour, 'N/A' AS MaxUpdatesPerHour, 'N/A' AS MaxConnectionsPerHour, " +
-                   "'N/A' AS MaxConnections, 'N/A' AS CreateTime, 'N/A' AS Comment, " +
-                   "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Set (hidden)' END AS AuthenticationString, " +
-                   "'N/A' AS PasswordLifetime, 'N/A' AS PasswordLastChanged, 'N/A' AS MustChangePassword, " +
-                   "CASE WHEN `Priv` IS NULL OR `Priv` = '' THEN 'N/A' ELSE 'Stored in mysql.global_priv' END AS Privileges " +
+                   "CASE WHEN COALESCE(JSON_VALUE(`Priv`, '$.account_locked'), 0) IN (1, '1', 'true') THEN 'Locked' ELSE 'Open' END AS Status, " +
+                   "'mysql.global_priv' AS Source, 'MariaDB' AS ProviderFamily, " +
+                   "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(`Priv`, '$.plugin')), ''), 'N/A') AS Plugin, " +
+                   "CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(`Priv`, '$.authentication_string')), '') = '' THEN 'No' ELSE 'Yes' END AS PasswordExists, " +
+                   "CASE WHEN COALESCE(JSON_VALUE(`Priv`, '$.account_locked'), 0) IN (1, '1', 'true') THEN 'Locked' ELSE 'Open' END AS AccountLocked, " +
+                   "CASE WHEN COALESCE(JSON_VALUE(`Priv`, '$.password_expired'), 0) IN (1, '1', 'true') THEN 'Expired' ELSE 'Active' END AS PasswordExpired, " +
+                   "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(`Priv`, '$.ssl_type')), ''), 'No') AS SSLRequired, " +
+                   "COALESCE(CAST(JSON_VALUE(`Priv`, '$.max_questions') AS CHAR), '0') AS MaxQuestionsPerHour, " +
+                   "COALESCE(CAST(JSON_VALUE(`Priv`, '$.max_updates') AS CHAR), '0') AS MaxUpdatesPerHour, " +
+                   "COALESCE(CAST(JSON_VALUE(`Priv`, '$.max_connections') AS CHAR), '0') AS MaxConnectionsPerHour, " +
+                   "COALESCE(CAST(JSON_VALUE(`Priv`, '$.max_user_connections') AS CHAR), '0') AS MaxConnections, " +
+                   "'N/A' AS CreateTime, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(`Priv`, '$.comment')), ''), 'N/A') AS Comment, " +
+                   "CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(`Priv`, '$.authentication_string')), '') = '' THEN 'N/A' ELSE 'Set (hidden)' END AS AuthenticationString, " +
+                   "COALESCE(CAST(JSON_VALUE(`Priv`, '$.password_lifetime') AS CHAR), 'N/A') AS PasswordLifetime, " +
+                   "CASE WHEN JSON_VALUE(`Priv`, '$.password_last_changed') IS NULL THEN 'N/A' ELSE CAST(FROM_UNIXTIME(JSON_VALUE(`Priv`, '$.password_last_changed')) AS CHAR) END AS PasswordLastChanged, " +
+                   "CASE WHEN COALESCE(JSON_VALUE(`Priv`, '$.password_expired'), 0) IN (1, '1', 'true') THEN 'Yes' ELSE 'No' END AS MustChangePassword, " +
+                   "'N/A' AS Privileges " +
                    "FROM mysql.global_priv ORDER BY `User`, `Host`;";
         }
 
@@ -271,6 +355,65 @@ namespace mySQLPunk.lib
                    "'N/A' AS AuthenticationString, 'N/A' AS PasswordLifetime, 'N/A' AS PasswordLastChanged, 'N/A' AS MustChangePassword, 'N/A' AS Privileges;";
         }
 
+        public static List<string> LoadGrantStatements(IDatabase db, string user, string host)
+        {
+            List<string> grants = new List<string>();
+            DataTable table = TrySelect(db, "SHOW GRANTS FOR " + QuoteAccount(user, host) + ";");
+            if (table == null) return grants;
+
+            foreach (DataRow row in table.Rows)
+            {
+                if (table.Columns.Count == 0 || row[0] == DBNull.Value) continue;
+                string statement = SanitizeGrantStatement(Convert.ToString(row[0]));
+                if (statement.Length > 0 && !grants.Contains(statement, StringComparer.OrdinalIgnoreCase)) grants.Add(statement.TrimEnd(';') + ";");
+            }
+            return grants;
+        }
+
+        public static string LoadSafeCreateUserStatement(IDatabase db, string user, string host)
+        {
+            DataTable table = TrySelect(db, "SHOW CREATE USER " + QuoteAccount(user, host) + ";");
+            if (table == null || table.Rows.Count == 0 || table.Columns.Count == 0) return string.Empty;
+
+            object value = table.Rows[0][table.Columns.Count - 1];
+            return value == null || value == DBNull.Value ? string.Empty : SanitizeCreateUserStatement(Convert.ToString(value));
+        }
+
+        public static List<string> GetGrantedPrivilegesForTarget(IEnumerable<string> grantStatements, string databaseName, string objectName, MySqlPrivilegeTargetType targetType)
+        {
+            string expectedTarget = NormalizeGrantTarget(BuildPrivilegeTarget(databaseName, objectName, targetType));
+            List<string> privileges = new List<string>();
+            if (grantStatements == null) return privileges;
+
+            foreach (string statement in grantStatements)
+            {
+                string privilegeText;
+                string targetText;
+                if (!TryParseGrantStatement(statement, out privilegeText, out targetText)) continue;
+                if (!string.Equals(NormalizeGrantTarget(targetText), expectedTarget, StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (string privilege in SplitPrivilegeList(privilegeText))
+                {
+                    if (!privileges.Contains(privilege, StringComparer.OrdinalIgnoreCase)) privileges.Add(privilege);
+                }
+            }
+            return privileges;
+        }
+
+        public static bool HasGrantOptionForTarget(IEnumerable<string> grantStatements, string databaseName, string objectName, MySqlPrivilegeTargetType targetType)
+        {
+            string expectedTarget = NormalizeGrantTarget(BuildPrivilegeTarget(databaseName, objectName, targetType));
+            if (grantStatements == null) return false;
+            foreach (string statement in grantStatements)
+            {
+                string privilegeText;
+                string targetText;
+                if (!TryParseGrantStatement(statement, out privilegeText, out targetText)) continue;
+                if (string.Equals(NormalizeGrantTarget(targetText), expectedTarget, StringComparison.OrdinalIgnoreCase) &&
+                    statement.IndexOf("WITH GRANT OPTION", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            }
+            return false;
+        }
+
         public static string BuildUserDdlPreview(DataRow userRow)
         {
             if (userRow == null) return string.Empty;
@@ -278,7 +421,16 @@ namespace mySQLPunk.lib
             string host = GetColumnValue(userRow, "Host");
             string account = QuoteAccount(user, host);
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("CREATE USER " + account + ";");
+            string createStatement = GetColumnValue(userRow, "CreateStatement");
+            if (IsMeaningful(createStatement))
+            {
+                sb.AppendLine(createStatement.TrimEnd(';') + ";");
+                sb.AppendLine("-- Authentication credentials omitted from preview.");
+            }
+            else
+            {
+                sb.AppendLine("CREATE USER " + account + ";");
+            }
 
             string plugin = GetColumnValue(userRow, "Plugin");
             if (IsMeaningful(plugin)) sb.AppendLine("-- Plugin: " + plugin);
@@ -309,7 +461,16 @@ namespace mySQLPunk.lib
             AppendResourceLimitDdl(sb, account, userRow);
 
             string privileges = GetColumnValue(userRow, "Privileges");
-            if (IsMeaningful(privileges))
+            string grantStatements = GetColumnValue(userRow, "GrantStatements");
+            if (IsMeaningful(grantStatements))
+            {
+                sb.AppendLine("-- Privileges: " + (IsMeaningful(privileges) ? privileges : "SHOW GRANTS"));
+                foreach (string grant in grantStatements.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    sb.AppendLine(grant.TrimEnd(';') + ";");
+                }
+            }
+            else if (IsMeaningful(privileges))
             {
                 sb.AppendLine("-- Privileges: " + privileges);
                 string grantSql = BuildGrantSqlFromSummary(privileges, user, host);
@@ -323,14 +484,29 @@ namespace mySQLPunk.lib
 
         public static string BuildCreateUserSql(MySqlCreateUserOptions options)
         {
+            return BuildCreateUserSql(options, CreateDefaultAdapter());
+        }
+
+        public static string BuildCreateUserSql(MySqlCreateUserOptions options, MySqlUserProviderAdapter adapter)
+        {
             if (options == null) throw new ArgumentNullException("options");
+            if (adapter == null) adapter = CreateDefaultAdapter();
+            EnsureSupportedCreateOptions(options, adapter);
             string account = QuoteAccount(options.User, options.Host);
             StringBuilder sql = new StringBuilder();
             sql.Append("CREATE USER ").Append(account);
             if (!string.IsNullOrEmpty(options.Plugin))
             {
-                sql.Append(" IDENTIFIED WITH ").Append(QuoteIdentifier(options.Plugin));
-                if (!string.IsNullOrEmpty(options.Password)) sql.Append(" BY ").Append(QuoteLiteral(options.Password));
+                if (adapter.IsMariaDb)
+                {
+                    sql.Append(" IDENTIFIED VIA ").Append(QuoteIdentifier(options.Plugin));
+                    if (!string.IsNullOrEmpty(options.Password)) sql.Append(" USING PASSWORD(").Append(QuoteLiteral(options.Password)).Append(")");
+                }
+                else
+                {
+                    sql.Append(" IDENTIFIED WITH ").Append(QuoteIdentifier(options.Plugin));
+                    if (!string.IsNullOrEmpty(options.Password)) sql.Append(" BY ").Append(QuoteLiteral(options.Password));
+                }
             }
             else if (!string.IsNullOrEmpty(options.Password))
             {
@@ -348,9 +524,21 @@ namespace mySQLPunk.lib
             return new List<string> { BuildCreateUserSql(options) };
         }
 
+        public static List<string> BuildCreateUserSqlStatements(MySqlCreateUserOptions options, MySqlUserProviderAdapter adapter)
+        {
+            return new List<string> { BuildCreateUserSql(options, adapter) };
+        }
+
         public static List<string> BuildAlterUserSqlStatements(MySqlAlterUserOptions options)
         {
+            return BuildAlterUserSqlStatements(options, CreateDefaultAdapter());
+        }
+
+        public static List<string> BuildAlterUserSqlStatements(MySqlAlterUserOptions options, MySqlUserProviderAdapter adapter)
+        {
             if (options == null) throw new ArgumentNullException("options");
+            if (adapter == null) adapter = CreateDefaultAdapter();
+            EnsureSupportedAlterOptions(options, adapter);
             List<string> statements = new List<string>();
             string targetUser = options.User;
             string targetHost = options.Host;
@@ -366,15 +554,15 @@ namespace mySQLPunk.lib
 
             if (options.ChangePassword || !string.IsNullOrEmpty(options.Plugin))
             {
-                statements.Add(BuildAlterAuthenticationSql(targetUser, targetHost, options.Plugin, options.Password, options.ChangePassword));
+                statements.Add(BuildAlterAuthenticationSql(targetUser, targetHost, options.Plugin, options.Password, options.ChangePassword, adapter));
             }
 
             if (options.LockAccount.HasValue) statements.Add(BuildAccountLockSql(targetUser, targetHost, options.LockAccount.Value));
             if (options.ExpirePassword) statements.Add(BuildExpirePasswordSql(targetUser, targetHost));
-            if (options.RequireSsl) statements.Add(BuildSslRequirementSql(targetUser, targetHost, "SSL"));
-            if (options.ClearSslRequirement) statements.Add(BuildSslRequirementSql(targetUser, targetHost, "NONE"));
+            if (options.RequireSsl) statements.Add(BuildSslRequirementSql(targetUser, targetHost, "SSL", adapter));
+            if (options.ClearSslRequirement) statements.Add(BuildSslRequirementSql(targetUser, targetHost, "NONE", adapter));
 
-            string limitSql = BuildResourceLimitSql(targetUser, targetHost, options.MaxQuestionsPerHour, options.MaxUpdatesPerHour, options.MaxConnectionsPerHour, options.MaxUserConnections);
+            string limitSql = BuildResourceLimitSql(targetUser, targetHost, options.MaxQuestionsPerHour, options.MaxUpdatesPerHour, options.MaxConnectionsPerHour, options.MaxUserConnections, adapter);
             if (limitSql.Length > 0) statements.Add(limitSql);
 
             if (statements.Count == 0) throw new InvalidOperationException("No ALTER USER changes were requested.");
@@ -400,7 +588,14 @@ namespace mySQLPunk.lib
             foreach (string statement in statements)
             {
                 if (string.IsNullOrWhiteSpace(statement)) continue;
-                db.ExecSQL(statement);
+                Dictionary<string, string> result = db.ExecSQL(statement);
+                string status = GetResultValue(result, "status");
+                if (!string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase))
+                {
+                    string reason = GetResultValue(result, "reason");
+                    if (string.IsNullOrWhiteSpace(reason)) reason = "Database rejected the user operation.";
+                    throw new InvalidOperationException("Statement " + (executed + 1) + " failed: " + reason);
+                }
                 executed++;
             }
             return executed;
@@ -433,12 +628,23 @@ namespace mySQLPunk.lib
 
         public static string BuildSslRequirementSql(string user, string host, string sslRequirement)
         {
+            return BuildSslRequirementSql(user, host, sslRequirement, CreateDefaultAdapter());
+        }
+
+        public static string BuildSslRequirementSql(string user, string host, string sslRequirement, MySqlUserProviderAdapter adapter)
+        {
             string value = (sslRequirement ?? string.Empty).Trim().ToUpperInvariant();
-            if (value == "NONE" || value == "NO" || value == "DISABLED") return "ALTER USER " + QuoteAccount(user, host) + " REQUIRE NONE;";
-            return "ALTER USER " + QuoteAccount(user, host) + " REQUIRE " + NormalizeSslRequirement(sslRequirement) + ";";
+            string prefix = adapter != null && !adapter.SupportsAlterUser ? "GRANT USAGE ON *.* TO " : "ALTER USER ";
+            if (value == "NONE" || value == "NO" || value == "DISABLED") return prefix + QuoteAccount(user, host) + " REQUIRE NONE;";
+            return prefix + QuoteAccount(user, host) + " REQUIRE " + NormalizeSslRequirement(sslRequirement) + ";";
         }
 
         public static string BuildResourceLimitSql(string user, string host, int? maxQuestionsPerHour, int? maxUpdatesPerHour, int? maxConnectionsPerHour, int? maxUserConnections)
+        {
+            return BuildResourceLimitSql(user, host, maxQuestionsPerHour, maxUpdatesPerHour, maxConnectionsPerHour, maxUserConnections, CreateDefaultAdapter());
+        }
+
+        public static string BuildResourceLimitSql(string user, string host, int? maxQuestionsPerHour, int? maxUpdatesPerHour, int? maxConnectionsPerHour, int? maxUserConnections, MySqlUserProviderAdapter adapter)
         {
             List<string> limits = new List<string>();
             AddResourceLimit(limits, "MAX_QUERIES_PER_HOUR", maxQuestionsPerHour);
@@ -446,7 +652,8 @@ namespace mySQLPunk.lib
             AddResourceLimit(limits, "MAX_CONNECTIONS_PER_HOUR", maxConnectionsPerHour);
             AddResourceLimit(limits, "MAX_USER_CONNECTIONS", maxUserConnections);
             if (limits.Count == 0) return string.Empty;
-            return "ALTER USER " + QuoteAccount(user, host) + " WITH " + string.Join(" ", limits.ToArray()) + ";";
+            string prefix = adapter != null && !adapter.SupportsAlterUser ? "GRANT USAGE ON *.* TO " : "ALTER USER ";
+            return prefix + QuoteAccount(user, host) + " WITH " + string.Join(" ", limits.ToArray()) + ";";
         }
 
         public static string BuildGrantSql(string privilege, string databaseName, string objectName, string user, string host)
@@ -517,6 +724,32 @@ namespace mySQLPunk.lib
             return string.Empty;
         }
 
+        private static void EnrichUsersFromShowStatements(IDatabase db, DataTable users, MySqlUserProviderAdapter adapter)
+        {
+            if (db == null || users == null) return;
+            foreach (DataRow row in users.Rows)
+            {
+                row["ProviderFamily"] = adapter != null && adapter.IsMariaDb ? "MariaDB" : "MySQL";
+                row["ProviderVersion"] = string.IsNullOrWhiteSpace(adapter == null ? null : adapter.Version) ? NotSupported : adapter.Version;
+                string user = GetColumnValue(row, "Name");
+                string host = GetColumnValue(row, "Host");
+                if (user.Length == 0) continue;
+
+                List<string> grants = LoadGrantStatements(db, user, host);
+                if (grants.Count > 0)
+                {
+                    row["GrantStatements"] = string.Join(Environment.NewLine, grants.ToArray());
+                    List<string> privilegeNames = ExtractPrivilegeSummary(grants);
+                    row["Privileges"] = privilegeNames.Count == 0 ? NotSupported : string.Join(",", privilegeNames.ToArray());
+                }
+
+                string createStatement = adapter != null && adapter.SupportsShowCreateUser
+                    ? LoadSafeCreateUserStatement(db, user, host)
+                    : string.Empty;
+                if (createStatement.Length > 0) row["CreateStatement"] = createStatement;
+            }
+        }
+
         private static void AppendUserRows(DataTable target, DataTable source)
         {
             if (target == null || source == null) return;
@@ -539,7 +772,8 @@ namespace mySQLPunk.lib
                    string.Equals(columnName, "Host", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(columnName, "Status", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(columnName, "Source", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(columnName, "ProviderFamily", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(columnName, "ProviderFamily", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(columnName, "ProviderVersion", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string ColumnOrNotSupported(MySqlUserProviderAdapter adapter, string columnName)
@@ -654,14 +888,28 @@ namespace mySQLPunk.lib
             limits.Add(keyword + " " + value.Value.ToString());
         }
 
-        private static string BuildAlterAuthenticationSql(string user, string host, string plugin, string password, bool changePassword)
+        private static string BuildAlterAuthenticationSql(string user, string host, string plugin, string password, bool changePassword, MySqlUserProviderAdapter adapter)
         {
+            if (adapter != null && !adapter.SupportsAlterUser)
+            {
+                if (!string.IsNullOrEmpty(plugin)) throw new NotSupportedException("Authentication plugin changes require ALTER USER support on this server version.");
+                return "SET PASSWORD FOR " + QuoteAccount(user, host) + " = PASSWORD(" + QuoteLiteral(password ?? string.Empty) + ");";
+            }
+
             StringBuilder sql = new StringBuilder();
             sql.Append("ALTER USER ").Append(QuoteAccount(user, host));
             if (!string.IsNullOrEmpty(plugin))
             {
-                sql.Append(" IDENTIFIED WITH ").Append(QuoteIdentifier(plugin));
-                if (changePassword || password != null) sql.Append(" BY ").Append(QuoteLiteral(password ?? string.Empty));
+                if (adapter != null && adapter.IsMariaDb)
+                {
+                    sql.Append(" IDENTIFIED VIA ").Append(QuoteIdentifier(plugin));
+                    if (changePassword) sql.Append(" USING PASSWORD(").Append(QuoteLiteral(password ?? string.Empty)).Append(")");
+                }
+                else
+                {
+                    sql.Append(" IDENTIFIED WITH ").Append(QuoteIdentifier(plugin));
+                    if (changePassword) sql.Append(" BY ").Append(QuoteLiteral(password ?? string.Empty));
+                }
             }
             else
             {
@@ -669,6 +917,36 @@ namespace mySQLPunk.lib
             }
             sql.Append(";");
             return sql.ToString();
+        }
+
+        private static void EnsureSupportedCreateOptions(MySqlCreateUserOptions options, MySqlUserProviderAdapter adapter)
+        {
+            if (options.LockAccount && !adapter.SupportsAccountLock)
+                throw new NotSupportedException("Account locking is not supported by " + DescribeProvider(adapter) + ".");
+            if (options.ExpirePassword && !adapter.SupportsPasswordExpiration)
+                throw new NotSupportedException("Password expiration is not supported by " + DescribeProvider(adapter) + ".");
+        }
+
+        private static void EnsureSupportedAlterOptions(MySqlAlterUserOptions options, MySqlUserProviderAdapter adapter)
+        {
+            if (options.LockAccount.HasValue && !adapter.SupportsAccountLock)
+                throw new NotSupportedException("Account locking is not supported by " + DescribeProvider(adapter) + ".");
+            if (options.ExpirePassword && !adapter.SupportsPasswordExpiration)
+                throw new NotSupportedException("Password expiration is not supported by " + DescribeProvider(adapter) + ".");
+            if (!adapter.SupportsAlterUser && !string.IsNullOrEmpty(options.Plugin))
+                throw new NotSupportedException("Authentication plugin changes are not supported by " + DescribeProvider(adapter) + ".");
+        }
+
+        private static string DescribeProvider(MySqlUserProviderAdapter adapter)
+        {
+            if (adapter == null) return "this provider";
+            string family = adapter.IsMariaDb ? "MariaDB" : "MySQL";
+            return string.IsNullOrWhiteSpace(adapter.Version) ? family : family + " " + adapter.Version;
+        }
+
+        private static MySqlUserProviderAdapter CreateDefaultAdapter()
+        {
+            return new MySqlUserProviderAdapter("8.0.0", null, false);
         }
 
         private static string BuildGrantSqlFromSummary(string privilegeSummary, string user, string host)
@@ -689,6 +967,96 @@ namespace mySQLPunk.lib
             }
             if (privileges.Count == 0) return string.Empty;
             return BuildGrantSql(privileges, null, null, user, host, withGrantOption);
+        }
+
+        private static string GetResultValue(Dictionary<string, string> result, string key)
+        {
+            if (result == null || string.IsNullOrWhiteSpace(key)) return string.Empty;
+            string value;
+            if (result.TryGetValue(key, out value)) return value ?? string.Empty;
+            foreach (KeyValuePair<string, string> pair in result)
+            {
+                if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase)) return pair.Value ?? string.Empty;
+            }
+            return string.Empty;
+        }
+
+        private static string SanitizeCreateUserStatement(string statement)
+        {
+            string value = (statement ?? string.Empty).Trim().TrimEnd(';');
+            if (value.Length == 0) return string.Empty;
+
+            const string plugin = @"(?<plugin>`(?:``|[^`])+`|'(?:''|[^'])+'|[A-Za-z0-9_]+)";
+            const string secret = @"'(?:''|\\.|[^'])*'";
+            value = Regex.Replace(value, @"\s+IDENTIFIED\s+WITH\s+" + plugin + @"\s+(?:AS|BY)\s+" + secret,
+                " IDENTIFIED WITH ${plugin}", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"\s+IDENTIFIED\s+(?:VIA|WITH)\s+" + plugin + @"\s+(?:USING|AS)\s+(?:PASSWORD\s*\(\s*)?" + secret + @"\s*\)?",
+                " IDENTIFIED VIA ${plugin}", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"\s+IDENTIFIED\s+BY(?:\s+PASSWORD)?\s+" + secret, string.Empty, RegexOptions.IgnoreCase);
+            return value.Trim() + ";";
+        }
+
+        private static string SanitizeGrantStatement(string statement)
+        {
+            string value = (statement ?? string.Empty).Trim().TrimEnd(';');
+            if (value.Length == 0) return string.Empty;
+            const string plugin = @"(?:`(?:``|[^`])+`|'(?:''|[^'])+'|[A-Za-z0-9_]+)";
+            const string secret = @"'(?:''|\\.|[^'])*'";
+            value = Regex.Replace(value, @"\s+IDENTIFIED\s+BY(?:\s+PASSWORD)?\s+" + secret, string.Empty, RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"\s+IDENTIFIED\s+WITH\s+" + plugin + @"(?:\s+(?:AS|BY)\s+" + secret + @")?", string.Empty, RegexOptions.IgnoreCase);
+            return value.Trim() + ";";
+        }
+
+        private static List<string> ExtractPrivilegeSummary(IEnumerable<string> grants)
+        {
+            List<string> privileges = new List<string>();
+            if (grants == null) return privileges;
+            foreach (string grant in grants)
+            {
+                string privilegeText;
+                string targetText;
+                if (!TryParseGrantStatement(grant, out privilegeText, out targetText)) continue;
+                foreach (string privilege in SplitPrivilegeList(privilegeText))
+                {
+                    if (!privileges.Contains(privilege, StringComparer.OrdinalIgnoreCase)) privileges.Add(privilege);
+                }
+                if (grant.IndexOf("WITH GRANT OPTION", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    !privileges.Contains("GRANT OPTION", StringComparer.OrdinalIgnoreCase)) privileges.Add("GRANT OPTION");
+            }
+            return privileges;
+        }
+
+        private static bool TryParseGrantStatement(string statement, out string privilegeText, out string targetText)
+        {
+            privilegeText = string.Empty;
+            targetText = string.Empty;
+            string value = (statement ?? string.Empty).Trim();
+            if (!value.StartsWith("GRANT ", StringComparison.OrdinalIgnoreCase)) return false;
+            int onIndex = value.IndexOf(" ON ", StringComparison.OrdinalIgnoreCase);
+            if (onIndex < 0) return false;
+            int toIndex = value.IndexOf(" TO ", onIndex + 4, StringComparison.OrdinalIgnoreCase);
+            if (toIndex < 0) return false;
+            privilegeText = value.Substring(6, onIndex - 6).Trim();
+            targetText = value.Substring(onIndex + 4, toIndex - onIndex - 4).Trim();
+            return privilegeText.Length > 0 && targetText.Length > 0;
+        }
+
+        private static IEnumerable<string> SplitPrivilegeList(string privilegeText)
+        {
+            foreach (string part in (privilegeText ?? string.Empty).Split(','))
+            {
+                string value = part.Trim().ToUpperInvariant().Replace('_', ' ');
+                if (value.Length == 0 || value == "USAGE") continue;
+                yield return value;
+            }
+        }
+
+        private static string NormalizeGrantTarget(string target)
+        {
+            string value = (target ?? string.Empty).Trim().TrimEnd(';').Replace("`", string.Empty);
+            value = Regex.Replace(value, @"\s*\.\s*", ".");
+            value = Regex.Replace(value, @"\s+", " ");
+            return value.ToUpperInvariant();
         }
 
         private static string NormalizeSslRequirement(string ssl)
@@ -712,6 +1080,7 @@ namespace mySQLPunk.lib
                 }
             }
             if (normalized.Count == 0) throw new ArgumentException("At least one privilege is required.", "privileges");
+            if (normalized.Contains("ALL PRIVILEGES")) return new List<string> { "ALL PRIVILEGES" };
             return normalized;
         }
 

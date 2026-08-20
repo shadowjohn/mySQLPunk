@@ -38,6 +38,7 @@ public static class SmokeTests
         Run("Database dump service", TestDatabaseDumpService, ref passed);
         Run("MySQL export/import service", TestMySqlExportImportService, ref passed);
         Run("MySQL user manager service", TestMySqlUserManagerService, ref passed);
+        Run("MySQL user operation dialog", TestMySqlUserOperationDialog, ref passed);
         Run("Database rename service", TestDatabaseRenameService, ref passed);
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("SpatiaLite runtime diagnostics", TestSpatiaLiteRuntimeDiagnostics, ref passed);
@@ -4303,6 +4304,8 @@ public static class SmokeTests
             "8.0.36",
             new[] { "User", "Host", "plugin", "authentication_string", "account_locked", "password_expired", "ssl_type", "max_questions", "max_updates", "max_connections", "max_user_connections", "password_lifetime", "password_last_changed", "Select_priv", "Insert_priv", "Grant_priv" },
             false);
+        Assert(mysql8.Family == MySqlUserProviderFamily.MySql8, "MySQL 8 provider should be detected from the server version.");
+        Assert(mysql8.SupportsAlterUser && mysql8.SupportsAccountLock && mysql8.SupportsPasswordExpiration, "MySQL 8 provider capabilities should enable modern user operations.");
         string mysql8Sql = MySqlUserManagerService.BuildMysqlUserListSql(mysql8);
         AssertContains(mysql8Sql, "`account_locked`", "MySQL 8 user list should include account_locked only when the column exists.");
         AssertContains(mysql8Sql, "`password_lifetime`", "MySQL 8 user list should include password_lifetime only when the column exists.");
@@ -4323,9 +4326,12 @@ public static class SmokeTests
             "11.4.2-MariaDB",
             new[] { "User", "Host" },
             true);
+        Assert(mariaGlobal.Family == MySqlUserProviderFamily.MariaDb, "MariaDB provider should be detected from the server version suffix.");
         List<string> candidates = MySqlUserManagerService.BuildUserListSqlCandidates(mariaGlobal).ToList();
         AssertContains(candidates[0], "mysql.global_priv", "MariaDB global_priv should be the first read path when available.");
         AssertNotContains(candidates[0], "CAST(`Priv` AS CHAR)", "MariaDB global_priv list must not expose raw authentication JSON in the UI summary.");
+        AssertContains(candidates[0], "JSON_EXTRACT(`Priv`, '$.plugin')", "MariaDB global_priv list should read supported metadata from the JSON document.");
+        AssertContains(candidates[0], "$.account_locked", "MariaDB global_priv list should expose account lock state without selecting a missing mysql.user column.");
         AssertContains(candidates[1], "mysql.user", "MariaDB user view should remain a fallback read path.");
 
         string createUser = MySqlUserManagerService.BuildCreateUserSql(new MySqlCreateUserOptions
@@ -4340,6 +4346,34 @@ public static class SmokeTests
         });
         AssertContains(createUser, "CREATE USER 'u''ser'@'%'", "Create user SQL should quote user accounts safely.");
         AssertContains(createUser, "IDENTIFIED WITH `mysql_native_password` BY 'p\\\\w''1' REQUIRE SSL PASSWORD EXPIRE ACCOUNT LOCK;", "Create user SQL should include authentication, SSL, expiry, and lock options.");
+
+        string mariaCreateUser = MySqlUserManagerService.BuildCreateUserSql(new MySqlCreateUserOptions
+        {
+            User = "maria_app",
+            Host = "%",
+            Password = "secret",
+            Plugin = "mysql_native_password",
+            LockAccount = true,
+            ExpirePassword = true
+        }, mariaGlobal);
+        AssertContains(mariaCreateUser, "IDENTIFIED VIA `mysql_native_password` USING PASSWORD('secret')", "MariaDB create user SQL should use MariaDB authentication syntax instead of MySQL IDENTIFIED WITH ... BY.");
+
+        MySqlUserProviderAdapter mysql56 = new MySqlUserProviderAdapter("5.6.51", new[] { "User", "Host", "Password" }, false);
+        Assert(mysql56.Family == MySqlUserProviderFamily.MySql5 && !mysql56.SupportsAlterUser && !mysql56.SupportsAccountLock && !mysql56.SupportsShowCreateUser, "MySQL 5.6 should use legacy account-management capabilities.");
+        List<string> mysql56Password = MySqlUserManagerService.BuildAlterUserSqlStatements(new MySqlAlterUserOptions
+        {
+            User = "legacy",
+            Host = "localhost",
+            ChangePassword = true,
+            Password = "next"
+        }, mysql56);
+        AssertEquals("SET PASSWORD FOR 'legacy'@'localhost' = PASSWORD('next');", mysql56Password[0], "MySQL 5.6 password changes should use SET PASSWORD fallback.");
+        AssertThrows<NotSupportedException>(() => MySqlUserManagerService.BuildAlterUserSqlStatements(new MySqlAlterUserOptions
+        {
+            User = "legacy",
+            Host = "localhost",
+            LockAccount = true
+        }, mysql56), "MySQL 5.6 account locking should report an unsupported capability instead of sending invalid SQL.");
 
         DataTable table = MySqlUserManagerService.CreateUserTable();
         DataRow row = table.NewRow();
@@ -4376,6 +4410,16 @@ public static class SmokeTests
         AssertEquals("REVOKE EXECUTE ON FUNCTION `sales`.`fn_total` FROM 'app'@'%';", functionRevoke, "Privilege editor revoke SQL should support function-scoped routine revokes.");
         AssertEquals("`sales`.*", MySqlUserManagerService.BuildPrivilegeTargetPreview("sales", "", MySqlPrivilegeTargetType.TableOrView), "Privilege target preview should show database-wide grants.");
         AssertEquals("FUNCTION `sales`.`fn_total`", MySqlUserManagerService.BuildPrivilegeTargetPreview("sales", "fn_total", MySqlPrivilegeTargetType.Function), "Privilege target preview should show routine scope.");
+        string[] existingGrants =
+        {
+            "GRANT SELECT, INSERT ON `sales`.* TO 'app'@'%' WITH GRANT OPTION;",
+            "GRANT UPDATE ON `sales`.`orders` TO 'app'@'%';",
+            "GRANT EXECUTE ON PROCEDURE `sales`.`sp_sync` TO 'app'@'%';"
+        };
+        List<string> databasePrivileges = MySqlUserManagerService.GetGrantedPrivilegesForTarget(existingGrants, "sales", "", MySqlPrivilegeTargetType.TableOrView);
+        Assert(databasePrivileges.SequenceEqual(new[] { "SELECT", "INSERT" }), "Privilege editor should preselect current database-scoped privileges from SHOW GRANTS.");
+        Assert(MySqlUserManagerService.HasGrantOptionForTarget(existingGrants, "sales", "", MySqlPrivilegeTargetType.TableOrView), "Privilege editor should detect WITH GRANT OPTION for the selected target.");
+        Assert(MySqlUserManagerService.GetGrantedPrivilegesForTarget(existingGrants, "sales", "sp_sync", MySqlPrivilegeTargetType.Procedure).Contains("EXECUTE"), "Privilege editor should parse routine-scoped grants.");
 
         List<string> alterStatements = MySqlUserManagerService.BuildAlterUserSqlStatements(new MySqlAlterUserOptions
         {
@@ -4403,6 +4447,129 @@ public static class SmokeTests
         int executed = MySqlUserManagerService.ExecuteUserSqlStatements(execDb, alterStatements);
         Assert(executed == alterStatements.Count, "User operation executor should return the executed statement count.");
         Assert(execDb.ExecutedSql.Count == alterStatements.Count, "User operation executor should execute every statement once.");
+
+        FakeExecDatabase rejectedDb = new FakeExecDatabase("mysql", "0") { ExecStatus = "NO", ExecReason = "synthetic permission denied" };
+        AssertThrows<InvalidOperationException>(() => MySqlUserManagerService.ExecuteUserSqlStatements(rejectedDb, new[] { "DROP USER 'blocked'@'%';" }), "User operation executor must not report completion when the provider returns a failed status.");
+
+        FakeExecDatabase metadataDb = CreateUserMetadataDatabase();
+        DataTable loadedUsers = MySqlUserManagerService.LoadUsers(metadataDb);
+        Assert(loadedUsers.Rows.Count == 1, "User manager should load metadata rows from the provider adapter query.");
+        DataRow loadedUser = loadedUsers.Rows[0];
+        AssertContains(Convert.ToString(loadedUser["GrantStatements"]), "GRANT SELECT ON `sales`.*", "User manager should preserve exact SHOW GRANTS statements for DDL and privilege editing.");
+        AssertNotContains(Convert.ToString(loadedUser["GrantStatements"]), "secret-hash", "SHOW GRANTS metadata must redact legacy authentication hashes.");
+        AssertNotContains(Convert.ToString(loadedUser["CreateStatement"]), "secret-hash", "SHOW CREATE USER metadata must redact authentication hashes.");
+        AssertContains(Convert.ToString(loadedUser["CreateStatement"]), "IDENTIFIED WITH 'mysql_native_password'", "Sanitized SHOW CREATE USER metadata should preserve the authentication plugin.");
+        AssertContains(MySqlUserManagerService.BuildUserDdlPreview(loadedUser), "GRANT SELECT ON `sales`.*", "User DDL preview should include object-scoped SHOW GRANTS output.");
+    }
+
+    private static FakeExecDatabase CreateUserMetadataDatabase()
+    {
+        FakeExecDatabase db = new FakeExecDatabase("mysql", "1");
+        db.SelectHandler = sql =>
+        {
+            if (sql.StartsWith("SELECT VERSION()", StringComparison.OrdinalIgnoreCase))
+            {
+                DataTable version = new DataTable();
+                version.Columns.Add("Version");
+                version.Rows.Add("8.0.36");
+                return version;
+            }
+            if (sql.StartsWith("SHOW COLUMNS FROM mysql.user", StringComparison.OrdinalIgnoreCase))
+            {
+                DataTable columns = new DataTable();
+                columns.Columns.Add("Field");
+                foreach (string name in new[] { "User", "Host", "plugin", "authentication_string", "account_locked", "password_expired", "ssl_type", "Select_priv" }) columns.Rows.Add(name);
+                return columns;
+            }
+            if (sql.IndexOf("information_schema.tables", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable count = new DataTable();
+                count.Columns.Add("Cnt");
+                count.Rows.Add("0");
+                return count;
+            }
+            if (sql.IndexOf("FROM mysql.user", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DataTable users = MySqlUserManagerService.CreateUserTable();
+                DataRow row = users.NewRow();
+                row["Name"] = "app";
+                row["Type"] = "User";
+                row["Host"] = "%";
+                row["Status"] = "Open";
+                row["Source"] = "mysql.user";
+                row["ProviderFamily"] = "MySQL";
+                row["Plugin"] = "mysql_native_password";
+                row["PasswordExists"] = "Yes";
+                row["AccountLocked"] = "Open";
+                row["PasswordExpired"] = "Active";
+                row["SSLRequired"] = "No";
+                row["Privileges"] = "SELECT";
+                users.Rows.Add(row);
+                return users;
+            }
+            if (sql.StartsWith("SHOW GRANTS", StringComparison.OrdinalIgnoreCase))
+            {
+                DataTable grants = new DataTable();
+                grants.Columns.Add("Grants for app@%");
+                grants.Rows.Add("GRANT USAGE ON *.* TO 'app'@'%' IDENTIFIED BY PASSWORD 'secret-hash'");
+                grants.Rows.Add("GRANT SELECT ON `sales`.* TO 'app'@'%'");
+                return grants;
+            }
+            if (sql.StartsWith("SHOW CREATE USER", StringComparison.OrdinalIgnoreCase))
+            {
+                DataTable create = new DataTable();
+                create.Columns.Add("User");
+                create.Columns.Add("CREATE USER for app@%");
+                create.Rows.Add("app@%", "CREATE USER 'app'@'%' IDENTIFIED WITH 'mysql_native_password' AS 'secret-hash' REQUIRE NONE ACCOUNT UNLOCK");
+                return create;
+            }
+            return new DataTable();
+        };
+        return db;
+    }
+
+    private static void TestMySqlUserOperationDialog()
+    {
+        Assembly appAssembly = typeof(MySqlUserManagerService).Assembly;
+        Type dialogType = appAssembly.GetType("mySQLPunk.UserOperationDialog", true);
+        Type modeType = appAssembly.GetType("mySQLPunk.MySqlUserOperationMode", true);
+        object grantMode = Enum.Parse(modeType, "Grant");
+        MySqlUserProviderAdapter mysql56 = new MySqlUserProviderAdapter("5.6.51", new[] { "User", "Host" }, false);
+        string[] grants = { "GRANT SELECT, INSERT ON `sales`.* TO 'app'@'%' WITH GRANT OPTION;" };
+
+        using (Form grantDialog = (Form)Activator.CreateInstance(
+            dialogType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            new object[] { grantMode, "sales", "app", "%", new[] { "sales" }, new[] { "orders" }, mysql56, grants },
+            null))
+        {
+            TextBox existing = GetPrivateField<TextBox>(grantDialog, "txtExistingGrants");
+            CheckedListBox privileges = GetPrivateField<CheckedListBox>(grantDialog, "lstPrivileges");
+            CheckBox grantOption = GetPrivateField<CheckBox>(grantDialog, "chkWithGrantOption");
+            CheckBox lockAccount = GetPrivateField<CheckBox>(grantDialog, "chkAlterLockAccount");
+            AssertContains(existing.Text, "GRANT SELECT, INSERT", "Privilege dialog should display current SHOW GRANTS statements.");
+            Assert(privileges.CheckedItems.Cast<object>().Any(item => string.Equals(Convert.ToString(item), "SELECT", StringComparison.OrdinalIgnoreCase)), "Privilege dialog should preselect existing target privileges.");
+            Assert(grantOption.Checked, "Privilege dialog should preselect WITH GRANT OPTION for the current target.");
+            Assert(!lockAccount.Enabled, "Unsupported account-lock controls should be disabled for MySQL 5.6.");
+        }
+
+        object createMode = Enum.Parse(modeType, "Create");
+        MySqlUserProviderAdapter maria = new MySqlUserProviderAdapter("10.11.8-MariaDB", new[] { "User", "Host" }, true);
+        using (Form createDialog = (Form)Activator.CreateInstance(
+            dialogType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            new object[] { createMode, "sales", "maria_app", "%", null, null, maria, null },
+            null))
+        {
+            GetPrivateField<TextBox>(createDialog, "txtCreatePassword").Text = "secret";
+            GetPrivateField<TextBox>(createDialog, "txtCreatePlugin").Text = "mysql_native_password";
+            GetPrivateField<CheckBox>(createDialog, "chkCreateLockAccount").Checked = true;
+            MethodInfo updatePreview = dialogType.GetMethod("TryUpdatePreview", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert((bool)updatePreview.Invoke(createDialog, new object[] { false }), "MariaDB create dialog should build a valid SQL preview.");
+            AssertContains(GetPrivateField<RichTextBox>(createDialog, "txtPreview").Text, "IDENTIFIED VIA `mysql_native_password` USING PASSWORD('secret')", "MariaDB create dialog should use provider-aware authentication SQL.");
+        }
     }
 
     private static void TestDatabaseRenameService()
@@ -8147,6 +8314,19 @@ public static class SmokeTests
         if (!condition) throw new Exception(message);
     }
 
+    private static void AssertThrows<TException>(Action action, string message) where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+        throw new Exception(message);
+    }
+
     private static void AssertEquals(string expected, string actual, string message)
     {
         if (!string.Equals(expected, actual, StringComparison.Ordinal))
@@ -8501,6 +8681,9 @@ public static class SmokeTests
         public List<string> ExecutedSql = new List<string>();
         public List<string> SelectedSql = new List<string>();
         public DataTable SelectResult;
+        public Func<string, DataTable> SelectHandler;
+        public string ExecStatus = "OK";
+        public string ExecReason = string.Empty;
 
         public FakeExecDatabase(string providerName, string rowsAffected)
         {
@@ -8517,13 +8700,15 @@ public static class SmokeTests
         public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
         {
             SelectedSql.Add(sql);
+            if (SelectHandler != null) return SelectHandler(sql);
             return SelectResult == null ? new DataTable() : SelectResult;
         }
         public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
         {
             ExecutedSql.Add(sql);
-            Dictionary<string, string> result = new Dictionary<string, string> { { "status", "OK" } };
+            Dictionary<string, string> result = new Dictionary<string, string> { { "status", ExecStatus } };
             if (rowsAffected != null) result["rowsAffected"] = rowsAffected;
+            if (!string.IsNullOrWhiteSpace(ExecReason)) result["reason"] = ExecReason;
             return result;
         }
         public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }

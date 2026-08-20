@@ -310,6 +310,8 @@ namespace mySQLPunk
             Add("User.ObjectTypeFunction", "Function", "Function");
             Add("User.ObjectTypeProcedure", "Procedure", "Procedure");
             Add("User.TargetPreview", "套用範圍", "Target Preview");
+            Add("User.ExistingGrants", "目前權限 SQL", "Current Grant SQL");
+            Add("User.ProviderDetected", "伺服器：{0}", "Server: {0}");
             Add("User.WithGrantOption", "WITH GRANT OPTION", "WITH GRANT OPTION");
             Add("User.SqlPreview", "SQL 預覽", "SQL Preview");
             Add("User.Execute", "執行", "Execute");
@@ -517,6 +519,7 @@ namespace mySQLPunk
             Add("Detail.Property.Host", "主機", "Host");
             Add("Detail.Property.Source", "來源", "Source");
             Add("Detail.Property.ProviderFamily", "Provider 類型", "Provider Family");
+            Add("Detail.Property.ProviderVersion", "伺服器版本", "Server Version");
             Add("Detail.Property.Plugin", "驗證 Plugin", "Authentication Plugin");
             Add("Detail.Property.PasswordExists", "密碼狀態", "Password Exists");
             Add("Detail.Property.AccountLocked", "帳號鎖定", "Account Locked");

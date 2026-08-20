@@ -62,12 +62,21 @@ Smoke test harness：
 
 目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder 的 MySQL / SQLite 建表與 MySQL / PostgreSQL / SQL Server / Oracle / SQLite 既有資料表 ALTER 輸出，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
 
+MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
+
+```powershell
+.\tests\Run-MySqlUserIntegrationTests.ps1
+```
+
+此測試會依序啟動 MySQL 5.6、5.7、8.0、MariaDB 10.6、10.11、11.4，實際驗證 User List、Create / Alter / Rename / Drop、SSL 與 resource limits、Table / Procedure Grant/Revoke、`SHOW GRANTS`、安全 DDL preview 與 provider SQL 失敗判定。
+
 ## 目前功能概況
 
 | 功能 | 狀態 | 說明 |
 | --- | --- | --- |
 | 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，並支援切換多個連線設定檔；密碼改存 Windows Credential Manager，設定檔只保留 credential target。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
+| MySQL / MariaDB 使用者管理 | 可用 | 自動偵測 MySQL 5 / MySQL 8 / MariaDB；支援使用者 CRUD、密碼/Plugin/Lock/Expire/SSL/資源限制、Database/Table/View/Routine 權限編輯、SQL 預覽、`SHOW GRANTS` 與安全 DDL，並保留同名不同 Host 的獨立節點。 |
 | PostgreSQL | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`public` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作，部分進階索引仍有限制。 |
 | SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；欄位註解以 mySQLPunk sidecar metadata table 保存。 |
 | SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`dbo` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作。 |
@@ -101,6 +110,14 @@ Smoke test harness：
   - 現況：`AppUpdateService` 可讀取 GitHub Releases latest API，解析 `tag_name`、版本、release notes、下載頁、installer asset 與 portable zip asset；主選單「說明 > 檢查更新...」可手動檢查，選項「啟動時自動檢查更新」會在啟動後背景檢查。
   - 完成內容：版本比較會支援 `v1.2.3` 這類 release tag，若發現新版且 release 內有 `.exe` / `.msi` / `.msix` / `.appinstaller` asset，會下載到暫存更新資料夾並啟動安裝程式；若沒有 installer 但有 `mySQLPunk` portable zip，會下載到暫存更新資料夾並詢問是否立即套用，選擇套用時會產生 PowerShell 腳本，等待目前程式結束後解壓 zip、覆蓋應用程式資料夾並重新啟動 `mySQLPunk.exe`，選擇不套用則維持開啟壓縮檔供手動更新；若 release 同時附帶 `release-manifest.json` 且 manifest 內有對應檔名的 SHA-256，會在開啟或套用前先比對下載檔雜湊，不符時停止並顯示錯誤；若 release 沒有可直接下載的更新檔，才會提示開啟 release 下載頁；尚未發布 release 或網路失敗時會在手動檢查顯示錯誤，背景檢查只更新狀態列避免干擾使用者；更新檢查與下載會套用選項中心的 HTTP/HTTPS 代理設定；`scripts/package-release.ps1` 可用 Release 組態建置並產生 portable zip 與 `release-manifest.json`，manifest 包含 SHA-256 與檔案大小，可作為 GitHub Releases 上傳素材。
   - 後續方向：正式打包仍可接 Velopack 或其他 installer 流程，讓安裝版更新支援更完整的差分、回復與版本控管。
+
+- **MySQL / MariaDB 使用者管理 Phase 2 ✅ 已完成**
+  - Provider Adapter 會讀取 `SELECT VERSION()`、`SHOW COLUMNS FROM mysql.user` 與 MariaDB `mysql.global_priv`，不會直接假設 MySQL 8 欄位存在；MariaDB JSON metadata 只取需要的欄位，不顯示驗證雜湊。
+  - User List 與 Detail/DDL 顯示 User、Host、Plugin、密碼狀態、Lock、Expire、SSL、resource limits、版本、註解與完整 `SHOW GRANTS`；`SHOW CREATE USER` 會移除驗證內容後再顯示。
+  - 支援 Create / Alter / Rename / Drop、密碼、Plugin、Lock / Unlock、Expire、SSL、resource limits，以及 Database / Table / View / Function / Procedure 的 Grant / Revoke；所有操作先顯示 SQL Preview，權限畫面會讀取並預選目前 target 的權限。
+  - MySQL 5.6 缺少現代 `ALTER USER` 能力時會使用 `SET PASSWORD` 等安全 fallback，無法支援的 Lock/Expire/Plugin 操作會停用或明確回報，不會送出已知無效 SQL。
+  - 同名但 Host 不同的帳號會以 `user@host` 分開顯示與操作；provider 回傳 `status=NO` 時會停止後續 statement 並回報失敗，不再誤顯示完成。
+  - Windows smoke test 會驗證 provider SQL、權限解析、UI 預選與失敗判定；Docker 實機矩陣已覆蓋 MySQL 5.6 / 5.7 / 8.0、MariaDB 10.6 / 10.11 / 11.4 的完整 CRUD 與權限流程。
 
 - **連線群組與物件群組顯示 ✅ 已完成**
   - 觸發位置：左側樹狀清單空白處右鍵選單的「新增群組」，以及連線/群組節點右鍵選單的群組操作項目。

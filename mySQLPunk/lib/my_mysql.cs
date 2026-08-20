@@ -91,10 +91,9 @@ namespace mySQLPunk.lib
 	            }
 	        }
 
-	        private DataTable ExecuteDataTable(string sql, Dictionary<string, object> parameters, int commandTimeoutSeconds)
-	        {
-	            DataTable output = new DataTable();
-	            using (MySqlCommand cmd = new MySqlCommand(sql, MCT))
+        private DataTable ExecuteDataTable(string sql, Dictionary<string, object> parameters, int commandTimeoutSeconds)
+        {
+            using (MySqlCommand cmd = new MySqlCommand(sql, MCT))
 	            {
                 cmd.CommandTimeout = commandTimeoutSeconds;
                 if (parameters != null)
@@ -106,9 +105,39 @@ namespace mySQLPunk.lib
                 }
                 using (MySqlDataReader reader = cmd.ExecuteReader())
                 {
-                    output.Load(reader);
+                    return ReadDataTableWithoutProviderConstraints(reader);
                 }
             }
+        }
+
+        internal static DataTable ReadDataTableWithoutProviderConstraints(IDataReader reader)
+        {
+            DataTable output = new DataTable();
+            if (reader == null) return output;
+
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                string baseName = string.IsNullOrWhiteSpace(reader.GetName(i)) ? "Column" + (i + 1) : reader.GetName(i);
+                string name = baseName;
+                int suffix = 2;
+                while (output.Columns.Contains(name)) name = baseName + "_" + suffix++;
+
+                Type fieldType;
+                try { fieldType = reader.GetFieldType(i) ?? typeof(object); }
+                catch { fieldType = typeof(object); }
+                DataColumn column = new DataColumn(name, fieldType) { AllowDBNull = true };
+                output.Columns.Add(column);
+            }
+
+            output.BeginLoadData();
+            while (reader.Read())
+            {
+                object[] values = new object[reader.FieldCount];
+                reader.GetValues(values);
+                for (int i = 0; i < values.Length; i++) if (values[i] == null) values[i] = DBNull.Value;
+                output.Rows.Add(values);
+            }
+            output.EndLoadData();
             return output;
         }
 
@@ -141,7 +170,6 @@ namespace mySQLPunk.lib
 
         public DataTable selectSQL_SAFE(string SQL, Dictionary<string, object> key_value)
         {
-            DataTable output = new DataTable();
             using (MySqlCommand cmd = new MySqlCommand(SQL, MCT))
             {
                 foreach (var key in key_value.Keys)
@@ -150,10 +178,9 @@ namespace mySQLPunk.lib
                 }
                 using (MySqlDataReader reader = cmd.ExecuteReader())
                 {
-                    output.Load(reader);
+                    return ReadDataTableWithoutProviderConstraints(reader);
                 }
             }
-            return output;
         }
 
         public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
@@ -187,7 +214,6 @@ namespace mySQLPunk.lib
 
         public async System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null)
         {
-            DataTable output = new DataTable();
             using (MySqlCommand cmd = new MySqlCommand(sql, MCT))
             {
                 if (parameters != null)
@@ -199,10 +225,9 @@ namespace mySQLPunk.lib
                 }
                 using (var reader = await cmd.ExecuteReaderAsync())
                 {
-                    output.Load(reader);
+                    return ReadDataTableWithoutProviderConstraints(reader);
                 }
             }
-            return output;
         }
 
         public async System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null)

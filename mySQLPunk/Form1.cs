@@ -3670,11 +3670,20 @@ namespace mySQLPunk
         private sealed class TreeObjectNodeTag
         {
             public TreeObjectNodeTag(string groupKey)
+                : this(groupKey, string.Empty, string.Empty)
+            {
+            }
+
+            public TreeObjectNodeTag(string groupKey, string objectName, string secondaryKey)
             {
                 GroupKey = groupKey ?? string.Empty;
+                ObjectName = objectName ?? string.Empty;
+                SecondaryKey = secondaryKey ?? string.Empty;
             }
 
             public string GroupKey { get; }
+            public string ObjectName { get; }
+            public string SecondaryKey { get; }
         }
 
         private string[] GetTreePathParts(TreeNode node)
@@ -3694,7 +3703,7 @@ namespace mySQLPunk
                 TreeObjectNodeTag objectTag = current.Tag as TreeObjectNodeTag;
                 if (objectTag != null)
                 {
-                    parts.Insert(0, current.Text);
+                    parts.Insert(0, string.IsNullOrWhiteSpace(objectTag.ObjectName) ? current.Text : objectTag.ObjectName);
                     string parentGroupKey = current.Parent == null ? string.Empty : GetTreeGroupKey(current.Parent);
                     if (!string.Equals(parentGroupKey, objectTag.GroupKey, StringComparison.OrdinalIgnoreCase))
                     {
@@ -3782,9 +3791,22 @@ namespace mySQLPunk
         {
             return new TreeNode(objectName)
             {
-                Tag = new TreeObjectNodeTag(groupKey),
+                Tag = new TreeObjectNodeTag(groupKey, objectName, string.Empty),
                 ImageIndex = imageIndex,
                 SelectedImageIndex = imageIndex
+            };
+        }
+
+        private static TreeNode CreateUserTreeNode(DataRow userRow)
+        {
+            string user = userRow == null ? string.Empty : Convert.ToString(userRow["Name"]);
+            string host = userRow == null ? string.Empty : Convert.ToString(userRow["Host"]);
+            if (string.IsNullOrWhiteSpace(host)) host = "%";
+            return new TreeNode(user + "@" + host)
+            {
+                Tag = new TreeObjectNodeTag("Users", user, host),
+                ImageIndex = 19,
+                SelectedImageIndex = 19
             };
         }
 
@@ -6866,9 +6888,12 @@ namespace mySQLPunk
                 if (pathParts.Length >= 4 && pathParts[2] == "Users")
                 {
                     string userName = pathParts[3];
-                    lblSidebarTitle.Text = BuildSidebarObjectTitle("User", userName);
+                    TreeObjectNodeTag userTag = e.Node == null ? null : e.Node.Tag as TreeObjectNodeTag;
+                    string userHost = userTag == null ? string.Empty : userTag.SecondaryKey;
+                    string userDisplayName = string.IsNullOrWhiteSpace(userHost) ? userName : userName + "@" + userHost;
+                    lblSidebarTitle.Text = BuildSidebarObjectTitle("User", userDisplayName);
                     ShowDatabaseGroupList(db, dbName, "Users", connInfo);
-                    ShowUserDetails(db, dbName, userName, connInfo);
+                    ShowUserDetails(db, dbName, userName, userHost, connInfo);
                     showTools("點到User本身");
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Models")
@@ -8110,12 +8135,17 @@ namespace mySQLPunk
                 displayDt.Columns.Add("主機");
                 displayDt.Columns.Add("Plugin");
                 displayDt.Columns.Add("密碼");
+                displayDt.Columns.Add("帳號鎖定");
+                displayDt.Columns.Add("密碼過期");
                 displayDt.Columns.Add("SSL");
                 displayDt.Columns.Add("每小時查詢");
                 displayDt.Columns.Add("每小時更新");
                 displayDt.Columns.Add("每小時連線");
                 displayDt.Columns.Add("最大連線");
                 displayDt.Columns.Add("密碼上次變更");
+                displayDt.Columns.Add("Provider");
+                displayDt.Columns.Add("版本");
+                displayDt.Columns.Add("註解");
                 displayDt.Columns.Add("來源");
                 foreach (DataRow userRow in GetDatabaseUsers(db, dbName, connInfo).Rows)
                 {
@@ -8126,12 +8156,17 @@ namespace mySQLPunk
                     row["主機"] = userRow["Host"];
                     row["Plugin"] = userRow["Plugin"];
                     row["密碼"] = userRow["PasswordExists"];
+                    row["帳號鎖定"] = userRow["AccountLocked"];
+                    row["密碼過期"] = userRow["PasswordExpired"];
                     row["SSL"] = userRow["SSLRequired"];
                     row["每小時查詢"] = userRow["MaxQuestionsPerHour"];
                     row["每小時更新"] = userRow["MaxUpdatesPerHour"];
                     row["每小時連線"] = userRow["MaxConnectionsPerHour"];
                     row["最大連線"] = userRow["MaxConnections"];
                     row["密碼上次變更"] = userRow["PasswordLastChanged"];
+                    row["Provider"] = userRow["ProviderFamily"];
+                    row["版本"] = userRow["ProviderVersion"];
+                    row["註解"] = userRow["Comment"];
                     row["來源"] = userRow["Source"];
                     displayDt.Rows.Add(row);
                 }
@@ -9661,7 +9696,7 @@ namespace mySQLPunk
             }
         }
 
-        private void ShowUserDetails(IDatabase db, string dbName, string userName, Dictionary<string, object> connInfo = null)
+        private void ShowUserDetails(IDatabase db, string dbName, string userName, string userHost = null, Dictionary<string, object> connInfo = null)
         {
             dgvDetails.Rows.Clear();
             btnInfo.PerformClick();
@@ -9670,7 +9705,8 @@ namespace mySQLPunk
             {
                 DataRow match = GetDatabaseUsers(db, dbName, connInfo).Rows
                     .Cast<DataRow>()
-                    .FirstOrDefault(row => string.Equals(row["Name"].ToString(), userName, StringComparison.OrdinalIgnoreCase));
+                    .FirstOrDefault(row => string.Equals(row["Name"].ToString(), userName, StringComparison.OrdinalIgnoreCase) &&
+                                           (string.IsNullOrWhiteSpace(userHost) || string.Equals(Convert.ToString(row["Host"]), userHost, StringComparison.OrdinalIgnoreCase)));
 
                 if (match == null)
                 {
@@ -9683,6 +9719,7 @@ namespace mySQLPunk
                 AddDetailRow("Host", match["Host"]);
                 AddDetailRow("Status", match["Status"]);
                 AddDetailRow("ProviderFamily", match["ProviderFamily"]);
+                AddDetailRow("ProviderVersion", match["ProviderVersion"]);
                 AddDetailRow("Plugin", match["Plugin"]);
                 AddDetailRow("PasswordExists", match["PasswordExists"]);
                 AddDetailRow("AccountLocked", match["AccountLocked"]);
@@ -10231,7 +10268,19 @@ namespace mySQLPunk
 
             string user = identity == null ? string.Empty : identity.User;
             string host = identity == null ? "%" : identity.Host;
-            using (UserOperationDialog dialog = new UserOperationDialog(mode, target.DatabaseName, user, host, BuildUserPrivilegeDatabaseChoices(target), BuildUserPrivilegeObjectChoices(target)))
+            MySqlUserProviderAdapter adapter = MySqlUserProviderAdapter.Detect(target.Database);
+            List<string> existingGrants = identity == null
+                ? new List<string>()
+                : MySqlUserManagerService.LoadGrantStatements(target.Database, user, host);
+            using (UserOperationDialog dialog = new UserOperationDialog(
+                mode,
+                target.DatabaseName,
+                user,
+                host,
+                BuildUserPrivilegeDatabaseChoices(target),
+                BuildUserPrivilegeObjectChoices(target),
+                adapter,
+                existingGrants))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
@@ -10301,6 +10350,11 @@ namespace mySQLPunk
             if (pathParts.Length >= 4 && pathParts[2] == "Users")
             {
                 string userName = pathParts[3];
+                TreeObjectNodeTag userTag = selectedNode == null ? null : selectedNode.Tag as TreeObjectNodeTag;
+                if (userTag != null && !string.IsNullOrWhiteSpace(userTag.SecondaryKey))
+                {
+                    return new UserIdentity { User = userName, Host = userTag.SecondaryKey };
+                }
                 string host = "%";
                 try
                 {
@@ -13591,7 +13645,7 @@ namespace mySQLPunk
             {
                 foreach (DataRow userRow in snapshot.Users.Rows)
                 {
-                    newNode.Nodes.Add(CreateTreeObjectNode(userRow["Name"].ToString(), "Users", 19));
+                    newNode.Nodes.Add(CreateUserTreeNode(userRow));
                 }
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -13692,7 +13746,7 @@ namespace mySQLPunk
             Dictionary<string, object> connInfo = connIdxUsers >= 0 && connIdxUsers < myN.connections.Count ? myN.connections[connIdxUsers] : null;
             foreach (DataRow userRow in GetDatabaseUsers(db, databaseName, connInfo).Rows)
             {
-                newNode.Nodes.Add(CreateTreeObjectNode(userRow["Name"].ToString(), "Users", 19));
+                newNode.Nodes.Add(CreateUserTreeNode(userRow));
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
 
