@@ -40,6 +40,7 @@ public static class SmokeTests
         Run("MySQL user manager service", TestMySqlUserManagerService, ref passed);
         Run("MySQL user operation dialog", TestMySqlUserOperationDialog, ref passed);
         Run("Database rename service", TestDatabaseRenameService, ref passed);
+        Run("Database rename tree keyboard", TestDatabaseRenameTreeKeyboard, ref passed);
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("SpatiaLite runtime diagnostics", TestSpatiaLiteRuntimeDiagnostics, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
@@ -4271,6 +4272,33 @@ public static class SmokeTests
         AssertNotContains(sql, "DEFINER", "MySQL export should remove DEFINER by default for cross-environment imports.");
         Assert(result.TableCount == 1 && result.ViewCount == 1 && result.RoutineCount == 2 && result.TriggerCount == 1 && result.RowCount == 1, "MySQL export result should count exported objects and rows.");
 
+        MySqlExportOptions selectedOptions = new MySqlExportOptions
+        {
+            IncludeTables = true,
+            IncludeViews = false,
+            IncludeRoutines = false,
+            IncludeTriggers = false,
+            SelectedTables = new List<string>(),
+            IncludeDropStatements = true
+        };
+        string selectedSql = MySqlExportService.BuildExportSql(db, "main", selectedOptions);
+        AssertNotContains(selectedSql, "CREATE TABLE `users`", "MySQL export should omit unchecked tables.");
+        AssertNotContains(selectedSql, "DROP TABLE", "A data-only or empty selection export should not emit destructive DROP statements for omitted objects.");
+
+        string exportPath = Path.Combine(Path.GetTempPath(), "mysqlpunk-stream-export-" + Guid.NewGuid().ToString("N") + ".sql");
+        try
+        {
+            MySqlExportResult streamedResult = MySqlExportService.WriteExportToFile(db, "main", options, exportPath, null);
+            byte[] exportedBytes = File.ReadAllBytes(exportPath);
+            Assert(streamedResult.Sql == null, "Streaming MySQL export should not retain the full SQL script in memory.");
+            Assert(exportedBytes.Length > 3 && !(exportedBytes[0] == 0xEF && exportedBytes[1] == 0xBB && exportedBytes[2] == 0xBF), "Streaming MySQL export should write UTF-8 without BOM.");
+            AssertContains(File.ReadAllText(exportPath, Encoding.UTF8), "CREATE TABLE `users`", "Streaming MySQL export should write the full schema to disk.");
+        }
+        finally
+        {
+            if (File.Exists(exportPath)) File.Delete(exportPath);
+        }
+
         string databaseDump = DatabaseDumpService.BuildDatabaseDump(db, "main");
         AssertContains(databaseDump, "-- mySQLPunk MySQL Export", "Generic database dump should use the MySQL-specific export path for MySQL connections.");
 
@@ -4296,6 +4324,37 @@ public static class SmokeTests
             null);
         Assert(streamingResult.ExecutedStatements == 2, "MySQL import should execute streaming statements successfully.");
         Assert(streamingDb.ExecutedSql.Count == 2, "MySQL import should execute the first statement before reading the rest of the file.");
+
+        string existingScript = "USE `main`;\nDROP TABLE IF EXISTS `users`;\nCREATE TABLE `users` (`id` int);\nINSERT INTO `users` VALUES (1);";
+        FakeExecDatabase recreateDb = new FakeExecDatabase("mysql", "1");
+        recreateDb.ExistingTables.Add("main.users");
+        MySqlImportResult recreateResult = MySqlImportService.Execute(
+            recreateDb,
+            new StringReader(existingScript),
+            new MySqlImportOptions { ExistingObjectStrategy = MySqlExistingObjectStrategy.DropAndRecreate },
+            null);
+        Assert(recreateResult.FailedStatements == 0, "Drop-and-recreate import should finish without failures.");
+        Assert(recreateDb.ExecutedSql.Any(value => value == "DROP TABLE IF EXISTS `main`.`users`;"), "Drop-and-recreate import should add an object-specific DROP before CREATE.");
+
+        FakeExecDatabase createMissingDb = new FakeExecDatabase("mysql", "1");
+        createMissingDb.ExistingTables.Add("main.users");
+        MySqlImportResult createMissingResult = MySqlImportService.Execute(
+            createMissingDb,
+            new StringReader(existingScript),
+            new MySqlImportOptions { ExistingObjectStrategy = MySqlExistingObjectStrategy.CreateIfMissing },
+            null);
+        Assert(createMissingResult.SkippedStatements == 2, "Create-if-missing import should skip the script DROP and existing CREATE.");
+        Assert(createMissingDb.ExecutedSql.Any(value => value.StartsWith("INSERT INTO", StringComparison.OrdinalIgnoreCase)), "Create-if-missing import should still import data for an existing table.");
+
+        FakeExecDatabase skipExistingDb = new FakeExecDatabase("mysql", "1");
+        skipExistingDb.ExistingTables.Add("main.users");
+        MySqlImportResult skipExistingResult = MySqlImportService.Execute(
+            skipExistingDb,
+            new StringReader(existingScript),
+            new MySqlImportOptions { ExistingObjectStrategy = MySqlExistingObjectStrategy.SkipExisting },
+            null);
+        Assert(skipExistingResult.SkippedStatements == 3, "Skip-existing import should skip DROP, CREATE, and data for an existing table.");
+        Assert(!skipExistingDb.ExecutedSql.Any(value => value.StartsWith("INSERT INTO", StringComparison.OrdinalIgnoreCase)), "Skip-existing import should not append duplicate data to an existing table.");
     }
 
     private static void TestMySqlUserManagerService()
@@ -4586,7 +4645,7 @@ public static class SmokeTests
         FakeRenameDatabase mysql = new FakeRenameDatabase("mysql");
         DatabaseRenameResult mysqlResult = DatabaseRenameService.Rename(mysql, "old_db", "new_db", new DatabaseRenameOptions(), null);
         string mysqlSql = string.Join("\n", mysql.ExecutedSql.ToArray());
-        AssertContains(mysqlSql, "CREATE DATABASE `new_db`;", "MySQL database rename should create the target database.");
+        AssertContains(mysqlSql, "CREATE DATABASE IF NOT EXISTS `new_db`", "MySQL database rename should create the target database.");
         AssertContains(mysqlSql, "USE `new_db`", "MySQL copy-based rename should import routines and triggers into the target database.");
         AssertContains(mysqlSql, "CREATE FUNCTION `fn_label`", "MySQL copy-based rename should copy functions.");
         AssertContains(mysqlSql, "CREATE PROCEDURE `sp_touch`", "MySQL copy-based rename should copy procedures.");
@@ -8314,6 +8373,34 @@ public static class SmokeTests
         if (!condition) throw new Exception(message);
     }
 
+    private static void TestDatabaseRenameTreeKeyboard()
+    {
+        using (Form1 form = new Form1())
+        {
+            FieldInfo treeField = typeof(Form1).GetField("db_tree", BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo allowEditField = typeof(Form1).GetField("_allowTreeLabelEdit", BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo keyDownMethod = typeof(Form1).GetMethod("db_tree_KeyDown", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert(treeField != null && allowEditField != null && keyDownMethod != null, "Database rename keyboard members should remain wired.");
+
+            TreeView tree = (TreeView)treeField.GetValue(form);
+            TreeNode connection = tree.Nodes.Add("integration-connection");
+            TreeNode database = connection.Nodes.Add("old_database");
+            tree.SelectedNode = database;
+            form.CreateControl();
+            tree.CreateControl();
+
+            KeyEventArgs f2 = new KeyEventArgs(Keys.F2);
+            keyDownMethod.Invoke(form, new object[] { tree, f2 });
+            Assert((bool)allowEditField.GetValue(form), "F2 should enter inline database rename mode.");
+            Assert(tree.LabelEdit && f2.Handled && f2.SuppressKeyPress, "F2 should enable tree label editing and consume the key.");
+
+            KeyEventArgs escape = new KeyEventArgs(Keys.Escape);
+            keyDownMethod.Invoke(form, new object[] { tree, escape });
+            Assert(!(bool)allowEditField.GetValue(form), "Escape should leave inline database rename mode.");
+            Assert(!tree.LabelEdit && escape.Handled && escape.SuppressKeyPress, "Escape should cancel rename without falling through to connection close handling.");
+        }
+    }
+
     private static void AssertThrows<TException>(Action action, string message) where TException : Exception
     {
         try
@@ -8684,6 +8771,8 @@ public static class SmokeTests
         public Func<string, DataTable> SelectHandler;
         public string ExecStatus = "OK";
         public string ExecReason = string.Empty;
+        public HashSet<string> ExistingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> ExistingViews = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public FakeExecDatabase(string providerName, string rowsAffected)
         {
@@ -8721,8 +8810,8 @@ public static class SmokeTests
         public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
         public string GetTableCreateStatement(string databaseName, string tableName) { return ""; }
-        public bool TableExists(string databaseName, string tableName) { return false; }
-        public bool ViewExists(string databaseName, string viewName) { return false; }
+        public bool TableExists(string databaseName, string tableName) { return ExistingTables.Contains((databaseName ?? string.Empty) + "." + (tableName ?? string.Empty)); }
+        public bool ViewExists(string databaseName, string viewName) { return ExistingViews.Contains((databaseName ?? string.Empty) + "." + (viewName ?? string.Empty)); }
         public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
         public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
         public long CountRows(string databaseName, string tableName) { return 0; }

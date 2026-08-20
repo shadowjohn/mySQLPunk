@@ -37,7 +37,7 @@ namespace mySQLPunk.lib
 
         public void Close()
         {
-            if (MCT.State != ConnectionState.Closed) MCT.Close();
+            if (MCT != null && MCT.State != ConnectionState.Closed) MCT.Close();
         }
         public void close() => Close();
 

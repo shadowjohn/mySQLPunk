@@ -70,6 +70,22 @@ MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
 
 此測試會依序啟動 MySQL 5.6、5.7、8.0、MariaDB 10.6、10.11、11.4，實際驗證 User List、Create / Alter / Rename / Drop、SSL 與 resource limits、Table / Procedure Grant/Revoke、`SHOW GRANTS`、安全 DDL preview 與 provider SQL 失敗判定。
 
+MySQL / MariaDB 匯出、匯入與 copy-based database rename 實機矩陣（需先啟動 Docker）：
+
+```powershell
+.\tests\Run-MySqlExportRenameIntegrationTests.ps1
+```
+
+此測試會在上述六個版本建立含主鍵、唯一鍵、一般索引、外鍵、AUTO_INCREMENT、資料表/欄位註解、utf8mb4 中文與 emoji、特殊字元、NULL、BLOB、decimal、datetime、View、Function、Procedure、Trigger 的資料庫，實際驗證串流匯出、UTF-8 without BOM、刪除後重新匯入、既有物件策略、指定物件匯出，以及保留原資料庫的 copy-based rename；同一份匯出檔也會再交給容器內建的 `mysql` / `mariadb` CLI 匯入並查回資料筆數，確認不是只有 mySQLPunk 自己能解析。
+
+SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Docker 以測試後兩者）：
+
+```powershell
+.\tests\Run-DatabaseRenameProviderIntegrationTests.ps1
+```
+
+此測試會實際驗證 SQLite 檔案移動後可重新開啟與讀取資料、PostgreSQL `ALTER DATABASE ... RENAME TO ...`、SQL Server `ALTER DATABASE ... MODIFY NAME`，並確認舊名稱消失、新名稱可由 provider metadata 讀取。
+
 ## 目前功能概況
 
 | 功能 | 狀態 | 說明 |
@@ -77,6 +93,8 @@ MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
 | 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，並支援切換多個連線設定檔；密碼改存 Windows Credential Manager，設定檔只保留 credential target。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | MySQL / MariaDB 使用者管理 | 可用 | 自動偵測 MySQL 5 / MySQL 8 / MariaDB；支援使用者 CRUD、密碼/Plugin/Lock/Expire/SSL/資源限制、Database/Table/View/Routine 權限編輯、SQL 預覽、`SHOW GRANTS` 與安全 DDL，並保留同名不同 Host 的獨立節點。 |
+| MySQL 匯出 / 匯入 | 可用 | 可選 Table/View/Routine/Trigger，支援完整 `SHOW CREATE` 結構、批次資料、DEFINER 移除、DELIMITER、UTF-8 without BOM 與串流檔案處理；匯入可選照 SQL 執行、刪除重建、只建不存在物件、略過既有物件與資料。 |
+| Database inline rename | 可用 | Database、Table、View 可用 F2 或右鍵改名；Esc 只取消編輯。MySQL 以完整 SQL 串流複製並保留舊 DB，PostgreSQL/SQL Server 使用原生 rename，SQLite 會移動檔案並更新連線路徑。 |
 | PostgreSQL | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`public` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作，部分進階索引仍有限制。 |
 | SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；欄位註解以 mySQLPunk sidecar metadata table 保存。 |
 | SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`dbo` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作。 |
@@ -118,6 +136,20 @@ MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
   - MySQL 5.6 缺少現代 `ALTER USER` 能力時會使用 `SET PASSWORD` 等安全 fallback，無法支援的 Lock/Expire/Plugin 操作會停用或明確回報，不會送出已知無效 SQL。
   - 同名但 Host 不同的帳號會以 `user@host` 分開顯示與操作；provider 回傳 `status=NO` 時會停止後續 statement 並回報失敗，不再誤顯示完成。
   - Windows smoke test 會驗證 provider SQL、權限解析、UI 預選與失敗判定；Docker 實機矩陣已覆蓋 MySQL 5.6 / 5.7 / 8.0、MariaDB 10.6 / 10.11 / 11.4 的完整 CRUD 與權限流程。
+
+- **MySQL 完整匯出 / 匯入 ✅ 已完成**
+  - 匯出選項可分頁勾選 Table、View、Function/Procedure、Trigger，並選擇結構、資料、DROP、CREATE DATABASE、USE、DEFINER、外鍵檢查與 INSERT batch size。
+  - 大型匯出會直接以 UTF-8 without BOM 串流寫入檔案，不會先把整份 SQL 留在記憶體；每批資料與每個物件都會更新中央遮罩進度視窗。
+  - Table 結構沿用 provider 的 `SHOW CREATE TABLE`，可保留索引、外鍵、AUTO_INCREMENT、charset/collation、資料表與欄位註解；資料會安全處理 NULL、特殊字元、中文/emoji、日期、decimal 與 BLOB hex。
+  - View、Function、Procedure、Trigger 支援移除 DEFINER 與 DELIMITER；匯入會逐段串流解析，並可選照 SQL 執行、刪除後重建、只建立不存在物件、略過既有物件及資料。
+  - Windows smoke 與 Docker 實機矩陣已覆蓋 MySQL 5.6 / 5.7 / 8.0、MariaDB 10.6 / 10.11 / 11.4 的完整 round-trip。
+
+- **Database Tree inline rename ✅ 已完成**
+  - Database、Table、View 節點可用 F2 或右鍵進入 inline rename；Enter 執行、Esc 只取消改名，不會繼續觸發關閉連線。
+  - MySQL 會使用完整 `SHOW CREATE` SQL 串流複製 Table、資料、View、Function、Procedure、Trigger，保留 charset、索引、外鍵與註解，並明確保留舊 database；DDL 中的 database qualifier 會安全改成新名稱。
+  - PostgreSQL、SQL Server 使用原生 rename；SQLite 會關閉連線、移動檔案、更新 connection string 與 profile path，再重新開啟資料庫。
+  - 改名在背景執行，中央遮罩進度視窗會顯示目前物件；成功後刷新並選取新節點，失敗會保留 provider、原名稱、新名稱與原因。
+  - Windows keyboard smoke、SQLite 實體檔案，以及 PostgreSQL 17、SQL Server 2022、六個 MySQL/MariaDB 版本均已實際驗證。
 
 - **連線群組與物件群組顯示 ✅ 已完成**
   - 觸發位置：左側樹狀清單空白處右鍵選單的「新增群組」，以及連線/群組節點右鍵選單的群組操作項目。

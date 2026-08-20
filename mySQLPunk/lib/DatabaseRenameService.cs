@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace mySQLPunk.lib
 {
@@ -147,55 +146,47 @@ namespace mySQLPunk.lib
             }
 
             AddMessage(result, progress, Localization.T("DatabaseRename.MySqlCopyNotice"));
-            ExecuteChecked(db, "CREATE DATABASE " + QuoteMySqlIdentifier(newName) + ";");
-            AddMessage(result, progress, Localization.Format("DatabaseRename.DatabaseCreated", newName));
-
-            DatabaseCopyService copyService = new DatabaseCopyService(options.BatchSize);
-            foreach (string tableName in SafeList(db.GetTables(oldName)))
+            string tempPath = Path.Combine(Path.GetTempPath(), "mysqlpunk-rename-" + Guid.NewGuid().ToString("N") + ".sql");
+            try
             {
-                DatabaseCopyItem source = new DatabaseCopyItem
+                MySqlExportOptions exportOptions = new MySqlExportOptions
                 {
-                    Database = db,
-                    DatabaseName = oldName,
-                    ObjectName = tableName,
-                    ObjectKind = "table",
-                    ProviderName = db.ProviderName
+                    IncludeStructure = true,
+                    IncludeData = true,
+                    IncludeDropStatements = false,
+                    IncludeCreateDatabase = true,
+                    IncludeUseDatabase = true,
+                    DisableForeignKeyChecks = true,
+                    IncludeTables = true,
+                    IncludeViews = true,
+                    IncludeRoutines = true,
+                    IncludeTriggers = true,
+                    RemoveDefiner = true,
+                    InsertBatchSize = options.BatchSize,
+                    TargetDatabaseName = newName
                 };
-                DatabaseCopyItem target = new DatabaseCopyItem
-                {
-                    Database = db,
-                    DatabaseName = newName,
-                    ObjectName = tableName,
-                    ObjectKind = "table",
-                    ProviderName = db.ProviderName
-                };
-                copyService.Copy(source, target, p => AddMessage(result, progress, p == null ? string.Empty : p.Message));
-                result.TablesCopied++;
-            }
+                MySqlExportResult export = MySqlExportService.WriteExportToFile(
+                    db,
+                    oldName,
+                    exportOptions,
+                    tempPath,
+                    message => AddMessage(result, progress, message));
+                MySqlImportService.Execute(
+                    db,
+                    tempPath,
+                    new MySqlImportOptions(),
+                    message => AddMessage(result, progress, message));
 
-            foreach (string viewName in SafeList(db.GetViews(oldName)))
+                result.TablesCopied = export.TableCount;
+                result.ViewsCopied = export.ViewCount;
+                result.RoutinesCopied = export.RoutineCount;
+                result.TriggersCopied = export.TriggerCount;
+                AddMessage(result, progress, Localization.Format("DatabaseRename.DatabaseCreated", newName));
+            }
+            finally
             {
-                DatabaseCopyItem source = new DatabaseCopyItem
-                {
-                    Database = db,
-                    DatabaseName = oldName,
-                    ObjectName = viewName,
-                    ObjectKind = "view",
-                    ProviderName = db.ProviderName
-                };
-                DatabaseCopyItem target = new DatabaseCopyItem
-                {
-                    Database = db,
-                    DatabaseName = newName,
-                    ObjectName = viewName,
-                    ObjectKind = "view",
-                    ProviderName = db.ProviderName
-                };
-                copyService.Copy(source, target, p => AddMessage(result, progress, p == null ? string.Empty : p.Message));
-                result.ViewsCopied++;
+                if (File.Exists(tempPath)) File.Delete(tempPath);
             }
-
-            CopyMySqlRoutinesAndTriggers(db, oldName, newName, result, progress);
 
             result.OldDatabaseRetained = true;
             AddMessage(result, progress, Localization.Format(
@@ -205,35 +196,6 @@ namespace mySQLPunk.lib
                 result.RoutinesCopied,
                 result.TriggersCopied));
             AddMessage(result, progress, Localization.T("DatabaseRename.MySqlOldDatabaseRetained"));
-        }
-
-        private static void CopyMySqlRoutinesAndTriggers(IDatabase db, string oldName, string newName, DatabaseRenameResult result, Action<string> progress)
-        {
-            MySqlExportOptions exportOptions = new MySqlExportOptions
-            {
-                IncludeStructure = true,
-                IncludeData = false,
-                IncludeDropStatements = false,
-                IncludeCreateDatabase = false,
-                IncludeUseDatabase = false,
-                DisableForeignKeyChecks = false,
-                IncludeTables = false,
-                IncludeViews = false,
-                IncludeRoutines = true,
-                IncludeTriggers = true,
-                RemoveDefiner = true
-            };
-
-            MySqlExportResult export = MySqlExportService.BuildExport(db, oldName, exportOptions, message => AddMessage(result, progress, message));
-            result.RoutinesCopied = export.RoutineCount;
-            result.TriggersCopied = export.TriggerCount;
-            if (result.RoutinesCopied + result.TriggersCopied == 0) return;
-
-            string script = "USE " + QuoteMySqlIdentifier(newName) + ";\r\n" + export.Sql;
-            using (StringReader reader = new StringReader(script))
-            {
-                MySqlImportService.Execute(db, reader, new MySqlImportOptions(), message => AddMessage(result, progress, message));
-            }
         }
 
         private static void RenameSqliteFile(IDatabase db, string newName, DatabaseRenameOptions options, Action<string> progress, DatabaseRenameResult result)
@@ -331,11 +293,6 @@ namespace mySQLPunk.lib
             }
         }
 
-        private static IEnumerable<string> SafeList(IEnumerable<string> values)
-        {
-            return values == null ? Enumerable.Empty<string>() : values.Where(v => !string.IsNullOrWhiteSpace(v));
-        }
-
         private static void ExecuteChecked(IDatabase db, string sql)
         {
             Dictionary<string, string> result = db.ExecSQL(sql);
@@ -356,11 +313,6 @@ namespace mySQLPunk.lib
         private static string NormalizeProvider(string providerName)
         {
             return (providerName ?? string.Empty).Trim().ToLowerInvariant();
-        }
-
-        private static string QuoteMySqlIdentifier(string name)
-        {
-            return "`" + (name ?? string.Empty).Replace("`", "``") + "`";
         }
 
         private static string QuotePostgreSqlIdentifier(string name)

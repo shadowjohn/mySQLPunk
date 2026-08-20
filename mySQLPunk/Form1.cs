@@ -5146,7 +5146,7 @@ namespace mySQLPunk
             MySqlExportOptions mysqlOptions = null;
             if (!dataOnlyForTable && selection == null && IsMySqlTarget(target))
             {
-                mysqlOptions = ShowMySqlExportOptionsDialog();
+                mysqlOptions = ShowMySqlExportOptionsDialog(target);
                 if (mysqlOptions == null) return;
             }
 
@@ -5262,27 +5262,48 @@ namespace mySQLPunk
             if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("Target path is required.", "targetPath");
 
             UpdateMainStatus(Localization.T("MySqlExport.Running"));
-            return await Task.Run(() =>
+            using (RunnerProgressOverlay progressOverlay = RunnerProgressOverlay.Show(this, Localization.T("Tool.ExportWizard"), Localization.T("MySqlExport.Running")))
             {
-                MySqlExportResult result = MySqlExportService.BuildExport(
+                int progressValue = 0;
+                MySqlExportResult result = await Task.Run(() => MySqlExportService.WriteExportToFile(
                     target.Database,
                     target.DatabaseName,
                     options,
-                    message => UpdateMainStatus(message));
-
-                string dir = Path.GetDirectoryName(targetPath);
-                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-
-                File.WriteAllText(targetPath, result.Sql, new UTF8Encoding(false));
+                    targetPath,
+                    message =>
+                    {
+                        int current = Math.Min(System.Threading.Interlocked.Increment(ref progressValue), 95);
+                        QueueRunnerProgress(progressOverlay, current, message);
+                    }));
+                progressOverlay.SetProgress(100, 100, Localization.T("Common.Complete"));
                 return result;
-            });
+            }
         }
 
-        private MySqlExportOptions ShowMySqlExportOptionsDialog()
+        private void QueueRunnerProgress(RunnerProgressOverlay progressOverlay, int current, string message)
         {
+            if (progressOverlay == null || IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    progressOverlay.SetProgress(current, 100, message);
+                    UpdateMainStatus(message);
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        private MySqlExportOptions ShowMySqlExportOptionsDialog(TreeDatabaseTarget target)
+        {
+            if (target == null) throw new ArgumentNullException("target");
+            List<string> tableNames = target.Database.GetTables(target.DatabaseName) ?? new List<string>();
+            List<string> viewNames = target.Database.GetViews(target.DatabaseName) ?? new List<string>();
+            List<MySqlRoutineInfo> routineNames = MySqlExportService.GetRoutines(target.Database, target.DatabaseName);
+            List<MySqlTriggerInfo> triggerNames = MySqlExportService.GetTriggers(target.Database, target.DatabaseName);
+
             using (Form dialog = new Form())
             using (TableLayoutPanel layout = new TableLayoutPanel())
             using (CheckBox includeStructure = new CheckBox())
@@ -5297,6 +5318,11 @@ namespace mySQLPunk
             using (CheckBox disableForeignKeys = new CheckBox())
             using (Label batchLabel = new Label())
             using (NumericUpDown batchSize = new NumericUpDown())
+            using (TabControl objectTabs = new TabControl())
+            using (CheckedListBox tableList = new CheckedListBox())
+            using (CheckedListBox viewList = new CheckedListBox())
+            using (CheckedListBox routineList = new CheckedListBox())
+            using (CheckedListBox triggerList = new CheckedListBox())
             using (FlowLayoutPanel buttons = new FlowLayoutPanel())
             using (Button okButton = new Button())
             using (Button cancelButton = new Button())
@@ -5306,14 +5332,22 @@ namespace mySQLPunk
                 dialog.MinimizeBox = false;
                 dialog.MaximizeBox = false;
                 dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
-                dialog.ClientSize = new Size(440, 380);
+                dialog.ClientSize = new Size(680, 600);
 
                 layout.Dock = DockStyle.Fill;
                 layout.Padding = new Padding(12);
                 layout.ColumnCount = 2;
-                layout.RowCount = 12;
+                layout.RowCount = 8;
                 layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
                 layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
                 ConfigureMySqlOptionCheckBox(includeStructure, "MySqlExport.IncludeStructure", true);
                 ConfigureMySqlOptionCheckBox(includeData, "MySqlExport.IncludeData", true);
@@ -5347,6 +5381,22 @@ namespace mySQLPunk
                 layout.Controls.Add(batchLabel, 0, 5);
                 layout.Controls.Add(batchSize, 1, 5);
 
+                objectTabs.Dock = DockStyle.Fill;
+                ConfigureMySqlObjectSelectionTab(objectTabs, Localization.T("Tree.Tables"), tableList, tableNames);
+                ConfigureMySqlObjectSelectionTab(objectTabs, Localization.T("Tree.Views"), viewList, viewNames);
+                ConfigureMySqlObjectSelectionTab(
+                    objectTabs,
+                    Localization.T("View.Group.Functions"),
+                    routineList,
+                    routineNames.Select(item => item.Type + ":" + item.Name));
+                ConfigureMySqlObjectSelectionTab(
+                    objectTabs,
+                    Localization.T("MySqlExport.Triggers"),
+                    triggerList,
+                    triggerNames.Select(item => item.Name));
+                layout.Controls.Add(objectTabs, 0, 6);
+                layout.SetColumnSpan(objectTabs, 2);
+
                 buttons.FlowDirection = FlowDirection.RightToLeft;
                 buttons.Dock = DockStyle.Fill;
                 buttons.Padding = new Padding(0, 12, 0, 0);
@@ -5358,7 +5408,7 @@ namespace mySQLPunk
                 cancelButton.AutoSize = true;
                 buttons.Controls.Add(okButton);
                 buttons.Controls.Add(cancelButton);
-                layout.Controls.Add(buttons, 0, 11);
+                layout.Controls.Add(buttons, 0, 7);
                 layout.SetColumnSpan(buttons, 2);
 
                 dialog.Controls.Add(layout);
@@ -5380,9 +5430,55 @@ namespace mySQLPunk
                     IncludeRoutines = includeRoutines.Checked,
                     IncludeTriggers = includeTriggers.Checked,
                     RemoveDefiner = removeDefiner.Checked,
-                    InsertBatchSize = (int)batchSize.Value
+                    InsertBatchSize = (int)batchSize.Value,
+                    SelectedTables = GetCheckedNames(tableList),
+                    SelectedViews = GetCheckedNames(viewList),
+                    SelectedRoutines = GetCheckedNames(routineList),
+                    SelectedTriggers = GetCheckedNames(triggerList)
                 };
             }
+        }
+
+        private static void ConfigureMySqlObjectSelectionTab(TabControl tabs, string title, CheckedListBox list, IEnumerable<string> values)
+        {
+            TabPage page = new TabPage(title);
+            FlowLayoutPanel commands = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 36,
+                FlowDirection = FlowDirection.LeftToRight,
+                Padding = new Padding(4)
+            };
+            Button selectAll = new Button { Text = Localization.T("View.ColumnChooserSelectAll"), AutoSize = true };
+            Button clearAll = new Button { Text = Localization.T("MySqlExport.ClearAll"), AutoSize = true };
+            selectAll.Click += (s, e) => SetAllChecked(list, true);
+            clearAll.Click += (s, e) => SetAllChecked(list, false);
+            commands.Controls.Add(selectAll);
+            commands.Controls.Add(clearAll);
+
+            list.Dock = DockStyle.Fill;
+            list.CheckOnClick = true;
+            list.IntegralHeight = false;
+            foreach (string value in values ?? Enumerable.Empty<string>())
+            {
+                if (!string.IsNullOrWhiteSpace(value)) list.Items.Add(value, true);
+            }
+            page.Controls.Add(list);
+            page.Controls.Add(commands);
+            tabs.TabPages.Add(page);
+        }
+
+        private static void SetAllChecked(CheckedListBox list, bool isChecked)
+        {
+            if (list == null) return;
+            for (int index = 0; index < list.Items.Count; index++) list.SetItemChecked(index, isChecked);
+        }
+
+        private static List<string> GetCheckedNames(CheckedListBox list)
+        {
+            return list == null
+                ? new List<string>()
+                : list.CheckedItems.Cast<object>().Select(item => Convert.ToString(item)).Where(item => !string.IsNullOrWhiteSpace(item)).ToList();
         }
 
         private static void ConfigureMySqlOptionCheckBox(CheckBox checkBox, string localizationKey, bool defaultValue)
@@ -5477,6 +5573,10 @@ namespace mySQLPunk
                     {
                         MySqlImportResult result = await ImportMySqlSqlFileWithProgress(target, dialog.FileName, mysqlOptions);
                         string message = Localization.Format("MySqlImport.Success", result.ExecutedStatements, result.FailedStatements);
+                        if (result.SkippedStatements > 0)
+                        {
+                            message += Localization.Format("MySqlImport.SkippedSummary", result.SkippedStatements);
+                        }
                         if (result.Errors.Count > 0)
                         {
                             message += Environment.NewLine + Localization.Format(
@@ -5511,12 +5611,21 @@ namespace mySQLPunk
             if (string.IsNullOrWhiteSpace(sqlPath)) throw new ArgumentException("SQL file path is required.", "sqlPath");
 
             UpdateMainStatus(Localization.T("MySqlImport.Running"));
-            MySqlImportResult result = await Task.Run(() =>
-                MySqlImportService.Execute(
+            MySqlImportResult result;
+            using (RunnerProgressOverlay progressOverlay = RunnerProgressOverlay.Show(this, Localization.T("ImportSql.Title"), Localization.T("MySqlImport.Running")))
+            {
+                int progressValue = 0;
+                result = await Task.Run(() => MySqlImportService.Execute(
                     target.Database,
                     sqlPath,
                     options,
-                    message => UpdateMainStatus(message)));
+                    message =>
+                    {
+                        int current = Math.Min(System.Threading.Interlocked.Increment(ref progressValue), 95);
+                        QueueRunnerProgress(progressOverlay, current, message);
+                    }));
+                progressOverlay.SetProgress(100, 100, Localization.T("Common.Complete"));
+            }
 
             RefreshDatabaseObjectNodes(target.DatabaseNode);
             db_tree.SelectedNode = target.DatabaseNode;
@@ -5528,6 +5637,8 @@ namespace mySQLPunk
             using (Form dialog = new Form())
             using (TableLayoutPanel layout = new TableLayoutPanel())
             using (Label description = new Label())
+            using (Label strategyLabel = new Label())
+            using (ComboBox existingStrategy = new ComboBox())
             using (CheckBox continueOnError = new CheckBox())
             using (FlowLayoutPanel buttons = new FlowLayoutPanel())
             using (Button okButton = new Button())
@@ -5538,16 +5649,28 @@ namespace mySQLPunk
                 dialog.MinimizeBox = false;
                 dialog.MaximizeBox = false;
                 dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
-                dialog.ClientSize = new Size(420, 180);
+                dialog.ClientSize = new Size(460, 230);
 
                 layout.Dock = DockStyle.Fill;
                 layout.Padding = new Padding(12);
-                layout.RowCount = 3;
-                layout.ColumnCount = 1;
+                layout.RowCount = 4;
+                layout.ColumnCount = 2;
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
 
                 description.Text = Localization.T("MySqlImport.OptionsDescription");
                 description.Dock = DockStyle.Fill;
                 description.Height = 64;
+                strategyLabel.Text = Localization.T("MySqlImport.ExistingStrategy");
+                strategyLabel.TextAlign = ContentAlignment.MiddleLeft;
+                strategyLabel.Dock = DockStyle.Fill;
+                existingStrategy.DropDownStyle = ComboBoxStyle.DropDownList;
+                existingStrategy.Dock = DockStyle.Fill;
+                existingStrategy.Items.Add(Localization.T("MySqlImport.StrategyExecuteScript"));
+                existingStrategy.Items.Add(Localization.T("MySqlImport.StrategyDropRecreate"));
+                existingStrategy.Items.Add(Localization.T("MySqlImport.StrategyCreateIfMissing"));
+                existingStrategy.Items.Add(Localization.T("MySqlImport.StrategySkipExisting"));
+                existingStrategy.SelectedIndex = 0;
                 continueOnError.Text = Localization.T("MySqlImport.ContinueOnError");
                 continueOnError.Checked = false;
                 continueOnError.AutoSize = true;
@@ -5566,14 +5689,23 @@ namespace mySQLPunk
                 buttons.Controls.Add(cancelButton);
 
                 layout.Controls.Add(description, 0, 0);
-                layout.Controls.Add(continueOnError, 0, 1);
-                layout.Controls.Add(buttons, 0, 2);
+                layout.SetColumnSpan(description, 2);
+                layout.Controls.Add(strategyLabel, 0, 1);
+                layout.Controls.Add(existingStrategy, 1, 1);
+                layout.Controls.Add(continueOnError, 0, 2);
+                layout.SetColumnSpan(continueOnError, 2);
+                layout.Controls.Add(buttons, 0, 3);
+                layout.SetColumnSpan(buttons, 2);
                 dialog.Controls.Add(layout);
                 dialog.AcceptButton = okButton;
                 dialog.CancelButton = cancelButton;
 
                 if (dialog.ShowDialog(this) != DialogResult.OK) return null;
-                return new MySqlImportOptions { ContinueOnError = continueOnError.Checked };
+                return new MySqlImportOptions
+                {
+                    ContinueOnError = continueOnError.Checked,
+                    ExistingObjectStrategy = (MySqlExistingObjectStrategy)Math.Max(0, existingStrategy.SelectedIndex)
+                };
             }
         }
 
@@ -7392,6 +7524,16 @@ namespace mySQLPunk
 
         private void db_tree_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode == Keys.Escape && _allowTreeLabelEdit)
+            {
+                if (db_tree.SelectedNode != null) db_tree.SelectedNode.EndEdit(true);
+                _allowTreeLabelEdit = false;
+                db_tree.LabelEdit = false;
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
             if (e.Control && e.KeyCode == Keys.C)
             {
                 CopySelectedDatabaseObjectToInternalClipboard();
@@ -7468,7 +7610,13 @@ namespace mySQLPunk
             if (e.Node == null || e.Label == null) return;
             string newName = e.Label.Trim();
             string oldName = e.Node.Text;
-            if (newName.Length == 0 || newName == oldName) return;
+            if (newName.Length == 0)
+            {
+                string message = IsDatabaseNode(e.Node) ? Localization.T("DatabaseRename.NameRequired") : Localization.T("Object.NameRequired");
+                MessageBox.Show(message, Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (newName == oldName) return;
 
             RenameDatabaseObjectNode(e.Node, oldName, newName);
         }
@@ -7549,101 +7697,101 @@ namespace mySQLPunk
 
             Cursor previousCursor = Cursor;
             bool previousEnabled = db_tree.Enabled;
-            try
+            string initialMessage = Localization.Format("DatabaseRename.Running", oldName, newName);
+            using (RunnerProgressOverlay progressOverlay = RunnerProgressOverlay.Show(this, Localization.T("Tool.RenameObject"), initialMessage))
             {
-                Cursor = Cursors.WaitCursor;
-                db_tree.Enabled = false;
-                UpdateMainStatus(Localization.Format("DatabaseRename.NativeRenameDone", oldName, newName));
-
-                DatabaseRenameOptions options = new DatabaseRenameOptions();
-                if (target.Database is my_sqlite)
+                try
                 {
-                    options.SqliteFilePath = GetSQLiteDatabasePath(target.ConnectionInfo, target.Database);
-                }
-                DatabaseRenameResult result = await Task.Run(() => DatabaseRenameService.Rename(
-                    target.Database,
-                    oldName,
-                    newName,
-                    options,
-                    message =>
+                    Cursor = Cursors.WaitCursor;
+                    db_tree.Enabled = false;
+                    UpdateMainStatus(initialMessage);
+
+                    DatabaseRenameOptions options = new DatabaseRenameOptions();
+                    if (target.Database is my_sqlite)
                     {
-                        if (string.IsNullOrWhiteSpace(message)) return;
-                        try
+                        options.SqliteFilePath = GetSQLiteDatabasePath(target.ConnectionInfo, target.Database);
+                    }
+                    int progressValue = 0;
+                    DatabaseRenameResult result = await Task.Run(() => DatabaseRenameService.Rename(
+                        target.Database,
+                        oldName,
+                        newName,
+                        options,
+                        message =>
                         {
-                            if (!IsDisposed && IsHandleCreated)
+                            if (string.IsNullOrWhiteSpace(message)) return;
+                            int current = Math.Min(System.Threading.Interlocked.Increment(ref progressValue), 95);
+                            QueueRunnerProgress(progressOverlay, current, message);
+                        }));
+
+                    TreeNode selectedNode;
+                    if (result.OldDatabaseRetained)
+                    {
+                        TreeNode parent = node.Parent;
+                        selectedNode = null;
+                        if (parent != null)
+                        {
+                            foreach (TreeNode sibling in parent.Nodes)
                             {
-                                BeginInvoke(new Action(() => UpdateMainStatus(message)));
+                                if (string.Equals(sibling.Text, newName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    selectedNode = sibling;
+                                    break;
+                                }
+                            }
+
+                            if (selectedNode == null)
+                            {
+                                selectedNode = new TreeNode(newName)
+                                {
+                                    ImageIndex = node.ImageIndex,
+                                    SelectedImageIndex = node.SelectedImageIndex
+                                };
+                                parent.Nodes.Add(selectedNode);
                             }
                         }
-                        catch { }
-                    }));
-
-                TreeNode selectedNode;
-                if (result.OldDatabaseRetained)
-                {
-                    TreeNode parent = node.Parent;
-                    selectedNode = null;
-                    if (parent != null)
-                    {
-                        foreach (TreeNode sibling in parent.Nodes)
+                        else
                         {
-                            if (string.Equals(sibling.Text, newName, StringComparison.OrdinalIgnoreCase))
-                            {
-                                selectedNode = sibling;
-                                break;
-                            }
-                        }
-
-                        if (selectedNode == null)
-                        {
-                            selectedNode = new TreeNode(newName)
-                            {
-                                ImageIndex = node.ImageIndex,
-                                SelectedImageIndex = node.SelectedImageIndex
-                            };
-                            parent.Nodes.Add(selectedNode);
+                            selectedNode = node;
                         }
                     }
                     else
                     {
+                        node.Text = newName;
                         selectedNode = node;
                     }
-                }
-                else
-                {
-                    node.Text = newName;
-                    selectedNode = node;
-                }
 
-                if (target.Database is my_sqlite && !string.IsNullOrWhiteSpace(result.NewSqlitePath) && target.ConnectionInfo != null)
-                {
-                    target.ConnectionInfo["path"] = result.NewSqlitePath;
-                    myN.setSettingINI();
-                }
+                    if (target.Database is my_sqlite && !string.IsNullOrWhiteSpace(result.NewSqlitePath) && target.ConnectionInfo != null)
+                    {
+                        target.ConnectionInfo["path"] = result.NewSqlitePath;
+                        myN.setSettingINI();
+                    }
 
-                if (selectedNode != null)
-                {
-                    selectedNode.EnsureVisible();
-                    db_tree.SelectedNode = selectedNode;
-                    RefreshDatabaseObjectNodes(selectedNode);
-                }
+                    if (selectedNode != null)
+                    {
+                        selectedNode.EnsureVisible();
+                        db_tree.SelectedNode = selectedNode;
+                        RefreshDatabaseObjectNodes(selectedNode);
+                    }
 
-                string status = result.Messages.Count > 0
-                    ? result.Messages[result.Messages.Count - 1]
-                    : Localization.Format("Object.RenamedStatus", "database", oldName, newName);
-                UpdateMainStatus(status);
-                db_tree_AfterSelect(db_tree, new TreeViewEventArgs(selectedNode ?? node));
-            }
-            catch (Exception ex)
-            {
-                string message = DatabaseRenameService.BuildFailureMessage(target.ProviderName, oldName, newName, ex);
-                UpdateMainStatus(message);
-                MessageBox.Show(message, Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                db_tree.Enabled = previousEnabled;
-                Cursor = previousCursor;
+                    string status = result.Messages.Count > 0
+                        ? result.Messages[result.Messages.Count - 1]
+                        : Localization.Format("Object.RenamedStatus", "database", oldName, newName);
+                    progressOverlay.SetProgress(100, 100, status);
+                    UpdateMainStatus(status);
+                    db_tree_AfterSelect(db_tree, new TreeViewEventArgs(selectedNode ?? node));
+                }
+                catch (Exception ex)
+                {
+                    string message = DatabaseRenameService.BuildFailureMessage(target.ProviderName, oldName, newName, ex);
+                    UpdateMainStatus(message);
+                    MessageBox.Show(message, Localization.T("Tool.RenameObject"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    db_tree.Enabled = previousEnabled;
+                    Cursor = previousCursor;
+                }
             }
         }
 
