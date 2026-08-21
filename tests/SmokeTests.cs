@@ -5045,7 +5045,10 @@ public static class SmokeTests
             File.WriteAllText(tempPath, legacyJson, Encoding.UTF8);
             SqliteColumnCommentImportPlan imported = SqliteColumnCommentExchangeService.ImportFromFile(db, tempPath, "users");
             Assert(imported.CommentCount == 2, "SQLite comment import from file should return import counts.");
-            Assert(db.ExecutedSql.Count == imported.Statements.Count, "SQLite comment import from file should execute every planned statement.");
+            // 匯入現在包在交易裡：計劃語句 + BEGIN + COMMIT
+            Assert(db.ExecutedSql.Count == imported.Statements.Count + 2, "SQLite comment import from file should execute every planned statement inside a transaction.");
+            Assert(db.ExecutedSql[0].StartsWith("BEGIN", StringComparison.OrdinalIgnoreCase), "SQLite comment import should begin a transaction.");
+            Assert(db.ExecutedSql[db.ExecutedSql.Count - 1].StartsWith("COMMIT", StringComparison.OrdinalIgnoreCase), "SQLite comment import should commit the transaction.");
         }
         finally
         {
@@ -7659,7 +7662,9 @@ public static class SmokeTests
         AssertContains(workflow, "foreach ($existingAsset in @($release.assets))", "Release workflow should remove legacy assets before publishing the single EXE.");
         Assert(!workflow.Contains("dist/*.zip"), "Release workflow should not upload a portable zip.");
         Assert(!workflow.Contains("release-manifest.json"), "Release workflow should not upload a separate manifest.");
-        AssertContains(workflow, "CHANGELOG.md", "Release workflow should prefer changelog entries for release notes.");
+        // d9c716d 之後 release notes 由 New-ReleaseNotes.ps1 產生（內部仍優先讀 CHANGELOG）
+        AssertContains(workflow, "New-ReleaseNotes.ps1", "Release workflow should generate release notes with the shared script.");
+        AssertContains(workflow, "dist/release-notes.md", "Release workflow should upload the generated release notes.");
         AssertContains(workflow, "api.github.com/repos/$env:REPOSITORY/releases", "Release workflow should create or update a GitHub Release through the API.");
         AssertContains(workflow, "${uploadBaseUrl}?name=$assetName", "Release workflow should preserve the upload host when appending asset query parameters.");
     }

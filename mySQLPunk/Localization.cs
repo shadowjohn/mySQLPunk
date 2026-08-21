@@ -408,6 +408,11 @@ namespace mySQLPunk
             Add("Common.Error", "錯誤", "Error");
             Add("Options.SaveFailed", "設定儲存失敗：{0}", "Failed to save settings: {0}");
             Add("Backup.RestoreFailedSafetyHint", "還原前的安全備份保留在：{0}", "The pre-restore safety backup is kept at: {0}");
+            Add("User.HostRequiredForAccountChange", "取不到這個帳號的主機（Host），不能猜測為 %。請改用 SQL 指定完整帳號。", "The account's host could not be determined and will not be assumed to be %. Use SQL with the full account instead.");
+            Add("Query.BlobImportLargeConfirm", "檔案大小為 {0}，將整個載入記憶體，確定要匯入嗎？", "The file is {0} and will be loaded entirely into memory. Import anyway?");
+            Add("Query.BlobImportFailed", "匯入 BLOB 失敗：{0}", "Failed to import BLOB: {0}");
+            Add("Query.BlobSavedFallback", "已以結果格內容儲存 {0}（串流讀取失敗：{1}）", "Saved {0} from the in-memory cell value (streaming failed: {1})");
+            Add("Connection.SqliteCreateFileConfirm", "檔案不存在：\n{0}\n\n要建立一個新的空白 SQLite 資料庫嗎？", "File does not exist:\n{0}\n\nCreate a new empty SQLite database?");
             Add("Query.AutoRecoveryDisabled", "自動備份草稿失敗已達 3 次，本分頁已停用自動備份：{0}", "Auto-recovery draft saving failed 3 times and has been disabled for this tab: {0}");
             Add("Common.Success", "成功", "Success");
             Add("Common.Info", "資訊", "Information");
@@ -1559,6 +1564,18 @@ namespace mySQLPunk
             {
                 ApplyToolStripItem(child);
             }
+        }
+
+        /// <summary>text 是否等於這個 key 的任一語言字串（我的最愛路徑、清單「類型」欄跨語言比對用）。</summary>
+        public static bool MatchesAnyLanguage(string key, string text)
+        {
+            string[] values;
+            if (string.IsNullOrEmpty(text) || !Texts.TryGetValue(key, out values)) return false;
+            foreach (string value in values)
+            {
+                if (string.Equals(value, text, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
         }
 
         private static void Add(string key, string zh, string en)

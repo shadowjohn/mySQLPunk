@@ -303,7 +303,7 @@ namespace utility
         }
         public byte[] file_get_contents(string url)
         {
-            if (url.ToLower().IndexOf("http:") > -1)
+            if (url.ToLower().StartsWith("http:") || url.ToLower().StartsWith("https:"))
             {
                 // URL                 
 
@@ -494,7 +494,7 @@ namespace utility
                         {
                             {prop.Name, prop.Value}
                         }
-                        : jobjToDictionary(prop.Name)
+                        : jobjToDictionary(prop.Value, prop.Name)
                     select new KeyValuePair<string, object>(propName, propValue);
                 return asBag.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
             }
@@ -502,7 +502,7 @@ namespace utility
             {
                 var vals = (obj as JArray).Values();
                 var alldicts = vals
-                    .SelectMany(val => jobjToDictionary(name))
+                    .SelectMany(val => jobjToDictionary(val, name))
                     .Select(x => x.Value)
                     .ToArray();
                 return new Dictionary<string, object>()
@@ -527,7 +527,7 @@ namespace utility
             input = trim(input);
             if (input.Length != 0)
             {
-                if (input.Substring(1, 1) != "[")
+                if (!input.StartsWith("["))
                 {
                     input = "[" + input + "]";
                     return (JArray)JsonConvert.DeserializeObject<JArray>(input);

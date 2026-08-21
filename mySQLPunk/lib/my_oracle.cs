@@ -352,8 +352,35 @@ namespace mySQLPunk.lib
 
         public void RenameView(string databaseName, string oldViewName, string newViewName)
         {
-            // Oracle 的 RENAME 語句不接受 schema 限定名（ORA-01765），只能改目前 schema 的物件
-            ExecOrThrow("RENAME " + QuoteIdentifier(oldViewName) + " TO " + QuoteIdentifier(newViewName));
+            // RENAME 不接受 schema 限定名且只作用於目前 session schema；
+            // 不切換的話，以 SYSTEM 連線改 SCOTT 的 view 會改到自己 schema 的同名物件
+            string originalSchema = null;
+            try
+            {
+                DataTable dt = SelectSQL("SELECT SYS_CONTEXT('USERENV','CURRENT_SCHEMA') FROM DUAL");
+                if (dt.Rows.Count > 0) originalSchema = dt.Rows[0][0].ToString();
+            }
+            catch { }
+
+            string targetSchema = NormalizeOwner(databaseName);
+            bool switched = false;
+            if (!string.IsNullOrWhiteSpace(targetSchema) &&
+                !string.Equals(targetSchema, originalSchema, StringComparison.OrdinalIgnoreCase))
+            {
+                ExecOrThrow("ALTER SESSION SET CURRENT_SCHEMA = " + QuoteIdentifier(targetSchema));
+                switched = true;
+            }
+            try
+            {
+                ExecOrThrow("RENAME " + QuoteIdentifier(oldViewName) + " TO " + QuoteIdentifier(newViewName));
+            }
+            finally
+            {
+                if (switched && !string.IsNullOrWhiteSpace(originalSchema))
+                {
+                    try { ExecOrThrow("ALTER SESSION SET CURRENT_SCHEMA = " + QuoteIdentifier(originalSchema)); } catch { }
+                }
+            }
         }
 
         public long CountRows(string databaseName, string tableName)

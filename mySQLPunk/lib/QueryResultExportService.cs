@@ -101,7 +101,15 @@ namespace mySQLPunk.lib
                 return;
             }
 
-            File.WriteAllText(path, BuildText(dt, format), Encoding.UTF8);
+            File.WriteAllText(path, BuildText(dt, format), GetTextEncoding(format));
+        }
+
+        /// <summary>CSV/TSV 帶 BOM 讓 Excel 正確認出 UTF-8；JSON/XML 帶 BOM 會讓不少解析器直接失敗。一般與串流路徑要一致。</summary>
+        private static Encoding GetTextEncoding(QueryResultExportFormat format)
+        {
+            return format == QueryResultExportFormat.Csv || format == QueryResultExportFormat.Tsv
+                ? new UTF8Encoding(true)
+                : new UTF8Encoding(false);
         }
 
         public static QueryResultExportSummary BuildSummary(string path, QueryResultExportFormat format, long rows, long? bytesWritten = null)
@@ -170,7 +178,7 @@ namespace mySQLPunk.lib
 
                 using (DbDataReader reader = command.ExecuteReader(CommandBehavior.SequentialAccess))
                 using (CountingFileStream stream = new CountingFileStream(path))
-                using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                using (StreamWriter writer = new StreamWriter(stream, GetTextEncoding(format)))
                 {
                     long rows;
                     switch (format)
@@ -879,7 +887,10 @@ namespace mySQLPunk.lib
             {
                 string wkt;
                 if (GeometryWktConverter.TryGeometryBytesToWkt(bytes, out wkt)) return wkt;
-                // 匯出要保真：畫面用的「前 12 bytes + ...」預覽寫進檔案等於資料遺失
+                // 匯出要保真：畫面用的「前 12 bytes + ...」預覽寫進檔案等於資料遺失。
+                // 但超大 BLOB 的完整 hex 會把記憶體吃爆（100MB → 200MB 字串），設個上限
+                const int maxFullHexBytes = 16 * 1024 * 1024;
+                if (bytes.Length > maxFullHexBytes) return FormatBinaryCellValue(bytes);
                 StringBuilder hex = new StringBuilder(bytes.Length * 2 + 2);
                 hex.Append("0x");
                 for (int i = 0; i < bytes.Length; i++) hex.Append(bytes[i].ToString("X2"));
@@ -934,8 +945,10 @@ namespace mySQLPunk.lib
             if (value.Length == 0) return value;
             char first = value[0];
             if (first != '=' && first != '+' && first != '-' && first != '@' && first != '\t') return value;
+            // 上游數值是用目前文化格式化的（de-DE 會是 -1234,5），兩種文化都要試
             double numeric;
             if (double.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out numeric)) return value;
+            if (double.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.CurrentCulture, out numeric)) return value;
             return "'" + value;
         }
 

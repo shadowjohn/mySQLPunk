@@ -603,12 +603,25 @@ namespace mySQLPunk.lib
 
         public static string BuildDropUserSql(string user, string host)
         {
-            return "DROP USER " + QuoteAccount(user, host) + ";";
+            return "DROP USER " + QuoteAccountStrict(user, host) + ";";
         }
 
         public static string BuildRenameUserSql(string user, string host, string newUser, string newHost)
         {
-            return "RENAME USER " + QuoteAccount(user, host) + " TO " + QuoteAccount(newUser, newHost) + ";";
+            return "RENAME USER " + QuoteAccountStrict(user, host) + " TO " + QuoteAccount(newUser, newHost) + ";";
+        }
+
+        /// <summary>
+        /// 刪除/改名的「來源帳號」不能在 host 缺漏時猜 %：
+        /// 使用者以為在刪 'app'@'10.0.0.5'，實際卻送出 'app'@'%'，會打到別的帳號。
+        /// </summary>
+        private static string QuoteAccountStrict(string user, string host)
+        {
+            if (string.IsNullOrWhiteSpace(host) || string.Equals(host, NotSupported, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(Localization.T("User.HostRequiredForAccountChange"));
+            }
+            return QuoteLiteral(user ?? string.Empty) + "@" + QuoteLiteral(host);
         }
 
         public static string BuildChangePasswordSql(string user, string host, string password)
@@ -1043,7 +1056,26 @@ namespace mySQLPunk.lib
 
         private static IEnumerable<string> SplitPrivilegeList(string privilegeText)
         {
-            foreach (string part in (privilegeText ?? string.Empty).Split(','))
+            // 欄位層級授權長這樣：SELECT (id, name), UPDATE (name)
+            // 逗號要看括號深度切；切進括號會產生 "SELECT (ID" 這種非法權限名
+            List<string> parts = new List<string>();
+            StringBuilder current = new StringBuilder();
+            int depth = 0;
+            foreach (char c in privilegeText ?? string.Empty)
+            {
+                if (c == '(') depth++;
+                else if (c == ')' && depth > 0) depth--;
+                if (c == ',' && depth == 0)
+                {
+                    parts.Add(current.ToString());
+                    current.Length = 0;
+                    continue;
+                }
+                current.Append(c);
+            }
+            parts.Add(current.ToString());
+
+            foreach (string part in parts)
             {
                 string value = part.Trim().ToUpperInvariant().Replace('_', ' ');
                 if (value.Length == 0 || value == "USAGE") continue;

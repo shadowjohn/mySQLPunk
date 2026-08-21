@@ -66,8 +66,11 @@ namespace mySQLPunk
                 WkbReader reader = new WkbReader(bytes, offset);
                 string parsed = reader.ReadGeometry();
                 if (string.IsNullOrWhiteSpace(parsed)) return false;
-                // 沒把 buffer 讀完代表這個 offset 是誤判（一般 BLOB 也可能碰巧像 WKB 開頭）
-                if (reader.Position != bytes.Length) return false;
+                // 沒把 buffer 讀完代表這個 offset 是誤判（一般 BLOB 也可能碰巧像 WKB 開頭）。
+                // 例外：SpatiaLite 格式（offset 39）結尾固定多一個 0xFE 標記位元組。
+                bool consumedAll = reader.Position == bytes.Length;
+                bool consumedAllButEndMarker = reader.Position == bytes.Length - 1 && bytes[bytes.Length - 1] == 0xFE;
+                if (!consumedAll && !consumedAllButEndMarker) return false;
                 wkt = parsed;
                 return true;
             }

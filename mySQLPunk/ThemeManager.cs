@@ -192,7 +192,10 @@ namespace mySQLPunk
             try
             {
                 Image current = item.Image;
-                if (current != null) OwnedPlaceholderImages.Remove(current);
+                if (current != null && OwnedPlaceholderImages.Remove(current))
+                {
+                    current.Dispose();
+                }
             }
             catch { }
         }
@@ -1018,9 +1021,9 @@ namespace mySQLPunk
             // 全自繪：把系統畫的虛線、展開方塊與焦點虛線框拿掉，
             // 換成整列圓角選取、自訂箭號與滑鼠停留回饋。事件只掛一次，
             // 語言/主題切換重複呼叫時不能累積 handler。
+            treeView.DrawMode = TreeViewDrawMode.OwnerDrawAll;
             if (WiredTreeViews.Add(treeView))
             {
-                treeView.DrawMode = TreeViewDrawMode.OwnerDrawAll;
                 treeView.DrawNode += TreeView_DrawNode;
                 treeView.MouseMove += TreeView_MouseMove;
                 treeView.MouseLeave += TreeView_MouseLeave;

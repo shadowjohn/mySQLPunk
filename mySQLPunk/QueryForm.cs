@@ -350,12 +350,14 @@ namespace mySQLPunk
 
             candidate = Regex.Replace(candidate, @"\s+", " ").Trim();
             candidate = Regex.Replace(candidate, @"\s+LIMIT\s+\d+(?:\s*,\s*\d+)?\s*$", "", RegexOptions.IgnoreCase).Trim();
-            if (!Regex.IsMatch(candidate, @"^SELECT\s+.+?\s+FROM\s+[`""\[\]\w\.]+$", RegexOptions.IgnoreCase))
+            // 允許單表加 WHERE / ORDER BY：寫回是逐列用主鍵比對，篩選過的結果一樣安全；
+            // 擋掉的是 JOIN / GROUP BY / UNION 這類「結果列不再對應單一資料表列」的情況
+            if (!Regex.IsMatch(candidate, @"^SELECT\s+.+?\s+FROM\s+[`""\[\]\w\.]+(\s+WHERE\s+.+?)?(\s+ORDER\s+BY\s+.+?)?$", RegexOptions.IgnoreCase))
             {
                 return false;
             }
 
-            if (Regex.IsMatch(candidate, @"\s+(WHERE|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|UNION|LIMIT|OFFSET|FETCH)\s+", RegexOptions.IgnoreCase))
+            if (Regex.IsMatch(candidate, @"\s+(JOIN|GROUP\s+BY|HAVING|UNION|OFFSET|FETCH)\s+", RegexOptions.IgnoreCase))
             {
                 return false;
             }
@@ -569,6 +571,7 @@ namespace mySQLPunk
         }
 
         private int _autoRecoveryFailureCount;
+        private string _autoRecoveryTitle;
 
         private void SaveAutoRecoveryDraftIfNeeded()
         {
@@ -580,10 +583,11 @@ namespace mySQLPunk
             string hash = ComputeSqlHash(sql);
             if (string.Equals(hash, _lastAutoRecoverySqlHash, StringComparison.Ordinal)) return;
 
+            if (_autoRecoveryTitle == null) _autoRecoveryTitle = Text; // 標題會隨載入的表變動，檔名 key 要固定
             string path;
             try
             {
-                path = AutoRecoveryDraftService.WriteQueryDraft(_databaseName, connectionHost, Text, sql);
+                path = AutoRecoveryDraftService.WriteQueryDraft(_databaseName, connectionHost, _autoRecoveryTitle, sql);
                 _autoRecoveryFailureCount = 0;
             }
             catch (Exception ex)
@@ -1021,6 +1025,8 @@ namespace mySQLPunk
             int selLen = txtSql.SelectionLength;
 
             txtSql.SuspendLayout();
+            try
+            {
 
             Color defaultTextColor = ThemeManager.TextColor;
             Color keywordColor = ThemeManager.AccentColor;
@@ -1030,7 +1036,7 @@ namespace mySQLPunk
             // 先全部重置為預設文字色
             txtSql.SelectAll();
             txtSql.SelectionColor = defaultTextColor;
-            txtSql.SelectionFont = new Font(txtSql.Font, FontStyle.Regular);
+            txtSql.SelectionFont = GetEditorFont(FontStyle.Regular);
 
             string text = txtSql.Text;
             string upper = text.ToUpperInvariant();
@@ -1050,7 +1056,7 @@ namespace mySQLPunk
                     {
                         txtSql.Select(idx, kw.Length);
                         txtSql.SelectionColor = keywordColor;
-                        txtSql.SelectionFont = new Font(txtSql.Font, FontStyle.Bold);
+                        txtSql.SelectionFont = GetEditorFont(FontStyle.Bold);
                     }
                     idx += kw.Length;
                 }
@@ -1062,13 +1068,42 @@ namespace mySQLPunk
             // 單行注釋 (綠色)
             HighlightPattern(text, @"--[^\r\n]*", commentColor, FontStyle.Italic);
 
-            // 還原游標
+            // 還原游標；有選取範圍時不要重設顏色，否則選取內的關鍵字上色會被抹掉
             txtSql.Select(selStart, selLen);
-            txtSql.SelectionColor = defaultTextColor;
-            txtSql.SelectionFont = new Font(txtSql.Font, FontStyle.Regular);
+            if (selLen == 0)
+            {
+                txtSql.SelectionColor = defaultTextColor;
+                txtSql.SelectionFont = GetEditorFont(FontStyle.Regular);
+            }
 
-            txtSql.ResumeLayout();
-            txtSql.TextChanged += TxtSql_TextChanged;
+            }
+            finally
+            {
+                // 中途丟例外也要把事件掛回去，否則之後打字永遠不再上色
+                txtSql.ResumeLayout();
+                txtSql.TextChanged += TxtSql_TextChanged;
+            }
+        }
+
+        private readonly Dictionary<FontStyle, Font> _editorFontCache = new Dictionary<FontStyle, Font>();
+        private Font _editorFontCacheBase;
+
+        /// <summary>上色是每敲一鍵就跑的熱路徑，Font 要快取，不能每個關鍵字 new 一個。</summary>
+        private Font GetEditorFont(FontStyle style)
+        {
+            if (!ReferenceEquals(_editorFontCacheBase, txtSql.Font))
+            {
+                foreach (Font font in _editorFontCache.Values) font.Dispose();
+                _editorFontCache.Clear();
+                _editorFontCacheBase = txtSql.Font;
+            }
+            Font cached;
+            if (!_editorFontCache.TryGetValue(style, out cached))
+            {
+                cached = new Font(txtSql.Font, style);
+                _editorFontCache[style] = cached;
+            }
+            return cached;
         }
 
         private void ApplyPlainEditorFormatting()
@@ -1080,7 +1115,7 @@ namespace mySQLPunk
             int selLen = txtSql.SelectionLength;
             txtSql.SelectAll();
             txtSql.SelectionColor = ThemeManager.TextColor;
-            txtSql.SelectionFont = new Font(txtSql.Font, FontStyle.Regular);
+            txtSql.SelectionFont = GetEditorFont(FontStyle.Regular);
             txtSql.Select(selStart, selLen);
             txtSql.TextChanged += TxtSql_TextChanged;
         }
@@ -1091,7 +1126,7 @@ namespace mySQLPunk
             {
                 txtSql.Select(m.Index, m.Length);
                 txtSql.SelectionColor = color;
-                txtSql.SelectionFont = new Font(txtSql.Font, style);
+                txtSql.SelectionFont = GetEditorFont(style);
             }
         }
 
@@ -1101,12 +1136,21 @@ namespace mySQLPunk
             string sql = txtSql.Text;
             if (string.IsNullOrEmpty(sql)) return;
 
-            txtSql.Text = FormatSqlForEditor(sql);
+            string formatted = FormatSqlForEditor(sql);
+            if (string.Equals(formatted, sql, StringComparison.Ordinal)) return;
+            // 用 SelectedText 取代而不是直接設 Text，Ctrl+Z 才救得回原始 SQL
+            txtSql.SelectAll();
+            txtSql.SelectedText = formatted;
         }
 
         private static string FormatSqlForEditor(string sql)
         {
             if (string.IsNullOrWhiteSpace(sql)) return sql;
+
+            // 這個重排式 formatter 沒有註解與反斜線跳脫的概念：
+            // -- 會被拆成兩個減號、註解文字會混進語句、'It\'s' 會被切壞。
+            // 這些情況寧可原樣不動，也不能把使用者的 SQL 改成會執行出錯的東西。
+            if (ContainsUnformattableSyntax(sql)) return sql;
 
             List<SqlToken> tokens = TokenizeSql(sql);
             if (tokens.Count == 0) return string.Empty;
@@ -1232,6 +1276,39 @@ namespace mySQLPunk
         {
             string text = BuildInlineSql(tokens, start, end);
             if (!string.IsNullOrWhiteSpace(text)) sb.Append(text);
+        }
+
+        private static bool ContainsUnformattableSyntax(string sql)
+        {
+            bool inSingle = false, inDouble = false, inBacktick = false, inBracket = false;
+            for (int i = 0; i < sql.Length; i++)
+            {
+                char c = sql[i];
+                char next = i + 1 < sql.Length ? sql[i + 1] : '\0';
+                if (inSingle)
+                {
+                    if (c == '\\') return true;
+                    if (c == '\'') { if (next == '\'') i++; else inSingle = false; }
+                    continue;
+                }
+                if (inDouble)
+                {
+                    if (c == '\\') return true;
+                    if (c == '"') { if (next == '"') i++; else inDouble = false; }
+                    continue;
+                }
+                if (inBacktick) { if (c == '`') inBacktick = false; continue; }
+                if (inBracket) { if (c == ']') inBracket = false; continue; }
+
+                if (c == '\'') inSingle = true;
+                else if (c == '"') inDouble = true;
+                else if (c == '`') inBacktick = true;
+                else if (c == '[') inBracket = true;
+                else if (c == '-' && next == '-') return true;
+                else if (c == '#') return true;
+                else if (c == '/' && next == '*') return true;
+            }
+            return false;
         }
 
         private static List<SqlToken> TokenizeSql(string sql)
@@ -1524,22 +1601,26 @@ namespace mySQLPunk
         {
             if (lstCompletion.Visible)
             {
+                // 只設 Handled 擋不住後續的 WM_CHAR，補完後會多插一個換行/Tab
                 if (e.KeyCode == Keys.Down)
                 {
                     lstCompletion.Focus();
                     e.Handled = true;
+                    e.SuppressKeyPress = true;
                     return;
                 }
                 if (e.KeyCode == Keys.Tab || e.KeyCode == Keys.Enter)
                 {
                     ApplyCompletion();
                     e.Handled = true;
+                    e.SuppressKeyPress = true;
                     return;
                 }
                 if (e.KeyCode == Keys.Escape)
                 {
                     lstCompletion.Visible = false;
                     e.Handled = true;
+                    e.SuppressKeyPress = true;
                     return;
                 }
             }
@@ -1776,13 +1857,15 @@ namespace mySQLPunk
 
             if (string.IsNullOrEmpty(rawSql)) return;
 
+            // busy 檢查要在任何狀態變更之前：查詢進行中再按 F5 不能清掉進行中結果的旗標
+            if (_isQueryBusy) return;
+            _isQueryBusy = true;
+
             string sql = GetSqlToExecute(rawSql);
             _lastResultSql = "";
             _lastResultCanStreamExport = false;
             lblSqlPreview.Text = sql; // 更新底部的 SQL 預覽
 
-            if (_isQueryBusy) return;
-            _isQueryBusy = true;
             _cts = new CancellationTokenSource();
             tsBtnExecute.Enabled = false;
             tsBtnCancel.Enabled = true;
@@ -2517,6 +2600,12 @@ namespace mySQLPunk
                     {
                         UpdateBlobExportProgress(written, total);
                     });
+                    if (!string.IsNullOrWhiteSpace(streamError))
+                    {
+                        // 串流失敗時寫出的是結果格的記憶體值，可能與資料庫現況不同，要講明
+                        UpdateStatus(Localization.Format("Query.BlobSavedFallback", dialog.FileName, streamError));
+                        return;
+                    }
                 }
 
                 UpdateStatus(Localization.Format("Query.BlobSaved", dialog.FileName));
@@ -2530,7 +2619,9 @@ namespace mySQLPunk
 
             try
             {
-                if (!_isTableDataMode || dgvResults == null || dgvResults.CurrentCell == null) return false;
+                // grid 內容不是綁定資料表的單表查詢時（JOIN 結果），
+                // 用綁定表名+主鍵去串流會撈到錯的資料，退回記憶體值才正確
+                if (!_isTableDataMode || !_gridBoundToBaseTable || dgvResults == null || dgvResults.CurrentCell == null) return false;
                 if (dgvResults.CurrentCell.RowIndex < 0 || dgvResults.CurrentCell.ColumnIndex < 0) return false;
 
                 string tableName = GetTableNameFromSql();
@@ -2610,8 +2701,32 @@ namespace mySQLPunk
                 dialog.Filter = Localization.T("Query.BlobImportFileFilter");
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-                SetCurrentResultBlob(File.ReadAllBytes(dialog.FileName));
-                UpdateStatus(Localization.Format("Query.BlobImported", dialog.FileName));
+                try
+                {
+                    FileInfo importInfo = new FileInfo(dialog.FileName);
+                    const long largeBlobThreshold = 256L * 1024 * 1024;
+                    if (importInfo.Length > largeBlobThreshold)
+                    {
+                        string sizeText = (importInfo.Length / (1024.0 * 1024.0)).ToString("0.#") + " MB";
+                        if (MessageBox.Show(this,
+                                Localization.Format("Query.BlobImportLargeConfirm", sizeText),
+                                Localization.T("Common.Warning"),
+                                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                        {
+                            return;
+                        }
+                    }
+                    SetCurrentResultBlob(File.ReadAllBytes(dialog.FileName));
+                    UpdateStatus(Localization.Format("Query.BlobImported", dialog.FileName));
+                }
+                catch (Exception ex)
+                {
+                    // 檔案被鎖、太大（OOM）等都不能冒成全域例外對話框
+                    MessageBox.Show(this,
+                        Localization.Format("Query.BlobImportFailed", ex.Message),
+                        Localization.T("Common.Error"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 

@@ -74,7 +74,8 @@ namespace mySQLPunk
             unselectAllButton.Click += (s, e) => SetAllChecked(false);
             resetButton.Click += (s, e) =>
             {
-                ViewColumnPreferenceService.Reset(currentProvider, currentGroup);
+                // 只把「回到預設」記在暫存，按確定才真正寫檔；按取消要救得回來
+                pendingSaves[BuildPendingKey(currentProvider, currentGroup)] = null;
                 LoadColumns(currentProvider, currentGroup);
             };
 
@@ -115,8 +116,32 @@ namespace mySQLPunk
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (DialogResult == DialogResult.OK) SaveCurrentCategory();
+            if (DialogResult == DialogResult.OK)
+            {
+                SaveCurrentCategory();
+                foreach (KeyValuePair<string, List<ViewColumnPreference>> entry in pendingSaves)
+                {
+                    string[] keyParts = entry.Key.Split('|');
+                    if (entry.Value == null)
+                    {
+                        ViewColumnPreferenceService.Reset(keyParts[0], keyParts[1]);
+                    }
+                    else
+                    {
+                        ViewColumnPreferenceService.Save(keyParts[0], keyParts[1], entry.Value);
+                    }
+                }
+            }
             base.OnFormClosing(e);
+        }
+
+        // 尚未按確定前的變更全部暫存在記憶體；value 為 null 代表「還原成預設」
+        private readonly Dictionary<string, List<ViewColumnPreference>> pendingSaves =
+            new Dictionary<string, List<ViewColumnPreference>>(StringComparer.OrdinalIgnoreCase);
+
+        private static string BuildPendingKey(string provider, string groupKey)
+        {
+            return provider + "|" + groupKey;
         }
 
         private Button CreateActionButton(string text)
@@ -196,6 +221,25 @@ namespace mySQLPunk
         private void LoadColumns(string provider, string groupKey)
         {
             columnList.Items.Clear();
+            List<ViewColumnPreference> pending;
+            string pendingKey = BuildPendingKey(provider, groupKey);
+            if (pendingSaves.TryGetValue(pendingKey, out pending) && pending != null)
+            {
+                // 有尚未落地的變更就顯示暫存版，切回來時才看得到剛才的勾選
+                foreach (ViewColumnPreference pref in pending)
+                {
+                    columnList.Items.Add(pref, pref.Visible);
+                }
+                return;
+            }
+            if (pendingSaves.ContainsKey(pendingKey) && pending == null)
+            {
+                foreach (ViewColumnPreference pref in ViewColumnPreferenceService.LoadDefaults(provider, groupKey))
+                {
+                    columnList.Items.Add(pref, pref.Visible);
+                }
+                return;
+            }
             foreach (ViewColumnPreference pref in ViewColumnPreferenceService.Load(provider, groupKey))
             {
                 columnList.Items.Add(pref, pref.Visible);
@@ -216,7 +260,8 @@ namespace mySQLPunk
                     Visible = columnList.GetItemChecked(i)
                 });
             }
-            if (prefs.Count > 0) ViewColumnPreferenceService.Save(currentProvider, currentGroup, prefs);
+            // 切分類時只進暫存；直接寫檔的話「取消」就救不回已切走的分類
+            if (prefs.Count > 0) pendingSaves[BuildPendingKey(currentProvider, currentGroup)] = prefs;
         }
 
         private void MoveSelectedColumn(int offset)

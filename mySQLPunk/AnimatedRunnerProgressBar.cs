@@ -180,7 +180,8 @@ namespace mySQLPunk
 
         private void OnRunnerFrameChanged(object sender, EventArgs e)
         {
-            if (!IsDisposed) Invalidate();
+            // ImageAnimator 在背景執行緒呼叫這裡，Invalidate 不是執行緒安全的；
+            // 類別裡本來就有 70ms 的 UI Timer 在 UpdateFrames + Invalidate，這裡留空即可
         }
 
         private void DrawRunner(Graphics g, Rectangle bounds)

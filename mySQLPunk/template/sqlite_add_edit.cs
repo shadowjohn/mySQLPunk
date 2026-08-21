@@ -131,6 +131,10 @@ namespace mySQLPunk.template
                 TestAndMaybeInitialize(true);
                 MessageBox.Show(Localization.Format("Connection.TestSucceeded", "SQLite"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+            catch (OperationCanceledException)
+            {
+                return; // 使用者取消建立新檔
+            }
             catch (Exception ex)
             {
                 MessageBox.Show(ConnectionDialogMessageService.BuildTestFailedMessage("SQLite", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -149,6 +153,10 @@ namespace mySQLPunk.template
             try
             {
                 TestAndMaybeInitialize(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // 使用者取消建立新檔
             }
             catch (Exception ex)
             {
@@ -226,6 +234,20 @@ namespace mySQLPunk.template
 
             if (!File.Exists(path))
             {
+                // 手動輸入或貼上的路徑打錯字時，靜默建新檔會讓使用者以為連到舊資料庫；
+                // 只有透過檔案對話框明確選了新檔（_selectedNewFile）才不再多問
+                if (!_selectedNewFile)
+                {
+                    DialogResult answer = MessageBox.Show(this,
+                        Localization.Format("Connection.SqliteCreateFileConfirm", path),
+                        Localization.T("Common.Warning"),
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+                    if (answer != DialogResult.Yes)
+                    {
+                        throw new OperationCanceledException();
+                    }
+                }
                 SQLiteConnection.CreateFile(path);
                 _selectedNewFile = true;
             }

@@ -105,7 +105,7 @@ namespace mySQLPunk.lib
             { "Views", new[] { "群組", "檢查選項", "定義者", "安全性類型", "是否可以更新" } },
             { "Functions", new[] { "群組", "定義者", "安全性類型", "修改日期", "函式類型", "具決定性", "建立日期", "資料存取", "註解" } },
             { "Events", new[] { "群組", "修改日期", "建立日期", "事件重複類型", "狀態", "執行時間", "間隔值", "間隔欄位", "STARTS", "ENDS", "ON COMPLETION", "註解" } },
-            { "Users", new[] { "SSL 類型", "每小時最大查詢數目", "每小時最大更新數目", "每小時最大連線數目", "最大使用者連線數目", "超級使用者" } },
+            { "Users", new[] { "主機", "Plugin", "密碼", "帳號鎖定", "密碼過期", "SSL", "每小時查詢", "每小時更新", "每小時連線", "最大連線", "密碼上次變更", "Provider", "版本", "註解", "來源" } },
             { "Tablespaces", new[] { "引擎", "類型", "路徑", "狀態", "加密", "列格式", "檔案大小", "範圍大小" } },
             { "Queries", new[] { "名稱", "類型", "狀態", "資料庫", "編號", "SQL" } }
         };
@@ -116,7 +116,7 @@ namespace mySQLPunk.lib
             { "Views", Visible("是否可以更新") },
             { "Functions", Visible("修改日期", "函式類型", "具決定性", "註解") },
             { "Events", Visible("修改日期", "事件重複類型", "狀態", "執行時間", "註解") },
-            { "Users", Visible("SSL 類型", "每小時最大查詢數目", "每小時最大更新數目", "每小時最大連線數目", "最大使用者連線數目", "超級使用者") },
+            { "Users", Visible("主機", "Plugin", "帳號鎖定", "密碼過期", "SSL", "每小時查詢", "每小時更新", "每小時連線", "最大連線", "註解") },
             { "Tablespaces", Visible("引擎", "類型", "路徑", "狀態", "加密", "列格式", "檔案大小", "範圍大小") },
             { "Queries", Visible("名稱", "類型", "狀態", "資料庫", "編號", "SQL") }
         };
@@ -219,6 +219,12 @@ namespace mySQLPunk.lib
         public static void Reset(string provider, string groupKey)
         {
             Save(provider, groupKey, BuildDefaults(NormalizeGroup(groupKey)));
+        }
+
+        /// <summary>取得預設欄位組合但不寫入設定，給欄位選擇器的「還原預設」預覽用。</summary>
+        public static List<ViewColumnPreference> LoadDefaults(string provider, string groupKey)
+        {
+            return BuildDefaults(NormalizeGroup(groupKey));
         }
 
         private static List<ViewColumnPreference> BuildDefaults(string groupKey)

@@ -327,6 +327,15 @@ namespace mySQLPunk.lib
 
         private static bool IsSupportedBackupFile(string path)
         {
+            // 備份寫入中的暫存檔（x.sql.partial.sql / x.sql.writing）不能被當成備份
+            // 掃描驗證，否則半成品會被判壞、甚至被移進隔離區害主流程 Move 失敗
+            string fileName = Path.GetFileName(path);
+            if (fileName.IndexOf(".partial", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                fileName.IndexOf(".writing", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                fileName.IndexOf(".restoring", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
             string extension = Path.GetExtension(path).ToLowerInvariant();
             return extension == ".sql" ||
                    extension == ".zip" ||

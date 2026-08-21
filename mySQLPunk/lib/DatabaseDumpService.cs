@@ -20,9 +20,20 @@ namespace mySQLPunk.lib
 
             // 先寫暫存再取代，寫到一半失敗時不會把舊檔賠掉
             string tempPath = targetPath + ".writing";
-            File.WriteAllText(tempPath, BuildDatabaseDump(db, databaseName), Encoding.UTF8);
-            if (File.Exists(targetPath)) File.Delete(targetPath);
-            File.Move(tempPath, targetPath);
+            try
+            {
+                File.WriteAllText(tempPath, BuildDatabaseDump(db, databaseName), Encoding.UTF8);
+                if (File.Exists(targetPath)) File.Delete(targetPath);
+                File.Move(tempPath, targetPath);
+            }
+            finally
+            {
+                // 舊檔還在＝這次沒寫成，清掉殘檔；舊檔已刪＝暫存是唯一完整內容，保留
+                if (File.Exists(tempPath) && File.Exists(targetPath))
+                {
+                    try { File.Delete(tempPath); } catch { }
+                }
+            }
         }
 
         public static string BuildDatabaseDump(IDatabase db, string databaseName)

@@ -39,7 +39,8 @@ namespace mySQLPunk.lib
             string tableName = RequireName(virtualTableName, "virtualTableName");
             string rowId = RequireName(idColumn, "idColumn");
             List<string> dimensions = NormalizeNames(dimensionColumns, "dimensionColumns");
-            if (dimensions.Count < 4 || dimensions.Count % 2 != 0)
+            // SQLite rtree 合法範圍是 1~5 維（2/4/6/8/10 個座標欄位）
+            if (dimensions.Count < 2 || dimensions.Count % 2 != 0 || dimensions.Count > 10)
             {
                 throw new ArgumentException(Localization.T("SqliteWizard.RTreeDimensionPairsRequired"));
             }

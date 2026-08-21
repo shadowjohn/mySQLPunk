@@ -242,7 +242,7 @@ namespace mySQLPunk.lib
         {
             PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
             var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
-            return SelectSQL(@"
+            const string indexColumnsSelect = @"
                 SELECT
                     CASE WHEN ix.indisprimary THEN 'PRIMARY' ELSE i.relname END AS ""Key_name"",
                     a.attname AS ""Column_name"",
@@ -255,10 +255,19 @@ namespace mySQLPunk.lib
                 JOIN pg_index ix ON t.oid = ix.indrelid
                 JOIN pg_class i ON i.oid = ix.indexrelid
                 JOIN pg_am am ON i.relam = am.oid
-                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.ord <= ix.indnkeyatts
+                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON {0}
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
                 WHERE n.nspname = :schema AND t.relname = :name
-                ORDER BY i.relname, k.ord;", p);
+                ORDER BY i.relname, k.ord;";
+            try
+            {
+                return SelectSQL(string.Format(indexColumnsSelect, "k.ord <= ix.indnkeyatts"), p);
+            }
+            catch
+            {
+                // PG 10 以下沒有 indnkeyatts（也還沒有 INCLUDE 欄位），退回全欄位寫法
+                return SelectSQL(string.Format(indexColumnsSelect, "true"), p);
+            }
         }
 
         public Dictionary<string, string> GetDatabaseInfo(string databaseName)
@@ -440,7 +449,7 @@ namespace mySQLPunk.lib
         {
             PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
             var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
-            return SelectSQL(@"
+            const string copyIndexSelect = @"
                 SELECT
                     i.relname AS ""IndexName"",
                     a.attname AS ""ColumnName"",
@@ -452,11 +461,20 @@ namespace mySQLPunk.lib
                 JOIN pg_index ix ON t.oid = ix.indrelid
                 JOIN pg_class i ON i.oid = ix.indexrelid
                 JOIN pg_am am ON i.relam = am.oid
-                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.ord <= ix.indnkeyatts
+                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON {0}
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
                 WHERE n.nspname = :schema AND t.relname = :name AND NOT ix.indisprimary
                   AND NOT (0 = ANY (ix.indkey))
-                ORDER BY i.relname, k.ord;", p);
+                ORDER BY i.relname, k.ord;";
+            try
+            {
+                return SelectSQL(string.Format(copyIndexSelect, "k.ord <= ix.indnkeyatts"), p);
+            }
+            catch
+            {
+                // PG 10 以下沒有 indnkeyatts（也還沒有 INCLUDE 欄位），退回全欄位寫法
+                return SelectSQL(string.Format(copyIndexSelect, "true"), p);
+            }
         }
 
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
@@ -560,15 +578,25 @@ namespace mySQLPunk.lib
             {
                 PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
                 var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
-                DataTable dt = SelectSQL(@"
+                const string primaryKeySelect = @"
                     SELECT a.attname
                     FROM pg_index ix
                     JOIN pg_class t ON t.oid = ix.indrelid
                     JOIN pg_namespace n ON n.oid = t.relnamespace
-                    JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.ord <= ix.indnkeyatts
+                    JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON {0}
                     JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
                     WHERE n.nspname = :schema AND t.relname = :name AND ix.indisprimary
-                    ORDER BY k.ord;", p);
+                    ORDER BY k.ord;";
+                DataTable dt;
+                try
+                {
+                    dt = SelectSQL(string.Format(primaryKeySelect, "k.ord <= ix.indnkeyatts"), p);
+                }
+                catch
+                {
+                    // PG 10 以下沒有 indnkeyatts；主鍵索引在舊版本身就沒有 INCLUDE 欄位
+                    dt = SelectSQL(string.Format(primaryKeySelect, "true"), p);
+                }
                 List<string> cols = new List<string>();
                 foreach (DataRow row in dt.Rows) cols.Add(QuotePg(row[0].ToString()));
                 if (cols.Count > 0) return " ORDER BY " + string.Join(", ", cols.ToArray());

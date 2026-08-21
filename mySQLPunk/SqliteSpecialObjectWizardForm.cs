@@ -155,7 +155,11 @@ namespace mySQLPunk
 
             if (isRTree && string.Equals(txtColumns.Text.Trim(), "title, body", StringComparison.OrdinalIgnoreCase))
             {
-                txtObjectName.Text = "idx_rtree";
+                // 只在名稱還是 FTS 預設值時才換成 RTree 預設，別把使用者打好的名稱蓋掉
+                if (string.Equals(txtObjectName.Text.Trim(), "search_idx", StringComparison.OrdinalIgnoreCase))
+                {
+                    txtObjectName.Text = "idx_rtree";
+                }
                 txtColumns.Text = "minX, maxX, minY, maxY";
             }
         }

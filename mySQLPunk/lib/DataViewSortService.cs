@@ -8,7 +8,8 @@ namespace mySQLPunk.lib
         public static string BuildSortExpression(DataTable table, string columnName, bool descending)
         {
             if (table == null || string.IsNullOrWhiteSpace(columnName) || !table.Columns.Contains(columnName)) return string.Empty;
-            return "[" + columnName.Replace("]", "]]") + "] " + (descending ? "DESC" : "ASC");
+            // DataView 運算式的跳脫是反斜線形式（與 DataViewFilterService 一致）；]] 不是合法跳脫
+            return "[" + columnName.Replace("\\", "\\\\").Replace("]", "\\]") + "] " + (descending ? "DESC" : "ASC");
         }
     }
 }

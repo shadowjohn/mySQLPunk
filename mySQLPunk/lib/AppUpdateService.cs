@@ -139,7 +139,9 @@ namespace mySQLPunk.lib
 
             Directory.CreateDirectory(scriptDirectory);
             string scriptPath = Path.Combine(scriptDirectory, "apply-portable-update-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".ps1");
-            File.WriteAllText(scriptPath, BuildPortableUpdateApplyScript(portableZipPath, applicationDirectory, executablePath, processId), new UTF8Encoding(false));
+            // Windows PowerShell 5.1 對「無 BOM」的 .ps1 用系統 ANSI 解碼，
+            // 使用者名稱或安裝路徑含中文時腳本裡的路徑會變亂碼、更新必失敗
+            File.WriteAllText(scriptPath, BuildPortableUpdateApplyScript(portableZipPath, applicationDirectory, executablePath, processId), new UTF8Encoding(true));
             return scriptPath;
         }
 

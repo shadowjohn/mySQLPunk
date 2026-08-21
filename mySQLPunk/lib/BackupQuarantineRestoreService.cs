@@ -203,12 +203,19 @@ namespace mySQLPunk.lib
             File.Move(quarantinedPath, tempPath);
             try
             {
-                if (File.Exists(destinationPath)) File.Delete(destinationPath);
-                File.Move(tempPath, destinationPath);
+                if (File.Exists(destinationPath))
+                {
+                    // Replace 失敗時兩個檔案都完好，沒有「舊檔已刪、新檔搬不進去」的窗口
+                    File.Replace(tempPath, destinationPath, null);
+                }
+                else
+                {
+                    File.Move(tempPath, destinationPath);
+                }
             }
             catch
             {
-                try { if (!File.Exists(quarantinedPath)) File.Move(tempPath, quarantinedPath); } catch { }
+                try { if (!File.Exists(quarantinedPath) && File.Exists(tempPath)) File.Move(tempPath, quarantinedPath); } catch { }
                 throw;
             }
             return new BackupQuarantineRestoreResult

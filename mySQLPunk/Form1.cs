@@ -1635,10 +1635,34 @@ namespace mySQLPunk
                 Dictionary<string, object> imported = new Dictionary<string, object>(preview.ImportedConnections[importedIndex]);
                 imported["isConnect"] = "F";
                 imported["pdo"] = null;
+
+                // 匯出檔不含密碼；先用 credential_target 把密碼讀回記憶體
+                // （與「取代全部」路徑一致），否則存檔流程會把既有憑證刪掉、密碼無聲消失
+                if (string.IsNullOrEmpty(GetConnectionValue(imported, "pwd")))
+                {
+                    string importedTarget = GetConnectionValue(imported, "credential_target");
+                    string credentialPassword;
+                    if (!string.IsNullOrWhiteSpace(importedTarget) &&
+                        WindowsCredentialService.TryReadPassword(importedTarget, out credentialPassword))
+                    {
+                        imported["pwd"] = credentialPassword;
+                    }
+                }
+
                 string key = BuildConnectionImportKey(imported);
                 int existingIndex;
                 if (existingIndexByKey.TryGetValue(key, out existingIndex))
                 {
+                    // 憑證讀不回來時沿用既有連線的密碼，不能覆蓋成空
+                    if (string.IsNullOrEmpty(GetConnectionValue(imported, "pwd")))
+                    {
+                        Dictionary<string, object> existingConn = myN.connections[existingIndex];
+                        imported["pwd"] = GetConnectionValue(existingConn, "pwd");
+                        if (string.IsNullOrWhiteSpace(GetConnectionValue(imported, "credential_target")))
+                        {
+                            imported["credential_target"] = GetConnectionValue(existingConn, "credential_target");
+                        }
+                    }
                     myN.connections[existingIndex] = imported;
                 }
                 else
@@ -2894,7 +2918,7 @@ namespace mySQLPunk
             }
 
             thirty_two_change("query");
-            table_top.DataSource = BuildQueryHistoryTable(target.DatabaseName);
+            BindQueryHistoryTable(target.DatabaseName);
             UpdateMainStatus(BuildQueryHistoryLoadedStatusText(target.DatabaseName));
         }
 
@@ -3268,7 +3292,15 @@ namespace mySQLPunk
 
             string columnName = ApplicationOptionSettings.GetString("ViewSortColumn");
             string sortExpression = DataViewSortService.BuildSortExpression(table, columnName, ApplicationOptionSettings.GetBool("ViewSortDescending"));
-            table.DefaultView.Sort = sortExpression;
+            try
+            {
+                table.DefaultView.Sort = sortExpression;
+            }
+            catch
+            {
+                // 偏好裡存的欄位與目前表不相容時退回未排序，不能讓整個清單炸掉
+                try { table.DefaultView.Sort = string.Empty; } catch { }
+            }
             ApplyObjectListFilter();
         }
 
@@ -3396,22 +3428,27 @@ namespace mySQLPunk
             UpdateMainStatus(BuildFavoriteStatusText("Cleared", string.Empty));
         }
 
-        private void OpenFavoriteNodePath(string path)
+        private async void OpenFavoriteNodePath(string path)
         {
-            TreeNode node = FindFavoriteNode(path);
+            TreeNode node = await FindFavoriteNodeAsync(path);
             if (node == null)
             {
                 UpdateMainStatus(BuildFavoriteStatusText("NotFound", path));
                 return;
             }
 
+            bool alreadySelected = db_tree.SelectedNode == node;
             db_tree.SelectedNode = node;
             node.EnsureVisible();
-            db_tree_AfterSelect(db_tree, new TreeViewEventArgs(node));
+            // SelectedNode 指派本身會觸發 AfterSelect；原本就選著時才需要手動補一發
+            if (alreadySelected)
+            {
+                db_tree_AfterSelect(db_tree, new TreeViewEventArgs(node));
+            }
             UpdateMainStatus(BuildFavoriteStatusText("Opened", path));
         }
 
-        private TreeNode FindFavoriteNode(string path)
+        private async Task<TreeNode> FindFavoriteNodeAsync(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) return null;
 
@@ -3419,29 +3456,60 @@ namespace mySQLPunk
             if (parts.Length == 0) return null;
 
             TreeNode current = db_tree.Nodes.Cast<TreeNode>()
-                .FirstOrDefault(n => string.Equals(n.Text, parts[0], StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(n => FavoritePartMatches(n, parts[0]));
             if (current == null) return null;
-            if (parts.Length == 1) return current;
-
-            if (current.Parent == null && current.Nodes.Count == 0)
-            {
-                db_tree.SelectedNode = current;
-                db_tree_DoubleClick(db_tree, EventArgs.Empty);
-            }
 
             for (int i = 1; i < parts.Length; i++)
             {
-                if (i == 2)
+                // 未連線的連線節點要先觸發連線；db_tree_DoubleClick 是 async void，
+                // 只能輪詢等子節點載入完成，否則第一次點我的最愛永遠「找不到」
+                if (IsFavoriteConnectionNode(current) && current.Nodes.Count == 0)
+                {
+                    db_tree.SelectedNode = current;
+                    db_tree_DoubleClick(db_tree, EventArgs.Empty);
+                    DateTime deadline = DateTime.UtcNow.AddSeconds(15);
+                    while (current.Nodes.Count == 0 && DateTime.UtcNow < deadline)
+                    {
+                        await Task.Delay(200);
+                    }
+                    if (current.Nodes.Count == 0) return null;
+                }
+
+                // 資料庫節點底下的群組（Tables/Views...）可能尚未建立；
+                // 用「父節點是連線」判斷層級，啟用連線群組後層級會位移，不能寫死 i == 2
+                if (current.Parent != null && IsFavoriteConnectionNode(current.Parent))
                 {
                     EnsureDatabaseGroupNodes(current);
                 }
 
-                current = current.Nodes.Cast<TreeNode>()
-                    .FirstOrDefault(n => string.Equals(n.Text, parts[i], StringComparison.OrdinalIgnoreCase));
+                TreeNode parent = current;
+                current = parent.Nodes.Cast<TreeNode>()
+                    .FirstOrDefault(n => FavoritePartMatches(n, parts[i]));
                 if (current == null) return null;
             }
 
             return current;
+        }
+
+        /// <summary>
+        /// 群組節點的 Text 是本地化字串；我的最愛存的是加入當下語言的 FullPath，
+        /// 要用群組 key 與兩種語言的字串都比對，切換語言後舊的最愛才找得到。
+        /// </summary>
+        private bool FavoritePartMatches(TreeNode node, string part)
+        {
+            if (node == null || string.IsNullOrEmpty(part)) return false;
+            if (string.Equals(node.Text, part, StringComparison.OrdinalIgnoreCase)) return true;
+            string groupKey = GetTreeGroupKey(node);
+            if (string.IsNullOrEmpty(groupKey)) return false;
+            if (string.Equals(groupKey, part, StringComparison.OrdinalIgnoreCase)) return true;
+            return Localization.MatchesAnyLanguage("Tree." + groupKey, part);
+        }
+
+        private bool IsFavoriteConnectionNode(TreeNode node)
+        {
+            if (node == null) return false;
+            if (node.Parent == null) return !IsConnectionGroupNode(node);
+            return IsConnectionGroupNode(node.Parent);
         }
 
         private void LoadFavoriteNodePaths()
@@ -3987,6 +4055,19 @@ namespace mySQLPunk
             ThemeManager.ApplyToolStrip(mTs);
             ThemeManager.ApplyToolStrip(statusStrip1);
             if (tsSidebar != null) ThemeManager.ApplyToolStrip(tsSidebar);
+
+            // 重套主題會把主功能列目前選取區段的高亮洗掉（Checked 狀態還在），補回來
+            if (tool_Connection != null)
+            {
+                foreach (ToolStripItem toolItem in tool_Connection.Items)
+                {
+                    ToolStripButton toolButton = toolItem as ToolStripButton;
+                    if (toolButton != null && toolButton.Checked)
+                    {
+                        toolButton.BackColor = ThemeManager.SelectionColor;
+                    }
+                }
+            }
         }
 
         /// <summary>換主題後讓自繪的外框元件重畫。</summary>
@@ -4980,6 +5061,7 @@ namespace mySQLPunk
                 if (page.Tag == dockable)
                 {
                     queryTabs.TabPages.Remove(page);
+                    page.Dispose(); // 不釋放的話每次浮出都漏一個視窗 handle
                     break;
                 }
             }
@@ -5050,6 +5132,8 @@ namespace mySQLPunk
 
         public void NotifyDockableFormClosed(IDockableForm dockable)
         {
+            // 主視窗關閉中時浮動視窗的 OnFormClosed 仍會回呼進來，別碰已釋放的控制項
+            if (IsDisposed || Disposing) return;
             if (dockable == null || queryTabs == null) return;
 
             foreach (TabPage page in queryTabs.TabPages)
@@ -6301,6 +6385,15 @@ namespace mySQLPunk
             return SplitSqlScript(script, false);
         }
 
+        private static bool IsSplitBufferWhitespace(StringBuilder buffer)
+        {
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                if (!char.IsWhiteSpace(buffer[i])) return false;
+            }
+            return true;
+        }
+
         /// <summary>
         /// 把 SQL 腳本切成單一語句。backslashEscapes 對應 MySQL：字串中的 \' 是跳脫，
         /// 不是字串結束；同時支援 mysql client 的 DELIMITER 指令（routine/trigger dump 會用到，
@@ -6344,7 +6437,10 @@ namespace mySQLPunk
 
                 if (!inSingle && !inDouble && !inBacktick)
                 {
+                    // 只有「語句邊界」上的 DELIMITER 才是 client 指令；
+                    // CREATE TABLE 裡名為 delimiter 的欄位定義行不能被吃掉
                     if (atLineStart && (c == 'D' || c == 'd') &&
+                        IsSplitBufferWhitespace(current) &&
                         string.Compare(script, i, "DELIMITER", 0, 9, StringComparison.OrdinalIgnoreCase) == 0 &&
                         i + 9 < script.Length && (script[i + 9] == ' ' || script[i + 9] == '\t'))
                     {
@@ -6525,15 +6621,19 @@ namespace mySQLPunk
                 DatabaseDumpService.WriteDatabaseDump(target.Database, target.DatabaseName, tempPath);
             }
 
+            bool verified = false;
             try
             {
                 VerifyDatabaseBackupOrThrow(tempPath);
+                verified = true;
                 if (File.Exists(targetPath)) File.Delete(targetPath);
                 File.Move(tempPath, targetPath);
             }
             finally
             {
-                if (File.Exists(tempPath))
+                // 驗證失敗的殘檔要清；但「驗證通過、舊檔已刪、Move 卻失敗」時
+                // 暫存檔是僅存的完好備份，絕對不能跟著刪
+                if (File.Exists(tempPath) && (!verified || File.Exists(targetPath)))
                 {
                     try { File.Delete(tempPath); } catch { }
                 }
@@ -7395,6 +7495,13 @@ namespace mySQLPunk
                 table_top.ClearSelection();
                 table_top.Rows[e.RowIndex].Selected = true;
                 
+                // 查詢歷史、診斷報表這類清單沒有「名稱」欄位，右鍵不能丟未捕捉例外
+                if (!table_top.Columns.Contains("名稱") ||
+                    table_top.Rows[e.RowIndex].Cells["名稱"].Value == null)
+                {
+                    return;
+                }
+
                 // 選取對應的 TreeView 節點以保持同步
                 string objectName = table_top.Rows[e.RowIndex].Cells["名稱"].Value.ToString();
                 string groupName = GetCurrentGridGroupName(e.RowIndex);
@@ -7615,6 +7722,20 @@ namespace mySQLPunk
             if (e.RowIndex < 0) return;
             if (TryRunOtherToolGridAction(e.RowIndex)) return;
 
+            // 查詢歷史列：雙擊用完整 SQL 開新查詢分頁（清單裡只有 120 字的預覽）
+            DataTable boundTable = table_top.DataSource as DataTable;
+            if (boundTable != null && boundTable.Columns.Contains("_歷史索引"))
+            {
+                object historyIndexValue = table_top.Rows[e.RowIndex].Cells["_歷史索引"].Value;
+                int historyIndex;
+                if (historyIndexValue != null && int.TryParse(historyIndexValue.ToString(), out historyIndex) &&
+                    historyIndex >= 0 && historyIndex < _queryHistory.Count)
+                {
+                    OpenQueryHistoryEntry(_queryHistory[historyIndex]);
+                }
+                return;
+            }
+
             string groupName = GetCurrentGridGroupName(e.RowIndex);
             if (groupName == "Queries")
             {
@@ -7793,43 +7914,34 @@ namespace mySQLPunk
             return int.TryParse(value.ToString(), out tabIndex) ? tabIndex : -1;
         }
 
+        private static bool GridTypeMatches(string typeText, string englishValue, string localizationKey)
+        {
+            if (string.IsNullOrEmpty(typeText)) return false;
+            if (string.Equals(typeText, englishValue, StringComparison.OrdinalIgnoreCase)) return true;
+            return Localization.MatchesAnyLanguage(localizationKey, typeText);
+        }
+
         private string GetCurrentGridGroupName(int rowIndex)
         {
             if (table_top.Columns.Contains("類型") && rowIndex >= 0 && rowIndex < table_top.Rows.Count)
             {
                 object typeValue = table_top.Rows[rowIndex].Cells["類型"].Value;
-                if (typeValue != null && string.Equals(typeValue.ToString(), "View", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "Views";
-                }
-                if (typeValue != null && string.Equals(typeValue.ToString(), "Query", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "Queries";
-                }
-                if (typeValue != null && (string.Equals(typeValue.ToString(), "User", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(typeValue.ToString(), "Role", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(typeValue.ToString(), "Connection", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(typeValue.ToString(), "Current User", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(typeValue.ToString(), "Superuser", StringComparison.OrdinalIgnoreCase)))
+                string typeText = typeValue == null ? null : typeValue.ToString();
+                // 「類型」欄填的是本地化字串（預設繁中），只比英文字面值在中文介面下整段是死碼
+                if (GridTypeMatches(typeText, "View", "DatabaseModel.ObjectTypeView")) return "Views";
+                if (GridTypeMatches(typeText, "Query", "DatabaseGroup.TypeQuery")) return "Queries";
+                if (typeText != null && (string.Equals(typeText, "User", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(typeText, "Role", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(typeText, "Connection", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(typeText, "Current User", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(typeText, "Superuser", StringComparison.OrdinalIgnoreCase)))
                 {
                     return "Users";
                 }
-                if (typeValue != null && string.Equals(typeValue.ToString(), "Model", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "Models";
-                }
-                if (typeValue != null && string.Equals(typeValue.ToString(), "BI", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "BI";
-                }
-                if (typeValue != null && string.Equals(typeValue.ToString(), "Other", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "Other";
-                }
-                if (typeValue != null && string.Equals(typeValue.ToString(), "Report", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "Reports";
-                }
+                if (GridTypeMatches(typeText, "Model", "DatabaseGroup.TypeModel")) return "Models";
+                if (GridTypeMatches(typeText, "BI", "DatabaseGroup.TypeBI")) return "BI";
+                if (GridTypeMatches(typeText, "Other", "DatabaseGroup.TypeOther")) return "Other";
+                if (GridTypeMatches(typeText, "Report", "DatabaseGroup.TypeReport")) return "Reports";
             }
 
             if (db_tree.SelectedNode != null)
@@ -8805,8 +8917,29 @@ namespace mySQLPunk
             {
                 TreeDatabaseTarget target = BuildTargetFromNode(db_tree.SelectedNode);
                 string activeDatabaseName = target == null ? databaseName : target.DatabaseName;
-                table_top.DataSource = BuildQueryHistoryTable(activeDatabaseName);
+                BindQueryHistoryTable(activeDatabaseName);
             }
+        }
+
+        /// <summary>綁定查詢歷史清單：隱藏索引欄並套用排序/篩選偏好（與其他清單一致）。</summary>
+        private void BindQueryHistoryTable(string databaseName)
+        {
+            table_top.DataSource = BuildQueryHistoryTable(databaseName);
+            if (table_top.Columns.Contains("_歷史索引")) table_top.Columns["_歷史索引"].Visible = false;
+            ApplyGridSortPreference();
+        }
+
+        private void OpenQueryHistoryEntry(QueryHistoryEntry entry)
+        {
+            if (entry == null) return;
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null || target.Database == null)
+            {
+                UpdateMainStatus(Localization.T("Status.SelectConnection"));
+                return;
+            }
+            string host = target.ConnectionInfo == null ? "" : GetConnectionValue(target.ConnectionInfo, "host");
+            OpenQuery(target.Database, target.DatabaseName, host, entry.Sql, true);
         }
 
         private DataTable BuildQueryHistoryTable(string databaseName)
@@ -8819,9 +8952,11 @@ namespace mySQLPunk
             dt.Columns.Add("列數");
             dt.Columns.Add("耗時(ms)");
             dt.Columns.Add("SQL");
+            dt.Columns.Add("_歷史索引", typeof(int));
 
-            foreach (QueryHistoryEntry entry in _queryHistory)
+            for (int historyIndex = 0; historyIndex < _queryHistory.Count; historyIndex++)
             {
+                QueryHistoryEntry entry = _queryHistory[historyIndex];
                 if (!string.IsNullOrWhiteSpace(databaseName) &&
                     !string.Equals(entry.DatabaseName, databaseName, StringComparison.OrdinalIgnoreCase))
                 {
@@ -8829,6 +8964,7 @@ namespace mySQLPunk
                 }
 
                 DataRow row = dt.NewRow();
+                row["_歷史索引"] = historyIndex;
                 row["時間"] = entry.ExecutedAt.ToString("yyyy-MM-dd HH:mm:ss");
                 row["資料庫"] = entry.DatabaseName;
                 row["類型"] = Localization.T(entry.IsQuery ? "Query.Query" : "Query.Command");
@@ -14918,10 +15054,11 @@ namespace mySQLPunk
             if (hoverTab != null && hoverTab != dragTab)
             {
                 int dragIdx = queryTabs.TabPages.IndexOf(dragTab);
-
-                queryTabs.TabPages.RemoveAt(dragIdx);
-                // 移除後右側頁籤索引都左移一格，往右拖時得重算目標位置
                 int dropIdx = queryTabs.TabPages.IndexOf(hoverTab);
+
+                // 用「移除前」的目標索引：往右拖時會落在 hover 頁籤右側，
+                // 連續拖曳才能一路換到最右邊；重算的話永遠卡在 hover 左側
+                queryTabs.TabPages.RemoveAt(dragIdx);
                 queryTabs.TabPages.Insert(dropIdx, dragTab);
                 queryTabs.SelectedTab = dragTab;
             }

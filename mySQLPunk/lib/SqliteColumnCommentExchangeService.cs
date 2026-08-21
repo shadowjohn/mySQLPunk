@@ -403,11 +403,38 @@ namespace mySQLPunk.lib
         {
             EnsureSqlite(db);
             SqliteColumnCommentImportPlan plan = BuildImportPlanFromFile(sourcePath, tableNameFilter);
-            foreach (string statement in plan.Statements)
+
+            // 語句是「整表 DELETE + 逐筆 INSERT」，一定要包在交易裡；
+            // 中途失敗（鎖定、磁碟滿、資料異常）若不回滾，原有註解會被清光
+            ExecOrThrow(db, "BEGIN TRANSACTION;");
+            try
             {
-                db.ExecSQL(statement);
+                foreach (string statement in plan.Statements)
+                {
+                    ExecOrThrow(db, statement);
+                }
+                ExecOrThrow(db, "COMMIT;");
+            }
+            catch
+            {
+                try { db.ExecSQL("ROLLBACK;"); } catch { }
+                throw;
             }
             return plan;
+        }
+
+        private static void ExecOrThrow(IDatabase db, string statement)
+        {
+            Dictionary<string, string> result = db.ExecSQL(statement);
+            string status;
+            // provider 的失敗標記是 "NO"；只認明確失敗，別把未知狀態當錯誤
+            if (result != null && result.TryGetValue("status", out status) &&
+                string.Equals(status, "NO", StringComparison.OrdinalIgnoreCase))
+            {
+                string reason;
+                result.TryGetValue("reason", out reason);
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(reason) ? statement : reason);
+            }
         }
 
         public static SqliteColumnCommentImportReviewReport BuildImportReviewReport(
@@ -857,7 +884,15 @@ namespace mySQLPunk.lib
 
         private static string YamlScalar(string value)
         {
-            return "\"" + (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+            // 換行不跳脫的話，多行註解匯出後第二行會被逐行解析器丟棄
+            return "\"" + (value ?? string.Empty)
+                .Replace("\\", "\\\\")
+                .Replace("\"", "\\\"")
+                .Replace("\r", "\\r")
+
+                .Replace("\n", "\\n")
+
+                .Replace("\t", "\\t") + "\"";
         }
 
         private static string ParseYamlScalar(string value)
@@ -872,7 +907,10 @@ namespace mySQLPunk.lib
                 {
                     if (escaped)
                     {
-                        builder.Append(ch);
+                        if (ch == 'n') builder.Append('\n');
+                        else if (ch == 'r') builder.Append('\r');
+                        else if (ch == 't') builder.Append('\t');
+                        else builder.Append(ch);
                         escaped = false;
                     }
                     else if (ch == '\\')
