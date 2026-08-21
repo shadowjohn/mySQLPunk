@@ -48,7 +48,7 @@ git tag v1.0.0.4
 git push origin v1.0.0.4
 ```
 
-推送 `v*` tag 後，`.github/workflows/release.yml` 會在 GitHub 的 Windows runner 上還原 NuGet、用 MSBuild 編譯 Release、安裝固定版本且先驗證 SHA-256 的 Inno Setup、執行 `scripts/package-release.ps1`，並建立或更新 GitHub Release。Release 會先清除同版本舊的 ZIP／manifest 等資產，再只上傳一個 setup EXE。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。Workflow 會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；若 `CHANGELOG.md` 內有對應版本段落，GitHub Release notes 會優先使用該段內容。
+推送 `v*` tag 後，`.github/workflows/release.yml` 會在 GitHub 的 Windows runner 上還原 NuGet、用 MSBuild 編譯 Release、安裝固定版本且先驗證 SHA-256 的 Inno Setup、執行 `scripts/package-release.ps1`，並建立或更新 GitHub Release。Release 會先清除同版本舊的 ZIP／manifest 等資產，再只上傳一個 setup EXE。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。Workflow 會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；`scripts/New-ReleaseNotes.ps1` 會從 `CHANGELOG.md` 的對應版本產生繁體中文 `🚀 新增功能`、`🛠️ 問題修正與優化`、`📦 下載與更新`、`🛡️ 完整性與驗證` 四段說明，並寫入安裝檔的實際 SHA-256 與 Authenticode 狀態。若缺少對應版本或必要段落，發佈會直接停止，不會建立內容不完整的 Release。
 
 備註：
 

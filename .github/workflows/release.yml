@@ -116,28 +116,7 @@ jobs:
 
       - name: Write release notes
         shell: pwsh
-        run: |
-          $version = "${{ steps.release_version.outputs.version }}"
-          $notes = $null
-          $changelogPath = ".\CHANGELOG.md"
-          if (Test-Path -LiteralPath $changelogPath) {
-            $changelog = Get-Content -LiteralPath $changelogPath -Raw -Encoding UTF8
-            $escapedVersion = [regex]::Escape($version)
-            $match = [regex]::Match($changelog, "(?ms)^## \[(?:v)?$escapedVersion\][^\r\n]*(?:\r?\n)(.*?)(?=^## \[|\z)")
-            if ($match.Success) {
-              $notes = "mySQLPunk $version`r`n`r`n" + $match.Groups[1].Value.Trim()
-            }
-          }
-
-          if ([string]::IsNullOrWhiteSpace($notes)) {
-            $notes = @"
-          mySQLPunk $version
-
-          下載並執行唯一的 setup EXE 即可安裝或更新。
-          "@
-          }
-
-          $notes.Trim() | Set-Content -LiteralPath ".\dist\release-notes.md" -Encoding UTF8
+        run: .\scripts\New-ReleaseNotes.ps1 -Version "${{ steps.release_version.outputs.version }}" -OutputDirectory .\dist
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -146,6 +125,7 @@ jobs:
           path: |
             dist/*-setup.exe
             dist/release-notes.md
+            dist/release-title.txt
 
       - name: Create or update GitHub Release
         shell: pwsh
@@ -153,15 +133,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TAG_NAME: ${{ steps.release_version.outputs.tag_name }}
-          RELEASE_NAME: mySQLPunk ${{ steps.release_version.outputs.version }}
         run: |
           $headers = @{
             Authorization = "Bearer $env:GITHUB_TOKEN"
             Accept = "application/vnd.github+json"
             "X-GitHub-Api-Version" = "2022-11-28"
           }
+          $releaseName = (Get-Content -LiteralPath ".\dist\release-title.txt" -Raw -Encoding UTF8).Trim()
+          $releaseNotes = Get-Content -LiteralPath ".\dist\release-notes.md" -Raw -Encoding UTF8
 
           $releaseByTagUrl = "https://api.github.com/repos/$env:REPOSITORY/releases/tags/$env:TAG_NAME"
+          $release = $null
           try {
             $release = Invoke-RestMethod -Method Get -Uri $releaseByTagUrl -Headers $headers
           } catch {
@@ -176,13 +158,23 @@ jobs:
             $body = @{
               tag_name = $env:TAG_NAME
               target_commitish = $env:GITHUB_SHA
-              name = $env:RELEASE_NAME
-              body = Get-Content -LiteralPath ".\dist\release-notes.md" -Raw
+              name = $releaseName
+              body = $releaseNotes
               draft = $false
               prerelease = $false
             } | ConvertTo-Json -Depth 4
 
             $release = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:REPOSITORY/releases" -Headers $headers -Body $body -ContentType "application/json"
+          }
+
+          if ($null -ne $release -and ($release.name -ne $releaseName -or [string]$release.body -ne $releaseNotes)) {
+            $body = @{
+              name = $releaseName
+              body = $releaseNotes
+              draft = $false
+              prerelease = $false
+            } | ConvertTo-Json -Depth 4
+            $release = Invoke-RestMethod -Method Patch -Uri "https://api.github.com/repos/$env:REPOSITORY/releases/$($release.id)" -Headers $headers -Body $body -ContentType "application/json"
           }
 
           $uploadBaseUrl = $release.upload_url -replace '\{.*\}$', ''
@@ -198,6 +190,7 @@ jobs:
 
           foreach ($asset in $assets) {
             $assetName = [uri]::EscapeDataString($asset.Name)
-            $uploadUrl = "${uploadBaseUrl}?name=$assetName"
+            $assetLabel = [uri]::EscapeDataString("Windows x64 單一安裝程式")
+            $uploadUrl = "${uploadBaseUrl}?name=$assetName&label=$assetLabel"
             Invoke-RestMethod -Method Post -Uri $uploadUrl -Headers $headers -InFile $asset.FullName -ContentType "application/octet-stream" | Out-Null
           }
