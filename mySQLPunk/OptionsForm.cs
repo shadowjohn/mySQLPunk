@@ -71,7 +71,6 @@ namespace mySQLPunk
                 Localization.T("Options.AutoComplete"),
                 Localization.T("Options.Editor"),
                 Localization.T("Options.Record"),
-                Localization.T("Options.AI"),
                 Localization.T("Options.AutoRecovery"),
                 Localization.T("Options.FileLocation"),
                 Localization.T("Options.Connection"),
@@ -176,10 +175,6 @@ namespace mySQLPunk
             else if (string.Equals(selected, Localization.T("Options.Record"), StringComparison.Ordinal))
             {
                 RenderRecordPage();
-            }
-            else if (string.Equals(selected, Localization.T("Options.AI"), StringComparison.Ordinal))
-            {
-                RenderAiPage();
             }
             else if (string.Equals(selected, Localization.T("Options.AutoRecovery"), StringComparison.Ordinal))
             {
@@ -289,11 +284,8 @@ namespace mySQLPunk
             };
             AddOptionCheckBox("AllowDuplicateObjects", T("允許重複開啟相同的物件", "Allow opening the same object more than once"), 340);
             AddOptionCheckBox("ShowObjectTooltips", T("顯示工具提示", "Show tooltips"), 372);
-            AddOptionCheckBox("ShowFunctionWizard", T("顯示函式精靈", "Show function wizard"), 404);
-            AddOptionCheckBox("RememberQuerySettings", T("開啟前提示儲存新增的查詢或設定檔", "Prompt before opening when unsaved query settings exist"), 436);
-            AddOptionCheckBox("RememberTableSettings", T("開啟前提示儲存新增的資料表設定檔", "Prompt before opening when unsaved table settings exist"), 468);
-            AddOptionCheckBox("UseSafeMode", T("使用安全確認對話方塊", "Use safe confirmation dialogs"), 500);
-            AddOptionCheckBox("AutoCheckUpdates", T("啟動時自動檢查更新", "Check for updates on startup"), 532);
+            AddOptionCheckBox("RememberTableSettings", T("開啟前提示儲存新增的資料表設定檔", "Prompt before opening when unsaved table settings exist"), 404);
+            AddOptionCheckBox("AutoCheckUpdates", T("啟動時自動檢查更新", "Check for updates on startup"), 436);
 
             lightThemeRadio.CheckedChanged += (s, e) => UpdateSelection();
             darkThemeRadio.CheckedChanged += (s, e) => UpdateSelection();
@@ -325,16 +317,6 @@ namespace mySQLPunk
                 new OptionChoice("new", T("新視窗", "New window"))
             }, 60, 210);
 
-            AddOptionCombo("StartupView", T("起始畫面:", "Startup view:"), new[]
-            {
-                new OptionChoice("connections", T("連線清單", "Connection list")),
-                new OptionChoice("last", T("繼續上次開啟的畫面", "Continue previous workspace")),
-                new OptionChoice("favorites", T("最愛與最近項目", "Favorites and recent items"))
-            }, 112, 210);
-
-            AddOptionCheckBox("ShowStructureInNavigation", T("在導覽窗格顯示物件結構描述", "Show object structure in the navigation pane"), 170);
-            AddOptionCheckBox("ShowTablesUnderGroups", T("在導覽窗格中的資料表下顯示物件", "Show objects under table groups in the navigation pane"), 202);
-            AddOptionCheckBox("SingleClickExpandsTree", T("單擊節點時展開資料庫樹狀清單", "Expand database tree nodes on single click"), 234);
         }
 
         private void RenderAutoCompletePage()
@@ -343,8 +325,7 @@ namespace mySQLPunk
             AddOptionTitle(Localization.T("Options.AutoComplete"));
             AddOptionCheckBox("AutoCompleteEnabled", T("使用自動完成程式碼", "Use code completion"), 60);
             AddOptionCheckBox("AutoCompleteAutoRefresh", T("自動更新自動完成資訊", "Automatically refresh completion metadata"), 92);
-            AddOptionCheckBox("AutoCompleteIncludeSystemObjects", T("更新自動完成資訊時包含系統物件", "Include system objects when refreshing completion metadata"), 124);
-            AddOptionCheckBox("AutoCompleteSelectFirst", T("自動選取第一個建議項目", "Automatically select the first suggestion"), 156);
+            AddOptionCheckBox("AutoCompleteSelectFirst", T("自動選取第一個建議項目", "Automatically select the first suggestion"), 124);
 
             Button clearButton = new Button
             {
@@ -369,13 +350,10 @@ namespace mySQLPunk
         {
             ClearOptionPage();
             AddOptionTitle(Localization.T("Options.Editor"));
-            AddOptionCheckBox("EditorShowLineNumbers", T("顯示行號", "Show line numbers"), 60);
-            AddOptionCheckBox("EditorCodeFolding", T("使用程式碼摺疊", "Use code folding"), 92);
-            AddOptionCheckBox("EditorHighlightBrackets", T("使用括號突顯", "Highlight matching brackets"), 124);
-            AddOptionCheckBox("EditorSyntaxHighlight", T("使用語法突顯", "Use syntax highlighting"), 156);
-            AddOptionNumeric("EditorLargeFileLimitMb", T("如果檔案大小大於此就停用 (MB):", "Disable editor helpers above file size (MB):"), 188, 1, 4096);
-            AddOptionCheckBox("EditorWordWrap", T("使用自動換行", "Use word wrap"), 220);
-            AddOptionNumeric("EditorTabWidth", T("定位點寬度:", "Tab width:"), 252, 1, 16);
+            AddOptionCheckBox("EditorSyntaxHighlight", T("使用語法突顯", "Use syntax highlighting"), 60);
+            AddOptionNumeric("EditorLargeFileLimitMb", T("如果檔案大小大於此就停用 (MB):", "Disable editor helpers above file size (MB):"), 92, 1, 4096);
+            AddOptionCheckBox("EditorWordWrap", T("使用自動換行", "Use word wrap"), 124);
+            AddOptionNumeric("EditorTabWidth", T("定位點寬度:", "Tab width:"), 156, 1, 16);
             AddOptionCheckBox("EditorInsertSpaces", T("按 Tab 時插入空格", "Insert spaces when pressing Tab"), 284);
 
             AddOptionCombo("EditorFontName", T("編輯器字型:", "Editor font:"), BuildFontChoices(), 330, 300);
@@ -433,15 +411,13 @@ namespace mySQLPunk
             AddOptionTitle(Localization.T("Options.AutoRecovery"));
             AddOptionCheckBox("AutoRecoveryQueryEnabled", T("查詢", "Query"), 60);
             AddOptionNumeric("AutoRecoveryIntervalSeconds", T("自動儲存間隔（秒）:", "Auto-save interval (seconds):"), 94, 5, 3600);
-            AddOptionCheckBox("AutoRecoveryTableDesignEnabled", T("資料表設計", "Table design"), 132);
         }
 
         private void RenderConnectivityPage()
         {
             ClearOptionPage();
             AddOptionTitle(Localization.T("Options.Connection"));
-            AddOptionCheckBox("ConnectionValidateCertificates", T("驗證伺服器憑證", "Validate server certificates"), 60);
-            AddOptionCheckBox("ConnectionUseProxy", T("使用代理伺服器", "Use proxy server"), 108);
+            AddOptionCheckBox("ConnectionUseProxy", T("使用代理伺服器", "Use proxy server"), 60);
             AddOptionCombo("ConnectionProxyType", T("代理伺服器類型:", "Proxy type:"), new[]
             {
                 new OptionChoice("http", "HTTP"),

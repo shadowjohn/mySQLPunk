@@ -441,6 +441,11 @@ namespace mySQLPunk
         }
 
         public void SetMainHost(Form1 mainHost) => _mainHost = mainHost;
+        public bool UsesDatabase(IDatabase database)
+        {
+            return database != null && ReferenceEquals(_db, database);
+        }
+
         public bool HasUnsavedChanges()
         {
             return _isModified;
@@ -2481,9 +2486,11 @@ namespace mySQLPunk
                     DataRow orig = origRows[0];
                     int origIdx = _originalDt.Rows.IndexOf(orig);
                     
-                    bool changed = (colName != oldName) || 
-                                   (orig["Type"].ToString() != colType) || 
-                                   (orig["Length"].ToString() != colLen) || 
+                    bool changed = (colName != oldName) ||
+                                   (orig["Type"].ToString() != colType) ||
+                                   (orig["Length"].ToString() != colLen) ||
+                                   (GetRowString(orig, "Decimals") != (colDec ?? "")) ||
+                                   (GetRowString(orig, "_TypeSuffix").Trim() != colTypeSuffix) ||
                                    (orig["NotNull"] != DBNull.Value && (bool)orig["NotNull"] != notNull) || 
                                    (orig["Default"].ToString() != colDefault) ||
                                    (orig["Comment"].ToString() != colComment) ||
@@ -2894,6 +2901,12 @@ namespace mySQLPunk
                 if (type == "PRIMARY") continue;
                 if (type == "FULLTEXT" || type == "SPATIAL") continue;
                 if (string.IsNullOrWhiteSpace(indexName)) indexName = tableName + "_idx";
+                if (indexName.StartsWith("sqlite_autoindex_", StringComparison.OrdinalIgnoreCase))
+                {
+                    // sqlite_ 開頭是保留名（object name reserved for internal use）；
+                    // 改成一般名稱重建，UNIQUE 約束在重建後才不會遺失
+                    indexName = tableName + "_uq_" + (statements.Count + 1);
+                }
 
                 string columnList = FormatGenericIndexColumns(columns);
                 if (string.IsNullOrWhiteSpace(columnList)) continue;
@@ -3083,11 +3096,17 @@ namespace mySQLPunk
                         QuoteDesignerIdentifier(columnName),
                         MapDesignerType(GetRowString(current, "Type"), GetRowString(current, "Length"), GetRowString(current, "Decimals"))
                     };
-                    if (!string.IsNullOrWhiteSpace(defaultValue))
+                    if (defaultChanged)
                     {
-                        parts.Add("DEFAULT " + FormatGenericDefault(defaultValue));
+                        // 清空 Default 要明寫 DEFAULT NULL，否則舊預設值原封不動留著
+                        parts.Add("DEFAULT " + (string.IsNullOrWhiteSpace(defaultValue) ? "NULL" : FormatGenericDefault(defaultValue)));
                     }
-                    parts.Add(GetBool(current, "NotNull") ? "NOT NULL" : "NULL");
+                    // Oracle 對「已是 NOT NULL 再宣告 NOT NULL」回 ORA-01442、
+                    // 「已可空再宣告 NULL」回 ORA-01451，空值屬性沒變時不能重申
+                    if (nullChanged)
+                    {
+                        parts.Add(GetBool(current, "NotNull") ? "NOT NULL" : "NULL");
+                    }
                     statements.Add("ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
                                    " MODIFY (" + string.Join(" ", parts.ToArray()) + ");");
                 }
@@ -3235,6 +3254,12 @@ namespace mySQLPunk
                 DataRow current = FindCurrentIndex(currentIdxDt, oldName);
                 if (current == null || IsIndexChanged(original, current))
                 {
+                    if (_db is my_sqlite && oldName.StartsWith("sqlite_autoindex_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // UNIQUE/PRIMARY 約束的內部索引不能 DROP（SQLite 會拒絕）
+                        unsupported.Add(Localization.Format("Designer.SqliteInternalIndex", oldName));
+                        continue;
+                    }
                     statements.Add(BuildDropIndexStatement(oldName));
                 }
             }
@@ -3287,6 +3312,11 @@ namespace mySQLPunk
                 DataRow original = FindOriginalIndex(indexName);
                 if (original == null || IsIndexChanged(original, current))
                 {
+                    if (_db is my_sqlite && indexName.StartsWith("sqlite_autoindex_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        unsupported.Add(Localization.Format("Designer.SqliteInternalIndex", indexName));
+                        continue;
+                    }
                     statements.Add(BuildCreateGenericIndexStatement(current));
                 }
             }
@@ -3718,12 +3748,14 @@ namespace mySQLPunk
             string decimals = GetRowString(row, "Decimals").Trim();
             bool notNull = row["NotNull"] != DBNull.Value && (bool)row["NotNull"];
             string defaultValue = GetRowString(row, "Default").Trim();
+            // 勾了 PK 沒勾 NotNull 時要隱含 NOT NULL：SQL Server 對 nullable 的主鍵欄直接拒絕
+            bool isPrimaryKey = row.Table.Columns.Contains("PK") && row["PK"] != DBNull.Value && (bool)row["PK"];
 
             List<string> parts = new List<string>
             {
                 QuoteDesignerIdentifier(columnName),
                 MapDesignerType(columnType, length, decimals),
-                notNull ? "NOT NULL" : "NULL"
+                (notNull || isPrimaryKey) ? "NOT NULL" : "NULL"
             };
 
             if (!string.IsNullOrWhiteSpace(defaultValue))
@@ -4430,7 +4462,11 @@ namespace mySQLPunk
 
         private void BtnSave_Click(object sender, EventArgs e)
         {
-            GeneratePreviewSql();
+            // 與「執行 SQL」一致：停在預覽分頁時保留使用者手改的 SQL，不重新產生蓋掉
+            if (tcMain == null || tpSqlPreview == null || tcMain.SelectedTab != tpSqlPreview)
+            {
+                GeneratePreviewSql();
+            }
             string sql = rtbSqlPreview.Text;
             
             if (!ContainsExecutableSql(sql))
@@ -4460,6 +4496,7 @@ namespace mySQLPunk
                     IsModified = false;
                     LoadColumns(); // 重新載入
                     LoadIndexes();
+                    GeneratePreviewSql(); // 預覽不重生的話，接著按「執行 SQL」會把剛執行過的再送一次
                     UpdateTitle();
                 }
                 else
@@ -5368,7 +5405,12 @@ namespace mySQLPunk
             ApplyAutoColumnComment(newRow);
             
             if (insert && dgvColumns.CurrentRow != null)
-                dt.Rows.InsertAt(newRow, dgvColumns.CurrentRow.Index);
+            {
+                // 刪除過欄位後 Deleted 列仍留在 DataTable 裡，檢視索引不能直接當資料索引用
+                DataRow anchor = GetBoundDataRow(dgvColumns.CurrentRow);
+                int insertIndex = anchor != null ? dt.Rows.IndexOf(anchor) : dt.Rows.Count;
+                dt.Rows.InsertAt(newRow, insertIndex < 0 ? dt.Rows.Count : insertIndex);
+            }
             else
                 dt.Rows.Add(newRow);
 
@@ -5383,20 +5425,47 @@ namespace mySQLPunk
 
         private void MoveColumn(int direction)
         {
-            if (dgvColumns.CurrentRow == null || dgvColumns.CurrentRow.IsNewRow) return;
-            int oldIdx = dgvColumns.CurrentRow.Index;
-            int newIdx = oldIdx + direction;
-            
-            DataTable dt = (DataTable)dgvColumns.DataSource;
-            if (newIdx >= 0 && newIdx < dt.Rows.Count)
+            MoveBoundRow(dgvColumns, direction);
+        }
+
+        /// <summary>
+        /// 上移/下移一列。刪除過列之後 Deleted 列仍留在 DataTable 裡、
+        /// 檢視索引與資料索引不同步，必須以繫結的 DataRow 反查真正位置。
+        /// </summary>
+        private static void MoveBoundRow(DataGridView grid, int direction)
+        {
+            if (grid == null || grid.CurrentRow == null || grid.CurrentRow.IsNewRow) return;
+            int targetViewIdx = grid.CurrentRow.Index + direction;
+            if (targetViewIdx < 0 || targetViewIdx >= grid.Rows.Count || grid.Rows[targetViewIdx].IsNewRow) return;
+
+            DataTable dt = grid.DataSource as DataTable;
+            DataRow row = GetBoundDataRow(grid.CurrentRow);
+            DataRow targetRow = GetBoundDataRow(grid.Rows[targetViewIdx]);
+            if (dt == null || row == null || targetRow == null) return;
+
+            int sourceIdx = dt.Rows.IndexOf(row);
+            if (sourceIdx < 0) return;
+            DataRow copy = dt.NewRow();
+            copy.ItemArray = row.ItemArray;
+            dt.Rows.RemoveAt(sourceIdx);
+            int targetIdx = dt.Rows.IndexOf(targetRow);
+            if (targetIdx < 0) targetIdx = Math.Max(0, Math.Min(dt.Rows.Count, sourceIdx + direction));
+            dt.Rows.InsertAt(copy, direction > 0 ? targetIdx + 1 : targetIdx);
+
+            for (int i = 0; i < grid.Rows.Count; i++)
             {
-                DataRow row = dt.Rows[oldIdx];
-                DataRow newRow = dt.NewRow();
-                newRow.ItemArray = row.ItemArray;
-                dt.Rows.RemoveAt(oldIdx);
-                dt.Rows.InsertAt(newRow, newIdx);
-                dgvColumns.CurrentCell = dgvColumns.Rows[newIdx].Cells[0];
+                if (ReferenceEquals(GetBoundDataRow(grid.Rows[i]), copy))
+                {
+                    grid.CurrentCell = grid.Rows[i].Cells[0];
+                    break;
+                }
             }
+        }
+
+        private static DataRow GetBoundDataRow(DataGridViewRow gridRow)
+        {
+            DataRowView view = gridRow == null ? null : gridRow.DataBoundItem as DataRowView;
+            return view == null ? null : view.Row;
         }
 
         private void AddIndex()
@@ -5419,19 +5488,7 @@ namespace mySQLPunk
 
         private void MoveIndex(int direction)
         {
-            if (dgvIndexes.CurrentRow == null || dgvIndexes.CurrentRow.IsNewRow) return;
-            int oldIdx = dgvIndexes.CurrentRow.Index;
-            int newIdx = oldIdx + direction;
-            DataTable dt = (DataTable)dgvIndexes.DataSource;
-            if (newIdx >= 0 && newIdx < dt.Rows.Count)
-            {
-                DataRow row = dt.Rows[oldIdx];
-                DataRow newRow = dt.NewRow();
-                newRow.ItemArray = row.ItemArray;
-                dt.Rows.RemoveAt(oldIdx);
-                dt.Rows.InsertAt(newRow, newIdx);
-                dgvIndexes.CurrentCell = dgvIndexes.Rows[newIdx].Cells[0];
-            }
+            MoveBoundRow(dgvIndexes, direction);
         }
 
         private void LoadIndexes()
@@ -5481,7 +5538,7 @@ namespace mySQLPunk
                     string indexType = GetMetadataString(first, "Index_type", "INDEX_TYPE", "IndexType", "INDEXTYPE", "type_desc");
                     newRow["索引類型"] = GetDesignerIndexType(group.Key, nonUnique, indexType);
 
-                    newRow["索引方法"] = indexType;
+                    newRow["索引方法"] = NormalizeDesignerIndexMethod(indexType);
                     newRow["註解"] = GetMetadataString(first, "Index_comment", "INDEX_COMMENT", "IndexComment", "INDEXCOMMENT", "comment");
                     
                     displayIdx.Rows.Add(newRow);
@@ -5595,11 +5652,43 @@ namespace mySQLPunk
                     DataPropertyName = "索引方法",
                     FlatStyle = FlatStyle.Flat
                 };
-                cb.Items.AddRange(new object[] { "BTREE", "HASH" });
+                cb.Items.AddRange(DesignerIndexMethodChoices);
                 dgvIndexes.Columns.Insert(idx, cb);
             }
 
             if (dgvIndexes.Columns.Contains("_OldName")) dgvIndexes.Columns["_OldName"].Visible = false;
+
+            // ComboBox 欄位遇到清單外的值會直接丟例外；正規化雖已涵蓋已知值，仍要兜底
+            dgvIndexes.DataError -= DesignerGrid_DataError;
+            dgvIndexes.DataError += DesignerGrid_DataError;
+        }
+
+        private void DesignerGrid_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            e.ThrowException = false;
+        }
+
+        // 各方言的索引方法/型別描述：MySQL BTREE/HASH/FULLTEXT/SPATIAL、
+        // PG amname（btree/gin/gist/brin）、MSSQL type_desc、Oracle INDEX_TYPE
+        private static readonly object[] DesignerIndexMethodChoices =
+        {
+            "BTREE", "HASH", "FULLTEXT", "SPATIAL", "GIN", "GIST", "BRIN", "CLUSTERED", "NONCLUSTERED", "NORMAL", "BITMAP"
+        };
+
+        private static string NormalizeDesignerIndexMethod(string indexType)
+        {
+            string value = (indexType ?? string.Empty).Trim().ToUpperInvariant();
+            if (value.Length == 0) return "BTREE";
+            foreach (object choice in DesignerIndexMethodChoices)
+            {
+                if (value == (string)choice) return value;
+            }
+            // "FUNCTION-BASED NORMAL" 這類複合描述取已知關鍵字
+            foreach (object choice in DesignerIndexMethodChoices)
+            {
+                if (value.IndexOf((string)choice, StringComparison.Ordinal) >= 0) return (string)choice;
+            }
+            return "BTREE";
         }
 
         private Image GetIcon(string path)

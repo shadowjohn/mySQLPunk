@@ -66,6 +66,7 @@ public static class SmokeTests
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
         Run("Release third-party notices", TestReleaseThirdPartyNotices, ref passed);
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
+        Run("SQL script splitter", TestSqlScriptSplitter, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
@@ -7643,6 +7644,31 @@ public static class SmokeTests
         AssertEquals("sqlite3.exe", sqliteAvailabilityTarget, "SQLite CLI availability should use PATH instead of a bundled sqlite3.exe.");
     }
 
+    private static void TestSqlScriptSplitter()
+    {
+        // DELIMITER 前面有註解仍要被當成 client 指令（曾經的回歸：只認純空白邊界）
+        var routineScript = "-- 建立預存程序\nDELIMITER $$\nCREATE PROCEDURE p()\nBEGIN\n  SET @a = 1;\n  SET @b = 2;\nEND$$\nDELIMITER ;\nSELECT 1;";
+        var statements = mySQLPunk.Form1.SplitSqlScript(routineScript, true)
+            .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
+        Assert(statements.Count == 2, "DELIMITER after a leading comment should still be honored. Got: " + statements.Count);
+        Assert(statements[0].Contains("SET @a = 1;") && statements[0].Contains("SET @b = 2;"),
+            "The procedure body must remain one statement.");
+        Assert(statements[1] == "SELECT 1", "Statements after DELIMITER ; should split normally.");
+
+        // 名為 delimiter 的欄位定義行不能被吃掉
+        var tableScript = "CREATE TABLE csv_profile (\n  id INT,\n  delimiter VARCHAR(4) NOT NULL\n);\nSELECT 2;";
+        var tableStatements = mySQLPunk.Form1.SplitSqlScript(tableScript, true)
+            .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
+        Assert(tableStatements.Count == 2, "A column named delimiter must not be treated as a directive.");
+        Assert(tableStatements[0].Contains("delimiter VARCHAR(4)"), "The delimiter column definition must survive splitting.");
+
+        // MySQL 的 \' 跳脫不能被當成字串結束
+        var escaped = mySQLPunk.Form1.SplitSqlScript("INSERT INTO t VALUES ('O\\'Brien; x');\nSELECT 3;", true)
+            .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
+        Assert(escaped.Count == 2 && escaped[0].Contains("O\\'Brien; x"),
+            "Backslash-escaped quotes must not terminate the string literal.");
+    }
+
     private static void TestGitHubReleaseWorkflow()
     {
         string root = FindRepositoryRootForTest();
@@ -7665,6 +7691,8 @@ public static class SmokeTests
         // d9c716d 之後 release notes 由 New-ReleaseNotes.ps1 產生（內部仍優先讀 CHANGELOG）
         AssertContains(workflow, "New-ReleaseNotes.ps1", "Release workflow should generate release notes with the shared script.");
         AssertContains(workflow, "dist/release-notes.md", "Release workflow should upload the generated release notes.");
+        string releaseNotesScript = File.ReadAllText(Path.Combine(root, "scripts", "New-ReleaseNotes.ps1"), Encoding.UTF8);
+        AssertContains(releaseNotesScript, "CHANGELOG.md", "Release notes must still be sourced from the changelog.");
         AssertContains(workflow, "api.github.com/repos/$env:REPOSITORY/releases", "Release workflow should create or update a GitHub Release through the API.");
         AssertContains(workflow, "${uploadBaseUrl}?name=$assetName", "Release workflow should preserve the upload host when appending asset query parameters.");
     }

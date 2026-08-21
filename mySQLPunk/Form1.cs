@@ -25,11 +25,12 @@ namespace mySQLPunk
 
     public partial class Form1 : Form
     {
-        private const int MainToolbarHeight = 96;
+        private const int MainToolbarHeight = 86;
         private const int MainToolbarItemWidth = 76;
-        private const int MainToolbarItemHeight = 84;
+        private const int MainToolbarItemHeight = 74;
         // 大型工具列圖示的常見尺寸是 24–32px；40 偏大，會把整條功能列撐得過高
         private const int MainToolbarIconSize = 32;
+        // 高度常數要跟著圖示尺寸走，否則縮圖示只是多出空白
 
         public Form dialog = new Form();
         public Label dialogLabel = new Label();
@@ -1126,7 +1127,8 @@ namespace mySQLPunk
         /// <summary>未連線用降彩度的同色系，連線後亮起，狀態一眼可辨。</summary>
         private static Bitmap TreeConnectionGlyph(Color engineColor, bool open)
         {
-            Color color = open ? engineColor : UiKit.Mix(engineColor, Color.FromArgb(152, 159, 170), 0.62f);
+            // 混向中亮灰而不是中灰：未連線的圖示在深色主題的深底上才不會沉掉
+            Color color = open ? engineColor : UiKit.Mix(engineColor, Color.FromArgb(168, 175, 184), 0.42f);
             return UiKit.RenderGlyph(UiGlyph.Database, 16, color);
         }
 
@@ -1691,10 +1693,9 @@ namespace mySQLPunk
                     {
                         Dictionary<string, object> existingConn = myN.connections[existingIndex];
                         imported["pwd"] = GetConnectionValue(existingConn, "pwd");
-                        if (string.IsNullOrWhiteSpace(GetConnectionValue(imported, "credential_target")))
-                        {
-                            imported["credential_target"] = GetConnectionValue(existingConn, "credential_target");
-                        }
+                        // 匯入檔可能帶著別台機器的 credential_target；一律以本機既有值為準，
+                        // 否則存檔時會拿外來字串去刪憑證、還留下本機的孤兒憑證
+                        imported["credential_target"] = GetConnectionValue(existingConn, "credential_target");
                     }
                     myN.connections[existingIndex] = imported;
                 }
@@ -2347,8 +2348,39 @@ namespace mySQLPunk
             return passwords;
         }
 
+        private void CloseAllDockablesBeforeImport()
+        {
+            if (queryTabs == null) return;
+            List<TabPage> pages = new List<TabPage>();
+            foreach (TabPage page in queryTabs.TabPages) pages.Add(page);
+            foreach (TabPage page in pages)
+            {
+                Form form = page.Tag as Form;
+                queryTabs.TabPages.Remove(page);
+                page.Dispose();
+                if (form != null && !form.IsDisposed)
+                {
+                    try { form.Dispose(); } catch { }
+                }
+            }
+            queryTabs.Visible = false;
+
+            List<Form> floating = new List<Form>();
+            foreach (Form openForm in Application.OpenForms)
+            {
+                if (openForm is IDockableForm) floating.Add(openForm);
+            }
+            foreach (Form form in floating)
+            {
+                try { form.Close(); } catch { }
+            }
+        }
+
         private void CloseAllConnectionsBeforeImport()
         {
+            // 分頁還握著即將 Dispose 的連線物件，先全部關掉
+            CloseAllDockablesBeforeImport();
+
             foreach (Dictionary<string, object> conn in myN.connections)
             {
                 if (conn == null) continue;
@@ -2477,7 +2509,9 @@ namespace mySQLPunk
             table_top.DragDrop += QueryTabs_DragDrop;
 
             // 初始化 dock 提示框 (懸浮視窗拖回時的視覺指引)
-            _dockHintOverlay = new Panel() { Dock = DockStyle.Top, Height = 36, Visible = false, BackColor = Color.FromArgb(220, 235, 255) };
+            // 不能 Dock=Top：一顯示就把底下的 queryTabs 往下擠，drop 判定區跟著移動，
+            // 拖曳時會 顯示→區域下移→判定失敗→隱藏→區域回來→判定成功 高速閃爍
+            _dockHintOverlay = new Panel() { Dock = DockStyle.None, Height = 36, Visible = false, BackColor = Color.FromArgb(220, 235, 255) };
             _dockHintOverlay.Paint += (s, e) =>
             {
                 using (var pen = new Pen(ThemeManager.AccentColor, 4))
@@ -3483,6 +3517,11 @@ namespace mySQLPunk
 
         private async Task<TreeNode> FindFavoriteNodeAsync(string path)
         {
+            return await FindFavoriteNodeAsync(path, false);
+        }
+
+        private async Task<TreeNode> FindFavoriteNodeAsync(string path, bool isRetry)
+        {
             if (string.IsNullOrWhiteSpace(path)) return null;
 
             string[] parts = path.Split('\\');
@@ -3495,24 +3534,36 @@ namespace mySQLPunk
             for (int i = 1; i < parts.Length; i++)
             {
                 // 未連線的連線節點要先觸發連線；db_tree_DoubleClick 是 async void，
-                // 只能輪詢等子節點載入完成，否則第一次點我的最愛永遠「找不到」
-                if (IsFavoriteConnectionNode(current) && current.Nodes.Count == 0)
+                // 只能輪詢等子節點載入完成，否則第一次點我的最愛永遠「找不到」。
+                // 斷線後節點會留一個 loading 佔位子節點，也要視為「未展開」。
+                if (IsFavoriteConnectionNode(current) && HasOnlyPlaceholderChildren(current))
                 {
                     db_tree.SelectedNode = current;
                     db_tree_DoubleClick(db_tree, EventArgs.Empty);
                     DateTime deadline = DateTime.UtcNow.AddSeconds(15);
-                    while (current.Nodes.Count == 0 && DateTime.UtcNow < deadline)
+                    DateTime failureGrace = DateTime.UtcNow.AddSeconds(2);
+                    while (HasOnlyPlaceholderChildren(current) && DateTime.UtcNow < deadline)
                     {
                         await Task.Delay(200);
+                        // 輪詢期間樹可能被整棵重建（drawLists），節點會變孤兒；重找一次
+                        if (current.TreeView == null)
+                        {
+                            return isRetry ? null : await FindFavoriteNodeAsync(path, true);
+                        }
+                        // 連線失敗（開啟流程結束、樹恢復可用但仍未連上）就別等滿 15 秒
+                        if (DateTime.UtcNow > failureGrace && db_tree.Enabled && !IsFavoriteConnectionOpen(current))
+                        {
+                            return null;
+                        }
                     }
-                    if (current.Nodes.Count == 0) return null;
+                    if (HasOnlyPlaceholderChildren(current)) return null;
                 }
 
                 // 資料庫節點底下的群組（Tables/Views...）可能尚未建立；
                 // 用「父節點是連線」判斷層級，啟用連線群組後層級會位移，不能寫死 i == 2
                 if (current.Parent != null && IsFavoriteConnectionNode(current.Parent))
                 {
-                    EnsureDatabaseGroupNodes(current);
+                    await EnsureDatabaseGroupNodesAsync(current);
                 }
 
                 TreeNode parent = current;
@@ -3543,6 +3594,23 @@ namespace mySQLPunk
             if (node == null) return false;
             if (node.Parent == null) return !IsConnectionGroupNode(node);
             return IsConnectionGroupNode(node.Parent);
+        }
+
+        /// <summary>沒有子節點，或只剩斷線後的 loading 佔位節點（無 Tag、無子節點）。</summary>
+        private static bool HasOnlyPlaceholderChildren(TreeNode node)
+        {
+            if (node.Nodes.Count == 0) return true;
+            if (node.Nodes.Count > 1) return false;
+            TreeNode child = node.Nodes[0];
+            return child.Tag == null && child.Nodes.Count == 0;
+        }
+
+        private bool IsFavoriteConnectionOpen(TreeNode connectionNode)
+        {
+            int index = GetConnectionIndex(connectionNode);
+            if (index < 0 || index >= myN.connections.Count) return false;
+            Dictionary<string, object> conn = myN.connections[index];
+            return conn.ContainsKey("isConnect") && conn["isConnect"].ToString() == "T";
         }
 
         private void LoadFavoriteNodePaths()
@@ -5084,6 +5152,41 @@ namespace mySQLPunk
             RefreshQueriesGroupIfSelected();
         }
 
+        /// <summary>關閉所有使用指定連線的停靠分頁與浮動視窗（關閉連線/切換設定檔前呼叫）。</summary>
+        private void CloseDockablesUsingDatabase(IDatabase db)
+        {
+            if (db == null || queryTabs == null) return;
+
+            List<TabPage> pagesToClose = new List<TabPage>();
+            foreach (TabPage page in queryTabs.TabPages)
+            {
+                IDockableForm dockable = page.Tag as IDockableForm;
+                if (dockable != null && dockable.UsesDatabase(db)) pagesToClose.Add(page);
+            }
+            foreach (TabPage page in pagesToClose)
+            {
+                Form form = page.Tag as Form;
+                queryTabs.TabPages.Remove(page);
+                page.Dispose();
+                if (form != null && !form.IsDisposed)
+                {
+                    try { form.Dispose(); } catch { }
+                }
+            }
+            if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
+
+            List<Form> floatingToClose = new List<Form>();
+            foreach (Form openForm in Application.OpenForms)
+            {
+                IDockableForm dockable = openForm as IDockableForm;
+                if (dockable != null && dockable.UsesDatabase(db)) floatingToClose.Add(openForm);
+            }
+            foreach (Form form in floatingToClose)
+            {
+                try { form.Close(); } catch { }
+            }
+        }
+
         public void FloatDockableForm(IDockableForm dockable)
         {
             if (dockable == null) return;
@@ -5152,6 +5255,11 @@ namespace mySQLPunk
             Rectangle bounds = GetTabDropScreenBounds();
             if (!bounds.IsEmpty)
                 _dockHintOverlay.Height = bounds.Height;
+            // Dock=None：每次顯示時手動鋪滿父容器上緣，蓋在 queryTabs 上而不推擠它
+            if (_dockHintOverlay.Parent != null)
+            {
+                _dockHintOverlay.SetBounds(0, 0, _dockHintOverlay.Parent.ClientSize.Width, _dockHintOverlay.Height);
+            }
             _dockHintOverlay.Visible = true;
             _dockHintOverlay.BringToFront();
             _dockHintOverlay.Invalidate();
@@ -6129,6 +6237,30 @@ namespace mySQLPunk
 
         private string lastRestoreSafetyBackupPath;
 
+        /// <summary>檔案關聯（開啟方式 .sql）啟動時由 Program 填入；有連線後開進查詢分頁。</summary>
+        public static string StartupSqlFilePath;
+
+        private void TryOpenStartupSqlFile(int connectionIndex, IDatabase db, string databaseName)
+        {
+            string path = StartupSqlFilePath;
+            if (string.IsNullOrWhiteSpace(path)) return;
+            StartupSqlFilePath = null; // 只開一次
+
+            try
+            {
+                string sql = File.ReadAllText(path, Encoding.UTF8);
+                string host = connectionIndex >= 0 && connectionIndex < myN.connections.Count
+                    ? GetConnectionValue(myN.connections[connectionIndex], "host")
+                    : string.Empty;
+                OpenQuery(db, databaseName, host, sql, true);
+                UpdateMainStatus(Localization.Format("Query.StartupFileOpened", path));
+            }
+            catch (Exception ex)
+            {
+                UpdateMainStatus(Localization.Format("Query.ErrorStatus", ex.Message));
+            }
+        }
+
         private void RestoreQuarantinedBackupWithDialog()
         {
             string quarantineDirectory = GetBackupIntegrityQuarantineDirectory();
@@ -6413,16 +6545,42 @@ namespace mySQLPunk
             return SplitSqlScript(script).Count(statement => !string.IsNullOrWhiteSpace(statement));
         }
 
-        private static List<string> SplitSqlScript(string script)
+        public static List<string> SplitSqlScript(string script)
         {
             return SplitSqlScript(script, false);
         }
 
-        private static bool IsSplitBufferWhitespace(StringBuilder buffer)
+        /// <summary>
+        /// 「語句邊界」= buffer 只含空白與註解。註解會被原樣累積進 buffer，
+        /// 只認空白的話，DELIMITER 前面有一行標題註解就不會被當成指令，整份腳本會被切壞。
+        /// </summary>
+        private static bool IsSplitBufferStatementBoundary(StringBuilder buffer)
         {
-            for (int i = 0; i < buffer.Length; i++)
+            int i = 0;
+            int length = buffer.Length;
+            while (i < length)
             {
-                if (!char.IsWhiteSpace(buffer[i])) return false;
+                char c = buffer[i];
+                if (char.IsWhiteSpace(c)) { i++; continue; }
+                if (c == '-' && i + 1 < length && buffer[i + 1] == '-')
+                {
+                    i += 2;
+                    while (i < length && buffer[i] != '\n') i++;
+                    continue;
+                }
+                if (c == '#')
+                {
+                    while (i < length && buffer[i] != '\n') i++;
+                    continue;
+                }
+                if (c == '/' && i + 1 < length && buffer[i + 1] == '*')
+                {
+                    i += 2;
+                    while (i + 1 < length && !(buffer[i] == '*' && buffer[i + 1] == '/')) i++;
+                    i = Math.Min(length, i + 2);
+                    continue;
+                }
+                return false;
             }
             return true;
         }
@@ -6432,7 +6590,7 @@ namespace mySQLPunk
         /// 不是字串結束；同時支援 mysql client 的 DELIMITER 指令（routine/trigger dump 會用到，
         /// 這個指令伺服器不認得，不能當語句送出）。
         /// </summary>
-        private static List<string> SplitSqlScript(string script, bool backslashEscapes)
+        public static List<string> SplitSqlScript(string script, bool backslashEscapes)
         {
             List<string> statements = new List<string>();
             StringBuilder current = new StringBuilder();
@@ -6473,7 +6631,7 @@ namespace mySQLPunk
                     // 只有「語句邊界」上的 DELIMITER 才是 client 指令；
                     // CREATE TABLE 裡名為 delimiter 的欄位定義行不能被吃掉
                     if (atLineStart && (c == 'D' || c == 'd') &&
-                        IsSplitBufferWhitespace(current) &&
+                        IsSplitBufferStatementBoundary(current) &&
                         string.Compare(script, i, "DELIMITER", 0, 9, StringComparison.OrdinalIgnoreCase) == 0 &&
                         i + 9 < script.Length && (script[i + 9] == ' ' || script[i + 9] == '\t'))
                     {
@@ -8569,6 +8727,12 @@ namespace mySQLPunk
             var conn = myN.connections[index];
             if (conn["isConnect"].ToString() == "T")
             {
+                // 先關掉使用這條連線的分頁與浮動視窗，否則它們會打到已 Dispose 的物件
+                if (conn.ContainsKey("pdo") && conn["pdo"] is IDatabase closingDb)
+                {
+                    CloseDockablesUsingDatabase(closingDb);
+                }
+
                 if (conn.ContainsKey("pdo") && conn["pdo"] is IDisposable disp)
                 {
                     try { disp.Dispose(); } catch { }
@@ -8969,6 +9133,14 @@ namespace mySQLPunk
             if (target == null || target.Database == null)
             {
                 UpdateMainStatus(Localization.T("Status.SelectConnection"));
+                return;
+            }
+            // 歷史清單可能同時列出多個資料庫的紀錄；資料庫不一致時擋下，
+            // 否則 DELETE 這類語句只差一個「執行」鍵就打到錯的庫
+            if (!string.IsNullOrWhiteSpace(entry.DatabaseName) &&
+                !string.Equals(target.DatabaseName, entry.DatabaseName, StringComparison.OrdinalIgnoreCase))
+            {
+                UpdateMainStatus(Localization.Format("Query.HistoryDatabaseMismatch", entry.DatabaseName));
                 return;
             }
             string host = target.ConnectionInfo == null ? "" : GetConnectionValue(target.ConnectionInfo, "host");
@@ -14307,6 +14479,8 @@ namespace mySQLPunk
                 Cursor = previousCursor;
                 ExitDatabaseMetadataLoadScope(connectionIndex, databaseName);
             }
+
+            TryOpenStartupSqlFile(connectionIndex, db, databaseName);
         }
 
         private void PopulateDatabaseChildren(TreeNode databaseNode, DatabaseMetadataSnapshot snapshot, string databaseName, Dictionary<string, object> connInfo)
@@ -14713,7 +14887,7 @@ namespace mySQLPunk
             SelectDatabaseGroupNode("BI");
         }
 
-        private void SelectDatabaseGroupNode(string groupName)
+        private async void SelectDatabaseGroupNode(string groupName)
         {
             TreeNode databaseNode = GetSelectedDatabaseNode();
             if (databaseNode == null)
@@ -14722,7 +14896,7 @@ namespace mySQLPunk
                 return;
             }
 
-            EnsureDatabaseGroupNodes(databaseNode);
+            await EnsureDatabaseGroupNodesAsync(databaseNode);
 
             foreach (TreeNode child in databaseNode.Nodes)
             {
@@ -14737,6 +14911,16 @@ namespace mySQLPunk
                     }
                     return;
                 }
+            }
+
+            // 「隱藏物件群組」或「只顯示有內容的物件」時群組節點不存在（被攤平或省略），
+            // 直接選資料庫節點並顯示該群組的清單，區段按鈕才不會變成死按鈕
+            TreeDatabaseTarget flattenTarget = BuildTargetFromNode(databaseNode);
+            if (flattenTarget != null && flattenTarget.Database != null)
+            {
+                db_tree.SelectedNode = databaseNode;
+                ShowDatabaseGroupList(flattenTarget.Database, flattenTarget.DatabaseName, groupName, flattenTarget.ConnectionInfo);
+                return;
             }
 
             UpdateMainStatus(BuildDatabaseGroupMissingStatusText(groupName));
@@ -14777,18 +14961,24 @@ namespace mySQLPunk
 
 	        private void EnsureDatabaseGroupNodes(TreeNode databaseNode)
 	        {
-	            if (databaseNode == null || databaseNode.Nodes.Count > 0) return;
+	            _ = EnsureDatabaseGroupNodesAsync(databaseNode);
+	        }
+
+	        /// <summary>載入完成後群組節點才會存在；呼叫端要接著找群組的話必須 await。</summary>
+	        private Task EnsureDatabaseGroupNodesAsync(TreeNode databaseNode)
+	        {
+	            if (databaseNode == null || databaseNode.Nodes.Count > 0) return Task.CompletedTask;
 
             TreeNode root = databaseNode;
             while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
             int index = GetConnectionIndex(root);
-            if (index < 0 || index >= myN.connections.Count) return;
+            if (index < 0 || index >= myN.connections.Count) return Task.CompletedTask;
 
 	            Dictionary<string, object> conn = myN.connections[index];
-	            if (!conn.ContainsKey("isConnect") || conn["isConnect"].ToString() != "T") return;
-	            if (!(conn.ContainsKey("pdo") && conn["pdo"] is IDatabase db)) return;
+	            if (!conn.ContainsKey("isConnect") || conn["isConnect"].ToString() != "T") return Task.CompletedTask;
+	            if (!(conn.ContainsKey("pdo") && conn["pdo"] is IDatabase db)) return Task.CompletedTask;
 
-	            _ = LoadDatabaseMetadataAsync(index, databaseNode, db, databaseNode.Text);
+	            return LoadDatabaseMetadataAsync(index, databaseNode, db, databaseNode.Text);
 	        }
 
         private void tool_Connection_ItemClicked(object sender, ToolStripItemClickedEventArgs e)

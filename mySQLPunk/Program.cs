@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.IO;
 using mySQLPunk.lib;
 
 namespace mySQLPunk
@@ -23,6 +24,33 @@ namespace mySQLPunk
                     Console.WriteLine(cliResult.Message);
                 }
                 return cliResult.ExitCode;
+            }
+
+            // 「允許重複執行」選項關閉時強制單一實例（選項頁本來就有這個開關，之前沒實作）
+            System.Threading.Mutex instanceMutex = null;
+            bool allowMultipleInstances = true;
+            try { allowMultipleInstances = ApplicationOptionSettings.GetBool("AdvancedAllowMultipleInstances"); }
+            catch { }
+            if (!allowMultipleInstances)
+            {
+                bool createdNew;
+                instanceMutex = new System.Threading.Mutex(true, @"Local\mySQLPunk_SingleInstance", out createdNew);
+                if (!createdNew)
+                {
+                    MessageBox.Show(
+                        Localization.T("Program.AlreadyRunning"),
+                        "mySQLPunk",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return 0;
+                }
+            }
+
+            // 檔案關聯（開啟方式 .sql）啟動時把檔案留給主視窗，等有連線後開進查詢分頁
+            if (args.Length > 0 && File.Exists(args[0]) &&
+                string.Equals(Path.GetExtension(args[0]), ".sql", StringComparison.OrdinalIgnoreCase))
+            {
+                Form1.StartupSqlFilePath = Path.GetFullPath(args[0]);
             }
 
             // 全域例外處理：捕捉 UI 執行緒未處理的例外，顯示訊息而非直接 crash
@@ -61,6 +89,7 @@ namespace mySQLPunk
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Form1());
+            GC.KeepAlive(instanceMutex);
             return 0;
         }
 

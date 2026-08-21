@@ -63,6 +63,9 @@ namespace mySQLPunk.lib
         {
             using (WebClient client = new WebClient())
             {
+                // DownloadString 預設用系統 ANSI 解碼；GitHub 回應是 UTF-8，
+                // release 名稱含中文時 Big5 的雙位元組解讀會吞掉字串結尾的引號、JSON 解析直接壞掉
+                client.Encoding = Encoding.UTF8;
                 client.Headers[HttpRequestHeader.UserAgent] = "mySQLPunk-update-check";
                 client.Headers[HttpRequestHeader.Accept] = "application/vnd.github+json";
                 IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();

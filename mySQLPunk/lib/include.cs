@@ -22,7 +22,9 @@ namespace utility
 
         public string pwd()
         {
-            return Directory.GetCurrentDirectory();
+            // 設定檔要跟著程式目錄；從檔案總管開 .sql 或 URL 協定啟動時
+            // 工作目錄會是別的地方，跟著 CWD 走會讓連線清單整個消失
+            return AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
         }
         public bool is_dir(string path)
         {
@@ -548,9 +550,22 @@ namespace utility
         }
         public void file_put_contents(string filepath, byte[] input)
         {
-            FileStream myFile = File.Open(@filepath, FileMode.Create);
-            myFile.Write(input, 0, input.Length);
-            myFile.Dispose();
+            // 先寫暫存再取代：FileMode.Create 會先截斷，寫到一半當機/磁碟滿
+            // 會把原檔（例如 setting.ini）毀成 0 byte 或半截 JSON
+            string tempPath = filepath + ".writing";
+            using (FileStream tempFile = File.Open(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                tempFile.Write(input, 0, input.Length);
+                tempFile.Flush(true);
+            }
+            if (File.Exists(filepath))
+            {
+                File.Replace(tempPath, filepath, null);
+            }
+            else
+            {
+                File.Move(tempPath, filepath);
+            }
         }
         public string implode(string keyword, string[] arrays)
         {

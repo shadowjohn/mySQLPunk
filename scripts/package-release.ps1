@@ -102,6 +102,12 @@ function Copy-ReleaseFiles {
 
     $items = Get-ChildItem -LiteralPath $SourceDirectory -Force | Where-Object {
         $_.Name -notmatch '\.pdb$' -and
+    $_.Name -ne "setting.ini" -and
+    $_.Name -ne "connection-profile.txt" -and
+    $_.Name -ne "connection_profiles" -and
+    $_.Name -ne "autocomplete-cache.json" -and
+    $_.Name -notmatch '\.log$' -and
+    $_.Name -notmatch '\.corrupt-' -and
         $_.Name -notmatch '\.xml$' -and
         $_.Name -ne "CodexVerify"
     }

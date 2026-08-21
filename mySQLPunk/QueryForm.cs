@@ -443,11 +443,6 @@ namespace mySQLPunk
             btnDataCancel = new ToolStripButton("X", null, (s, e) => ExecutePagedQuery()) { ForeColor = Color.Red, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
             btnDataRefresh = new ToolStripButton("↻", null, (s, e) => ExecutePagedQuery()) { Font = new Font("Segoe UI", 12, FontStyle.Bold) };
 
-            btnDataFirst = new ToolStripButton("|<", null, (s, e) => { _currentPage = 1; ExecutePagedQuery(); });
-            btnDataPrev = new ToolStripButton("<", null, (s, e) => { if (_currentPage > 1) { _currentPage--; ExecutePagedQuery(); } });
-            btnDataNext = new ToolStripButton(">", null, (s, e) => { if (_currentPage < GetTotalPages()) { _currentPage++; ExecutePagedQuery(); } });
-            btnDataLast = new ToolStripButton(">|", null, (s, e) => { _currentPage = GetTotalPages(); ExecutePagedQuery(); });
-
             ToolStripLabel lblLimit = new ToolStripLabel(Localization.T("Query.Limit")) { Margin = new Padding(10, 0, 0, 0) };
             txtPageSize = new ToolStripTextBox { Text = _pageSize.ToString(), Width = 50, TextBoxTextAlign = HorizontalAlignment.Center };
             txtPageSize.Leave += (s, e) => ApplyPageSizeFromInput();
@@ -797,6 +792,11 @@ namespace mySQLPunk
             _mainHost = mainHost;
         }
 
+        public bool UsesDatabase(IDatabase database)
+        {
+            return database != null && ReferenceEquals(_db, database);
+        }
+
         public bool HasUnsavedChanges()
         {
             try
@@ -1136,7 +1136,14 @@ namespace mySQLPunk
             string sql = txtSql.Text;
             if (string.IsNullOrEmpty(sql)) return;
 
-            string formatted = FormatSqlForEditor(sql);
+            if (ContainsUnformattableSyntax(sql, IsMySqlProvider()))
+            {
+                // 寧可不動也不能改壞，但要讓使用者知道為什麼沒反應
+                UpdateStatus(Localization.T("Query.BeautifySkipped"));
+                return;
+            }
+
+            string formatted = FormatSqlForEditor(sql, IsMySqlProvider());
             if (string.Equals(formatted, sql, StringComparison.Ordinal)) return;
             // 用 SelectedText 取代而不是直接設 Text，Ctrl+Z 才救得回原始 SQL
             txtSql.SelectAll();
@@ -1145,12 +1152,17 @@ namespace mySQLPunk
 
         private static string FormatSqlForEditor(string sql)
         {
+            return FormatSqlForEditor(sql, true);
+        }
+
+        private static string FormatSqlForEditor(string sql, bool mysqlDialect)
+        {
             if (string.IsNullOrWhiteSpace(sql)) return sql;
 
             // 這個重排式 formatter 沒有註解與反斜線跳脫的概念：
             // -- 會被拆成兩個減號、註解文字會混進語句、'It\'s' 會被切壞。
             // 這些情況寧可原樣不動，也不能把使用者的 SQL 改成會執行出錯的東西。
-            if (ContainsUnformattableSyntax(sql)) return sql;
+            if (ContainsUnformattableSyntax(sql, mysqlDialect)) return sql;
 
             List<SqlToken> tokens = TokenizeSql(sql);
             if (tokens.Count == 0) return string.Empty;
@@ -1278,8 +1290,10 @@ namespace mySQLPunk
             if (!string.IsNullOrWhiteSpace(text)) sb.Append(text);
         }
 
-        private static bool ContainsUnformattableSyntax(string sql)
+        private static bool ContainsUnformattableSyntax(string sql, bool mysqlDialect)
         {
+            // # 註解與反斜線跳脫是 MySQL 特有；MSSQL 的 #temp、PG 的 #> 運算子、
+            // 各方言字串裡的 Windows 路徑都不該被誤判成「不可美化」
             bool inSingle = false, inDouble = false, inBacktick = false, inBracket = false;
             for (int i = 0; i < sql.Length; i++)
             {
@@ -1287,13 +1301,13 @@ namespace mySQLPunk
                 char next = i + 1 < sql.Length ? sql[i + 1] : '\0';
                 if (inSingle)
                 {
-                    if (c == '\\') return true;
+                    if (mysqlDialect && c == '\\') return true;
                     if (c == '\'') { if (next == '\'') i++; else inSingle = false; }
                     continue;
                 }
                 if (inDouble)
                 {
-                    if (c == '\\') return true;
+                    if (mysqlDialect && c == '\\') return true;
                     if (c == '"') { if (next == '"') i++; else inDouble = false; }
                     continue;
                 }
@@ -1305,7 +1319,7 @@ namespace mySQLPunk
                 else if (c == '`') inBacktick = true;
                 else if (c == '[') inBracket = true;
                 else if (c == '-' && next == '-') return true;
-                else if (c == '#') return true;
+                else if (mysqlDialect && c == '#') return true;
                 else if (c == '/' && next == '*') return true;
             }
             return false;
@@ -1692,7 +1706,6 @@ namespace mySQLPunk
             }
 
             if (_isQueryBusy) return;
-            _isQueryBusy = true;
             _cts = new CancellationTokenSource();
             tsBtnExecute.Enabled = false;
             tsBtnCancel.Enabled = true;
@@ -1704,6 +1717,7 @@ namespace mySQLPunk
             ShowLoadingOverlay();
 
             Stopwatch sw = Stopwatch.StartNew();
+            _isQueryBusy = true;
             try
             {
                 TablePageLoadResult result = await Task.Run(
@@ -1826,6 +1840,9 @@ namespace mySQLPunk
                 return;
             }
 
+            // 值沒變就別動：光是 Tab 走過輸入框不能改寫全域選項、跳回第 1 頁、重跑查詢
+            if (parsed == _pageSize) return;
+
             _pageSize = parsed;
             _recordLimitEnabled = true;
             _currentPage = 1;
@@ -1859,7 +1876,6 @@ namespace mySQLPunk
 
             // busy 檢查要在任何狀態變更之前：查詢進行中再按 F5 不能清掉進行中結果的旗標
             if (_isQueryBusy) return;
-            _isQueryBusy = true;
 
             string sql = GetSqlToExecute(rawSql);
             _lastResultSql = "";
@@ -1876,6 +1892,8 @@ namespace mySQLPunk
 
             Stopwatch sw = Stopwatch.StartNew();
 
+            // busy 只在 try/finally 保護下為 true：中間任何敘述丟例外都不能讓它卡死
+            _isQueryBusy = true;
             try
             {
                 // 判斷是否為 SELECT/SHOW/EXPLAIN/DESC (顯示結果集) 或 DML (顯示影響行數)
@@ -4929,6 +4947,9 @@ namespace mySQLPunk
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            foreach (Font cachedFont in _editorFontCache.Values) cachedFont.Dispose();
+            _editorFontCache.Clear();
+
             if (dgvResults != null)
             {
                 dgvResults.ContextMenuStrip = null;

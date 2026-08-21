@@ -15,6 +15,7 @@ namespace mySQLPunk.lib
 
             string[] filters = table.Columns
                 .Cast<DataColumn>()
+                .Where(column => !column.ColumnName.StartsWith("_", StringComparison.Ordinal)) // _ 開頭是隱藏的內部欄位
                 .Select(column => "Convert(" + QuoteColumn(column.ColumnName) + ", 'System.String') LIKE '%" + escapedKeyword + "%'")
                 .ToArray();
 

@@ -209,7 +209,7 @@ namespace mySQLPunk
             Add("Toolbar.Other", "其它", "Other");
             Add("Toolbar.Query", "查詢", "Queries");
             Add("Toolbar.Backup", "備份", "Backups");
-            Add("Toolbar.AutoRun", "自動執行", "Automation");
+            Add("Toolbar.AutoRun", "事件", "Events");
             Add("Toolbar.Model", "模型", "Models");
             Add("Toolbar.BI", "BI", "BI");
             Add("Tree.Tables", "資料表", "Tables");
@@ -408,6 +408,12 @@ namespace mySQLPunk
             Add("Common.Error", "錯誤", "Error");
             Add("Options.SaveFailed", "設定儲存失敗：{0}", "Failed to save settings: {0}");
             Add("Backup.RestoreFailedSafetyHint", "還原前的安全備份保留在：{0}", "The pre-restore safety backup is kept at: {0}");
+            Add("Connection.SettingsCorrupt", "連線設定檔已損毀，無法讀取：\n{0}\n\n已將損毀的檔案備份到：\n{1}\n\n本次啟動將以空的連線清單開始；在修復前新增連線會覆蓋原檔。", "The connection settings file is corrupt and could not be read:\n{0}\n\nThe corrupt file was backed up to:\n{1}\n\nThis session starts with an empty connection list; adding connections before repairing will overwrite the original file.");
+            Add("Program.AlreadyRunning", "mySQLPunk 已經在執行中。\n\n如需同時開啟多個視窗，請到「選項 → 進階」勾選「允許重複執行 mySQLPunk」。", "mySQLPunk is already running.\n\nTo allow multiple windows, enable \"Allow multiple mySQLPunk instances\" under Options → Advanced.");
+            Add("Query.BeautifySkipped", "SQL 內含註解或跳脫字元，為避免改壞內容，已略過美化。", "The SQL contains comments or escape sequences; beautify was skipped to avoid corrupting it.");
+            Add("Query.HistoryDatabaseMismatch", "這筆歷史屬於資料庫「{0}」，請先在左側選取該資料庫再開啟。", "This history entry belongs to database \"{0}\"; select that database in the tree first.");
+            Add("Query.StartupFileOpened", "已開啟啟動時指定的 SQL 檔案：{0}", "Opened the SQL file passed at startup: {0}");
+            Add("Designer.SqliteInternalIndex", "「{0}」是 SQLite 為 UNIQUE/PRIMARY KEY 約束自動建立的內部索引，無法在此刪除或修改。", "\"{0}\" is an internal index SQLite maintains for a UNIQUE/PRIMARY KEY constraint and cannot be dropped or modified here.");
             Add("User.HostRequiredForAccountChange", "取不到這個帳號的主機（Host），不能猜測為 %。請改用 SQL 指定完整帳號。", "The account's host could not be determined and will not be assumed to be %. Use SQL with the full account instead.");
             Add("Query.BlobImportLargeConfirm", "檔案大小為 {0}，將整個載入記憶體，確定要匯入嗎？", "The file is {0} and will be loaded entirely into memory. Import anyway?");
             Add("Query.BlobImportFailed", "匯入 BLOB 失敗：{0}", "Failed to import BLOB: {0}");

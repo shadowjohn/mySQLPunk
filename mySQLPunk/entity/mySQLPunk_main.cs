@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.IO;
+using System.Windows.Forms;
 using utility;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -41,7 +42,28 @@ namespace mySQLPunk.entity
 
             JToken root;
             try { root = JToken.Parse(endata); }
-            catch { return; }
+            catch
+            {
+                // 不能默默當作空清單：下一次存檔會用空清單覆蓋整份連線。
+                // 先備份損毀檔再告知使用者，至少留下救援的機會。
+                string backupPath = string.Empty;
+                try
+                {
+                    backupPath = setting_path + ".corrupt-" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    File.Copy(setting_path, backupPath, true);
+                }
+                catch { }
+                try
+                {
+                    MessageBox.Show(
+                        Localization.Format("Connection.SettingsCorrupt", setting_path, backupPath),
+                        Localization.T("Common.Error"),
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+                catch { }
+                return;
+            }
 
             if (root.Type == JTokenType.Array)
             {
@@ -140,7 +162,54 @@ namespace mySQLPunk.entity
             Directory.CreateDirectory(GetProfilesDirectory());
             string sourcePath = GetProfileReadPath(source);
             string content = File.Exists(sourcePath) ? File.ReadAllText(sourcePath, Encoding.UTF8) : BuildEmptySettingsJson();
+            // 憑證名稱含 profile 名。若沿用來源的 credential_target，之後在新 profile 的
+            // 任何一次存檔都會把憑證「搬走」並刪掉來源 profile 的密碼（來源密碼無聲消失）。
+            // 這裡當場把讀得到的密碼複寫到新 profile 名下；讀不到的清空 target，寧可要求重打。
+            content = RewriteCredentialTargetsForCopiedProfile(content, target);
             File.WriteAllText(GetProfileSettingPath(target), content, Encoding.UTF8);
+        }
+
+        private string RewriteCredentialTargetsForCopiedProfile(string content, string targetProfileName)
+        {
+            try
+            {
+                JToken root = JToken.Parse(content);
+                JToken connectionsToken = root.Type == JTokenType.Array ? root : root["connections"];
+                JArray connections = connectionsToken as JArray;
+                if (connections == null) return content;
+
+                foreach (JToken token in connections)
+                {
+                    JObject conn = token as JObject;
+                    if (conn == null) continue;
+                    string oldTarget = (string)conn["credential_target"] ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(oldTarget)) continue;
+
+                    string password;
+                    string newTarget = string.Empty;
+                    if (WindowsCredentialService.TryReadPassword(oldTarget, out password) && !string.IsNullOrEmpty(password))
+                    {
+                        Dictionary<string, object> connDict = new Dictionary<string, object>();
+                        foreach (var property in conn.Properties())
+                        {
+                            connDict[property.Name] = property.Value == null ? string.Empty : property.Value.ToString();
+                        }
+                        connDict["username"] = SafeDecrypt(GetVal(connDict, "username"));
+                        string candidate = WindowsCredentialService.BuildTargetName(targetProfileName, connDict);
+                        if (WindowsCredentialService.TryWritePassword(candidate, GetVal(connDict, "username"), password))
+                        {
+                            newTarget = candidate;
+                        }
+                    }
+                    conn["credential_target"] = newTarget;
+                }
+                return root.ToString(Newtonsoft.Json.Formatting.Indented);
+            }
+            catch
+            {
+                // 解析不了就原樣複製，最壞情況與舊行為相同
+                return content;
+            }
         }
 
         public void RenameProfile(string oldProfileName, string newProfileName)
@@ -183,6 +252,7 @@ namespace mySQLPunk.entity
             string path = GetProfileSettingPath(normalized);
             if (File.Exists(path))
             {
+                TryDeleteProfileCredentials(path);
                 File.Delete(path);
             }
 
@@ -191,6 +261,30 @@ namespace mySQLPunk.entity
                 ActiveProfileName = DefaultProfileName;
                 SaveActiveProfileName();
                 getSettingINI();
+            }
+        }
+
+        /// <summary>刪除 profile 前，把檔案裡記錄的憑證從 Windows 認證管理員清掉。</summary>
+        private static void TryDeleteProfileCredentials(string settingPath)
+        {
+            try
+            {
+                JToken root = JToken.Parse(File.ReadAllText(settingPath, Encoding.UTF8));
+                JToken connectionsToken = root.Type == JTokenType.Array ? root : root["connections"];
+                JArray connections = connectionsToken as JArray;
+                if (connections == null) return;
+                foreach (JToken token in connections)
+                {
+                    JObject conn = token as JObject;
+                    string target = conn == null ? null : (string)conn["credential_target"];
+                    if (!string.IsNullOrWhiteSpace(target))
+                    {
+                        WindowsCredentialService.TryDeletePassword(target);
+                    }
+                }
+            }
+            catch
+            {
             }
         }
 
