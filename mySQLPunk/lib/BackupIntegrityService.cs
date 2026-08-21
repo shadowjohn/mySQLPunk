@@ -150,7 +150,7 @@ namespace mySQLPunk.lib
         {
             result.Kind = "sqlite";
             result.EntryName = entryName ?? "";
-            using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + sqlitePath + ";Version=3;Read Only=True;"))
+            using (SQLiteConnection connection = new SQLiteConnection(new SQLiteConnectionStringBuilder { DataSource = sqlitePath, Version = 3, ReadOnly = true }.ConnectionString))
             using (SQLiteCommand command = new SQLiteCommand("PRAGMA integrity_check;", connection))
             {
                 connection.Open();

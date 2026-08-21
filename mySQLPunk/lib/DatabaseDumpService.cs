@@ -18,8 +18,11 @@ namespace mySQLPunk.lib
                 Directory.CreateDirectory(dir);
             }
 
+            // 先寫暫存再取代，寫到一半失敗時不會把舊檔賠掉
+            string tempPath = targetPath + ".writing";
+            File.WriteAllText(tempPath, BuildDatabaseDump(db, databaseName), Encoding.UTF8);
             if (File.Exists(targetPath)) File.Delete(targetPath);
-            File.WriteAllText(targetPath, BuildDatabaseDump(db, databaseName), Encoding.UTF8);
+            File.Move(tempPath, targetPath);
         }
 
         public static string BuildDatabaseDump(IDatabase db, string databaseName)
@@ -235,9 +238,30 @@ namespace mySQLPunk.lib
                        "', 'YYYY-MM-DD HH24:MI:SS.FF7')";
             }
 
-            if (value is string || value is char || value is DateTime || value is Guid)
+            if (value is DateTime)
             {
-                return "'" + value.ToString().Replace("'", "''") + "'";
+                // 一律用 invariant 格式；DateTime.ToString() 會跟著系統文化（民國曆、上午/下午）走
+                return "'" + ((DateTime)value).ToString("yyyy-MM-dd HH:mm:ss.fffffff", System.Globalization.CultureInfo.InvariantCulture).TrimEnd('0').TrimEnd('.') + "'";
+            }
+
+            if (value is TimeSpan)
+            {
+                return "'" + FormatTimeSpanLiteral((TimeSpan)value) + "'";
+            }
+
+            if (value is double)
+            {
+                return ((double)value).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (value is float)
+            {
+                return ((float)value).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (value is string || value is char || value is Guid)
+            {
+                return "'" + EscapeStringLiteral(db, value.ToString()) + "'";
             }
 
             IFormattable formattable = value as IFormattable;
@@ -246,7 +270,37 @@ namespace mySQLPunk.lib
                 return formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
             }
 
-            return "'" + value.ToString().Replace("'", "''") + "'";
+            return "'" + EscapeStringLiteral(db, value.ToString()) + "'";
+        }
+
+        /// <summary>MySQL 的字串預設把反斜線當跳脫字元，其他方言只需倍增單引號。</summary>
+        private static string EscapeStringLiteral(IDatabase db, string text)
+        {
+            if (IsProvider(db, "mysql"))
+            {
+                return text.Replace("\\", "\\\\").Replace("'", "''");
+            }
+            return text.Replace("'", "''");
+        }
+
+        /// <summary>TIME/interval 欄位要帶引號輸出；TimeSpan 預設格式的日數部分（d.hh）資料庫不認得。</summary>
+        private static string FormatTimeSpanLiteral(TimeSpan value)
+        {
+            bool negative = value < TimeSpan.Zero;
+            TimeSpan abs = negative ? value.Negate() : value;
+            long totalHours = (long)abs.TotalHours;
+            string result = (negative ? "-" : "") +
+                totalHours.ToString("00") + ":" + abs.Minutes.ToString("00") + ":" + abs.Seconds.ToString("00");
+            if (abs.Milliseconds != 0)
+            {
+                result += "." + abs.Milliseconds.ToString("000");
+            }
+            return result;
+        }
+
+        public static string FormatTimeSpanLiteralPublic(TimeSpan value)
+        {
+            return FormatTimeSpanLiteral(value);
         }
 
         public static bool IsProvider(IDatabase db, string providerName)

@@ -126,22 +126,32 @@ namespace mySQLPunk.lib
             long total = source.Database.CountRows(source.DatabaseName, source.ObjectName);
             long copied = 0;
 
-            while (copied < total)
+            try
             {
-                DataTable page = source.Database.SelectTablePage(source.DatabaseName, source.ObjectName, copied, _batchSize);
-                if (page == null || page.Rows.Count == 0) break;
-
-                target.Database.InsertTableBatch(target.DatabaseName, targetName, page);
-                copied += page.Rows.Count;
-
-                progress?.Invoke(new DatabaseCopyProgress
+                while (copied < total)
                 {
-                    SourceName = source.ObjectName,
-                    TargetName = targetName,
-                    CopiedRows = copied,
-                    TotalRows = total,
-                    Message = Localization.Format("Object.CopyProgress", source.ObjectName, targetName, copied, total)
-                });
+                    DataTable page = source.Database.SelectTablePage(source.DatabaseName, source.ObjectName, copied, _batchSize);
+                    if (page == null || page.Rows.Count == 0) break;
+
+                    target.Database.InsertTableBatch(target.DatabaseName, targetName, page);
+                    copied += page.Rows.Count;
+
+                    progress?.Invoke(new DatabaseCopyProgress
+                    {
+                        SourceName = source.ObjectName,
+                        TargetName = targetName,
+                        CopiedRows = copied,
+                        TotalRows = total,
+                        Message = Localization.Format("Object.CopyProgress", source.ObjectName, targetName, copied, total)
+                    });
+                }
+            }
+            catch
+            {
+                // 資料抄到一半失敗時清掉半套目標表，否則重試會撞名或留下殘缺資料
+                try { target.Database.DropTableForCopy(target.DatabaseName, targetName); }
+                catch { }
+                throw;
             }
 
             try

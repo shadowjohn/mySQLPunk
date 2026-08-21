@@ -368,7 +368,9 @@ namespace mySQLPunk
             string initialDatabase = GetConnectionValue(conn, "initial_database");
 
             uint port = 3306;
-            if (!string.IsNullOrWhiteSpace(portText)) uint.TryParse(portText, out port);
+            uint parsedMySqlPort;
+            // TryParse 失敗會把 out 參數寫成 0，不能直接 parse 進 port，否則預設值被蓋掉
+            if (!string.IsNullOrWhiteSpace(portText) && uint.TryParse(portText.Trim(), out parsedMySqlPort) && parsedMySqlPort > 0) port = parsedMySqlPort;
 
             var builder = new MySqlConnectionStringBuilder
             {
@@ -394,7 +396,8 @@ namespace mySQLPunk
             string password = GetConnectionValue(conn, "pwd");
 
             int port = 5432;
-            if (!string.IsNullOrWhiteSpace(portText)) int.TryParse(portText, out port);
+            int parsedPgPort;
+            if (!string.IsNullOrWhiteSpace(portText) && int.TryParse(portText.Trim(), out parsedPgPort) && parsedPgPort > 0) port = parsedPgPort;
 
             // 優先用使用者填的初始資料庫；有些帳號沒有權限連 postgres
             string initialDatabase = GetConnectionValue(conn, "initial_database");
@@ -5977,7 +5980,8 @@ namespace mySQLPunk
                     }
 
                     DatabaseRestoreSnapshot beforeSnapshot = CaptureDatabaseRestoreSnapshot(target);
-                    string safetyBackupPath = CreatePreRestoreSafetyBackup(target);
+                    lastRestoreSafetyBackupPath = CreatePreRestoreSafetyBackup(target);
+                    string safetyBackupPath = lastRestoreSafetyBackupPath;
                     int executed = ImportSqlScript(target, package.Script);
                     DatabaseRestoreSnapshot afterSnapshot = CaptureDatabaseRestoreSnapshot(target);
                     string diffSummary = BackupRestoreDiffService.BuildSummary(beforeSnapshot, afterSnapshot);
@@ -5995,11 +5999,18 @@ namespace mySQLPunk
                 catch (Exception ex)
                 {
                     string message = BuildFormattedExceptionMessage("Backup.RestoreFailed", ex);
+                    // 還原到一半失敗時資料庫是殘缺的，安全備份的位置是唯一救命資訊，必須讓使用者看到
+                    if (!string.IsNullOrWhiteSpace(lastRestoreSafetyBackupPath))
+                    {
+                        message += Environment.NewLine + Localization.Format("Backup.RestoreFailedSafetyHint", lastRestoreSafetyBackupPath);
+                    }
                     MessageBox.Show(message, Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                     UpdateMainStatus(message);
                 }
             }
         }
+
+        private string lastRestoreSafetyBackupPath;
 
         private void RestoreQuarantinedBackupWithDialog()
         {
@@ -6251,11 +6262,18 @@ namespace mySQLPunk
 
         private static int ExecuteSqlScript(IDatabase db, string databaseName, string script)
         {
+            return ExecuteSqlScriptCore(db, databaseName, script);
+        }
+
+        private static int ExecuteSqlScriptCore(IDatabase db, string databaseName, string script)
+        {
             if (db == null) throw new ArgumentNullException(nameof(db));
             if (script == null) throw new ArgumentNullException(nameof(script));
 
             int executed = 0;
-            foreach (string statement in SplitSqlScript(script))
+            // MySQL dump 用反斜線跳脫（\'），其他方言的反斜線是普通字元，切句器要分開對待
+            bool backslashEscapes = db is my_mysql;
+            foreach (string statement in SplitSqlScript(script, backslashEscapes))
             {
                 string sql = statement.Trim();
                 if (sql.Length == 0) continue;
@@ -6280,6 +6298,16 @@ namespace mySQLPunk
 
         private static List<string> SplitSqlScript(string script)
         {
+            return SplitSqlScript(script, false);
+        }
+
+        /// <summary>
+        /// 把 SQL 腳本切成單一語句。backslashEscapes 對應 MySQL：字串中的 \' 是跳脫，
+        /// 不是字串結束；同時支援 mysql client 的 DELIMITER 指令（routine/trigger dump 會用到，
+        /// 這個指令伺服器不認得，不能當語句送出）。
+        /// </summary>
+        private static List<string> SplitSqlScript(string script, bool backslashEscapes)
+        {
             List<string> statements = new List<string>();
             StringBuilder current = new StringBuilder();
             bool inSingle = false;
@@ -6287,6 +6315,8 @@ namespace mySQLPunk
             bool inBacktick = false;
             bool inLineComment = false;
             bool inBlockComment = false;
+            string delimiter = ";";
+            bool atLineStart = true;
 
             for (int i = 0; i < script.Length; i++)
             {
@@ -6296,7 +6326,7 @@ namespace mySQLPunk
                 if (inLineComment)
                 {
                     current.Append(c);
-                    if (c == '\n') inLineComment = false;
+                    if (c == '\n') { inLineComment = false; atLineStart = true; }
                     continue;
                 }
 
@@ -6314,6 +6344,18 @@ namespace mySQLPunk
 
                 if (!inSingle && !inDouble && !inBacktick)
                 {
+                    if (atLineStart && (c == 'D' || c == 'd') &&
+                        string.Compare(script, i, "DELIMITER", 0, 9, StringComparison.OrdinalIgnoreCase) == 0 &&
+                        i + 9 < script.Length && (script[i + 9] == ' ' || script[i + 9] == '\t'))
+                    {
+                        int lineEnd = script.IndexOf('\n', i);
+                        if (lineEnd < 0) lineEnd = script.Length;
+                        string token = script.Substring(i + 9, lineEnd - i - 9).Trim().TrimEnd('\r');
+                        if (token.Length > 0) delimiter = token;
+                        i = lineEnd; // for 迴圈的 i++ 會跳過換行
+                        atLineStart = true;
+                        continue;
+                    }
                     if (c == '-' && next == '-')
                     {
                         current.Append(c);
@@ -6330,15 +6372,27 @@ namespace mySQLPunk
                         inBlockComment = true;
                         continue;
                     }
-                    if (c == ';')
+                    if (c == delimiter[0] &&
+                        (delimiter.Length == 1 ||
+                         string.Compare(script, i, delimiter, 0, delimiter.Length, StringComparison.Ordinal) == 0))
                     {
                         statements.Add(current.ToString());
                         current.Clear();
+                        i += delimiter.Length - 1;
+                        atLineStart = false;
                         continue;
                     }
                 }
 
+                atLineStart = c == '\n' || (atLineStart && (c == ' ' || c == '\t' || c == '\r'));
                 current.Append(c);
+
+                if (backslashEscapes && (inSingle || inDouble) && c == '\\' && next != '\0')
+                {
+                    current.Append(next);
+                    i++;
+                    continue;
+                }
 
                 if (c == '\'' && !inDouble && !inBacktick)
                 {
@@ -6450,25 +6504,40 @@ namespace mySQLPunk
                 Directory.CreateDirectory(dir);
             }
 
-            if (File.Exists(targetPath))
-            {
-                File.Delete(targetPath);
-            }
+            // 先寫到暫存檔、驗證通過後才取代舊檔；
+            // 先刪舊檔的話，這次備份失敗會連同上一份可用備份一起賠掉。
+            // 暫存名保留副檔名，驗證邏輯是靠副檔名分流的。
+            string tempPath = targetPath + ".partial" + Path.GetExtension(targetPath);
+            if (File.Exists(tempPath)) File.Delete(tempPath);
 
             my_sqlite sqlite = target.Database as my_sqlite;
             if (sqlite != null)
             {
-                using (System.Data.SQLite.SQLiteConnection destination = new System.Data.SQLite.SQLiteConnection("Data Source=" + targetPath + ";Version=3;"))
+                var tempConn = new System.Data.SQLite.SQLiteConnectionStringBuilder { DataSource = tempPath, Version = 3 };
+                using (System.Data.SQLite.SQLiteConnection destination = new System.Data.SQLite.SQLiteConnection(tempConn.ConnectionString))
                 {
                     destination.Open();
                     sqlite.MCT.BackupDatabase(destination, "main", "main", -1, null, 0);
                 }
-                VerifyDatabaseBackupOrThrow(targetPath);
-                return MirrorDatabaseBackupToRemote(targetPath);
+            }
+            else
+            {
+                DatabaseDumpService.WriteDatabaseDump(target.Database, target.DatabaseName, tempPath);
             }
 
-            DatabaseDumpService.WriteDatabaseDump(target.Database, target.DatabaseName, targetPath);
-            VerifyDatabaseBackupOrThrow(targetPath);
+            try
+            {
+                VerifyDatabaseBackupOrThrow(tempPath);
+                if (File.Exists(targetPath)) File.Delete(targetPath);
+                File.Move(tempPath, targetPath);
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { }
+                }
+            }
             return MirrorDatabaseBackupToRemote(targetPath);
         }
 
@@ -6962,9 +7031,32 @@ namespace mySQLPunk
                        "', 'YYYY-MM-DD HH24:MI:SS.FF7')";
             }
 
-            if (value is string || value is char || value is DateTime || value is Guid)
+            if (value is DateTime dumpDateTime)
             {
-                return "'" + value.ToString().Replace("'", "''") + "'";
+                // 一律用 invariant 格式；DateTime.ToString() 會跟著系統文化（民國曆、上午/下午）走
+                return "'" + dumpDateTime.ToString("yyyy-MM-dd HH:mm:ss.fffffff", System.Globalization.CultureInfo.InvariantCulture).TrimEnd('0').TrimEnd('.') + "'";
+            }
+
+            if (value is TimeSpan dumpTimeSpan)
+            {
+                return "'" + DatabaseDumpService.FormatTimeSpanLiteralPublic(dumpTimeSpan) + "'";
+            }
+
+            if (value is double dumpDouble)
+            {
+                return dumpDouble.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (value is float dumpFloat)
+            {
+                return dumpFloat.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (value is string || value is char || value is Guid)
+            {
+                string text = value.ToString();
+                if (IsDumpProvider(db, "mysql")) text = text.Replace("\\", "\\\\");
+                return "'" + text.Replace("'", "''") + "'";
             }
 
             if (value is IFormattable formattable)
@@ -6972,7 +7064,11 @@ namespace mySQLPunk
                 return formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
             }
 
-            return "'" + value.ToString().Replace("'", "''") + "'";
+            {
+                string text = value.ToString();
+                if (IsDumpProvider(db, "mysql")) text = text.Replace("\\", "\\\\");
+                return "'" + text.Replace("'", "''") + "'";
+            }
         }
 
         private static string ToSqlLiteral(object value)
@@ -9414,17 +9510,35 @@ namespace mySQLPunk
         {
             DataTable dt = CreateOtherToolTable();
             string supported = Localization.T("ProviderCapability.Supported");
+            string unavailable = Localization.T("ProviderCapability.Unavailable");
+            string partial = Localization.T("ProviderCapability.Partial");
+            bool isMySql = db is my_mysql;
+            bool isSqlite = db is my_sqlite;
+            bool isOracle = db is my_oracle;
+
             AddOtherToolRow(dt, Localization.T("ProviderCapability.Tables"), supported, Localization.Format("ProviderCapability.LoadedCount", GetTablesSafe(db, dbName).Count));
             AddOtherToolRow(dt, Localization.T("ProviderCapability.Views"), supported, Localization.Format("ProviderCapability.LoadedCount", GetViewsSafe(db, dbName).Count));
             AddOtherToolRow(dt, Localization.T("ProviderCapability.EditableTableData"), supported, Localization.T("ProviderCapability.QueryFormTableMode"));
             AddOtherToolRow(dt, Localization.T("ProviderCapability.SqlImport"), supported, Localization.T("ProviderCapability.ExecSqlPipeline"));
             AddOtherToolRow(dt, Localization.T("ProviderCapability.SqlExport"), supported, Localization.T("ProviderCapability.DumpSqlTool"));
-            AddOtherToolRow(dt, Localization.T("ProviderCapability.Backup"), supported, db is my_sqlite ? Localization.T("ProviderCapability.SqliteFileCopy") : Localization.T("ProviderCapability.LogicalSqlDump"));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.Backup"), supported, isSqlite ? Localization.T("ProviderCapability.SqliteFileCopy") : Localization.T("ProviderCapability.LogicalSqlDump"));
             AddOtherToolRow(dt,
                 Localization.T("ProviderCapability.StoredFunctions"),
-                db is my_sqlite ? Localization.T("ProviderCapability.Unavailable") : supported,
-                db is my_sqlite ? Localization.T("ProviderCapability.SqliteNoRoutines") : Localization.T("ProviderCapability.RoutineMetadataPermission"));
-            AddOtherToolRow(dt, Localization.T("ProviderCapability.TriggersEvents"), supported, Localization.T("ProviderCapability.MetadataPermission"));
+                isSqlite ? unavailable : supported,
+                isSqlite ? Localization.T("ProviderCapability.SqliteNoRoutines") : Localization.T("ProviderCapability.RoutineMetadataPermission"));
+            // 以下依各 provider 實際實作回報，不再一律寫「支援」
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.TriggersEvents"),
+                isMySql ? supported : partial,
+                isMySql ? Localization.T("ProviderCapability.MetadataPermission") : Localization.T("ProviderCapability.TriggersOnly"));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.UserManagement"),
+                isMySql ? supported : unavailable,
+                isMySql ? Localization.T("ProviderCapability.MySqlUserTools") : Localization.T("ProviderCapability.MySqlOnlyUserManagement"));
+            AddOtherToolRow(dt, Localization.T("ProviderCapability.DatabaseRename"),
+                isOracle ? unavailable : supported,
+                isOracle ? Localization.T("ProviderCapability.OracleRenameHint")
+                         : (isSqlite ? Localization.T("ProviderCapability.SqliteRenameFile")
+                                     : (isMySql ? Localization.T("ProviderCapability.MySqlRenameCopy")
+                                                : Localization.T("ProviderCapability.NativeRename"))));
             return dt;
         }
 
@@ -12569,7 +12683,7 @@ namespace mySQLPunk
 
             if (sqlite.MCT != null && sqlite.MCT.State == ConnectionState.Open)
             {
-                using (System.Data.SQLite.SQLiteConnection destination = new System.Data.SQLite.SQLiteConnection("Data Source=" + backupPath + ";Version=3;"))
+                using (System.Data.SQLite.SQLiteConnection destination = new System.Data.SQLite.SQLiteConnection(new System.Data.SQLite.SQLiteConnectionStringBuilder { DataSource = backupPath, Version = 3 }.ConnectionString))
                 {
                     destination.Open();
                     sqlite.MCT.BackupDatabase(destination, "main", "main", -1, null, 0);

@@ -61,8 +61,9 @@ namespace mySQLPunk.lib
 
             if (provider == "mysql" || provider == "mariadb")
             {
+                // MySQL 的系統物件在 mysql / sys / information_schema 這些 schema 裡，
+                // 不能用 sys_ 名稱前綴過濾：sys_user、sys_config 是極常見的業務資料表
                 if (name.StartsWith("INNODB_", StringComparison.OrdinalIgnoreCase)) return false;
-                if (name.StartsWith("sys_", StringComparison.OrdinalIgnoreCase)) return false;
             }
 
             if (provider == "postgresql")

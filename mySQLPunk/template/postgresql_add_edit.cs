@@ -134,16 +134,19 @@ namespace mySQLPunk.template
 
             try
             {
-                string connStr = string.Format(
-                    "Server={0};Port={1};User Id={2};Password={3};Database={4};",
-                    postgresql_host.Text.Trim(),
-                    postgresql_port.Text.Trim(),
-                    postgresql_username.Text.Trim(),
-                    postgresql_pwd.Text,
-                    GetInitialDatabase());
+                // 用 builder 組字串：密碼含 ; 或 = 時字串串接會被拆錯
+                var builder = new Npgsql.NpgsqlConnectionStringBuilder
+                {
+                    Host = postgresql_host.Text.Trim(),
+                    Username = postgresql_username.Text.Trim(),
+                    Password = postgresql_pwd.Text,
+                    Database = GetInitialDatabase()
+                };
+                int testPort;
+                if (int.TryParse(postgresql_port.Text.Trim(), out testPort) && testPort > 0) builder.Port = testPort;
 
                 my_postgresql db = new my_postgresql();
-                db.SetConn(connStr);
+                db.SetConn(builder.ConnectionString);
                 db.Open();
                 MessageBox.Show(Localization.Format("Connection.TestSucceeded", "PostgreSQL"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 db.Close();

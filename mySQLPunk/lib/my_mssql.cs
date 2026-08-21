@@ -251,7 +251,7 @@ namespace mySQLPunk.lib
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.schema_id = o.schema_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
-                WHERE s.name = @schemaName AND o.name = @name AND i.name IS NOT NULL
+                WHERE s.name = @schemaName AND o.name = @name AND i.name IS NOT NULL AND ic.is_included_column = 0
                 ORDER BY i.name, ic.key_ordinal;", p);
         }
 
@@ -438,12 +438,15 @@ namespace mySQLPunk.lib
                     c.NUMERIC_SCALE AS NumericScale,
                     c.COLUMN_DEFAULT AS DefaultValue,
                     CAST(ep.value AS NVARCHAR(4000)) AS Comment,
-                    c.ORDINAL_POSITION AS OrdinalPosition
+                    c.ORDINAL_POSITION AS OrdinalPosition,
+                    CASE WHEN kcu.COLUMN_NAME IS NOT NULL THEN 'PRI' ELSE '' END AS ColumnKey
                 FROM [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.COLUMNS c
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.name = c.TABLE_SCHEMA
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.name = c.TABLE_NAME AND o.schema_id = s.schema_id
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns sc ON sc.object_id = o.object_id AND sc.name = c.COLUMN_NAME
                 LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.extended_properties ep ON ep.major_id = sc.object_id AND ep.minor_id = sc.column_id AND ep.name = 'MS_Description'
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc ON tc.TABLE_SCHEMA = c.TABLE_SCHEMA AND tc.TABLE_NAME = c.TABLE_NAME AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME AND kcu.TABLE_SCHEMA = c.TABLE_SCHEMA AND kcu.TABLE_NAME = c.TABLE_NAME AND kcu.COLUMN_NAME = c.COLUMN_NAME
                 WHERE c.TABLE_SCHEMA = @schemaName AND c.TABLE_NAME = @name
                 ORDER BY c.ORDINAL_POSITION;", p);
         }
@@ -464,7 +467,7 @@ namespace mySQLPunk.lib
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.schema_id = o.schema_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
-                WHERE s.name = @schemaName AND o.name = @name AND i.name IS NOT NULL AND i.is_primary_key = 0 AND i.is_unique_constraint = 0
+                WHERE s.name = @schemaName AND o.name = @name AND i.name IS NOT NULL AND i.is_primary_key = 0 AND i.is_unique_constraint = 0 AND ic.is_included_column = 0
                 ORDER BY i.name, ic.key_ordinal;", p);
         }
 
@@ -474,6 +477,12 @@ namespace mySQLPunk.lib
             {
                 ExecOrThrow(sql);
             }
+        }
+
+        public void DropTableForCopy(string databaseName, string tableName)
+        {
+            SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+            ExecOrThrow("DROP TABLE " + BuildSqlServerQualifiedName(databaseName, target) + ";");
         }
 
         private static List<string> BuildSqlServerCopyCreateTableStatements(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
@@ -493,6 +502,19 @@ namespace mySQLPunk.lib
                 definition += " " + nullable;
                 defs.Add(definition);
             }
+
+            // 沒帶主鍵的複製表在資料分頁會被判成唯讀，來源有 PK 就要一併帶過來
+            List<string> primaryKeys = new List<string>();
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                if (string.Equals(GetOptionalString(row, "ColumnKey"), "PRI", StringComparison.OrdinalIgnoreCase))
+                    primaryKeys.Add("[" + EscapeSqlServerName(row["Name"].ToString()) + "]");
+            }
+            if (primaryKeys.Count > 0)
+            {
+                defs.Add("PRIMARY KEY (" + string.Join(", ", primaryKeys.ToArray()) + ")");
+            }
+
             statements.Add("CREATE TABLE " + BuildSqlServerQualifiedName(databaseName, target) + " (" + string.Join(", ", defs.ToArray()) + ");");
 
             foreach (DataRow row in sourceColumns.Rows)
@@ -542,7 +564,33 @@ namespace mySQLPunk.lib
 
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
         {
-            return SelectSQL("SELECT * FROM " + BuildSqlServerQualifiedName(databaseName, tableName) + " ORDER BY (SELECT NULL) OFFSET " + offset + " ROWS FETCH NEXT " + limit + " ROWS ONLY;");
+            // ORDER BY (SELECT NULL) 是明示的「無序」，平行掃描下每頁順序都可能不同；
+            // 有主鍵就改用主鍵排序，分頁才不會重複或漏列
+            string orderBy = GetPrimaryKeyOrderBy(databaseName, tableName);
+            if (string.IsNullOrEmpty(orderBy)) orderBy = " ORDER BY (SELECT NULL)";
+            return SelectSQL("SELECT * FROM " + BuildSqlServerQualifiedName(databaseName, tableName) + orderBy + " OFFSET " + offset + " ROWS FETCH NEXT " + limit + " ROWS ONLY;");
+        }
+
+        private string GetPrimaryKeyOrderBy(string databaseName, string tableName)
+        {
+            try
+            {
+                SqlServerObjectName target = ParseSqlServerObjectName(tableName);
+                var p = new Dictionary<string, object> { { "schemaName", target.Schema }, { "name", target.Name } };
+                DataTable dt = SelectSQL(@"
+                    SELECT kcu.COLUMN_NAME
+                    FROM [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                    JOIN [" + EscapeSqlServerName(databaseName) + @"].INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA AND kcu.TABLE_NAME = tc.TABLE_NAME
+                    WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_SCHEMA = @schemaName AND tc.TABLE_NAME = @name
+                    ORDER BY kcu.ORDINAL_POSITION;", p);
+                List<string> cols = new List<string>();
+                foreach (DataRow row in dt.Rows) cols.Add("[" + EscapeSqlServerName(row[0].ToString()) + "]");
+                if (cols.Count > 0) return " ORDER BY " + string.Join(", ", cols.ToArray());
+            }
+            catch
+            {
+            }
+            return "";
         }
 
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows)
@@ -571,8 +619,19 @@ namespace mySQLPunk.lib
         {
             SqlServerObjectName target = ParseSqlServerObjectName(viewName);
             var p = new Dictionary<string, object> { { "fullName", databaseName + "." + target.Schema + "." + target.Name } };
-            DataTable dt = SelectSQL("SELECT OBJECT_DEFINITION(OBJECT_ID(@fullName));", p);
-            return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
+            // OBJECT_DEFINITION 只會在「目前連線的資料庫」解析 object_id，
+            // 連線停在 master 時會拿到 NULL 或別的物件，必須先切庫
+            string originalDb = MCT.Database;
+            try
+            {
+                MCT.ChangeDatabase(databaseName);
+                DataTable dt = SelectSQL("SELECT OBJECT_DEFINITION(OBJECT_ID(@fullName));", p);
+                return dt.Rows.Count > 0 ? dt.Rows[0][0].ToString() : "";
+            }
+            finally
+            {
+                MCT.ChangeDatabase(originalDb);
+            }
         }
 
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql)

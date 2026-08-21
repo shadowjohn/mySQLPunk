@@ -228,6 +228,7 @@ namespace mySQLPunk.lib
             db.Close();
             System.Data.SQLite.SQLiteConnection.ClearAllPools();
             File.Move(oldPath, newPath);
+            MoveSqliteSidecarFiles(oldPath, newPath);
 
             string newConnectionString = BuildSqliteConnectionString(oldConnectionString, newPath);
             try
@@ -241,7 +242,11 @@ namespace mySQLPunk.lib
                 {
                     db.Close();
                     System.Data.SQLite.SQLiteConnection.ClearAllPools();
-                    if (File.Exists(newPath) && !File.Exists(oldPath)) File.Move(newPath, oldPath);
+                    if (File.Exists(newPath) && !File.Exists(oldPath))
+                    {
+                        File.Move(newPath, oldPath);
+                        MoveSqliteSidecarFiles(newPath, oldPath);
+                    }
                     if (!string.IsNullOrWhiteSpace(oldConnectionString)) db.SetConn(oldConnectionString);
                 }
                 catch { }
@@ -265,6 +270,29 @@ namespace mySQLPunk.lib
             string directory = Path.GetDirectoryName(oldPath);
             if (string.IsNullOrEmpty(directory)) directory = Directory.GetCurrentDirectory();
             return Path.Combine(directory, fileName);
+        }
+
+        /// <summary>
+        /// WAL 模式下尚未 checkpoint 的已提交交易都在 -wal 檔裡；
+        /// 只搬主檔會把這些資料留在原地，還留下孤兒 -wal/-shm。
+        /// </summary>
+        private static void MoveSqliteSidecarFiles(string fromPath, string toPath)
+        {
+            foreach (string suffix in new string[] { "-wal", "-shm" })
+            {
+                try
+                {
+                    string source = fromPath + suffix;
+                    string destination = toPath + suffix;
+                    if (!File.Exists(source)) continue;
+                    if (File.Exists(destination)) File.Delete(destination);
+                    File.Move(source, destination);
+                }
+                catch
+                {
+                    // sidecar 搬不動不阻斷主流程
+                }
+            }
         }
 
         private static string BuildSqliteConnectionString(string oldConnectionString, string newPath)

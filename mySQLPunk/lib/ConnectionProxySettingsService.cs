@@ -209,7 +209,10 @@ namespace mySQLPunk.lib
         public static void ApplyTo(WebRequest request)
         {
             if (request == null) return;
-            request.Proxy = CreateWebProxyFromOptions();
+            IWebProxy proxy = CreateWebProxyFromOptions();
+            // Proxy = null 的語意是「完全不用 proxy」；未設定時保持預設
+            // 才會沿用系統（IE）的 proxy 設定，公司網路環境才連得出去
+            if (proxy != null) request.Proxy = proxy;
         }
 
         public static string BuildStatusText(ConnectionProxySettings settings)

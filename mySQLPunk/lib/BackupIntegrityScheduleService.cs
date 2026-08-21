@@ -205,15 +205,25 @@ namespace mySQLPunk.lib
             if (retainCount <= 0) return 0;
 
             FileInfo[] files = new DirectoryInfo(quarantineDirectory).GetFiles();
-            List<FileInfo> managedFiles = new List<FileInfo>();
+            // manifest 與隔離備份要分開套用保留額度：混在一起排序時，
+            // 較新的 manifest 會把所有舊備份擠出額度，反之亦然
+            List<FileInfo> manifestFiles = new List<FileInfo>();
+            List<FileInfo> backupFiles = new List<FileInfo>();
             foreach (FileInfo file in files)
             {
-                if (IsManagedQuarantineFile(file.Name))
-                {
-                    managedFiles.Add(file);
-                }
+                if (!IsManagedQuarantineFile(file.Name)) continue;
+                if (file.Name.StartsWith("backup-quarantine_", StringComparison.OrdinalIgnoreCase)) manifestFiles.Add(file);
+                else backupFiles.Add(file);
             }
 
+            int deleted = 0;
+            deleted += PruneFileList(manifestFiles, retainCount);
+            deleted += PruneFileList(backupFiles, retainCount);
+            return deleted;
+        }
+
+        private static int PruneFileList(List<FileInfo> managedFiles, int retainCount)
+        {
             managedFiles.Sort((left, right) => right.LastWriteTimeUtc.CompareTo(left.LastWriteTimeUtc));
 
             int deleted = 0;

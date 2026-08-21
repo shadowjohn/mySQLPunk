@@ -5343,15 +5343,15 @@ public static class SmokeTests
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
             string zhCsv = QueryResultExportService.BuildText(table, QueryResultExportFormat.Csv);
-            AssertContains(zhCsv, "\"A, B\",12.5,[BLOB 3 位元組] 0xAABBCC", "CSV export should localize BLOB previews in Traditional Chinese.");
+            AssertContains(zhCsv, "\"A, B\",12.5,0xAABBCC", "CSV export should keep full binary data regardless of locale.");
 
             Localization.SetLanguage(Localization.English, false);
             string csv = QueryResultExportService.BuildText(table, QueryResultExportFormat.Csv);
-            AssertContains(csv, "\"A, B\",12.5,[BLOB 3 bytes] 0xAABBCC", "CSV export should escape commas and format BLOB values.");
+            AssertContains(csv, "\"A, B\",12.5,0xAABBCC", "CSV export should escape commas and keep full BLOB data.");
 
             string json = QueryResultExportService.BuildText(table, QueryResultExportFormat.Json);
             AssertContains(json, "\"Name\": \"A, B\"", "JSON export should include string values.");
-            AssertContains(json, "[BLOB 3 bytes] 0xAABBCC", "JSON export should use the shared BLOB preview.");
+            AssertContains(json, "0xAABBCC", "JSON export should keep full BLOB data.");
 
             string markdown = QueryResultExportService.BuildText(table, QueryResultExportFormat.Markdown);
             AssertContains(markdown, "| Name | Amount | Payload |", "Markdown export should include headers.");
@@ -5508,7 +5508,7 @@ public static class SmokeTests
             Assert(streamCsv.Rows == 2 && lastProgress == 2, "Streaming CSV export should report exported rows.");
             Assert(streamCsv.BytesWritten > 0, "Streaming CSV export should report written bytes.");
             AssertContains(streamedCsv, "name,amount,payload", "Streaming CSV export should include headers.");
-            AssertContains(streamedCsv, "\"A, B\",12.5,[BLOB 3 bytes] 0xAABBCC", "Streaming CSV export should escape values and format BLOB previews.");
+            AssertContains(streamedCsv, "\"A, B\",12.5,0xAABBCC", "Streaming CSV export should escape values and keep full BLOB data.");
             AssertContains(streamedCsv, "\"Line\nBreak\",7.25,", "Streaming CSV export should preserve embedded newlines safely.");
 
             QueryResultStreamingExportResult streamJson = QueryResultExportService.WriteStreaming(
@@ -5520,7 +5520,7 @@ public static class SmokeTests
             string streamedJson = File.ReadAllText(jsonPath, Encoding.UTF8);
             Assert(streamJson.Rows == 2, "Streaming JSON export should report exported rows.");
             AssertContains(streamedJson, "\"name\":\"A, B\"", "Streaming JSON export should include row objects without loading a DataTable.");
-            AssertContains(streamedJson, "\"payload\":\"[BLOB 3 bytes] 0xAABBCC\"", "Streaming JSON export should use shared BLOB previews.");
+            AssertContains(streamedJson, "\"payload\":\"0xAABBCC\"", "Streaming JSON export should keep full BLOB data.");
             AssertContains(streamedJson, "\"payload\":null", "Streaming JSON export should preserve null values.");
 
             QueryResultStreamingExportResult streamXml = QueryResultExportService.WriteStreaming(
@@ -5545,7 +5545,7 @@ public static class SmokeTests
             Assert(streamHtml.Rows == 2, "Streaming HTML export should report exported rows.");
             AssertContains(streamedHtml, "<table>", "Streaming HTML export should include a table.");
             AssertContains(streamedHtml, "<td>A, B</td>", "Streaming HTML export should include escaped table cells.");
-            AssertContains(streamedHtml, "<td>[BLOB 3 bytes] 0xAABBCC</td>", "Streaming HTML export should use shared BLOB previews.");
+            AssertContains(streamedHtml, "<td>0xAABBCC</td>", "Streaming HTML export should keep full BLOB data.");
 
             QueryResultStreamingExportResult streamMarkdown = QueryResultExportService.WriteStreaming(
                 db,
@@ -5556,7 +5556,7 @@ public static class SmokeTests
             string streamedMarkdown = File.ReadAllText(markdownPath, Encoding.UTF8);
             Assert(streamMarkdown.Rows == 2, "Streaming Markdown export should report exported rows.");
             AssertContains(streamedMarkdown, "| name | payload |", "Streaming Markdown export should include headers.");
-            AssertContains(streamedMarkdown, "| A, B | [BLOB 3 bytes] 0xAABBCC |", "Streaming Markdown export should include row values.");
+            AssertContains(streamedMarkdown, "| A, B | 0xAABBCC |", "Streaming Markdown export should include row values.");
             AssertContains(streamedMarkdown, "| Line<br>Break |  |", "Streaming Markdown export should keep multiline cells table-safe.");
 
             QueryResultStreamingExportResult streamSql = QueryResultExportService.WriteStreaming(
@@ -8582,6 +8582,7 @@ public static class SmokeTests
         public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
         public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void DropTableForCopy(string databaseName, string tableName) { }
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
@@ -8670,6 +8671,7 @@ public static class SmokeTests
         public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
         public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void DropTableForCopy(string databaseName, string tableName) { }
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
         {
@@ -8744,6 +8746,7 @@ public static class SmokeTests
         public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
         public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void DropTableForCopy(string databaseName, string tableName) { }
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
         {
@@ -8840,6 +8843,7 @@ public static class SmokeTests
         public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
         public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void DropTableForCopy(string databaseName, string tableName) { }
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
@@ -8895,6 +8899,7 @@ public static class SmokeTests
         }
         public DataTable GetCopyIndexes(string databaseName, string tableName) { return new DataTable(); }
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { }
+        public void DropTableForCopy(string databaseName, string tableName) { }
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { }
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { }
@@ -8959,6 +8964,7 @@ public static class SmokeTests
         public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
         public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void DropTableForCopy(string databaseName, string tableName) { }
         public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return new DataTable(); }
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }

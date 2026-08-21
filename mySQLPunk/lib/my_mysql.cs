@@ -423,7 +423,8 @@ namespace mySQLPunk.lib
                     COLUMN_NAME AS ColumnName,
                     NON_UNIQUE AS NonUnique,
                     SEQ_IN_INDEX AS SeqInIndex,
-                    INDEX_TYPE AS IndexType
+                    INDEX_TYPE AS IndexType,
+                    SUB_PART AS SubPart
                 FROM information_schema.statistics
                 WHERE table_schema = ?db AND table_name = ?name
                 ORDER BY INDEX_NAME, SEQ_IN_INDEX;", p);
@@ -435,6 +436,11 @@ namespace mySQLPunk.lib
             {
                 ExecOrThrow(sql);
             }
+        }
+
+        public void DropTableForCopy(string databaseName, string tableName)
+        {
+            ExecOrThrow("DROP TABLE IF EXISTS `" + databaseName.Replace("`", "``") + "`.`" + tableName.Replace("`", "``") + "`;");
         }
 
         private static List<string> BuildMySqlCopyCreateTableStatements(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
@@ -452,7 +458,7 @@ namespace mySQLPunk.lib
                 string autoIncrement = extra.IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0 ? " AUTO_INCREMENT" : "";
                 string comment = "";
                 if (row.Table.Columns.Contains("Comment") && row["Comment"] != DBNull.Value && row["Comment"].ToString().Length > 0)
-                    comment = " COMMENT '" + row["Comment"].ToString().Replace("'", "''") + "'";
+                    comment = " COMMENT '" + row["Comment"].ToString().Replace("\\", "\\\\").Replace("'", "''") + "'";
                 defs.Add("`" + name + "` " + MapCopyTypeToMySql(row) + (string.IsNullOrWhiteSpace(defaultValue) ? "" : " DEFAULT " + defaultValue) + " " + nullable + autoIncrement + comment);
                 if (string.Equals(GetOptionalString(row, "ColumnKey"), "PRI", StringComparison.OrdinalIgnoreCase))
                 {
@@ -480,12 +486,23 @@ namespace mySQLPunk.lib
                 if (first.Table.Columns.Contains("NonUnique") && first["NonUnique"] != DBNull.Value)
                     unique = first["NonUnique"].ToString() == "0" || first["NonUnique"].ToString().Equals("False", StringComparison.OrdinalIgnoreCase);
 
+                string indexType = GetOptionalString(first, "IndexType").ToUpperInvariant();
+                bool fulltext = indexType.Contains("FULLTEXT");
+                bool spatial = indexType.Contains("SPATIAL");
+
                 List<string> cols = new List<string>();
                 foreach (DataRow row in group.OrderBy(r => Convert.ToInt32(r["SeqInIndex"])))
-                    cols.Add("`" + row["ColumnName"].ToString().Replace("`", "``") + "`");
+                {
+                    string col = "`" + row["ColumnName"].ToString().Replace("`", "``") + "`";
+                    // TEXT/BLOB 欄位的一般索引必須帶前綴長度，掉了會 errno 1170
+                    string subPart = GetOptionalString(row, "SubPart");
+                    if (!fulltext && !spatial && !string.IsNullOrWhiteSpace(subPart)) col += "(" + subPart + ")";
+                    cols.Add(col);
+                }
 
                 string safeIndex = indexName.Replace("`", "``");
-                string sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX `" + safeIndex + "` ON `" + safeDB + "`.`" + safeTable + "` (" + string.Join(",", cols.ToArray()) + ");";
+                string kind = fulltext ? "FULLTEXT " : (spatial ? "SPATIAL " : (unique ? "UNIQUE " : ""));
+                string sql = "CREATE " + kind + "INDEX `" + safeIndex + "` ON `" + safeDB + "`.`" + safeTable + "` (" + string.Join(",", cols.ToArray()) + ");";
                 ExecOrThrow(sql);
             }
         }
@@ -494,7 +511,33 @@ namespace mySQLPunk.lib
         {
             string safeDB = databaseName.Replace("`", "``");
             string safeTable = tableName.Replace("`", "``");
-            return SelectSQL($"SELECT * FROM `{safeDB}`.`{safeTable}` LIMIT {limit} OFFSET {offset};");
+            string orderBy = GetPrimaryKeyOrderBy(databaseName, tableName);
+            return SelectSQL($"SELECT * FROM `{safeDB}`.`{safeTable}`{orderBy} LIMIT {limit} OFFSET {offset};");
+        }
+
+        /// <summary>
+        /// 沒有 ORDER BY 的 OFFSET 分頁在翻頁、匯出、複製時可能重複或漏列
+        /// （執行計畫或並行寫入都會改變列順序），有主鍵就固定用主鍵排序。
+        /// </summary>
+        private string GetPrimaryKeyOrderBy(string databaseName, string tableName)
+        {
+            try
+            {
+                var p = new Dictionary<string, object> { { "db", databaseName }, { "name", tableName } };
+                DataTable dt = SelectSQL(@"
+                    SELECT COLUMN_NAME
+                    FROM information_schema.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA = ?db AND TABLE_NAME = ?name AND CONSTRAINT_NAME = 'PRIMARY'
+                    ORDER BY ORDINAL_POSITION;", p);
+                List<string> cols = new List<string>();
+                foreach (DataRow row in dt.Rows) cols.Add("`" + row[0].ToString().Replace("`", "``") + "`");
+                if (cols.Count > 0) return " ORDER BY " + string.Join(", ", cols.ToArray());
+            }
+            catch
+            {
+                // 查不到主鍵資訊就維持無排序的舊行為
+            }
+            return "";
         }
 
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows)
@@ -604,7 +647,7 @@ namespace mySQLPunk.lib
                 return defaultValue;
             }
 
-            return "'" + defaultValue.Replace("'", "''") + "'";
+            return "'" + defaultValue.Replace("\\", "\\\\").Replace("'", "''") + "'";
         }
 
         private static bool IsMySqlDefaultExpression(string defaultValue)

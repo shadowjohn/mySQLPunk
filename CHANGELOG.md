@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### 第二輪掃修與功能補完
+
+- 資料庫層修正：
+  - PostgreSQL 查詢不再把整段 SQL 的 `@` 換成 `:`（`'abc@gmail.com'` 會被改成錯值、jsonb 的 `@>` 會語法錯誤）。
+  - Oracle：資料表清單的 `AS ROWS`、複製欄位的 `AS COMMENT` 是保留字會直接 ORA 錯誤，已加引號；View 改名不再帶 schema 限定名（原本必失敗）；連線設定的 service_name/SID/TNS 等欄位現在會存檔（原本重開程式後 Oracle 連線全數失效）。
+  - SQL Server：讀取 View DDL 前先切換資料庫（原本連在 master 時會拿到空白或別的物件定義）；索引查詢排除 INCLUDE 欄位。
+  - 所有 provider 的資料分頁改為依主鍵排序，翻頁、匯出、複製不再有重複或漏列的風險。
+  - MySQL SRID=0 的 geometry 不再被解析成錯誤座標（WKB 解析加上完整長度驗證）。
+- 備份／匯出／還原：
+  - 還原的切句器看懂 MySQL dump 的 `'` 跳脫與 `DELIMITER` 指令（原本自家備份含單引號資料或 stored procedure 時還原必失敗且留半套）。
+  - 匯出的 DATETIME 一律用 invariant 格式（原本跟著系統文化走，民國曆設定下產出的 dump 無法還原）；TIME 欄位補引號；MySQL 字串補反斜線跳脫；浮點數用完整精度。
+  - 備份先寫暫存檔、驗證通過才取代舊檔（原本先刪舊檔，失敗會兩頭空）；隔離區還原同樣改為安全順序；還原失敗的訊息會附上事前安全備份的路徑。
+  - SQLite 改名連同 -wal/-shm 一起搬移，WAL 中未 checkpoint 的交易不再遺失。
+  - CSV/TSV 匯出對 `=`、`+`、`@` 開頭的值加公式注入防護；BLOB 匯出改為完整十六進位（原本只寫入畫面預覽字串，資料靜默遺失）。
+  - 大檔 SQL 匯入的切句從 O(n²) 改為線性。
+- 連線與憑證：
+  - 密碼憑證改為「先寫新的、成功才刪舊的」（原本 Credential Manager 寫入失敗會讓密碼無聲消失）；解密加上回寫驗證，root/user 這類明文舊帳號不再被解成亂碼。
+  - MySQL 連線對話框新增「初始資料庫」欄位；MySQL/PostgreSQL 的測試連線改用 ConnectionStringBuilder（密碼含分號不再誤判失敗），MySQL 測試不再硬連 mysql 系統庫。
+  - Proxy 未啟用時沿用系統設定（原本會被設成「完全不用 proxy」）；port 打錯字時回退預設值而不是 0。
+- 功能補完：
+  - 複製資料表帶主鍵：五種資料庫的複製建表都會帶上 PRIMARY KEY（原本除 MySQL 外全部遺失，複製出來的表開資料分頁會變唯讀）；複製中途失敗會清掉半套目標表；MySQL 索引複製支援 FULLTEXT/SPATIAL 與前綴長度。
+  - PostgreSQL 的 DDL 補完：包含主鍵、DEFAULT、欄位/資料表註解與索引（原本只有欄位加型別）。
+  - SQLite 的 FTS5/RTree 虛擬表現在會列在資料表清單與樹狀（引擎欄標示模組名），模組未編入時自動略過避免連環錯誤。
+  - 「Provider 能力」報表依實際實作回報（使用者管理僅 MySQL、Events 僅 MySQL、Oracle 無資料庫改名等），不再一律顯示「支援」。
+  - MySQL 的 `sys_` 開頭資料表不再被誤當系統物件藏起來。
+
 ### 介面改版
 
 - 新增 `UiKit` / `UiControls` 設計系統：色彩、間距、圓角、字級 token，以及純程式繪製的向量圖示與區塊標題列、分段控制項、空狀態等共用元件。

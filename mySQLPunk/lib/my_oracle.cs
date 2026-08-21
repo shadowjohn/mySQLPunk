@@ -216,7 +216,7 @@ namespace mySQLPunk.lib
                     0 AS MAX_DATA_LENGTH,
                     0 AS DATA_FREE,
                     'Oracle' AS ENGINE,
-                    t.NUM_ROWS AS ROWS,
+                    t.NUM_ROWS AS ""ROWS"",
                     COALESCE(tc.COMMENTS, '') AS COMMENTS,
                     '' AS ROW_FORMAT,
                     '' AS COLLATION,
@@ -352,7 +352,8 @@ namespace mySQLPunk.lib
 
         public void RenameView(string databaseName, string oldViewName, string newViewName)
         {
-            ExecOrThrow("RENAME " + QualifiedName(databaseName, oldViewName) + " TO " + QuoteIdentifier(newViewName));
+            // Oracle 的 RENAME 語句不接受 schema 限定名（ORA-01765），只能改目前 schema 的物件
+            ExecOrThrow("RENAME " + QuoteIdentifier(oldViewName) + " TO " + QuoteIdentifier(newViewName));
         }
 
         public long CountRows(string databaseName, string tableName)
@@ -377,10 +378,17 @@ namespace mySQLPunk.lib
                     c.DATA_PRECISION AS NUMERICPRECISION,
                     c.DATA_SCALE AS NUMERICSCALE,
                     c.DATA_DEFAULT AS DEFAULTVALUE,
-                    cc.COMMENTS AS COMMENT,
-                    c.COLUMN_ID AS ORDINALPOSITION
+                    cc.COMMENTS AS ""COMMENT"",
+                    c.COLUMN_ID AS ORDINALPOSITION,
+                    CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'PRI' ELSE '' END AS COLUMNKEY
                 FROM ALL_TAB_COLUMNS c
                 LEFT JOIN ALL_COL_COMMENTS cc ON cc.OWNER = c.OWNER AND cc.TABLE_NAME = c.TABLE_NAME AND cc.COLUMN_NAME = c.COLUMN_NAME
+                LEFT JOIN (
+                    SELECT ccol.OWNER, ccol.TABLE_NAME, ccol.COLUMN_NAME
+                    FROM ALL_CONSTRAINTS con
+                    JOIN ALL_CONS_COLUMNS ccol ON ccol.OWNER = con.OWNER AND ccol.CONSTRAINT_NAME = con.CONSTRAINT_NAME
+                    WHERE con.CONSTRAINT_TYPE = 'P'
+                ) pk ON pk.OWNER = c.OWNER AND pk.TABLE_NAME = c.TABLE_NAME AND pk.COLUMN_NAME = c.COLUMN_NAME
                 WHERE c.OWNER = :owner AND c.TABLE_NAME = :tableName
                 ORDER BY c.COLUMN_ID", p);
         }
@@ -444,6 +452,11 @@ namespace mySQLPunk.lib
             }
         }
 
+        public void DropTableForCopy(string databaseName, string tableName)
+        {
+            ExecOrThrow("DROP TABLE " + QualifiedName(databaseName, tableName));
+        }
+
         private static List<string> BuildOracleCopyCreateTableStatements(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
         {
             List<string> statements = new List<string>();
@@ -459,6 +472,18 @@ namespace mySQLPunk.lib
                 }
                 definition += " " + nullable;
                 defs.Add(definition);
+            }
+
+            // 沒帶主鍵的複製表在資料分頁會被判成唯讀，來源有 PK 就要一併帶過來
+            List<string> primaryKeys = new List<string>();
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                if (string.Equals(GetDataRowValue(row, "ColumnKey", "COLUMNKEY"), "PRI", StringComparison.OrdinalIgnoreCase))
+                    primaryKeys.Add(QuoteIdentifier(row["Name"].ToString()));
+            }
+            if (primaryKeys.Count > 0)
+            {
+                defs.Add("PRIMARY KEY (" + string.Join(", ", primaryKeys.ToArray()) + ")");
             }
 
             statements.Add("CREATE TABLE " + QualifiedName(databaseName, tableName) + " (" + string.Join(", ", defs.ToArray()) + ")");
@@ -520,8 +545,35 @@ namespace mySQLPunk.lib
 
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
         {
-            return SelectSQL("SELECT * FROM " + QualifiedName(databaseName, tableName) +
+            string orderBy = GetPrimaryKeyOrderBy(databaseName, tableName);
+            return SelectSQL("SELECT * FROM " + QualifiedName(databaseName, tableName) + orderBy +
                              " OFFSET " + offset + " ROWS FETCH NEXT " + limit + " ROWS ONLY");
+        }
+
+        /// <summary>OFFSET 分頁沒有 ORDER BY 時列順序不保證穩定，有主鍵就用主鍵排序。</summary>
+        private string GetPrimaryKeyOrderBy(string databaseName, string tableName)
+        {
+            try
+            {
+                var p = new Dictionary<string, object>
+                {
+                    { "owner", NormalizeOwner(databaseName) },
+                    { "tableName", NormalizeName(tableName) }
+                };
+                DataTable dt = SelectSQL(@"
+                    SELECT ccol.COLUMN_NAME
+                    FROM ALL_CONSTRAINTS con
+                    JOIN ALL_CONS_COLUMNS ccol ON ccol.OWNER = con.OWNER AND ccol.CONSTRAINT_NAME = con.CONSTRAINT_NAME
+                    WHERE con.CONSTRAINT_TYPE = 'P' AND con.OWNER = :owner AND con.TABLE_NAME = :tableName
+                    ORDER BY ccol.POSITION", p);
+                List<string> cols = new List<string>();
+                foreach (DataRow row in dt.Rows) cols.Add(QuoteIdentifier(row[0].ToString()));
+                if (cols.Count > 0) return " ORDER BY " + string.Join(", ", cols.ToArray());
+            }
+            catch
+            {
+            }
+            return "";
         }
 
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows)

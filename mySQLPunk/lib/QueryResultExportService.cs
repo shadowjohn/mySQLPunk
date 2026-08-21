@@ -875,7 +875,16 @@ namespace mySQLPunk.lib
         {
             if (value == null || value == DBNull.Value) return string.Empty;
             byte[] bytes = value as byte[];
-            if (bytes != null) return FormatBinaryCellValue(bytes);
+            if (bytes != null)
+            {
+                string wkt;
+                if (GeometryWktConverter.TryGeometryBytesToWkt(bytes, out wkt)) return wkt;
+                // 匯出要保真：畫面用的「前 12 bytes + ...」預覽寫進檔案等於資料遺失
+                StringBuilder hex = new StringBuilder(bytes.Length * 2 + 2);
+                hex.Append("0x");
+                for (int i = 0; i < bytes.Length; i++) hex.Append(bytes[i].ToString("X2"));
+                return hex.ToString();
+            }
             if (value is DateTime) return ((DateTime)value).ToString("yyyy-MM-dd HH:mm:ss");
             return value.ToString();
         }
@@ -902,7 +911,7 @@ namespace mySQLPunk.lib
 
         private static string CsvEscape(string value)
         {
-            value = value ?? string.Empty;
+            value = NeutralizeSpreadsheetFormula(value ?? string.Empty);
             if (value.Contains(",") || value.Contains("\"") || value.Contains("\r") || value.Contains("\n"))
                 return "\"" + value.Replace("\"", "\"\"") + "\"";
             return value;
@@ -910,10 +919,24 @@ namespace mySQLPunk.lib
 
         private static string DelimitedEscape(string value, char delimiter)
         {
-            value = value ?? string.Empty;
+            value = NeutralizeSpreadsheetFormula(value ?? string.Empty);
             if (value.Contains(delimiter.ToString()) || value.Contains("\"") || value.Contains("\r") || value.Contains("\n"))
                 return "\"" + value.Replace("\"", "\"\"") + "\"";
             return value;
+        }
+
+        /// <summary>
+        /// 以 = + - @ 開頭的值會被 Excel 當公式執行（CSV injection）。
+        /// 前置單引號中和；純數字（含負數）不動，避免弄髒數值資料。
+        /// </summary>
+        private static string NeutralizeSpreadsheetFormula(string value)
+        {
+            if (value.Length == 0) return value;
+            char first = value[0];
+            if (first != '=' && first != '+' && first != '-' && first != '@' && first != '\t') return value;
+            double numeric;
+            if (double.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out numeric)) return value;
+            return "'" + value;
         }
 
         private static string HtmlEscape(string value)

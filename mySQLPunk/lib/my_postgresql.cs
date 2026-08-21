@@ -53,7 +53,8 @@ namespace mySQLPunk.lib
 
         public DataTable selectSQL_SAFE(string SQL, Dictionary<string, object> key_value)
         {
-            SQL = SQL.Replace("@", ":");
+            // 不可對整段 SQL 做 @→: 取代：'abc@gmail.com' 或 jsonb 的 @> 都會被改壞。
+            // Npgsql 原生同時支援 @name 與 :name 兩種參數寫法，不需要轉換。
             DataTable output = new DataTable();
             using (NpgsqlCommand cmd = new NpgsqlCommand(SQL, MCT))
             {
@@ -254,7 +255,7 @@ namespace mySQLPunk.lib
                 JOIN pg_index ix ON t.oid = ix.indrelid
                 JOIN pg_class i ON i.oid = ix.indexrelid
                 JOIN pg_am am ON i.relam = am.oid
-                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.ord <= ix.indnkeyatts
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
                 WHERE n.nspname = :schema AND t.relname = :name
                 ORDER BY i.relname, k.ord;", p);
@@ -282,16 +283,95 @@ namespace mySQLPunk.lib
             DataTable columns = GetCopyColumns(databaseName, tableName);
             if (columns.Rows.Count == 0) return "";
 
+            PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
+            var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
+
             List<string> definitions = new List<string>();
+            List<string> primaryKeys = new List<string>();
+            StringBuilder columnComments = new StringBuilder();
             foreach (DataRow row in columns.Rows)
             {
+                string name = row["Name"].ToString();
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
-                definitions.Add("  " + QuotePg(row["Name"].ToString()) + " " + MapCopyTypeToPostgreSql(row) + " " + nullable);
+                string definition = "  " + QuotePg(name) + " " + MapCopyTypeToPostgreSql(row);
+                string defaultValue = GetDataRowValue(row, "DefaultValue", "DEFAULTVALUE").Trim();
+                if (!string.IsNullOrWhiteSpace(defaultValue))
+                {
+                    // column_default 本身就是合法的 PG 運算式（含 nextval(...)），原樣輸出
+                    definition += " DEFAULT " + defaultValue;
+                }
+                definition += " " + nullable;
+                definitions.Add(definition);
+
+                if (string.Equals(GetDataRowValue(row, "ColumnKey", "COLUMNKEY"), "PRI", StringComparison.OrdinalIgnoreCase))
+                {
+                    primaryKeys.Add(QuotePg(name));
+                }
+
+                string comment = GetDataRowValue(row, "Comment", "COMMENT");
+                if (!string.IsNullOrWhiteSpace(comment))
+                {
+                    columnComments.Append("\r\nCOMMENT ON COLUMN " + QualifiedName(tableName) + "." + QuotePg(name) +
+                                          " IS '" + comment.Replace("'", "''") + "';");
+                }
             }
 
-            return "CREATE TABLE " + QualifiedName(tableName) + " (\r\n" +
-                   string.Join(",\r\n", definitions.ToArray()) +
-                   "\r\n);";
+            if (primaryKeys.Count > 0)
+            {
+                definitions.Add("  PRIMARY KEY (" + string.Join(", ", primaryKeys.ToArray()) + ")");
+            }
+
+            StringBuilder sql = new StringBuilder();
+            sql.Append("CREATE TABLE " + QualifiedName(tableName) + " (\r\n" +
+                       string.Join(",\r\n", definitions.ToArray()) +
+                       "\r\n);");
+
+            try
+            {
+                DataTable tableComment = SelectSQL(
+                    "SELECT obj_description(c.oid, 'pg_class') AS comment " +
+                    "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
+                    "WHERE n.nspname = :schema AND c.relname = :name;", p);
+                if (tableComment.Rows.Count > 0 && tableComment.Rows[0]["comment"] != DBNull.Value)
+                {
+                    string text = tableComment.Rows[0]["comment"].ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        sql.Append("\r\nCOMMENT ON TABLE " + QualifiedName(tableName) + " IS '" + text.Replace("'", "''") + "';");
+                    }
+                }
+            }
+            catch
+            {
+                // 註解屬附加資訊，查不到不影響主體 DDL
+            }
+
+            sql.Append(columnComments.ToString());
+
+            try
+            {
+                DataTable indexes = SelectSQL(@"
+                    SELECT i.indexdef
+                    FROM pg_indexes i
+                    WHERE i.schemaname = :schema AND i.tablename = :name
+                      AND NOT EXISTS (
+                          SELECT 1 FROM pg_constraint con
+                          JOIN pg_class ic ON ic.oid = con.conindid
+                          WHERE con.contype = 'p' AND ic.relname = i.indexname
+                      )
+                    ORDER BY i.indexname;", p);
+                foreach (DataRow row in indexes.Rows)
+                {
+                    string indexDef = row["indexdef"] == DBNull.Value ? "" : row["indexdef"].ToString().Trim();
+                    if (indexDef.Length > 0) sql.Append("\r\n" + indexDef + ";");
+                }
+            }
+            catch
+            {
+                // 索引查詢失敗（權限不足等）時保留主體 DDL
+            }
+
+            return sql.ToString();
         }
 
         public bool TableExists(string databaseName, string tableName)
@@ -340,11 +420,18 @@ namespace mySQLPunk.lib
                     c.numeric_scale AS ""NumericScale"",
                     c.column_default AS ""DefaultValue"",
                     col_description(cls.oid, a.attnum) AS ""Comment"",
-                    c.ordinal_position AS ""OrdinalPosition""
+                    c.ordinal_position AS ""OrdinalPosition"",
+                    CASE WHEN pk.attname IS NOT NULL THEN 'PRI' ELSE '' END AS ""ColumnKey""
                 FROM information_schema.columns c
                 LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
                 LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
                 LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped
+                LEFT JOIN (
+                    SELECT a2.attname, ix.indrelid
+                    FROM pg_index ix
+                    JOIN pg_attribute a2 ON a2.attrelid = ix.indrelid AND a2.attnum = ANY(ix.indkey)
+                    WHERE ix.indisprimary
+                ) pk ON pk.indrelid = cls.oid AND pk.attname = c.column_name
                 WHERE c.table_schema = :schema AND c.table_name = :name
                 ORDER BY c.ordinal_position;", p);
         }
@@ -365,9 +452,10 @@ namespace mySQLPunk.lib
                 JOIN pg_index ix ON t.oid = ix.indrelid
                 JOIN pg_class i ON i.oid = ix.indexrelid
                 JOIN pg_am am ON i.relam = am.oid
-                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.ord <= ix.indnkeyatts
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
                 WHERE n.nspname = :schema AND t.relname = :name AND NOT ix.indisprimary
+                  AND NOT (0 = ANY (ix.indkey))
                 ORDER BY i.relname, k.ord;", p);
         }
 
@@ -377,6 +465,11 @@ namespace mySQLPunk.lib
             {
                 ExecOrThrow(sql);
             }
+        }
+
+        public void DropTableForCopy(string databaseName, string tableName)
+        {
+            ExecOrThrow("DROP TABLE IF EXISTS " + QualifiedName(tableName) + ";");
         }
 
         private static List<string> BuildPostgreSqlCopyCreateTableStatements(string tableName, DataTable sourceColumns, string sourceProvider)
@@ -394,6 +487,18 @@ namespace mySQLPunk.lib
                 }
                 definition += " " + nullable;
                 defs.Add(definition);
+            }
+
+            // 沒帶主鍵的複製表在資料分頁會被判成唯讀，來源有 PK 就要一併帶過來
+            List<string> primaryKeys = new List<string>();
+            foreach (DataRow row in sourceColumns.Rows)
+            {
+                if (string.Equals(GetDataRowValue(row, "ColumnKey", "COLUMNKEY"), "PRI", StringComparison.OrdinalIgnoreCase))
+                    primaryKeys.Add(QuotePg(row["Name"].ToString()));
+            }
+            if (primaryKeys.Count > 0)
+            {
+                defs.Add("PRIMARY KEY (" + string.Join(", ", primaryKeys.ToArray()) + ")");
             }
 
             statements.Add("CREATE TABLE " + QualifiedName(tableName) + " (" + string.Join(", ", defs.ToArray()) + ");");
@@ -441,7 +546,37 @@ namespace mySQLPunk.lib
 
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
         {
-            return SelectSQL("SELECT * FROM " + QualifiedName(tableName) + " LIMIT " + limit + " OFFSET " + offset + ";");
+            string orderBy = GetPrimaryKeyOrderBy(tableName);
+            return SelectSQL("SELECT * FROM " + QualifiedName(tableName) + orderBy + " LIMIT " + limit + " OFFSET " + offset + ";");
+        }
+
+        /// <summary>
+        /// PG 的 synchronize_seqscans 會讓同一張表多次掃描起點不同，
+        /// 沒有 ORDER BY 的分頁匯出/複製會重複或漏列；有主鍵就用主鍵排序。
+        /// </summary>
+        private string GetPrimaryKeyOrderBy(string tableName)
+        {
+            try
+            {
+                PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
+                var p = new Dictionary<string, object> { { "schema", target.Schema }, { "name", target.Name } };
+                DataTable dt = SelectSQL(@"
+                    SELECT a.attname
+                    FROM pg_index ix
+                    JOIN pg_class t ON t.oid = ix.indrelid
+                    JOIN pg_namespace n ON n.oid = t.relnamespace
+                    JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.ord <= ix.indnkeyatts
+                    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                    WHERE n.nspname = :schema AND t.relname = :name AND ix.indisprimary
+                    ORDER BY k.ord;", p);
+                List<string> cols = new List<string>();
+                foreach (DataRow row in dt.Rows) cols.Add(QuotePg(row[0].ToString()));
+                if (cols.Count > 0) return " ORDER BY " + string.Join(", ", cols.ToArray());
+            }
+            catch
+            {
+            }
+            return "";
         }
 
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows)

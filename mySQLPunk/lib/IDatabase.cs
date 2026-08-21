@@ -39,6 +39,8 @@ namespace mySQLPunk.lib
         DataTable GetCopyColumns(string databaseName, string tableName);
         DataTable GetCopyIndexes(string databaseName, string tableName);
         void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider);
+        /// <summary>複製中途失敗時清掉半套的目標表（best-effort，呼叫端自行吞例外）。</summary>
+        void DropTableForCopy(string databaseName, string tableName);
         void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider);
         DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit);
         void InsertTableBatch(string databaseName, string tableName, DataTable rows);

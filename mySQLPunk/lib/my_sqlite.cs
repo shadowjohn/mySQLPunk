@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Data.SQLite;
+using System.Text.RegularExpressions;
 using System.Data;
 using System.IO;
 using utility;
@@ -261,21 +262,45 @@ namespace mySQLPunk.lib
         public List<string> GetTables(string databaseName)
         {
             List<string> tables = new List<string>();
-            // 排除系統內部表及 virtual table（模組未載入時會異常）
             DataTable dt = SelectSQL(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 + "AND name NOT LIKE 'sqlite_%' "
-                + "AND name <> '" + ColumnCommentTableName + "' "
-                + "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%');");
-            // 從結果中再排除 FTS/RTree 影子表（名稱為 <virtual_table>_xxx）
+                + "AND name <> '" + ColumnCommentTableName + "';");
+            // FTS/RTree 影子表（<virtual_table>_xxx）不列出；
+            // virtual table 本體要列出來，否則用精靈建完就永遠看不到、也刪不掉。
             var virtualNames = GetVirtualTableNames();
             foreach (DataRow row in dt.Rows)
             {
                 string name = row[0].ToString();
-                if (!IsShadowTable(name, virtualNames))
-                    tables.Add(name);
+                if (IsShadowTable(name, virtualNames)) continue;
+                if (virtualNames.Contains(name) && !IsVirtualTableUsable(name)) continue;
+                tables.Add(name);
             }
             return tables;
+        }
+
+        /// <summary>
+        /// virtual table 的模組（fts5/rtree...）沒被編入 SQLite 時一查就丟例外，
+        /// 先用零列查詢探測，探不通的就不列出，避免後續操作連環爆。
+        /// </summary>
+        private bool IsVirtualTableUsable(string tableName)
+        {
+            try
+            {
+                DataTable probe = SelectSQL("SELECT 1 FROM " + QuoteSqlite(tableName) + " LIMIT 0;");
+                return !HasQueryError(probe);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string GetVirtualTableModule(object sqlValue)
+        {
+            string sql = sqlValue == null || sqlValue == DBNull.Value ? "" : sqlValue.ToString();
+            Match m = Regex.Match(sql, @"USING\s+([A-Za-z0-9_]+)", RegexOptions.IgnoreCase);
+            return m.Success ? m.Groups[1].Value.ToUpperInvariant() : "VIRTUAL";
         }
 
         public List<string> GetViews(string databaseName)
@@ -308,18 +333,18 @@ namespace mySQLPunk.lib
         public DataTable GetTableStatus(string databaseName)
         {
             DataTable output = CreateTableStatusSchema();
-            // 排除 virtual table：其 sql 欄以 CREATE VIRTUAL TABLE 開頭，模組未載入時會拋出 "no such table"
             DataTable tables = SelectSQL(
                 "SELECT name, sql FROM sqlite_master WHERE type='table' "
                 + "AND name NOT LIKE 'sqlite_%' "
                 + "AND name <> '" + ColumnCommentTableName + "' "
-                + "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%') "
                 + "ORDER BY name;");
             var virtualNames = GetVirtualTableNames();
             foreach (DataRow row in tables.Rows)
             {
                 string tableName = row["name"].ToString();
-                if (IsShadowTable(tableName, virtualNames)) continue; // 跟着排除 FTS/RTree 影子表
+                if (IsShadowTable(tableName, virtualNames)) continue; // FTS/RTree 影子表不列出
+                bool isVirtual = virtualNames.Contains(tableName);
+                if (isVirtual && !IsVirtualTableUsable(tableName)) continue;
                 DataRow nr = output.NewRow();
                 nr["Name"] = tableName;
                 nr["Auto_increment"] = DBNull.Value;
@@ -330,7 +355,7 @@ namespace mySQLPunk.lib
                 nr["Index_length"] = 0L;
                 nr["Max_data_length"] = 0L;
                 nr["Data_free"] = 0L;
-                nr["Engine"] = "SQLite";
+                nr["Engine"] = isVirtual ? "SQLite " + GetVirtualTableModule(row["sql"]) : "SQLite";
                 try { nr["Rows"] = CountRows(databaseName, tableName); }
                 catch { nr["Rows"] = -1L; } // 無法計數（如被鎖定、尚未初始化等）時展示 -1
                 nr["Comment"] = "";
@@ -534,12 +559,14 @@ namespace mySQLPunk.lib
             dt.Columns.Add("NumericScale");
             dt.Columns.Add("Comment");
             dt.Columns.Add("OrdinalPosition", typeof(int));
+            dt.Columns.Add("ColumnKey");
             foreach (DataRow row in raw.Rows)
             {
                 DataRow nr = dt.NewRow();
                 nr["Name"] = row["name"];
                 nr["DataType"] = row["type"];
                 nr["IsNullable"] = row["notnull"].ToString() == "1" ? "NO" : "YES";
+                nr["ColumnKey"] = row["pk"].ToString() != "0" ? "PRI" : "";
                 string comment;
                 nr["Comment"] = comments.TryGetValue(row["name"].ToString(), out comment) ? comment : "";
                 nr["OrdinalPosition"] = Convert.ToInt32(row["cid"]) + 1;
@@ -605,13 +632,27 @@ namespace mySQLPunk.lib
             return output;
         }
 
+        public void DropTableForCopy(string databaseName, string tableName)
+        {
+            ExecOrThrow("DROP TABLE IF EXISTS " + QuoteSqlite(tableName) + ";");
+        }
+
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider)
         {
             List<string> defs = new List<string>();
+            List<string> primaryKeys = new List<string>();
             foreach (DataRow row in sourceColumns.Rows)
             {
                 string nullable = IsCopyNullable(row) ? "NULL" : "NOT NULL";
                 defs.Add(QuoteSqlite(row["Name"].ToString()) + " " + MapCopyTypeToSqlite(row) + " " + nullable);
+                bool isPrimaryKey = row.Table.Columns.Contains("ColumnKey") && row["ColumnKey"] != DBNull.Value &&
+                    string.Equals(row["ColumnKey"].ToString(), "PRI", StringComparison.OrdinalIgnoreCase);
+                if (isPrimaryKey) primaryKeys.Add(QuoteSqlite(row["Name"].ToString()));
+            }
+            // 沒帶主鍵的複製表在資料分頁會被判成唯讀，來源有 PK 就要一併帶過來
+            if (primaryKeys.Count > 0)
+            {
+                defs.Add("PRIMARY KEY (" + string.Join(", ", primaryKeys.ToArray()) + ")");
             }
             ExecOrThrow("CREATE TABLE " + QuoteSqlite(tableName) + " (" + string.Join(", ", defs.ToArray()) + ");");
         }
@@ -637,7 +678,28 @@ namespace mySQLPunk.lib
 
         public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit)
         {
-            return SelectSQL("SELECT * FROM " + QuoteSqlite(tableName) + " LIMIT " + limit + " OFFSET " + offset + ";");
+            string orderBy = GetPrimaryKeyOrderBy(tableName);
+            return SelectSQL("SELECT * FROM " + QuoteSqlite(tableName) + orderBy + " LIMIT " + limit + " OFFSET " + offset + ";");
+        }
+
+        /// <summary>OFFSET 分頁沒有 ORDER BY 時列順序不保證穩定，有主鍵就用主鍵排序。</summary>
+        private string GetPrimaryKeyOrderBy(string tableName)
+        {
+            try
+            {
+                DataTable dt = SelectSQL("PRAGMA table_info(" + QuoteSqlite(tableName) + ");");
+                SortedDictionary<int, string> pk = new SortedDictionary<int, string>();
+                foreach (DataRow row in dt.Rows)
+                {
+                    int rank = Convert.ToInt32(row["pk"]);
+                    if (rank > 0) pk[rank] = QuoteSqlite(row["name"].ToString());
+                }
+                if (pk.Count > 0) return " ORDER BY " + string.Join(", ", new List<string>(pk.Values).ToArray());
+            }
+            catch
+            {
+            }
+            return "";
         }
 
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows)

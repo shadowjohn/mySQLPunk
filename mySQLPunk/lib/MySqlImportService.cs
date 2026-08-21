@@ -302,7 +302,7 @@ namespace mySQLPunk.lib
             {
                 lineNumber++;
                 string trimmed = line.Trim();
-                if (trimmed.StartsWith("DELIMITER ", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(current.ToString()))
+                if (trimmed.StartsWith("DELIMITER ", StringComparison.OrdinalIgnoreCase) && IsWhitespaceOnly(current))
                 {
                     delimiter = trimmed.Substring("DELIMITER ".Length).Trim();
                     if (delimiter.Length == 0) delimiter = ";";
@@ -333,15 +333,34 @@ namespace mySQLPunk.lib
 
         public static string BuildPreview(string sql)
         {
-            string value = (sql ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
+            // 先截短再整理空白；對整條（可能數百 KB 的 INSERT）做全文取代太傷
+            string value = sql ?? string.Empty;
+            if (value.Length > 400) value = value.Substring(0, 400);
+            value = value.Replace('\r', ' ').Replace('\n', ' ').Trim();
             while (value.Contains("  ")) value = value.Replace("  ", " ");
             return value.Length <= 160 ? value : value.Substring(0, 157) + "...";
         }
 
         private static bool EndsWithDelimiter(StringBuilder builder, string delimiter)
         {
-            string text = builder.ToString().TrimEnd();
-            return text.EndsWith(delimiter, StringComparison.Ordinal);
+            // 每讀一行就把整條語句 ToString 一次會讓大檔匯入變 O(n²)，直接掃 StringBuilder
+            int end = builder.Length;
+            while (end > 0 && char.IsWhiteSpace(builder[end - 1])) end--;
+            if (end < delimiter.Length) return false;
+            for (int i = 0; i < delimiter.Length; i++)
+            {
+                if (builder[end - delimiter.Length + i] != delimiter[i]) return false;
+            }
+            return true;
+        }
+
+        private static bool IsWhitespaceOnly(StringBuilder builder)
+        {
+            for (int i = 0; i < builder.Length; i++)
+            {
+                if (!char.IsWhiteSpace(builder[i])) return false;
+            }
+            return true;
         }
 
         private static string RemoveTrailingDelimiter(string sql, string delimiter)

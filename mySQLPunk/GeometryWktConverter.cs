@@ -19,7 +19,10 @@ namespace mySQLPunk
 
             if (TryReadSpatiaLiteBlob(bytes, out wkt)) return true;
 
-            int[] preferredOffsets = { 0, 4, 39 };
+            // MySQL 的格式是「4 bytes SRID + WKB」。SRID = 0 時前四個 0x00 會讓
+            // offset 0 被誤判成 big-endian POINT 而讀出垃圾座標，所以 offset 4 要先試；
+            // 搭配「必須把整個 buffer 讀完」的驗證，誤判的那組會因長度不符被淘汰。
+            int[] preferredOffsets = { 4, 0, 39 };
             foreach (int offset in preferredOffsets)
             {
                 if (TryReadWkbAt(bytes, offset, out wkt)) return true;
@@ -63,6 +66,8 @@ namespace mySQLPunk
                 WkbReader reader = new WkbReader(bytes, offset);
                 string parsed = reader.ReadGeometry();
                 if (string.IsNullOrWhiteSpace(parsed)) return false;
+                // 沒把 buffer 讀完代表這個 offset 是誤判（一般 BLOB 也可能碰巧像 WKB 開頭）
+                if (reader.Position != bytes.Length) return false;
                 wkt = parsed;
                 return true;
             }
@@ -76,6 +81,8 @@ namespace mySQLPunk
         {
             private readonly byte[] bytes;
             private int position;
+
+            public int Position => position;
             private bool littleEndian;
             private bool hasZ;
             private bool hasM;

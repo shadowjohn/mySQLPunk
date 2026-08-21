@@ -333,7 +333,13 @@ namespace mySQLPunk.entity
                     { "path", GetVal(conn, "path") },
                     { "init_geospatial", GetVal(conn, "init_geospatial") },
                     { "trusted_connection", GetVal(conn, "trusted_connection") },
-                    { "conn_group", GetVal(conn, "conn_group") }
+                    { "conn_group", GetVal(conn, "conn_group") },
+                    // Oracle 連線靠這幾個欄位組 TNS 描述；漏存的話重開程式後連線全數失效
+                    { "service_name", GetVal(conn, "service_name") },
+                    { "sid", GetVal(conn, "sid") },
+                    { "tns_name", GetVal(conn, "tns_name") },
+                    { "connection_type", GetVal(conn, "connection_type") },
+                    { "oracle_identifier_type", GetVal(conn, "oracle_identifier_type") }
                 };
                 saveList.Add(item);
             }
@@ -400,17 +406,20 @@ namespace mySQLPunk.entity
             }
 
             string target = WindowsCredentialService.BuildTargetName(ActiveProfileName, conn);
-            if (!string.Equals(existingTarget, target, StringComparison.OrdinalIgnoreCase))
-            {
-                WindowsCredentialService.TryDeletePassword(existingTarget);
-            }
-
+            // 先寫新的、確認成功後才刪舊的；反過來的話寫入失敗（群組原則停用
+            // Credential Manager 等）會讓密碼三處皆無且完全無感
             if (WindowsCredentialService.TryWritePassword(target, GetVal(conn, "username"), password))
             {
+                if (!string.IsNullOrWhiteSpace(existingTarget) &&
+                    !string.Equals(existingTarget, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    WindowsCredentialService.TryDeletePassword(existingTarget);
+                }
                 return target;
             }
 
-            return "";
+            // 寫入失敗：沿用還存在的舊憑證，至少不把密碼弄丟
+            return string.IsNullOrWhiteSpace(existingTarget) ? "" : existingTarget;
         }
 
         private void LoadConnectionPassword(Dictionary<string, object> conn)

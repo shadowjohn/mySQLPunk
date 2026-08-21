@@ -273,6 +273,25 @@ namespace mySQLPunk.lib
             {
                 return "'" + ((DateTime)value).ToString("yyyy-MM-dd HH:mm:ss.fffffff", System.Globalization.CultureInfo.InvariantCulture).TrimEnd('0').TrimEnd('.') + "'";
             }
+            if (value is TimeSpan)
+            {
+                // TIME 欄位（TimeSpan）要帶引號，且不能用預設 d.hh:mm:ss 格式
+                TimeSpan span = (TimeSpan)value;
+                bool negative = span < TimeSpan.Zero;
+                TimeSpan abs = negative ? span.Negate() : span;
+                long totalHours = (long)abs.TotalHours;
+                string time = (negative ? "-" : "") + totalHours.ToString("00") + ":" + abs.Minutes.ToString("00") + ":" + abs.Seconds.ToString("00");
+                if (abs.Milliseconds != 0) time += "." + abs.Milliseconds.ToString("000");
+                return "'" + time + "'";
+            }
+            if (value is double)
+            {
+                return ((double)value).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            }
+            if (value is float)
+            {
+                return ((float)value).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            }
             IFormattable formattable = value as IFormattable;
             if (!(value is string) && !(value is char) && formattable != null)
             {

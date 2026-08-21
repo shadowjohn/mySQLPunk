@@ -407,6 +407,7 @@ namespace mySQLPunk
             Add("Common.Warning", "警告", "Warning");
             Add("Common.Error", "錯誤", "Error");
             Add("Options.SaveFailed", "設定儲存失敗：{0}", "Failed to save settings: {0}");
+            Add("Backup.RestoreFailedSafetyHint", "還原前的安全備份保留在：{0}", "The pre-restore safety backup is kept at: {0}");
             Add("Query.AutoRecoveryDisabled", "自動備份草稿失敗已達 3 次，本分頁已停用自動備份：{0}", "Auto-recovery draft saving failed 3 times and has been disabled for this tab: {0}");
             Add("Common.Success", "成功", "Success");
             Add("Common.Info", "資訊", "Information");
@@ -989,6 +990,16 @@ namespace mySQLPunk
             Add("ProviderCapability.SqliteNoRoutines", "SQLite 不會把 database routines 儲存在資料庫 schema。", "SQLite does not store database routines.");
             Add("ProviderCapability.RoutineMetadataPermission", "權限允許時可讀取 routine metadata。", "Routine metadata available when permissions allow.");
             Add("ProviderCapability.MetadataPermission", "權限允許時可讀取 metadata。", "Metadata available when permissions allow.");
+            Add("ProviderCapability.Partial", "部分支援", "Partial");
+            Add("ProviderCapability.TriggersOnly", "僅支援 Triggers；此資料庫類型沒有 Events。", "Triggers only; this database type has no events.");
+            Add("ProviderCapability.UserManagement", "使用者管理", "User Management");
+            Add("ProviderCapability.MySqlUserTools", "建立、授權、刪除帳號等操作。", "Create, grant and drop account operations.");
+            Add("ProviderCapability.MySqlOnlyUserManagement", "帳號管理操作目前僅支援 MySQL。", "Account management is currently available for MySQL only.");
+            Add("ProviderCapability.DatabaseRename", "資料庫改名", "Database Rename");
+            Add("ProviderCapability.OracleRenameHint", "Oracle 沒有安全的改名方式，請以匯出／匯入 schema 處理。", "Oracle has no safe rename; use schema export/import instead.");
+            Add("ProviderCapability.SqliteRenameFile", "以檔案改名實作。", "Implemented by renaming the database file.");
+            Add("ProviderCapability.MySqlRenameCopy", "以建立新資料庫並複製內容實作。", "Implemented by creating a new database and copying content.");
+            Add("ProviderCapability.NativeRename", "原生 ALTER / RENAME 支援。", "Native ALTER / RENAME support.");
             Add("ImportSql.Title", "匯入 SQL 檔案", "Import SQL File");
             Add("ImportSql.SelectDatabase", "請先選取一個已展開的資料庫。", "Select an expanded database first.");
             Add("ImportSql.Success", "SQL 匯入完成。執行語句數：{0}", "SQL import completed. Statements executed: {0}");

@@ -136,11 +136,23 @@ namespace mySQLPunk.lib
             }
             catch (InvalidCastException)
             {
+                ResetOutputForFallback(output);
                 return WriteFallbackValue(reader.GetValue(ordinal), output, progress, bufferSize);
             }
             catch (NotSupportedException)
             {
+                ResetOutputForFallback(output);
                 return WriteFallbackValue(reader.GetValue(ordinal), output, progress, bufferSize);
+            }
+        }
+
+        /// <summary>GetBytes 寫到一半才失敗時，回退值不能接在殘料後面。</summary>
+        private static void ResetOutputForFallback(Stream output)
+        {
+            if (output != null && output.CanSeek)
+            {
+                output.SetLength(0);
+                output.Position = 0;
             }
         }
 

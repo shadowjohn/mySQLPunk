@@ -190,14 +190,27 @@ namespace mySQLPunk.lib
                 Directory.CreateDirectory(destinationDirectory);
             }
 
-            if (File.Exists(destinationPath))
+            if (File.Exists(destinationPath) && !overwrite)
             {
-                if (!overwrite) throw new IOException(Localization.T("Backup.QuarantineRestoreDestinationExists"));
-                File.Delete(destinationPath);
+                throw new IOException(Localization.T("Backup.QuarantineRestoreDestinationExists"));
             }
 
             long sizeBytes = new FileInfo(quarantinedPath).Length;
-            File.Move(quarantinedPath, destinationPath);
+            // 先搬到目的地的暫存名、成功後才取代舊檔；
+            // 先刪舊檔再 Move 的話，Move 失敗（防毒鎖檔等）會把目的檔也賠掉
+            string tempPath = destinationPath + ".restoring";
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+            File.Move(quarantinedPath, tempPath);
+            try
+            {
+                if (File.Exists(destinationPath)) File.Delete(destinationPath);
+                File.Move(tempPath, destinationPath);
+            }
+            catch
+            {
+                try { if (!File.Exists(quarantinedPath)) File.Move(tempPath, quarantinedPath); } catch { }
+                throw;
+            }
             return new BackupQuarantineRestoreResult
             {
                 SourcePath = quarantinedPath,
