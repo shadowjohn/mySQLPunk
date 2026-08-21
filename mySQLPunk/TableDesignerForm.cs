@@ -171,18 +171,17 @@ namespace mySQLPunk
                 ImageScalingSize = new Size(20, 20) 
             };
             
-            string iconPath = my.pwd() + "\\image\\";
-            ToolStripButton btnSave = new ToolStripButton(Localization.T("Designer.Save"), GetIcon(iconPath + "save.png"), BtnSave_Click);
-            btnExecuteSql = new ToolStripButton(Localization.T("Designer.ExecuteSql"), GetIcon(iconPath + "new_query.png"), BtnExecuteSql_Click);
+            ToolStripButton btnSave = new ToolStripButton(Localization.T("Designer.Save"), null, BtnSave_Click);
+            btnExecuteSql = new ToolStripButton(Localization.T("Designer.ExecuteSql"), null, BtnExecuteSql_Click);
             btnExecuteSql.ToolTipText = Localization.T("Designer.ExecuteSqlTooltip");
             
             ToolStripSeparator sep1 = new ToolStripSeparator();
-            ToolStripButton btnAddCol = new ToolStripButton(Localization.T("Designer.AddColumn"), GetIcon(iconPath + "add.png"));
-            ToolStripButton btnInsertCol = new ToolStripButton(Localization.T("Designer.InsertColumn"), GetIcon(iconPath + "insert.png"));
-            ToolStripButton btnDelCol = new ToolStripButton(Localization.T("Designer.DeleteColumn"), GetIcon(iconPath + "delete.png"));
+            ToolStripButton btnAddCol = new ToolStripButton(Localization.T("Designer.AddColumn"), null);
+            ToolStripButton btnInsertCol = new ToolStripButton(Localization.T("Designer.InsertColumn"), null);
+            ToolStripButton btnDelCol = new ToolStripButton(Localization.T("Designer.DeleteColumn"), null);
             
             ToolStripSeparator sep2 = new ToolStripSeparator();
-            btnFillAutoComments = new ToolStripSplitButton(Localization.T("Designer.FillAutoComments"), GetIcon(iconPath + "table.png"));
+            btnFillAutoComments = new ToolStripSplitButton(Localization.T("Designer.FillAutoComments"), null);
             ToolStripMenuItem fillBlankCommentsItem = new ToolStripMenuItem(Localization.T("Designer.FillBlankAutoComments"));
             fillBlankCommentsItem.Click += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.FillBlanks, true);
             ToolStripMenuItem overwriteCommentsItem = new ToolStripMenuItem(Localization.T("Designer.OverwriteAutoComments"));
@@ -217,8 +216,18 @@ namespace mySQLPunk
             btnFillAutoComments.DropDownItems.Add(restoreCommentsDictionaryVersionItem);
             btnFillAutoComments.ButtonClick += async (s, e) => await FillAutoColumnCommentsAsync(AutoCommentMode.FillBlanks, true);
             ToolStripSeparator sepAutoComment = new ToolStripSeparator();
-            ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), GetIcon(iconPath + "up.png"));
-            ToolStripButton btnMoveDown = new ToolStripButton(Localization.T("Designer.MoveDown"), GetIcon(iconPath + "down.png"));
+            ToolStripButton btnMoveUp = new ToolStripButton(Localization.T("Designer.MoveUp"), null);
+            ToolStripButton btnMoveDown = new ToolStripButton(Localization.T("Designer.MoveDown"), null);
+
+            // 工具列圖示統一走向量（與主視窗/查詢視窗同一套設計語言）
+            ThemeManager.SetGlyph(btnSave, UiGlyph.Save, 20);
+            ThemeManager.SetGlyph(btnExecuteSql, UiGlyph.Play, 20, ThemeManager.SuccessColor);
+            ThemeManager.SetGlyph(btnAddCol, UiGlyph.Plus, 20);
+            ThemeManager.SetGlyph(btnInsertCol, UiGlyph.Import, 20);
+            ThemeManager.SetGlyph(btnDelCol, UiGlyph.Trash, 20);
+            ThemeManager.SetGlyph(btnFillAutoComments, UiGlyph.Document, 20);
+            ThemeManager.SetGlyph(btnMoveUp, UiGlyph.ArrowUp, 20);
+            ThemeManager.SetGlyph(btnMoveDown, UiGlyph.ArrowDown, 20);
 
             btnFloat = new ToolStripButton(Localization.T("Query.Float"), null, (s, e) => _mainHost?.FloatDockableForm(this)) { Alignment = ToolStripItemAlignment.Right };
             btnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => _mainHost?.DockDockableForm(this)) { Visible = false, Alignment = ToolStripItemAlignment.Right };

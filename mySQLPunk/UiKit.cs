@@ -36,10 +36,12 @@ namespace mySQLPunk
         public const int SplitterWidth = 6;
 
         // 字級（pt）
-        public const float FontSizeCaption = 8.25f;
-        public const float FontSizeBody = 9f;
-        public const float FontSizeSubtitle = 10f;
-        public const float FontSizeTitle = 11.5f;
+        // 字級：WinForms 預設是 Segoe UI 9pt，但繁中在 9pt 的正黑體偏小；
+        // 現代桌面工具（VS Code / DataGrip）內文約 13px ≈ 9.75pt，取 9.5pt 為內文基準
+        public const float FontSizeCaption = 8.5f;
+        public const float FontSizeBody = 9.5f;
+        public const float FontSizeSubtitle = 10.5f;
+        public const float FontSizeTitle = 12f;
         public const float FontSizeDisplay = 15f;
     }
 
@@ -72,6 +74,8 @@ namespace mySQLPunk
         Archive,
         Model,
         Folder,
+        FolderOpen,
+        Document,
         Filter,
         Columns,
         ChevronRight,
@@ -80,6 +84,8 @@ namespace mySQLPunk
         PageFirst,
         PageLast,
         Minus,
+        ArrowUp,
+        ArrowDown,
         Stop,
         Detach,
         Attach,
@@ -502,10 +508,11 @@ namespace mySQLPunk
                     break;
 
                 case UiGlyph.Plug:
-                    Line(g, pen, r, 12, 14.5f, 12, 20.5f);
                     Rect(g, pen, r, 7, 6.5f, 10, 8, 3f);
                     Line(g, pen, r, 9.5f, 6.5f, 9.5f, 3);
                     Line(g, pen, r, 14.5f, 6.5f, 14.5f, 3);
+                    // 纜線用弧線收尾
+                    g.DrawCurve(pen, new[] { P(r, 12, 14.5f), P(r, 12.2f, 17.2f), P(r, 9.6f, 19.4f), P(r, 6.8f, 20.6f) }, 0.6f);
                     break;
 
                 case UiGlyph.Chart:
@@ -539,12 +546,53 @@ namespace mySQLPunk
                     break;
 
                 case UiGlyph.Folder:
-                    Line(g, pen, r, 3.5f, 19.5f, 3.5f, 6);
-                    Line(g, pen, r, 3.5f, 6, 9.5f, 6);
-                    Line(g, pen, r, 9.5f, 6, 11.5f, 8.5f);
-                    Line(g, pen, r, 11.5f, 8.5f, 20.5f, 8.5f);
-                    Line(g, pen, r, 20.5f, 8.5f, 20.5f, 19.5f);
-                    Line(g, pen, r, 3.5f, 19.5f, 20.5f, 19.5f);
+                    // 圓角含籤片的現代資料夾
+                    using (poly = new GraphicsPath())
+                    {
+                        poly.AddArc(R(r, 3.5f, 16.4f, 3.1f, 3.1f), 90, 90);
+                        poly.AddArc(R(r, 3.5f, 4.8f, 3.1f, 3.1f), 180, 90);
+                        poly.AddLine(P(r, 9.1f, 4.8f), P(r, 11.5f, 7.4f));
+                        poly.AddLine(P(r, 11.5f, 7.4f), P(r, 18.9f, 7.4f));
+                        poly.AddArc(R(r, 17.4f, 7.4f, 3.1f, 3.1f), 270, 90);
+                        poly.AddArc(R(r, 17.4f, 16.4f, 3.1f, 3.1f), 0, 90);
+                        poly.CloseFigure();
+                        g.DrawPath(pen, poly);
+                    }
+                    break;
+
+                case UiGlyph.FolderOpen:
+                    // 後蓋 + 掀開的前蓋
+                    using (poly = new GraphicsPath())
+                    {
+                        poly.AddLine(P(r, 3f, 17.2f), P(r, 3f, 6.3f));
+                        poly.AddArc(R(r, 3f, 4.8f, 3f, 3f), 180, 90);
+                        poly.AddLine(P(r, 8.4f, 4.8f), P(r, 10.7f, 7.3f));
+                        poly.AddLine(P(r, 10.7f, 7.3f), P(r, 17.8f, 7.3f));
+                        g.DrawPath(pen, poly);
+                    }
+                    using (poly = new GraphicsPath())
+                    {
+                        poly.AddPolygon(new[] { P(r, 3f, 19f), P(r, 6.6f, 10.7f), P(r, 21.3f, 10.7f), P(r, 17.7f, 19f) });
+                        g.DrawPath(pen, poly);
+                    }
+                    break;
+
+                case UiGlyph.Document:
+                    // 摺角文件 + 內容線
+                    using (poly = new GraphicsPath())
+                    {
+                        poly.AddLine(P(r, 5.5f, 20.5f), P(r, 5.5f, 3.5f));
+                        poly.AddLine(P(r, 5.5f, 3.5f), P(r, 14.5f, 3.5f));
+                        poly.AddLine(P(r, 14.5f, 3.5f), P(r, 18.5f, 7.5f));
+                        poly.AddLine(P(r, 18.5f, 7.5f), P(r, 18.5f, 20.5f));
+                        poly.CloseFigure();
+                        g.DrawPath(pen, poly);
+                    }
+                    Line(g, pen, r, 14.5f, 3.5f, 14.5f, 7.5f);
+                    Line(g, pen, r, 14.5f, 7.5f, 18.5f, 7.5f);
+                    Line(g, pen, r, 8.5f, 11.5f, 15.5f, 11.5f);
+                    Line(g, pen, r, 8.5f, 14.8f, 15.5f, 14.8f);
+                    Line(g, pen, r, 8.5f, 18, 13, 18);
                     break;
 
                 case UiGlyph.Filter:
@@ -588,6 +636,18 @@ namespace mySQLPunk
 
                 case UiGlyph.Minus:
                     Line(g, pen, r, 5, 12, 19, 12);
+                    break;
+
+                case UiGlyph.ArrowUp:
+                    Line(g, pen, r, 12, 19.5f, 12, 4.5f);
+                    Line(g, pen, r, 6, 10.5f, 12, 4.5f);
+                    Line(g, pen, r, 18, 10.5f, 12, 4.5f);
+                    break;
+
+                case UiGlyph.ArrowDown:
+                    Line(g, pen, r, 12, 4.5f, 12, 19.5f);
+                    Line(g, pen, r, 6, 13.5f, 12, 19.5f);
+                    Line(g, pen, r, 18, 13.5f, 12, 19.5f);
                     break;
 
                 case UiGlyph.Stop:

@@ -380,7 +380,7 @@ namespace mySQLPunk
 
             // ── 頂部專業工具列 (ToolStrip) ──
             mainToolStrip = new ToolStrip { 
-                ImageScalingSize = new Size(24, 24), 
+                ImageScalingSize = new Size(16, 16), 
                 Padding = new Padding(0, 5, 0, 5),
                 GripStyle = ToolStripGripStyle.Hidden,
                 BackColor = Color.White

@@ -28,7 +28,8 @@ namespace mySQLPunk
         private const int MainToolbarHeight = 96;
         private const int MainToolbarItemWidth = 76;
         private const int MainToolbarItemHeight = 84;
-        private const int MainToolbarIconSize = 40;
+        // 大型工具列圖示的常見尺寸是 24–32px；40 偏大，會把整條功能列撐得過高
+        private const int MainToolbarIconSize = 32;
 
         public Form dialog = new Form();
         public Label dialogLabel = new Label();
@@ -1107,36 +1108,63 @@ namespace mySQLPunk
             }
         }
 
+        // 樹狀圖示配色：亮/暗主題都可讀的中彩度色；各引擎一眼可辨
+        private static readonly Color TreeMySqlColor = Color.FromArgb(0xDD, 0x8A, 0x24);      // MySQL 橘
+        private static readonly Color TreePostgresColor = Color.FromArgb(0x33, 0x67, 0x91);   // PostgreSQL 藍
+        private static readonly Color TreeOracleColor = Color.FromArgb(0xC7, 0x46, 0x34);     // Oracle 紅
+        private static readonly Color TreeSqliteColor = Color.FromArgb(0x0F, 0x80, 0xCC);     // SQLite 亮藍
+        private static readonly Color TreeSqlServerColor = Color.FromArgb(0x8E, 0x44, 0xAD);  // SQL Server 紫
+        private static readonly Color TreeGenericDbColor = Color.FromArgb(0x64, 0x74, 0x8B);  // 資料庫節點 石板灰
+        private static readonly Color TreeGroupIconColor = Color.FromArgb(0x7A, 0x86, 0x99);  // 群組圖示
+        private static readonly Color TreeFolderColor = Color.FromArgb(0xD9, 0xA0, 0x38);     // 資料夾 琥珀
+
+        private static Bitmap TreeGlyph(UiGlyph glyph)
+        {
+            return UiKit.RenderGlyph(glyph, 16, TreeGroupIconColor);
+        }
+
+        /// <summary>未連線用降彩度的同色系，連線後亮起，狀態一眼可辨。</summary>
+        private static Bitmap TreeConnectionGlyph(Color engineColor, bool open)
+        {
+            Color color = open ? engineColor : UiKit.Mix(engineColor, Color.FromArgb(152, 159, 170), 0.62f);
+            return UiKit.RenderGlyph(UiGlyph.Database, 16, color);
+        }
+
         public void drawLists()
         {
-            ImageList myImageList = new ImageList();
-            string pwd = my.pwd();
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\mysql_close.png")); //0
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\mysql_open.png")); //1
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\postgresql_close.png")); //2
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\postgresql_open.png")); //3
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\oracle_close.png")); //4
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\oracle_open.png")); //5
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\sqlite_close.png")); //6
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\sqlite_open.png")); //7
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\sqlserver_close.png"));  //8
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\sqlserver_open.png"));  //9           
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\db_close.png"));  //10           
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\db_open.png"));  //11
+            // 樹狀圖示改為向量繪製：與整體設計語言一致、支援任意 DPI、
+            // 也不再因 Image.FromFile 鎖住 image/ 下的檔案
+            ImageList myImageList = new ImageList
+            {
+                ColorDepth = ColorDepth.Depth32Bit,
+                ImageSize = new Size(16, 16)
+            };
+            myImageList.Images.Add(TreeConnectionGlyph(TreeMySqlColor, false)); //0 mysql 未連線
+            myImageList.Images.Add(TreeConnectionGlyph(TreeMySqlColor, true)); //1 mysql 已連線
+            myImageList.Images.Add(TreeConnectionGlyph(TreePostgresColor, false)); //2
+            myImageList.Images.Add(TreeConnectionGlyph(TreePostgresColor, true)); //3
+            myImageList.Images.Add(TreeConnectionGlyph(TreeOracleColor, false)); //4
+            myImageList.Images.Add(TreeConnectionGlyph(TreeOracleColor, true)); //5
+            myImageList.Images.Add(TreeConnectionGlyph(TreeSqliteColor, false)); //6
+            myImageList.Images.Add(TreeConnectionGlyph(TreeSqliteColor, true)); //7
+            myImageList.Images.Add(TreeConnectionGlyph(TreeSqlServerColor, false)); //8
+            myImageList.Images.Add(TreeConnectionGlyph(TreeSqlServerColor, true)); //9
+            myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, false)); //10 資料庫節點
+            myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, true)); //11
 
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\tables.png"));  //12
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\views.png"));  //13
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\functions.png"));  //14
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\events.png"));  //15
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\queries.png"));  //16
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\reports.png"));  //17
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\backups.png"));  //18
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\user.png"));  //19
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\model.png"));  //20
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\bi.png"));  //21
-            myImageList.Images.Add(Image.FromFile(pwd + "\\image\\other.png"));  //22
-            myImageList.Images.Add(GetShellFolderBitmap(false)); //23 folder_closed
-            myImageList.Images.Add(GetShellFolderBitmap(true));  //24 folder_open
+            myImageList.Images.Add(TreeGlyph(UiGlyph.Table)); //12
+            myImageList.Images.Add(TreeGlyph(UiGlyph.View)); //13
+            myImageList.Images.Add(TreeGlyph(UiGlyph.Function)); //14
+            myImageList.Images.Add(TreeGlyph(UiGlyph.Clock)); //15 events
+            myImageList.Images.Add(TreeGlyph(UiGlyph.Code)); //16 queries
+            myImageList.Images.Add(TreeGlyph(UiGlyph.Document)); //17 reports
+            myImageList.Images.Add(TreeGlyph(UiGlyph.Archive)); //18 backups
+            myImageList.Images.Add(TreeGlyph(UiGlyph.User)); //19
+            myImageList.Images.Add(TreeGlyph(UiGlyph.Model)); //20
+            myImageList.Images.Add(TreeGlyph(UiGlyph.Chart)); //21 bi
+            myImageList.Images.Add(TreeGlyph(UiGlyph.More)); //22 other
+            myImageList.Images.Add(UiKit.RenderGlyph(UiGlyph.Folder, 16, TreeFolderColor)); //23 folder_closed
+            myImageList.Images.Add(UiKit.RenderGlyph(UiGlyph.FolderOpen, 16, TreeFolderColor)); //24 folder_open
 
             // Assign the ImageList to the TreeView.
 
@@ -1202,7 +1230,12 @@ namespace mySQLPunk
             // 展開所有群組節點
             foreach (var gNode in groupNodeMap.Values) gNode.Expand();
 
+            ImageList previousTreeImageList = db_tree.ImageList;
             db_tree.ImageList = myImageList;
+            if (previousTreeImageList != null && !ReferenceEquals(previousTreeImageList, myImageList))
+            {
+                previousTreeImageList.Dispose();
+            }
             db_tree.Indent = 20;
             db_tree.ItemHeight = 22;
 
