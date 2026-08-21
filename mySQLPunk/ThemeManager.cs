@@ -137,6 +137,10 @@ namespace mySQLPunk
         }
 
         private static readonly Dictionary<ToolStripItem, GlyphSpec> ItemGlyphs = new Dictionary<ToolStripItem, GlyphSpec>();
+
+        // 記錄哪些 Image 是 SetGlyph 自己建立的透明佔位圖。
+        // Properties.Resources 每次回傳同一個共用實例，Dispose 它會讓其他按鈕畫到已釋放的圖。
+        private static readonly HashSet<Image> OwnedPlaceholderImages = new HashSet<Image>();
         private static readonly HashSet<ListBox> NavigationLists = new HashSet<ListBox>();
 
         /// <summary>
@@ -157,6 +161,12 @@ namespace mySQLPunk
             if (glyph == UiGlyph.None)
             {
                 ItemGlyphs.Remove(item);
+                Image cleared = item.Image;
+                if (cleared != null && OwnedPlaceholderImages.Remove(cleared))
+                {
+                    item.Image = null;
+                    cleared.Dispose();
+                }
                 return;
             }
 
@@ -164,9 +174,11 @@ namespace mySQLPunk
 
             // ToolStrip 只有在 Image 不為 null 時才會保留圖示區並呼叫 OnRenderItemImage
             Image previous = item.Image;
-            item.Image = new Bitmap(Math.Max(1, reserveSize), Math.Max(1, reserveSize));
+            Bitmap placeholder = new Bitmap(Math.Max(1, reserveSize), Math.Max(1, reserveSize));
+            OwnedPlaceholderImages.Add(placeholder);
+            item.Image = placeholder;
             item.ImageScaling = ToolStripItemImageScaling.None;
-            if (previous != null) previous.Dispose();
+            if (previous != null && OwnedPlaceholderImages.Remove(previous)) previous.Dispose();
 
             item.Disposed -= ToolStripItem_Disposed;
             item.Disposed += ToolStripItem_Disposed;
@@ -175,7 +187,14 @@ namespace mySQLPunk
         private static void ToolStripItem_Disposed(object sender, EventArgs e)
         {
             ToolStripItem item = sender as ToolStripItem;
-            if (item != null) ItemGlyphs.Remove(item);
+            if (item == null) return;
+            ItemGlyphs.Remove(item);
+            try
+            {
+                Image current = item.Image;
+                if (current != null) OwnedPlaceholderImages.Remove(current);
+            }
+            catch { }
         }
 
         private static bool TryGetGlyph(ToolStripItem item, out GlyphSpec spec)
@@ -188,8 +207,10 @@ namespace mySQLPunk
         public static void MarkAsRibbon(ToolStrip strip)
         {
             if (strip == null) return;
+            bool alreadyKnown = StripVariants.ContainsKey(strip);
             StripVariants[strip] = ToolStripVariant.Ribbon;
-            strip.Disposed += (s, e) => StripVariants.Remove(strip);
+            // 語言/主題切換會重複呼叫，Disposed 只能掛一次
+            if (!alreadyKnown) strip.Disposed += (s, e) => StripVariants.Remove(strip);
         }
 
         private static ToolStripVariant GetVariant(ToolStrip strip)
@@ -272,8 +293,9 @@ namespace mySQLPunk
                 Math.Max(1, pill.Width - UiMetrics.Space3 * 2),
                 pill.Height);
 
+            object listItem = list.Items[e.Index];
             UiKit.DrawText(g,
-                list.Items[e.Index].ToString(),
+                listItem == null ? string.Empty : listItem.ToString(),
                 selected ? UiKit.BodyBold : UiKit.Body,
                 textBounds,
                 selected ? AccentColor : MutedTextColor,
@@ -321,9 +343,14 @@ namespace mySQLPunk
 
             ApplyControl(root);
 
-            foreach (Control child in root.Controls)
+            // ToolStrip 的 Controls 是 ToolStripControlHost 內嵌的原生控制項，
+            // 直接改它們的尺寸會反推回 item 大小、把整條工具列撐高
+            if (!(root is ToolStrip))
             {
-                ApplyTo(child);
+                foreach (Control child in root.Controls)
+                {
+                    ApplyTo(child);
+                }
             }
 
             // 對話框的預設按鈕自動升級為主要動作，讓每個視窗都有明確的主行動點
@@ -413,6 +440,7 @@ namespace mySQLPunk
                 textBox.BorderStyle = BorderStyle.FixedSingle;
                 textBox.Margin = new Padding(3, 4, 3, 4);
                 if (!textBox.Multiline && textBox.Height < 24) textBox.Height = 24;
+                WatchInteractiveState(textBox);
                 return;
             }
 
@@ -425,6 +453,7 @@ namespace mySQLPunk
                 // 深色主題只能用 Flat，否則系統會畫出淺色外框。
                 comboBox.FlatStyle = IsDark ? FlatStyle.Flat : FlatStyle.Standard;
                 comboBox.Margin = new Padding(3, 4, 3, 4);
+                WatchInteractiveState(comboBox);
                 return;
             }
 
@@ -536,6 +565,7 @@ namespace mySQLPunk
                 checkBox.BackColor = Color.Transparent;
                 checkBox.ForeColor = checkBox.Enabled ? TextColor : DisabledTextColor;
                 checkBox.FlatStyle = FlatStyle.Standard;
+                WatchInteractiveState(checkBox);
                 return;
             }
 
@@ -545,6 +575,7 @@ namespace mySQLPunk
                 radioButton.BackColor = Color.Transparent;
                 radioButton.ForeColor = radioButton.Enabled ? TextColor : DisabledTextColor;
                 radioButton.FlatStyle = FlatStyle.Standard;
+                WatchInteractiveState(radioButton);
                 return;
             }
 
@@ -564,7 +595,15 @@ namespace mySQLPunk
             if (label != null)
             {
                 label.BackColor = Color.Transparent;
-                bool wasMuted = label.ForeColor == Color.Gray || label.ForeColor == Color.DarkGray || label.ForeColor == Color.Silver;
+                // 「次要文字」只能在第一次套用時判定；套完 ForeColor 已被蓋掉，
+                // 再從當下顏色反推會把 muted 樣式全部弄丟
+                bool wasMuted;
+                if (!MutedLabels.TryGetValue(label, out wasMuted))
+                {
+                    wasMuted = label.ForeColor == Color.Gray || label.ForeColor == Color.DarkGray || label.ForeColor == Color.Silver;
+                    MutedLabels[label] = wasMuted;
+                    label.Disposed += (s, e) => MutedLabels.Remove((Label)s);
+                }
                 label.ForeColor = wasMuted ? MutedTextColor : TextColor;
                 return;
             }
@@ -576,6 +615,20 @@ namespace mySQLPunk
                 progressBar.ForeColor = AccentColor;
                 return;
             }
+        }
+
+        private static readonly Dictionary<Label, bool> MutedLabels = new Dictionary<Label, bool>();
+        private static readonly HashSet<Control> StateWatchedControls = new HashSet<Control>();
+
+        /// <summary>Enabled/ReadOnly 之後才改變的話要重套顏色，否則停用色會固化在套版當下。</summary>
+        private static void WatchInteractiveState(Control control)
+        {
+            if (!StateWatchedControls.Add(control)) return;
+            EventHandler reapply = (s, e) => ApplyControl((Control)s);
+            control.EnabledChanged += reapply;
+            TextBoxBase watchedTextBox = control as TextBoxBase;
+            if (watchedTextBox != null) watchedTextBox.ReadOnlyChanged += reapply;
+            control.Disposed += (s, e) => StateWatchedControls.Remove((Control)s);
         }
 
         // ── 按鈕 ──────────────────────────────────────────────────────
@@ -852,6 +905,9 @@ namespace mySQLPunk
 
         // ── 工具列 ────────────────────────────────────────────────────
 
+        // 所有覆寫都讀動態顏色，共用單一實例即可，主題切換不會殘留舊色
+        private static readonly AppToolStripRenderer SharedToolStripRenderer = new AppToolStripRenderer();
+
         public static void ApplyToolStrip(ToolStrip strip)
         {
             if (strip == null) return;
@@ -859,7 +915,7 @@ namespace mySQLPunk
             ToolStripVariant variant = GetVariant(strip);
 
             strip.ForeColor = TextColor;
-            strip.Renderer = new AppToolStripRenderer();
+            strip.Renderer = SharedToolStripRenderer;
             strip.GripStyle = ToolStripGripStyle.Hidden;
             strip.Font = UiKit.Body;
 
@@ -933,7 +989,7 @@ namespace mySQLPunk
 
             dropDown.DropDown.BackColor = ElevatedColor;
             dropDown.DropDown.ForeColor = TextColor;
-            dropDown.DropDown.Renderer = new AppToolStripRenderer();
+            dropDown.DropDown.Renderer = SharedToolStripRenderer;
             dropDown.DropDown.Padding = new Padding(0, UiMetrics.Space1, 0, UiMetrics.Space1);
             foreach (ToolStripItem child in dropDown.DropDownItems)
             {
@@ -944,6 +1000,7 @@ namespace mySQLPunk
         // ── 樹狀 ──────────────────────────────────────────────────────
 
         private static readonly Dictionary<TreeView, TreeNode> TreeHoverNodes = new Dictionary<TreeView, TreeNode>();
+        private static readonly HashSet<TreeView> WiredTreeViews = new HashSet<TreeView>();
 
         private static void ApplyTreeView(TreeView treeView)
         {
@@ -959,15 +1016,20 @@ namespace mySQLPunk
             treeView.HideSelection = false;
 
             // 全自繪：把系統畫的虛線、展開方塊與焦點虛線框拿掉，
-            // 換成整列圓角選取、自訂箭號與滑鼠停留回饋。
-            treeView.DrawNode -= TreeView_DrawNode;
-            treeView.MouseMove -= TreeView_MouseMove;
-            treeView.MouseLeave -= TreeView_MouseLeave;
-            treeView.DrawMode = TreeViewDrawMode.OwnerDrawAll;
-            treeView.DrawNode += TreeView_DrawNode;
-            treeView.MouseMove += TreeView_MouseMove;
-            treeView.MouseLeave += TreeView_MouseLeave;
-            treeView.Disposed += (s, e) => TreeHoverNodes.Remove(treeView);
+            // 換成整列圓角選取、自訂箭號與滑鼠停留回饋。事件只掛一次，
+            // 語言/主題切換重複呼叫時不能累積 handler。
+            if (WiredTreeViews.Add(treeView))
+            {
+                treeView.DrawMode = TreeViewDrawMode.OwnerDrawAll;
+                treeView.DrawNode += TreeView_DrawNode;
+                treeView.MouseMove += TreeView_MouseMove;
+                treeView.MouseLeave += TreeView_MouseLeave;
+                treeView.Disposed += (s, e) =>
+                {
+                    TreeHoverNodes.Remove(treeView);
+                    WiredTreeViews.Remove(treeView);
+                };
+            }
         }
 
         private static void TreeView_MouseMove(object sender, MouseEventArgs e)
@@ -981,7 +1043,8 @@ namespace mySQLPunk
             if (ReferenceEquals(previous, node)) return;
 
             TreeHoverNodes[treeView] = node;
-            treeView.Invalidate();
+            InvalidateTreeRow(treeView, previous);
+            InvalidateTreeRow(treeView, node);
         }
 
         private static void TreeView_MouseLeave(object sender, EventArgs e)
@@ -993,7 +1056,23 @@ namespace mySQLPunk
             if (!TreeHoverNodes.TryGetValue(treeView, out previous) || previous == null) return;
 
             TreeHoverNodes[treeView] = null;
-            treeView.Invalidate();
+            InvalidateTreeRow(treeView, previous);
+        }
+
+        private static void InvalidateTreeRow(TreeView treeView, TreeNode node)
+        {
+            if (node == null) return;
+            try
+            {
+                // 只重畫該列；OwnerDrawAll 下整棵樹 Invalidate 會明顯閃爍
+                Rectangle bounds = node.Bounds;
+                if (bounds.Height <= 0) return;
+                treeView.Invalidate(new Rectangle(0, bounds.Y, Math.Max(1, treeView.ClientSize.Width), bounds.Height));
+            }
+            catch
+            {
+                // 節點可能已被移出樹（重新整理），略過即可
+            }
         }
 
         private static void TreeView_DrawNode(object sender, DrawTreeNodeEventArgs e)
@@ -1020,6 +1099,12 @@ namespace mySQLPunk
             bool selected = (e.State & TreeNodeStates.Selected) == TreeNodeStates.Selected;
             TreeNode hoveredNode;
             TreeHoverNodes.TryGetValue(treeView, out hoveredNode);
+            if (hoveredNode != null && hoveredNode.TreeView == null)
+            {
+                // 停留的節點已被移出樹（重新整理），放掉參考讓它能被回收
+                TreeHoverNodes[treeView] = null;
+                hoveredNode = null;
+            }
             bool isHovered = !selected && ReferenceEquals(hoveredNode, e.Node);
 
             Rectangle pill = new Rectangle(
@@ -1093,8 +1178,9 @@ namespace mySQLPunk
             dgv.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
             dgv.RowHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
             dgv.RowTemplate.Height = Math.Max(dgv.RowTemplate.Height, UiMetrics.RowHeight);
-            dgv.ColumnHeadersHeight = Math.Max(dgv.ColumnHeadersHeight, 32);
+            // SizeMode 還是 AutoSize 時設定 Height 不會生效，要先關掉
             dgv.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            dgv.ColumnHeadersHeight = Math.Max(dgv.ColumnHeadersHeight, 32);
             dgv.Font = UiKit.Body;
 
             Color alternating = IsDark ? Color.FromArgb(35, 39, 45) : Color.FromArgb(250, 251, 252);
@@ -1120,8 +1206,6 @@ namespace mySQLPunk
             dgv.TopLeftHeaderCell.Style.ForeColor = MutedTextColor;
             dgv.TopLeftHeaderCell.Style.SelectionBackColor = SurfaceColor;
             dgv.TopLeftHeaderCell.Style.SelectionForeColor = MutedTextColor;
-
-            ApplyDataGridViewSelectionStyles(dgv);
         }
 
         private static void ApplyCellStyle(DataGridViewCellStyle style, Color backColor)
@@ -1131,23 +1215,6 @@ namespace mySQLPunk
             style.SelectionBackColor = SelectionColor;
             style.SelectionForeColor = SelectionTextColor;
             style.Padding = new Padding(UiMetrics.Space2, 2, UiMetrics.Space2, 2);
-        }
-
-        private static void ApplyDataGridViewSelectionStyles(DataGridView dgv)
-        {
-            foreach (DataGridViewRow row in dgv.Rows)
-            {
-                if (row == null) continue;
-                row.DefaultCellStyle.SelectionBackColor = SelectionColor;
-                row.DefaultCellStyle.SelectionForeColor = SelectionTextColor;
-
-                foreach (DataGridViewCell cell in row.Cells)
-                {
-                    if (cell == null) continue;
-                    cell.Style.SelectionBackColor = SelectionColor;
-                    cell.Style.SelectionForeColor = SelectionTextColor;
-                }
-            }
         }
 
         // ── 自訂 Renderer ─────────────────────────────────────────────

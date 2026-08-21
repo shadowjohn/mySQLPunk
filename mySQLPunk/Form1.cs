@@ -396,8 +396,10 @@ namespace mySQLPunk
             int port = 5432;
             if (!string.IsNullOrWhiteSpace(portText)) int.TryParse(portText, out port);
 
-            // 用 postgres 作為初始 DB 以便取得 database 清單
-            return $"Server={host};Port={port};User Id={user};Password={password};Database=postgres;Timeout=8;Command Timeout=8;";
+            // 優先用使用者填的初始資料庫；有些帳號沒有權限連 postgres
+            string initialDatabase = GetConnectionValue(conn, "initial_database");
+            string database = string.IsNullOrWhiteSpace(initialDatabase) ? "postgres" : initialDatabase.Trim();
+            return $"Server={host};Port={port};User Id={user};Password={password};Database={database};Timeout=8;Command Timeout=8;";
         }
 
         private void PopulateConnectionDatabaseNodes(TreeNode connectionNode, IEnumerable<string> databaseNames)
@@ -4281,6 +4283,7 @@ namespace mySQLPunk
             _emptyStateTimer.Interval = 400;
             _emptyStateTimer.Tick += (s, e) => SyncEmptyStates();
             _emptyStateTimer.Start();
+            FormClosed += (s, e) => { _emptyStateTimer.Stop(); _emptyStateTimer.Dispose(); };
             SyncEmptyStates();
         }
 
@@ -4938,6 +4941,8 @@ namespace mySQLPunk
                         existingDockable.GetType(),
                         dockable.GetType()))
                 {
+                    // 浮動視窗還有未儲存的變更時不能直接銷毀，改為照常停靠成新分頁
+                    if (dockable.HasUnsavedChanges()) break;
                     queryTabs.SelectedTab = tp;
                     f.Dispose();
                     return;
@@ -8084,7 +8089,7 @@ namespace mySQLPunk
                     if (!string.IsNullOrEmpty(p.Message)) UpdateMainStatus(p.Message);
                 }, viewFallback));
 
-                RefreshDatabaseObjectNodes(target.DatabaseNode);
+                await RefreshDatabaseObjectNodesAsync(target.DatabaseNode);
                 SelectObjectNode(target.DatabaseNode, result.ObjectKind, result.TargetName);
                 UpdateMainStatus(result.ObjectKind == "table"
                     ? Localization.Format("Object.CopyCompletedRowsStatus", result.TargetName, result.CopiedRows)
@@ -8292,14 +8297,20 @@ namespace mySQLPunk
 
 	        private void RefreshDatabaseObjectNodes(TreeNode databaseNode)
 	        {
-	            if (databaseNode == null) return;
+	            _ = RefreshDatabaseObjectNodesAsync(databaseNode);
+	        }
+
+	        /// <summary>重整完成後才會填回子節點；呼叫端要接著找子節點的話必須 await。</summary>
+	        private Task RefreshDatabaseObjectNodesAsync(TreeNode databaseNode)
+	        {
+	            if (databaseNode == null) return Task.CompletedTask;
 	            TreeNode root = databaseNode;
 	            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
 	            int connIdxRefresh = GetConnectionIndex(root);
-	            if (connIdxRefresh < 0 || connIdxRefresh >= myN.connections.Count) return;
+	            if (connIdxRefresh < 0 || connIdxRefresh >= myN.connections.Count) return Task.CompletedTask;
 	            IDatabase db = (IDatabase)myN.connections[connIdxRefresh]["pdo"];
 	            databaseNode.Nodes.Clear();
-	            _ = LoadDatabaseMetadataAsync(connIdxRefresh, databaseNode, db, databaseNode.Text);
+	            return LoadDatabaseMetadataAsync(connIdxRefresh, databaseNode, db, databaseNode.Text);
 	        }
 
         private void SelectObjectNode(TreeNode databaseNode, string objectKind, string objectName)
@@ -8435,7 +8446,12 @@ namespace mySQLPunk
                 ApplyCurrentColumnPreferences("Tables");
                 ApplyGridSortPreference();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // 失敗時留著上一個資料庫的清單會讓人以為換庫成功，必須清空並講明原因
+                table_top.DataSource = null;
+                UpdateMainStatus(Localization.Format("Query.ErrorStatus", ex.Message));
+            }
         }
 
         private void ShowDatabaseGroupList(IDatabase db, string dbName, string groupName, Dictionary<string, object> connInfo = null)
@@ -11311,11 +11327,11 @@ namespace mySQLPunk
             return (value ?? "").IndexOf(keyword ?? "", StringComparison.CurrentCultureIgnoreCase) >= 0;
         }
 
-        private void RefreshDatabaseGroupNode(TreeNode groupNode, string groupName)
+        private async void RefreshDatabaseGroupNode(TreeNode groupNode, string groupName)
         {
             if (groupNode == null || groupNode.Parent == null) return;
             TreeNode databaseNode = groupNode.Parent;
-            RefreshDatabaseObjectNodes(databaseNode);
+            await RefreshDatabaseObjectNodesAsync(databaseNode);
             foreach (TreeNode child in databaseNode.Nodes)
             {
                 if (!TreeNodeBelongsToGroup(child, groupName)) continue;
@@ -14212,7 +14228,9 @@ namespace mySQLPunk
         }
         private void db_tree_third_click(int father_index, int index, string databaseName, string name)
         {
-            //MessageBox.Show(father_index + "," + index + "," + name);
+            // 雙擊 Tables/Views 這類群組節點：展開/收合交給 TreeView 原生行為，
+            // 這裡只負責還原雙擊流程先設下的「正在載入資料...」，否則狀態列會永遠卡住
+            UpdateMainStatus(Localization.T("Status.Ready"));
         }
         private async void db_tree_DoubleClick(object sender, EventArgs e)
         {
@@ -14786,9 +14804,10 @@ namespace mySQLPunk
             if (hoverTab != null && hoverTab != dragTab)
             {
                 int dragIdx = queryTabs.TabPages.IndexOf(dragTab);
-                int dropIdx = queryTabs.TabPages.IndexOf(hoverTab);
-                
+
                 queryTabs.TabPages.RemoveAt(dragIdx);
+                // 移除後右側頁籤索引都左移一格，往右拖時得重算目標位置
+                int dropIdx = queryTabs.TabPages.IndexOf(hoverTab);
                 queryTabs.TabPages.Insert(dropIdx, dragTab);
                 queryTabs.SelectedTab = dragTab;
             }

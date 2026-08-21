@@ -39,7 +39,7 @@ namespace mySQLPunk.lib
 
             string directory = GetQueryDraftDirectory();
             Directory.CreateDirectory(directory);
-            string path = BuildQueryDraftPath(directory, databaseName, connectionHost);
+            string path = BuildQueryDraftPath(directory, databaseName, connectionHost, title);
             File.WriteAllText(path, BuildQueryDraftJson(databaseName, connectionHost, title, sql), new UTF8Encoding(false));
             return path;
         }
@@ -73,8 +73,16 @@ namespace mySQLPunk.lib
 
         public static string BuildQueryDraftPath(string directory, string databaseName, string connectionHost)
         {
-            string scope = (connectionHost ?? string.Empty).Trim() + "_" + (databaseName ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(scope)) scope = "query";
+            return BuildQueryDraftPath(directory, databaseName, connectionHost, string.Empty);
+        }
+
+        public static string BuildQueryDraftPath(string directory, string databaseName, string connectionHost, string title)
+        {
+            // 標題也要進 key：同一個資料庫可以同時開好幾個查詢分頁，
+            // 只用 host+db 當檔名的話，後存的會把先存的草稿蓋掉。
+            string scope = (connectionHost ?? string.Empty).Trim() + "_" + (databaseName ?? string.Empty).Trim()
+                + "_" + (title ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(scope.Replace("_", string.Empty))) scope = "query";
             string hash = ComputeSha256(scope).Substring(0, 12);
             return Path.Combine(directory, "query-draft-" + SanitizeFileName(scope, 48) + "-" + hash + ".json");
         }

@@ -127,6 +127,17 @@ namespace mySQLPunk
                 SaveApplicationOptionSettings();
                 ApplyAdvancedRegistrationSettings();
                 UpdateSelection();
+
+                // 存檔失敗以往被默默吞掉，重開程式設定就消失了；至少要讓使用者知道
+                string saveError = ApplicationOptionSettings.LastSaveErrorMessage
+                    ?? CliPathSettings.LastSaveErrorMessage
+                    ?? TableEditSettings.LastSaveErrorMessage
+                    ?? BackupMirrorSettings.LastSaveErrorMessage;
+                if (saveError != null)
+                {
+                    MessageBox.Show(this, Localization.Format("Options.SaveFailed", saveError),
+                        Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             };
 
             RenderGeneralPage();
@@ -1185,9 +1196,12 @@ namespace mySQLPunk
             StringValues[key] = (value ?? string.Empty).Trim();
         }
 
+        public static string LastSaveErrorMessage;
+
         public static void Save()
         {
             EnsureLoaded();
+            LastSaveErrorMessage = null;
             try
             {
                 string path = GetSettingsFilePath();
@@ -1199,8 +1213,9 @@ namespace mySQLPunk
                     StringValues = StringValues
                 }, Formatting.Indented));
             }
-            catch
+            catch (Exception ex)
             {
+                LastSaveErrorMessage = ex.Message;
             }
         }
 
@@ -1387,17 +1402,21 @@ namespace mySQLPunk
             }
         }
 
+        public static string LastSaveErrorMessage;
+
         public static void Save()
         {
             EnsureLoaded();
+            LastSaveErrorMessage = null;
             try
             {
                 string path = GetSettingsFilePath();
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 File.WriteAllText(path, JsonConvert.SerializeObject(Paths, Formatting.Indented));
             }
-            catch
+            catch (Exception ex)
             {
+                LastSaveErrorMessage = ex.Message;
             }
         }
 
@@ -1460,9 +1479,12 @@ namespace mySQLPunk
             }
         }
 
+        public static string LastSaveErrorMessage;
+
         public static void Save()
         {
             EnsureLoaded();
+            LastSaveErrorMessage = null;
             try
             {
                 string path = GetSettingsFilePath();
@@ -1472,8 +1494,9 @@ namespace mySQLPunk
                     NoPrimaryKeyReadOnly = noPrimaryKeyReadOnly
                 }, Formatting.Indented));
             }
-            catch
+            catch (Exception ex)
             {
+                LastSaveErrorMessage = ex.Message;
             }
         }
 
@@ -1649,9 +1672,12 @@ namespace mySQLPunk
             }
         }
 
+        public static string LastSaveErrorMessage;
+
         public static void Save()
         {
             EnsureLoaded();
+            LastSaveErrorMessage = null;
             try
             {
                 string path = GetSettingsFilePath();
@@ -1669,8 +1695,9 @@ namespace mySQLPunk
                     LastIntegrityReportPath = lastIntegrityReportPath
                 }, Formatting.Indented));
             }
-            catch
+            catch (Exception ex)
             {
+                LastSaveErrorMessage = ex.Message;
             }
         }
 

@@ -135,7 +135,15 @@ namespace mySQLPunk
         public void AddSegment(string text, UiGlyph glyph)
         {
             _segments.Add(new Segment(text, glyph));
-            if (_selectedIndex < 0) _selectedIndex = 0;
+            _cachedWidths = null;
+            if (_selectedIndex < 0)
+            {
+                // 走 setter 才會發 SelectedIndexChanged；直接改欄位的話，
+                // 外部之後想用 SelectedIndex = 0 觸發初始化會被「值沒變」擋下
+                _selectedIndex = 0;
+                EventHandler handler = SelectedIndexChanged;
+                if (handler != null) handler(this, EventArgs.Empty);
+            }
             Invalidate();
         }
 
@@ -143,26 +151,33 @@ namespace mySQLPunk
         {
             if (index < 0 || index >= _segments.Count) return;
             _segments[index].Text = text ?? string.Empty;
+            _cachedWidths = null;
             Invalidate();
         }
+
+        private int[] _cachedWidths;
 
         /// <summary>依內容算出剛好容納所有分段的寬度。</summary>
         public int GetPreferredWidth()
         {
             int total = UiMetrics.Space1 * 2;
-            using (Graphics g = CreateGraphics())
+            foreach (Segment segment in _segments)
             {
-                foreach (Segment segment in _segments)
-                {
-                    total += MeasureSegmentWidth(g, segment);
-                }
+                total += MeasureSegmentWidth(segment);
             }
             return total;
         }
 
-        private int MeasureSegmentWidth(Graphics g, Segment segment)
+        protected override void OnFontChanged(EventArgs e)
         {
-            Size textSize = TextRenderer.MeasureText(g, segment.Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPrefix);
+            base.OnFontChanged(e);
+            _cachedWidths = null;
+            Invalidate();
+        }
+
+        private int MeasureSegmentWidth(Segment segment)
+        {
+            Size textSize = TextRenderer.MeasureText(segment.Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPrefix);
             int width = textSize.Width + UiMetrics.Space4;
             if (segment.Glyph != UiGlyph.None) width += 15 + UiMetrics.Space1;
             return Math.Max(56, width);
@@ -173,16 +188,19 @@ namespace mySQLPunk
             Rectangle[] bounds = new Rectangle[_segments.Count];
             if (_segments.Count == 0) return bounds;
 
-            int[] widths = new int[_segments.Count];
-            int total = 0;
-            using (Graphics g = CreateGraphics())
+            // OnPaint 與 MouseMove 都會走到這裡，量測結果要快取，
+            // 不然滑鼠每動一格就重新量測一輪文字
+            if (_cachedWidths == null || _cachedWidths.Length != _segments.Count)
             {
+                _cachedWidths = new int[_segments.Count];
                 for (int i = 0; i < _segments.Count; i++)
                 {
-                    widths[i] = MeasureSegmentWidth(g, _segments[i]);
-                    total += widths[i];
+                    _cachedWidths[i] = MeasureSegmentWidth(_segments[i]);
                 }
             }
+            int[] widths = _cachedWidths;
+            int total = 0;
+            for (int i = 0; i < widths.Length; i++) total += widths[i];
 
             int available = Width - UiMetrics.Space1 * 2;
             // 內容比可用寬度窄時就靠左排；太寬則等比壓縮，避免溢出

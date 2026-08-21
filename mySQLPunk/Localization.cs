@@ -406,6 +406,8 @@ namespace mySQLPunk
             Add("Common.General", "一般", "General");
             Add("Common.Warning", "警告", "Warning");
             Add("Common.Error", "錯誤", "Error");
+            Add("Options.SaveFailed", "設定儲存失敗：{0}", "Failed to save settings: {0}");
+            Add("Query.AutoRecoveryDisabled", "自動備份草稿失敗已達 3 次，本分頁已停用自動備份：{0}", "Auto-recovery draft saving failed 3 times and has been disabled for this tab: {0}");
             Add("Common.Success", "成功", "Success");
             Add("Common.Info", "資訊", "Information");
             Add("Common.Complete", "完成", "Done");
@@ -1155,6 +1157,9 @@ namespace mySQLPunk
             Add("Query.CannotDetermineSaveTable", "無法判斷要儲存的資料表。", "Cannot determine which table to save.");
             Add("Query.NoWritableInsertColumns", "新增資料列沒有可寫入的欄位。", "The inserted row has no writable columns.");
             Add("Query.UnsafeWhereClause", "無法建立安全的 WHERE 條件。", "Cannot build a safe WHERE condition.");
+            Add("Query.PrimaryKeyColumnMissing", "結果集缺少主鍵欄位（{0}），無法安全寫回。請在查詢中包含主鍵欄位。", "The result set is missing primary key column(s) ({0}); changes cannot be saved safely. Include the primary key columns in the query.");
+            Add("Query.PrimaryKeyEditNotSupported", "不支援直接修改主鍵欄位「{0}」的值，請改用 SQL 執行更新。", "Editing the primary key column \"{0}\" directly is not supported. Use an SQL UPDATE statement instead.");
+            Add("Query.ResultNotEditable", "目前結果不是這張資料表的單表查詢，已切換為唯讀。", "The current result is not a single-table query of this table; switched to read-only.");
             Add("Query.NoRowsAffectedConflict", "儲存沒有影響任何資料列。資料可能已被其他人修改或刪除，請重新整理後再試。", "Saving did not affect any rows. The data may have been changed or deleted by someone else. Refresh and try again.");
             Add("Query.UnknownError", "未知錯誤", "Unknown error");
 

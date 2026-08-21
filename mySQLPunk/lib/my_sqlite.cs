@@ -440,12 +440,27 @@ namespace mySQLPunk.lib
         /// <summary>
         /// 判斷 tableName 是否為某個 virtual table 的影子表（格式：&lt;vtab&gt;_xxx）。
         /// </summary>
+        // FTS3/4/5 與 R-Tree 的影子表後綴。只認這些，
+        // 免得把使用者剛好取名為 <vtab>_archive 的正常資料表也一併藏掉。
+        private static readonly string[] ShadowTableSuffixes = new string[]
+        {
+            "data", "idx", "content", "docsize", "config",   // FTS5
+            "segments", "segdir", "stat",                    // FTS3/4
+            "node", "rowid", "parent",                       // R-Tree
+        };
+
         private static bool IsShadowTable(string tableName, HashSet<string> virtualNames)
         {
             int idx = tableName.LastIndexOf('_');
             if (idx <= 0) return false;
             string prefix = tableName.Substring(0, idx);
-            return virtualNames.Contains(prefix);
+            if (!virtualNames.Contains(prefix)) return false;
+            string suffix = tableName.Substring(idx + 1);
+            foreach (string known in ShadowTableSuffixes)
+            {
+                if (string.Equals(suffix, known, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
         }
 
         private static DataTable CreateIndexSchema()
@@ -555,7 +570,7 @@ namespace mySQLPunk.lib
             }
             catch
             {
-                comments.Clear();
+                // 讀取失敗時保留已讀到的部分；清空會讓設計師把空註解寫回而毀掉原資料
             }
 
             return comments;

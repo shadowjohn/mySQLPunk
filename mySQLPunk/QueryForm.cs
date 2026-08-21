@@ -38,7 +38,9 @@ namespace mySQLPunk
         private SplitContainer split;
         private Form1 _mainHost;
         private bool _isDocked;
-        private bool _isTableDataMode; 
+        private bool _isTableDataMode;
+        private bool _isQueryBusy;                 // 查詢執行中，擋 F5/Ctrl+Enter 重入（共用同一條連線）
+        private bool _gridBoundToBaseTable = true; // grid 內容是否來自 _baseSql 那張表；否則禁止寫回 
         private bool _isNoPrimaryKeyReadOnlyMode;
         private bool _recordLimitEnabled = true;
         private string _lastResultSql = "";
@@ -307,6 +309,13 @@ namespace mySQLPunk
 
         private string GetTableNameFromSql()
         {
+            // 表格模式下一律以實際載入資料的 SQL（_baseSql）為準；
+            // txtSql 可能被使用者改過但尚未執行，拿來決定寫回目標會寫錯資料表。
+            if (_isTableDataMode)
+            {
+                string bound = ExtractTableNameFromSql(_baseSql);
+                if (!string.IsNullOrWhiteSpace(bound)) return bound;
+            }
             string tableName = ExtractTableNameFromSql(txtSql == null ? "" : txtSql.Text);
             if (!string.IsNullOrWhiteSpace(tableName)) return tableName;
             tableName = ExtractTableNameFromSql(_baseSql);
@@ -559,6 +568,8 @@ namespace mySQLPunk
             _autoRecoveryTimer.Start();
         }
 
+        private int _autoRecoveryFailureCount;
+
         private void SaveAutoRecoveryDraftIfNeeded()
         {
             if (!AutoRecoveryDraftService.IsQueryAutoRecoveryEnabled() || txtSql == null) return;
@@ -569,7 +580,24 @@ namespace mySQLPunk
             string hash = ComputeSqlHash(sql);
             if (string.Equals(hash, _lastAutoRecoverySqlHash, StringComparison.Ordinal)) return;
 
-            string path = AutoRecoveryDraftService.WriteQueryDraft(_databaseName, connectionHost, Text, sql);
+            string path;
+            try
+            {
+                path = AutoRecoveryDraftService.WriteQueryDraft(_databaseName, connectionHost, Text, sql);
+                _autoRecoveryFailureCount = 0;
+            }
+            catch (Exception ex)
+            {
+                // 這裡掛在 Timer.Tick 與 FormClosing 上，寫檔失敗（磁碟滿、網路磁碟斷線、
+                // 防毒鎖檔）不能往外丟；連續失敗就停掉計時器，別每幾秒撞一次牆
+                _autoRecoveryFailureCount++;
+                if (_autoRecoveryFailureCount >= 3 && _autoRecoveryTimer != null)
+                {
+                    _autoRecoveryTimer.Stop();
+                    UpdateStatus(Localization.Format("Query.AutoRecoveryDisabled", ex.Message));
+                }
+                return;
+            }
             if (!string.IsNullOrWhiteSpace(path))
             {
                 _lastAutoRecoverySqlHash = hash;
@@ -763,6 +791,25 @@ namespace mySQLPunk
         public void SetMainHost(Form1 mainHost)
         {
             _mainHost = mainHost;
+        }
+
+        public bool HasUnsavedChanges()
+        {
+            try
+            {
+                if (!_isTableDataMode) return false;
+                if (dgvResults != null && dgvResults.IsCurrentCellInEditMode) return true;
+                DataTable dt = dgvResults?.DataSource as DataTable;
+                if (dt == null) return false;
+                using (DataTable changes = dt.GetChanges())
+                {
+                    return changes != null && changes.Rows.Count > 0;
+                }
+            }
+            catch
+            {
+                return true; // 判斷不了就當作有，寧可多開一個分頁也不能弄丟編輯
+            }
         }
 
         public string GetDisplayTitle()
@@ -1563,6 +1610,8 @@ namespace mySQLPunk
                 return;
             }
 
+            if (_isQueryBusy) return;
+            _isQueryBusy = true;
             _cts = new CancellationTokenSource();
             tsBtnExecute.Enabled = false;
             tsBtnCancel.Enabled = true;
@@ -1589,6 +1638,7 @@ namespace mySQLPunk
                 _currentPage = result.CurrentPage;
                 _lastResultSql = "";
                 _lastResultCanStreamExport = false;
+                _gridBoundToBaseTable = true;
                 dt.AcceptChanges();
                 PrepareTableDataForEditing(dt);
 
@@ -1627,6 +1677,7 @@ namespace mySQLPunk
                     UpdatePaginationUI();
                 }
 
+                _isQueryBusy = false;
                 CancellationTokenSource cts = _cts;
                 _cts = null;
                 cts?.Dispose();
@@ -1730,6 +1781,8 @@ namespace mySQLPunk
             _lastResultCanStreamExport = false;
             lblSqlPreview.Text = sql; // 更新底部的 SQL 預覽
 
+            if (_isQueryBusy) return;
+            _isQueryBusy = true;
             _cts = new CancellationTokenSource();
             tsBtnExecute.Enabled = false;
             tsBtnCancel.Enabled = true;
@@ -1748,13 +1801,16 @@ namespace mySQLPunk
 
                 if (isQuery)
                 {
+                    // 表格模式：先判斷這次執行是不是可安全寫回的單表查詢，
+                    // 但 _baseSql 要等資料真的載入成功才能改，
+                    // 否則查詢失敗時儲存目標會指向沒載入資料的表。
+                    string pendingTableBaseSql = null;
                     if (_isTableDataMode)
                     {
                         string tableDataBaseSql;
                         if (TryBuildTableDataBaseSql(rawSql, out tableDataBaseSql))
                         {
-                            _baseSql = tableDataBaseSql;
-                            this.Text = $"{_databaseName}.{GetTableNameFromSql()} - {Localization.T("Query.TableData")}";
+                            pendingTableBaseSql = tableDataBaseSql;
                         }
                     }
 
@@ -1770,6 +1826,12 @@ namespace mySQLPunk
                     }
                     if (_isTableDataMode)
                     {
+                        _gridBoundToBaseTable = pendingTableBaseSql != null;
+                        if (pendingTableBaseSql != null)
+                        {
+                            _baseSql = pendingTableBaseSql;
+                            this.Text = $"{_databaseName}.{GetTableNameFromSql()} - {Localization.T("Query.TableData")}";
+                        }
                         dt.AcceptChanges();
                         PrepareTableDataForEditing(dt);
                         _lastResultSql = "";
@@ -1797,6 +1859,10 @@ namespace mySQLPunk
                             if (_isTableDataMode)
                             {
                                 ApplyTableDataEditability();
+                                if (!_gridBoundToBaseTable)
+                                {
+                                    UpdateStatus(Localization.T("Query.ResultNotEditable"));
+                                }
                             }
                             else
                             {
@@ -1867,6 +1933,7 @@ namespace mySQLPunk
                     if (_isTableDataMode) ApplyTableDataEditability();
                 }
 
+                _isQueryBusy = false;
                 CancellationTokenSource cts = _cts;
                 _cts = null;
                 cts?.Dispose();
@@ -3338,7 +3405,7 @@ namespace mySQLPunk
 
         private bool CanEditTableData()
         {
-            return _isTableDataMode && !_isNoPrimaryKeyReadOnlyMode;
+            return _isTableDataMode && _gridBoundToBaseTable && !_isNoPrimaryKeyReadOnlyMode;
         }
 
         private bool ShouldOpenNoPrimaryKeyAsReadOnly(string tableName)
@@ -3407,7 +3474,7 @@ namespace mySQLPunk
         private DataSaveResult SaveTableChanges(DataTable dt)
         {
             string tableName = GetTableNameFromSql();
-            if (string.IsNullOrWhiteSpace(_databaseName) || string.IsNullOrWhiteSpace(tableName))
+            if (!_gridBoundToBaseTable || string.IsNullOrWhiteSpace(_databaseName) || string.IsNullOrWhiteSpace(tableName))
             {
                 throw new Exception(Localization.T("Query.CannotDetermineSaveTable"));
             }
@@ -3445,8 +3512,10 @@ namespace mySQLPunk
                     }
                     else if (row.RowState == DataRowState.Modified)
                     {
-                        ExecuteUpdate(tableName, columns, primaryKeys, row);
-                        result.Updated++;
+                        if (ExecuteUpdate(tableName, columns, primaryKeys, row))
+                        {
+                            result.Updated++;
+                        }
                     }
                     else if (row.RowState == DataRowState.Deleted)
                     {
@@ -3659,7 +3728,7 @@ namespace mySQLPunk
             ExecOrThrow(sql, parameters, false);
         }
 
-        private void ExecuteUpdate(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
+        private bool ExecuteUpdate(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
             List<string> setSql = new List<string>();
@@ -3668,7 +3737,15 @@ namespace mySQLPunk
             foreach (TableColumnInfo column in columns)
             {
                 if (!row.Table.Columns.Contains(column.Name)) continue;
-                if (primaryKeys.Contains(column.Name)) continue;
+                if (primaryKeys.Contains(column.Name))
+                {
+                    // WHERE 用舊值、SET 又跳過主鍵，主鍵值被改時不能假裝更新成功
+                    if (HasColumnChanged(row, column.Name))
+                    {
+                        throw new Exception(Localization.Format("Query.PrimaryKeyEditNotSupported", column.Name));
+                    }
+                    continue;
+                }
                 if (!HasColumnChanged(row, column.Name)) continue;
 
                 string parameterName = "p" + index;
@@ -3677,13 +3754,14 @@ namespace mySQLPunk
                 index++;
             }
 
-            if (setSql.Count == 0) return;
+            if (setSql.Count == 0) return false;
 
             string whereSql = BuildWhereClause(row, columns, primaryKeys, parameters, ref index);
             string sql = "UPDATE " + GetQualifiedTableName(tableName) +
                          " SET " + string.Join(", ", setSql) +
                          " WHERE " + whereSql + ";";
             ExecOrThrow(sql, parameters, true, BuildNoPrimaryKeyConflictDetailProvider(tableName, columns, primaryKeys, row));
+            return true;
         }
 
         private void ExecuteDelete(string tableName, List<TableColumnInfo> columns, List<string> primaryKeys, DataRow row)
@@ -3703,12 +3781,25 @@ namespace mySQLPunk
             Dictionary<string, object> parameters,
             ref int index)
         {
-            List<string> targetColumns = primaryKeys.Count > 0
-                ? primaryKeys
-                : columns
+            List<string> targetColumns;
+            if (primaryKeys.Count > 0)
+            {
+                // 主鍵欄位不在結果集時 row[名稱] 會丟 ArgumentException；
+                // 只比對部分主鍵又可能一次改到多列，直接擋下並講清楚原因。
+                List<string> missing = primaryKeys.Where(name => !row.Table.Columns.Contains(name)).ToList();
+                if (missing.Count > 0)
+                {
+                    throw new Exception(Localization.Format("Query.PrimaryKeyColumnMissing", string.Join(", ", missing)));
+                }
+                targetColumns = primaryKeys;
+            }
+            else
+            {
+                targetColumns = columns
                     .Where(c => row.Table.Columns.Contains(c.Name) && IsOptimisticWhereComparableValue(row[c.Name, DataRowVersion.Original]))
                     .Select(c => c.Name)
                     .ToList();
+            }
             List<string> clauses = new List<string>();
 
             foreach (string columnName in targetColumns)

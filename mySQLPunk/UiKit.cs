@@ -117,7 +117,10 @@ namespace mySQLPunk
                     }
                 }
 
-                _resolvedFamily = SystemFonts.MessageBoxFont.FontFamily.Name;
+                using (Font systemFont = SystemFonts.MessageBoxFont)
+                {
+                    _resolvedFamily = systemFont.FontFamily.Name;
+                }
                 return _resolvedFamily;
             }
         }
@@ -185,7 +188,10 @@ namespace mySQLPunk
                 }
                 catch
                 {
-                    font = new Font(SystemFonts.MessageBoxFont.FontFamily, size, style, GraphicsUnit.Point);
+                    using (Font systemFont = SystemFonts.MessageBoxFont)
+                    {
+                        font = new Font(systemFont.FontFamily, size, style, GraphicsUnit.Point);
+                    }
                 }
 
                 FontCache[key] = font;
@@ -460,18 +466,20 @@ namespace mySQLPunk
                     break;
 
                 case UiGlyph.Play:
-                    poly = new GraphicsPath();
-                    poly.AddPolygon(new[] { P(r, 7.5f, 4.5f), P(r, 19.5f, 12), P(r, 7.5f, 19.5f) });
-                    g.FillPath(brush, poly);
-                    poly.Dispose();
+                    using (poly = new GraphicsPath())
+                    {
+                        poly.AddPolygon(new[] { P(r, 7.5f, 4.5f), P(r, 19.5f, 12), P(r, 7.5f, 19.5f) });
+                        g.FillPath(brush, poly);
+                    }
                     break;
 
                 case UiGlyph.Refresh:
                     g.DrawArc(pen, R(r, 4.5f, 4.5f, 15, 15), 60, 250);
-                    poly = new GraphicsPath();
-                    poly.AddPolygon(new[] { P(r, 17.8f, 2.8f), P(r, 20.2f, 9.6f), P(r, 13.4f, 7.6f) });
-                    g.FillPath(brush, poly);
-                    poly.Dispose();
+                    using (poly = new GraphicsPath())
+                    {
+                        poly.AddPolygon(new[] { P(r, 17.8f, 2.8f), P(r, 20.2f, 9.6f), P(r, 13.4f, 7.6f) });
+                        g.FillPath(brush, poly);
+                    }
                     break;
 
                 case UiGlyph.Search:

@@ -432,6 +432,11 @@ namespace mySQLPunk
         }
 
         public void SetMainHost(Form1 mainHost) => _mainHost = mainHost;
+        public bool HasUnsavedChanges()
+        {
+            return _isModified;
+        }
+
         public string GetDisplayTitle() => this.Text;
 
         public void PrepareForDocking()
@@ -532,6 +537,7 @@ namespace mySQLPunk
             displayDt.Columns.Add("Comment");
             displayDt.Columns.Add("_OldName");
             displayDt.Columns.Add("_AutoComment");
+            displayDt.Columns.Add("_TypeSuffix");
             return displayDt;
         }
 
@@ -542,25 +548,12 @@ namespace mySQLPunk
                 newRow["Name"] = row["Field"];
                 newRow["_OldName"] = row["Field"];
                 string typeStr = row["Type"].ToString();
-                if (typeStr.Contains("("))
-                {
-                    string rawType = typeStr.Split('(')[0];
-                    string fullLen = typeStr.Split('(')[1].Replace(")", "");
-                    newRow["Type"] = rawType;
-                    if (fullLen.Contains(","))
-                    {
-                        newRow["Length"] = fullLen.Split(',')[0];
-                        newRow["Decimals"] = fullLen.Split(',')[1];
-                    }
-                    else
-                    {
-                        newRow["Length"] = fullLen;
-                    }
-                }
-                else
-                {
-                    newRow["Type"] = typeStr;
-                }
+                string baseType, lengthPart, decimalsPart, typeSuffix;
+                ParseMySqlColumnType(typeStr, out baseType, out lengthPart, out decimalsPart, out typeSuffix);
+                newRow["Type"] = baseType;
+                if (!string.IsNullOrEmpty(lengthPart)) newRow["Length"] = lengthPart;
+                if (!string.IsNullOrEmpty(decimalsPart)) newRow["Decimals"] = decimalsPart;
+                if (!string.IsNullOrEmpty(typeSuffix)) newRow["_TypeSuffix"] = typeSuffix;
                 newRow["NotNull"] = (row["Null"].ToString() == "NO");
                 newRow["PK"] = (row["Key"].ToString() == "PRI");
                 newRow["Default"] = row["Default"];
@@ -2307,6 +2300,7 @@ namespace mySQLPunk
             ApplyColumnHeaders();
             dgvColumns.Columns["_OldName"].Visible = false;
             dgvColumns.Columns["_AutoComment"].Visible = false;
+            dgvColumns.Columns["_TypeSuffix"].Visible = false;
         }
 
         public void ApplyLanguage()
@@ -2454,16 +2448,18 @@ namespace mySQLPunk
                     if (!string.IsNullOrEmpty(colDec)) typeFull += "," + colDec;
                     typeFull += ")";
                 }
+                string colTypeSuffix = GetRowString(row, "_TypeSuffix").Trim();
+                if (!string.IsNullOrEmpty(colTypeSuffix)) typeFull += " " + colTypeSuffix;
 
                 string nullStr = notNull ? "NOT NULL" : "NULL";
-                string defStr = string.IsNullOrEmpty(colDefault) ? "" : $"DEFAULT '{colDefault}'";
-                if (colDefault.ToUpper() == "NULL") defStr = "DEFAULT NULL";
+                // FormatMySqlDefault 會處理 NULL / CURRENT_TIMESTAMP / 數值與引號跳脫（CREATE 路徑同款）
+                string defStr = string.IsNullOrEmpty(colDefault) ? "" : "DEFAULT " + FormatMySqlDefault(colDefault);
                 string commentStr = string.IsNullOrEmpty(colComment) ? "" : "COMMENT " + EscapeMySqlStringLiteral(colComment);
                 
                 // 位置語法
                 string posStr = (prevCol == null) ? "FIRST" : $"AFTER `{prevCol}`";
 
-                DataRow[] origRows = string.IsNullOrEmpty(oldName) ? new DataRow[0] : _originalDt.Select($"Name = '{oldName}'");
+                DataRow[] origRows = string.IsNullOrEmpty(oldName) ? new DataRow[0] : _originalDt.Select("Name = '" + oldName.Replace("'", "''") + "'");
                 
                 if (origRows.Length == 0)
                 {
@@ -4169,6 +4165,52 @@ namespace mySQLPunk
                    ") ENGINE=" + engine + " DEFAULT CHARSET=utf8mb4" + commentSql + ";";
         }
 
+        /// <summary>
+        /// 解析 SHOW FULL COLUMNS 的 Type，例如 "int(10) unsigned"、"decimal(10,2)"、
+        /// "enum('a','b','c')"。enum/set 的值清單含逗號，不能用逗號切成長度/小數；
+        /// unsigned、zerofill 這類後綴要留著，組回 DDL 時補在括號後面。
+        /// </summary>
+        private static void ParseMySqlColumnType(string typeStr, out string baseType, out string lengthPart, out string decimalsPart, out string typeSuffix)
+        {
+            baseType = (typeStr ?? "").Trim();
+            lengthPart = "";
+            decimalsPart = "";
+            typeSuffix = "";
+
+            int open = baseType.IndexOf('(');
+            if (open < 0)
+            {
+                int space = baseType.IndexOf(' ');
+                if (space > 0)
+                {
+                    typeSuffix = baseType.Substring(space + 1).Trim();
+                    baseType = baseType.Substring(0, space).Trim();
+                }
+                return;
+            }
+
+            int close = baseType.LastIndexOf(')');
+            if (close < open)
+            {
+                return; // 括號沒關上就保留原樣，不要越修越壞
+            }
+
+            string inner = baseType.Substring(open + 1, close - open - 1).Trim();
+            typeSuffix = baseType.Substring(close + 1).Trim();
+            baseType = baseType.Substring(0, open).Trim();
+
+            Match numeric = Regex.Match(inner, @"^(\d+)\s*(?:,\s*(\d+))?$");
+            if (numeric.Success)
+            {
+                lengthPart = numeric.Groups[1].Value;
+                decimalsPart = numeric.Groups[2].Success ? numeric.Groups[2].Value : "";
+            }
+            else
+            {
+                lengthPart = inner;
+            }
+        }
+
         private string BuildMySqlColumnDefinition(DataRow row)
         {
             string columnName = GetRowString(row, "Name").Trim();
@@ -4184,6 +4226,8 @@ namespace mySQLPunk
                 if (!string.IsNullOrWhiteSpace(decimals)) typeFull += "," + decimals;
                 typeFull += ")";
             }
+            string typeSuffix = GetRowString(row, "_TypeSuffix").Trim();
+            if (!string.IsNullOrWhiteSpace(typeSuffix)) typeFull += " " + typeSuffix;
 
             bool notNull = row["NotNull"] != DBNull.Value && (bool)row["NotNull"];
             string defaultValue = GetRowString(row, "Default").Trim();
