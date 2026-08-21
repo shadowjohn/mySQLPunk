@@ -26,31 +26,34 @@ namespace mySQLPunk
                 return cliResult.ExitCode;
             }
 
-            // 「允許重複執行」選項關閉時強制單一實例（選項頁本來就有這個開關，之前沒實作）
-            System.Threading.Mutex instanceMutex = null;
-            bool allowMultipleInstances = true;
-            try { allowMultipleInstances = ApplicationOptionSettings.GetBool("AdvancedAllowMultipleInstances"); }
-            catch { }
-            if (!allowMultipleInstances)
-            {
-                bool createdNew;
-                instanceMutex = new System.Threading.Mutex(true, @"Local\mySQLPunk_SingleInstance", out createdNew);
-                if (!createdNew)
-                {
-                    MessageBox.Show(
-                        Localization.T("Program.AlreadyRunning"),
-                        "mySQLPunk",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                    return 0;
-                }
-            }
-
             // 檔案關聯（開啟方式 .sql）啟動時把檔案留給主視窗，等有連線後開進查詢分頁
             if (args.Length > 0 && File.Exists(args[0]) &&
                 string.Equals(Path.GetExtension(args[0]), ".sql", StringComparison.OrdinalIgnoreCase))
             {
                 Form1.StartupSqlFilePath = Path.GetFullPath(args[0]);
+            }
+
+            // 「允許重複執行」選項關閉時強制單一實例（選項頁本來就有這個開關，之前沒實作）。
+            // 帶著 .sql 檔案啟動時放行：使用者明確要開檔，擋下的話檔案就永遠不會被開啟
+            System.Threading.Mutex instanceMutex = null;
+            bool allowMultipleInstances = true;
+            try { allowMultipleInstances = ApplicationOptionSettings.GetBool("AdvancedAllowMultipleInstances"); }
+            catch { }
+            if (!allowMultipleInstances && Form1.StartupSqlFilePath == null)
+            {
+                bool createdNew;
+                instanceMutex = new System.Threading.Mutex(true, @"Local\mySQLPunk_SingleInstance", out createdNew);
+                if (!createdNew)
+                {
+                    // 此時語言檔尚未載入，訊息直接雙語呈現
+                    MessageBox.Show(
+                        "mySQLPunk 已經在執行中。\n如需同時開啟多個視窗，請到「選項 → 進階」勾選「允許重複執行 mySQLPunk」。\n\n" +
+                        "mySQLPunk is already running.\nTo allow multiple windows, enable \"Allow multiple instances\" under Options > Advanced.",
+                        "mySQLPunk",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return 0;
+                }
             }
 
             // 全域例外處理：捕捉 UI 執行緒未處理的例外，顯示訊息而非直接 crash

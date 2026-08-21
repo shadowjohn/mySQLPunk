@@ -723,6 +723,15 @@ namespace mySQLPunk.lib
         private static void WriteXlsx(DataTable dt, string path)
         {
             if (dt == null) throw new ArgumentNullException(nameof(dt));
+            // 超過 Excel 規格上限的 xlsx 是保證打不開的，先明確擋下
+            if (dt.Rows.Count > 1048575)
+            {
+                throw new InvalidOperationException(Localization.Format("Export.XlsxRowLimit", dt.Rows.Count));
+            }
+            if (dt.Columns.Count > 16384)
+            {
+                throw new InvalidOperationException(Localization.Format("Export.XlsxColumnLimit", dt.Columns.Count));
+            }
             if (File.Exists(path)) File.Delete(path);
 
             using (ZipArchive archive = ZipFile.Open(path, ZipArchiveMode.Create))
@@ -959,7 +968,32 @@ namespace mySQLPunk.lib
 
         private static string XmlEscape(string value)
         {
-            return System.Security.SecurityElement.Escape(value ?? string.Empty) ?? string.Empty;
+            // XML 1.0 禁止 0x00–0x08 / 0x0B / 0x0C / 0x0E–0x1F；
+            // 資料裡有這些位元組（\0 分隔的舊資料、控制碼）時 Excel 會拒開整份檔案
+            string text = StripInvalidXmlChars(value ?? string.Empty);
+            return System.Security.SecurityElement.Escape(text) ?? string.Empty;
+        }
+
+        private static string StripInvalidXmlChars(string value)
+        {
+            bool hasInvalid = false;
+            foreach (char c in value)
+            {
+                if (IsInvalidXmlChar(c)) { hasInvalid = true; break; }
+            }
+            if (!hasInvalid) return value;
+
+            StringBuilder builder = new StringBuilder(value.Length);
+            foreach (char c in value)
+            {
+                if (!IsInvalidXmlChar(c)) builder.Append(c);
+            }
+            return builder.ToString();
+        }
+
+        private static bool IsInvalidXmlChar(char c)
+        {
+            return c < 0x20 && c != '\t' && c != '\n' && c != '\r';
         }
 
         private static string MarkdownEscape(string value)

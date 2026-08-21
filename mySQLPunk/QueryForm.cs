@@ -1150,11 +1150,6 @@ namespace mySQLPunk
             txtSql.SelectedText = formatted;
         }
 
-        private static string FormatSqlForEditor(string sql)
-        {
-            return FormatSqlForEditor(sql, true);
-        }
-
         private static string FormatSqlForEditor(string sql, bool mysqlDialect)
         {
             if (string.IsNullOrWhiteSpace(sql)) return sql;
@@ -1319,7 +1314,9 @@ namespace mySQLPunk
                 else if (c == '`') inBacktick = true;
                 else if (c == '[') inBracket = true;
                 else if (c == '-' && next == '-') return true;
-                else if (mysqlDialect && c == '#') return true;
+                // # 一律視為不可美化：MySQL 是註解；MSSQL 的 #temp、PG 的 #> 運算子
+                // 這個重排式 tokenizer 撐不住（會拆成獨立符號再補空白，改壞 SQL）
+                else if (c == '#') return true;
                 else if (c == '/' && next == '*') return true;
             }
             return false;
@@ -1706,20 +1703,21 @@ namespace mySQLPunk
             }
 
             if (_isQueryBusy) return;
-            _cts = new CancellationTokenSource();
-            tsBtnExecute.Enabled = false;
-            tsBtnCancel.Enabled = true;
-            tsBtnExport.Enabled = false;
-            tsBtnRefresh.Enabled = false;
-            btnDataRefresh.Enabled = false;
-            SetPaginationControlsEnabled(false);
-            UpdateStatus(Localization.T("Query.LoadingTablePage"));
-            ShowLoadingOverlay();
 
             Stopwatch sw = Stopwatch.StartNew();
             _isQueryBusy = true;
             try
             {
+                _cts = new CancellationTokenSource();
+                tsBtnExecute.Enabled = false;
+                tsBtnCancel.Enabled = true;
+                tsBtnExport.Enabled = false;
+                tsBtnRefresh.Enabled = false;
+                btnDataRefresh.Enabled = false;
+                SetPaginationControlsEnabled(false);
+                UpdateStatus(Localization.T("Query.LoadingTablePage"));
+                ShowLoadingOverlay();
+
                 TablePageLoadResult result = await Task.Run(
                     () => LoadTablePage(tableName, offset, _pageSize, _cts.Token),
                     _cts.Token);
@@ -1878,24 +1876,25 @@ namespace mySQLPunk
             if (_isQueryBusy) return;
 
             string sql = GetSqlToExecute(rawSql);
-            _lastResultSql = "";
-            _lastResultCanStreamExport = false;
-            lblSqlPreview.Text = sql; // 更新底部的 SQL 預覽
-
-            _cts = new CancellationTokenSource();
-            tsBtnExecute.Enabled = false;
-            tsBtnCancel.Enabled = true;
-            tsBtnExport.Enabled = false;
-            tsBtnRefresh.Enabled = false;
-            btnDataRefresh.Enabled = false;
-            UpdateStatus(Localization.T("Query.Executing"));
-
             Stopwatch sw = Stopwatch.StartNew();
 
-            // busy 只在 try/finally 保護下為 true：中間任何敘述丟例外都不能讓它卡死
+            // busy 設定後立刻進 try：UI 狀態變更也要在 finally 的保護傘下，
+            // 否則中途丟例外會留下停用的執行鈕與掛著的遮罩
             _isQueryBusy = true;
             try
             {
+                _lastResultSql = "";
+                _lastResultCanStreamExport = false;
+                lblSqlPreview.Text = sql; // 更新底部的 SQL 預覽
+
+                _cts = new CancellationTokenSource();
+                tsBtnExecute.Enabled = false;
+                tsBtnCancel.Enabled = true;
+                tsBtnExport.Enabled = false;
+                tsBtnRefresh.Enabled = false;
+                btnDataRefresh.Enabled = false;
+                UpdateStatus(Localization.T("Query.Executing"));
+
                 // 判斷是否為 SELECT/SHOW/EXPLAIN/DESC (顯示結果集) 或 DML (顯示影響行數)
                 string firstWord = GetFirstWord(rawSql);
                 bool isQuery = IsSelectStatement(firstWord);
@@ -2682,10 +2681,9 @@ namespace mySQLPunk
         private void UpdateBlobExportProgress(long written, long total)
         {
             if (lblStatus == null) return;
-
-            string totalText = total >= 0 ? FormatByteCount(total) : "?";
             lblStatus.Text = BuildBlobStreamingProgressText(written, total);
-            Application.DoEvents();
+            // 不可 DoEvents：大 BLOB 寫檔途中 pump 訊息，使用者切格子會換掉串流來源
+            lblStatus.Owner?.Refresh();
         }
 
         private static string BuildBlobStreamingProgressText(long written, long total)

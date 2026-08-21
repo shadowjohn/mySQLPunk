@@ -98,6 +98,9 @@ namespace mySQLPunk
             Add("Menu.NewConnection", "新增連線", "New Connection");
             Add("Menu.OpenConnection", "開啟連線", "Open Connection");
             Add("Menu.CloseConnection", "關閉連線", "Close Connection");
+            Add("Menu.Reconnect", "重新連線", "Reconnect");
+            Add("Export.XlsxRowLimit", "資料共 {0} 列，超過 Excel 工作表的 1,048,575 列上限，請改用 CSV 匯出。", "The data has {0} rows, exceeding Excel's 1,048,575-row sheet limit. Export as CSV instead.");
+            Add("Export.XlsxColumnLimit", "資料共 {0} 欄，超過 Excel 工作表的 16,384 欄上限。", "The data has {0} columns, exceeding Excel's 16,384-column sheet limit.");
             Add("Menu.ExportConnections", "匯出連線", "Export Connections");
             Add("Menu.ImportConnections", "匯入連線", "Import Connections");
             Add("Menu.Close", "關閉", "Close");

@@ -337,10 +337,17 @@ namespace mySQLPunk.lib
 
             Match match = Regex.Match(
                 sql,
-                @"\bAS\s+(?<body>(?:SELECT|WITH)\b.*)$",
+                @"\bAS\s*(?<paren>\(\s*)?(?<body>(?:SELECT|WITH)\b.*)$",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
-            return match.Success ? match.Groups["body"].Value.Trim().TrimEnd(';').Trim() : "";
+            if (!match.Success) return "";
+            string body = match.Groups["body"].Value.Trim().TrimEnd(';').Trim();
+            // CREATE VIEW v AS (SELECT ...) 的外層括號要剝掉
+            if (match.Groups["paren"].Success && body.EndsWith(")", StringComparison.Ordinal))
+            {
+                body = body.Substring(0, body.Length - 1).Trim();
+            }
+            return body;
         }
 
         private static bool TryRewritePortableSyntax(string selectSql, string sourceProvider, string targetProvider, out string rewrittenSql, out string reason)
@@ -389,6 +396,12 @@ namespace mySQLPunk.lib
             if (targetProvider == "mssql") return true;
 
             string body = match.Groups["body"].Value.Trim();
+            // TOP n PERCENT / WITH TIES 沒有對應的 LIMIT 語意，硬拆會產生必定語法錯誤的 SQL
+            if (Regex.IsMatch(body, @"^(PERCENT|WITH\s+TIES)\b", RegexOptions.IgnoreCase))
+            {
+                reason = "TOP PERCENT / WITH TIES";
+                return false;
+            }
             string distinct = match.Groups["distinct"].Value;
             string withoutTop = "SELECT " + distinct + body;
             rewrittenSql = AppendRowLimit(withoutTop, targetProvider, match.Groups["limit"].Value);
@@ -4866,7 +4879,8 @@ namespace mySQLPunk.lib
         private static string AppendRowLimit(string selectSql, string targetProvider, string limit)
         {
             string sql = selectSql.Trim().TrimEnd(';').Trim();
-            if (Regex.IsMatch(sql, @"\b(TOP|LIMIT|FETCH\s+FIRST)\b", RegexOptions.IgnoreCase)) return sql;
+            // 先遮罩字串常值：值裡剛好有 'TOP' 這種字時不能默默丟掉列數上限
+            if (Regex.IsMatch(MaskStringLiterals(sql), @"\b(TOP|LIMIT|FETCH\s+FIRST)\b", RegexOptions.IgnoreCase)) return sql;
             if (targetProvider == "mssql") return InsertSqlServerTop(sql, limit);
             if (targetProvider == "oracle") return sql + " FETCH FIRST " + limit + " ROWS ONLY";
             return sql + " LIMIT " + limit;
@@ -4992,7 +5006,11 @@ namespace mySQLPunk.lib
             return ReplaceOutsideSingleQuotedStrings(selectSql, segment =>
             {
                 string sql = Regex.Replace(segment, @"`([^`]+)`", m => QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
-                sql = Regex.Replace(sql, @"\[([^\]]+)\]", m => QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
+                // 純數字的 [1] 是 PG/Oracle 的陣列下標，不是識別字
+                sql = Regex.Replace(sql, @"\[([^\]]+)\]", m =>
+                    Regex.IsMatch(m.Groups[1].Value, @"^\s*\d+\s*$")
+                        ? m.Value
+                        : QuoteIdentifier(m.Groups[1].Value, openQuote, closeQuote));
 
                 if (provider == "mysql" || provider == "mssql")
                 {

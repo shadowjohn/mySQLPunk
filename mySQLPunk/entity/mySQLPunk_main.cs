@@ -46,10 +46,11 @@ namespace mySQLPunk.entity
             {
                 // 不能默默當作空清單：下一次存檔會用空清單覆蓋整份連線。
                 // 先備份損毀檔再告知使用者，至少留下救援的機會。
+                _settingsLoadFailed = true; // 擋住 setSettingINI，原檔才不會被空清單覆蓋
                 string backupPath = string.Empty;
                 try
                 {
-                    backupPath = setting_path + ".corrupt-" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    backupPath = setting_path + ".corrupt";
                     File.Copy(setting_path, backupPath, true);
                 }
                 catch { }
@@ -94,8 +95,13 @@ namespace mySQLPunk.entity
             }
         }
 
+        /// <summary>設定檔載入失敗時為 true；此時禁止存檔，避免用空清單覆蓋原檔。</summary>
+        private bool _settingsLoadFailed;
+
         public void setSettingINI()
         {
+            if (_settingsLoadFailed) return; // 損毀檔還沒處理前，任何存檔都會把原內容毀掉
+
             string setting_path = GetSettingPath();
             my.file_put_contents(setting_path, BuildSettingsJson());
         }
@@ -194,6 +200,7 @@ namespace mySQLPunk.entity
                         {
                             connDict[property.Name] = property.Value == null ? string.Empty : property.Value.ToString();
                         }
+                        NormalizeConnection(connDict); // 舊格式 key（name/ip/kind）要先補齊，否則 target 會全部撞名
                         connDict["username"] = SafeDecrypt(GetVal(connDict, "username"));
                         string candidate = WindowsCredentialService.BuildTargetName(targetProfileName, connDict);
                         if (WindowsCredentialService.TryWritePassword(candidate, GetVal(connDict, "username"), password))
@@ -252,7 +259,7 @@ namespace mySQLPunk.entity
             string path = GetProfileSettingPath(normalized);
             if (File.Exists(path))
             {
-                TryDeleteProfileCredentials(path);
+                TryDeleteProfileCredentials(path, normalized);
                 File.Delete(path);
             }
 
@@ -264,8 +271,12 @@ namespace mySQLPunk.entity
             }
         }
 
-        /// <summary>刪除 profile 前，把檔案裡記錄的憑證從 Windows 認證管理員清掉。</summary>
-        private static void TryDeleteProfileCredentials(string settingPath)
+        /// <summary>
+        /// 刪除 profile 前，把「確定屬於這個 profile」的憑證清掉。
+        /// 舊版複製出來的檔案可能沿用來源 profile 的 target，直接照檔案刪
+        /// 會把來源 profile 的密碼一起清掉——target 名稱對不上就不刪。
+        /// </summary>
+        private void TryDeleteProfileCredentials(string settingPath, string profileName)
         {
             try
             {
@@ -277,7 +288,17 @@ namespace mySQLPunk.entity
                 {
                     JObject conn = token as JObject;
                     string target = conn == null ? null : (string)conn["credential_target"];
-                    if (!string.IsNullOrWhiteSpace(target))
+                    if (string.IsNullOrWhiteSpace(target)) continue;
+
+                    Dictionary<string, object> connDict = new Dictionary<string, object>();
+                    foreach (var property in conn.Properties())
+                    {
+                        connDict[property.Name] = property.Value == null ? string.Empty : property.Value.ToString();
+                    }
+                    NormalizeConnection(connDict);
+                    connDict["username"] = SafeDecrypt(GetVal(connDict, "username"));
+                    string expected = WindowsCredentialService.BuildTargetName(profileName, connDict);
+                    if (string.Equals(expected, target, StringComparison.OrdinalIgnoreCase))
                     {
                         WindowsCredentialService.TryDeletePassword(target);
                     }
@@ -293,8 +314,14 @@ namespace mySQLPunk.entity
             File.WriteAllText(path, BuildSettingsJson(), Encoding.UTF8);
         }
 
+        private bool _importingConnections;
+
         public void importConnections(string path)
         {
+            _importingConnections = true;
+            try
+            {
+
             string json = File.ReadAllText(path, Encoding.UTF8);
             JToken root = JToken.Parse(json);
             connections.Clear();
@@ -319,6 +346,11 @@ namespace mySQLPunk.entity
                     }
             }
             setSettingINI();
+            }
+            finally
+            {
+                _importingConnections = false;
+            }
         }
 
         private string GetSettingPath()
@@ -482,6 +514,12 @@ namespace mySQLPunk.entity
             NormalizeConnection(conn);
             conn["username"] = SafeDecrypt(GetVal(conn, "username"));
             LoadConnectionPassword(conn);
+            if (_importingConnections)
+            {
+                // 匯入檔的 target 可能屬於別的 profile / 機器：密碼已讀進記憶體，
+                // 清掉參照讓存檔時建立自己的憑證，而不是把別人的搬走或誤刪
+                conn["credential_target"] = "";
+            }
             conn["isConnect"] = "F";
             connections.Add(conn);
         }

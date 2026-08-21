@@ -28,6 +28,10 @@ namespace mySQLPunk.lib
         public void SetConn(string connection)
         {
             MCT = new SQLiteConnection(connection);
+            // LoadExtension 是連線層級的：換了連線就要重新載入，
+            // 否則 SpatiaLiteEnabled 會沿用舊連線的狀態說謊
+            _spatialiteLoadTried = false;
+            SpatiaLiteEnabled = false;
         }
         public void setConn(string connection) => SetConn(connection);
 
@@ -46,6 +50,9 @@ namespace mySQLPunk.lib
         public void Close()
         {
             if (MCT != null && MCT.State != ConnectionState.Closed) MCT.Close();
+            // 重新 Open 時要重載 SpatiaLite（extension 隨連線關閉而卸載）
+            _spatialiteLoadTried = false;
+            SpatiaLiteEnabled = false;
         }
         public void close() => Close();
 

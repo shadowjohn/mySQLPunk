@@ -20,7 +20,9 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(destinationDirectory)) return string.Empty;
 
             string sourceFullPath = Path.GetFullPath(sourcePath);
-            string destinationFullDirectory = Path.GetFullPath(destinationDirectory);
+            // GetFullPath 會保留結尾的 \，GetDirectoryName 永遠不帶：不修剪的話同目錄判斷永遠不成立
+            string destinationFullDirectory = Path.GetFullPath(destinationDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             string sourceDirectory = Path.GetDirectoryName(sourceFullPath);
             if (string.Equals(sourceDirectory, destinationFullDirectory, StringComparison.OrdinalIgnoreCase))
             {

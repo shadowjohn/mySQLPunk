@@ -61,8 +61,8 @@ namespace mySQLPunk
             if (owner != null)
             {
                 owner.Move += OwnerBoundsChanged;
+                // Resize 之後緊接著就會 raise SizeChanged，只掛一個就夠
                 owner.Resize += OwnerBoundsChanged;
-                owner.SizeChanged += OwnerBoundsChanged;
                 owner.VisibleChanged += OwnerVisibleChanged;
             }
         }
@@ -80,7 +80,8 @@ namespace mySQLPunk
             ProgressBar.SetProgress(current, total, message);
             ProgressBar.Refresh();
             progressForm.Refresh();
-            Application.DoEvents();
+            // 不可 Application.DoEvents()：進度更新走 BeginInvoke 已在 UI 執行緒，
+            // 再 pump 訊息會讓使用者在匯出途中重按按鈕造成重入
         }
 
         public void Dispose()
@@ -92,19 +93,29 @@ namespace mySQLPunk
             {
                 owner.Move -= OwnerBoundsChanged;
                 owner.Resize -= OwnerBoundsChanged;
-                owner.SizeChanged -= OwnerBoundsChanged;
                 owner.VisibleChanged -= OwnerVisibleChanged;
+                if (ownerWasEnabled) owner.Enabled = true;
             }
 
             CloseForm(progressForm);
             CloseForm(maskForm);
         }
 
+        private bool ownerWasEnabled;
+
         private void Show()
         {
             Rectangle bounds = GetOverlayBounds();
             maskForm.Bounds = bounds;
             CenterProgressForm(bounds);
+
+            // 遮罩只蓋 client 區域、又不是 modal：要真的停用主視窗，
+            // 否則使用者可以在匯出途中再按一次精靈按鈕造成兩條匯出同時寫檔
+            if (owner != null)
+            {
+                ownerWasEnabled = owner.Enabled;
+                owner.Enabled = false;
+            }
 
             if (owner != null && owner.IsHandleCreated)
             {

@@ -23,8 +23,10 @@ namespace utility
         public string pwd()
         {
             // 設定檔要跟著程式目錄；從檔案總管開 .sql 或 URL 協定啟動時
-            // 工作目錄會是別的地方，跟著 CWD 走會讓連線清單整個消失
-            return AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
+            // 工作目錄會是別的地方，跟著 CWD 走會讓連線清單整個消失。
+            // 不能單純 TrimEnd('\\')：裝在磁碟根目錄時 "C:\\" 會變成 "C:"（相對路徑語意）
+            string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            return Path.GetDirectoryName(Path.Combine(baseDirectory, "placeholder"));
         }
         public bool is_dir(string path)
         {
@@ -558,13 +560,27 @@ namespace utility
                 tempFile.Write(input, 0, input.Length);
                 tempFile.Flush(true);
             }
-            if (File.Exists(filepath))
+            try
             {
-                File.Replace(tempPath, filepath, null);
+                if (File.Exists(filepath))
+                {
+                    File.Replace(tempPath, filepath, null);
+                }
+                else
+                {
+                    File.Move(tempPath, filepath);
+                }
             }
-            else
+            catch (IOException)
             {
-                File.Move(tempPath, filepath);
+                // FAT32 / 部分網路磁碟不支援交易式取代，退回複寫
+                File.Copy(tempPath, filepath, true);
+                try { File.Delete(tempPath); } catch { }
+            }
+            catch (PlatformNotSupportedException)
+            {
+                File.Copy(tempPath, filepath, true);
+                try { File.Delete(tempPath); } catch { }
             }
         }
         public string implode(string keyword, string[] arrays)

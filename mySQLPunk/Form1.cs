@@ -1124,12 +1124,72 @@ namespace mySQLPunk
             return UiKit.RenderGlyph(glyph, 16, TreeGroupIconColor);
         }
 
+        /// <summary>徽章形狀：與顏色搭配的第二重編碼，色弱使用者也能分辨引擎。</summary>
+        private enum TreeEngineBadge
+        {
+            None,
+            Circle,   // MySQL
+            Square,   // PostgreSQL
+            Triangle, // Oracle
+            Diamond,  // SQLite
+            Bar       // SQL Server
+        }
+
         /// <summary>未連線用降彩度的同色系，連線後亮起，狀態一眼可辨。</summary>
-        private static Bitmap TreeConnectionGlyph(Color engineColor, bool open)
+        private static Bitmap TreeConnectionGlyph(Color engineColor, bool open, TreeEngineBadge badge)
         {
             // 混向中亮灰而不是中灰：未連線的圖示在深色主題的深底上才不會沉掉
             Color color = open ? engineColor : UiKit.Mix(engineColor, Color.FromArgb(168, 175, 184), 0.42f);
-            return UiKit.RenderGlyph(UiGlyph.Database, 16, color);
+            Bitmap bitmap = UiKit.RenderGlyph(UiGlyph.Database, 16, color);
+            if (badge == TreeEngineBadge.None) return bitmap;
+
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+                // 先把右下角清成透明，讓徽章與圓柱線條分離
+                g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                using (SolidBrush clear = new SolidBrush(Color.Transparent))
+                {
+                    g.FillEllipse(clear, 8.4f, 8.4f, 8.6f, 8.6f);
+                }
+                g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+
+                RectangleF r = new RectangleF(10f, 10f, 5.6f, 5.6f);
+                using (SolidBrush brush = new SolidBrush(color))
+                {
+                    switch (badge)
+                    {
+                        case TreeEngineBadge.Circle:
+                            g.FillEllipse(brush, r);
+                            break;
+                        case TreeEngineBadge.Square:
+                            g.FillRectangle(brush, r.X + 0.3f, r.Y + 0.3f, r.Width - 0.6f, r.Height - 0.6f);
+                            break;
+                        case TreeEngineBadge.Triangle:
+                            g.FillPolygon(brush, new[]
+                            {
+                                new PointF(r.X + r.Width / 2f, r.Y),
+                                new PointF(r.X + r.Width, r.Y + r.Height),
+                                new PointF(r.X, r.Y + r.Height)
+                            });
+                            break;
+                        case TreeEngineBadge.Diamond:
+                            g.FillPolygon(brush, new[]
+                            {
+                                new PointF(r.X + r.Width / 2f, r.Y - 0.4f),
+                                new PointF(r.X + r.Width + 0.4f, r.Y + r.Height / 2f),
+                                new PointF(r.X + r.Width / 2f, r.Y + r.Height + 0.4f),
+                                new PointF(r.X - 0.4f, r.Y + r.Height / 2f)
+                            });
+                            break;
+                        case TreeEngineBadge.Bar:
+                            g.FillRectangle(brush, r.X - 0.4f, r.Y + 1.6f, r.Width + 0.8f, 2.6f);
+                            break;
+                    }
+                }
+            }
+            return bitmap;
         }
 
         public void drawLists()
@@ -1141,18 +1201,18 @@ namespace mySQLPunk
                 ColorDepth = ColorDepth.Depth32Bit,
                 ImageSize = new Size(16, 16)
             };
-            myImageList.Images.Add(TreeConnectionGlyph(TreeMySqlColor, false)); //0 mysql 未連線
-            myImageList.Images.Add(TreeConnectionGlyph(TreeMySqlColor, true)); //1 mysql 已連線
-            myImageList.Images.Add(TreeConnectionGlyph(TreePostgresColor, false)); //2
-            myImageList.Images.Add(TreeConnectionGlyph(TreePostgresColor, true)); //3
-            myImageList.Images.Add(TreeConnectionGlyph(TreeOracleColor, false)); //4
-            myImageList.Images.Add(TreeConnectionGlyph(TreeOracleColor, true)); //5
-            myImageList.Images.Add(TreeConnectionGlyph(TreeSqliteColor, false)); //6
-            myImageList.Images.Add(TreeConnectionGlyph(TreeSqliteColor, true)); //7
-            myImageList.Images.Add(TreeConnectionGlyph(TreeSqlServerColor, false)); //8
-            myImageList.Images.Add(TreeConnectionGlyph(TreeSqlServerColor, true)); //9
-            myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, false)); //10 資料庫節點
-            myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, true)); //11
+            myImageList.Images.Add(TreeConnectionGlyph(TreeMySqlColor, false, TreeEngineBadge.Circle)); //0 mysql 未連線
+            myImageList.Images.Add(TreeConnectionGlyph(TreeMySqlColor, true, TreeEngineBadge.Circle)); //1 mysql 已連線
+            myImageList.Images.Add(TreeConnectionGlyph(TreePostgresColor, false, TreeEngineBadge.Square)); //2
+            myImageList.Images.Add(TreeConnectionGlyph(TreePostgresColor, true, TreeEngineBadge.Square)); //3
+            myImageList.Images.Add(TreeConnectionGlyph(TreeOracleColor, false, TreeEngineBadge.Triangle)); //4
+            myImageList.Images.Add(TreeConnectionGlyph(TreeOracleColor, true, TreeEngineBadge.Triangle)); //5
+            myImageList.Images.Add(TreeConnectionGlyph(TreeSqliteColor, false, TreeEngineBadge.Diamond)); //6
+            myImageList.Images.Add(TreeConnectionGlyph(TreeSqliteColor, true, TreeEngineBadge.Diamond)); //7
+            myImageList.Images.Add(TreeConnectionGlyph(TreeSqlServerColor, false, TreeEngineBadge.Bar)); //8
+            myImageList.Images.Add(TreeConnectionGlyph(TreeSqlServerColor, true, TreeEngineBadge.Bar)); //9
+            myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, false, TreeEngineBadge.None)); //10 資料庫節點
+            myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, true, TreeEngineBadge.None)); //11
 
             myImageList.Images.Add(TreeGlyph(UiGlyph.Table)); //12
             myImageList.Images.Add(TreeGlyph(UiGlyph.View)); //13
@@ -1646,7 +1706,7 @@ namespace mySQLPunk
                 return -1;
             }
 
-            CloseAllConnectionsBeforeImport();
+            if (!CloseAllConnectionsBeforeImport()) return -1;
             myN.importConnections(sourcePath);
             drawLists();
             return myN.connections.Count;
@@ -1656,7 +1716,7 @@ namespace mySQLPunk
         {
             if (preview == null || selectedImportedIndexes == null || selectedImportedIndexes.Count == 0) return;
 
-            CloseAllConnectionsBeforeImport();
+            if (!CloseAllConnectionsBeforeImport()) return;
             Dictionary<string, int> existingIndexByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < myN.connections.Count; i++)
             {
@@ -2348,38 +2408,10 @@ namespace mySQLPunk
             return passwords;
         }
 
-        private void CloseAllDockablesBeforeImport()
+        private bool CloseAllConnectionsBeforeImport()
         {
-            if (queryTabs == null) return;
-            List<TabPage> pages = new List<TabPage>();
-            foreach (TabPage page in queryTabs.TabPages) pages.Add(page);
-            foreach (TabPage page in pages)
-            {
-                Form form = page.Tag as Form;
-                queryTabs.TabPages.Remove(page);
-                page.Dispose();
-                if (form != null && !form.IsDisposed)
-                {
-                    try { form.Dispose(); } catch { }
-                }
-            }
-            queryTabs.Visible = false;
-
-            List<Form> floating = new List<Form>();
-            foreach (Form openForm in Application.OpenForms)
-            {
-                if (openForm is IDockableForm) floating.Add(openForm);
-            }
-            foreach (Form form in floating)
-            {
-                try { form.Close(); } catch { }
-            }
-        }
-
-        private void CloseAllConnectionsBeforeImport()
-        {
-            // 分頁還握著即將 Dispose 的連線物件，先全部關掉
-            CloseAllDockablesBeforeImport();
+            // 分頁還握著即將 Dispose 的連線物件，先全部關掉；使用者取消就中止整個操作
+            if (!TryCloseDockables(null)) return false;
 
             foreach (Dictionary<string, object> conn in myN.connections)
             {
@@ -2403,6 +2435,8 @@ namespace mySQLPunk
                     conn.Remove("pdo");
                 }
             }
+
+            return true;
         }
 
         private void CloseToolStripMenuItem_Click(object sender, EventArgs e)
@@ -5152,39 +5186,58 @@ namespace mySQLPunk
             RefreshQueriesGroupIfSelected();
         }
 
-        /// <summary>關閉所有使用指定連線的停靠分頁與浮動視窗（關閉連線/切換設定檔前呼叫）。</summary>
-        private void CloseDockablesUsingDatabase(IDatabase db)
+        /// <summary>
+        /// 關閉停靠分頁與浮動視窗（db 為 null 表示全部）。
+        /// 走 form.Close()：設計器既有的「要不要儲存」詢問會照常出現；
+        /// 使用者取消或有未存變更不同意時回傳 false，呼叫端要中止整個操作。
+        /// </summary>
+        private bool TryCloseDockables(IDatabase db)
         {
-            if (db == null || queryTabs == null) return;
+            if (queryTabs == null) return true;
 
-            List<TabPage> pagesToClose = new List<TabPage>();
+            List<Form> targets = new List<Form>();
             foreach (TabPage page in queryTabs.TabPages)
             {
                 IDockableForm dockable = page.Tag as IDockableForm;
-                if (dockable != null && dockable.UsesDatabase(db)) pagesToClose.Add(page);
-            }
-            foreach (TabPage page in pagesToClose)
-            {
-                Form form = page.Tag as Form;
-                queryTabs.TabPages.Remove(page);
-                page.Dispose();
-                if (form != null && !form.IsDisposed)
+                if (dockable != null && (db == null || dockable.UsesDatabase(db)) && page.Tag is Form pageForm)
                 {
-                    try { form.Dispose(); } catch { }
+                    targets.Add(pageForm);
                 }
             }
-            if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
-
-            List<Form> floatingToClose = new List<Form>();
             foreach (Form openForm in Application.OpenForms)
             {
                 IDockableForm dockable = openForm as IDockableForm;
-                if (dockable != null && dockable.UsesDatabase(db)) floatingToClose.Add(openForm);
+                if (dockable != null && (db == null || dockable.UsesDatabase(db)) && !targets.Contains(openForm))
+                {
+                    targets.Add(openForm);
+                }
             }
-            foreach (Form form in floatingToClose)
+            if (targets.Count == 0) return true;
+
+            int unsaved = 0;
+            foreach (Form form in targets)
             {
-                try { form.Close(); } catch { }
+                IDockableForm dockable = (IDockableForm)form;
+                if (dockable.HasUnsavedChanges()) unsaved++;
             }
+            if (unsaved > 0 &&
+                MessageBox.Show(this,
+                    Localization.Format("Connection.CloseTabsUnsavedConfirm", unsaved),
+                    Localization.T("Common.Warning"),
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                return false;
+            }
+
+            foreach (Form form in targets)
+            {
+                if (form.IsDisposed) continue;
+                try { form.Close(); } catch { }
+                if (!form.IsDisposed) return false; // FormClosing 被取消（例如設計器的存檔詢問按了取消）
+            }
+
+            if (queryTabs.TabPages.Count == 0) queryTabs.Visible = false;
+            return true;
         }
 
         public void FloatDockableForm(IDockableForm dockable)
@@ -5258,7 +5311,9 @@ namespace mySQLPunk
             // Dock=None：每次顯示時手動鋪滿父容器上緣，蓋在 queryTabs 上而不推擠它
             if (_dockHintOverlay.Parent != null)
             {
-                _dockHintOverlay.SetBounds(0, 0, _dockHintOverlay.Parent.ClientSize.Width, _dockHintOverlay.Height);
+                // 用 DisplayRectangle：頂端篩選列（Dock=Top）開啟時，內容區不是從 y=0 開始
+                Rectangle display = _dockHintOverlay.Parent.DisplayRectangle;
+                _dockHintOverlay.SetBounds(display.X, display.Y, display.Width, _dockHintOverlay.Height);
             }
             _dockHintOverlay.Visible = true;
             _dockHintOverlay.BringToFront();
@@ -6054,7 +6109,7 @@ namespace mySQLPunk
                     }
                     else
                     {
-                        string script = File.ReadAllText(dialog.FileName, Encoding.UTF8);
+                        string script = ReadSqlScriptWithEncodingDetection(dialog.FileName);
                         int executed = ImportSqlScript(target, script);
                         string message = string.Format(Localization.T("ImportSql.Success"), executed);
                         MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -6244,11 +6299,11 @@ namespace mySQLPunk
         {
             string path = StartupSqlFilePath;
             if (string.IsNullOrWhiteSpace(path)) return;
-            StartupSqlFilePath = null; // 只開一次
 
             try
             {
                 string sql = File.ReadAllText(path, Encoding.UTF8);
+                StartupSqlFilePath = null; // 開成功才清，讀檔失敗保留路徑讓下一次載入重試
                 string host = connectionIndex >= 0 && connectionIndex < myN.connections.Count
                     ? GetConnectionValue(myN.connections[connectionIndex], "host")
                     : string.Empty;
@@ -6507,6 +6562,23 @@ namespace mySQLPunk
             db_tree.SelectedNode = target.DatabaseNode;
             UpdateMainStatus(string.Format(Localization.T("ImportSql.Success"), executed));
             return executed;
+        }
+
+        /// <summary>
+        /// 舊工具產出的 dump 常是無 BOM 的 Big5/ANSI；硬用 UTF-8 讀不會報錯，
+        /// 只會把中文全部換成 U+FFFD 然後「成功」寫進資料庫。先嚴格試 UTF-8，失敗退回系統 ANSI。
+        /// </summary>
+        private static string ReadSqlScriptWithEncodingDetection(string path)
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            try
+            {
+                return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
+            }
+            catch (DecoderFallbackException)
+            {
+                return Encoding.Default.GetString(bytes);
+            }
         }
 
         private static int ExecuteSqlScript(IDatabase db, string databaseName, string script)
@@ -8727,10 +8799,11 @@ namespace mySQLPunk
             var conn = myN.connections[index];
             if (conn["isConnect"].ToString() == "T")
             {
-                // 先關掉使用這條連線的分頁與浮動視窗，否則它們會打到已 Dispose 的物件
+                // 先關掉使用這條連線的分頁與浮動視窗，否則它們會打到已 Dispose 的物件；
+                // 使用者對「未儲存變更」按取消時就中止關閉連線
                 if (conn.ContainsKey("pdo") && conn["pdo"] is IDatabase closingDb)
                 {
-                    CloseDockablesUsingDatabase(closingDb);
+                    if (!TryCloseDockables(closingDb)) return;
                 }
 
                 if (conn.ContainsKey("pdo") && conn["pdo"] is IDisposable disp)
@@ -13189,6 +13262,16 @@ namespace mySQLPunk
             openItem.Click += (s, ev) => OpenConnectionNode(node);
             menu.Items.Add(openItem);
 
+            ToolStripMenuItem reconnectItem = new ToolStripMenuItem(Localization.T("Menu.Reconnect"));
+            reconnectItem.Enabled = isConnected;
+            reconnectItem.Click += (s, ev) => ReconnectConnectionNode(node);
+            menu.Items.Add(reconnectItem);
+
+            ToolStripMenuItem closeConnectionItem = new ToolStripMenuItem(Localization.T("Menu.CloseConnection"));
+            closeConnectionItem.Enabled = isConnected;
+            closeConnectionItem.Click += (s, ev) => CloseConnection(GetConnectionIndex(node));
+            menu.Items.Add(closeConnectionItem);
+
             ToolStripMenuItem profileItem = new ToolStripMenuItem(Localization.T("Menu.ConnectionProfile"));
             AddConnectionProfileMenuItems(profileItem);
             menu.Items.Add(profileItem);
@@ -13329,7 +13412,7 @@ namespace mySQLPunk
             if (string.Equals(profileName, myN.ActiveProfileName, StringComparison.OrdinalIgnoreCase)) return;
 
             myN.setSettingINI();
-            CloseAllConnectionsBeforeImport();
+            if (!CloseAllConnectionsBeforeImport()) return;
             myN.SwitchProfile(profileName);
             drawLists();
             ConfigureMainMenu();
@@ -13354,7 +13437,7 @@ namespace mySQLPunk
             }
 
             myN.setSettingINI();
-            CloseAllConnectionsBeforeImport();
+            if (!CloseAllConnectionsBeforeImport()) return;
             myN.CreateProfile(profileName);
             drawLists();
             ConfigureMainMenu();
@@ -13418,7 +13501,7 @@ namespace mySQLPunk
                 MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
 
-            CloseAllConnectionsBeforeImport();
+            if (!CloseAllConnectionsBeforeImport()) return;
             myN.DeleteProfile(profileName);
             drawLists();
             ConfigureMainMenu();
@@ -13431,6 +13514,18 @@ namespace mySQLPunk
             Dictionary<string, object> conn = myN.connections[index];
             return conn.ContainsKey("isConnect") && conn["isConnect"].ToString() == "T" &&
                    conn.ContainsKey("pdo") && conn["pdo"] is IDatabase;
+        }
+
+        /// <summary>斷線（逾時、休眠、換網路）後一鍵重連：先關閉既有連線再重新開啟。</summary>
+        private void ReconnectConnectionNode(TreeNode node)
+        {
+            int connIdx = GetConnectionIndex(node);
+            if (connIdx < 0 || connIdx >= myN.connections.Count) return;
+            if (IsConnectionOpen(connIdx))
+            {
+                CloseConnection(connIdx);
+            }
+            OpenConnectionNode(node);
         }
 
         private void OpenConnectionNode(TreeNode node)
@@ -14405,6 +14500,7 @@ namespace mySQLPunk
             if (databaseNode.Nodes.Count > 0)
             {
                 databaseNode.Expand();
+                TryOpenStartupSqlFile(connectionIndex, db, databaseName); // 已載入的資料庫也要接住啟動檔案
                 return;
             }
 
@@ -14887,7 +14983,28 @@ namespace mySQLPunk
             SelectDatabaseGroupNode("BI");
         }
 
+        private bool _selectingDatabaseGroup;
+
         private async void SelectDatabaseGroupNode(string groupName)
+        {
+            // 載入期間重按區段按鈕不能疊加第二次載入（同一條連線非執行緒安全）
+            if (_selectingDatabaseGroup) return;
+            _selectingDatabaseGroup = true;
+            try
+            {
+                await SelectDatabaseGroupNodeCore(groupName);
+            }
+            catch (Exception ex)
+            {
+                UpdateMainStatus(Localization.Format("Query.ErrorStatus", ex.Message));
+            }
+            finally
+            {
+                _selectingDatabaseGroup = false;
+            }
+        }
+
+        private async Task SelectDatabaseGroupNodeCore(string groupName)
         {
             TreeNode databaseNode = GetSelectedDatabaseNode();
             if (databaseNode == null)
@@ -14914,8 +15031,11 @@ namespace mySQLPunk
             }
 
             // 「隱藏物件群組」或「只顯示有內容的物件」時群組節點不存在（被攤平或省略），
-            // 直接選資料庫節點並顯示該群組的清單，區段按鈕才不會變成死按鈕
-            TreeDatabaseTarget flattenTarget = BuildTargetFromNode(databaseNode);
+            // 直接選資料庫節點並顯示該群組的清單，區段按鈕才不會變成死按鈕。
+            // 兩個選項都沒開時維持「找不到群組」訊息（例如 SQLite 沒有 Users/Events）
+            bool groupNodesSuppressed = ApplicationOptionSettings.GetBool("ViewHideObjectGroups") ||
+                                        ApplicationOptionSettings.GetBool("ViewActiveObjectsOnly");
+            TreeDatabaseTarget flattenTarget = groupNodesSuppressed ? BuildTargetFromNode(databaseNode) : null;
             if (flattenTarget != null && flattenTarget.Database != null)
             {
                 db_tree.SelectedNode = databaseNode;

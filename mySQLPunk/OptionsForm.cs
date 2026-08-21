@@ -354,7 +354,8 @@ namespace mySQLPunk
             AddOptionNumeric("EditorLargeFileLimitMb", T("如果檔案大小大於此就停用 (MB):", "Disable editor helpers above file size (MB):"), 92, 1, 4096);
             AddOptionCheckBox("EditorWordWrap", T("使用自動換行", "Use word wrap"), 124);
             AddOptionNumeric("EditorTabWidth", T("定位點寬度:", "Tab width:"), 156, 1, 16);
-            AddOptionCheckBox("EditorInsertSpaces", T("按 Tab 時插入空格", "Insert spaces when pressing Tab"), 284);
+
+            AddOptionCheckBox("EditorInsertSpaces", T("按 Tab 時插入空格", "Insert spaces when pressing Tab"), 188);
 
             AddOptionCombo("EditorFontName", T("編輯器字型:", "Editor font:"), BuildFontChoices(), 330, 300);
             AddOptionNumeric("EditorFontSize", T("字型大小:", "Font size:"), 372, 6, 48);
@@ -422,16 +423,16 @@ namespace mySQLPunk
             {
                 new OptionChoice("http", "HTTP"),
                 new OptionChoice("socks5", "SOCKS5")
-            }, 142, 160);
-            AddOptionTextBox("ConnectionProxyHost", T("主機:", "Host:"), 184, 300);
-            AddOptionNumeric("ConnectionProxyPort", T("通訊埠:", "Port:"), 226, 1, 65535);
-            AddOptionTextBox("ConnectionProxyUser", T("使用者名稱:", "User name:"), 268, 240);
-            AddOptionTextBox("ConnectionProxyPassword", T("密碼:", "Password:"), 310, 240, true);
+            }, 94, 160);
+            AddOptionTextBox("ConnectionProxyHost", T("主機:", "Host:"), 136, 300);
+            AddOptionNumeric("ConnectionProxyPort", T("通訊埠:", "Port:"), 178, 1, 65535);
+            AddOptionTextBox("ConnectionProxyUser", T("使用者名稱:", "User name:"), 220, 240);
+            AddOptionTextBox("ConnectionProxyPassword", T("密碼:", "Password:"), 262, 240, true);
 
             Button testButton = new Button
             {
                 Text = T("測試連線能力", "Test connectivity"),
-                Location = new Point(430, 348),
+                Location = new Point(430, 300),
                 Size = new Size(150, 30)
             };
             testButton.Click += async (s, e) =>
@@ -1275,7 +1276,7 @@ namespace mySQLPunk
             BoolValues["ConnectionValidateCertificates"] = true;
             BoolValues["ConnectionUseProxy"] = false;
             BoolValues["AdvancedEnableDiagnosticsLog"] = false;
-            BoolValues["AdvancedAllowMultipleInstances"] = false;
+            BoolValues["AdvancedAllowMultipleInstances"] = true; // 多開是長期以來的既有行為，預設不能拿掉
             BoolValues["AdvancedRegisterSqlFileOpen"] = false;
             BoolValues["AdvancedRegisterUrlProtocol"] = false;
 
