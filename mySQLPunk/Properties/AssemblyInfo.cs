@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 // 變更這些屬性的值即可修改組件的相關
 // 資訊。
 [assembly: AssemblyTitle("mySQLPunk")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyDescription("免費開源的多資料庫管理工具：MySQL / MariaDB、PostgreSQL、SQL Server、Oracle、SQLite")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("mySQLPunk")]
