@@ -16,6 +16,9 @@ namespace mySQLPunk
         [STAThread]
         static int Main(string[] args)
         {
+            // 全程式的 HTTPS（檢查更新、下載安裝檔、補註解字典）都需要 TLS 1.2+
+            AppUpdateService.EnsureModernTls();
+
             SqliteColumnCommentCliResult cliResult = SqliteColumnCommentCliService.TryRun(args);
             if (cliResult.Handled)
             {

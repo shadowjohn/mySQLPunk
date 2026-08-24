@@ -44,6 +44,30 @@ namespace mySQLPunk.lib
 
     public static class AppUpdateService
     {
+        static AppUpdateService()
+        {
+            EnsureModernTls();
+        }
+
+        /// <summary>
+        /// GitHub API 要求 TLS 1.2 以上；部分環境的 .NET Framework 預設交涉不起來，
+        /// 會直接丟「無法建立 SSL/TLS 的安全通道」。這裡明確啟用 TLS 1.2 與 1.3
+        ///（舊版 Windows 不支援 1.3 時忽略），檢查更新與下載才能通。
+        /// </summary>
+        public static void EnsureModernTls()
+        {
+            try
+            {
+                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+            }
+            catch (NotSupportedException) { }
+            try
+            {
+                ServicePointManager.SecurityProtocol |= (SecurityProtocolType)12288; // TLS 1.3
+            }
+            catch (NotSupportedException) { }
+        }
+
         public const string DefaultOwner = "shadowjohn";
         public const string DefaultRepository = "mySQLPunk";
 
