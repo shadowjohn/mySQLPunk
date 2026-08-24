@@ -2637,6 +2637,12 @@ namespace mySQLPunk
             db_tree.DragDrop -= DbTree_DragDrop;
             db_tree.DragEnter += DbTree_DragEnter;
             db_tree.DragDrop += DbTree_DragDrop;
+            db_tree.ItemDrag -= DbTree_ItemDrag;
+            db_tree.ItemDrag += DbTree_ItemDrag;
+            db_tree.DragOver -= DbTree_DragOver;
+            db_tree.DragOver += DbTree_DragOver;
+            db_tree.DragLeave -= DbTree_DragLeave;
+            db_tree.DragLeave += DbTree_DragLeave;
 
             tool_Connection.BringToFront();
 
@@ -2764,6 +2770,71 @@ namespace mySQLPunk
             return name + " (" + DateTime.Now.ToString("yyyyMMddHHmmss") + ")";
         }
 
+        // ── 連線節點拖曳進出群組 ────────────────────────────
+
+        private TreeNode _connectionDragHoverGroup;
+
+        private void DbTree_ItemDrag(object sender, ItemDragEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            TreeNode node = e.Item as TreeNode;
+            if (node == null || GetConnectionIndex(node) < 0) return; // 只有連線節點可以拖
+
+            db_tree.SelectedNode = node;
+            db_tree.DoDragDrop(node, DragDropEffects.Move);
+        }
+
+        private void DbTree_DragOver(object sender, DragEventArgs e)
+        {
+            TreeNode dragged = GetDraggedConnectionNode(e);
+            if (dragged == null) return; // 檔案拖入的效果由 DragEnter 決定
+
+            int index = GetConnectionIndex(dragged);
+            string targetGroup = GetDropTargetGroupName(e);
+            bool wouldChange = index >= 0 && GetConnectionGroupName(index) != targetGroup;
+            e.Effect = wouldChange ? DragDropEffects.Move : DragDropEffects.None;
+            HighlightDragTargetGroup(wouldChange ? FindConnectionGroupNode(targetGroup) : null);
+        }
+
+        private void DbTree_DragLeave(object sender, EventArgs e)
+        {
+            HighlightDragTargetGroup(null);
+        }
+
+        private TreeNode GetDraggedConnectionNode(DragEventArgs e)
+        {
+            if (e.Data == null || !e.Data.GetDataPresent(typeof(TreeNode))) return null;
+            TreeNode node = e.Data.GetData(typeof(TreeNode)) as TreeNode;
+            return node != null && GetConnectionIndex(node) >= 0 ? node : null;
+        }
+
+        private TreeNode FindConnectionGroupNode(string groupName)
+        {
+            if (string.IsNullOrWhiteSpace(groupName)) return null;
+            foreach (TreeNode node in db_tree.Nodes)
+            {
+                if (IsConnectionGroupNode(node) && node.Text == groupName) return node;
+            }
+            return null;
+        }
+
+        /// <summary>拖曳滑過群組節點時給選取色當回饋，離開或放下時還原。</summary>
+        private void HighlightDragTargetGroup(TreeNode groupNode)
+        {
+            if (ReferenceEquals(_connectionDragHoverGroup, groupNode)) return;
+            if (_connectionDragHoverGroup != null)
+            {
+                _connectionDragHoverGroup.BackColor = Color.Empty;
+                _connectionDragHoverGroup.ForeColor = Color.Empty;
+            }
+            _connectionDragHoverGroup = groupNode;
+            if (groupNode != null)
+            {
+                groupNode.BackColor = ThemeManager.SelectionColor;
+                groupNode.ForeColor = ThemeManager.SelectionTextColor;
+            }
+        }
+
         private string GetDropTargetGroupName(DragEventArgs e)
         {
             try
@@ -2787,6 +2858,12 @@ namespace mySQLPunk
         {
             try
             {
+                if (GetDraggedConnectionNode(e) != null)
+                {
+                    e.Effect = DragDropEffects.Move;
+                    return;
+                }
+
                 if (e.Data == null || !e.Data.GetDataPresent(DataFormats.FileDrop))
                 {
                     e.Effect = DragDropEffects.None;
@@ -2811,6 +2888,25 @@ namespace mySQLPunk
 
         private void DbTree_DragDrop(object sender, DragEventArgs e)
         {
+            TreeNode draggedConnection = GetDraggedConnectionNode(e);
+            if (draggedConnection != null)
+            {
+                HighlightDragTargetGroup(null);
+                int draggedIndex = GetConnectionIndex(draggedConnection);
+                string dropGroup = GetDropTargetGroupName(e);
+                if (draggedIndex >= 0 && GetConnectionGroupName(draggedIndex) != dropGroup)
+                {
+                    MoveConnectionToGroup(draggedIndex, dropGroup);
+                    TreeNode moved = FindConnectionNode(draggedIndex);
+                    if (moved != null)
+                    {
+                        db_tree.SelectedNode = moved;
+                        moved.EnsureVisible();
+                    }
+                }
+                return;
+            }
+
             if (e.Data == null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
             string[] paths = e.Data.GetData(DataFormats.FileDrop) as string[];
             if (paths == null || paths.Length == 0) return;
