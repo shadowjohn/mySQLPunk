@@ -1450,19 +1450,22 @@ namespace mySQLPunk
         }
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            MessageBox.Show(BuildAboutMessage(Application.ProductVersion), Localization.T("Menu.Help"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            using (AboutDialog dialog = new AboutDialog(Application.ProductVersion))
+            {
+                dialog.ShowDialog(this);
+            }
         }
 
         public static string BuildAboutMessage(string productVersion)
         {
             return
-                "mySQLPunk\r\n\r\n" +
+                Localization.T("About.ProductLine") + "\r\n\r\n" +
                 Localization.Format("About.Version", productVersion) + "\r\n" +
                 Localization.T("About.Platform") + "\r\n" +
                 Localization.T("About.Providers") + "\r\n\r\n" +
                 Localization.T("About.Authors") + "\r\n" +
                 "羽山秋人 ( https://3wa.tw )\r\n" +
-                "NickYCLin\r\n" +
+                "NickYCLin ( https://github.com/NickYCLin )\r\n" +
                 Localization.T("About.CodexCollaboration");
         }
 

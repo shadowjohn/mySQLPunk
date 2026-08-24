@@ -1,8 +1,21 @@
 # mySQLPunk
 
+> 資料庫管理 Punky / Universal Database Workbench
+
 mySQLPunk 是一套免費開源的 Windows 資料庫管理工具（WinForms），用同一個介面就能連多種資料庫：瀏覽資料表、下 SQL、改資料、設計資料表、搬 Table/View、產生常用的 DDL/DML。
 
 主要支援 MySQL / MariaDB、PostgreSQL、SQLite（含 SpatiaLite）、SQL Server；Oracle 也大致可用，但還有些限制。介面有繁體中文跟英文，連線密碼存在 Windows 認證管理員，不會以明文留在設定檔。
+
+<p align="center">
+  <img src="snapshot/mySQLPunk_avatar.png" alt="看板娘：Punky 崩琦" width="260">
+</p>
+<p align="center"><strong>看板娘：Punky 崩琦</strong>，現在也會在「說明 > 關於」裡眨眼打招呼。</p>
+
+作者：
+
+- 羽山秋人 ( https://3wa.tw )
+- [**NickYCLin**](https://github.com/NickYCLin) ([https://github.com/NickYCLin](https://github.com/NickYCLin))
+- Codex 協作
 
 ## 最新版本
 
@@ -112,7 +125,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | 連線與 metadata service | 可用 | 連線開啟、retry 判斷與 database metadata snapshot 已抽出 service，Form UI 保留 TreeView 呈現與錯誤提示。 |
 | 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、大型 SQL 停用編輯器輔助、資料表儲存自動交易、SQL 檔案位置、匯出位置、還原差異抽樣列數、結果網格字型與列高度、日期/時間與數字格式、工具提示顯示開關、診斷記錄、自動復原草稿、索引標籤開啟偏好、HTTP 代理與進階註冊設定。 |
 | 單一實例與檔案關聯 | 可用 | 「允許重複執行 mySQLPunk」選項關掉時強制單一實例（預設允許多開）；`.sql` 檔可以用「開啟方式」直接開進查詢分頁。 |
-| 介面與語系 | 可用 | 圖示全面向量繪製（引擎專屬色＋形狀徽章），支援淺色／深色主題，繁中／英文可即時切換。 |
+| 介面與語系 | 可用 | 圖示全面向量繪製（引擎專屬色＋形狀徽章），支援淺色／深色主題，繁中／英文可即時切換；「說明 > 關於」會播放去背的看板娘 Punky 崩琦眨眼動畫。 |
 | 應用程式更新 | 可用 | GitHub Release 只發布一個 setup EXE；說明選單可手動檢查，也可在啟動時背景檢查。程式會讀取 GitHub release asset 的 SHA-256 digest，下載後先校驗再啟動安裝程式；舊版 portable ZIP 更新仍保留相容處理。 |
 
 ## 已知限制
@@ -132,6 +145,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 - `mySQLPunk/Program.cs`: 程式進入點、單一實例與 .sql 檔案參數處理。
 - `mySQLPunk/Form1.cs`: 主視窗、左側連線樹、右鍵選單、metadata 瀏覽、資料庫級操作。
+- `mySQLPunk/AboutDialog.cs`: 自訂關於視窗，顯示版本、作者資訊與看板娘 Punky 崩琦眨眼動畫。
 - `mySQLPunk/QueryForm.cs`: SQL 編輯器、查詢結果、資料表資料瀏覽與儲存。
 - `mySQLPunk/TableDesignerForm.cs`: 資料表設計器、欄位/索引/SQL 預覽。
 - `mySQLPunk/RunnerProgressOverlay.cs`: 補註解遮罩進度視窗。
@@ -147,8 +161,11 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `mySQLPunk/lib/my_mssql.cs`: SQL Server provider。
 - `mySQLPunk/lib/my_oracle.cs`: Oracle provider。
 - `mySQLPunk/lib/DatabaseCopyService.cs`: Table/View 跨 provider 複製服務。
-- `mySQLPunk/image/progress_runner.gif`: 補註解進度視窗的 CC0 貓咪跑者動畫。
+- `mySQLPunk/image/progress_runner.gif`: 補註解進度視窗的 CC0 跑者動畫。
 - `mySQLPunk/image/progress_runner_LICENSE.txt`: 跑者動畫素材來源與授權資訊。
+- `mySQLPunk/image/mySQLPunk_avatar_wink.gif`: 關於視窗使用的透明背景看板娘 Punky 崩琦眨眼動畫。
+- `snapshot/mySQLPunk_avatar.png`: README 使用的看板娘 Punky 崩琦靜態圖。
+- `snapshot/mySQLPunk_avatar_wink.mp4`: 看板娘眨眼動畫原始素材，runtime 使用去背後的 GIF。
 - `mySQLPunk/lib/`: 其餘 service 層（匯出、備份、複製、更新檢查、憑證等）。
 - `tests/`: smoke test（`Run-SmokeTests.ps1`）與 Docker 實機整合測試。
 - `scripts/`: 打包（`package-release.ps1`）與發版說明（`New-ReleaseNotes.ps1`）腳本。

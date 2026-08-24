@@ -108,11 +108,14 @@ namespace mySQLPunk
             Add("Menu.Exit", "離開", "Exit");
             Add("Menu.About", "關於", "About");
             Add("Menu.CheckUpdates", "檢查更新...", "Check for Updates...");
+            Add("About.ProductLine", "資料庫管理 Punky", "Universal Database Workbench");
             Add("About.Version", "版本：{0}", "Version: {0}");
             Add("About.Platform", "平台：.NET Framework WinForms", "Platform: .NET Framework WinForms");
             Add("About.Providers", "支援連線：MySQL、PostgreSQL、SQLite、SQL Server、Oracle", "Supported connections: MySQL, PostgreSQL, SQLite, SQL Server, Oracle");
             Add("About.Authors", "作者：", "Authors:");
             Add("About.CodexCollaboration", "Codex 協作", "Codex collaboration");
+            Add("About.MascotTitle", "mySQLPunk", "mySQLPunk");
+            Add("About.MascotSubtitle", "看板娘：Punky 崩琦", "Mascot: Punky 崩琦");
 
             Add("View.NavigationPane", "導覽窗格", "Navigation Pane");
             Add("View.ShowNavigationPane", "顯示導覽窗格", "Show Navigation Pane");

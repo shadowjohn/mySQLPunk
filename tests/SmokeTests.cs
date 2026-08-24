@@ -7518,6 +7518,18 @@ public static class SmokeTests
     {
         MethodInfo method = typeof(Form1).GetMethod("BuildAboutMessage", BindingFlags.Public | BindingFlags.Static);
         Assert(method != null, "About message builder should be exposed for smoke tests.");
+        Type aboutDialogType = typeof(Form1).Assembly.GetType("mySQLPunk.AboutDialog");
+        Assert(aboutDialogType != null, "About dialog should be available for the animated mascot.");
+        MethodInfo avatarPathMethod = aboutDialogType.GetMethod("BuildAvatarAnimationPath", BindingFlags.Public | BindingFlags.Static);
+        Assert(avatarPathMethod != null, "About dialog should expose the avatar animation path builder for smoke tests.");
+        AssertEquals(
+            Path.Combine("C:\\app", "image", "mySQLPunk_avatar_wink.gif"),
+            (string)avatarPathMethod.Invoke(null, new object[] { "C:\\app" }),
+            "About dialog should load the packaged mascot animation from the image directory.");
+        using (Form aboutDialog = (Form)Activator.CreateInstance(aboutDialogType, new object[] { "1.0.0.0" }))
+        {
+            Assert(aboutDialog.ClientSize.Height >= 340, "About dialog should leave enough vertical room for authors and the close button.");
+        }
 
         Type programType = typeof(Form1).Assembly.GetType("mySQLPunk.Program");
         Assert(programType != null, "Program type should be available for smoke tests.");
@@ -7531,10 +7543,12 @@ public static class SmokeTests
         {
             Localization.SetLanguage(Localization.TraditionalChinese, false);
             string message = (string)method.Invoke(null, new object[] { "1.0.0.0" });
-            AssertContains(message, "mySQLPunk", "About message should include the product name.");
+            AssertContains(message, "資料庫管理 Punky", "About message should include the Traditional Chinese product line.");
             AssertContains(message, "版本：1.0.0.0", "About message should include the current version.");
             AssertContains(message, "支援連線：MySQL、PostgreSQL、SQLite、SQL Server、Oracle", "About message should include supported providers.");
-            AssertContains(message, "作者：\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin\r\nCodex 協作", "About message should list authors on separate lines.");
+            AssertContains(message, "作者：\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin ( https://github.com/NickYCLin )\r\nCodex 協作", "About message should list authors on separate lines.");
+            AssertEquals("mySQLPunk", Localization.T("About.MascotTitle"), "About dialog mascot title should localize Traditional Chinese.");
+            AssertEquals("看板娘：Punky 崩琦", Localization.T("About.MascotSubtitle"), "About dialog mascot subtitle should localize Traditional Chinese.");
 
             AssertEquals("未預期錯誤", (string)unexpectedTitleMethod.Invoke(null, new object[0]), "Unexpected error title should localize Traditional Chinese.");
             AssertContains((string)unexpectedUiMethod.Invoke(null, new object[] { new InvalidOperationException("boom") }), "執行時發生未預期的錯誤", "UI thread unexpected error should localize Traditional Chinese.");
@@ -7543,9 +7557,12 @@ public static class SmokeTests
 
             Localization.SetLanguage(Localization.English, false);
             string englishMessage = (string)method.Invoke(null, new object[] { "1.0.0.0" });
+            AssertContains(englishMessage, "Universal Database Workbench", "About message should support English product line.");
             AssertContains(englishMessage, "Version: 1.0.0.0", "About message should support English version text.");
             AssertContains(englishMessage, "Supported connections: MySQL, PostgreSQL, SQLite, SQL Server, Oracle", "About message should support English provider text.");
-            AssertContains(englishMessage, "Authors:\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin\r\nCodex collaboration", "About message should support English author label.");
+            AssertContains(englishMessage, "Authors:\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin ( https://github.com/NickYCLin )\r\nCodex collaboration", "About message should support English author label.");
+            AssertEquals("mySQLPunk", Localization.T("About.MascotTitle"), "About dialog mascot title should support English.");
+            AssertEquals("Mascot: Punky 崩琦", Localization.T("About.MascotSubtitle"), "About dialog mascot subtitle should support English.");
 
             AssertEquals("Unexpected Error", (string)unexpectedTitleMethod.Invoke(null, new object[0]), "Unexpected error title should support English.");
             AssertContains((string)unexpectedUiMethod.Invoke(null, new object[] { new InvalidOperationException("boom") }), "An unexpected error occurred while running", "UI thread unexpected error should support English.");
@@ -7590,9 +7607,11 @@ public static class SmokeTests
 
         string projectPath = Path.Combine(root, "mySQLPunk", "mySQLPunk.csproj");
         string project = File.ReadAllText(projectPath, Encoding.UTF8);
+        AssertContains(project, "AboutDialog.cs", "Project should compile the custom About dialog.");
         AssertContains(project, "binary\\sqlite3_ext\\sqlite3.exe", "Project should exclude the SQLite shell from release output.");
         AssertContains(project, "binary\\sqlite3_ext\\libreadline*.dll", "Project should exclude Readline from release output.");
         AssertContains(project, "image\\ASSET_NOTICES.md", "Project should copy image asset notices to release output.");
+        AssertContains(project, "image\\mySQLPunk_avatar_wink.gif", "Project should copy the mascot wink animation to release output.");
 
         string spatialiteScriptPath = Path.Combine(root, "tools", "spatialite", "Build-SpatiaLiteRuntime.ps1");
         string spatialiteScript = File.ReadAllText(spatialiteScriptPath, Encoding.UTF8);
@@ -7627,6 +7646,17 @@ public static class SmokeTests
         string assetNotices = File.ReadAllText(assetNoticesPath, Encoding.UTF8);
         AssertContains(assetNotices, "brand_mysql.png", "Image asset notices should list database brand icons.");
         AssertContains(assetNotices, "progress_runner.gif", "Image asset notices should list progress runner animation.");
+        AssertContains(assetNotices, "mySQLPunk_avatar_wink.gif", "Image asset notices should list the mascot animation.");
+        string avatarAnimationPath = Path.Combine(root, "mySQLPunk", "image", "mySQLPunk_avatar_wink.gif");
+        Assert(File.Exists(avatarAnimationPath), "Mascot animation should exist in the image assets.");
+        using (Image avatarAnimation = Image.FromFile(avatarAnimationPath))
+        {
+            Assert(avatarAnimation.Width == 220, "Mascot animation should keep the About dialog asset width.");
+            Assert(avatarAnimation.Height == 220, "Mascot animation should keep the About dialog asset height.");
+            Assert(
+                avatarAnimation.GetFrameCount(System.Drawing.Imaging.FrameDimension.Time) >= 80,
+                "Mascot animation should keep enough frames for smoother playback.");
+        }
 
         string runtimeNoticesPath = Path.Combine(root, "mySQLPunk", "binary", "sqlite3_ext", "THIRD_PARTY_RUNTIME_NOTICES.md");
         Assert(File.Exists(runtimeNoticesPath), "Native runtime notices should exist.");

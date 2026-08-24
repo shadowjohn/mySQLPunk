@@ -35,6 +35,18 @@ The animation is derived from OpenGameArt "Cat & Dog - Free Sprites" by pzUH,
 published under CC0 1.0 Universal. The local license/source note is distributed
 with the image.
 
+## Project Mascot: Punky 崩琦
+
+Files:
+
+- `mySQLPunk_avatar_wink.gif`
+
+This animation is derived from the mySQLPunk mascot artwork provided for this
+project. The repository keeps the source still image and MP4 under `snapshot/`;
+the release package ships the transparent GIF above. These files are treated as
+mySQLPunk project assets and are distributed under the same project license as
+mySQLPunk unless a future replacement adds a more specific notice here.
+
 ## Application UI Icons
 
 Files include the general toolbar, tree, tab, and database object icons under
