@@ -84,6 +84,7 @@ namespace mySQLPunk
             Add("Menu.GroupNamePrompt", "請輸入群組名稱：", "Enter a group name:");
             Add("Menu.MoveToGroup", "移至群組...", "Move to Group...");
             Add("Menu.RemoveFromGroup", "移出群組", "Remove from Group");
+            Add("Menu.NewSubGroup", "新增子群組", "New Subgroup");
             Add("Menu.RenameGroup", "重新命名群組...", "Rename Group...");
             Add("Menu.DeleteGroup", "刪除群組", "Delete Group");
             Add("Menu.GroupCreated", "群組已建立：{0}", "Group created: {0}");

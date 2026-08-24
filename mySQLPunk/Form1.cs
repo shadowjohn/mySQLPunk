@@ -135,6 +135,8 @@ namespace mySQLPunk
         private TreeNode[] _connectionTreeNodes = new TreeNode[0];
 
         private const string ConnectionGroupNodeTag = "__CONN_GROUP__";
+        // 群組名稱用「/」串成路徑就會巢狀顯示，例如「正式站/北區」
+        private const char ConnectionGroupSeparator = '/';
         private const string ConnectionExportSourceIdFileName = "connection-export-source-id.txt";
         private const string TrustedConnectionImportSourcesFileName = "trusted-connection-import-sources.json";
 
@@ -252,6 +254,70 @@ namespace mySQLPunk
                 default:
                     return isConnected ? 11 : 10;
             }
+        }
+
+        /// <summary>
+        /// 樹狀清單的引擎圖示：品牌色圓角 chip 加白色記號（字母或符號），
+        /// 16px 下比縮小的原廠 logo 清楚得多。未連線降彩度呈現。
+        /// </summary>
+        private static Bitmap TreeEngineChipIcon(Color engineColor, bool open, string letter)
+        {
+            Bitmap bitmap = new Bitmap(16, 16);
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                Color chip = DrawEngineChipBase(g, engineColor, open);
+
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                // UiKit.GetFont 是共用快取，不能 dispose
+                Font font = UiKit.GetFont(8f, FontStyle.Bold);
+                using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                using (var brush = new SolidBrush(open ? Color.White : Color.FromArgb(235, 255, 255, 255)))
+                {
+                    g.DrawString(letter, font, brush, new RectangleF(0f, 0.5f, 16f, 15f), format);
+                }
+            }
+            return bitmap;
+        }
+
+        /// <summary>SQLite 的白色羽毛 chip（S 已經被 SQL Server 用掉，羽毛也更像它的本尊）。</summary>
+        private static Bitmap TreeSqliteFeatherIcon(Color engineColor, bool open)
+        {
+            Bitmap bitmap = new Bitmap(16, 16);
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                Color chip = DrawEngineChipBase(g, engineColor, open);
+
+                using (var leaf = new System.Drawing.Drawing2D.GraphicsPath())
+                {
+                    leaf.AddBezier(4.6f, 11.6f, 4.4f, 6.6f, 7.4f, 3.9f, 12.2f, 3.3f);
+                    leaf.AddBezier(12.2f, 3.3f, 11.6f, 7.8f, 9.2f, 10.9f, 4.6f, 11.6f);
+                    leaf.CloseFigure();
+                    using (var brush = new SolidBrush(Color.White))
+                    {
+                        g.FillPath(brush, leaf);
+                    }
+                }
+                using (var vein = new Pen(chip, 1.1f))
+                {
+                    g.DrawLine(vein, 5.4f, 10.8f, 11.2f, 4.4f); // 羽軸
+                }
+                using (var quill = new Pen(Color.White, 1.4f))
+                {
+                    g.DrawLine(quill, 4.6f, 11.6f, 3.2f, 13f);  // 羽毛柄
+                }
+            }
+            return bitmap;
+        }
+
+        /// <summary>chip 底座：圓角色塊＋深一階的描邊；回傳實際使用的底色（未連線會降彩度）。</summary>
+        private static Color DrawEngineChipBase(Graphics g, Color engineColor, bool open)
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            Color chip = open ? engineColor : UiKit.Mix(engineColor, Color.FromArgb(168, 175, 184), 0.5f);
+            RectangleF bounds = new RectangleF(0.5f, 0.5f, 15f, 15f);
+            UiKit.FillRounded(g, bounds, 4.5f, chip);
+            UiKit.DrawRounded(g, bounds, 4.5f, UiKit.Mix(chip, Color.Black, 0.18f), 1f);
+            return chip;
         }
 
         private static void ApplyConnectionNodeIcon(TreeNode node, string dbKind, bool isConnected)
@@ -1201,16 +1267,16 @@ namespace mySQLPunk
                 ColorDepth = ColorDepth.Depth32Bit,
                 ImageSize = new Size(16, 16)
             };
-            myImageList.Images.Add(TreeConnectionGlyph(TreeMySqlColor, false, TreeEngineBadge.Circle)); //0 mysql 未連線
-            myImageList.Images.Add(TreeConnectionGlyph(TreeMySqlColor, true, TreeEngineBadge.Circle)); //1 mysql 已連線
-            myImageList.Images.Add(TreeConnectionGlyph(TreePostgresColor, false, TreeEngineBadge.Square)); //2
-            myImageList.Images.Add(TreeConnectionGlyph(TreePostgresColor, true, TreeEngineBadge.Square)); //3
-            myImageList.Images.Add(TreeConnectionGlyph(TreeOracleColor, false, TreeEngineBadge.Triangle)); //4
-            myImageList.Images.Add(TreeConnectionGlyph(TreeOracleColor, true, TreeEngineBadge.Triangle)); //5
-            myImageList.Images.Add(TreeConnectionGlyph(TreeSqliteColor, false, TreeEngineBadge.Diamond)); //6
-            myImageList.Images.Add(TreeConnectionGlyph(TreeSqliteColor, true, TreeEngineBadge.Diamond)); //7
-            myImageList.Images.Add(TreeConnectionGlyph(TreeSqlServerColor, false, TreeEngineBadge.Bar)); //8
-            myImageList.Images.Add(TreeConnectionGlyph(TreeSqlServerColor, true, TreeEngineBadge.Bar)); //9
+            myImageList.Images.Add(TreeEngineChipIcon(TreeMySqlColor, false, "M")); //0 mysql 未連線
+            myImageList.Images.Add(TreeEngineChipIcon(TreeMySqlColor, true, "M")); //1 mysql 已連線
+            myImageList.Images.Add(TreeEngineChipIcon(TreePostgresColor, false, "P")); //2
+            myImageList.Images.Add(TreeEngineChipIcon(TreePostgresColor, true, "P")); //3
+            myImageList.Images.Add(TreeEngineChipIcon(TreeOracleColor, false, "O")); //4
+            myImageList.Images.Add(TreeEngineChipIcon(TreeOracleColor, true, "O")); //5
+            myImageList.Images.Add(TreeSqliteFeatherIcon(TreeSqliteColor, false)); //6
+            myImageList.Images.Add(TreeSqliteFeatherIcon(TreeSqliteColor, true)); //7
+            myImageList.Images.Add(TreeEngineChipIcon(TreeSqlServerColor, false, "S")); //8
+            myImageList.Images.Add(TreeEngineChipIcon(TreeSqlServerColor, true, "S")); //9
             myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, false, TreeEngineBadge.None)); //10 資料庫節點
             myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, true, TreeEngineBadge.None)); //11
 
@@ -1249,20 +1315,11 @@ namespace mySQLPunk
                     .OrderBy(g => g)
                     .ToList();
 
-            // 建立群組節點
+            // 建立群組節點（路徑式名稱會展開成巢狀資料夾）
             var groupNodeMap = new Dictionary<string, TreeNode>(StringComparer.Ordinal);
             foreach (string grp in groupNames)
             {
-                TreeNode gNode = new TreeNode(grp)
-                {
-                    Tag = ConnectionGroupNodeTag,
-                    Name = ConnectionGroupNodeTag + ":" + grp,
-                    ImageIndex = 23,          // folder_closed
-                    SelectedImageIndex = 24,  // folder_open
-                    NodeFont = new Font(db_tree.Font, FontStyle.Bold)
-                };
-                db_tree.Nodes.Add(gNode);
-                groupNodeMap[grp] = gNode;
+                EnsureConnectionGroupNode(grp, groupNodeMap);
             }
 
             // 建立連線節點並記錄至 _connectionTreeNodes
@@ -2778,7 +2835,9 @@ namespace mySQLPunk
         {
             if (e.Button != MouseButtons.Left) return;
             TreeNode node = e.Item as TreeNode;
-            if (node == null || GetConnectionIndex(node) < 0) return; // 只有連線節點可以拖
+            if (node == null) return;
+            // 連線節點與群組節點都可以拖（群組拖曳 = 整個資料夾換位置）
+            if (GetConnectionIndex(node) < 0 && !IsConnectionGroupNode(node)) return;
 
             db_tree.SelectedNode = node;
             db_tree.DoDragDrop(node, DragDropEffects.Move);
@@ -2787,13 +2846,44 @@ namespace mySQLPunk
         private void DbTree_DragOver(object sender, DragEventArgs e)
         {
             TreeNode dragged = GetDraggedConnectionNode(e);
-            if (dragged == null) return; // 檔案拖入的效果由 DragEnter 決定
+            if (dragged != null)
+            {
+                int index = GetConnectionIndex(dragged);
+                string targetGroup = GetDropTargetGroupName(e);
+                bool wouldChange = index >= 0 && GetConnectionGroupName(index) != targetGroup;
+                e.Effect = wouldChange ? DragDropEffects.Move : DragDropEffects.None;
+                HighlightDragTargetGroup(wouldChange ? FindConnectionGroupNode(targetGroup) : null);
+                return;
+            }
 
-            int index = GetConnectionIndex(dragged);
-            string targetGroup = GetDropTargetGroupName(e);
-            bool wouldChange = index >= 0 && GetConnectionGroupName(index) != targetGroup;
-            e.Effect = wouldChange ? DragDropEffects.Move : DragDropEffects.None;
-            HighlightDragTargetGroup(wouldChange ? FindConnectionGroupNode(targetGroup) : null);
+            TreeNode draggedGroup = GetDraggedGroupNode(e);
+            if (draggedGroup != null)
+            {
+                string sourcePath = GetGroupNodePath(draggedGroup);
+                string targetParent = GetDropTargetGroupName(e);
+                bool valid = IsValidGroupReparent(sourcePath, targetParent);
+                e.Effect = valid ? DragDropEffects.Move : DragDropEffects.None;
+                HighlightDragTargetGroup(valid ? FindConnectionGroupNode(targetParent) : null);
+            }
+            // 檔案拖入的效果由 DragEnter 決定
+        }
+
+        private TreeNode GetDraggedGroupNode(DragEventArgs e)
+        {
+            if (e.Data == null || !e.Data.GetDataPresent(typeof(TreeNode))) return null;
+            TreeNode node = e.Data.GetData(typeof(TreeNode)) as TreeNode;
+            return IsConnectionGroupNode(node) ? node : null;
+        }
+
+        /// <summary>群組能不能搬到 targetParent 底下：不能搬給自己、自己的子孫，搬到原本的父層也沒意義。</summary>
+        private static bool IsValidGroupReparent(string sourcePath, string targetParent)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)) return false;
+            if (targetParent == sourcePath) return false;
+            if (targetParent.StartsWith(sourcePath + ConnectionGroupSeparator, StringComparison.Ordinal)) return false;
+            int separatorIndex = sourcePath.LastIndexOf(ConnectionGroupSeparator);
+            string currentParent = separatorIndex > 0 ? sourcePath.Substring(0, separatorIndex) : "";
+            return targetParent != currentParent;
         }
 
         private void DbTree_DragLeave(object sender, EventArgs e)
@@ -2811,9 +2901,10 @@ namespace mySQLPunk
         private TreeNode FindConnectionGroupNode(string groupName)
         {
             if (string.IsNullOrWhiteSpace(groupName)) return null;
-            foreach (TreeNode node in db_tree.Nodes)
+            TreeNode[] matches = db_tree.Nodes.Find(ConnectionGroupNodeTag + ":" + groupName, true);
+            foreach (TreeNode node in matches)
             {
-                if (IsConnectionGroupNode(node) && node.Text == groupName) return node;
+                if (IsConnectionGroupNode(node)) return node;
             }
             return null;
         }
@@ -2846,7 +2937,7 @@ namespace mySQLPunk
                 TreeNode node = db_tree.GetNodeAt(pt);
                 while (node != null)
                 {
-                    if (IsConnectionGroupNode(node)) return node.Text;
+                    if (IsConnectionGroupNode(node)) return GetGroupNodePath(node);
                     node = node.Parent;
                 }
             }
@@ -2858,7 +2949,7 @@ namespace mySQLPunk
         {
             try
             {
-                if (GetDraggedConnectionNode(e) != null)
+                if (GetDraggedConnectionNode(e) != null || GetDraggedGroupNode(e) != null)
                 {
                     e.Effect = DragDropEffects.Move;
                     return;
@@ -2888,6 +2979,22 @@ namespace mySQLPunk
 
         private void DbTree_DragDrop(object sender, DragEventArgs e)
         {
+            TreeNode draggedGroupNode = GetDraggedGroupNode(e);
+            if (draggedGroupNode != null)
+            {
+                HighlightDragTargetGroup(null);
+                string sourcePath = GetGroupNodePath(draggedGroupNode);
+                string targetParent = GetDropTargetGroupName(e);
+                if (IsValidGroupReparent(sourcePath, targetParent))
+                {
+                    int separatorIndex = sourcePath.LastIndexOf(ConnectionGroupSeparator);
+                    string label = separatorIndex >= 0 ? sourcePath.Substring(separatorIndex + 1) : sourcePath;
+                    string newPath = string.IsNullOrWhiteSpace(targetParent) ? label : targetParent + ConnectionGroupSeparator + label;
+                    if (newPath != sourcePath) ApplyConnectionGroupPathChange(sourcePath, newPath);
+                }
+                return;
+            }
+
             TreeNode draggedConnection = GetDraggedConnectionNode(e);
             if (draggedConnection != null)
             {
@@ -3808,6 +3915,39 @@ namespace mySQLPunk
             return node != null && (node.Tag as string) == ConnectionGroupNodeTag;
         }
 
+        /// <summary>依路徑建立群組節點鏈（「A/B」會先確保「A」存在再掛「B」），回傳最深的那個節點。</summary>
+        private TreeNode EnsureConnectionGroupNode(string path, Dictionary<string, TreeNode> map)
+        {
+            TreeNode existing;
+            if (map.TryGetValue(path, out existing)) return existing;
+
+            int separatorIndex = path.LastIndexOf(ConnectionGroupSeparator);
+            TreeNode parent = separatorIndex > 0 ? EnsureConnectionGroupNode(path.Substring(0, separatorIndex), map) : null;
+            string label = separatorIndex >= 0 ? path.Substring(separatorIndex + 1) : path;
+
+            TreeNode gNode = new TreeNode(label)
+            {
+                Tag = ConnectionGroupNodeTag,
+                Name = ConnectionGroupNodeTag + ":" + path,
+                ImageIndex = 23,          // folder_closed
+                SelectedImageIndex = 24,  // folder_open
+                NodeFont = new Font(db_tree.Font, FontStyle.Bold)
+            };
+            if (parent != null) parent.Nodes.Add(gNode);
+            else db_tree.Nodes.Add(gNode);
+            map[path] = gNode;
+            return gNode;
+        }
+
+        /// <summary>群組節點的完整路徑（節點文字只有最後一段，路徑存在 Name 裡）。</summary>
+        private static string GetGroupNodePath(TreeNode node)
+        {
+            if (!IsConnectionGroupNode(node)) return string.Empty;
+            string name = node.Name ?? string.Empty;
+            string prefix = ConnectionGroupNodeTag + ":";
+            return name.StartsWith(prefix, StringComparison.Ordinal) ? name.Substring(prefix.Length) : node.Text;
+        }
+
         private int GetConnectionIndex(TreeNode node)
         {
             if (node == null) return -1;
@@ -3841,13 +3981,16 @@ namespace mySQLPunk
             return result.OrderBy(g => g).ToList();
         }
 
-        private void ShowCreateGroupDialog()
+        private void ShowCreateGroupDialog(string parentPath = "")
         {
             string name = PromptForText(
                 Localization.T("Menu.NewGroup"),
                 Localization.T("Menu.GroupNamePrompt"),
                 "");
             if (string.IsNullOrWhiteSpace(name)) return;
+            name = name.Trim().Trim(ConnectionGroupSeparator);
+            if (string.IsNullOrWhiteSpace(name)) return;
+            if (!string.IsNullOrWhiteSpace(parentPath)) name = parentPath + ConnectionGroupSeparator + name;
 
             // 若已有連線屬於此群組，則只需要重繪
             if (GetAllGroupNames().Contains(name))
@@ -3948,12 +4091,14 @@ namespace mySQLPunk
                 MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
 
+            string deletePrefix = groupName + ConnectionGroupSeparator;
             foreach (var conn in myN.connections)
             {
-                if (GetConnectionValue(conn, "conn_group") == groupName)
+                string g = GetConnectionValue(conn, "conn_group");
+                if (g == groupName || g.StartsWith(deletePrefix, StringComparison.Ordinal))
                     conn["conn_group"] = "";
             }
-            myN.groups.Remove(groupName);
+            myN.groups.RemoveAll(g => g == groupName || g.StartsWith(deletePrefix, StringComparison.Ordinal));
             myN.setSettingINI();
             drawLists();
             UpdateMainStatus(Localization.Format("Menu.GroupDeleted", groupName));
@@ -3967,16 +4112,32 @@ namespace mySQLPunk
                 Localization.T("Menu.RenameGroup"),
                 Localization.T("Menu.GroupNamePrompt"),
                 oldName);
+            if (string.IsNullOrWhiteSpace(newName)) return;
+            newName = newName.Trim().Trim(ConnectionGroupSeparator);
             if (string.IsNullOrWhiteSpace(newName) || newName == oldName) return;
 
+            ApplyConnectionGroupPathChange(oldName, newName);
+        }
+
+        /// <summary>把群組（含所有子孫群組與其中連線）從 oldName 路徑改到 newName 路徑，存檔並重繪。</summary>
+        private void ApplyConnectionGroupPathChange(string oldName, string newName)
+        {
+            string oldPrefix = oldName + ConnectionGroupSeparator;
             foreach (var conn in myN.connections)
             {
-                if (GetConnectionValue(conn, "conn_group") == oldName)
-                    conn["conn_group"] = newName;
+                string g = GetConnectionValue(conn, "conn_group");
+                if (g == oldName) conn["conn_group"] = newName;
+                else if (g.StartsWith(oldPrefix, StringComparison.Ordinal))
+                    conn["conn_group"] = newName + g.Substring(oldName.Length);
             }
-            int idx = myN.groups.IndexOf(oldName);
-            if (idx >= 0) myN.groups[idx] = newName;
-            else if (!myN.groups.Contains(newName)) myN.groups.Add(newName);
+            for (int i = 0; i < myN.groups.Count; i++)
+            {
+                string g = myN.groups[i];
+                if (g == oldName) myN.groups[i] = newName;
+                else if (g.StartsWith(oldPrefix, StringComparison.Ordinal))
+                    myN.groups[i] = newName + g.Substring(oldName.Length);
+            }
+            if (!myN.groups.Contains(newName)) myN.groups.Add(newName);
             myN.setSettingINI();
             drawLists();
             UpdateMainStatus(Localization.Format("Menu.GroupRenamed", oldName, newName));
@@ -11008,7 +11169,12 @@ namespace mySQLPunk
             // 連線群組節點：顯示重新命名 / 刪除群組
             if (IsConnectionGroupNode(node))
             {
-                string groupName = node.Text;
+                string groupName = GetGroupNodePath(node);
+
+                ToolStripMenuItem newSubGroupItem = new ToolStripMenuItem(Localization.T("Menu.NewSubGroup"));
+                newSubGroupItem.Click += (s, ev) => ShowCreateGroupDialog(groupName);
+                menu.Items.Add(newSubGroupItem);
+
                 ToolStripMenuItem renameGroupItem = new ToolStripMenuItem(Localization.T("Menu.RenameGroup"));
                 renameGroupItem.Click += (s, ev) => RenameConnectionGroup(groupName);
                 menu.Items.Add(renameGroupItem);
