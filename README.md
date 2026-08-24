@@ -6,7 +6,7 @@ mySQLPunk 是一套免費開源的 Windows 資料庫管理工具（WinForms）�
 
 ## 最新版本
 
-目前發版版本：`v1.0.0.6`，最新版請看 [GitHub Releases](https://github.com/shadowjohn/mySQLPunk/releases)。
+目前發版版本：`v1.0.0.7`，最新版請看 [GitHub Releases](https://github.com/shadowjohn/mySQLPunk/releases)。
 
 目前 GitHub Release 會只提供一個 `mySQLPunk-<version>-win-x64-setup.exe`。安裝程式內含程式運作所需的 managed DLL、SQLite／SpatiaLite 原生 runtime、素材與第三方授權檔；使用者不需要另外下載 ZIP 或 manifest。完整變更請見 `CHANGELOG.md`。
 
@@ -34,7 +34,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 打包發布：
 
 ```powershell
-.\scripts\package-release.ps1 -Version 1.0.0.6
+.\scripts\package-release.ps1 -Version 1.0.0.7
 ```
 
 此腳本會使用 Release 組態建置專案，再以 Inno Setup 6 將 `mySQLPunk/bin/Release` 封裝成單一 `dist/mySQLPunk-<version>-win-x64-setup.exe`。安裝內容會帶入 `LICENSE`、`THIRD_PARTY_NOTICES.md` 與可取得的 NuGet license/notice 檔，並排除不屬於程式必要 runtime 的 `sqlite3.exe`、`libreadline8.dll`、`libtermcap-0.dll`。本機打包前需先安裝 Inno Setup 6，或用 `-InnoSetupCompiler` 指定 `ISCC.exe`。
@@ -43,9 +43,9 @@ GitHub Actions 自動發版：
 
 ```powershell
 # 1. 先確認 mySQLPunk/Properties/AssemblyInfo.cs 的 AssemblyVersion / AssemblyFileVersion
-#    已更新成要發布的版本，例如 1.0.0.6。
-git tag v1.0.0.6
-git push origin v1.0.0.6
+#    已更新成要發布的版本，例如 1.0.0.7。
+git tag v1.0.0.7
+git push origin v1.0.0.7
 ```
 
 推送 `v*` tag 後，`.github/workflows/release.yml` 會在 GitHub 的 Windows runner 上還原 NuGet、用 MSBuild 編譯 Release、安裝固定版本且先驗證 SHA-256 的 Inno Setup、執行 `scripts/package-release.ps1`，並建立或更新 GitHub Release。Release 會先清除同版本舊的 ZIP／manifest 等資產，再只上傳一個 setup EXE。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。Workflow 會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；`scripts/New-ReleaseNotes.ps1` 會從 `CHANGELOG.md` 的對應版本產生繁體中文 `🚀 新增功能`、`🛠️ 問題修正與優化`、`📦 下載與更新`、`🛡️ 完整性與驗證` 四段說明，並寫入安裝檔的實際 SHA-256 與 Authenticode 狀態。若缺少對應版本或必要段落，發佈會直接停止，不會建立內容不完整的 Release。
