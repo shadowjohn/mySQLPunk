@@ -33,57 +33,35 @@ namespace mySQLPunk.template
         private void InitializeUi()
         {
             Text = Localization.T("Common.SqlServerConnection");
-            StartPosition = FormStartPosition.CenterParent;
-            Size = new Size(560, 360);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
 
-            int labelX = 24;
-            int inputX = 145;
-            int y = 24;
+            Label lblName = new Label { Text = Localization.T("Common.ConnectionName") };
+            txtName = new TextBox();
+            Label lblHost = new Label { Text = Localization.T("Common.Host") };
+            txtHost = new TextBox { Text = "localhost" };
+            Label lblPort = new Label { Text = Localization.T("Common.Port") };
+            txtPort = new TextBox { Text = "1433" };
+            Label lblDatabase = new Label { Text = Localization.T("Common.InitialDatabase") };
+            txtDatabase = new TextBox { Text = "master" };
+            chkWindowsAuth = new CheckBox { Text = Localization.T("Common.WindowsAuth") };
+            Label lblUser = new Label { Text = Localization.T("Common.Username") };
+            txtUser = new TextBox();
+            Label lblPassword = new Label { Text = Localization.T("Common.Password") };
+            txtPassword = new TextBox { UseSystemPasswordChar = true };
+            btnTest = new Button { Text = Localization.T("Common.TestConnection") };
+            btnOk = new Button { Text = Localization.T("Common.OK") };
+            btnCancel = new Button { Text = Localization.T("Common.Cancel") };
 
-            Controls.Add(new Label { Text = Localization.T("Common.ConnectionName"), Location = new Point(labelX, y + 4), AutoSize = true });
-            txtName = new TextBox { Location = new Point(inputX, y), Width = 360 };
-            Controls.Add(txtName);
+            ConnectionDialogUi.Shell shell = ConnectionDialogUi.Build(this, "SQL Server", ConnectionDialogUi.SqlServerColor);
+            ConnectionDialogUi.AddField(shell, lblName, txtName, ConnectionDialogUi.FieldWide);
+            ConnectionDialogUi.AddField(shell, lblHost, txtHost, ConnectionDialogUi.FieldWide);
+            ConnectionDialogUi.AddField(shell, lblPort, txtPort, ConnectionDialogUi.FieldNarrow);
+            ConnectionDialogUi.AddField(shell, lblDatabase, txtDatabase, ConnectionDialogUi.FieldMedium);
+            ConnectionDialogUi.AddFieldOnly(shell, chkWindowsAuth);
+            ConnectionDialogUi.AddField(shell, lblUser, txtUser, ConnectionDialogUi.FieldMedium);
+            ConnectionDialogUi.AddField(shell, lblPassword, txtPassword, ConnectionDialogUi.FieldMedium);
+            ConnectionDialogUi.Finish(this, shell, btnTest, btnOk, btnCancel);
 
-            y += 40;
-            Controls.Add(new Label { Text = Localization.T("Common.Host"), Location = new Point(labelX, y + 4), AutoSize = true });
-            txtHost = new TextBox { Location = new Point(inputX, y), Width = 360, Text = "localhost" };
-            Controls.Add(txtHost);
-
-            y += 40;
-            Controls.Add(new Label { Text = Localization.T("Common.Port"), Location = new Point(labelX, y + 4), AutoSize = true });
-            txtPort = new TextBox { Location = new Point(inputX, y), Width = 120, Text = "1433" };
-            Controls.Add(txtPort);
-
-            y += 40;
-            Controls.Add(new Label { Text = Localization.T("Common.InitialDatabase"), Location = new Point(labelX, y + 4), AutoSize = true });
-            txtDatabase = new TextBox { Location = new Point(inputX, y), Width = 160, Text = "master" };
-            Controls.Add(txtDatabase);
-
-            y += 40;
-            chkWindowsAuth = new CheckBox { Text = Localization.T("Common.WindowsAuth"), Location = new Point(inputX, y), Width = 260 };
             chkWindowsAuth.CheckedChanged += (s, e) => ToggleAuthFields();
-            Controls.Add(chkWindowsAuth);
-
-            y += 40;
-            Controls.Add(new Label { Text = Localization.T("Common.Username"), Location = new Point(labelX, y + 4), AutoSize = true });
-            txtUser = new TextBox { Location = new Point(inputX, y), Width = 240 };
-            Controls.Add(txtUser);
-
-            y += 40;
-            Controls.Add(new Label { Text = Localization.T("Common.Password"), Location = new Point(labelX, y + 4), AutoSize = true });
-            txtPassword = new TextBox { Location = new Point(inputX, y), Width = 240, UseSystemPasswordChar = true };
-            Controls.Add(txtPassword);
-
-            btnTest = new Button { Text = Localization.T("Common.TestConnection"), Location = new Point(24, 284), Size = new Size(145, 34) };
-            btnOk = new Button { Text = Localization.T("Common.OK"), Location = new Point(356, 284), Size = new Size(75, 34) };
-            btnCancel = new Button { Text = Localization.T("Common.Cancel"), Location = new Point(440, 284), Size = new Size(75, 34) };
-            Controls.Add(btnTest);
-            Controls.Add(btnOk);
-            Controls.Add(btnCancel);
-
             Load += sqlserver_add_edit_Load;
             btnTest.Click += btnTest_Click;
             btnOk.Click += btnOk_Click;

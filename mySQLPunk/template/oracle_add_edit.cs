@@ -27,7 +27,6 @@ namespace mySQLPunk.template
         private void ApplyLanguage()
         {
             Text = "Oracle";
-            tabPage1.Text = Localization.T("Common.General");
             label1.Text = Localization.T("Common.ConnectionNameColon");
             label2.Text = Localization.T("Common.ConnectionType") + ":";
             label3.Text = Localization.T("Common.HostNameColon");

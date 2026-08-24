@@ -33,42 +33,38 @@ namespace mySQLPunk.template
         private void InitializeUi()
         {
             Text = Localization.T("Common.SQLiteConnection");
-            StartPosition = FormStartPosition.CenterParent;
-            Size = new Size(620, 250);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
 
-            Label lblName = new Label { Text = Localization.T("Common.ConnectionName"), Location = new Point(20, 24), AutoSize = true };
-            txtName = new TextBox { Location = new Point(120, 20), Width = 450 };
+            Label lblName = new Label { Text = Localization.T("Common.ConnectionName") };
+            txtName = new TextBox();
+            Label lblPath = new Label { Text = Localization.T("Common.SQLiteFile") };
+            txtPath = new TextBox();
+            btnBrowse = new Button { Text = Localization.T("Common.Browse"), AutoSize = true, MinimumSize = new Size(80, 30) };
+            btnCreateNew = new Button { Text = Localization.T("Common.CreateNew"), AutoSize = true, MinimumSize = new Size(110, 30) };
+            chkInitGeospatial = new CheckBox { Text = Localization.T("Common.InitGeospatial"), Checked = true };
+            btnTest = new Button { Text = Localization.T("Common.TestConnection") };
+            btnOk = new Button { Text = Localization.T("Common.OK") };
+            btnCancel = new Button { Text = Localization.T("Common.Cancel") };
 
-            Label lblPath = new Label { Text = Localization.T("Common.SQLiteFile"), Location = new Point(20, 64), AutoSize = true };
-            txtPath = new TextBox { Location = new Point(120, 60), Width = 330 };
-            btnBrowse = new Button { Text = Localization.T("Common.Browse"), Location = new Point(460, 58), Size = new Size(80, 28) };
-            btnCreateNew = new Button { Text = Localization.T("Common.CreateNew"), Location = new Point(120, 96), Size = new Size(120, 30) };
+            ConnectionDialogUi.Shell shell = ConnectionDialogUi.Build(this, "SQLite", ConnectionDialogUi.SqliteColor);
+            ConnectionDialogUi.AddField(shell, lblName, txtName, ConnectionDialogUi.FieldWide);
 
-            chkInitGeospatial = new CheckBox
+            // 檔案列：路徑輸入 + 瀏覽按鈕
+            FlowLayoutPanel pathRow = new FlowLayoutPanel
             {
-                Text = Localization.T("Common.InitGeospatial"),
-                Location = new Point(120, 136),
-                Width = 360,
-                Checked = true
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                WrapContents = false
             };
-
-            btnTest = new Button { Text = Localization.T("Common.TestConnection"), Location = new Point(20, 170), Size = new Size(150, 34) };
-            btnOk = new Button { Text = Localization.T("Common.OK"), Location = new Point(410, 170), Size = new Size(80, 34) };
-            btnCancel = new Button { Text = Localization.T("Common.Cancel"), Location = new Point(500, 170), Size = new Size(80, 34) };
-
-            Controls.Add(lblName);
-            Controls.Add(txtName);
-            Controls.Add(lblPath);
-            Controls.Add(txtPath);
-            Controls.Add(btnBrowse);
-            Controls.Add(btnCreateNew);
-            Controls.Add(chkInitGeospatial);
-            Controls.Add(btnTest);
-            Controls.Add(btnOk);
-            Controls.Add(btnCancel);
+            txtPath.Width = ConnectionDialogUi.FieldWide - 88;
+            txtPath.Margin = new Padding(0, 4, 8, 4);
+            txtPath.Anchor = AnchorStyles.Left;
+            btnBrowse.Margin = new Padding(0, 2, 0, 2);
+            pathRow.Controls.Add(txtPath);
+            pathRow.Controls.Add(btnBrowse);
+            ConnectionDialogUi.AddField(shell, lblPath, pathRow, 0);
+            ConnectionDialogUi.AddFieldOnly(shell, btnCreateNew);
+            ConnectionDialogUi.AddFieldOnly(shell, chkInitGeospatial);
+            ConnectionDialogUi.Finish(this, shell, btnTest, btnOk, btnCancel);
 
             Load += sqlite_add_edit_Load;
             btnBrowse.Click += btnBrowse_Click;

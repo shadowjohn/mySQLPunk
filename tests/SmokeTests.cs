@@ -7014,7 +7014,7 @@ public static class SmokeTests
             AssertEquals("SQLite 初始化失敗：未知錯誤", ConnectionDialogMessageService.BuildInitializationFailedMessage("SQLite", new Exception("   ")), "Blank SQLite initialization errors should localize Traditional Chinese unknown errors.");
             using (mySQLPunk.template.mysql_add_edit mysql = new mySQLPunk.template.mysql_add_edit())
             {
-                AssertEquals("一般", GetPrivateField<TabPage>(mysql, "tabPage1").Text, "MySQL connection editor tab should localize Traditional Chinese.");
+                AssertEquals("MySQL", mysql.Text, "MySQL connection editor title should use canonical provider casing.");
                 AssertEquals("連線名稱:", GetPrivateField<Label>(mysql, "label1").Text, "MySQL connection editor name label should localize Traditional Chinese.");
                 AssertEquals("主機名稱 / IP 位址:", GetPrivateField<Label>(mysql, "label2").Text, "MySQL connection editor host label should localize Traditional Chinese.");
                 AssertEquals("測試連線", GetPrivateField<Button>(mysql, "mysql_add_edit_test_connection").Text, "MySQL connection editor test button should localize Traditional Chinese.");
@@ -7051,7 +7051,7 @@ public static class SmokeTests
             AssertEquals("SQL Server connection failed: login denied", ConnectionDialogMessageService.BuildTestFailedMessage("SQL Server", new InvalidOperationException(" login denied ")), "Connection test errors should preserve explicit English reasons.");
             using (mySQLPunk.template.mysql_add_edit mysql = new mySQLPunk.template.mysql_add_edit())
             {
-                AssertEquals("General", GetPrivateField<TabPage>(mysql, "tabPage1").Text, "MySQL connection editor tab should support English.");
+                AssertEquals("MySQL", mysql.Text, "MySQL connection editor title should stay canonical in English.");
                 AssertEquals("Connection Name:", GetPrivateField<Label>(mysql, "label1").Text, "MySQL connection editor name label should support English.");
                 AssertEquals("Host Name/IP Address:", GetPrivateField<Label>(mysql, "label2").Text, "MySQL connection editor host label should support English.");
                 AssertEquals("Test Connection", GetPrivateField<Button>(mysql, "mysql_add_edit_test_connection").Text, "MySQL connection editor test button should support English.");

@@ -26,7 +26,6 @@ namespace mySQLPunk.template
         private void ApplyLanguage()
         {
             Text = "PostgreSQL";
-            tabPage1.Text = Localization.T("Common.General");
             label1.Text = Localization.T("Common.ConnectionNameColon");
             label2.Text = Localization.T("Common.HostNameColon");
             label3.Text = Localization.T("Common.PortColon");

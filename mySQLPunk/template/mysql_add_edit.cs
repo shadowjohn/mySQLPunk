@@ -16,30 +16,22 @@ namespace mySQLPunk.template
     {
         private Label initialDatabaseLabel;
         private TextBox mysql_initial_database;
+        // 這兩個控制項的實體在 Designer 的 InitializeComponent 建立
 
         public mysql_add_edit()
         {
             InitializeComponent();
-            InitializeInitialDatabaseField();
             Form1.ApplyModernTheme(this);
             Localization.ApplyTo(this);
             ApplyLanguage();
         }
 
-        private void InitializeInitialDatabaseField()
-        {
-            initialDatabaseLabel = new Label { AutoSize = true, Location = new System.Drawing.Point(9, 208) };
-            mysql_initial_database = new TextBox { Location = new System.Drawing.Point(185, 205), Size = new System.Drawing.Size(167, 27), TabIndex = 10 };
-            tabPage1.Controls.Add(initialDatabaseLabel);
-            tabPage1.Controls.Add(mysql_initial_database);
-        }
         public Form1 F1 { get; set; }
         public int editIndex { get; set; } = -1;
 
         private void ApplyLanguage()
         {
             Text = "MySQL";
-            tabPage1.Text = Localization.T("Common.General");
             label1.Text = Localization.T("Common.ConnectionNameColon");
             label2.Text = Localization.T("Common.HostNameColon");
             label3.Text = Localization.T("Common.PortColon");
