@@ -55,11 +55,14 @@ namespace mySQLPunk.template
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 WrapContents = false
             };
-            txtPath.Width = ConnectionDialogUi.FieldWide - 88;
-            txtPath.Margin = new Padding(0, 4, 8, 4);
-            txtPath.Anchor = AnchorStyles.Left;
+            UiInputShell pathShell = new UiInputShell(txtPath)
+            {
+                Width = ConnectionDialogUi.FieldWide - 88,
+                Margin = new Padding(0, 4, 8, 4),
+                Anchor = AnchorStyles.Left
+            };
             btnBrowse.Margin = new Padding(0, 2, 0, 2);
-            pathRow.Controls.Add(txtPath);
+            pathRow.Controls.Add(pathShell);
             pathRow.Controls.Add(btnBrowse);
             ConnectionDialogUi.AddField(shell, lblPath, pathRow, 0);
             ConnectionDialogUi.AddFieldOnly(shell, btnCreateNew);

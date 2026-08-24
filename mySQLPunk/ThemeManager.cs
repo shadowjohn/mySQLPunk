@@ -438,6 +438,16 @@ namespace mySQLPunk
             TextBoxBase textBox = control as TextBoxBase;
             if (textBox != null)
             {
+                // UiInputShell 內的文字框：外殼負責邊框與底色，這裡別把 BorderStyle 改回方框
+                UiInputShell hostShell = textBox.Parent as UiInputShell;
+                if (hostShell != null)
+                {
+                    hostShell.SyncColors();
+                    hostShell.Invalidate();
+                    WatchInteractiveState(textBox);
+                    return;
+                }
+
                 textBox.BackColor = textBox.ReadOnly ? DisabledBackColor : TextBoxBackColor;
                 textBox.ForeColor = textBox.Enabled ? TextColor : DisabledTextColor;
                 textBox.BorderStyle = BorderStyle.FixedSingle;
@@ -504,6 +514,14 @@ namespace mySQLPunk
             {
                 segmented.BackColor = SurfaceColor;
                 segmented.ForeColor = TextColor;
+                return;
+            }
+
+            UiInputShell inputShell = control as UiInputShell;
+            if (inputShell != null)
+            {
+                inputShell.SyncColors();
+                inputShell.Invalidate();
                 return;
             }
 

@@ -159,6 +159,9 @@
     </Compile>
     <Compile Include="AutoCommentMode.cs" />
     <Compile Include="GeometryWktConverter.cs" />
+    <Compile Include="UpdatePromptDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="RunnerProgressOverlay.cs">
       <SubType>Form</SubType>
     </Compile>

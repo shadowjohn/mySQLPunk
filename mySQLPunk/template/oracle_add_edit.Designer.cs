@@ -213,21 +213,23 @@ namespace mySQLPunk.template
             label.AutoSize = true;
             label.Anchor = System.Windows.Forms.AnchorStyles.Left;
             label.Margin = new System.Windows.Forms.Padding(0, 0, 12, 0);
-            ConnectionDialogUi.StyleField(field, width);
+            System.Windows.Forms.Control cell = ConnectionDialogUi.WrapInput(field);
+            ConnectionDialogUi.StyleField(cell, width);
             int row = table.RowCount;
             table.RowCount = row + 1;
             table.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
             table.Controls.Add(label, 0, row);
-            table.Controls.Add(field, 1, row);
+            table.Controls.Add(cell, 1, row);
         }
 
         private static void AddPanelControl(System.Windows.Forms.TableLayoutPanel table, System.Windows.Forms.Control field, int width)
         {
-            ConnectionDialogUi.StyleField(field, width);
+            System.Windows.Forms.Control cell = ConnectionDialogUi.WrapInput(field);
+            ConnectionDialogUi.StyleField(cell, width);
             int row = table.RowCount;
             table.RowCount = row + 1;
             table.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            table.Controls.Add(field, 1, row);
+            table.Controls.Add(cell, 1, row);
         }
 
         #endregion

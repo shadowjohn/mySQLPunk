@@ -644,6 +644,12 @@ namespace mySQLPunk
             Add("Connection.CliTemporaryPasswordPrompt", "此連線未儲存密碼。\n請輸入本次命令列介面要使用的密碼；留空會改由命令列工具自行提示。", "This connection does not have a saved password.\nEnter the password to use for this CLI session; leave blank to let the CLI prompt for it.");
             Add("Connection.CliTemporaryPasswordCancelled", "已取消開啟命令列介面。", "Opening command line interface cancelled.");
             Add("Update.Checking", "正在檢查更新...", "Checking for updates...");
+            Add("Update.PromptTitle", "發現新版本", "Update available");
+            Add("Update.PromptVersions", "最新版本 {0}（目前版本 {1}）", "Latest version {0} (current version {1})");
+            Add("Update.PromptNoNotes", "（此版本沒有提供更新說明）", "(No release notes provided.)");
+            Add("Update.UpdateNow", "立即更新", "Update now");
+            Add("Update.Later", "稍後再說", "Later");
+            Add("Update.ViewReleasePage", "查看發行頁", "View release page");
             Add("Update.Available", "發現新版本 {0}。\n目前版本：{1}\n\n是否下載更新？", "Version {0} is available.\nCurrent version: {1}\n\nDownload the update?");
             Add("Update.OpenReleasePage", "找不到可直接下載的更新檔。\n是否開啟下載頁？", "No direct update package was found.\nOpen the release page?");
             Add("Update.Downloading", "正在下載更新：{0}", "Downloading update: {0}");

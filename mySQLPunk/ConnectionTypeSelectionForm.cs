@@ -204,7 +204,6 @@ namespace mySQLPunk
             nextButton = new Button
             {
                 Text = Localization.T("Common.Next"),
-                DialogResult = DialogResult.OK,
                 Size = new Size(96, UiMetrics.ControlHeight),
                 Margin = new Padding(UiMetrics.Space2, 0, 0, 0),
                 Enabled = false
@@ -370,22 +369,37 @@ namespace mySQLPunk
 
             embeddedConnectionForm = form;
             Text = form.Text;
-            MinimumSize = new Size(Math.Max(MinimumSize.Width, form.Width + 40), Math.Max(MinimumSize.Height, form.Height + 70));
-            Size = new Size(Math.Max(Width, form.Width + 40), Math.Max(Height, form.Height + 70));
+
+            form.TopLevel = false;
+            form.FormBorderStyle = FormBorderStyle.None;
+            form.StartPosition = FormStartPosition.Manual;
+            Size preferred = form.AutoSize ? form.PreferredSize : form.Size;
+            if (preferred.Width < 200 || preferred.Height < 150) preferred = form.Size;
+            form.AutoSize = false;
+            form.Dock = DockStyle.Fill;
 
             selectionPage.Visible = false;
             connectionFormPage.Controls.Clear();
             connectionFormPage.Visible = true;
             connectionFormPage.BringToFront();
 
-            form.TopLevel = false;
-            form.FormBorderStyle = FormBorderStyle.None;
-            form.Dock = DockStyle.Fill;
-            form.StartPosition = FormStartPosition.Manual;
+            // 換頁時把視窗縮放成編輯頁的大小、維持中心點不動，看起來才像同一個精靈換頁，
+            // 而不是關掉一個視窗又冒出另一個
+            Point center = new Point(Left + Width / 2, Top + Height / 2);
+            Size target = new Size(
+                preferred.Width + Width - ClientSize.Width,
+                preferred.Height + Height - ClientSize.Height);
+            MinimumSize = Size.Empty;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            Size = target;
+            Location = new Point(Math.Max(0, center.X - Width / 2), Math.Max(0, center.Y - Height / 2));
+
             form.FormClosed += EmbeddedConnectionForm_FormClosed;
             connectionFormPage.Controls.Add(form);
             form.Show();
             ActiveControl = form;
+            AcceptButton = form.AcceptButton;
+            CancelButton = form.CancelButton;
         }
 
         private void EmbeddedConnectionForm_FormClosed(object sender, FormClosedEventArgs e)

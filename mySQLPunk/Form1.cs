@@ -1421,12 +1421,12 @@ namespace mySQLPunk
                 if (result.UpdateAvailable)
                 {
                     string message = Localization.Format("Update.Available", result.LatestVersion, result.CurrentVersion);
-                    DialogResult answer = MessageBox.Show(
-                        message,
-                        Localization.T("Menu.CheckUpdates"),
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information);
-                    if (answer == DialogResult.Yes)
+                    DialogResult answer;
+                    using (UpdatePromptDialog prompt = new UpdatePromptDialog(result))
+                    {
+                        answer = prompt.ShowDialog(this);
+                    }
+                    if (answer == DialogResult.OK)
                     {
                         if (!string.IsNullOrWhiteSpace(result.InstallerDownloadUrl))
                         {

@@ -129,11 +129,19 @@ namespace mySQLPunk.template
             label.AutoSize = true;
             label.Anchor = AnchorStyles.Left;
             label.Margin = new Padding(0, 0, 12, 0);
-            StyleField(field, width);
+            Control cell = WrapInput(field);
+            StyleField(cell, width);
 
             int row = NextRow(shell.Fields);
             shell.Fields.Controls.Add(label, 0, row);
-            shell.Fields.Controls.Add(field, 1, row);
+            shell.Fields.Controls.Add(cell, 1, row);
+        }
+
+        /// <summary>文字框包進圓角外殼；其它控制項原樣使用。</summary>
+        public static Control WrapInput(Control field)
+        {
+            TextBoxBase textBox = field as TextBoxBase;
+            return textBox != null ? new UiInputShell(textBox) : field;
         }
 
         /// <summary>加一列只有輸入側的控制項（核取方塊、次要按鈕這類）。</summary>

@@ -436,4 +436,55 @@ namespace mySQLPunk
             }
         }
     }
+
+    /// <summary>
+    /// 圓角輸入框外殼：WinForms 的 TextBox 畫不出圓角與內距，
+    /// 把 BorderStyle.None 的 TextBox 包進來自繪邊框，聚焦時邊框亮主色。
+    /// ThemeManager 會透過 SyncColors 套用主題色。
+    /// </summary>
+    public class UiInputShell : Panel
+    {
+        private readonly TextBoxBase _inner;
+
+        public UiInputShell(TextBoxBase inner)
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            _inner = inner;
+            inner.BorderStyle = BorderStyle.None;
+            Height = UiMetrics.ControlHeight;
+            int vertical = Math.Max(0, (Height - inner.PreferredHeight) / 2);
+            Padding = new Padding(10, vertical, 10, vertical);
+            inner.Dock = DockStyle.Fill;
+            Controls.Add(inner);
+            SyncColors();
+
+            inner.GotFocus += (s, e) => Invalidate();
+            inner.LostFocus += (s, e) => Invalidate();
+            inner.EnabledChanged += (s, e) => { SyncColors(); Invalidate(); };
+            inner.ReadOnlyChanged += (s, e) => { SyncColors(); Invalidate(); };
+            Click += (s, e) => inner.Focus();
+            Cursor = Cursors.IBeam;
+        }
+
+        public TextBoxBase Inner { get { return _inner; } }
+
+        public void SyncColors()
+        {
+            Color back = !_inner.Enabled || _inner.ReadOnly ? ThemeManager.DisabledBackColor : ThemeManager.TextBoxBackColor;
+            BackColor = back;
+            _inner.BackColor = back;
+            _inner.ForeColor = _inner.Enabled ? ThemeManager.TextColor : ThemeManager.DisabledTextColor;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(Parent != null ? Parent.BackColor : BackColor);
+            RectangleF bounds = new RectangleF(0.5f, 0.5f, Width - 1f, Height - 1f);
+            UiKit.FillRounded(g, bounds, UiMetrics.RadiusMd, BackColor);
+            bool focusRing = _inner.Focused && _inner.Enabled && !_inner.ReadOnly;
+            Color border = focusRing ? ThemeManager.AccentColor : ThemeManager.BorderStrongColor;
+            UiKit.DrawRounded(g, bounds, UiMetrics.RadiusMd, border, focusRing ? 1.6f : 1f);
+        }
+    }
 }
