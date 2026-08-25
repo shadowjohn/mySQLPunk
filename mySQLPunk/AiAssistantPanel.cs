@@ -155,13 +155,125 @@ namespace mySQLPunk
             };
             AppendSystemLine(Localization.T("Ai.Welcome"));
 
+            // ── 供應商／模型快速切換列 ──
+            BuildPickerRow();
+
             Controls.Add(chatBox);
             Controls.Add(suggestionPanel);
             Controls.Add(actionPanel);
             Controls.Add(inputPanel);
+            Controls.Add(pickerPanel);
             Controls.Add(headerPanel);
 
             ApplyThemeColors();
+        }
+
+        private Panel pickerPanel;
+        private ComboBox providerCombo;
+        private ComboBox modelCombo;
+        private Button refreshModelsButton;
+        private bool _suppressPickerEvents;
+
+        /// <summary>面板頂端的供應商／模型快速切換：使用者訂閱哪家、本機跑什麼，這裡直接換。</summary>
+        private void BuildPickerRow()
+        {
+            pickerPanel = new Panel { Dock = DockStyle.Top, Height = 34, Padding = new Padding(10, 4, 10, 4) };
+            providerCombo = new ComboBox
+            {
+                Dock = DockStyle.Left,
+                Width = 140,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            foreach (AiProviderPreset preset in AiChatService.Presets) providerCombo.Items.Add(preset.DisplayName);
+
+            refreshModelsButton = new Button { Dock = DockStyle.Right, Width = 30, Text = "↻", TabStop = false };
+            modelCombo = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDown
+            };
+
+            Panel modelHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6, 0, 4, 0) };
+            modelHost.Controls.Add(modelCombo);
+            pickerPanel.Controls.Add(modelHost);
+            pickerPanel.Controls.Add(refreshModelsButton);
+            pickerPanel.Controls.Add(providerCombo);
+
+            SyncPickerFromSettings();
+
+            providerCombo.SelectedIndexChanged += (s, e) =>
+            {
+                if (_suppressPickerEvents) return;
+                int index = providerCombo.SelectedIndex;
+                if (index < 0 || index >= AiChatService.Presets.Length) return;
+                AiProviderPreset preset = AiChatService.Presets[index];
+                ApplicationOptionSettings.SetString("AiProvider", preset.Id);
+                ApplicationOptionSettings.SetString("AiEndpoint", "");
+                ApplicationOptionSettings.SetString("AiModel", "");
+                ApplicationOptionSettings.Save();
+                _suppressPickerEvents = true;
+                modelCombo.Items.Clear();
+                modelCombo.Text = preset.DefaultModel ?? "";
+                _suppressPickerEvents = false;
+                if (preset.NeedsKey && !AiChatService.HasApiKey(preset.Id))
+                {
+                    AppendSystemLine(Localization.T("Ai.NoApiKeyHint"));
+                }
+            };
+            modelCombo.Leave += (s, e) => SaveModelFromPicker();
+            modelCombo.SelectedIndexChanged += (s, e) => { if (!_suppressPickerEvents) SaveModelFromPicker(); };
+            refreshModelsButton.Click += async (s, e) =>
+            {
+                refreshModelsButton.Enabled = false;
+                try
+                {
+                    AiChatSettings settings = AiChatSettings.Load();
+                    var models = await Task.Run(() => AiChatService.ListModels(settings));
+                    _suppressPickerEvents = true;
+                    string current = modelCombo.Text;
+                    modelCombo.Items.Clear();
+                    foreach (string m in models) modelCombo.Items.Add(m);
+                    modelCombo.Text = current;
+                    _suppressPickerEvents = false;
+                    AppendSystemLine(Localization.Format("Ai.ModelsLoaded", models.Count));
+                }
+                catch (Exception ex)
+                {
+                    AppendErrorBody(Localization.Format("Ai.RequestFailed", ex.Message));
+                }
+                finally
+                {
+                    refreshModelsButton.Enabled = true;
+                }
+            };
+        }
+
+        private void SaveModelFromPicker()
+        {
+            AiChatSettings current = AiChatSettings.Load();
+            string text = (modelCombo.Text ?? "").Trim();
+            // 跟預設一樣就存空字串（維持「留空用預設」語意）
+            ApplicationOptionSettings.SetString("AiModel", text == current.Preset.DefaultModel ? "" : text);
+            ApplicationOptionSettings.Save();
+        }
+
+        /// <summary>把設定值套回快速切換列（開啟面板或設定變更後呼叫）。</summary>
+        public void SyncPickerFromSettings()
+        {
+            _suppressPickerEvents = true;
+            AiChatSettings settings = AiChatSettings.Load();
+            // 設定裡若是無效值（例如舊版的 "none"），退回 FindPreset 的 fallback，不讓下拉空白
+            AiProviderPreset effective = settings.Preset;
+            for (int i = 0; i < AiChatService.Presets.Length; i++)
+            {
+                if (ReferenceEquals(AiChatService.Presets[i], effective))
+                {
+                    providerCombo.SelectedIndex = i;
+                    break;
+                }
+            }
+            modelCombo.Text = settings.Model ?? "";
+            _suppressPickerEvents = false;
         }
 
         private void AddSuggestion(string text)
@@ -195,6 +307,7 @@ namespace mySQLPunk
             actionPanel.BackColor = ThemeManager.SurfaceColor;
             suggestionPanel.BackColor = ThemeManager.WindowBackColor;
             includeContextBox.ForeColor = ThemeManager.TextColor;
+            if (pickerPanel != null) pickerPanel.BackColor = ThemeManager.SurfaceColor;
         }
 
         private void SendCurrentInput()
@@ -213,10 +326,9 @@ namespace mySQLPunk
             AppendRoleLine(Localization.T("Ai.You"), ThemeManager.AccentColor);
             AppendBody(userText);
 
+            AiChatSettings settings = AiChatSettings.Load();
             try
             {
-                AiChatSettings settings = AiChatSettings.Load();
-
                 List<AiChatMessage> messages = new List<AiChatMessage>();
                 messages.Add(new AiChatMessage("system", Localization.T("Ai.SystemPrompt")));
                 if (includeContextBox.Checked && _contextProvider != null)
@@ -252,7 +364,7 @@ namespace mySQLPunk
             {
                 RemoveThinkingLine();
                 AppendErrorBody(Localization.Format("Ai.RequestFailed", ex.Message));
-                if (!AiChatService.HasApiKey())
+                if (settings.Preset.NeedsKey && !AiChatService.HasApiKey(settings.Provider))
                 {
                     AppendErrorBody(Localization.T("Ai.NoApiKeyHint"));
                 }

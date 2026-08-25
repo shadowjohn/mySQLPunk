@@ -387,17 +387,35 @@ namespace mySQLPunk
         {
             ClearOptionPage();
             AddOptionTitle(T("AI 助理", "AI Assistant"));
-            AddOptionCombo("AiProvider", T("服務提供者:", "Provider:"), new[]
-            {
-                new OptionChoice("openai", "OpenAI"),
-                new OptionChoice("ollama", T("Ollama（本機模型）", "Ollama (local models)")),
-                new OptionChoice("github", T("GitHub Models（退場中）", "GitHub Models (being retired)")),
-                new OptionChoice("custom", T("自訂 OpenAI 相容端點", "Custom OpenAI-compatible endpoint"))
-            }, 72, 260);
-            AddOptionTextBox("AiEndpoint", T("端點 URL（留空用預設）:", "Endpoint URL (blank = default):"), 116, 360);
-            AddOptionTextBox("AiModel", T("模型（留空用預設）:", "Model (blank = default):"), 158, 360);
 
-            // API 金鑰不落地設定檔，直接進 Windows 認證管理員
+            // 供應商清單直接取自 AiChatService.Presets：使用者訂閱哪家就選哪家
+            var providerChoices = new List<OptionChoice>();
+            foreach (lib.AiProviderPreset preset in lib.AiChatService.Presets)
+            {
+                providerChoices.Add(new OptionChoice(preset.Id, preset.DisplayName));
+            }
+            ComboBox providerCombo = AddOptionCombo("AiProvider", T("服務提供者:", "Provider:"), providerChoices.ToArray(), 72, 260);
+
+            TextBox endpointBox = AddOptionTextBox("AiEndpoint", T("端點 URL（留空用預設）:", "Endpoint URL (blank = default):"), 116, 360);
+
+            // 模型用可輸入的下拉：按「測試連線」會把服務端的模型清單抓回來
+            contentPanel.Controls.Add(new Label
+            {
+                Text = T("模型（留空用預設）:", "Model (blank = default):"),
+                AutoSize = true,
+                Location = new Point(18, 162)
+            });
+            ComboBox modelCombo = new ComboBox
+            {
+                Location = new Point(250, 158),
+                Width = 360,
+                DropDownStyle = ComboBoxStyle.DropDown,
+                Text = ApplicationOptionSettings.GetString("AiModel")
+            };
+            modelCombo.TextChanged += (s, e) => ApplicationOptionSettings.SetString("AiModel", modelCombo.Text);
+            contentPanel.Controls.Add(modelCombo);
+
+            // API 金鑰不落地設定檔，直接進 Windows 認證管理員；一家一把
             contentPanel.Controls.Add(new Label
             {
                 Text = T("API 金鑰:", "API key:"),
@@ -410,45 +428,179 @@ namespace mySQLPunk
                 Width = 360,
                 UseSystemPasswordChar = true
             };
-            bool hasKey = lib.AiChatService.HasApiKey();
             Label keyState = new Label
             {
                 AutoSize = true,
                 MaximumSize = new Size(620, 0),
                 Location = new Point(250, 228),
-                ForeColor = SystemColors.GrayText,
-                Text = hasKey
-                    ? T("已設定（存於 Windows 認證管理員）。留空＝保持不變；輸入新值＝覆蓋；輸入單一減號「-」＝清除。",
-                        "Configured (stored in Windows Credential Manager). Blank = keep; new value = replace; a single \"-\" = clear.")
-                    : T("尚未設定。金鑰會存進 Windows 認證管理員，不會寫入設定檔。GitHub Models 用 GitHub 個人存取權杖即可；Ollama 不需要金鑰。",
-                        "Not configured. The key is stored in Windows Credential Manager, never in the settings file. For GitHub Models use a GitHub personal access token; Ollama needs no key.")
+                ForeColor = SystemColors.GrayText
+            };
+            Func<string> currentProviderId = () =>
+            {
+                OptionChoice choice = providerCombo.SelectedItem as OptionChoice;
+                return choice == null ? "openai" : choice.Value;
+            };
+            Action refreshKeyState = () =>
+            {
+                lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
+                if (!preset.NeedsKey)
+                {
+                    keyState.Text = T("這個服務不需要金鑰（本機推論）。", "This service needs no key (local inference).");
+                }
+                else if (lib.AiChatService.HasApiKey(preset.Id))
+                {
+                    keyState.Text = T("此服務已設定金鑰。留空＝保持不變；輸入新值＝覆蓋；輸入單一減號「-」＝清除。",
+                        "A key is configured for this provider. Blank = keep; new value = replace; a single \"-\" = clear.");
+                }
+                else
+                {
+                    keyState.Text = T("此服務尚未設定金鑰。金鑰會存進 Windows 認證管理員，不會寫入設定檔。",
+                        "No key configured for this provider yet. Keys are stored in Windows Credential Manager, never in the settings file.");
+                }
             };
             keyBox.Leave += (s, e) =>
             {
                 string value = (keyBox.Text ?? "").Trim();
                 if (value.Length == 0) return;
+                string target = lib.AiChatService.ApiKeyTargetFor(currentProviderId());
                 if (value == "-")
                 {
-                    lib.WindowsCredentialService.TryDeletePassword(lib.AiChatService.ApiKeyCredentialTarget);
-                    keyState.Text = T("金鑰已清除。", "Key cleared.");
+                    lib.WindowsCredentialService.TryDeletePassword(target);
                 }
                 else
                 {
-                    lib.WindowsCredentialService.TryWritePassword(lib.AiChatService.ApiKeyCredentialTarget, "ai", value);
-                    keyState.Text = T("金鑰已更新（存於 Windows 認證管理員）。", "Key updated (stored in Windows Credential Manager).");
+                    lib.WindowsCredentialService.TryWritePassword(target, "ai", value);
                 }
                 keyBox.Text = "";
+                refreshKeyState();
             };
             contentPanel.Controls.Add(keyBox);
             contentPanel.Controls.Add(keyState);
 
-            Label hint = new Label
+            // 一鍵跳到該服務的金鑰／認證網頁（本機服務則是下載頁）
+            LinkLabel keyLink = new LinkLabel
             {
-                Text = T("面板走 OpenAI 相容的 chat/completions 介面。預設端點：GitHub Models＝models.github.ai/inference、OpenAI＝api.openai.com/v1、Ollama＝localhost:11434/v1。",
-                         "The panel uses the OpenAI-compatible chat/completions API. Default endpoints: GitHub Models = models.github.ai/inference, OpenAI = api.openai.com/v1, Ollama = localhost:11434/v1."),
+                Text = T("前往取得金鑰／認證頁面", "Open the provider's key / sign-up page"),
+                AutoSize = true,
+                Location = new Point(18, 228),
+                LinkColor = SystemColors.HotTrack
+            };
+            keyLink.LinkClicked += (s, e) =>
+            {
+                lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
+                if (string.IsNullOrWhiteSpace(preset.KeySignupUrl)) return;
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(preset.KeySignupUrl) { UseShellExecute = true });
+                }
+                catch { }
+            };
+            contentPanel.Controls.Add(keyLink);
+
+            // ── 偵測本機服務 + 測試連線 ──
+            Label probeResult = new Label
+            {
                 AutoSize = true,
                 MaximumSize = new Size(620, 0),
-                Location = new Point(18, 268)
+                Location = new Point(18, 300),
+                ForeColor = SystemColors.GrayText
+            };
+            Button detectButton = new Button
+            {
+                Text = T("偵測本機服務", "Detect local services"),
+                Location = new Point(18, 260),
+                AutoSize = true
+            };
+            Button testButton = new Button
+            {
+                Text = T("測試連線並列出模型", "Test connection && list models"),
+                Location = new Point(160, 260),
+                AutoSize = true
+            };
+
+            detectButton.Click += async (s, e) =>
+            {
+                detectButton.Enabled = false;
+                probeResult.Text = T("偵測中…", "Detecting…");
+                try
+                {
+                    var found = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.DetectLocalServices());
+                    if (found.Count == 0)
+                    {
+                        probeResult.Text = T("沒偵測到本機服務。想免金鑰使用可安裝 Ollama（ollama.com）或 LM Studio，啟動後再按一次。",
+                            "No local service detected. For key-free usage install Ollama (ollama.com) or LM Studio, then try again.");
+                    }
+                    else
+                    {
+                        var first = found[0];
+                        // 自動切到偵測到的服務並帶入第一個模型
+                        for (int i = 0; i < providerCombo.Items.Count; i++)
+                        {
+                            OptionChoice choice = providerCombo.Items[i] as OptionChoice;
+                            if (choice != null && choice.Value == first.Key.Id) { providerCombo.SelectedIndex = i; break; }
+                        }
+                        modelCombo.Items.Clear();
+                        foreach (string m in first.Value) modelCombo.Items.Add(m);
+                        if (first.Value.Count > 0 && string.IsNullOrWhiteSpace(modelCombo.Text)) modelCombo.Text = first.Value[0];
+                        probeResult.Text = T("偵測到 ", "Detected ") + first.Key.DisplayName +
+                            T("，共 ", " with ") + first.Value.Count + T(" 個模型，已自動選用。", " models. Selected automatically.");
+                    }
+                }
+                finally
+                {
+                    detectButton.Enabled = true;
+                }
+            };
+
+            testButton.Click += async (s, e) =>
+            {
+                testButton.Enabled = false;
+                probeResult.Text = T("測試中…", "Testing…");
+                try
+                {
+                    lib.AiChatSettings settings = lib.AiChatSettings.Load();
+                    var models = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.ListModels(settings));
+                    modelCombo.Items.Clear();
+                    foreach (string m in models) modelCombo.Items.Add(m);
+                    probeResult.Text = T("連線成功，", "Connected. ") + models.Count + T(" 個可用模型已放進模型下拉。", " models loaded into the model dropdown.");
+                }
+                catch (Exception ex)
+                {
+                    probeResult.Text = T("測試失敗：", "Test failed: ") + ex.Message;
+                }
+                finally
+                {
+                    testButton.Enabled = true;
+                }
+            };
+
+            providerCombo.SelectedIndexChanged += (s, e) =>
+            {
+                lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
+                // 換供應商時清掉端點/模型覆寫，回到該家預設
+                endpointBox.Text = "";
+                modelCombo.Items.Clear();
+                modelCombo.Text = "";
+                keyBox.Text = "";
+                refreshKeyState();
+                probeResult.Text = string.IsNullOrWhiteSpace(preset.Endpoint)
+                    ? T("這個選項需要自行填端點 URL。", "This option requires you to fill in the endpoint URL.")
+                    : T("預設端點：", "Default endpoint: ") + preset.Endpoint +
+                      (string.IsNullOrWhiteSpace(preset.DefaultModel) ? "" : T("；預設模型：", "; default model: ") + preset.DefaultModel);
+            };
+            refreshKeyState();
+
+            contentPanel.Controls.Add(detectButton);
+            contentPanel.Controls.Add(testButton);
+            contentPanel.Controls.Add(probeResult);
+
+            Label hint = new Label
+            {
+                Text = T("除 Anthropic Claude 走原生 API 外，其餘服務都走 OpenAI 相容的 chat/completions 介面。Azure OpenAI 的端點請填到 deployment 為止（…/openai/deployments/<名稱>），金鑰用資源的 api-key。",
+                         "All providers use the OpenAI-compatible chat/completions API except Anthropic Claude (native API). For Azure OpenAI, fill the endpoint down to the deployment (…/openai/deployments/<name>) and use the resource api-key."),
+                AutoSize = true,
+                MaximumSize = new Size(620, 0),
+                Location = new Point(18, 356)
             };
             contentPanel.Controls.Add(hint);
         }
@@ -1319,7 +1471,6 @@ namespace mySQLPunk
             BoolValues["RecordUseSystemNumberFormat"] = true;
             BoolValues["AiAssistantEnabled"] = false;
             BoolValues["ViewShowAiPanel"] = false;
-            StringValues["AiProvider"] = "openai";
             BoolValues["AutoRecoveryQueryEnabled"] = true;
             BoolValues["AutoRecoveryTableDesignEnabled"] = true;
             BoolValues["ConnectionValidateCertificates"] = true;
@@ -1347,8 +1498,9 @@ namespace mySQLPunk
             StringValues["RecordDateFormat"] = "";
             StringValues["RecordTimeFormat"] = "";
             StringValues["RecordDateTimeFormat"] = "";
-            StringValues["AiProvider"] = "none";
+            StringValues["AiProvider"] = "openai";
             StringValues["AiEndpoint"] = "";
+            StringValues["AiModel"] = "";
             StringValues["ConnectionProxyType"] = "http";
             StringValues["ConnectionProxyHost"] = "";
             StringValues["ConnectionProxyUser"] = "";

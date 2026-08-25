@@ -3519,6 +3519,8 @@ namespace mySQLPunk
                         {
                             form.ShowDialog(this);
                         }
+                        // 設定改完把面板上的供應商/模型下拉同步回來
+                        if (aiPanel != null) aiPanel.SyncPickerFromSettings();
                     })
                 {
                     Dock = DockStyle.Right,
@@ -3527,6 +3529,7 @@ namespace mySQLPunk
                 splitContainer1.Panel2.Controls.Add(aiPanel);
                 // Fill 佈局的內容要排在最後（z 順序最前），右側面板才不會被蓋住
                 splitContainer2.Parent?.Controls.SetChildIndex(splitContainer2, 0);
+                ThemeManager.ApplyTo(aiPanel);
             }
             if (aiPanel != null)
             {
