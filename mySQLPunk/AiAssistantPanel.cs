@@ -209,6 +209,7 @@ namespace mySQLPunk
                 ApplicationOptionSettings.Save();
                 _suppressPickerEvents = true;
                 modelCombo.Items.Clear();
+                foreach (string m in AiChatService.KnownCliModels(preset.Id)) modelCombo.Items.Add(m);
                 modelCombo.Text = preset.DefaultModel ?? "";
                 _suppressPickerEvents = false;
                 if (preset.NeedsKey && !AiChatService.HasApiKey(preset.Id))
@@ -223,8 +224,14 @@ namespace mySQLPunk
                 AiChatSettings settings = AiChatSettings.Load();
                 if (settings.Preset.AuthStyle == "cli")
                 {
-                    // CLI 沒有模型清單可抓,這是說明不是錯誤,用灰色系統訊息就好
-                    chatView.AddSystem(Localization.T("Ai.CliNoModels"));
+                    // CLI 沒有列模型的 API,改放內建的常用型號清單
+                    _suppressPickerEvents = true;
+                    string keep = modelCombo.Text;
+                    modelCombo.Items.Clear();
+                    foreach (string m in AiChatService.KnownCliModels(settings.Provider)) modelCombo.Items.Add(m);
+                    modelCombo.Text = keep;
+                    _suppressPickerEvents = false;
+                    chatView.AddSystem(Localization.Format("Ai.CliModelsHint", settings.Preset.DisplayName));
                     return;
                 }
                 if (settings.Preset.NeedsKey && !AiChatService.HasApiKey(settings.Provider))
@@ -304,6 +311,8 @@ namespace mySQLPunk
                     break;
                 }
             }
+            modelCombo.Items.Clear();
+            foreach (string m in AiChatService.KnownCliModels(effective.Id)) modelCombo.Items.Add(m);
             modelCombo.Text = settings.Model ?? "";
             _suppressPickerEvents = false;
         }

@@ -530,6 +530,25 @@ namespace mySQLPunk.lib
             return models;
         }
 
+        /// <summary>
+        /// CLI 沒有「列模型」的 API，但各家可用的型號是已知的——給一份常用清單讓使用者挑，
+        /// 留空就用該 CLI 的預設模型。
+        /// </summary>
+        public static string[] KnownCliModels(string providerId)
+        {
+            switch ((providerId ?? "").ToLowerInvariant())
+            {
+                case "codex-cli":
+                    return new[] { "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5.1" };
+                case "claude-cli":
+                    return new[] { "sonnet", "opus", "haiku" };
+                case "gemini-cli":
+                    return new[] { "gemini-2.5-pro", "gemini-2.5-flash" };
+                default:
+                    return new string[0];
+            }
+        }
+
         /// <summary>偵測本機已安裝的 AI CLI（codex / claude / gemini）：用 where 快查 PATH，不真的執行。</summary>
         public static List<AiProviderPreset> DetectInstalledClis()
         {

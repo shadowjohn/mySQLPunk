@@ -648,9 +648,10 @@ namespace mySQLPunk
             providerCombo.SelectedIndexChanged += (s, e) =>
             {
                 lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
-                // 換供應商時清掉端點/模型覆寫，回到該家預設
+                // 換供應商時清掉端點/模型覆寫，回到該家預設；CLI 供應商放內建常用型號
                 endpointBox.Text = "";
                 modelCombo.Items.Clear();
+                foreach (string m in lib.AiChatService.KnownCliModels(preset.Id)) modelCombo.Items.Add(m);
                 modelCombo.Text = "";
                 keyBox.Text = "";
                 refreshKeyState();

@@ -378,6 +378,7 @@ namespace mySQLPunk
             Add("Ai.CliTimeout", "CLI「{0}」回應逾時（180 秒），已中止。", "CLI \"{0}\" timed out (180 seconds) and was terminated.");
             Add("Ai.CliNoModels", "CLI 模式沒有模型清單可抓：模型欄留空用該 CLI 的預設模型，或自行填入型號（例如 gpt-5.1-codex）。", "CLI mode has no model list to fetch: leave the model blank to use the CLI's default, or type a model name (e.g. gpt-5.1-codex).");
             Add("Ai.AutoDetectedCli", "偵測到你本機已安裝的 {0}，已自動選用——走你既有的訂閱額度，不需要 API 金鑰。想換服務可用上方下拉或 ⚙ 設定。", "Detected {0} installed on this machine and selected it automatically — it uses your existing subscription, no API key needed. Switch providers via the dropdown above or ⚙.");
+            Add("Ai.CliModelsHint", "已把 {0} 的常用型號放進模型下拉；留空則使用該 CLI 的預設模型。", "Loaded the common model names for {0} into the dropdown; leave it blank to use the CLI's default model.");
             Add("Ai.NeedOpenConnection", "請先開啟一個連線並選取資料庫，才能把 SQL 插入查詢分頁。", "Open a connection and select a database first, then the SQL can be inserted into a query tab.");
             Add("Dict.MenuItem", "產生資料字典", "Generate Data Dictionary");
             Add("Dict.Title", "資料字典", "Data Dictionary");
