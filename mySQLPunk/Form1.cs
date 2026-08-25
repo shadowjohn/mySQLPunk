@@ -5523,6 +5523,28 @@ namespace mySQLPunk
             UpdateMainStatus(Localization.Format(explicitColumns ? "Object.SelectColumnsOpenedStatus" : "Object.SelectStarOpenedStatus", tableName));
         }
 
+        private void OpenSelectedTableDataProfile()
+        {
+            DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (selection == null || selection.GroupName != "Tables")
+            {
+                MessageBox.Show(
+                    Localization.T("Object.SelectTable"),
+                    Localization.T("Tool.DataProfile"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            DataProfileForm profileForm = new DataProfileForm(
+                selection.Database,
+                selection.DatabaseName,
+                selection.ObjectName,
+                sql => OpenQuery(selection.Database, selection.DatabaseName, selection.Host, sql, true));
+            DockDockableForm(profileForm);
+            UpdateMainStatus(Localization.Format("DataProfile.OpenedStatus", selection.ObjectName));
+        }
+
         private void OpenSelectedViewInQuery()
         {
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
@@ -8543,6 +8565,10 @@ namespace mySQLPunk
                 var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                 itemDesign.Click += (s, ev) => DesignSelectedTable();
                 cms.Items.Add(itemDesign);
+
+                var itemProfile = new ToolStripMenuItem(Localization.T("Tool.DataProfile"));
+                itemProfile.Click += (s, ev) => OpenSelectedTableDataProfile();
+                cms.Items.Add(itemProfile);
 
                 cms.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
 
@@ -11639,6 +11665,10 @@ namespace mySQLPunk
                     ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
                     designTableItem.Click += (s, ev) => DesignSelectedTable();
                     menu.Items.Add(designTableItem);
+
+                    ToolStripMenuItem dataProfileItem = new ToolStripMenuItem(Localization.T("Tool.DataProfile"));
+                    dataProfileItem.Click += (s, ev) => OpenSelectedTableDataProfile();
+                    menu.Items.Add(dataProfileItem);
 
                     menu.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
 

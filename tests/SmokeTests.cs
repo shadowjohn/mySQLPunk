@@ -51,6 +51,7 @@ public static class SmokeTests
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
         Run("Data view filter service", TestDataViewFilterService, ref passed);
         Run("Data view sort service", TestDataViewSortService, ref passed);
+        Run("Data profiling service", TestDataProfilingService, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -7983,6 +7984,90 @@ public static class SmokeTests
         AssertEquals("", DataViewSortService.BuildSortExpression(table, "不存在", true), "Missing sort column should clear sort expression safely.");
     }
 
+    private static void TestDataProfilingService()
+    {
+        FakeDataProfilingDatabase database = new FakeDataProfilingDatabase { Provider = "mysql" };
+        DataProfileReport report = DataProfilingService.AnalyzeAsync(
+            database,
+            "sample",
+            "users",
+            10,
+            5,
+            null,
+            System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+
+        AssertEquals("25", report.TotalRowCount.ToString(), "Data profile should keep the full table row count.");
+        AssertEquals("10", report.SampleRowCount.ToString(), "Data profile should report the sampled row count.");
+        AssertEquals("3", report.Columns.Count.ToString(), "Data profile should include every metadata column.");
+
+        DataProfileColumnResult id = report.Columns.First(column => column.ColumnName == "id");
+        AssertEquals("0", id.NullCount.ToString(), "Numeric profile should calculate NULL count from the sample.");
+        AssertEquals("10", id.DistinctCount.ToString(), "Numeric profile should calculate distinct values.");
+        Assert(id.HasRange && id.HasAverage, "Numeric profile should include min, max, and average values.");
+        AssertEquals("2", id.TopValues.Count.ToString(), "Numeric profile should keep returned Top value buckets.");
+
+        DataProfileColumnResult name = report.Columns.First(column => column.ColumnName == "name");
+        AssertEquals("1", name.NullCount.ToString(), "Text profile should calculate NULL count.");
+        AssertEquals("3", name.DistinctCount.ToString(), "Text profile should calculate distinct values.");
+        Assert(name.HasRange && !name.HasAverage, "Text profile should keep min/max without a numeric average.");
+
+        DataProfileColumnResult payload = report.Columns.First(column => column.ColumnName == "payload");
+        AssertEquals("2", payload.NullCount.ToString(), "Fallback non-null count should keep binary-column NULL statistics.");
+        Assert(!payload.HasDistinctCount && payload.IsPartial, "Unsupported binary DISTINCT should produce a partial profile instead of failing the report.");
+        Assert(payload.TopValues.Count == 0, "Binary columns should not run an unsupported GROUP BY distribution.");
+        Assert(database.Queries.Any(sql => sql.Contains("LIMIT 10")), "MySQL profiling should use the requested sample limit.");
+
+        database.Provider = "mssql";
+        string sqlServerSource = DataProfilingService.BuildSampleSourceSql(database, "sample", "dbo.users", 10000);
+        AssertContains(sqlServerSource, "SELECT TOP (10000)", "SQL Server profiling should use TOP for sampling.");
+        AssertContains(sqlServerSource, "[sample].[dbo].[users]", "SQL Server profiling should preserve schema-qualified table names.");
+
+        database.Provider = "oracle";
+        string oracleSource = DataProfilingService.BuildSampleSourceSql(database, "APP", "USERS", 1000);
+        AssertContains(oracleSource, "ROWNUM <= 1000", "Oracle profiling should support pre-12c sampling syntax.");
+
+        database.Provider = "postgresql";
+        string drilldown = DataProfilingService.BuildDrilldownSql(database, "sample", "public.users", "name", "O'Reilly", 200);
+        AssertContains(drilldown, "\"public\".\"users\"", "PostgreSQL drilldown should preserve schema-qualified identifiers.");
+        AssertContains(drilldown, "\"name\" = 'O''Reilly'", "Drilldown SQL should safely escape selected string values.");
+        AssertContains(drilldown, "LIMIT 200", "PostgreSQL drilldown should cap returned rows.");
+
+        database.Provider = "mysql";
+        string nullDrilldown = DataProfilingService.BuildDrilldownSql(database, "sample", "users", "name", null, 200);
+        AssertContains(nullDrilldown, "`name` IS NULL", "NULL distribution buckets should use IS NULL in drilldown SQL.");
+        using (DataProfileForm form = new DataProfileForm(database, "sample", "users", sql => { }))
+        {
+            form.CreateControl();
+            AssertContains(form.GetDisplayTitle(), "users", "Data profile workspace title should identify the selected table.");
+            Assert(form.UsesDatabase(database), "Data profile workspace should close with its database connection.");
+            Assert(!form.HasUnsavedChanges(), "Read-only data profile workspaces should never block tab closing as unsaved.");
+        }
+
+        using (my_sqlite sqlite = new my_sqlite())
+        {
+            sqlite.SetConn("Data Source=:memory:;Version=3;New=True;");
+            sqlite.Open();
+            sqlite.ExecSQL("CREATE TABLE profile_test (id INTEGER PRIMARY KEY, category TEXT, amount REAL);");
+            sqlite.ExecSQL("INSERT INTO profile_test VALUES (1, 'A', 10.5), (2, 'A', 5.5), (3, 'B', NULL);");
+            DataProfileReport sqliteReport = DataProfilingService.AnalyzeAsync(
+                sqlite,
+                "main",
+                "profile_test",
+                0,
+                10,
+                null,
+                System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+            AssertEquals("3", sqliteReport.TotalRowCount.ToString(), "SQLite live profiling should count the real table rows.");
+            AssertEquals("3", sqliteReport.SampleRowCount.ToString(), "SQLite full-table profiling should analyze every row.");
+            DataProfileColumnResult sqliteCategory = sqliteReport.Columns.First(column => column.ColumnName == "category");
+            AssertEquals("2", sqliteCategory.DistinctCount.ToString(), "SQLite live profiling should calculate distinct text values.");
+            AssertEquals("2", sqliteCategory.TopValues[0].Count.ToString(), "SQLite live profiling should rank Top values by occurrence count.");
+            DataProfileColumnResult sqliteAmount = sqliteReport.Columns.First(column => column.ColumnName == "amount");
+            AssertEquals("1", sqliteAmount.NullCount.ToString(), "SQLite live profiling should calculate NULL numeric values.");
+            Assert(sqliteAmount.HasAverage, "SQLite live profiling should calculate numeric averages.");
+        }
+    }
+
     private static void TestDatabaseGroupVisibilityService()
     {
         Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Functions", 0, false), "Inactive-only off should show empty function group.");
@@ -8650,6 +8735,98 @@ public static class SmokeTests
         using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
         {
             return reader.ReadToEnd();
+        }
+    }
+
+    private sealed class FakeDataProfilingDatabase : IDatabase
+    {
+        public string Provider = "mysql";
+        public readonly List<string> Queries = new List<string>();
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => Provider;
+
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            Queries.Add(sql);
+            if (sql.IndexOf("sample_count", StringComparison.OrdinalIgnoreCase) >= 0)
+                return Table(new[] { "sample_count" }, new object[] { 10L });
+
+            if (sql.IndexOf("GROUP BY", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (sql.IndexOf("name", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return Table(new[] { "profile_value", "occurrences" }, new object[] { "Alice", 5L }, new object[] { DBNull.Value, 1L });
+                return Table(new[] { "profile_value", "occurrences" }, new object[] { 1, 4L }, new object[] { 2, 3L });
+            }
+
+            if (sql.IndexOf("MIN(", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (sql.IndexOf("name", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return Table(new[] { "minimum_value", "maximum_value" }, new object[] { "Alice", "Zoe" });
+                return Table(new[] { "minimum_value", "maximum_value", "average_value" }, new object[] { 1, 10, 5.5m });
+            }
+
+            if (sql.IndexOf("COUNT(DISTINCT", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (sql.IndexOf("payload", StringComparison.OrdinalIgnoreCase) >= 0)
+                    throw new InvalidOperationException("blob distinct unavailable");
+                if (sql.IndexOf("name", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return Table(new[] { "non_null_count", "distinct_count" }, new object[] { 9L, 3L });
+                return Table(new[] { "non_null_count", "distinct_count" }, new object[] { 10L, 10L });
+            }
+
+            if (sql.IndexOf("COUNT(", StringComparison.OrdinalIgnoreCase) >= 0)
+                return Table(new[] { "non_null_count" }, new object[] { 8L });
+
+            throw new InvalidOperationException("Unexpected profiling SQL: " + sql);
+        }
+
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null)
+        {
+            return System.Threading.Tasks.Task.FromResult(SelectSQL(sql, parameters));
+        }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public List<string> GetDatabases() { return new List<string> { "sample" }; }
+        public List<string> GetTables(string databaseName) { return new List<string> { "users" }; }
+        public List<string> GetViews(string databaseName) { return new List<string>(); }
+        public DataTable GetColumns(string databaseName, string tableName)
+        {
+            return Table(
+                new[] { "Field", "Type" },
+                new object[] { "id", "int" },
+                new object[] { "name", "varchar(100)" },
+                new object[] { "payload", "blob" });
+        }
+        public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return string.Empty; }
+        public bool TableExists(string databaseName, string tableName) { return true; }
+        public bool ViewExists(string databaseName, string viewName) { return false; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 25L; }
+        public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void DropTableForCopy(string databaseName, string tableName) { }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { throw new NotSupportedException(); }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return string.Empty; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
+
+        private static DataTable Table(string[] columns, params object[][] rows)
+        {
+            DataTable table = new DataTable();
+            foreach (string column in columns) table.Columns.Add(column, typeof(object));
+            foreach (object[] row in rows) table.Rows.Add(row);
+            return table;
         }
     }
 
