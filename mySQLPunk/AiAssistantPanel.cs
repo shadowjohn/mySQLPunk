@@ -8,8 +8,8 @@ using mySQLPunk.lib;
 namespace mySQLPunk
 {
     /// <summary>
-    /// AI 助理右側面板（Navicat / SSMS Copilot 式的停靠聊天窗）。
-    /// 走 OpenAI 相容 API（GitHub Models / OpenAI / Ollama / 自訂），
+    /// AI 助理右側面板（Punky 崩琦）。對話用泡泡呈現：使用者靠右、Punky 靠左，
+    /// SQL 區塊在泡泡裡用等寬字型與獨立底色。走 OpenAI 相容 API，
     /// 可附上目前連線的資料庫結構當上下文，回覆裡的 SQL 一鍵插入查詢分頁。
     /// </summary>
     public class AiAssistantPanel : Panel
@@ -22,7 +22,7 @@ namespace mySQLPunk
         private Button settingsButton;
         private Button closeButton;
         private Panel headerPanel;
-        private RichTextBox chatBox;
+        private AiChatView chatView;
         private FlowLayoutPanel suggestionPanel;
         private Panel actionPanel;
         private Button insertSqlButton;
@@ -45,7 +45,7 @@ namespace mySQLPunk
             Width = 380;
             MinimumSize = new Size(280, 0);
 
-            // ── 標題列（看板娘 Punky 頭像 + 名稱）──
+            // ── 標題列（Punky 頭像 + 名稱）──
             headerPanel = new Panel { Dock = DockStyle.Top, Height = 38, Padding = new Padding(10, 0, 4, 0) };
             PictureBox avatarBox = new PictureBox
             {
@@ -144,21 +144,14 @@ namespace mySQLPunk
             AddSuggestion(Localization.T("Ai.SuggestExplain"));
             AddSuggestion(Localization.T("Ai.SuggestOptimize"));
 
-            // ── 對話區 ──
-            chatBox = new RichTextBox
-            {
-                Dock = DockStyle.Fill,
-                ReadOnly = true,
-                BorderStyle = BorderStyle.None,
-                Font = UiKit.Body,
-                DetectUrls = false
-            };
-            AppendSystemLine(Localization.T("Ai.Welcome"));
+            // ── 對話區（泡泡）──
+            chatView = new AiChatView { Dock = DockStyle.Fill };
+            chatView.AddAssistant("Punky", Localization.T("Ai.Welcome"));
 
             // ── 供應商／模型快速切換列 ──
             BuildPickerRow();
 
-            Controls.Add(chatBox);
+            Controls.Add(chatView);
             Controls.Add(suggestionPanel);
             Controls.Add(actionPanel);
             Controls.Add(inputPanel);
@@ -217,7 +210,7 @@ namespace mySQLPunk
                 _suppressPickerEvents = false;
                 if (preset.NeedsKey && !AiChatService.HasApiKey(preset.Id))
                 {
-                    AppendSystemLine(Localization.T("Ai.NoApiKeyHint"));
+                    chatView.AddSystem(Localization.T("Ai.NoApiKeyHint"));
                 }
             };
             modelCombo.Leave += (s, e) => SaveModelFromPicker();
@@ -235,11 +228,11 @@ namespace mySQLPunk
                     foreach (string m in models) modelCombo.Items.Add(m);
                     modelCombo.Text = current;
                     _suppressPickerEvents = false;
-                    AppendSystemLine(Localization.Format("Ai.ModelsLoaded", models.Count));
+                    chatView.AddSystem(Localization.Format("Ai.ModelsLoaded", models.Count));
                 }
                 catch (Exception ex)
                 {
-                    AppendErrorBody(Localization.Format("Ai.RequestFailed", ex.Message));
+                    chatView.AddError(Localization.Format("Ai.RequestFailed", ex.Message));
                 }
                 finally
                 {
@@ -301,13 +294,13 @@ namespace mySQLPunk
             BackColor = ThemeManager.SurfaceColor;
             headerPanel.BackColor = ThemeManager.SurfaceColor;
             titleLabel.ForeColor = ThemeManager.TextColor;
-            chatBox.BackColor = ThemeManager.WindowBackColor;
-            chatBox.ForeColor = ThemeManager.TextColor;
+            chatView.BackColor = ThemeManager.WindowBackColor;
             inputPanel.BackColor = ThemeManager.SurfaceColor;
             actionPanel.BackColor = ThemeManager.SurfaceColor;
             suggestionPanel.BackColor = ThemeManager.WindowBackColor;
             includeContextBox.ForeColor = ThemeManager.TextColor;
             if (pickerPanel != null) pickerPanel.BackColor = ThemeManager.SurfaceColor;
+            chatView.RefreshTheme();
         }
 
         private void SendCurrentInput()
@@ -323,10 +316,10 @@ namespace mySQLPunk
         {
             _busy = true;
             sendButton.Enabled = false;
-            AppendRoleLine(Localization.T("Ai.You"), ThemeManager.AccentColor);
-            AppendBody(userText);
+            chatView.AddUser(userText);
 
             AiChatSettings settings = AiChatSettings.Load();
+            AiChatBubble replyBubble = chatView.AddAssistant("Punky · " + settings.Model, Localization.T("Ai.Thinking"));
             try
             {
                 List<AiChatMessage> messages = new List<AiChatMessage>();
@@ -343,14 +336,10 @@ namespace mySQLPunk
                 foreach (AiChatMessage m in _history) messages.Add(m);
                 messages.Add(new AiChatMessage("user", userText));
 
-                AppendRoleLine("Punky（" + settings.Model + "）", ThemeManager.SuccessColor);
-                AppendBody(Localization.T("Ai.Thinking"));
-                int thinkingStart = chatBox.TextLength;
-
                 string reply = await Task.Run(() => AiChatService.ChatCompletion(settings, messages));
 
-                RemoveThinkingLine();
-                AppendBody(reply);
+                replyBubble.SetContent(reply);
+                chatView.ScrollToBottom();
 
                 _history.Add(new AiChatMessage("user", userText));
                 _history.Add(new AiChatMessage("assistant", reply));
@@ -362,11 +351,11 @@ namespace mySQLPunk
             }
             catch (Exception ex)
             {
-                RemoveThinkingLine();
-                AppendErrorBody(Localization.Format("Ai.RequestFailed", ex.Message));
+                chatView.RemoveBubble(replyBubble);
+                chatView.AddError(Localization.Format("Ai.RequestFailed", ex.Message));
                 if (settings.Preset.NeedsKey && !AiChatService.HasApiKey(settings.Provider))
                 {
-                    AppendErrorBody(Localization.T("Ai.NoApiKeyHint"));
+                    chatView.AddSystem(Localization.T("Ai.NoApiKeyHint"));
                 }
             }
             finally
@@ -375,55 +364,305 @@ namespace mySQLPunk
                 sendButton.Enabled = true;
             }
         }
+    }
 
-        private int _thinkingMark = -1;
+    /// <summary>對話泡泡清單：自己管排版與捲動，泡泡寬度跟著面板寬度走。</summary>
+    internal class AiChatView : Panel
+    {
+        private readonly List<AiChatBubble> _bubbles = new List<AiChatBubble>();
 
-        private void AppendRoleLine(string who, Color color)
+        public AiChatView()
         {
-            chatBox.SelectionStart = chatBox.TextLength;
-            chatBox.SelectionFont = UiKit.BodyBold;
-            chatBox.SelectionColor = color;
-            chatBox.AppendText((chatBox.TextLength > 0 ? "\n" : "") + who + "\n");
+            AutoScroll = true;
+            DoubleBuffered = true;
         }
 
-        private void AppendBody(string text)
+        public AiChatBubble AddUser(string text)
         {
-            _thinkingMark = chatBox.TextLength;
-            chatBox.SelectionStart = chatBox.TextLength;
-            chatBox.SelectionFont = UiKit.Body;
-            chatBox.SelectionColor = ThemeManager.TextColor;
-            chatBox.AppendText(text + "\n");
-            chatBox.SelectionStart = chatBox.TextLength;
-            chatBox.ScrollToCaret();
+            return Add(new AiChatBubble(AiChatBubbleKind.User, null, text));
         }
 
-        private void AppendErrorBody(string text)
+        public AiChatBubble AddAssistant(string header, string text)
         {
-            _thinkingMark = -1;
-            chatBox.SelectionStart = chatBox.TextLength;
-            chatBox.SelectionFont = UiKit.Body;
-            chatBox.SelectionColor = ThemeManager.DangerColor;
-            chatBox.AppendText(text + "\n");
-            chatBox.SelectionStart = chatBox.TextLength;
-            chatBox.ScrollToCaret();
+            return Add(new AiChatBubble(AiChatBubbleKind.Assistant, header, text));
         }
 
-        private void AppendSystemLine(string text)
+        public AiChatBubble AddSystem(string text)
         {
-            chatBox.SelectionStart = chatBox.TextLength;
-            chatBox.SelectionFont = UiKit.Body;
-            chatBox.SelectionColor = ThemeManager.MutedTextColor;
-            chatBox.AppendText(text + "\n");
+            return Add(new AiChatBubble(AiChatBubbleKind.System, null, text));
         }
 
-        /// <summary>把「思考中…」那一行移掉，換成真正的回覆。</summary>
-        private void RemoveThinkingLine()
+        public AiChatBubble AddError(string text)
         {
-            if (_thinkingMark < 0 || _thinkingMark > chatBox.TextLength) { _thinkingMark = -1; return; }
-            chatBox.SelectionStart = _thinkingMark;
-            chatBox.SelectionLength = chatBox.TextLength - _thinkingMark;
-            chatBox.SelectedText = "";
-            _thinkingMark = -1;
+            return Add(new AiChatBubble(AiChatBubbleKind.Error, null, text));
+        }
+
+        private AiChatBubble Add(AiChatBubble bubble)
+        {
+            _bubbles.Add(bubble);
+            Controls.Add(bubble);
+            LayoutBubbles();
+            ScrollToBottom();
+            return bubble;
+        }
+
+        public void RemoveBubble(AiChatBubble bubble)
+        {
+            if (bubble == null) return;
+            _bubbles.Remove(bubble);
+            Controls.Remove(bubble);
+            bubble.Dispose();
+            LayoutBubbles();
+        }
+
+        public void RefreshTheme()
+        {
+            foreach (AiChatBubble bubble in _bubbles) bubble.Invalidate();
+        }
+
+        public void ScrollToBottom()
+        {
+            if (_bubbles.Count == 0) return;
+            ScrollControlIntoView(_bubbles[_bubbles.Count - 1]);
+        }
+
+        protected override void OnResize(EventArgs eventargs)
+        {
+            base.OnResize(eventargs);
+            LayoutBubbles();
+        }
+
+        /// <summary>由上而下排：每個泡泡都是全寬的 row，泡泡本體在 row 裡靠左/靠右。</summary>
+        internal void LayoutBubbles()
+        {
+            int width = ClientSize.Width;
+            if (width <= 0) return;
+            int y = 6 + AutoScrollPosition.Y;
+            SuspendLayout();
+            foreach (AiChatBubble bubble in _bubbles)
+            {
+                bubble.Location = new Point(AutoScrollPosition.X, y);
+                bubble.Width = width;
+                bubble.RecalculateHeight();
+                y += bubble.Height + 6;
+            }
+            ResumeLayout();
+        }
+    }
+
+    internal enum AiChatBubbleKind { User, Assistant, System, Error }
+
+    /// <summary>
+    /// 一則對話泡泡。內容切成一般文字與 ```code``` 兩種區段：
+    /// 一般文字直接畫在泡泡上，code 區段畫成等寬字型的內嵌區塊。
+    /// </summary>
+    internal class AiChatBubble : Control
+    {
+        private const int RowPadding = 10;    // row 左右留白
+        private const int BubblePadding = 10; // 泡泡內距
+        private const int CodePadding = 8;
+
+        private readonly AiChatBubbleKind _kind;
+        private readonly string _header;
+        private List<KeyValuePair<string, bool>> _segments; // (文字, 是否為 code)
+        private string _plainText;
+
+        public AiChatBubble(AiChatBubbleKind kind, string header, string text)
+        {
+            _kind = kind;
+            _header = header;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            ParseSegments(text);
+
+            // 右鍵可以把整則內容複製走
+            ContextMenuStrip menu = new ContextMenuStrip();
+            ToolStripMenuItem copyItem = new ToolStripMenuItem(Localization.T("Ai.CopyMessage"));
+            copyItem.Click += (s, e) =>
+            {
+                try { if (!string.IsNullOrEmpty(_plainText)) Clipboard.SetText(_plainText); } catch { }
+            };
+            menu.Items.Add(copyItem);
+            ThemeManager.ApplyToolStrip(menu);
+            ContextMenuStrip = menu;
+        }
+
+        public void SetContent(string text)
+        {
+            ParseSegments(text);
+            AiChatView view = Parent as AiChatView;
+            if (view != null) view.LayoutBubbles();
+            Invalidate();
+        }
+
+        private void ParseSegments(string text)
+        {
+            _plainText = text ?? "";
+            _segments = new List<KeyValuePair<string, bool>>();
+            string remaining = _plainText.Replace("\r\n", "\n");
+            while (true)
+            {
+                int start = remaining.IndexOf("```", StringComparison.Ordinal);
+                if (start < 0) break;
+                int lineEnd = remaining.IndexOf('\n', start);
+                if (lineEnd < 0) break;
+                int end = remaining.IndexOf("```", lineEnd, StringComparison.Ordinal);
+                if (end < 0) break;
+
+                string before = remaining.Substring(0, start).Trim();
+                if (before.Length > 0) _segments.Add(new KeyValuePair<string, bool>(before, false));
+                string code = remaining.Substring(lineEnd + 1, end - lineEnd - 1).Trim('\n', '\r');
+                if (code.Length > 0) _segments.Add(new KeyValuePair<string, bool>(code, true));
+                remaining = remaining.Substring(Math.Min(remaining.Length, end + 3));
+            }
+            string tail = remaining.Trim();
+            if (tail.Length > 0) _segments.Add(new KeyValuePair<string, bool>(tail, false));
+            if (_segments.Count == 0) _segments.Add(new KeyValuePair<string, bool>("", false));
+        }
+
+        private Font BodyFont => UiKit.Body;
+        private Font CodeFont => UiKit.GetFont(9f, FontStyle.Regular); // 共用快取，不能 dispose
+        private Font HeaderFont => UiKit.GetFont(8.5f, FontStyle.Bold);
+
+        private const TextFormatFlags MeasureFlags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.TextBoxControl;
+
+        /// <summary>依目前寬度重算泡泡高度（由 AiChatView 在排版時呼叫）。</summary>
+        public void RecalculateHeight()
+        {
+            int rowWidth = Math.Max(60, Width - RowPadding * 2);
+            int maxBubbleWidth = _kind == AiChatBubbleKind.System ? rowWidth : (int)(rowWidth * 0.9);
+            int contentWidth = Math.Max(30, ComputeContentWidth(maxBubbleWidth - BubblePadding * 2));
+
+            int height = BubblePadding;
+            if (!string.IsNullOrEmpty(_header))
+            {
+                height += TextRenderer.MeasureText(_header, HeaderFont, new Size(contentWidth, int.MaxValue), MeasureFlags).Height + 4;
+            }
+            for (int i = 0; i < _segments.Count; i++)
+            {
+                var segment = _segments[i];
+                if (i > 0) height += 6;
+                if (segment.Value)
+                {
+                    Size size = TextRenderer.MeasureText(segment.Key, CodeFont, new Size(contentWidth - CodePadding * 2, int.MaxValue), MeasureFlags);
+                    height += size.Height + CodePadding * 2;
+                }
+                else
+                {
+                    height += TextRenderer.MeasureText(segment.Key, BodyFont, new Size(contentWidth, int.MaxValue), MeasureFlags).Height;
+                }
+            }
+            height += BubblePadding;
+
+            _bubbleWidth = contentWidth + BubblePadding * 2;
+            Height = height + 2;
+        }
+
+        private int _bubbleWidth;
+
+        /// <summary>泡泡寬度貼合內容：短訊息小泡泡、長訊息吃滿可用寬度。</summary>
+        private int ComputeContentWidth(int maxContentWidth)
+        {
+            int widest = 0;
+            if (!string.IsNullOrEmpty(_header))
+            {
+                widest = TextRenderer.MeasureText(_header, HeaderFont).Width;
+            }
+            foreach (var segment in _segments)
+            {
+                Font font = segment.Value ? CodeFont : BodyFont;
+                int natural = TextRenderer.MeasureText(segment.Key, font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Width;
+                if (segment.Value) natural += CodePadding * 2;
+                if (natural > widest) widest = natural;
+            }
+            return Math.Min(maxContentWidth, Math.Max(24, widest));
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(ThemeManager.WindowBackColor);
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            int rowWidth = Math.Max(60, Width - RowPadding * 2);
+            int bubbleWidth = Math.Min(_bubbleWidth, rowWidth);
+            int contentWidth = bubbleWidth - BubblePadding * 2;
+
+            Color bubbleBack;
+            Color bubbleBorder;
+            Color textColor;
+            Color codeBack;
+            Color codeText;
+            int x;
+            switch (_kind)
+            {
+                case AiChatBubbleKind.User:
+                    bubbleBack = ThemeManager.AccentColor;
+                    bubbleBorder = ThemeManager.AccentColor;
+                    textColor = Color.White;
+                    codeBack = Color.FromArgb(46, Color.White);
+                    codeText = Color.White;
+                    x = Width - RowPadding - bubbleWidth;
+                    break;
+                case AiChatBubbleKind.Error:
+                    bubbleBack = UiKit.Mix(ThemeManager.DangerColor, ThemeManager.WindowBackColor, 0.88f);
+                    bubbleBorder = UiKit.Mix(ThemeManager.DangerColor, ThemeManager.WindowBackColor, 0.55f);
+                    textColor = ThemeManager.DangerColor;
+                    codeBack = ThemeManager.WindowBackColor;
+                    codeText = ThemeManager.DangerColor;
+                    x = RowPadding;
+                    break;
+                case AiChatBubbleKind.System:
+                    // 系統訊息：沒有泡泡，置中灰字
+                    Rectangle systemRect = new Rectangle(RowPadding, 4, rowWidth, Height - 8);
+                    TextRenderer.DrawText(g, _plainText, UiKit.GetFont(8.5f, FontStyle.Regular), systemRect,
+                        ThemeManager.MutedTextColor, MeasureFlags | TextFormatFlags.HorizontalCenter);
+                    return;
+                default: // Assistant
+                    bubbleBack = ThemeManager.SurfaceColor;
+                    bubbleBorder = ThemeManager.BorderColor;
+                    textColor = ThemeManager.TextColor;
+                    codeBack = ThemeManager.WindowBackColor;
+                    codeText = ThemeManager.TextColor;
+                    x = RowPadding;
+                    break;
+            }
+
+            Rectangle bubbleRect = new Rectangle(x, 0, bubbleWidth, Height - 2);
+            UiKit.FillRounded(g, bubbleRect, 10f, bubbleBack);
+            if (bubbleBorder != bubbleBack) UiKit.DrawRounded(g, bubbleRect, 10f, bubbleBorder, 1f);
+
+            int y = BubblePadding;
+            if (!string.IsNullOrEmpty(_header))
+            {
+                Rectangle headerRect = new Rectangle(x + BubblePadding, y, contentWidth, int.MaxValue / 2);
+                Color headerColor = _kind == AiChatBubbleKind.User ? Color.White : ThemeManager.SuccessColor;
+                Size headerSize = TextRenderer.MeasureText(_header, HeaderFont, new Size(contentWidth, int.MaxValue), MeasureFlags);
+                TextRenderer.DrawText(g, _header, HeaderFont, new Rectangle(headerRect.X, headerRect.Y, contentWidth, headerSize.Height), headerColor, MeasureFlags);
+                y += headerSize.Height + 4;
+            }
+
+            for (int i = 0; i < _segments.Count; i++)
+            {
+                var segment = _segments[i];
+                if (i > 0) y += 6;
+                if (segment.Value)
+                {
+                    Size size = TextRenderer.MeasureText(segment.Key, CodeFont, new Size(contentWidth - CodePadding * 2, int.MaxValue), MeasureFlags);
+                    Rectangle codeRect = new Rectangle(x + BubblePadding, y, contentWidth, size.Height + CodePadding * 2);
+                    UiKit.FillRounded(g, codeRect, 6f, codeBack);
+                    TextRenderer.DrawText(g, segment.Key, CodeFont,
+                        new Rectangle(codeRect.X + CodePadding, codeRect.Y + CodePadding, contentWidth - CodePadding * 2, size.Height),
+                        codeText, MeasureFlags);
+                    y += codeRect.Height;
+                }
+                else
+                {
+                    Size size = TextRenderer.MeasureText(segment.Key, BodyFont, new Size(contentWidth, int.MaxValue), MeasureFlags);
+                    TextRenderer.DrawText(g, segment.Key, BodyFont,
+                        new Rectangle(x + BubblePadding, y, contentWidth, size.Height), textColor, MeasureFlags);
+                    y += size.Height;
+                }
+            }
         }
     }
 }

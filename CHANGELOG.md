@@ -7,6 +7,7 @@
 - **AI 助理支援十家服務與本機模型**：Punky 面板的串接從三種擴充到 OpenAI、Anthropic Claude（原生 API）、Google Gemini、Azure OpenAI、OpenRouter、Groq、DeepSeek、xAI Grok、Ollama、LM Studio 與自訂端點，使用者訂閱哪家就接哪家。
 - 面板頂端新增供應商／模型快速切換列：換服務不用進選項；↻ 會跟服務端抓回可用模型清單放進下拉。
 - 選項 > AI 新增「偵測本機服務」（自動找 Ollama / LM Studio 並帶入模型）與「測試連線並列出模型」；每家服務的金鑰各自存 Windows 認證管理員，並提供「前往取得金鑰／認證頁面」一鍵開啟該服務的申請網頁。
+- 對話改成泡泡呈現：使用者訊息藍底靠右、Punky 回覆灰底靠左並標示使用的模型，回覆裡的 SQL 用等寬字型的獨立區塊顯示，錯誤與系統訊息也各有樣式；泡泡右鍵可複製整則內容。
 
 ### 🛠️ 問題修正與優化
 

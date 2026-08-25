@@ -368,6 +368,7 @@ namespace mySQLPunk
             Add("Ai.RequestFailed", "請求失敗：{0}", "Request failed: {0}");
             Add("Ai.NoApiKeyHint", "這個服務還沒設定 API 金鑰：按右上角 ⚙ 開啟選項 > AI，那裡可以直接跳到該服務的金鑰申請頁；本機模型（Ollama / LM Studio）不需要金鑰。", "No API key configured for this provider: open Options > AI via ⚙ — it links straight to the provider's key page. Local models (Ollama / LM Studio) need no key.");
             Add("Ai.ModelsLoaded", "已載入 {0} 個可用模型到模型下拉。", "Loaded {0} available models into the model dropdown.");
+            Add("Ai.CopyMessage", "複製這則訊息", "Copy this message");
             Add("Ai.NeedOpenConnection", "請先開啟一個連線並選取資料庫，才能把 SQL 插入查詢分頁。", "Open a connection and select a database first, then the SQL can be inserted into a query tab.");
             Add("Dict.MenuItem", "產生資料字典", "Generate Data Dictionary");
             Add("Dict.Title", "資料字典", "Data Dictionary");
