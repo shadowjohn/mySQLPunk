@@ -448,7 +448,12 @@ namespace mySQLPunk
             Action refreshKeyState = () =>
             {
                 lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
-                if (!preset.NeedsKey)
+                if (preset.AuthStyle == "cli")
+                {
+                    keyState.Text = T("這個服務走本機 CLI 的登入身分（你的訂閱），不需要 API 金鑰、不另外計費；端點欄可留空（自動從 PATH 找），或填執行檔完整路徑。",
+                        "This service uses the local CLI's signed-in identity (your subscription) — no API key, no separate billing. Leave the endpoint blank (found via PATH) or set the full executable path.");
+                }
+                else if (!preset.NeedsKey)
                 {
                     keyState.Text = T("這個服務不需要金鑰（本機推論）。", "This service needs no key (local inference).");
                 }
@@ -599,10 +604,18 @@ namespace mySQLPunk
                 try
                 {
                     lib.AiChatSettings settings = lib.AiChatSettings.Load();
-                    var models = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.ListModels(settings));
-                    modelCombo.Items.Clear();
-                    foreach (string m in models) modelCombo.Items.Add(m);
-                    probeResult.Text = T("連線成功，", "Connected. ") + models.Count + T(" 個可用模型已放進模型下拉。", " models loaded into the model dropdown.");
+                    if (settings.Preset.AuthStyle == "cli")
+                    {
+                        string version = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.CliVersion(settings));
+                        probeResult.Text = T("CLI 可用：", "CLI available: ") + version;
+                    }
+                    else
+                    {
+                        var models = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.ListModels(settings));
+                        modelCombo.Items.Clear();
+                        foreach (string m in models) modelCombo.Items.Add(m);
+                        probeResult.Text = T("連線成功，", "Connected. ") + models.Count + T(" 個可用模型已放進模型下拉。", " models loaded into the model dropdown.");
+                    }
                 }
                 catch (Exception ex)
                 {

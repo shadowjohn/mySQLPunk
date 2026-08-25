@@ -82,6 +82,9 @@ namespace mySQLPunk.lib
         /// </summary>
         public static readonly AiProviderPreset[] Presets = new[]
         {
+            new AiProviderPreset("codex-cli",  "Codex CLI（ChatGPT 訂閱）",  "", "", "cli", false, "https://developers.openai.com/codex/cli"),
+            new AiProviderPreset("claude-cli", "Claude Code CLI（Claude 訂閱）", "", "", "cli", false, "https://claude.com/claude-code"),
+            new AiProviderPreset("gemini-cli", "Gemini CLI（Google 帳號）",  "", "", "cli", false, "https://github.com/google-gemini/gemini-cli"),
             new AiProviderPreset("openai",    "OpenAI",                 "https://api.openai.com/v1",                                  "gpt-4o-mini",               "bearer",    true,  "https://platform.openai.com/api-keys"),
             new AiProviderPreset("anthropic", "Anthropic Claude",       "https://api.anthropic.com",                                  "claude-haiku-4-5",          "x-api-key", true,  "https://console.anthropic.com/settings/keys"),
             new AiProviderPreset("gemini",    "Google Gemini",          "https://generativelanguage.googleapis.com/v1beta/openai",    "gemini-2.0-flash",          "bearer",    true,  "https://aistudio.google.com/apikey"),
@@ -132,11 +135,150 @@ namespace mySQLPunk.lib
         /// <summary>同步呼叫（請包在 Task.Run 裡），回傳 assistant 的完整回覆文字。</summary>
         public static string ChatCompletion(AiChatSettings settings, IList<AiChatMessage> messages)
         {
+            if (settings.Preset.AuthStyle == "cli")
+            {
+                return CliChat(settings, messages);
+            }
             if (string.Equals(settings.Provider, "anthropic", StringComparison.OrdinalIgnoreCase))
             {
                 return AnthropicChat(settings, messages);
             }
             return OpenAiCompatibleChat(settings, messages);
+        }
+
+        // ── 本機 CLI 後端（走使用者訂閱，不用 API 金鑰）────────────
+        // Codex CLI（codex exec）、Claude Code（claude -p）、Gemini CLI 都有
+        // 官方的非互動模式：prompt 從 stdin 餵進去、回覆從 stdout 收回來。
+        // 用 cmd /c 啟動，npm 的 .cmd shim 與 winget 的 exe 都吃得到。
+
+        /// <summary>該 CLI 供應商的預設執行檔名（Endpoint 欄位可覆寫成完整路徑）。</summary>
+        public static string CliExecutableFor(string providerId)
+        {
+            switch ((providerId ?? "").ToLowerInvariant())
+            {
+                case "codex-cli": return "codex";
+                case "claude-cli": return "claude";
+                case "gemini-cli": return "gemini";
+                default: return null;
+            }
+        }
+
+        private static string CliChat(AiChatSettings settings, IList<AiChatMessage> messages)
+        {
+            string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(settings.Provider);
+            string model = (settings.Model ?? "").Trim();
+
+            string arguments;
+            switch (settings.Provider)
+            {
+                case "codex-cli":
+                    // read-only sandbox + 空的工作目錄：純問答，不讓它動到任何檔案
+                    arguments = "exec --skip-git-repo-check -s read-only" + (model.Length > 0 ? " -m " + model : "") + " -";
+                    break;
+                case "claude-cli":
+                    arguments = "-p" + (model.Length > 0 ? " --model " + model : "");
+                    break;
+                case "gemini-cli":
+                    arguments = model.Length > 0 ? "-m " + model : "";
+                    break;
+                default:
+                    throw new InvalidOperationException("unknown cli provider: " + settings.Provider);
+            }
+
+            // CLI 是一次一問，把系統指示、上下文與對話攤平成一份 prompt
+            StringBuilder prompt = new StringBuilder();
+            foreach (AiChatMessage m in messages)
+            {
+                if (m.Role == "system")
+                {
+                    prompt.AppendLine(m.Content);
+                    prompt.AppendLine();
+                }
+            }
+            bool hasHistory = false;
+            foreach (AiChatMessage m in messages)
+            {
+                if (m.Role == "system") continue;
+                hasHistory = true;
+                prompt.AppendLine((m.Role == "assistant" ? "[助理]" : "[使用者]"));
+                prompt.AppendLine(m.Content);
+                prompt.AppendLine();
+            }
+            if (hasHistory) prompt.AppendLine("請以助理身分直接回覆最後一則使用者訊息，不要重複前面的對話。");
+
+            return RunCliProcess(exe, arguments, prompt.ToString(), 180000);
+        }
+
+        /// <summary>跑 CLI 的 --version 當「測試連線」：確認裝了、抓得到。</summary>
+        public static string CliVersion(AiChatSettings settings)
+        {
+            string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(settings.Provider);
+            return RunCliProcess(exe, "--version", null, 20000);
+        }
+
+        private static string RunCliProcess(string exe, string arguments, string stdin, int timeoutMs)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/d /c " + exe + " " + arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+                WorkingDirectory = Path.GetTempPath()
+            };
+            psi.EnvironmentVariables["NO_COLOR"] = "1";
+
+            using (var process = System.Diagnostics.Process.Start(psi))
+            {
+                var stdout = new StringBuilder();
+                var stderr = new StringBuilder();
+                process.OutputDataReceived += (s, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
+                process.ErrorDataReceived += (s, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                if (stdin != null)
+                {
+                    using (var writer = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false)))
+                    {
+                        writer.Write(stdin);
+                    }
+                }
+                else
+                {
+                    process.StandardInput.Close();
+                }
+
+                if (!process.WaitForExit(timeoutMs))
+                {
+                    try { process.Kill(); } catch { }
+                    throw new InvalidOperationException(Localization.Format("Ai.CliTimeout", exe));
+                }
+                process.WaitForExit(); // 等非同步輸出讀完
+
+                string output = stdout.ToString().Trim();
+                if (process.ExitCode != 0)
+                {
+                    string detail = stderr.ToString().Trim();
+                    if (detail.Length == 0) detail = output;
+                    if (detail.IndexOf("不是內部或外部命令", StringComparison.Ordinal) >= 0
+                        || detail.IndexOf("is not recognized", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        throw new InvalidOperationException(Localization.Format("Ai.CliNotFound", exe));
+                    }
+                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, Truncate(detail, 400)));
+                }
+                if (output.Length == 0)
+                {
+                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, Truncate(stderr.ToString().Trim(), 400)));
+                }
+                return output;
+            }
         }
 
         private static string OpenAiCompatibleChat(AiChatSettings settings, IList<AiChatMessage> messages)
@@ -290,6 +432,10 @@ namespace mySQLPunk.lib
         /// <summary>跟服務要可用的模型清單（同時當「測試連線」用：能拿到清單代表端點與金鑰都通）。</summary>
         public static List<string> ListModels(AiChatSettings settings)
         {
+            if (settings.Preset.AuthStyle == "cli")
+            {
+                throw new InvalidOperationException(Localization.T("Ai.CliNoModels"));
+            }
             List<string> models = new List<string>();
             string baseUrl = settings.Endpoint.TrimEnd('/');
             string url = string.Equals(settings.Provider, "anthropic", StringComparison.OrdinalIgnoreCase)

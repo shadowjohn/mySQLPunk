@@ -373,6 +373,10 @@ namespace mySQLPunk
             Add("Ai.OAuthDoneBody", "金鑰已交給 mySQLPunk，這個分頁可以關掉了。", "The key has been handed to mySQLPunk. You can close this tab.");
             Add("Ai.ModelsLoaded", "已載入 {0} 個可用模型到模型下拉。", "Loaded {0} available models into the model dropdown.");
             Add("Ai.CopyMessage", "複製這則訊息", "Copy this message");
+            Add("Ai.CliNotFound", "找不到「{0}」指令：請先安裝並登入該 CLI（選項 > AI 的「前往取得金鑰／認證頁面」有安裝說明），或在端點欄填入執行檔完整路徑。", "Command \"{0}\" not found: install and sign in to the CLI first (the key/sign-up link in Options > AI has install instructions), or put the full executable path in the endpoint field.");
+            Add("Ai.CliFailed", "CLI「{0}」執行失敗：{1}", "CLI \"{0}\" failed: {1}");
+            Add("Ai.CliTimeout", "CLI「{0}」回應逾時（180 秒），已中止。", "CLI \"{0}\" timed out (180 seconds) and was terminated.");
+            Add("Ai.CliNoModels", "CLI 模式沒有模型清單可抓：模型欄留空用該 CLI 的預設模型，或自行填入型號（例如 gpt-5.1-codex）。", "CLI mode has no model list to fetch: leave the model blank to use the CLI's default, or type a model name (e.g. gpt-5.1-codex).");
             Add("Ai.NeedOpenConnection", "請先開啟一個連線並選取資料庫，才能把 SQL 插入查詢分頁。", "Open a connection and select a database first, then the SQL can be inserted into a query tab.");
             Add("Dict.MenuItem", "產生資料字典", "Generate Data Dictionary");
             Add("Dict.Title", "資料字典", "Data Dictionary");

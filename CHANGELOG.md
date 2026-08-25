@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### 🚀 新增功能
+
+- **AI 助理支援本機 CLI（免 API 費用）**：新增 Codex CLI（ChatGPT 訂閱）、Claude Code CLI（Claude 訂閱）與 Gemini CLI（Google 帳號）三個供應商——直接呼叫你本機已登入的 CLI，走訂閱額度不另計 API 費；不需金鑰，選了就能用。「測試連線」會確認 CLI 已安裝並顯示版本。
+
 ## [1.0.0.12] - 2026-08-25
 
 ### 🚀 新增功能
