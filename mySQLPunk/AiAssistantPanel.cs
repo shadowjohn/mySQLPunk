@@ -71,15 +71,19 @@ namespace mySQLPunk
                 Padding = new Padding(4, 10, 0, 0)
             };
             closeButton = new Button { Text = "✕", Dock = DockStyle.Right, Width = 32, FlatStyle = FlatStyle.Flat, TabStop = false };
+            closeButton.AccessibleName = Localization.T("Common.Close");
             closeButton.FlatAppearance.BorderSize = 0;
             closeButton.Click += (s, e) => closeAction?.Invoke();
             settingsButton = new Button { Text = "⚙", Dock = DockStyle.Right, Width = 32, FlatStyle = FlatStyle.Flat, TabStop = false };
+            settingsButton.AccessibleName = Localization.T("Menu.Options");
             settingsButton.FlatAppearance.BorderSize = 0;
             settingsButton.Click += (s, e) => _openSettingsAction?.Invoke();
             headerPanel.Controls.Add(titleLabel);
             headerPanel.Controls.Add(avatarBox);   // 排在 titleLabel 之後,靠左停靠時才會在最左邊
             headerPanel.Controls.Add(settingsButton);
             headerPanel.Controls.Add(closeButton);
+            ThemeManager.SetGlyph(settingsButton, UiGlyph.Settings);
+            ThemeManager.SetGlyph(closeButton, UiGlyph.Close);
             headerPanel.Paint += (s, e) => UiKit.DrawHairline(e.Graphics, 0, headerPanel.Width, headerPanel.Height - 1, ThemeManager.BorderColor);
 
             // ── 輸入區（底部）──
@@ -182,7 +186,14 @@ namespace mySQLPunk
             };
             foreach (AiProviderPreset preset in AiChatService.Presets) providerCombo.Items.Add(preset.DisplayName);
 
-            refreshModelsButton = new Button { Dock = DockStyle.Right, Width = 30, Text = "↻", TabStop = false };
+            refreshModelsButton = new Button
+            {
+                Dock = DockStyle.Right,
+                Width = 30,
+                Text = "↻",
+                AccessibleName = Localization.T("Query.Refresh"),
+                TabStop = false
+            };
             modelCombo = new ComboBox
             {
                 Dock = DockStyle.Fill,
@@ -194,6 +205,7 @@ namespace mySQLPunk
             pickerPanel.Controls.Add(modelHost);
             pickerPanel.Controls.Add(refreshModelsButton);
             pickerPanel.Controls.Add(providerCombo);
+            ThemeManager.SetGlyph(refreshModelsButton, UiGlyph.Refresh);
 
             SyncPickerFromSettings();
 

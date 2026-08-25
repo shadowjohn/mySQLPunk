@@ -65,6 +65,7 @@ namespace mySQLPunk
         Export,
         Play,
         Refresh,
+        Settings,
         Search,
         Info,
         Code,
@@ -530,6 +531,19 @@ namespace mySQLPunk
                         poly.AddPolygon(new[] { P(r, 17.8f, 2.8f), P(r, 20.2f, 9.6f), P(r, 13.4f, 7.6f) });
                         g.FillPath(brush, poly);
                     }
+                    break;
+
+                case UiGlyph.Settings:
+                    g.DrawEllipse(pen, R(r, 5, 5, 14, 14));
+                    g.DrawEllipse(pen, R(r, 9.2f, 9.2f, 5.6f, 5.6f));
+                    Line(g, pen, r, 12, 2.5f, 12, 5);
+                    Line(g, pen, r, 12, 19, 12, 21.5f);
+                    Line(g, pen, r, 2.5f, 12, 5, 12);
+                    Line(g, pen, r, 19, 12, 21.5f, 12);
+                    Line(g, pen, r, 5.3f, 5.3f, 7.1f, 7.1f);
+                    Line(g, pen, r, 16.9f, 16.9f, 18.7f, 18.7f);
+                    Line(g, pen, r, 18.7f, 5.3f, 16.9f, 7.1f);
+                    Line(g, pen, r, 7.1f, 16.9f, 5.3f, 18.7f);
                     break;
 
                 case UiGlyph.Search:

@@ -70,6 +70,7 @@ public static class SmokeTests
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
         Run("SQL script splitter", TestSqlScriptSplitter, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
+        Run("AI assistant compact button glyphs", TestAiAssistantCompactButtonGlyphs, ref passed);
         Run("Main toolbar vector icons", TestMainToolbarVectorIcons, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
@@ -7854,6 +7855,43 @@ public static class SmokeTests
         finally
         {
             ThemeManager.SetTheme(originalTheme, false);
+        }
+    }
+
+    private static void TestAiAssistantCompactButtonGlyphs()
+    {
+        string root = FindRepositoryRootForTest();
+        string source = File.ReadAllText(Path.Combine(root, "mySQLPunk", "AiAssistantPanel.cs"), Encoding.UTF8);
+        AssertContains(source, "ThemeManager.SetGlyph(settingsButton, UiGlyph.Settings);", "AI settings button should use a vector glyph instead of clipped text.");
+        AssertContains(source, "ThemeManager.SetGlyph(closeButton, UiGlyph.Close);", "AI close button should use a vector glyph instead of clipped text.");
+        AssertContains(source, "ThemeManager.SetGlyph(refreshModelsButton, UiGlyph.Refresh);", "AI model refresh button should use a vector glyph instead of clipped text.");
+
+        UiGlyph[] glyphs = { UiGlyph.Settings, UiGlyph.Close, UiGlyph.Refresh };
+        foreach (UiGlyph glyph in glyphs)
+        {
+            using (Bitmap bitmap = UiKit.RenderGlyph(glyph, 18, Color.Black, 0.9f))
+            {
+                int paintedPixels = 0;
+                int minX = bitmap.Width;
+                int minY = bitmap.Height;
+                int maxX = -1;
+                int maxY = -1;
+                for (int y = 0; y < bitmap.Height; y++)
+                {
+                    for (int x = 0; x < bitmap.Width; x++)
+                    {
+                        if (bitmap.GetPixel(x, y).A == 0) continue;
+                        paintedPixels++;
+                        minX = Math.Min(minX, x);
+                        minY = Math.Min(minY, y);
+                        maxX = Math.Max(maxX, x);
+                        maxY = Math.Max(maxY, y);
+                    }
+                }
+
+                Assert(paintedPixels >= 20, glyph + " should remain visible at compact button size.");
+                Assert(minX >= 0 && minY >= 0 && maxX < bitmap.Width && maxY < bitmap.Height, glyph + " should not be clipped at compact button size.");
+            }
         }
     }
 
