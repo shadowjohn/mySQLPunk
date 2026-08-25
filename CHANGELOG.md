@@ -7,6 +7,10 @@
 - **AI 助理支援本機 CLI（免 API 費用）**：新增 Codex CLI（ChatGPT 訂閱）、Claude Code CLI（Claude 訂閱）與 Gemini CLI（Google 帳號）三個供應商——直接呼叫你本機已登入的 CLI，走訂閱額度不另計 API 費；不需金鑰，選了就能用。「測試連線」會確認 CLI 已安裝並顯示版本。
 - 下載即用的自動偵測：還沒設定金鑰的使用者開啟 AI 面板時，會自動掃描本機已安裝的 CLI（Codex／Claude Code／Gemini）並直接選用；選項的「偵測本機服務」也改為同時掃 CLI 與 Ollama／LM Studio，列出全部找到的選項。
 
+### 🛠️ 問題修正與優化
+
+- 本版以新增功能為主，無獨立修正項目。
+
 ## [1.0.0.12] - 2026-08-25
 
 ### 🚀 新增功能
