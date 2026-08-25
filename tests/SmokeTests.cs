@@ -7803,9 +7803,13 @@ public static class SmokeTests
         };
 
         HashSet<string> renderedHashes = new HashSet<string>(StringComparer.Ordinal);
+        Color outline = Color.FromArgb(55, 65, 81);
+        Color primary = Color.FromArgb(37, 99, 235);
+        Color secondary = Color.FromArgb(20, 184, 166);
+        Color accent = Color.FromArgb(245, 158, 11);
         foreach (UiGlyph glyph in glyphs)
         {
-            using (Bitmap bitmap = UiKit.RenderGlyph(glyph, 32, Color.FromArgb(55, 65, 81), 0.85f))
+            using (Bitmap bitmap = UiKit.RenderGlyph(glyph, 32, outline, 0.85f))
             {
                 int paintedPixels = 0;
                 int minX = bitmap.Width;
@@ -7836,6 +7840,43 @@ public static class SmokeTests
                     string hash = BitConverter.ToString(sha.ComputeHash(stream.ToArray())).Replace("-", string.Empty);
                     Assert(renderedHashes.Add(hash), glyph + " should not duplicate another main toolbar icon.");
                 }
+            }
+
+            using (Bitmap colorBitmap = UiKit.RenderMainToolbarGlyph(
+                glyph,
+                32,
+                outline,
+                primary,
+                secondary,
+                accent,
+                Color.FromArgb(42, primary),
+                0.85f))
+            {
+                int paletteColorsUsed = 0;
+                Color[] expectedColors = { primary, secondary, accent };
+                foreach (Color expected in expectedColors)
+                {
+                    bool found = false;
+                    for (int y = 0; y < colorBitmap.Height && !found; y++)
+                    {
+                        for (int x = 0; x < colorBitmap.Width; x++)
+                        {
+                            Color actual = colorBitmap.GetPixel(x, y);
+                            if (actual.A < 64) continue;
+                            int colorDistance = Math.Abs(actual.R - expected.R)
+                                + Math.Abs(actual.G - expected.G)
+                                + Math.Abs(actual.B - expected.B);
+                            // 32px 圖示的節點只有數個像素，邊框抗鋸齒會把中心色與外框混合；
+                            // 允許小幅色差，但仍要能辨認出至少兩個彼此差異很大的語意色。
+                            if (colorDistance > 72) continue;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (found) paletteColorsUsed++;
+                }
+
+                Assert(paletteColorsUsed >= 2, glyph + " should use at least two semantic palette colors.");
             }
         }
     }

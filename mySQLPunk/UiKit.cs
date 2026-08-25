@@ -325,6 +325,23 @@ namespace mySQLPunk
         {
             if (glyph == UiGlyph.None || bounds.Width <= 2 || bounds.Height <= 2) return;
 
+            // 主功能列有自己的彩色繪圖系統；單色入口仍使用同一套新輪廓，
+            // 讓測試、列印或其他需要單色輸出的情境不會退回舊圖示。
+            if (MainToolbarGlyphPainter.Supports(glyph))
+            {
+                MainToolbarGlyphPainter.Draw(
+                    g,
+                    glyph,
+                    bounds,
+                    color,
+                    color,
+                    color,
+                    color,
+                    Color.FromArgb(38, color),
+                    strokeScale);
+                return;
+            }
+
             SmoothingMode previousSmoothing = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
@@ -352,6 +369,21 @@ namespace mySQLPunk
         public static void DrawGlyph(Graphics g, UiGlyph glyph, RectangleF bounds, Color color)
         {
             DrawGlyph(g, glyph, bounds, color, 1f);
+        }
+
+        /// <summary>使用主功能列專用的彩色圖示系統。</summary>
+        public static void DrawMainToolbarGlyph(
+            Graphics g,
+            UiGlyph glyph,
+            RectangleF bounds,
+            Color outline,
+            Color primary,
+            Color secondary,
+            Color accent,
+            Color soft,
+            float strokeScale)
+        {
+            MainToolbarGlyphPainter.Draw(g, glyph, bounds, outline, primary, secondary, accent, soft, strokeScale);
         }
 
         /// <summary>把 24x24 設計座標換算成實際畫布座標。</summary>
@@ -880,6 +912,28 @@ namespace mySQLPunk
         public static Bitmap RenderGlyph(UiGlyph glyph, int size, Color color)
         {
             return RenderGlyph(glyph, size, color, 1f);
+        }
+
+        /// <summary>把彩色主功能圖示輸出成透明點陣圖，供測試與設計預覽使用。</summary>
+        public static Bitmap RenderMainToolbarGlyph(
+            UiGlyph glyph,
+            int size,
+            Color outline,
+            Color primary,
+            Color secondary,
+            Color accent,
+            Color soft,
+            float strokeScale)
+        {
+            Bitmap bitmap = new Bitmap(Math.Max(1, size), Math.Max(1, size));
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(Color.Transparent);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                DrawMainToolbarGlyph(g, glyph, new RectangleF(0, 0, size, size), outline, primary, secondary, accent, soft, strokeScale);
+            }
+            return bitmap;
         }
 
         /// <summary>把既有的點陣圖示縮放到指定尺寸並置中，維持等比例。</summary>

@@ -136,6 +136,15 @@ namespace mySQLPunk
             public bool HasTint;
         }
 
+        private struct MainGlyphPalette
+        {
+            public Color Outline;
+            public Color Primary;
+            public Color Secondary;
+            public Color Accent;
+            public Color Soft;
+        }
+
         private static readonly Dictionary<ToolStripItem, GlyphSpec> ItemGlyphs = new Dictionary<ToolStripItem, GlyphSpec>();
 
         // 記錄哪些 Image 是 SetGlyph 自己建立的透明佔位圖。
@@ -1492,6 +1501,25 @@ namespace mySQLPunk
                 ToolStripButton button = e.Item as ToolStripButton;
                 bool isChecked = button != null && button.Checked;
 
+                if (IsRibbon(e.ToolStrip) && MainToolbarGlyphPainter.Supports(spec.Glyph) && !spec.HasTint)
+                {
+                    MainGlyphPalette palette = GetMainGlyphPalette(
+                        spec.Glyph,
+                        e.Item.Enabled,
+                        isChecked || e.Item.Selected || e.Item.Pressed);
+                    UiKit.DrawMainToolbarGlyph(
+                        e.Graphics,
+                        spec.Glyph,
+                        e.ImageRectangle,
+                        palette.Outline,
+                        palette.Primary,
+                        palette.Secondary,
+                        palette.Accent,
+                        palette.Soft,
+                        0.85f);
+                    return;
+                }
+
                 Color color;
                 if (!e.Item.Enabled) color = DisabledTextColor;
                 else if (spec.HasTint) color = spec.Tint;
@@ -1502,6 +1530,106 @@ namespace mySQLPunk
                 // 主功能列的圖示筆畫略細，避免大尺寸下顯得笨重
                 float strokeScale = IsRibbon(e.ToolStrip) ? 0.85f : 1f;
                 UiKit.DrawGlyph(e.Graphics, spec.Glyph, e.ImageRectangle, color, strokeScale);
+            }
+
+            private static MainGlyphPalette GetMainGlyphPalette(UiGlyph glyph, bool enabled, bool emphasized)
+            {
+                Color primary;
+                Color secondary;
+                Color accent;
+
+                switch (glyph)
+                {
+                    case UiGlyph.MainConnection:
+                        primary = ThemePalette(Color.FromArgb(13, 148, 136), Color.FromArgb(45, 212, 191));
+                        secondary = ThemePalette(Color.FromArgb(34, 197, 94), Color.FromArgb(74, 222, 128));
+                        accent = ThemePalette(Color.FromArgb(6, 182, 212), Color.FromArgb(34, 211, 238));
+                        break;
+                    case UiGlyph.MainNewQuery:
+                        primary = ThemePalette(Color.FromArgb(22, 163, 74), Color.FromArgb(74, 222, 128));
+                        secondary = ThemePalette(Color.FromArgb(37, 99, 235), Color.FromArgb(96, 165, 250));
+                        accent = ThemePalette(Color.FromArgb(245, 158, 11), Color.FromArgb(251, 191, 36));
+                        break;
+                    case UiGlyph.MainTable:
+                        primary = ThemePalette(Color.FromArgb(37, 99, 235), Color.FromArgb(96, 165, 250));
+                        secondary = ThemePalette(Color.FromArgb(6, 182, 212), Color.FromArgb(34, 211, 238));
+                        accent = ThemePalette(Color.FromArgb(34, 197, 94), Color.FromArgb(74, 222, 128));
+                        break;
+                    case UiGlyph.MainView:
+                        primary = ThemePalette(Color.FromArgb(8, 145, 178), Color.FromArgb(34, 211, 238));
+                        secondary = ThemePalette(Color.FromArgb(59, 130, 246), Color.FromArgb(96, 165, 250));
+                        accent = ThemePalette(Color.FromArgb(20, 184, 166), Color.FromArgb(45, 212, 191));
+                        break;
+                    case UiGlyph.MainFunction:
+                        primary = ThemePalette(Color.FromArgb(124, 58, 237), Color.FromArgb(167, 139, 250));
+                        secondary = ThemePalette(Color.FromArgb(192, 38, 211), Color.FromArgb(232, 121, 249));
+                        accent = ThemePalette(Color.FromArgb(22, 163, 74), Color.FromArgb(74, 222, 128));
+                        break;
+                    case UiGlyph.MainUser:
+                        primary = ThemePalette(Color.FromArgb(37, 99, 235), Color.FromArgb(96, 165, 250));
+                        secondary = ThemePalette(Color.FromArgb(14, 165, 233), Color.FromArgb(56, 189, 248));
+                        accent = ThemePalette(Color.FromArgb(22, 163, 74), Color.FromArgb(74, 222, 128));
+                        break;
+                    case UiGlyph.MainMore:
+                        primary = ThemePalette(Color.FromArgb(16, 185, 129), Color.FromArgb(52, 211, 153));
+                        secondary = ThemePalette(Color.FromArgb(245, 158, 11), Color.FromArgb(251, 191, 36));
+                        accent = ThemePalette(Color.FromArgb(219, 39, 119), Color.FromArgb(244, 114, 182));
+                        break;
+                    case UiGlyph.MainQuery:
+                        primary = ThemePalette(Color.FromArgb(67, 56, 202), Color.FromArgb(129, 140, 248));
+                        secondary = ThemePalette(Color.FromArgb(6, 182, 212), Color.FromArgb(34, 211, 238));
+                        accent = ThemePalette(Color.FromArgb(22, 163, 74), Color.FromArgb(74, 222, 128));
+                        break;
+                    case UiGlyph.MainBackup:
+                        primary = ThemePalette(Color.FromArgb(14, 165, 233), Color.FromArgb(56, 189, 248));
+                        secondary = ThemePalette(Color.FromArgb(37, 99, 235), Color.FromArgb(96, 165, 250));
+                        accent = ThemePalette(Color.FromArgb(124, 58, 237), Color.FromArgb(167, 139, 250));
+                        break;
+                    case UiGlyph.MainEvent:
+                        primary = ThemePalette(Color.FromArgb(225, 29, 72), Color.FromArgb(251, 113, 133));
+                        secondary = ThemePalette(Color.FromArgb(37, 99, 235), Color.FromArgb(96, 165, 250));
+                        accent = ThemePalette(Color.FromArgb(245, 158, 11), Color.FromArgb(251, 191, 36));
+                        break;
+                    case UiGlyph.MainModel:
+                        primary = ThemePalette(Color.FromArgb(37, 99, 235), Color.FromArgb(96, 165, 250));
+                        secondary = ThemePalette(Color.FromArgb(22, 163, 74), Color.FromArgb(74, 222, 128));
+                        accent = ThemePalette(Color.FromArgb(124, 58, 237), Color.FromArgb(167, 139, 250));
+                        break;
+                    default:
+                        primary = ThemePalette(Color.FromArgb(219, 39, 119), Color.FromArgb(244, 114, 182));
+                        secondary = ThemePalette(Color.FromArgb(245, 158, 11), Color.FromArgb(251, 191, 36));
+                        accent = ThemePalette(Color.FromArgb(22, 163, 74), Color.FromArgb(74, 222, 128));
+                        break;
+                }
+
+                if (!enabled)
+                {
+                    return new MainGlyphPalette
+                    {
+                        Outline = DisabledTextColor,
+                        Primary = Color.FromArgb(150, DisabledTextColor),
+                        Secondary = Color.FromArgb(125, DisabledTextColor),
+                        Accent = Color.FromArgb(105, DisabledTextColor),
+                        Soft = Color.FromArgb(28, DisabledTextColor)
+                    };
+                }
+
+                Color outline = IsDark ? Color.FromArgb(218, 226, 237) : Color.FromArgb(55, 65, 81);
+                if (emphasized) outline = UiKit.Mix(outline, primary, 0.28f);
+
+                return new MainGlyphPalette
+                {
+                    Outline = outline,
+                    Primary = primary,
+                    Secondary = secondary,
+                    Accent = accent,
+                    Soft = Color.FromArgb(IsDark ? 76 : 42, primary)
+                };
+            }
+
+            private static Color ThemePalette(Color light, Color dark)
+            {
+                return IsDark ? dark : light;
             }
 
             protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)

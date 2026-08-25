@@ -177,6 +177,7 @@
     </Compile>
     <Compile Include="ThemeManager.cs" />
     <Compile Include="UiKit.cs" />
+    <Compile Include="MainToolbarGlyphPainter.cs" />
     <Compile Include="UiControls.cs" />
     <Compile Include="UserOperationDialog.cs">
       <SubType>Form</SubType>
