@@ -75,10 +75,41 @@ Assert-True $aged.ShouldRelease 'A small user-facing change should publish after
 Assert-Equal '1.0.0.16' (Get-NextAutoReleaseVersion -LatestTag 'v1.0.0.15') 'Four-part versions should increment the revision.'
 Assert-Equal '1.2.4' (Get-NextAutoReleaseVersion -LatestTag 'v1.2.3') 'Three-part versions should increment the patch.'
 
-& (Join-Path $repoRoot 'scripts\Prepare-AutoRelease.ps1') `
-    -Version '1.0.0.16' `
-    -LatestTag 'v1.0.0.15' `
-    -RepositoryRoot $repoRoot `
-    -CheckOnly
+$prepareRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("mysqlpunk-auto-release-policy-" + [Guid]::NewGuid().ToString('N'))
+$propertiesRoot = Join-Path $prepareRoot 'mySQLPunk\Properties'
+New-Item -ItemType Directory -Path $propertiesRoot -Force | Out-Null
+try {
+    '[assembly: System.Reflection.AssemblyFileVersion("1.0.0.15")]' |
+        Set-Content -LiteralPath (Join-Path $propertiesRoot 'AssemblyInfo.cs') -Encoding UTF8
+    '目前發版版本：`v1.0.0.15`' |
+        Set-Content -LiteralPath (Join-Path $prepareRoot 'README.md') -Encoding UTF8
+    @'
+# Changelog
+
+## [1.0.0.16] - 2026-08-25
+
+### 🚀 新增功能
+
+- **測試功能**：驗證發版準備流程。
+
+### 🛠️ 問題修正與優化
+
+- 測試修正。
+'@ | Set-Content -LiteralPath (Join-Path $prepareRoot 'CHANGELOG.md') -Encoding UTF8
+
+    & (Join-Path $repoRoot 'scripts\Prepare-AutoRelease.ps1') `
+        -Version '1.0.0.16' `
+        -LatestTag 'v1.0.0.15' `
+        -RepositoryRoot $prepareRoot `
+        -CheckOnly
+}
+finally {
+    $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $resolvedPrepareRoot = [System.IO.Path]::GetFullPath($prepareRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedPrepareRoot.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove test data outside the temporary directory: $resolvedPrepareRoot"
+    }
+    Remove-Item -LiteralPath $prepareRoot -Recurse -Force
+}
 
 Write-Host '[PASS] Auto release policy'

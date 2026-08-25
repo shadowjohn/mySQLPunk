@@ -25,10 +25,10 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Setup NuGet
-        uses: NuGet/setup-nuget@v2
+        uses: NuGet/setup-nuget@v4
 
       - name: Resolve release version
         id: release_version
@@ -114,12 +114,86 @@ jobs:
         shell: pwsh
         run: .\scripts\package-release.ps1 -Version "${{ steps.release_version.outputs.version }}" -Configuration Release -OutputRoot .\dist
 
+      - name: Smoke test installer
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath ".\dist" -Filter "*-setup.exe" -File)
+          if ($installers.Count -ne 1) {
+            throw "Exactly one setup EXE is required for the installer smoke test."
+          }
+
+          $installRoot = Join-Path $env:RUNNER_TEMP "mysqlpunk-installer-smoke"
+          $runnerRoot = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+          $resolvedInstallRoot = [System.IO.Path]::GetFullPath($installRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+          if (-not $resolvedInstallRoot.StartsWith($runnerRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Installer smoke path must stay inside RUNNER_TEMP: $resolvedInstallRoot"
+          }
+
+          $appProcess = $null
+          try {
+            $install = Start-Process -FilePath $installers[0].FullName -ArgumentList @(
+              "/VERYSILENT",
+              "/SUPPRESSMSGBOXES",
+              "/NORESTART",
+              "/SP-",
+              "/CURRENTUSER",
+              "/NOICONS",
+              "/DIR=`"$installRoot`""
+            ) -Wait -PassThru
+            if ($install.ExitCode -ne 0) {
+              throw "Installer smoke installation failed with exit code $($install.ExitCode)."
+            }
+
+            $appPath = Join-Path $installRoot "mySQLPunk.exe"
+            $uninstallerPath = Join-Path $installRoot "unins000.exe"
+            foreach ($requiredPath in @($appPath, $uninstallerPath, (Join-Path $installRoot "THIRD_PARTY_NOTICES.md"))) {
+              if (-not (Test-Path -LiteralPath $requiredPath)) {
+                throw "Installer smoke test is missing required file: $requiredPath"
+              }
+            }
+
+            $appProcess = Start-Process -FilePath $appPath -WindowStyle Hidden -PassThru
+            Start-Sleep -Seconds 5
+            $appProcess.Refresh()
+            if ($appProcess.HasExited) {
+              throw "Installed mySQLPunk exited during the startup smoke test with code $($appProcess.ExitCode)."
+            }
+
+            $null = $appProcess.CloseMainWindow()
+            if (-not $appProcess.WaitForExit(5000)) {
+              Stop-Process -Id $appProcess.Id -Force
+              $appProcess.WaitForExit()
+            }
+          }
+          finally {
+            if ($null -ne $appProcess -and -not $appProcess.HasExited) {
+              Stop-Process -Id $appProcess.Id -Force -ErrorAction SilentlyContinue
+              $appProcess.WaitForExit()
+            }
+
+            $uninstallerPath = Join-Path $installRoot "unins000.exe"
+            if (Test-Path -LiteralPath $uninstallerPath) {
+              $uninstall = Start-Process -FilePath $uninstallerPath -ArgumentList @(
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART"
+              ) -Wait -PassThru
+              if ($uninstall.ExitCode -ne 0) {
+                throw "Installer smoke uninstall failed with exit code $($uninstall.ExitCode)."
+              }
+            }
+          }
+
+          if (Test-Path -LiteralPath (Join-Path $installRoot "mySQLPunk.exe")) {
+            throw "Installer smoke uninstall left mySQLPunk.exe behind."
+          }
+
       - name: Write release notes
         shell: pwsh
         run: .\scripts\New-ReleaseNotes.ps1 -Version "${{ steps.release_version.outputs.version }}" -OutputDirectory .\dist
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mySQLPunk-${{ steps.release_version.outputs.version }}-release-assets
           path: |

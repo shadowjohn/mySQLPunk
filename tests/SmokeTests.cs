@@ -7769,9 +7769,14 @@ public static class SmokeTests
         AssertContains(workflow, "tags:", "Release workflow should run for pushed version tags.");
         AssertContains(workflow, "workflow_dispatch:", "Release workflow should allow manual releases.");
         AssertContains(workflow, "contents: write", "Release workflow should be allowed to create GitHub Releases.");
+        AssertContains(workflow, "microsoft/setup-msbuild@v3", "Release workflow should use the Node.js 24 MSBuild setup action.");
+        AssertContains(workflow, "NuGet/setup-nuget@v4", "Release workflow should use the Node.js 24 NuGet setup action.");
         AssertContains(workflow, "nuget restore", "Release workflow should restore packages before building.");
         AssertContains(workflow, "scripts\\package-release.ps1", "Release workflow should use the repository packaging script.");
         AssertContains(workflow, "innosetup-6.7.3.exe", "Release workflow should install a pinned Inno Setup compiler.");
+        AssertContains(workflow, "Smoke test installer", "Release workflow should install, launch, close, and uninstall the built setup EXE before publishing.");
+        AssertContains(workflow, "Installer smoke uninstall left mySQLPunk.exe behind", "Release workflow should verify that smoke-test uninstallation completed.");
+        AssertContains(workflow, "actions/upload-artifact@v7", "Release workflow should use the Node.js 24 artifact action.");
         AssertContains(workflow, "dist/*-setup.exe", "Release workflow should upload the single setup EXE.");
         AssertContains(workflow, "Exactly one setup EXE is required", "Release workflow should reject multiple downloadable setup files.");
         AssertContains(workflow, "foreach ($existingAsset in @($release.assets))", "Release workflow should remove legacy assets before publishing the single EXE.");
