@@ -61,6 +61,7 @@ public static class SmokeTests
         Run("Connection profile service", TestConnectionProfileService, ref passed);
         Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
+        Run("AI CLI process integration", TestAiCliProcessIntegration, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
         Run("Application about message", TestApplicationAboutMessage, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
@@ -7257,6 +7258,59 @@ public static class SmokeTests
         AssertEquals("HEAD", request.Method, "Connectivity test should use HEAD.");
         Assert(request.Proxy != null, "Connectivity request should include HTTP proxy.");
         AssertEquals("http://proxy.local:3128/", request.Proxy.GetProxy(new Uri("https://example.test/")).ToString(), "Connectivity request proxy URI should match settings.");
+    }
+
+    private static void TestAiCliProcessIntegration()
+    {
+        AssertEquals("", AiChatService.NormalizeCliModel("codex-cli", "gpt-5.1-codex"), "Deprecated Codex subscription models should fall back to the CLI default.");
+        AssertEquals("", AiChatService.NormalizeCliModel("codex-cli", "gpt-5.1-codex-max"), "Deprecated Codex model variants should fall back to the CLI default.");
+        AssertEquals("gpt-5.6-sol", AiChatService.NormalizeCliModel("codex-cli", "gpt-5.6-sol"), "Current Codex models should remain selected.");
+        AssertEquals("gpt-5.1-codex", AiChatService.NormalizeCliModel("openai", "gpt-5.1-codex"), "API providers should preserve explicitly selected models.");
+
+        string[] codexModels = AiChatService.KnownCliModels("codex-cli");
+        Assert(Array.IndexOf(codexModels, "gpt-5.6-sol") >= 0, "Codex CLI model suggestions should include the current default family.");
+        Assert(Array.IndexOf(codexModels, "gpt-5.1-codex") < 0, "Codex CLI model suggestions should not offer deprecated subscription models.");
+
+        string resolvedCmd = AiChatService.ResolveCliExecutablePath("cmd");
+        Assert(!string.IsNullOrWhiteSpace(resolvedCmd) && File.Exists(resolvedCmd), "CLI executable resolution should find Windows system commands without cmd.exe indirection.");
+        string missingName = "mysqlpunk-missing-cli-" + Guid.NewGuid().ToString("N");
+        Assert(AiChatService.ResolveCliExecutablePath(missingName) == null, "CLI executable resolution should reject missing commands cleanly.");
+
+        string tempRoot = Path.Combine(Path.GetTempPath(), "mySQLPunk AI CLI " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            string successCli = Path.Combine(tempRoot, "fake cli.cmd");
+            File.WriteAllText(successCli, "@echo off\r\necho ai-cli-ok\r\n", Encoding.ASCII);
+            string output = AiChatService.CliVersion(new AiChatSettings
+            {
+                Provider = "codex-cli",
+                Endpoint = successCli,
+                Model = ""
+            });
+            AssertContains(output, "ai-cli-ok", "CLI batch shims in paths containing spaces should execute successfully.");
+
+            string failedCli = Path.Combine(tempRoot, "failed cli.cmd");
+            File.WriteAllText(failedCli, "@echo off\r\ndefinitely-not-a-real-command --version\r\n", Encoding.ASCII);
+            try
+            {
+                AiChatService.CliVersion(new AiChatSettings
+                {
+                    Provider = "codex-cli",
+                    Endpoint = failedCli,
+                    Model = ""
+                });
+                Assert(false, "A failed CLI batch shim should raise a readable error.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                Assert(ex.Message.IndexOf('\uFFFD') < 0, "CLI errors should not contain UTF-8 replacement-character mojibake.");
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(tempRoot, true); } catch { }
+        }
     }
 
     private static void TestAdvancedRegistrationService()

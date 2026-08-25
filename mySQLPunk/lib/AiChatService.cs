@@ -67,6 +67,7 @@ namespace mySQLPunk.lib
             AiProviderPreset preset = AiChatService.FindPreset(s.Provider);
             if (string.IsNullOrWhiteSpace(s.Endpoint)) s.Endpoint = preset.Endpoint;
             if (string.IsNullOrWhiteSpace(s.Model)) s.Model = preset.DefaultModel;
+            s.Model = AiChatService.NormalizeCliModel(s.Provider, s.Model);
             return s;
         }
     }
@@ -166,28 +167,30 @@ namespace mySQLPunk.lib
         private static string CliChat(AiChatSettings settings, IList<AiChatMessage> messages)
         {
             string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(settings.Provider);
-            string model = (settings.Model ?? "").Trim();
+            string model = NormalizeCliModel(settings.Provider, settings.Model);
             string promptText = BuildCliPrompt(messages);
 
-            string[] argumentTries;
+            string[][] argumentTries;
             switch (settings.Provider)
             {
                 case "codex-cli":
                     // read-only sandbox + 空的工作目錄：純問答，不讓它動到任何檔案。
                     // 各版本 codex 支援的旗標不一，不吃就逐步降階重試
-                    string modelArgs = model.Length > 0 ? " -m " + model : "";
+                    ValidateCliModel(model);
                     argumentTries = new[]
                     {
-                        "exec --skip-git-repo-check -s read-only" + modelArgs + " -",
-                        "exec --skip-git-repo-check" + modelArgs + " -",
-                        "exec" + modelArgs + " -"
+                        BuildCodexArguments(model, true, true),
+                        BuildCodexArguments(model, true, false),
+                        BuildCodexArguments(model, false, false)
                     };
                     break;
                 case "claude-cli":
-                    argumentTries = new[] { "-p" + (model.Length > 0 ? " --model " + model : "") };
+                    ValidateCliModel(model);
+                    argumentTries = new[] { model.Length > 0 ? new[] { "-p", "--model", model } : new[] { "-p" } };
                     break;
                 case "gemini-cli":
-                    argumentTries = new[] { model.Length > 0 ? "-m " + model : "" };
+                    ValidateCliModel(model);
+                    argumentTries = new[] { model.Length > 0 ? new[] { "-m", model } : new string[0] };
                     break;
                 default:
                     throw new InvalidOperationException("unknown cli provider: " + settings.Provider);
@@ -214,6 +217,35 @@ namespace mySQLPunk.lib
                 }
             }
             throw lastError;
+        }
+
+        private static string[] BuildCodexArguments(string model, bool skipGitCheck, bool readOnlySandbox)
+        {
+            List<string> arguments = new List<string> { "exec" };
+            if (skipGitCheck) arguments.Add("--skip-git-repo-check");
+            if (readOnlySandbox)
+            {
+                arguments.Add("-s");
+                arguments.Add("read-only");
+            }
+            if (!string.IsNullOrWhiteSpace(model))
+            {
+                arguments.Add("-m");
+                arguments.Add(model);
+            }
+            arguments.Add("-");
+            return arguments.ToArray();
+        }
+
+        private static void ValidateCliModel(string model)
+        {
+            if (string.IsNullOrWhiteSpace(model)) return;
+            for (int i = 0; i < model.Length; i++)
+            {
+                char c = model[i];
+                if (char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.' || c == '/' || c == ':') continue;
+                throw new InvalidOperationException(Localization.T("Ai.CliInvalidModel"));
+            }
         }
 
         /// <summary>CLI 是一次一問，把系統指示、上下文與對話攤平成一份 prompt。</summary>
@@ -246,27 +278,31 @@ namespace mySQLPunk.lib
         public static string CliVersion(AiChatSettings settings)
         {
             string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(settings.Provider);
-            return RunCliProcess(exe, "--version", null, 20000);
+            return RunCliProcess(exe, new[] { "--version" }, null, 20000);
         }
 
-        private static string RunCliProcess(string exe, string arguments, string stdin, int timeoutMs)
+        private static string RunCliProcess(string exe, IList<string> arguments, string stdin, int timeoutMs)
         {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = "/d /c " + exe + " " + arguments,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-                WorkingDirectory = Path.GetTempPath()
-            };
-            psi.EnvironmentVariables["NO_COLOR"] = "1";
+            string resolvedExe = ResolveCliExecutablePath(exe);
+            if (string.IsNullOrWhiteSpace(resolvedExe))
+                throw new InvalidOperationException(Localization.Format("Ai.CliNotFound", exe));
 
-            using (var process = System.Diagnostics.Process.Start(psi))
+            var psi = BuildCliProcessStartInfo(resolvedExe, arguments);
+            psi.EnvironmentVariables["NO_COLOR"] = "1";
+            psi.EnvironmentVariables["FORCE_COLOR"] = "0";
+            psi.EnvironmentVariables["CLICOLOR"] = "0";
+
+            System.Diagnostics.Process started;
+            try
+            {
+                started = System.Diagnostics.Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, ex.Message), ex);
+            }
+
+            using (var process = started)
             {
                 var stdout = new StringBuilder();
                 var stderr = new StringBuilder();
@@ -314,6 +350,177 @@ namespace mySQLPunk.lib
                 }
                 return output;
             }
+        }
+
+        /// <summary>
+        /// 解析 CLI 的實際檔案，避免透過 cmd.exe 再找一次 PATH，導致「明明偵測得到、執行時卻找不到」。
+        /// </summary>
+        public static string ResolveCliExecutablePath(string executable)
+        {
+            string candidate = (executable ?? "").Trim();
+            if (candidate.Length >= 2 && candidate[0] == '"' && candidate[candidate.Length - 1] == '"')
+                candidate = candidate.Substring(1, candidate.Length - 2);
+            if (candidate.Length == 0) return null;
+
+            bool explicitPath = Path.IsPathRooted(candidate)
+                || candidate.IndexOf(Path.DirectorySeparatorChar) >= 0
+                || candidate.IndexOf(Path.AltDirectorySeparatorChar) >= 0;
+            if (explicitPath) return FirstExistingCliPath(candidate);
+
+            for (int i = 0; i < candidate.Length; i++)
+            {
+                char c = candidate[i];
+                if (char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.') continue;
+                return null;
+            }
+
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            foreach (string folder in new[]
+            {
+                Path.Combine(localAppData, "Microsoft", "WinGet", "Links"),
+                Path.Combine(localAppData, "Microsoft", "WindowsApps"),
+                Path.Combine(appData, "npm")
+            })
+            {
+                string found = FirstExistingCliPath(Path.Combine(folder, candidate));
+                if (found != null) return found;
+            }
+
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "where.exe",
+                    Arguments = QuoteWindowsArgument(candidate),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    StandardOutputEncoding = Encoding.Default,
+                    StandardErrorEncoding = Encoding.Default
+                };
+                using (var process = System.Diagnostics.Process.Start(psi))
+                {
+                    string stdout = process.StandardOutput.ReadToEnd();
+                    process.StandardError.ReadToEnd();
+                    if (!process.WaitForExit(5000))
+                    {
+                        try { process.Kill(); } catch { }
+                        return null;
+                    }
+                    if (process.ExitCode != 0) return null;
+                    foreach (string line in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string found = FirstExistingCliPath(line.Trim());
+                        if (found != null) return found;
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static string FirstExistingCliPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            try
+            {
+                if (File.Exists(path)) return Path.GetFullPath(path);
+                if (Path.GetExtension(path).Length == 0)
+                {
+                    foreach (string extension in new[] { ".exe", ".cmd", ".bat" })
+                    {
+                        string withExtension = path + extension;
+                        if (File.Exists(withExtension)) return Path.GetFullPath(withExtension);
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static System.Diagnostics.ProcessStartInfo BuildCliProcessStartInfo(string resolvedExe, IList<string> arguments)
+        {
+            string extension = Path.GetExtension(resolvedExe);
+            bool isBatch = string.Equals(extension, ".cmd", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".bat", StringComparison.OrdinalIgnoreCase);
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+                WorkingDirectory = Path.GetTempPath()
+            };
+
+            string joinedArguments = JoinWindowsArguments(arguments);
+            if (isBatch)
+            {
+                psi.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+                psi.EnvironmentVariables["MYSQLPUNK_AI_CLI"] = resolvedExe;
+                string command = "chcp 65001 >nul & call \"%MYSQLPUNK_AI_CLI%\"";
+                if (joinedArguments.Length > 0) command += " " + joinedArguments;
+                psi.Arguments = "/d /s /c \"" + command + "\"";
+            }
+            else
+            {
+                psi.FileName = resolvedExe;
+                psi.Arguments = joinedArguments;
+            }
+            return psi;
+        }
+
+        private static string JoinWindowsArguments(IList<string> arguments)
+        {
+            if (arguments == null || arguments.Count == 0) return "";
+            StringBuilder joined = new StringBuilder();
+            for (int i = 0; i < arguments.Count; i++)
+            {
+                if (i > 0) joined.Append(' ');
+                joined.Append(QuoteWindowsArgument(arguments[i] ?? ""));
+            }
+            return joined.ToString();
+        }
+
+        private static string QuoteWindowsArgument(string argument)
+        {
+            if (argument == null || argument.Length == 0) return "\"\"";
+            bool needsQuotes = false;
+            for (int i = 0; i < argument.Length; i++)
+            {
+                char c = argument[i];
+                if (char.IsWhiteSpace(c) || c == '"') { needsQuotes = true; break; }
+            }
+            if (!needsQuotes) return argument;
+
+            StringBuilder quoted = new StringBuilder(argument.Length + 2);
+            quoted.Append('"');
+            int backslashes = 0;
+            foreach (char c in argument)
+            {
+                if (c == '\\')
+                {
+                    backslashes++;
+                    continue;
+                }
+                if (c == '"')
+                {
+                    quoted.Append('\\', backslashes * 2 + 1);
+                    quoted.Append('"');
+                    backslashes = 0;
+                    continue;
+                }
+                quoted.Append('\\', backslashes);
+                backslashes = 0;
+                quoted.Append(c);
+            }
+            quoted.Append('\\', backslashes * 2);
+            quoted.Append('"');
+            return quoted.ToString();
         }
 
         /// <summary>把 ANSI escape（CSI/OSC）與不可列印的控制字元從 CLI 輸出裡清掉。</summary>
@@ -539,7 +746,7 @@ namespace mySQLPunk.lib
             switch ((providerId ?? "").ToLowerInvariant())
             {
                 case "codex-cli":
-                    return new[] { "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5.1" };
+                    return new[] { "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna" };
                 case "claude-cli":
                     return new[] { "sonnet", "opus", "haiku" };
                 case "gemini-cli":
@@ -549,6 +756,21 @@ namespace mySQLPunk.lib
             }
         }
 
+        /// <summary>已退場且 ChatGPT 訂閱路徑不再接受的 Codex 型號，改由 CLI 自行選擇目前預設。</summary>
+        public static string NormalizeCliModel(string providerId, string model)
+        {
+            string value = (model ?? "").Trim();
+            if (!string.Equals(providerId, "codex-cli", StringComparison.OrdinalIgnoreCase)) return value;
+
+            string lower = value.ToLowerInvariant();
+            if (lower == "gpt-5-codex"
+                || lower == "gpt-5.2-codex"
+                || lower == "codex-mini-latest"
+                || lower.StartsWith("gpt-5.1-codex", StringComparison.Ordinal))
+                return "";
+            return value;
+        }
+
         /// <summary>偵測本機已安裝的 AI CLI（codex / claude / gemini）：用 where 快查 PATH，不真的執行。</summary>
         public static List<AiProviderPreset> DetectInstalledClis()
         {
@@ -556,24 +778,7 @@ namespace mySQLPunk.lib
             foreach (AiProviderPreset preset in Presets)
             {
                 if (preset.AuthStyle != "cli") continue;
-                try
-                {
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "cmd.exe",
-                        Arguments = "/d /c where " + CliExecutableFor(preset.Id),
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true
-                    };
-                    using (var process = System.Diagnostics.Process.Start(psi))
-                    {
-                        if (process.WaitForExit(5000) && process.ExitCode == 0) found.Add(preset);
-                        else if (!process.HasExited) { try { process.Kill(); } catch { } }
-                    }
-                }
-                catch { }
+                if (ResolveCliExecutablePath(CliExecutableFor(preset.Id)) != null) found.Add(preset);
             }
             return found;
         }

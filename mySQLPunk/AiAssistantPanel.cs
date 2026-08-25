@@ -376,7 +376,8 @@ namespace mySQLPunk
             chatView.AddUser(userText);
 
             AiChatSettings settings = AiChatSettings.Load();
-            AiChatBubble replyBubble = chatView.AddAssistant("Punky · " + settings.Model, Localization.T("Ai.Thinking"));
+            string modelLabel = string.IsNullOrWhiteSpace(settings.Model) ? Localization.T("Ai.CliDefaultModel") : settings.Model;
+            AiChatBubble replyBubble = chatView.AddAssistant("Punky · " + modelLabel, Localization.T("Ai.Thinking"));
             try
             {
                 List<AiChatMessage> messages = new List<AiChatMessage>();

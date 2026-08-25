@@ -392,6 +392,7 @@ namespace mySQLPunk
         {
             ClearOptionPage();
             AddOptionTitle(T("AI 助理", "AI Assistant"));
+            lib.AiChatSettings initialAiSettings = lib.AiChatSettings.Load();
 
             // 供應商清單直接取自 AiChatService.Presets：使用者訂閱哪家就選哪家
             var providerChoices = new List<OptionChoice>();
@@ -415,7 +416,7 @@ namespace mySQLPunk
                 Location = new Point(250, 158),
                 Width = 360,
                 DropDownStyle = ComboBoxStyle.DropDown,
-                Text = ApplicationOptionSettings.GetString("AiModel")
+                Text = initialAiSettings.Model
             };
             modelCombo.TextChanged += (s, e) => ApplicationOptionSettings.SetString("AiModel", modelCombo.Text);
             contentPanel.Controls.Add(modelCombo);

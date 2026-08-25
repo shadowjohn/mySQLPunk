@@ -377,7 +377,9 @@ namespace mySQLPunk
             Add("Ai.CliNotFound", "找不到「{0}」指令：請先安裝並登入該 CLI（選項 > AI 的「前往取得金鑰／認證頁面」有安裝說明），或在端點欄填入執行檔完整路徑。", "Command \"{0}\" not found: install and sign in to the CLI first (the key/sign-up link in Options > AI has install instructions), or put the full executable path in the endpoint field.");
             Add("Ai.CliFailed", "CLI「{0}」執行失敗：{1}", "CLI \"{0}\" failed: {1}");
             Add("Ai.CliTimeout", "CLI「{0}」回應逾時（180 秒），已中止。", "CLI \"{0}\" timed out (180 seconds) and was terminated.");
-            Add("Ai.CliNoModels", "CLI 模式沒有模型清單可抓：模型欄留空用該 CLI 的預設模型，或自行填入型號（例如 gpt-5.1-codex）。", "CLI mode has no model list to fetch: leave the model blank to use the CLI's default, or type a model name (e.g. gpt-5.1-codex).");
+            Add("Ai.CliInvalidModel", "模型名稱只能包含英文字母、數字、句點、斜線、冒號、底線與連字號。", "Model names may only contain letters, numbers, periods, slashes, colons, underscores, and hyphens.");
+            Add("Ai.CliDefaultModel", "CLI 預設模型", "CLI default model");
+            Add("Ai.CliNoModels", "CLI 模式沒有模型清單可抓：模型欄留空用該 CLI 的預設模型，或自行填入型號（例如 gpt-5.6-sol）。", "CLI mode has no model list to fetch: leave the model blank to use the CLI's default, or type a model name (e.g. gpt-5.6-sol).");
             Add("Ai.AutoDetectedCli", "偵測到你本機已安裝的 {0}，已自動選用——走你既有的訂閱額度，不需要 API 金鑰。想換服務可用上方下拉或 ⚙ 設定。", "Detected {0} installed on this machine and selected it automatically — it uses your existing subscription, no API key needed. Switch providers via the dropdown above or ⚙.");
             Add("Ai.CliModelsHint", "已把 {0} 的常用型號放進模型下拉；留空則使用該 CLI 的預設模型。", "Loaded the common model names for {0} into the dropdown; leave it blank to use the CLI's default model.");
             Add("Ai.NeedOpenConnection", "請先開啟一個連線並選取資料庫，才能把 SQL 插入查詢分頁。", "Open a connection and select a database first, then the SQL can be inserted into a query tab.");
