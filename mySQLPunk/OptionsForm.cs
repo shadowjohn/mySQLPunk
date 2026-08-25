@@ -517,6 +517,41 @@ namespace mySQLPunk
                 Location = new Point(160, 260),
                 AutoSize = true
             };
+            // OpenRouter 有官方 PKCE 流程，可以做到「跳瀏覽器授權、自動拿金鑰」，
+            // 其它模型商不開放第三方桌面程式 OAuth，只能手動貼金鑰
+            Button oauthButton = new Button
+            {
+                Text = T("🔑 用瀏覽器授權連結 OpenRouter", "🔑 Connect OpenRouter via browser"),
+                Location = new Point(340, 260),
+                AutoSize = true
+            };
+            oauthButton.Click += async (s, e) =>
+            {
+                oauthButton.Enabled = false;
+                probeResult.Text = T("已開啟瀏覽器，請在網頁上同意授權…", "Browser opened — approve the authorization there…");
+                try
+                {
+                    await System.Threading.Tasks.Task.Run(() => lib.AiOAuthService.ConnectOpenRouter());
+                    ApplicationOptionSettings.SetString("AiProvider", "openrouter");
+                    ApplicationOptionSettings.SetString("AiEndpoint", "");
+                    for (int i = 0; i < providerCombo.Items.Count; i++)
+                    {
+                        OptionChoice choice = providerCombo.Items[i] as OptionChoice;
+                        if (choice != null && choice.Value == "openrouter") { providerCombo.SelectedIndex = i; break; }
+                    }
+                    refreshKeyState();
+                    probeResult.Text = T("OpenRouter 已連結完成，金鑰存進 Windows 認證管理員；這把鑰匙可以用 OpenAI／Claude／Gemini 等各家模型。",
+                        "OpenRouter connected — the key is stored in Windows Credential Manager and works with OpenAI / Claude / Gemini models and more.");
+                }
+                catch (Exception ex)
+                {
+                    probeResult.Text = T("授權失敗：", "Authorization failed: ") + ex.Message;
+                }
+                finally
+                {
+                    oauthButton.Enabled = true;
+                }
+            };
 
             detectButton.Click += async (s, e) =>
             {
@@ -592,6 +627,7 @@ namespace mySQLPunk
 
             contentPanel.Controls.Add(detectButton);
             contentPanel.Controls.Add(testButton);
+            contentPanel.Controls.Add(oauthButton);
             contentPanel.Controls.Add(probeResult);
 
             Label hint = new Label

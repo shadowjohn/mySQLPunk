@@ -366,7 +366,11 @@ namespace mySQLPunk
             Add("Ai.Thinking", "思考中…", "Thinking…");
             Add("Ai.You", "你", "You");
             Add("Ai.RequestFailed", "請求失敗：{0}", "Request failed: {0}");
-            Add("Ai.NoApiKeyHint", "這個服務還沒設定 API 金鑰：按右上角 ⚙ 開啟選項 > AI，那裡可以直接跳到該服務的金鑰申請頁；本機模型（Ollama / LM Studio）不需要金鑰。", "No API key configured for this provider: open Options > AI via ⚙ — it links straight to the provider's key page. Local models (Ollama / LM Studio) need no key.");
+            Add("Ai.NoApiKeyHint", "這個服務還沒設定 API 金鑰：按右上角 ⚙ 開啟選項 > AI——可以「用瀏覽器授權連結 OpenRouter」一鍵完成（一把鑰匙用各家模型），或跳到各服務的金鑰申請頁手動貼；本機模型（Ollama / LM Studio）不需要金鑰。", "No API key configured for this provider: open Options > AI via ⚙ — connect OpenRouter with one click via browser authorization (one key for all major models), or open the provider's key page and paste one. Local models (Ollama / LM Studio) need no key.");
+            Add("Ai.OAuthNoCode", "瀏覽器授權逾時或被取消，沒有收到授權碼。", "Browser authorization timed out or was cancelled; no authorization code received.");
+            Add("Ai.OAuthNoKey", "授權碼兌換金鑰失敗，服務端沒有回傳金鑰。", "Failed to exchange the authorization code; the service returned no key.");
+            Add("Ai.OAuthDoneTitle", "授權完成！", "Authorization complete!");
+            Add("Ai.OAuthDoneBody", "金鑰已交給 mySQLPunk，這個分頁可以關掉了。", "The key has been handed to mySQLPunk. You can close this tab.");
             Add("Ai.ModelsLoaded", "已載入 {0} 個可用模型到模型下拉。", "Loaded {0} available models into the model dropdown.");
             Add("Ai.CopyMessage", "複製這則訊息", "Copy this message");
             Add("Ai.NeedOpenConnection", "請先開啟一個連線並選取資料庫，才能把 SQL 插入查詢分頁。", "Open a connection and select a database first, then the SQL can be inserted into a query tab.");

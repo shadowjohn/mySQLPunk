@@ -193,6 +193,7 @@
     <Compile Include="lib\BackupRemoteMirrorService.cs" />
     <Compile Include="lib\AdvancedRegistrationService.cs" />
     <Compile Include="lib\AiChatService.cs" />
+    <Compile Include="lib\AiOAuthService.cs" />
     <Compile Include="lib\DataDictionaryService.cs" />
     <Compile Include="lib\AppIconService.cs" />
     <Compile Include="lib\AppUpdateService.cs" />

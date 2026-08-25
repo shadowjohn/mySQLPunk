@@ -9470,6 +9470,8 @@ namespace mySQLPunk
                     // 加回一個虛擬節點以便下次雙擊展開
                     root.Nodes.Add("loading...");
                     root.Collapse();
+                    // 圖示切回未連線的灰色（之前漏了這步，關閉後還亮著品牌色）
+                    ApplyConnectionNodeIcon(root, GetConnectionValue(conn, "db_kind"), false);
                 }
                 
                 // 重設右側與中間面板
