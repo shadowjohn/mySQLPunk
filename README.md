@@ -15,7 +15,6 @@ mySQLPunk 是一套免費開源的 Windows 資料庫管理工具（WinForms）�
 
 - 羽山秋人 ( https://3wa.tw )
 - [**NickYCLin**](https://github.com/NickYCLin) ([https://github.com/NickYCLin](https://github.com/NickYCLin))
-- Codex 協作
 
 ## 最新版本
 

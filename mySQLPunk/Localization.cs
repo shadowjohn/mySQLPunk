@@ -113,7 +113,6 @@ namespace mySQLPunk
             Add("About.Platform", "平台：.NET Framework WinForms", "Platform: .NET Framework WinForms");
             Add("About.Providers", "支援連線：MySQL、PostgreSQL、SQLite、SQL Server、Oracle", "Supported connections: MySQL, PostgreSQL, SQLite, SQL Server, Oracle");
             Add("About.Authors", "作者：", "Authors:");
-            Add("About.CodexCollaboration", "Codex 協作", "Codex collaboration");
             Add("About.MascotTitle", "mySQLPunk", "mySQLPunk");
             Add("About.MascotSubtitle", "看板娘：Punky 崩琦", "Mascot: Punky 崩琦");
 

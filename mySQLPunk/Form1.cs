@@ -1578,8 +1578,7 @@ namespace mySQLPunk
                 Localization.T("About.Providers") + "\r\n\r\n" +
                 Localization.T("About.Authors") + "\r\n" +
                 "羽山秋人 ( https://3wa.tw )\r\n" +
-                "NickYCLin ( https://github.com/NickYCLin )\r\n" +
-                Localization.T("About.CodexCollaboration");
+                "NickYCLin ( https://github.com/NickYCLin )";
         }
 
         private async void CheckForUpdatesAsync(bool silent)

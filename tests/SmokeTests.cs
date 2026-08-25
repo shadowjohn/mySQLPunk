@@ -7602,7 +7602,8 @@ public static class SmokeTests
             AssertContains(message, "資料庫管理 Punky", "About message should include the Traditional Chinese product line.");
             AssertContains(message, "版本：1.0.0.0", "About message should include the current version.");
             AssertContains(message, "支援連線：MySQL、PostgreSQL、SQLite、SQL Server、Oracle", "About message should include supported providers.");
-            AssertContains(message, "作者：\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin ( https://github.com/NickYCLin )\r\nCodex 協作", "About message should list authors on separate lines.");
+            AssertContains(message, "作者：\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin ( https://github.com/NickYCLin )", "About message should list authors on separate lines.");
+            AssertNotContains(message, "Codex 協作", "About message should not credit Codex as an author.");
             AssertEquals("mySQLPunk", Localization.T("About.MascotTitle"), "About dialog mascot title should localize Traditional Chinese.");
             AssertEquals("看板娘：Punky 崩琦", Localization.T("About.MascotSubtitle"), "About dialog mascot subtitle should localize Traditional Chinese.");
 
@@ -7616,7 +7617,8 @@ public static class SmokeTests
             AssertContains(englishMessage, "Universal Database Workbench", "About message should support English product line.");
             AssertContains(englishMessage, "Version: 1.0.0.0", "About message should support English version text.");
             AssertContains(englishMessage, "Supported connections: MySQL, PostgreSQL, SQLite, SQL Server, Oracle", "About message should support English provider text.");
-            AssertContains(englishMessage, "Authors:\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin ( https://github.com/NickYCLin )\r\nCodex collaboration", "About message should support English author label.");
+            AssertContains(englishMessage, "Authors:\r\n羽山秋人 ( https://3wa.tw )\r\nNickYCLin ( https://github.com/NickYCLin )", "About message should support English author label.");
+            AssertNotContains(englishMessage, "Codex collaboration", "English about message should not credit Codex as an author.");
             AssertEquals("mySQLPunk", Localization.T("About.MascotTitle"), "About dialog mascot title should support English.");
             AssertEquals("Mascot: Punky 崩琦", Localization.T("About.MascotSubtitle"), "About dialog mascot subtitle should support English.");
 
