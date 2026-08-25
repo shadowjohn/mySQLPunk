@@ -456,6 +456,35 @@ namespace mySQLPunk.lib
             return models;
         }
 
+        /// <summary>偵測本機已安裝的 AI CLI（codex / claude / gemini）：用 where 快查 PATH，不真的執行。</summary>
+        public static List<AiProviderPreset> DetectInstalledClis()
+        {
+            var found = new List<AiProviderPreset>();
+            foreach (AiProviderPreset preset in Presets)
+            {
+                if (preset.AuthStyle != "cli") continue;
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "cmd.exe",
+                        Arguments = "/d /c where " + CliExecutableFor(preset.Id),
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    using (var process = System.Diagnostics.Process.Start(psi))
+                    {
+                        if (process.WaitForExit(5000) && process.ExitCode == 0) found.Add(preset);
+                        else if (!process.HasExited) { try { process.Kill(); } catch { } }
+                    }
+                }
+                catch { }
+            }
+            return found;
+        }
+
         /// <summary>偵測本機推論服務（Ollama / LM Studio），回傳偵測到的供應商與其模型。</summary>
         public static List<KeyValuePair<AiProviderPreset, List<string>>> DetectLocalServices()
         {

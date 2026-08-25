@@ -151,6 +151,9 @@ namespace mySQLPunk
             // ── 供應商／模型快速切換列 ──
             BuildPickerRow();
 
+            // 新使用者什麼都沒設時，自動找本機已登入的 CLI（走訂閱、免金鑰）
+            AutoDetectBackendAsync();
+
             Controls.Add(chatView);
             Controls.Add(suggestionPanel);
             Controls.Add(actionPanel);
@@ -253,6 +256,31 @@ namespace mySQLPunk
             // 跟預設一樣就存空字串（維持「留空用預設」語意）
             ApplicationOptionSettings.SetString("AiModel", text == current.Preset.DefaultModel ? "" : text);
             ApplicationOptionSettings.Save();
+        }
+
+        /// <summary>
+        /// 目前的供應商還不能用（要金鑰但沒設）時，自動偵測本機已安裝的 AI CLI
+        /// （Codex / Claude Code / Gemini），找到就直接選用——下載即用，不用任何設定。
+        /// </summary>
+        private async void AutoDetectBackendAsync()
+        {
+            try
+            {
+                AiChatSettings settings = AiChatSettings.Load();
+                if (!settings.Preset.NeedsKey || AiChatService.HasApiKey(settings.Provider)) return; // 已經能用就不動
+
+                var clis = await Task.Run(() => AiChatService.DetectInstalledClis());
+                if (clis.Count == 0) return;
+
+                AiProviderPreset pick = clis[0];
+                ApplicationOptionSettings.SetString("AiProvider", pick.Id);
+                ApplicationOptionSettings.SetString("AiEndpoint", "");
+                ApplicationOptionSettings.SetString("AiModel", "");
+                ApplicationOptionSettings.Save();
+                SyncPickerFromSettings();
+                chatView.AddSystem(Localization.Format("Ai.AutoDetectedCli", pick.DisplayName));
+            }
+            catch { }
         }
 
         /// <summary>把設定值套回快速切換列（開啟面板或設定變更後呼叫）。</summary>

@@ -569,21 +569,39 @@ namespace mySQLPunk
                 probeResult.Text = T("偵測中…", "Detecting…");
                 try
                 {
+                    // 一次掃兩類:已登入的 AI CLI(走訂閱免金鑰)與本機推論服務
+                    var clis = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.DetectInstalledClis());
                     var found = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.DetectLocalServices());
-                    if (found.Count == 0)
+
+                    Action<string> selectProvider = id =>
                     {
-                        probeResult.Text = T("沒偵測到本機服務。想免金鑰使用可安裝 Ollama（ollama.com）或 LM Studio，啟動後再按一次。",
-                            "No local service detected. For key-free usage install Ollama (ollama.com) or LM Studio, then try again.");
+                        for (int i = 0; i < providerCombo.Items.Count; i++)
+                        {
+                            OptionChoice choice = providerCombo.Items[i] as OptionChoice;
+                            if (choice != null && choice.Value == id) { providerCombo.SelectedIndex = i; break; }
+                        }
+                    };
+
+                    var summary = new List<string>();
+                    foreach (var cli in clis) summary.Add(cli.DisplayName);
+                    foreach (var server in found) summary.Add(server.Key.DisplayName + "（" + server.Value.Count + T(" 個模型）", " models)"));
+
+                    if (summary.Count == 0)
+                    {
+                        probeResult.Text = T("沒偵測到本機 CLI 或推論服務。想免費使用：安裝並登入 Codex CLI／Claude Code／Gemini CLI（走訂閱），或安裝 Ollama（ollama.com）跑本機模型。",
+                            "No local CLI or inference service detected. For free usage: install and sign in to Codex CLI / Claude Code / Gemini CLI (uses your subscription), or install Ollama (ollama.com) for local models.");
+                    }
+                    else if (clis.Count > 0)
+                    {
+                        // 優先選 CLI:走使用者既有訂閱,零設定
+                        selectProvider(clis[0].Id);
+                        probeResult.Text = T("偵測到：", "Detected: ") + string.Join("、", summary)
+                            + T("。已自動選用 ", ". Auto-selected ") + clis[0].DisplayName + T("，不需要金鑰。", " — no key needed.");
                     }
                     else
                     {
                         var first = found[0];
-                        // 自動切到偵測到的服務並帶入第一個模型
-                        for (int i = 0; i < providerCombo.Items.Count; i++)
-                        {
-                            OptionChoice choice = providerCombo.Items[i] as OptionChoice;
-                            if (choice != null && choice.Value == first.Key.Id) { providerCombo.SelectedIndex = i; break; }
-                        }
+                        selectProvider(first.Key.Id);
                         modelCombo.Items.Clear();
                         foreach (string m in first.Value) modelCombo.Items.Add(m);
                         if (first.Value.Count > 0 && string.IsNullOrWhiteSpace(modelCombo.Text)) modelCombo.Text = first.Value[0];
