@@ -146,6 +146,9 @@
     <Compile Include="AboutDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="AiAssistantPanel.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="ExportCompletedDialog.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -189,6 +192,8 @@
     <Compile Include="lib\BackupRestoreDiffService.cs" />
     <Compile Include="lib\BackupRemoteMirrorService.cs" />
     <Compile Include="lib\AdvancedRegistrationService.cs" />
+    <Compile Include="lib\AiChatService.cs" />
+    <Compile Include="lib\DataDictionaryService.cs" />
     <Compile Include="lib\AppIconService.cs" />
     <Compile Include="lib\AppUpdateService.cs" />
     <Compile Include="lib\AutoRecoveryDraftService.cs" />

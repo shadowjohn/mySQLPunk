@@ -43,13 +43,37 @@ namespace mySQLPunk
                 Font = UiKit.Caption,
                 ForeColor = ThemeManager.MutedTextColor
             };
-            Label body = new Label
+            // 作者資訊裡的網址要能點：改用 LinkLabel 並把每個網址標成 Link
+            string bodyText = Form1.BuildAboutMessage(productVersion);
+            LinkLabel body = new LinkLabel
             {
                 AutoSize = false,
                 Dock = DockStyle.Fill,
-                Text = Form1.BuildAboutMessage(productVersion),
+                Text = bodyText,
                 Font = UiKit.Body,
-                ForeColor = ThemeManager.TextColor
+                ForeColor = ThemeManager.TextColor,
+                LinkColor = ThemeManager.AccentColor,
+                ActiveLinkColor = ThemeManager.AccentColor,
+                VisitedLinkColor = ThemeManager.AccentColor,
+                LinkBehavior = LinkBehavior.HoverUnderline,
+                LinkArea = new LinkArea(0, 0)
+            };
+            foreach (string url in new[] { "https://3wa.tw", "https://github.com/NickYCLin" })
+            {
+                int index = bodyText.IndexOf(url, StringComparison.Ordinal);
+                if (index >= 0) body.Links.Add(index, url.Length, url);
+            }
+            body.LinkClicked += (s, e) =>
+            {
+                try
+                {
+                    string url = e.Link != null && e.Link.LinkData != null ? e.Link.LinkData.ToString() : null;
+                    if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+                    }
+                }
+                catch { }
             };
             Button okButton = new Button
             {

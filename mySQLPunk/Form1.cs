@@ -118,6 +118,10 @@ namespace mySQLPunk
         private UiEmptyState sidebarEmptyState;
         private UiSectionHeader connectionsHeader;
         private UiEmptyState treeEmptyState;
+        private TextBox treeSearchBox;          // 連線清單搜尋框
+        private UiInputShell treeSearchShell;
+        private string _treeSearchText = "";
+        private AiAssistantPanel aiPanel;       // AI 助理右側面板
         private UiEmptyState contentEmptyState;
         private ToolStripStatusLabel lblConnectionSummary;
         private readonly Timer _emptyStateTimer = new Timer();
@@ -1365,6 +1369,34 @@ namespace mySQLPunk
                     .OrderBy(g => g)
                     .ToList();
 
+            // 搜尋篩選（Navicat 式進階搜尋）：比對連線名稱與群組路徑，
+            // 有比對到的連線所屬群組鏈也一併保留
+            string treeFilter = (_treeSearchText ?? "").Trim();
+            bool treeFiltering = treeFilter.Length > 0;
+            Func<int, bool> connectionVisible = i =>
+            {
+                if (!treeFiltering) return true;
+                string cName = GetConnectionValue(myN.connections[i], "conn_name");
+                string cGroup = GetConnectionValue(myN.connections[i], "conn_group");
+                return cName.IndexOf(treeFilter, StringComparison.OrdinalIgnoreCase) >= 0
+                    || cGroup.IndexOf(treeFilter, StringComparison.OrdinalIgnoreCase) >= 0;
+            };
+            if (treeFiltering)
+            {
+                var neededGroups = new HashSet<string>(StringComparer.Ordinal);
+                foreach (string g in groupNames)
+                {
+                    if (g.IndexOf(treeFilter, StringComparison.OrdinalIgnoreCase) >= 0) neededGroups.Add(g);
+                }
+                for (int i = 0; i < myN.connections.Count; i++)
+                {
+                    if (!connectionVisible(i)) continue;
+                    string g = GetConnectionValue(myN.connections[i], "conn_group");
+                    if (!string.IsNullOrWhiteSpace(g)) neededGroups.Add(g);
+                }
+                groupNames = groupNames.Where(g => neededGroups.Contains(g)).ToList();
+            }
+
             // 建立群組節點（路徑式名稱會展開成巢狀資料夾）
             var groupNodeMap = new Dictionary<string, TreeNode>(StringComparer.Ordinal);
             foreach (string grp in groupNames)
@@ -1376,6 +1408,7 @@ namespace mySQLPunk
             _connectionTreeNodes = new TreeNode[myN.connections.Count];
             for (int i = 0, max_i = myN.connections.Count; i < max_i; i++)
             {
+                if (!connectionVisible(i)) continue; // 搜尋時只顯示比對到的連線
                 TreeNode newNode = new TreeNode(myN.connections[i]["conn_name"].ToString());
                 newNode.Tag = i; // 以整數 Tag 儲存連線索引
                 ApplyConnectionNodeIcon(
@@ -1401,7 +1434,8 @@ namespace mySQLPunk
             // 造成「展開的群組顯示閉合資料夾」
             foreach (var pair in groupNodeMap)
             {
-                if (!collapsedGroups.Contains(pair.Key)) pair.Value.Expand();
+                // 搜尋模式下全部展開,方便一眼看到比對結果
+                if (treeFiltering || !collapsedGroups.Contains(pair.Key)) pair.Value.Expand();
                 pair.Value.ImageIndex = pair.Value.IsExpanded ? 24 : 23;
                 pair.Value.SelectedImageIndex = 24;
             }
@@ -1429,7 +1463,8 @@ namespace mySQLPunk
                 TreeNode groupNode = FindConnectionGroupNode(selectedGroupPath);
                 if (groupNode != null) db_tree.SelectedNode = groupNode;
             }
-            else if (selectedConnectionIndex >= 0 && selectedConnectionIndex < _connectionTreeNodes.Length)
+            else if (selectedConnectionIndex >= 0 && selectedConnectionIndex < _connectionTreeNodes.Length
+                && _connectionTreeNodes[selectedConnectionIndex] != null)
             {
                 db_tree.SelectedNode = _connectionTreeNodes[selectedConnectionIndex];
             }
@@ -3437,6 +3472,16 @@ namespace mySQLPunk
                     UpdateMainStatus(Localization.T("View.TableSettingsProfileChanged"));
                 });
 
+            ToolStripMenuItem focusModeItem = CreateCheckedViewMenuItem(
+                Localization.T("View.FocusMode") + "\tF11",
+                _focusMode,
+                value => SetFocusMode(value));
+
+            ToolStripMenuItem aiPanelItem = CreateCheckedViewMenuItem(
+                Localization.T("Ai.PanelTitle"),
+                aiPanel != null && aiPanel.Visible,
+                value => SetAiPanelVisible(value));
+
             viewMenu.DropDownItems.AddRange(new ToolStripItem[]
             {
                 navigationPaneMenu,
@@ -3451,8 +3496,176 @@ namespace mySQLPunk
                 chooseColumnsItem,
                 new ToolStripSeparator(),
                 showHiddenItemsItem,
-                showTableSettingsItem
+                showTableSettingsItem,
+                new ToolStripSeparator(),
+                focusModeItem,
+                aiPanelItem
             });
+        }
+
+        // ── AI 助理右側面板 ─────────────────────────────────────────
+
+        private void SetAiPanelVisible(bool visible, bool save = true)
+        {
+            if (visible && aiPanel == null)
+            {
+                aiPanel = new AiAssistantPanel(
+                    BuildAiSchemaContext,
+                    sql => OpenQueryWithSqlFromCurrentSelection(sql),
+                    () => SetAiPanelVisible(false),
+                    () =>
+                    {
+                        using (OptionsForm form = new OptionsForm())
+                        {
+                            form.ShowDialog(this);
+                        }
+                    })
+                {
+                    Dock = DockStyle.Right,
+                    Width = 380
+                };
+                splitContainer1.Panel2.Controls.Add(aiPanel);
+                // Fill 佈局的內容要排在最後（z 順序最前），右側面板才不會被蓋住
+                splitContainer2.Parent?.Controls.SetChildIndex(splitContainer2, 0);
+            }
+            if (aiPanel != null)
+            {
+                aiPanel.ApplyThemeColors();
+                aiPanel.Visible = visible;
+            }
+
+            if (save)
+            {
+                ApplicationOptionSettings.SetBool("ViewShowAiPanel", visible);
+                ApplicationOptionSettings.Save();
+                ConfigureMainMenu();
+            }
+        }
+
+        /// <summary>AI 助理用：目前選取連線的資料庫上下文（引擎、資料庫、資料表清單、選取物件 DDL）。</summary>
+        private string BuildAiSchemaContext()
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                TreeNode node = db_tree != null ? db_tree.SelectedNode : null;
+                int connIndex = -1;
+                string dbName = "";
+                if (node != null)
+                {
+                    TreeNode root = node;
+                    while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+                    connIndex = GetConnectionIndex(root);
+                    var pathParts = GetTreePathParts(node);
+                    if (pathParts.Length >= 2) dbName = pathParts[1];
+                }
+                if (connIndex < 0 || connIndex >= myN.connections.Count) return "";
+
+                var connInfo = myN.connections[connIndex];
+                sb.AppendLine("engine: " + GetConnectionValue(connInfo, "db_kind"));
+                if (!string.IsNullOrWhiteSpace(dbName)) sb.AppendLine("database: " + dbName);
+
+                if (connInfo["isConnect"].ToString() == "T" && !string.IsNullOrWhiteSpace(dbName))
+                {
+                    IDatabase db = connInfo["pdo"] as IDatabase;
+                    if (db != null)
+                    {
+                        List<string> tables = GetTablesSafe(db, dbName);
+                        if (tables != null && tables.Count > 0)
+                        {
+                            const int maxTables = 120;
+                            sb.AppendLine("tables: " + string.Join(", ", tables.Take(maxTables)));
+                            if (tables.Count > maxTables) sb.AppendLine("(還有 " + (tables.Count - maxTables) + " 張資料表未列出)");
+                        }
+                    }
+                }
+
+                // 資訊窗格目前顯示的 DDL（使用者剛點選的物件）
+                if (rtbDDL != null && !string.IsNullOrWhiteSpace(rtbDDL.Text) && rtbDDL.Text.Length < 6000
+                    && rtbDDL.Text != Localization.T("View.AiPaneHint"))
+                {
+                    sb.AppendLine("selected object DDL:");
+                    sb.AppendLine(rtbDDL.Text);
+                }
+                return sb.ToString();
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        /// <summary>AI 助理用：以目前選取的連線/資料庫開新查詢分頁並帶入 SQL。</summary>
+        private void OpenQueryWithSqlFromCurrentSelection(string sql)
+        {
+            TreeNode node = db_tree != null ? db_tree.SelectedNode : null;
+            int connIndex = -1;
+            string dbName = "";
+            if (node != null)
+            {
+                TreeNode root = node;
+                while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+                connIndex = GetConnectionIndex(root);
+                var pathParts = GetTreePathParts(node);
+                if (pathParts.Length >= 2) dbName = pathParts[1];
+            }
+
+            if (connIndex < 0 || connIndex >= myN.connections.Count
+                || myN.connections[connIndex]["isConnect"].ToString() != "T")
+            {
+                MessageBox.Show(Localization.T("Ai.NeedOpenConnection"), Localization.T("Ai.PanelTitle"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var connInfo = myN.connections[connIndex];
+            IDatabase db = (IDatabase)connInfo["pdo"];
+            string host = connInfo.ContainsKey("host") && connInfo["host"] != null ? connInfo["host"].ToString() : "";
+            OpenQuery(db, dbName, host, sql, true);
+        }
+
+        // ── 專注模式：一鍵隱藏主功能列、導覽面板與資訊窗格，只留工作區 ──
+
+        private bool _focusMode;
+        private bool _focusPrevNav = true;
+        private bool _focusPrevInfo = true;
+        private bool _focusPrevToolbar = true;
+
+        private void SetFocusMode(bool enabled)
+        {
+            if (_focusMode == enabled) return;
+            _focusMode = enabled;
+
+            if (enabled)
+            {
+                _focusPrevToolbar = splitContainer1 != null && !splitContainer1.Panel1Collapsed;
+                _focusPrevNav = splitContainer3 != null && !splitContainer3.Panel1Collapsed;
+                _focusPrevInfo = splitContainer5 != null && !splitContainer5.Panel2Collapsed;
+                if (splitContainer1 != null) splitContainer1.Panel1Collapsed = true;  // 主功能列
+                if (splitContainer3 != null) splitContainer3.Panel1Collapsed = true;  // 導覽面板
+                if (splitContainer4 != null) splitContainer4.Panel1Collapsed = true;  // 導覽標題帶
+                if (splitContainer5 != null) splitContainer5.Panel2Collapsed = true;  // 資訊窗格
+            }
+            else
+            {
+                if (splitContainer1 != null) splitContainer1.Panel1Collapsed = !_focusPrevToolbar;
+                if (splitContainer3 != null) splitContainer3.Panel1Collapsed = !_focusPrevNav;
+                if (splitContainer4 != null) splitContainer4.Panel1Collapsed = !_focusPrevNav;
+                if (splitContainer5 != null) splitContainer5.Panel2Collapsed = !_focusPrevInfo;
+            }
+
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T(enabled ? "View.FocusModeOn" : "View.FocusModeOff"));
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.F11)
+            {
+                SetFocusMode(!_focusMode);
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private ToolStripMenuItem CreateCheckedViewMenuItem(string text, bool isChecked, Action<bool> onChanged)
@@ -3490,6 +3703,7 @@ namespace mySQLPunk
             SetObjectListMode(ApplicationOptionSettings.GetString("ViewObjectListMode"), false);
             SetObjectFilterVisible(ApplicationOptionSettings.GetBool("ViewShowTopFilter"), false);
             SetInfoPaneMode(ApplicationOptionSettings.GetBool("ViewInfoPaneAiMode"), false);
+            SetAiPanelVisible(ApplicationOptionSettings.GetBool("ViewShowAiPanel"), false);
         }
 
         private void SetNavigationPaneVisible(bool visible, bool save = true)
@@ -4859,6 +5073,29 @@ namespace mySQLPunk
             splitContainer4.Panel2.BackColor = ThemeManager.SurfaceColor;
             mTs.Dock = DockStyle.Fill;
             TrySetSplitterDistance(splitContainer2, UiMetrics.SectionHeaderHeight);
+
+            // ── 連線清單搜尋框（Navicat 式的進階搜尋）─────────────────
+            treeSearchBox = new TextBox();
+            treeSearchShell = new UiInputShell(treeSearchBox);
+            splitContainer3.Panel1.Controls.Add(treeSearchShell);
+            treeSearchShell.BringToFront();
+            ThemeManager.ApplyTo(treeSearchShell);
+            SetTextBoxPlaceholder(treeSearchBox, Localization.T("Tree.SearchPlaceholder"));
+            treeSearchBox.TextChanged += (s, e) =>
+            {
+                _treeSearchText = treeSearchBox.Text ?? "";
+                drawLists();
+            };
+            // Esc 清空搜尋
+            treeSearchBox.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Escape)
+                {
+                    treeSearchBox.Text = "";
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                }
+            };
 
             // ── 樹狀清單的空狀態 ──────────────────────────────────────
             treeEmptyState = new UiEmptyState
@@ -8015,8 +8252,23 @@ namespace mySQLPunk
 
         private void splitContainer3_Panel1_Resize(object sender, EventArgs e)
         {
-            db_tree.Width = splitContainer3.Width;
-            db_tree.Height = splitContainer3.Height;
+            int top = 0;
+            if (treeSearchShell != null && treeSearchShell.Visible)
+            {
+                treeSearchShell.SetBounds(6, 6, Math.Max(40, splitContainer3.Panel1.Width - 12), treeSearchShell.Height);
+                top = treeSearchShell.Bottom + 6;
+            }
+            db_tree.SetBounds(0, top, splitContainer3.Panel1.Width, Math.Max(0, splitContainer3.Panel1.Height - top));
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+        /// <summary>單行輸入框的灰色提示文字（Win32 cue banner，聚焦時仍顯示）。</summary>
+        private static void SetTextBoxPlaceholder(TextBox textBox, string placeholder)
+        {
+            const int EM_SETCUEBANNER = 0x1501;
+            try { SendMessage(textBox.Handle, EM_SETCUEBANNER, (IntPtr)1, placeholder); } catch { }
         }
 
         private void db_tree_AfterSelect(object sender, TreeViewEventArgs e)
@@ -12268,6 +12520,63 @@ namespace mySQLPunk
             }
         }
 
+        /// <summary>產生資料字典：整個資料庫的結構文件（HTML，可用瀏覽器另存 PDF）。</summary>
+        private void GenerateDataDictionaryForNode(TreeNode node)
+        {
+            TreeNode root = node;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connIndex = GetConnectionIndex(root);
+            var pathParts = GetTreePathParts(node);
+            if (connIndex < 0 || connIndex >= myN.connections.Count || pathParts.Length < 2) return;
+
+            var connInfo = myN.connections[connIndex];
+            if (connInfo["isConnect"].ToString() != "T")
+            {
+                MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), Localization.T("Dict.MenuItem"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            IDatabase db = (IDatabase)connInfo["pdo"];
+            string dbName = pathParts[1];
+            string engine = GetConnectionValue(connInfo, "db_kind");
+            string host = GetConnectionValue(connInfo, "host");
+
+            using (SaveFileDialog dlg = new SaveFileDialog
+            {
+                Filter = "HTML|*.html",
+                FileName = dbName + "_data_dictionary.html",
+                Title = Localization.T("Dict.MenuItem")
+            })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                UpdateMainStatus(Localization.T("Dict.Generating"));
+                Cursor = Cursors.WaitCursor;
+                try
+                {
+                    // 同一條連線不能兩個執行緒搶用，metadata 又都是輕量查詢，直接同步跑
+                    string html = DataDictionaryService.BuildHtml(db, dbName, engine, host, Application.ProductVersion);
+                    File.WriteAllText(dlg.FileName, html, new UTF8Encoding(true));
+                    UpdateMainStatus(Localization.Format("Dict.Generated", dlg.FileName));
+                    if (MessageBox.Show(Localization.T("Dict.OpenNow"), Localization.T("Dict.MenuItem"),
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    {
+                        Process.Start(new ProcessStartInfo(dlg.FileName) { UseShellExecute = true });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(Localization.Format("Dict.Failed", ExceptionMessageService.GetReason(ex)),
+                        Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    Cursor = Cursors.Default;
+                }
+            }
+        }
+
         private void AddDatabaseNodeMenuItems(ContextMenuStrip menu, TreeNode node)
         {
             ToolStripMenuItem closeItem = new ToolStripMenuItem(Localization.T("Tool.CloseDatabase"));
@@ -12303,6 +12612,10 @@ namespace mySQLPunk
             ToolStripMenuItem commandLineItem = new ToolStripMenuItem(Localization.T("Tool.CommandLine"));
             commandLineItem.Click += (s, ev) => OpenSelectedDatabaseCommandLine(node);
             menu.Items.Add(commandLineItem);
+
+            ToolStripMenuItem dataDictionaryItem = new ToolStripMenuItem(Localization.T("Dict.MenuItem"));
+            dataDictionaryItem.Click += (s, ev) => GenerateDataDictionaryForNode(node);
+            menu.Items.Add(dataDictionaryItem);
 
             ToolStripMenuItem executeSqlFileItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteSqlFile"));
             executeSqlFileItem.Click += (s, ev) => ImportSqlWithDialog();

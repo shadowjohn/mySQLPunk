@@ -35,6 +35,8 @@ namespace mySQLPunk
         private Label lblLoadingMessage;
         private ListBox lstCompletion;
         private TabControl tabResults;
+        private ToolStripButton btnPinResult;      // 釘選查詢結果
+        private int _pinnedResultCount;
         private SplitContainer split;
         private Form1 _mainHost;
         private bool _isDocked;
@@ -442,6 +444,7 @@ namespace mySQLPunk
             btnDataApply = new ToolStripButton("✓", null, (s, e) => SaveChanges()) { ForeColor = Color.Green, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
             btnDataCancel = new ToolStripButton("X", null, (s, e) => ExecutePagedQuery()) { ForeColor = Color.Red, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
             btnDataRefresh = new ToolStripButton("↻", null, (s, e) => ExecutePagedQuery()) { Font = new Font("Segoe UI", 12, FontStyle.Bold) };
+            btnPinResult = new ToolStripButton("📌", null, (s, e) => PinCurrentResult()) { Font = new Font("Segoe UI", 10, FontStyle.Regular) };
 
             ToolStripLabel lblLimit = new ToolStripLabel(Localization.T("Query.Limit")) { Margin = new Padding(10, 0, 0, 0) };
             txtPageSize = new ToolStripTextBox { Text = _pageSize.ToString(), Width = 50, TextBoxTextAlign = HorizontalAlignment.Center };
@@ -464,7 +467,7 @@ namespace mySQLPunk
             btnDataLast = new ToolStripButton(">|", null, (s, e) => { _currentPage = GetTotalPages(); ExecutePagedQuery(); }) { Alignment = ToolStripItemAlignment.Right };
 
             dataToolStrip.Items.AddRange(new ToolStripItem[] {
-                btnDataAdd, btnDataDelete, btnDataApply, btnDataCancel, btnDataRefresh,
+                btnDataAdd, btnDataDelete, btnDataApply, btnDataCancel, btnDataRefresh, btnPinResult,
                 lblLimit, txtPageSize, lblRecords,
                 btnDataLast, btnDataNext, lblDataPagination, btnDataPrev, btnDataFirst
             });
@@ -535,6 +538,7 @@ namespace mySQLPunk
             tabData.Controls.Add(dgvResults);
             CreateLoadingOverlay(tabData);
             tabResults.TabPages.Add(tabData);
+            tabResults.MouseUp += TabResults_MouseUp;
 
             split.Panel2.Controls.Add(tabResults);
 
@@ -2209,10 +2213,70 @@ namespace mySQLPunk
             ApplyToolStripTooltip(btnDataApply, Localization.T("Query.DataApplyTooltip"));
             ApplyToolStripTooltip(btnDataCancel, Localization.T("Query.DataCancelTooltip"));
             ApplyToolStripTooltip(btnDataRefresh, Localization.T("Query.DataRefreshTooltip"));
+            ApplyToolStripTooltip(btnPinResult, Localization.T("Query.PinResultTooltip"));
             ApplyToolStripTooltip(btnDataFirst, Localization.T("Query.DataFirstPageTooltip"));
             ApplyToolStripTooltip(btnDataPrev, Localization.T("Query.DataPreviousPageTooltip"));
             ApplyToolStripTooltip(btnDataNext, Localization.T("Query.DataNextPageTooltip"));
             ApplyToolStripTooltip(btnDataLast, Localization.T("Query.DataLastPageTooltip"));
+        }
+
+        // ── 釘選查詢結果：把目前結果複製成唯讀快照分頁，之後跑新查詢也能對照比較 ──
+
+        private void PinCurrentResult()
+        {
+            DataTable source = dgvResults?.DataSource as DataTable;
+            if (source == null || source.Columns.Count == 0)
+            {
+                UpdateStatus(Localization.T("Query.PinNoData"));
+                return;
+            }
+
+            DataTable snapshot = source.Copy();
+            _pinnedResultCount++;
+            TabPage page = new TabPage("📌 " + DateTime.Now.ToString("HH:mm:ss"));
+            DataGridView grid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText,
+                BackgroundColor = ThemeManager.WindowBackColor,
+                GridColor = ThemeManager.GridColor
+            };
+            EnableGridDoubleBuffer(grid);
+            ApplyConfiguredResultGridAppearance(grid, dgvResults.Font);
+            grid.DataSource = snapshot;
+            page.Controls.Add(grid);
+            tabResults.TabPages.Add(page);
+            tabResults.SelectedTab = page;
+            UpdateStatus(Localization.Format("Query.ResultPinned", snapshot.Rows.Count));
+        }
+
+        private void TabResults_MouseUp(object sender, MouseEventArgs e)
+        {
+            // 釘選分頁可用滑鼠中鍵或右鍵關閉；第一頁「結果」不能關
+            for (int i = 1; i < tabResults.TabPages.Count; i++)
+            {
+                if (!tabResults.GetTabRect(i).Contains(e.Location)) continue;
+                TabPage page = tabResults.TabPages[i];
+                if (e.Button == MouseButtons.Middle)
+                {
+                    tabResults.TabPages.Remove(page);
+                    page.Dispose();
+                }
+                else if (e.Button == MouseButtons.Right)
+                {
+                    ContextMenuStrip menu = new ContextMenuStrip();
+                    ToolStripMenuItem closeItem = new ToolStripMenuItem(Localization.T("Query.ClosePinnedResult"));
+                    closeItem.Click += (s2, e2) => { tabResults.TabPages.Remove(page); page.Dispose(); };
+                    menu.Items.Add(closeItem);
+                    ThemeManager.ApplyToolStrip(menu);
+                    menu.Show(tabResults, e.Location);
+                }
+                return;
+            }
         }
 
         private static void ApplyToolStripTooltip(ToolStripItem item, string tooltip)

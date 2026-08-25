@@ -387,21 +387,68 @@ namespace mySQLPunk
         {
             ClearOptionPage();
             AddOptionTitle(T("AI 助理", "AI Assistant"));
-            AddOptionCheckBox("AiAssistantEnabled", T("啟用 AI 助理入口", "Enable AI assistant entry point"), 72);
-            AddOptionCombo("AiProvider", T("服務提供方式:", "Service provider:"), new[]
+            AddOptionCombo("AiProvider", T("服務提供者:", "Provider:"), new[]
             {
-                new OptionChoice("none", T("尚未設定", "Not configured")),
-                new OptionChoice("local", T("本機或團隊服務", "Local or team service")),
-                new OptionChoice("custom", T("自訂 API", "Custom API"))
-            }, 112, 220);
-            AddOptionTextBox("AiEndpoint", T("端點 URL:", "Endpoint URL:"), 158, 360);
+                new OptionChoice("openai", "OpenAI"),
+                new OptionChoice("ollama", T("Ollama（本機模型）", "Ollama (local models)")),
+                new OptionChoice("github", T("GitHub Models（退場中）", "GitHub Models (being retired)")),
+                new OptionChoice("custom", T("自訂 OpenAI 相容端點", "Custom OpenAI-compatible endpoint"))
+            }, 72, 260);
+            AddOptionTextBox("AiEndpoint", T("端點 URL（留空用預設）:", "Endpoint URL (blank = default):"), 116, 360);
+            AddOptionTextBox("AiModel", T("模型（留空用預設）:", "Model (blank = default):"), 158, 360);
+
+            // API 金鑰不落地設定檔，直接進 Windows 認證管理員
+            contentPanel.Controls.Add(new Label
+            {
+                Text = T("API 金鑰:", "API key:"),
+                AutoSize = true,
+                Location = new Point(18, 204)
+            });
+            TextBox keyBox = new TextBox
+            {
+                Location = new Point(250, 200),
+                Width = 360,
+                UseSystemPasswordChar = true
+            };
+            bool hasKey = lib.AiChatService.HasApiKey();
+            Label keyState = new Label
+            {
+                AutoSize = true,
+                MaximumSize = new Size(620, 0),
+                Location = new Point(250, 228),
+                ForeColor = SystemColors.GrayText,
+                Text = hasKey
+                    ? T("已設定（存於 Windows 認證管理員）。留空＝保持不變；輸入新值＝覆蓋；輸入單一減號「-」＝清除。",
+                        "Configured (stored in Windows Credential Manager). Blank = keep; new value = replace; a single \"-\" = clear.")
+                    : T("尚未設定。金鑰會存進 Windows 認證管理員，不會寫入設定檔。GitHub Models 用 GitHub 個人存取權杖即可；Ollama 不需要金鑰。",
+                        "Not configured. The key is stored in Windows Credential Manager, never in the settings file. For GitHub Models use a GitHub personal access token; Ollama needs no key.")
+            };
+            keyBox.Leave += (s, e) =>
+            {
+                string value = (keyBox.Text ?? "").Trim();
+                if (value.Length == 0) return;
+                if (value == "-")
+                {
+                    lib.WindowsCredentialService.TryDeletePassword(lib.AiChatService.ApiKeyCredentialTarget);
+                    keyState.Text = T("金鑰已清除。", "Key cleared.");
+                }
+                else
+                {
+                    lib.WindowsCredentialService.TryWritePassword(lib.AiChatService.ApiKeyCredentialTarget, "ai", value);
+                    keyState.Text = T("金鑰已更新（存於 Windows 認證管理員）。", "Key updated (stored in Windows Credential Manager).");
+                }
+                keyBox.Text = "";
+            };
+            contentPanel.Controls.Add(keyBox);
+            contentPanel.Controls.Add(keyState);
 
             Label hint = new Label
             {
-                Text = T("此頁會保留 AI 助理設定入口；實際服務整合時會避免在服務名稱與文案中使用競品字樣。", "This page keeps the AI assistant settings entry point; service names and copy avoid competitor wording."),
+                Text = T("面板走 OpenAI 相容的 chat/completions 介面。預設端點：GitHub Models＝models.github.ai/inference、OpenAI＝api.openai.com/v1、Ollama＝localhost:11434/v1。",
+                         "The panel uses the OpenAI-compatible chat/completions API. Default endpoints: GitHub Models = models.github.ai/inference, OpenAI = api.openai.com/v1, Ollama = localhost:11434/v1."),
                 AutoSize = true,
                 MaximumSize = new Size(620, 0),
-                Location = new Point(18, 210)
+                Location = new Point(18, 268)
             };
             contentPanel.Controls.Add(hint);
         }
@@ -1271,6 +1318,8 @@ namespace mySQLPunk
             BoolValues["RecordShowThousandsSeparator"] = false;
             BoolValues["RecordUseSystemNumberFormat"] = true;
             BoolValues["AiAssistantEnabled"] = false;
+            BoolValues["ViewShowAiPanel"] = false;
+            StringValues["AiProvider"] = "openai";
             BoolValues["AutoRecoveryQueryEnabled"] = true;
             BoolValues["AutoRecoveryTableDesignEnabled"] = true;
             BoolValues["ConnectionValidateCertificates"] = true;
