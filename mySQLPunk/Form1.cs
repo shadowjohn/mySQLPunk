@@ -469,7 +469,9 @@ namespace mySQLPunk
                 UserID = user,
                 Password = password,
                 Database = string.IsNullOrWhiteSpace(initialDatabase) ? string.Empty : initialDatabase,
-                SslMode = MySqlSslMode.None,
+                // Preferred：伺服器支援就走 TLS 加密，不支援自動退回明文，
+                // 對既有連線完全相容；以前寫死 None，遠端連線帳密全裸奔
+                SslMode = MySqlSslMode.Preferred,
                 CharacterSet = "utf8",
                 AllowZeroDateTime = true,
                 ConnectionTimeout = 8
@@ -492,7 +494,10 @@ namespace mySQLPunk
             // 優先用使用者填的初始資料庫；有些帳號沒有權限連 postgres
             string initialDatabase = GetConnectionValue(conn, "initial_database");
             string database = string.IsNullOrWhiteSpace(initialDatabase) ? "postgres" : initialDatabase.Trim();
-            return $"Server={host};Port={port};User Id={user};Password={password};Database={database};Timeout=8;Command Timeout=8;";
+            // Timeout=8 只管「建立連線」；Command Timeout 以前也設 8，任何超過 8 秒的查詢
+            // （大表瀏覽、dump）都會逾時失敗，拿掉讓它用 Npgsql 預設的 30 秒，
+            // 個別長查詢再由呼叫端 setTimeout 調整
+            return $"Server={host};Port={port};User Id={user};Password={password};Database={database};Timeout=8;";
         }
 
         private void PopulateConnectionDatabaseNodes(TreeNode connectionNode, IEnumerable<string> databaseNames)
@@ -662,7 +667,12 @@ namespace mySQLPunk
                 await Task.Yield();
 
                 var conn = myN.connections[index];
-                string connString = "Data Source=" + GetConnectionValue(conn, "path") + ";Version=3;";
+                // 用 builder 組字串：路徑含 ; 時字串串接會被拆錯
+                string connString = new System.Data.SQLite.SQLiteConnectionStringBuilder
+                {
+                    DataSource = GetConnectionValue(conn, "path"),
+                    Version = 3
+                }.ConnectionString;
 
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
@@ -1325,6 +1335,20 @@ namespace mySQLPunk
             db_tree.ShowNodeToolTips = ShouldShowObjectTooltips();
 
             db_tree.ShowPlusMinus = true;
+
+            // 記住重繪前的收合狀態與選取節點，重繪後還原；以前每次重繪（建群組、搬連線、
+            // 編輯連線……）都會全部重新展開、選取歸零。第一次繪製維持預設全展開。
+            bool hasExistingTree = db_tree.Nodes.Count > 0;
+            var collapsedGroups = new HashSet<string>(StringComparer.Ordinal);
+            if (hasExistingTree) CollectCollapsedGroupPaths(db_tree.Nodes, collapsedGroups);
+            string selectedGroupPath = null;
+            int selectedConnectionIndex = -1;
+            if (db_tree.SelectedNode != null)
+            {
+                if (IsConnectionGroupNode(db_tree.SelectedNode)) selectedGroupPath = GetGroupNodePath(db_tree.SelectedNode);
+                else selectedConnectionIndex = GetConnectionIndex(db_tree.SelectedNode);
+            }
+
             db_tree.Nodes.Clear();
 
             // 收集所有群組名稱：myN.groups（含空群組）＋連線衍生的群組，去重後排序
@@ -1369,8 +1393,15 @@ namespace mySQLPunk
                 _connectionTreeNodes[i] = newNode;
             }
 
-            // 展開所有群組節點
-            foreach (var gNode in groupNodeMap.Values) gNode.Expand();
+            // 展開群組節點（重繪前使用者收起來的維持收合），並直接套對應的資料夾圖示：
+            // AfterExpand handler 是之後才掛的，第一次繪製靠事件切圖示會漏掉，
+            // 造成「展開的群組顯示閉合資料夾」
+            foreach (var pair in groupNodeMap)
+            {
+                if (!collapsedGroups.Contains(pair.Key)) pair.Value.Expand();
+                pair.Value.ImageIndex = pair.Value.IsExpanded ? 24 : 23;
+                pair.Value.SelectedImageIndex = 24;
+            }
 
             ImageList previousTreeImageList = db_tree.ImageList;
             db_tree.ImageList = myImageList;
@@ -1389,6 +1420,27 @@ namespace mySQLPunk
 
             SetWindowTheme(db_tree.Handle, "explorer", null);
 
+            // 還原重繪前的選取
+            if (selectedGroupPath != null)
+            {
+                TreeNode groupNode = FindConnectionGroupNode(selectedGroupPath);
+                if (groupNode != null) db_tree.SelectedNode = groupNode;
+            }
+            else if (selectedConnectionIndex >= 0 && selectedConnectionIndex < _connectionTreeNodes.Length)
+            {
+                db_tree.SelectedNode = _connectionTreeNodes[selectedConnectionIndex];
+            }
+        }
+
+        /// <summary>收集目前樹上「收合中」的群組路徑（預設是展開，所以記例外比較省）。</summary>
+        private static void CollectCollapsedGroupPaths(TreeNodeCollection nodes, HashSet<string> collapsed)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (!IsConnectionGroupNode(node)) continue;
+                if (!node.IsExpanded) collapsed.Add(GetGroupNodePath(node));
+                CollectCollapsedGroupPaths(node.Nodes, collapsed);
+            }
         }
 
         private void db_tree_AfterExpand(object sender, TreeViewEventArgs e)
@@ -1496,6 +1548,9 @@ namespace mySQLPunk
         {
             if (!silent) UpdateMainStatus(Localization.T("Update.Checking"));
 
+            // 使用者一旦在提示框按了「立即更新」，後續下載/驗證失敗就一定要跳訊息，
+            // 不能再被啟動自動檢查的 silent 吞掉（不然使用者以為更新正在進行）
+            bool userStartedUpdate = false;
             try
             {
                 AppUpdateCheckResult result = await Task.Run(() =>
@@ -1503,6 +1558,14 @@ namespace mySQLPunk
 
                 if (result.UpdateAvailable)
                 {
+                    // 啟動自動檢查時，之前按過「稍後再說」的版本不再吵；手動檢查照常提示
+                    string latestVersionText = result.LatestVersion != null ? result.LatestVersion.ToString() : "";
+                    if (silent && ApplicationOptionSettings.GetString("UpdateSkippedVersion") == latestVersionText)
+                    {
+                        UpdateMainStatus(Localization.Format("Update.Available", result.LatestVersion, result.CurrentVersion).Replace("\n", " "));
+                        return;
+                    }
+
                     string message = Localization.Format("Update.Available", result.LatestVersion, result.CurrentVersion);
                     DialogResult answer;
                     using (UpdatePromptDialog prompt = new UpdatePromptDialog(result))
@@ -1511,6 +1574,7 @@ namespace mySQLPunk
                     }
                     if (answer == DialogResult.OK)
                     {
+                        userStartedUpdate = true;
                         if (!string.IsNullOrWhiteSpace(result.InstallerDownloadUrl))
                         {
                             await DownloadAndLaunchUpdateInstallerAsync(result);
@@ -1529,6 +1593,12 @@ namespace mySQLPunk
                             Process.Start(new ProcessStartInfo(result.ReleasePageUrl) { UseShellExecute = true });
                         }
                     }
+                    else
+                    {
+                        // 「稍後再說」記住這個版本，下次啟動不再跳同版提示；出新版會再問
+                        ApplicationOptionSettings.SetString("UpdateSkippedVersion", latestVersionText);
+                        ApplicationOptionSettings.Save();
+                    }
                     UpdateMainStatus(message.Replace("\n", " "));
                     return;
                 }
@@ -1544,7 +1614,7 @@ namespace mySQLPunk
             {
                 string message = BuildFormattedExceptionMessage("Update.CheckFailed", ex);
                 UpdateMainStatus(message);
-                if (!silent)
+                if (!silent || userStartedUpdate)
                 {
                     MessageBox.Show(message, Localization.T("Menu.CheckUpdates"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
@@ -2865,6 +2935,10 @@ namespace mySQLPunk
             // 連線節點與群組節點都可以拖（群組拖曳 = 整個資料夾換位置）
             if (GetConnectionIndex(node) < 0 && !IsConnectionGroupNode(node)) return;
 
+            // 「隱藏連線群組」檢視下看不到資料夾，拖曳的結果只會是把連線的群組歸屬
+            // 悄悄清空並存檔（放到哪裡都判定成「移到根層」），乾脆不啟動拖曳
+            if (ApplicationOptionSettings.GetBool("ViewHideConnectionGroups")) return;
+
             db_tree.SelectedNode = node;
             db_tree.DoDragDrop(node, DragDropEffects.Move);
         }
@@ -2927,10 +3001,18 @@ namespace mySQLPunk
         private TreeNode FindConnectionGroupNode(string groupName)
         {
             if (string.IsNullOrWhiteSpace(groupName)) return null;
-            TreeNode[] matches = db_tree.Nodes.Find(ConnectionGroupNodeTag + ":" + groupName, true);
-            foreach (TreeNode node in matches)
+            return FindConnectionGroupNode(db_tree.Nodes, ConnectionGroupNodeTag + ":" + groupName);
+        }
+
+        // 不能用 Nodes.Find：它比對 Name 不分大小寫，但群組路徑全程用 Ordinal，
+        // "Prod" 和 "prod" 是兩個群組，Find 會把拖曳高亮亮在錯的節點上
+        private static TreeNode FindConnectionGroupNode(TreeNodeCollection nodes, string key)
+        {
+            foreach (TreeNode node in nodes)
             {
-                if (IsConnectionGroupNode(node)) return node;
+                if (IsConnectionGroupNode(node) && string.Equals(node.Name, key, StringComparison.Ordinal)) return node;
+                TreeNode found = FindConnectionGroupNode(node.Nodes, key);
+                if (found != null) return found;
             }
             return null;
         }
@@ -4007,6 +4089,23 @@ namespace mySQLPunk
             return result.OrderBy(g => g).ToList();
         }
 
+        /// <summary>
+        /// 把使用者輸入的群組路徑整理乾淨：去頭尾空白與斜線、拆段後丟掉空段再組回來。
+        /// 沒整理的話 "A/"、"/A"、"A//B" 這種輸入會產生顯示空白名稱的鬼群組並永久存進設定檔。
+        /// </summary>
+        private static string NormalizeGroupPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+            string[] segments = path.Split(ConnectionGroupSeparator);
+            List<string> cleaned = new List<string>();
+            foreach (string segment in segments)
+            {
+                string s = segment.Trim();
+                if (s.Length > 0) cleaned.Add(s);
+            }
+            return string.Join(ConnectionGroupSeparator.ToString(), cleaned);
+        }
+
         private void ShowCreateGroupDialog(string parentPath = "")
         {
             string name = PromptForText(
@@ -4014,7 +4113,7 @@ namespace mySQLPunk
                 Localization.T("Menu.GroupNamePrompt"),
                 "");
             if (string.IsNullOrWhiteSpace(name)) return;
-            name = name.Trim().Trim(ConnectionGroupSeparator);
+            name = NormalizeGroupPath(name);
             if (string.IsNullOrWhiteSpace(name)) return;
             if (!string.IsNullOrWhiteSpace(parentPath)) name = parentPath + ConnectionGroupSeparator + name;
 
@@ -4038,7 +4137,8 @@ namespace mySQLPunk
         private void MoveConnectionToGroup(int index, string groupName)
         {
             if (index < 0 || index >= myN.connections.Count) return;
-            myN.connections[index]["conn_group"] = groupName ?? "";
+            groupName = NormalizeGroupPath(groupName);
+            myN.connections[index]["conn_group"] = groupName;
             if (!string.IsNullOrWhiteSpace(groupName) && !myN.groups.Contains(groupName))
                 myN.groups.Add(groupName);
             myN.setSettingINI();
@@ -4139,7 +4239,7 @@ namespace mySQLPunk
                 Localization.T("Menu.GroupNamePrompt"),
                 oldName);
             if (string.IsNullOrWhiteSpace(newName)) return;
-            newName = newName.Trim().Trim(ConnectionGroupSeparator);
+            newName = NormalizeGroupPath(newName);
             if (string.IsNullOrWhiteSpace(newName) || newName == oldName) return;
 
             ApplyConnectionGroupPathChange(oldName, newName);
@@ -4164,6 +4264,15 @@ namespace mySQLPunk
                     myN.groups[i] = newName + g.Substring(oldName.Length);
             }
             if (!myN.groups.Contains(newName)) myN.groups.Add(newName);
+            // 改名撞到既有群組時上面的就地改寫會產生重複項（["A","B"] 把 A 改成 B → ["B","B"]），
+            // 這裡去重後才存檔，不然重複項會一路寫進設定檔
+            List<string> dedupedGroups = new List<string>();
+            foreach (string g in myN.groups)
+            {
+                if (!dedupedGroups.Contains(g)) dedupedGroups.Add(g);
+            }
+            myN.groups.Clear();
+            myN.groups.AddRange(dedupedGroups);
             myN.setSettingINI();
             drawLists();
             UpdateMainStatus(Localization.Format("Menu.GroupRenamed", oldName, newName));

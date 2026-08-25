@@ -254,7 +254,13 @@ namespace mySQLPunk.template
 
         private string BuildConnectionString()
         {
-            return "Data Source=" + txtPath.Text.Trim() + ";Version=3;";
+            // 用 builder 組字串：路徑含 ; 時字串串接會被拆錯
+            var builder = new System.Data.SQLite.SQLiteConnectionStringBuilder
+            {
+                DataSource = txtPath.Text.Trim(),
+                Version = 3
+            };
+            return builder.ConnectionString;
         }
 
         private bool ValidateInput()

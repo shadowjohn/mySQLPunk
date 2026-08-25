@@ -24,9 +24,21 @@ namespace mySQLPunk.lib
         }
         public void setConn(string connection) => SetConn(connection);
 
+        // 0 表示交給 Npgsql 預設（30 秒）。以前只設在 MC 上，但查詢都是各自 new command，
+        // 等於整個方法是 no-op，這裡改成記下來讓之後每個 command 都套用
+        private int defaultCommandTimeout = 0;
+
         public void setTimeout(int timeout)
         {
+            defaultCommandTimeout = timeout;
             if (MC != null) MC.CommandTimeout = timeout;
+        }
+
+        private NpgsqlCommand CreateCommand(string sql)
+        {
+            NpgsqlCommand cmd = new NpgsqlCommand(sql, MCT);
+            if (defaultCommandTimeout > 0) cmd.CommandTimeout = defaultCommandTimeout;
+            return cmd;
         }
 
         public void Open()
@@ -56,7 +68,7 @@ namespace mySQLPunk.lib
             // 不可對整段 SQL 做 @→: 取代：'abc@gmail.com' 或 jsonb 的 @> 都會被改壞。
             // Npgsql 原生同時支援 @name 與 :name 兩種參數寫法，不需要轉換。
             DataTable output = new DataTable();
-            using (NpgsqlCommand cmd = new NpgsqlCommand(SQL, MCT))
+            using (NpgsqlCommand cmd = CreateCommand(SQL))
             {
                 foreach (var key in key_value.Keys)
                 {
@@ -80,7 +92,7 @@ namespace mySQLPunk.lib
             Dictionary<string, string> output = new Dictionary<string, string>();
             try
             {
-                using (NpgsqlCommand cmd = new NpgsqlCommand(SQL, MCT))
+                using (NpgsqlCommand cmd = CreateCommand(SQL))
                 {
                     foreach (var key in m.Keys)
                     {
@@ -102,7 +114,7 @@ namespace mySQLPunk.lib
         public async System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null)
         {
             DataTable output = new DataTable();
-            using (NpgsqlCommand cmd = new NpgsqlCommand(sql, MCT))
+            using (NpgsqlCommand cmd = CreateCommand(sql))
             {
                 if (parameters != null)
                 {
@@ -126,7 +138,7 @@ namespace mySQLPunk.lib
             Dictionary<string, string> output = new Dictionary<string, string>();
             try
             {
-                using (NpgsqlCommand cmd = new NpgsqlCommand(sql, MCT))
+                using (NpgsqlCommand cmd = CreateCommand(sql))
                 {
                     if (parameters != null)
                     {
@@ -744,7 +756,7 @@ namespace mySQLPunk.lib
                 VALUES("
                         + my.implode(",", qa) +
                     @")";
-                MC = new NpgsqlCommand(SQL, MCT);
+                MC = CreateCommand(SQL);
                 foreach (var key in m.Keys)
                 {
                     PA = new NpgsqlParameter(":" + key, m[key]);
@@ -781,7 +793,7 @@ namespace mySQLPunk.lib
                         1=1
                         " + whereSQL + @"
                 ";
-                MC = new NpgsqlCommand(SQL, MCT);
+                MC = CreateCommand(SQL);
                 foreach (var key in m.Keys)
                 {
                     PA = new NpgsqlParameter(":" + key, m[key]);

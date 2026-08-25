@@ -162,24 +162,35 @@ namespace mySQLPunk.template
             return host + "," + port;
         }
 
-        private void btnTest_Click(object sender, EventArgs e)
+        private async void btnTest_Click(object sender, EventArgs e)
         {
             if (!ValidateInput()) return;
 
+            // 連線期間停用按鈕並丟到背景執行緒：以前同步 Open 會把整個視窗凍住
+            Button testButton = sender as Button;
+            if (testButton != null) testButton.Enabled = false;
             try
             {
-                using (my_mssql db = new my_mssql())
+                string testConnectionString = BuildConnectionString();
+                await System.Threading.Tasks.Task.Run(() =>
                 {
-                    db.SetConn(BuildConnectionString());
-                    db.Open();
-                    db.Close();
-                }
+                    using (my_mssql db = new my_mssql())
+                    {
+                        db.SetConn(testConnectionString);
+                        db.Open();
+                        db.Close();
+                    }
+                });
 
                 MessageBox.Show(Localization.Format("Connection.TestSucceeded", "SQL Server"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ConnectionDialogMessageService.BuildTestFailedMessage("SQL Server", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (testButton != null && !testButton.IsDisposed) testButton.Enabled = true;
             }
         }
 

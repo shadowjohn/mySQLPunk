@@ -116,7 +116,7 @@ namespace mySQLPunk.template
             return true;
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        private async void button1_Click(object sender, EventArgs e)
         {
             if (!ValidateInput())
             {
@@ -124,6 +124,10 @@ namespace mySQLPunk.template
             }
 
             // Test Connection
+            // 連線期間停用按鈕並丟到背景執行緒：以前同步 Open 會把整個視窗凍住，
+            // 逾時期間的連點還會在恢復後再觸發一輪
+            Button testButton = sender as Button;
+            if (testButton != null) testButton.Enabled = false;
             try
             {
                 // 用 builder 組字串：密碼含 ; 或 = 時字串串接會被拆錯，
@@ -133,21 +137,31 @@ namespace mySQLPunk.template
                     Server = mysql_host.Text.Trim(),
                     UserID = mysql_username.Text.Trim(),
                     Password = mysql_pwd.Text,
-                    SslMode = MySqlSslMode.None
+                    SslMode = MySqlSslMode.Preferred // 跟正式連線一致：能加密就加密，不支援自動退回
                 };
                 uint testPort;
                 if (uint.TryParse(mysql_port.Text.Trim(), out testPort) && testPort > 0) builder.Port = testPort;
                 string testInitialDb = mysql_initial_database.Text.Trim();
                 if (testInitialDb.Length > 0) builder.Database = testInitialDb;
-                my_mysql db = new my_mysql();
-                db.SetConn(builder.ConnectionString);
-                db.MCT.Open();
+                string testConnectionString = builder.ConnectionString;
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (my_mysql db = new my_mysql())
+                    {
+                        db.SetConn(testConnectionString);
+                        db.MCT.Open();
+                        db.MCT.Close();
+                    }
+                });
                 MessageBox.Show(Localization.Format("Connection.TestSucceeded", "MySQL"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                db.MCT.Close();
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ConnectionDialogMessageService.BuildTestFailedMessage("MySQL", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (testButton != null && !testButton.IsDisposed) testButton.Enabled = true;
             }
         }
         

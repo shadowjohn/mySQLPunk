@@ -124,13 +124,16 @@ namespace mySQLPunk.template
             //Form1.ActiveForm.Parent.Parent.Parent.Parent.Parent.Enabled = true;
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        private async void button1_Click(object sender, EventArgs e)
         {
             if (!ValidateInput())
             {
                 return;
             }
 
+            // 連線期間停用按鈕並丟到背景執行緒：以前同步 Open 會把整個視窗凍住
+            Button testButton = sender as Button;
+            if (testButton != null) testButton.Enabled = false;
             try
             {
                 // 用 builder 組字串：密碼含 ; 或 = 時字串串接會被拆錯
@@ -144,15 +147,25 @@ namespace mySQLPunk.template
                 int testPort;
                 if (int.TryParse(postgresql_port.Text.Trim(), out testPort) && testPort > 0) builder.Port = testPort;
 
-                my_postgresql db = new my_postgresql();
-                db.SetConn(builder.ConnectionString);
-                db.Open();
+                string testConnectionString = builder.ConnectionString;
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (my_postgresql db = new my_postgresql())
+                    {
+                        db.SetConn(testConnectionString);
+                        db.Open();
+                        db.Close();
+                    }
+                });
                 MessageBox.Show(Localization.Format("Connection.TestSucceeded", "PostgreSQL"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                db.Close();
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ConnectionDialogMessageService.BuildTestFailedMessage("PostgreSQL", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (testButton != null && !testButton.IsDisposed) testButton.Enabled = true;
             }
         }
         

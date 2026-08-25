@@ -85,24 +85,35 @@ namespace mySQLPunk.template
             //Form1.ActiveForm.Parent.Parent.Parent.Parent.Parent.Enabled = true;
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        private async void button1_Click(object sender, EventArgs e)
         {
             if (!ValidateInput()) return;
 
+            // 連線期間停用按鈕並丟到背景執行緒：以前同步 Open 會把整個視窗凍住
+            Button testButton = sender as Button;
+            if (testButton != null) testButton.Enabled = false;
             try
             {
-                using (my_oracle db = new my_oracle())
+                string testConnectionString = BuildConnectionString();
+                await System.Threading.Tasks.Task.Run(() =>
                 {
-                    db.SetConn(BuildConnectionString());
-                    db.Open();
-                    db.Close();
-                }
+                    using (my_oracle db = new my_oracle())
+                    {
+                        db.SetConn(testConnectionString);
+                        db.Open();
+                        db.Close();
+                    }
+                });
 
                 MessageBox.Show(Localization.Format("Connection.TestSucceeded", "Oracle"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ConnectionDialogMessageService.BuildTestFailedMessage("Oracle", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (testButton != null && !testButton.IsDisposed) testButton.Enabled = true;
             }
         }
         
