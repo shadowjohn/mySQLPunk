@@ -141,6 +141,15 @@ namespace mySQLPunk.lib
 
         private static string OpenAiCompatibleChat(AiChatSettings settings, IList<AiChatMessage> messages)
         {
+            // codex 系列模型（gpt-5-codex / gpt-5.1-codex…）只支援 Responses API，
+            // 不支援 chat/completions，偵測到就自動改走
+            if (string.Equals(settings.Provider, "openai", StringComparison.OrdinalIgnoreCase)
+                && settings.Model != null
+                && settings.Model.IndexOf("codex", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return OpenAiResponsesChat(settings, messages);
+            }
+
             string baseUrl = settings.Endpoint.TrimEnd('/');
             string url;
             if (string.Equals(settings.Provider, "azure", StringComparison.OrdinalIgnoreCase))
@@ -181,6 +190,57 @@ namespace mySQLPunk.lib
                     if (!string.IsNullOrEmpty(content)) return content.Trim();
                 }
             }
+            throw new InvalidOperationException("AI 服務回應了無法解析的內容: " + Truncate(responseText, 300));
+        }
+
+        /// <summary>OpenAI Responses API：system 放 instructions，回覆在 output 陣列的 message 項目裡。</summary>
+        private static string OpenAiResponsesChat(AiChatSettings settings, IList<AiChatMessage> messages)
+        {
+            string url = settings.Endpoint.TrimEnd('/') + "/responses";
+
+            StringBuilder instructions = new StringBuilder();
+            JArray input = new JArray();
+            foreach (AiChatMessage m in messages)
+            {
+                if (m.Role == "system")
+                {
+                    if (instructions.Length > 0) instructions.AppendLine();
+                    instructions.Append(m.Content);
+                }
+                else
+                {
+                    input.Add(new JObject { ["role"] = m.Role, ["content"] = m.Content });
+                }
+            }
+            JObject body = new JObject
+            {
+                ["model"] = settings.Model,
+                ["input"] = input
+            };
+            if (instructions.Length > 0) body["instructions"] = instructions.ToString();
+
+            string responseText = PostJson(settings, url, body.ToString());
+            JObject parsed = JObject.Parse(responseText);
+
+            StringBuilder sb = new StringBuilder();
+            if (parsed["output"] is JArray output)
+            {
+                foreach (JToken item in output)
+                {
+                    if ((string)item["type"] != "message") continue;
+                    if (item["content"] is JArray parts)
+                    {
+                        foreach (JToken part in parts)
+                        {
+                            if ((string)part["type"] == "output_text") sb.Append((string)part["text"]);
+                        }
+                    }
+                }
+            }
+            if (sb.Length > 0) return sb.ToString().Trim();
+
+            string outputText = (string)parsed["output_text"];
+            if (!string.IsNullOrWhiteSpace(outputText)) return outputText.Trim();
             throw new InvalidOperationException("AI 服務回應了無法解析的內容: " + Truncate(responseText, 300));
         }
 

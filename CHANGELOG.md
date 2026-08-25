@@ -5,6 +5,7 @@
 ### 🚀 新增功能
 
 - **一鍵瀏覽器授權連結 OpenRouter**：選項 > AI 新增 CLI 式的瀏覽器授權（官方 PKCE 流程）——按下按鈕開瀏覽器、在網頁上同意，金鑰就自動存進 Windows 認證管理員並切換到 OpenRouter，不用手動複製貼上；一把鑰匙可用 OpenAI／Claude／Gemini 等各家模型。其它模型商不開放第三方桌面程式 OAuth，仍需手動貼金鑰。
+- 支援 OpenAI codex 系列模型（gpt-5-codex／gpt-5.1-codex 等）：這些模型只支援 Responses API，程式偵測到模型名含 codex 會自動改走對應介面，設定上照樣選 OpenAI、貼 API 金鑰、模型填 codex 型號即可。
 
 ### 🛠️ 問題修正與優化
 
