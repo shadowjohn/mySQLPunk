@@ -74,6 +74,7 @@ namespace mySQLPunk
                 Localization.T("Options.AutoRecovery"),
                 Localization.T("Options.FileLocation"),
                 Localization.T("Options.Connection"),
+                Localization.T("Options.AI"),
                 Localization.T("Options.Environment"),
                 Localization.T("Options.Advanced")
             });
@@ -183,6 +184,10 @@ namespace mySQLPunk
             else if (string.Equals(selected, Localization.T("Options.Connection"), StringComparison.Ordinal))
             {
                 RenderConnectivityPage();
+            }
+            else if (string.Equals(selected, Localization.T("Options.AI"), StringComparison.Ordinal))
+            {
+                RenderAiPage();
             }
             else if (string.Equals(selected, Localization.T("Options.Environment"), StringComparison.Ordinal))
             {
