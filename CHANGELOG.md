@@ -11,6 +11,7 @@
 
 - 關閉 AI 助理後會記住使用者選擇；暫時收合則不會改動偏好，下次啟動仍依原本的開啟或關閉設定顯示。
 - 執行計畫一次只接受一個 SELECT／WITH／DML statement，拒絕 DDL；PostgreSQL 明確使用 `ANALYZE FALSE`，分析 UPDATE／DELETE 時不會真的修改資料。
+- AI CLI 改在 mySQLPunk 專屬空白工作目錄執行；Codex 會對該目錄套用單次 trusted project 設定，Gemini 使用 session trust，避免共用暫存目錄的未信任路徑錯誤，同時不關閉唯讀沙箱。
 
 ## [1.0.0.16] - 2026-08-25
 

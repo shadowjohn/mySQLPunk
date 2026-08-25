@@ -169,28 +169,36 @@ namespace mySQLPunk.lib
             string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(settings.Provider);
             string model = NormalizeCliModel(settings.Provider, settings.Model);
             string promptText = BuildCliPrompt(messages);
+            string workspace = EnsureCliWorkspaceDirectory();
 
             string[][] argumentTries;
             switch (settings.Provider)
             {
                 case "codex-cli":
-                    // read-only sandbox + 空的工作目錄：純問答，不讓它動到任何檔案。
+                    // read-only sandbox + mySQLPunk 專屬空白工作目錄：純問答，不讓它動到使用者檔案。
+                    // 官方支援 projects.<path>.trust_level；只信任這個專屬目錄，不把整個 TEMP 設成可信任。
                     // 各版本 codex 支援的旗標不一，不吃就逐步降階重試
                     ValidateCliModel(model);
                     argumentTries = new[]
                     {
-                        BuildCodexArguments(model, true, true),
-                        BuildCodexArguments(model, true, false),
-                        BuildCodexArguments(model, false, false)
+                        BuildCodexArguments(model, true, true, workspace, true),
+                        BuildCodexArguments(model, true, false, workspace, true),
+                        BuildCodexArguments(model, false, false, workspace, true),
+                        BuildCodexArguments(model, false, false, workspace, false)
                     };
                     break;
                 case "claude-cli":
+                    // Claude 的非互動 -p 模式會略過 workspace trust 對話。
                     ValidateCliModel(model);
                     argumentTries = new[] { model.Length > 0 ? new[] { "-p", "--model", model } : new[] { "-p" } };
                     break;
                 case "gemini-cli":
                     ValidateCliModel(model);
-                    argumentTries = new[] { model.Length > 0 ? new[] { "-m", model } : new string[0] };
+                    string[] trustedGeminiArguments = model.Length > 0
+                        ? new[] { "--skip-trust", "-m", model }
+                        : new[] { "--skip-trust" };
+                    string[] legacyGeminiArguments = model.Length > 0 ? new[] { "-m", model } : new string[0];
+                    argumentTries = new[] { trustedGeminiArguments, legacyGeminiArguments };
                     break;
                 default:
                     throw new InvalidOperationException("unknown cli provider: " + settings.Provider);
@@ -219,9 +227,14 @@ namespace mySQLPunk.lib
             throw lastError;
         }
 
-        private static string[] BuildCodexArguments(string model, bool skipGitCheck, bool readOnlySandbox)
+        private static string[] BuildCodexArguments(string model, bool skipGitCheck, bool readOnlySandbox, string workspace, bool trustWorkspace)
         {
             List<string> arguments = new List<string> { "exec" };
+            if (trustWorkspace)
+            {
+                arguments.Add("-c");
+                arguments.Add(BuildCodexTrustOverride(workspace));
+            }
             if (skipGitCheck) arguments.Add("--skip-git-repo-check");
             if (readOnlySandbox)
             {
@@ -235,6 +248,24 @@ namespace mySQLPunk.lib
             }
             arguments.Add("-");
             return arguments.ToArray();
+        }
+
+        /// <summary>Codex CLI 的單次專案信任覆寫，不修改使用者的全域 config.toml。</summary>
+        public static string BuildCodexTrustOverride(string workspace)
+        {
+            string fullPath = Path.GetFullPath(workspace ?? "");
+            string tomlPath = fullPath.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            return "projects.\"" + tomlPath + "\".trust_level=\"trusted\"";
+        }
+
+        /// <summary>所有 AI CLI 共用的隔離工作目錄；避免信任整個 Windows 暫存根目錄。</summary>
+        public static string EnsureCliWorkspaceDirectory()
+        {
+            string root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(root)) root = Path.GetTempPath();
+            string workspace = Path.GetFullPath(Path.Combine(root, "mySQLPunk", "AiCliWorkspace"));
+            Directory.CreateDirectory(workspace);
+            return workspace;
         }
 
         private static void ValidateCliModel(string model)
@@ -454,7 +485,7 @@ namespace mySQLPunk.lib
                 RedirectStandardError = true,
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8,
-                WorkingDirectory = Path.GetTempPath()
+                WorkingDirectory = EnsureCliWorkspaceDirectory()
             };
 
             string joinedArguments = JoinWindowsArguments(arguments);

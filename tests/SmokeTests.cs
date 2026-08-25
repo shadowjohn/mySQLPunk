@@ -7368,6 +7368,14 @@ public static class SmokeTests
         Assert(Array.IndexOf(codexModels, "gpt-5.6-sol") >= 0, "Codex CLI model suggestions should include the current default family.");
         Assert(Array.IndexOf(codexModels, "gpt-5.1-codex") < 0, "Codex CLI model suggestions should not offer deprecated subscription models.");
 
+        string cliWorkspace = AiChatService.EnsureCliWorkspaceDirectory();
+        Assert(Directory.Exists(cliWorkspace), "AI CLI workspace should be created before launching a provider.");
+        Assert(cliWorkspace.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), StringComparison.OrdinalIgnoreCase), "AI CLI workspace should stay under the application's local data folder.");
+        Assert(!string.Equals(cliWorkspace.TrimEnd(Path.DirectorySeparatorChar), Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase), "AI CLI should not trust the shared Windows temporary root.");
+        string codexTrust = AiChatService.BuildCodexTrustOverride(cliWorkspace);
+        AssertContains(codexTrust, "projects.\"", "Codex trust override should target one quoted project path.");
+        AssertContains(codexTrust, ".trust_level=\"trusted\"", "Codex trust override should mark the isolated workspace as trusted.");
+
         string resolvedCmd = AiChatService.ResolveCliExecutablePath("cmd");
         Assert(!string.IsNullOrWhiteSpace(resolvedCmd) && File.Exists(resolvedCmd), "CLI executable resolution should find Windows system commands without cmd.exe indirection.");
         string missingName = "mysqlpunk-missing-cli-" + Guid.NewGuid().ToString("N");
@@ -7386,6 +7394,22 @@ public static class SmokeTests
                 Model = ""
             });
             AssertContains(output, "ai-cli-ok", "CLI batch shims in paths containing spaces should execute successfully.");
+
+            string inspectCli = Path.Combine(tempRoot, "inspect cli.cmd");
+            File.WriteAllText(inspectCli, "@echo off\r\nmore >nul\r\necho cwd=%CD%\r\necho args=%*\r\n", Encoding.ASCII);
+            string codexOutput = AiChatService.ChatCompletion(
+                new AiChatSettings { Provider = "codex-cli", Endpoint = inspectCli, Model = "gpt-5.6-sol" },
+                new[] { new AiChatMessage("user", "hello") });
+            AssertContains(codexOutput, "cwd=" + cliWorkspace, "Codex CLI should run from the isolated mySQLPunk workspace.");
+            AssertContains(codexOutput, "trust_level", "Codex CLI should receive a per-run trusted-project override.");
+            AssertContains(codexOutput, "read-only", "Codex CLI should remain in the read-only sandbox while the workspace is trusted.");
+            Assert(codexOutput.IndexOf("dangerously-bypass", StringComparison.OrdinalIgnoreCase) < 0, "Trusting the workspace must not disable Codex approvals or sandboxing.");
+
+            string geminiOutput = AiChatService.ChatCompletion(
+                new AiChatSettings { Provider = "gemini-cli", Endpoint = inspectCli, Model = "gemini-2.5-flash" },
+                new[] { new AiChatMessage("user", "hello") });
+            AssertContains(geminiOutput, "cwd=" + cliWorkspace, "Gemini CLI should run from the isolated mySQLPunk workspace.");
+            AssertContains(geminiOutput, "--skip-trust", "Gemini CLI should trust the isolated workspace for the session.");
 
             string failedCli = Path.Combine(tempRoot, "failed cli.cmd");
             File.WriteAllText(failedCli, "@echo off\r\ndefinitely-not-a-real-command --version\r\n", Encoding.ASCII);
