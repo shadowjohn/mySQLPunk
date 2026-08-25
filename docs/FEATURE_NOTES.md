@@ -8,6 +8,11 @@
 
 ### 優先待辦
 
+- **Navicat 對齊：視覺化執行計畫 🟡 MySQL／PostgreSQL 第一階段已完成**
+  - 現況：查詢工具列與檔案選單新增「執行計畫」，會分析選取 SQL 或全文；MySQL／MariaDB 使用 `EXPLAIN FORMAT=JSON`，PostgreSQL 使用 `EXPLAIN (FORMAT JSON, ANALYZE FALSE, ...)`，不會為了取得實際時間而執行 DML。
+  - 完成內容：JSON 計畫會解析成可展開的節點樹，顯示 relation、access／join 類型、預估列數、成本與可用的實際統計；相對高成本節點以顏色與文字標示，也能切換原始 JSON、文字計畫與完整節點屬性。
+  - 安全與限制：一次只接受一個 SELECT／WITH／INSERT／UPDATE／DELETE／REPLACE，拒絕 DDL 與多 statement；SQL Server、Oracle、SQLite 的原生計畫格式留待下一階段。
+
 - **右側 AI 助理與物件詳細資料收合 ✅ 已完成**
   - 現況：新使用者第一次啟動時會直接顯示 AI 助理；按關閉後會記住選擇，下次啟動維持關閉，仍可從「檢視 > AI 助理」重新開啟。
   - 完成內容：AI 助理與物件詳細資料各自提供暫時收合按鈕，收合後會留在右側圖示列，不改動長期顯示偏好；可由圖示列或「檢視」選單再次展開。

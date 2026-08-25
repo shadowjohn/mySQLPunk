@@ -18,7 +18,7 @@
 | 關聯式／維度／Data Vault 2.0 模型 | 📋 | 納入模型工作區第三階段。 |
 | 資料字典範本、個人化、PDF、自動化、郵件、模型字典 | 🟡 | 已能輸出五種 provider 的整庫 HTML 並由瀏覽器另存 PDF；待補範本、直接 PDF、排程、郵件與模型來源。 |
 | 資料分析：型別、格式、分佈、統計與互動探索 | 🆕 | 資料表右鍵「資料分析」；五種既有 provider 共用，含抽樣／全表、NULL、相異值、極值、平均、Top 10 比例與值鑽取查詢。待補格式異常偵測與更多圖表。 |
-| Query Explain：視覺／JSON／文字／統計計畫與高成本標示 | 📋 | MySQL／PostgreSQL JSON 計畫先行，再補 SQL Server／Oracle／SQLite 表格計畫。 |
+| Query Explain：視覺／JSON／文字／統計計畫與高成本標示 | 🟡 | MySQL／MariaDB、PostgreSQL 的唯讀 JSON 計畫、樹狀節點、屬性、文字計畫與高成本標示已完成；待補 SQL Server／Oracle／SQLite 原生計畫。 |
 | 釘選查詢結果（SQL、耗時、不可變快照） | ✅ | 結果快照分頁可比較並可中鍵／右鍵關閉。 |
 | Table Profile：多組篩選／排序／欄顯示設定 | 🟡 | 已能記住單一資料表設定；待補具名多組設定與快速切換。 |
 | 物件 URI 分享與直接定位 | 🟡 | 已註冊 `mysqlpunk://`；待補「複製物件 URI」、參數驗證與啟動後定位物件。 |
@@ -45,7 +45,7 @@
 | 資料分析與互動圖表 | 🆕 | 已完成欄位摘要、Top 值比例與值鑽取的第一版。 |
 | 自動完成程式碼 | 🟡 | 已有關鍵字與資料表名稱；待補欄位、alias、JOIN 與語境感知。 |
 | 程式碼片段 | 📋 | 待補內建／自訂片段、搜尋、插入與同步介面。 |
-| 視覺化解釋 | 📋 | 同 Query Explain 路線。 |
+| 視覺化解釋 | 🟡 | MySQL／MariaDB、PostgreSQL 第一階段已完成；待補 SQL Server／Oracle／SQLite。 |
 | 視覺查詢建構器 | 📋 | 待補拖拉資料表、JOIN、條件與 SQL 雙向更新。 |
 | Procedure／Function 偵錯器（中斷點、逐步、變數、呼叫堆疊） | 📋 | 依 provider 能力分階段實作，優先 PostgreSQL／SQL Server。 |
 | AI 助理／詢問 AI | 🟡 | 核心聊天與 schema 上下文已完成，進階動作見上表。 |
@@ -79,10 +79,10 @@
 
 ## 接續順序
 
-1. 視覺化執行計畫（MySQL／PostgreSQL JSON 計畫、成本標示）。
-2. 程式碼片段＋欄位／alias 上下文自動完成。
-3. 資料表設定檔（多組具名篩選／排序／欄顯示）。
-4. 物件 URI 複製、啟動解析與定位。
+1. 程式碼片段＋欄位／alias 上下文自動完成。
+2. 資料表設定檔（多組具名篩選／排序／欄顯示）。
+3. 物件 URI 複製、啟動解析與定位。
+4. SQL Server／Oracle／SQLite 原生執行計畫。
 5. 唯讀 ER 圖與兩庫結構差異報告，建立模型／同步共用底層。
 6. Windows 自動執行＋查詢／匯出／備份作業與記錄。
 7. SSH tunnel＋SSL/TLS 選項 UI。

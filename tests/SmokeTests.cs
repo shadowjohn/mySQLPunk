@@ -44,6 +44,7 @@ public static class SmokeTests
         Run("SQLite column comment exchange service", TestSqliteColumnCommentExchangeService, ref passed);
         Run("SpatiaLite runtime diagnostics", TestSpatiaLiteRuntimeDiagnostics, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
+        Run("Query execution plan service", TestQueryExecutionPlanService, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
@@ -7260,6 +7261,100 @@ public static class SmokeTests
         AssertEquals("HEAD", request.Method, "Connectivity test should use HEAD.");
         Assert(request.Proxy != null, "Connectivity request should include HTTP proxy.");
         AssertEquals("http://proxy.local:3128/", request.Proxy.GetProxy(new Uri("https://example.test/")).ToString(), "Connectivity request proxy URI should match settings.");
+    }
+
+    private static void TestQueryExecutionPlanService()
+    {
+        string mysqlSql = QueryPlanService.BuildExplainSql("mysql", "SELECT * FROM film;");
+        AssertEquals("EXPLAIN FORMAT=JSON SELECT * FROM film", mysqlSql, "MySQL plan SQL should request JSON without executing ANALYZE.");
+
+        string postgresSql = QueryPlanService.BuildExplainSql("postgresql", "WITH recent AS (SELECT ';' AS marker) SELECT * FROM recent;");
+        AssertContains(postgresSql, "EXPLAIN (FORMAT JSON, ANALYZE FALSE", "PostgreSQL plan SQL should explicitly remain read-only.");
+        AssertContains(postgresSql, "SELECT ';' AS marker", "Statement validation should allow semicolons inside string literals.");
+        string commentedSql = QueryPlanService.BuildExplainSql("mysql", "-- first\n  /* second */\nSELECT 1; -- trailing note");
+        AssertContains(commentedSql, "SELECT 1", "Plan SQL should accept leading and trailing comments around one statement.");
+        AssertThrows<InvalidOperationException>(
+            () => QueryPlanService.BuildExplainSql("mysql", ""),
+            "Plan generation should explain that SQL is required.");
+        AssertThrows<InvalidOperationException>(
+            () => QueryPlanService.BuildExplainSql("mysql", "SELECT 1; SELECT 2"),
+            "Plan generation should reject multiple statements.");
+        AssertThrows<NotSupportedException>(
+            () => QueryPlanService.BuildExplainSql("sqlite", "SELECT 1"),
+            "Unsupported providers should return a clear first-phase fallback.");
+        AssertThrows<InvalidOperationException>(
+            () => QueryPlanService.BuildExplainSql("mysql", "DROP TABLE users"),
+            "Plan generation should reject DDL.");
+
+        string mysqlJson = @"{
+  ""query_block"": {
+    ""select_id"": 1,
+    ""cost_info"": { ""query_cost"": ""38.00"" },
+    ""nested_loop"": [
+      { ""table"": { ""table_name"": ""film_category"", ""access_type"": ""index"", ""rows_examined_per_scan"": 1000, ""rows_produced_per_join"": 1000, ""cost_info"": { ""read_cost"": ""15.00"", ""prefix_cost"": ""16.00"" } } },
+      { ""table"": { ""table_name"": ""film"", ""access_type"": ""eq_ref"", ""rows_examined_per_scan"": 1, ""rows_produced_per_join"": 1000, ""cost_info"": { ""read_cost"": ""20.00"", ""prefix_cost"": ""38.00"" } } }
+    ]
+  }
+}";
+        QueryPlanDocument mysqlPlan = QueryPlanService.ParseJson("mysql", mysqlJson);
+        AssertEquals("4", mysqlPlan.NodeCount.ToString(), "MySQL JSON parser should preserve the query block, nested loop, and table nodes.");
+        AssertEquals("38", mysqlPlan.TotalCost.Value.ToString("0"), "MySQL JSON parser should keep query_cost.");
+        QueryPlanNode mysqlLoop = mysqlPlan.Roots[0].Children[0];
+        AssertEquals("Nested Loop", mysqlLoop.NodeType, "MySQL nested_loop should become a visual operation.");
+        AssertEquals("film", mysqlLoop.Children[1].RelationName, "MySQL table names should be available in visual nodes.");
+        Assert(mysqlLoop.Children[1].Severity == QueryPlanSeverity.High, "A MySQL node consuming at least half the total cost should be highlighted.");
+        AssertContains(mysqlPlan.TextPlan, "[HIGH] Table Access film", "Text plan should preserve high-cost markers.");
+
+        string postgresJson = @"[
+  {
+    ""Plan"": {
+      ""Node Type"": ""Hash Join"",
+      ""Join Type"": ""Inner"",
+      ""Startup Cost"": 10.00,
+      ""Total Cost"": 40.00,
+      ""Plan Rows"": 20,
+      ""Actual Total Time"": 8.0,
+      ""Actual Rows"": 19,
+      ""Plans"": [
+        { ""Node Type"": ""Seq Scan"", ""Relation Name"": ""orders"", ""Alias"": ""o"", ""Startup Cost"": 0.0, ""Total Cost"": 26.0, ""Plan Rows"": 500, ""Actual Total Time"": 6.0, ""Actual Rows"": 500 },
+        { ""Node Type"": ""Hash"", ""Startup Cost"": 5.0, ""Total Cost"": 10.0, ""Plan Rows"": 20, ""Plans"": [
+          { ""Node Type"": ""Seq Scan"", ""Relation Name"": ""customers"", ""Startup Cost"": 0.0, ""Total Cost"": 9.0, ""Plan Rows"": 20 }
+        ] }
+      ]
+    },
+    ""Planning Time"": 0.45,
+    ""Execution Time"": 8.5
+  }
+]";
+        DataTable postgresResult = new DataTable();
+        postgresResult.Columns.Add("QUERY PLAN");
+        postgresResult.Rows.Add(postgresJson);
+        QueryPlanDocument postgresPlan = QueryPlanService.Parse("postgresql", postgresResult, postgresSql);
+        AssertEquals("4", postgresPlan.NodeCount.ToString(), "PostgreSQL JSON parser should preserve nested Plans.");
+        AssertEquals("Hash Join", postgresPlan.Roots[0].NodeType, "PostgreSQL node types should be retained.");
+        AssertEquals("orders", postgresPlan.Roots[0].Children[0].RelationName, "PostgreSQL relation names should be retained.");
+        Assert(postgresPlan.Roots[0].Children[0].Severity == QueryPlanSeverity.High, "PostgreSQL high-cost nodes should be highlighted.");
+        AssertEquals("0.45", postgresPlan.PlanningTimeMs.Value.ToString("0.00"), "PostgreSQL planning statistics should be parsed.");
+        AssertEquals("8.5", postgresPlan.ExecutionTimeMs.Value.ToString("0.0"), "PostgreSQL execution statistics should be parsed when present.");
+
+        using (QueryPlanView view = new QueryPlanView())
+        {
+            view.LoadDocument(postgresPlan);
+            TabControl planTabs = view.Controls.OfType<TabControl>().Single();
+            AssertEquals("3", planTabs.TabPages.Count.ToString(), "Execution plan UI should expose visual, JSON, and text views.");
+            SplitContainer visualSplit = planTabs.TabPages[0].Controls.OfType<SplitContainer>().Single();
+            TreeView planTree = visualSplit.Panel1.Controls.OfType<TreeView>().Single();
+            AssertEquals("1", planTree.Nodes.Count.ToString(), "Execution plan UI should render the root operation.");
+            AssertContains(planTree.Nodes[0].Text, "Hash Join", "Execution plan tree should render the parsed operation name.");
+        }
+
+        string root = FindRepositoryRootForTest();
+        string querySource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "QueryForm.cs"), Encoding.UTF8);
+        string viewSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "QueryPlanView.cs"), Encoding.UTF8);
+        AssertContains(querySource, "ExplainQueryAsync", "Query window should expose an execution-plan action.");
+        AssertContains(viewSource, "Query.PlanVisual", "Execution plans should include a visual view.");
+        AssertContains(viewSource, "Query.PlanJson", "Execution plans should include raw JSON.");
+        AssertContains(viewSource, "Query.PlanText", "Execution plans should include a text view.");
     }
 
     private static void TestAiCliProcessIntegration()

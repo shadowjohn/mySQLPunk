@@ -230,6 +230,7 @@
     <Compile Include="lib\my_postgresql.cs" />
     <Compile Include="lib\my_sqlite.cs" />
     <Compile Include="lib\PreDeleteBackupArchiveService.cs" />
+    <Compile Include="lib\QueryPlanService.cs" />
     <Compile Include="lib\QueryResultExportService.cs" />
     <Compile Include="lib\SqliteColumnCommentExchangeService.cs" />
     <Compile Include="lib\SqliteSpecialObjectSqlBuilder.cs" />
@@ -237,6 +238,9 @@
     <Compile Include="lib\ViewColumnPreferenceService.cs" />
     <Compile Include="lib\WindowsCredentialService.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="QueryPlanView.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="QueryForm.cs">
       <SubType>Form</SubType>
     </Compile>

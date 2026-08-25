@@ -35,6 +35,8 @@ namespace mySQLPunk
         private Label lblLoadingMessage;
         private ListBox lstCompletion;
         private TabControl tabResults;
+        private TabPage queryPlanTab;
+        private QueryPlanView queryPlanView;
         private ToolStripButton btnPinResult;      // 釘選查詢結果
         private int _pinnedResultCount;
         private SplitContainer split;
@@ -138,6 +140,7 @@ namespace mySQLPunk
         
         // 頂部按鈕
         private ToolStripButton tsBtnExecute;
+        private ToolStripButton tsBtnExplain;
         private ToolStripButton tsBtnCancel;
         private ToolStripButton tsBtnBeautify;
         private ToolStripButton tsBtnSave;
@@ -167,6 +170,7 @@ namespace mySQLPunk
         private ToolStripMenuItem menuWindow;
         private ToolStripMenuItem menuHelp;
         private ToolStripMenuItem menuFileExecute;
+        private ToolStripMenuItem menuFileExplain;
         private ToolStripMenuItem menuFileOpenSql;
         private ToolStripMenuItem menuFileSaveSql;
         private ToolStripMenuItem menuFileExport;
@@ -389,6 +393,7 @@ namespace mySQLPunk
             };
             
             tsBtnExecute = new ToolStripButton(Localization.T("Query.Execute"), null, (s, e) => ExecuteQueryAsync()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsBtnExplain = new ToolStripButton(Localization.T("Query.ExplainPlan"), null, (s, e) => ExplainQueryAsync()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             tsBtnCancel = new ToolStripButton(Localization.T("Query.Stop"), null, (s, e) => CancelQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Enabled = false };
             tsBtnBeautify = new ToolStripButton(Localization.T("Query.Beautify"), null, (s, e) => BeautifySql()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             
@@ -402,7 +407,7 @@ namespace mySQLPunk
             tsBtnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => DockToMainWindow()) { DisplayStyle = ToolStripItemDisplayStyle.Image, Visible = false };
 
             mainToolStrip.Items.AddRange(new ToolStripItem[] { 
-                tsBtnExecute, tsBtnCancel, tsBtnBeautify, 
+                tsBtnExecute, tsBtnExplain, tsBtnCancel, tsBtnBeautify,
                 new ToolStripSeparator(), 
                 tsBtnSave, tsBtnAdd, tsBtnDelete, tsBtnRefresh, 
                 new ToolStripSeparator(), 
@@ -743,6 +748,7 @@ namespace mySQLPunk
             menuHelp = new ToolStripMenuItem();
 
             menuFileExecute = new ToolStripMenuItem(null, null, (s, e) => ExecuteQueryAsync()) { ShortcutKeys = Keys.F5 };
+            menuFileExplain = new ToolStripMenuItem(null, null, (s, e) => ExplainQueryAsync()) { ShortcutKeys = Keys.Control | Keys.Shift | Keys.E };
             menuFileOpenSql = new ToolStripMenuItem(null, null, (s, e) => OpenSqlWithDialog()) { ShortcutKeys = Keys.Control | Keys.O };
             menuFileSaveSql = new ToolStripMenuItem(null, null, (s, e) => SaveSqlWithDialog()) { ShortcutKeys = Keys.Control | Keys.S };
             menuFileExport = new ToolStripMenuItem(null, null, (s, e) => ExportCsv());
@@ -766,6 +772,7 @@ namespace mySQLPunk
             menuFile.DropDownItems.AddRange(new ToolStripItem[]
             {
                 menuFileExecute,
+                menuFileExplain,
                 new ToolStripSeparator(),
                 menuFileOpenSql,
                 menuFileSaveSql,
@@ -1714,6 +1721,7 @@ namespace mySQLPunk
             {
                 _cts = new CancellationTokenSource();
                 tsBtnExecute.Enabled = false;
+                tsBtnExplain.Enabled = false;
                 tsBtnCancel.Enabled = true;
                 tsBtnExport.Enabled = false;
                 tsBtnRefresh.Enabled = false;
@@ -1766,6 +1774,7 @@ namespace mySQLPunk
                 if (CanUpdateUi())
                 {
                     tsBtnExecute.Enabled = true;
+                    tsBtnExplain.Enabled = true;
                     tsBtnCancel.Enabled = false;
                     tsBtnRefresh.Enabled = true;
                     btnDataRefresh.Enabled = true;
@@ -1893,6 +1902,7 @@ namespace mySQLPunk
 
                 _cts = new CancellationTokenSource();
                 tsBtnExecute.Enabled = false;
+                tsBtnExplain.Enabled = false;
                 tsBtnCancel.Enabled = true;
                 tsBtnExport.Enabled = false;
                 tsBtnRefresh.Enabled = false;
@@ -2031,6 +2041,7 @@ namespace mySQLPunk
                 if (CanUpdateUi())
                 {
                     tsBtnExecute.Enabled = true;
+                    tsBtnExplain.Enabled = true;
                     tsBtnCancel.Enabled = false;
                     tsBtnRefresh.Enabled = true;
                     btnDataRefresh.Enabled = true;
@@ -2042,6 +2053,102 @@ namespace mySQLPunk
                 _cts = null;
                 cts?.Dispose();
             }
+        }
+
+        private async void ExplainQueryAsync()
+        {
+            string rawSql = txtSql.SelectionLength > 0
+                ? txtSql.SelectedText.Trim()
+                : txtSql.Text.Trim();
+            if (_isQueryBusy) return;
+
+            string explainSql;
+            try
+            {
+                explainSql = QueryPlanService.BuildExplainSql(_db == null ? string.Empty : _db.ProviderName, rawSql);
+            }
+            catch (Exception ex)
+            {
+                string reason = BuildQueryExceptionMessage(ex);
+                UpdateStatus(Localization.Format("Query.PlanFailedStatus", reason));
+                ShowResultFeedback(Localization.T("Query.PlanErrorTitle"), reason);
+                return;
+            }
+
+            Stopwatch sw = Stopwatch.StartNew();
+            _isQueryBusy = true;
+            try
+            {
+                lblSqlPreview.Text = explainSql;
+                _cts = new CancellationTokenSource();
+                tsBtnExecute.Enabled = false;
+                tsBtnExplain.Enabled = false;
+                tsBtnCancel.Enabled = true;
+                tsBtnRefresh.Enabled = false;
+                btnDataRefresh.Enabled = false;
+                UpdateStatus(Localization.T("Query.PlanGenerating"));
+
+                DataTable result = await Task.Run(() => _db.SelectSQL(explainSql), _cts.Token);
+                if (!CanUpdateUi()) return;
+                if (result == null) result = new DataTable();
+                string queryError = GetQueryError(result);
+                if (!string.IsNullOrWhiteSpace(queryError)) throw new InvalidOperationException(queryError);
+
+                QueryPlanDocument plan = QueryPlanService.Parse(_db.ProviderName, result, explainSql);
+                sw.Stop();
+                ShowQueryPlan(plan);
+                string status = Localization.Format("Query.PlanLoadedStatus", plan.NodeCount, sw.ElapsedMilliseconds);
+                UpdateStatus(status);
+                _mainHost?.RecordQueryHistory(_databaseName, explainSql, status, sw.ElapsedMilliseconds, result.Rows.Count, true);
+            }
+            catch (OperationCanceledException)
+            {
+                if (!CanUpdateUi()) return;
+                sw.Stop();
+                UpdateStatus(Localization.T("Query.Cancelled"));
+            }
+            catch (Exception ex)
+            {
+                if (!CanUpdateUi()) return;
+                sw.Stop();
+                string reason = BuildQueryExceptionMessage(ex);
+                string status = Localization.Format("Query.PlanFailedStatus", reason);
+                UpdateStatus(status);
+                ShowResultFeedback(Localization.T("Query.PlanErrorTitle"), reason);
+                _mainHost?.RecordQueryHistory(_databaseName, explainSql, status, sw.ElapsedMilliseconds, -1, false);
+            }
+            finally
+            {
+                if (CanUpdateUi())
+                {
+                    tsBtnExecute.Enabled = true;
+                    tsBtnExplain.Enabled = true;
+                    tsBtnCancel.Enabled = false;
+                    tsBtnRefresh.Enabled = true;
+                    btnDataRefresh.Enabled = true;
+                    if (_isTableDataMode) ApplyTableDataEditability();
+                }
+
+                _isQueryBusy = false;
+                CancellationTokenSource cts = _cts;
+                _cts = null;
+                cts?.Dispose();
+            }
+        }
+
+        private void ShowQueryPlan(QueryPlanDocument plan)
+        {
+            if (queryPlanTab == null || queryPlanTab.IsDisposed || queryPlanView == null || queryPlanView.IsDisposed)
+            {
+                queryPlanView = new QueryPlanView();
+                queryPlanTab = new TabPage(Localization.T("Query.ExecutionPlan"));
+                queryPlanTab.Controls.Add(queryPlanView);
+                tabResults.TabPages.Add(queryPlanTab);
+            }
+
+            queryPlanView.LoadDocument(plan);
+            queryPlanView.ApplyLanguage();
+            tabResults.SelectedTab = queryPlanTab;
         }
 
         private bool CanUpdateUi()
@@ -2144,6 +2251,7 @@ namespace mySQLPunk
             ApplyMenuLanguage();
 
             if (tsBtnExecute != null) tsBtnExecute.Text = Localization.T("Query.Execute");
+            if (tsBtnExplain != null) tsBtnExplain.Text = Localization.T("Query.ExplainPlan");
             if (tsBtnCancel != null) tsBtnCancel.Text = Localization.T("Query.Stop");
             if (tsBtnBeautify != null) tsBtnBeautify.Text = Localization.T("Query.Beautify");
             if (tsBtnSave != null) tsBtnSave.Text = Localization.T("Query.Save");
@@ -2154,6 +2262,8 @@ namespace mySQLPunk
             if (tsBtnFloat != null) tsBtnFloat.Text = Localization.T("Query.Float");
             if (tsBtnDock != null) tsBtnDock.Text = Localization.T("Query.Dock");
             if (tabResults != null && tabResults.TabPages.Count > 0) tabResults.TabPages[0].Text = Localization.T("Query.Results");
+            if (queryPlanTab != null) queryPlanTab.Text = Localization.T("Query.ExecutionPlan");
+            if (queryPlanView != null) queryPlanView.ApplyLanguage();
             ApplyDataToolbarButtonTooltips();
             UpdateLoadingOverlayText();
             if (lblStatus != null && (lblStatus.Text == "Ready" || lblStatus.Text == "就緒")) lblStatus.Text = Localization.T("Status.Ready");
@@ -2172,6 +2282,7 @@ namespace mySQLPunk
             const int size = 16;
 
             ThemeManager.SetGlyph(tsBtnExecute, UiGlyph.Play, size, ThemeManager.SuccessColor);
+            ThemeManager.SetGlyph(tsBtnExplain, UiGlyph.Chart, size, ThemeManager.AccentColor);
             ThemeManager.SetGlyph(tsBtnCancel, UiGlyph.Stop, size);
             ThemeManager.SetGlyph(tsBtnBeautify, UiGlyph.Code, size);
             ThemeManager.SetGlyph(tsBtnSave, UiGlyph.Save, size);
@@ -2218,6 +2329,7 @@ namespace mySQLPunk
             ApplyToolStripTooltip(btnDataPrev, Localization.T("Query.DataPreviousPageTooltip"));
             ApplyToolStripTooltip(btnDataNext, Localization.T("Query.DataNextPageTooltip"));
             ApplyToolStripTooltip(btnDataLast, Localization.T("Query.DataLastPageTooltip"));
+            ApplyToolStripTooltip(tsBtnExplain, Localization.T("Query.ExplainPlanTooltip"));
         }
 
         // ── 釘選查詢結果：把目前結果複製成唯讀快照分頁，之後跑新查詢也能對照比較 ──
@@ -2263,19 +2375,31 @@ namespace mySQLPunk
                 TabPage page = tabResults.TabPages[i];
                 if (e.Button == MouseButtons.Middle)
                 {
-                    tabResults.TabPages.Remove(page);
-                    page.Dispose();
+                    CloseResultTab(page);
                 }
                 else if (e.Button == MouseButtons.Right)
                 {
                     ContextMenuStrip menu = new ContextMenuStrip();
-                    ToolStripMenuItem closeItem = new ToolStripMenuItem(Localization.T("Query.ClosePinnedResult"));
-                    closeItem.Click += (s2, e2) => { tabResults.TabPages.Remove(page); page.Dispose(); };
+                    ToolStripMenuItem closeItem = new ToolStripMenuItem(Localization.T("Query.CloseResultTab"));
+                    closeItem.Click += (s2, e2) => CloseResultTab(page);
                     menu.Items.Add(closeItem);
                     ThemeManager.ApplyToolStrip(menu);
                     menu.Show(tabResults, e.Location);
                 }
                 return;
+            }
+        }
+
+        private void CloseResultTab(TabPage page)
+        {
+            if (page == null || tabResults == null || page == tabResults.TabPages[0]) return;
+            bool isPlan = ReferenceEquals(page, queryPlanTab);
+            tabResults.TabPages.Remove(page);
+            page.Dispose();
+            if (isPlan)
+            {
+                queryPlanTab = null;
+                queryPlanView = null;
             }
         }
 
@@ -2295,6 +2419,7 @@ namespace mySQLPunk
             if (menuWindow != null) menuWindow.Text = Localization.T("Menu.Window");
             if (menuHelp != null) menuHelp.Text = Localization.T("Menu.Help");
             if (menuFileExecute != null) menuFileExecute.Text = Localization.T("Query.Execute");
+            if (menuFileExplain != null) menuFileExplain.Text = Localization.T("Query.ExplainPlan");
             if (menuFileOpenSql != null) menuFileOpenSql.Text = Localization.T("Query.OpenSql");
             if (menuFileSaveSql != null) menuFileSaveSql.Text = Localization.T("Query.SaveSql");
             if (menuFileExport != null) menuFileExport.Text = Localization.T("Query.Export");
@@ -2362,6 +2487,7 @@ namespace mySQLPunk
             }
             if (lblSqlPreview != null) lblSqlPreview.ForeColor = ThemeManager.MutedTextColor;
             if (lblStatus != null) lblStatus.ForeColor = ThemeManager.TextColor;
+            if (queryPlanView != null) queryPlanView.ApplyTheme();
         }
 
         private void RefreshResultsContextMenu()
@@ -3028,6 +3154,7 @@ namespace mySQLPunk
         private void BindResultsTable(DataTable table)
         {
             if (dgvResults == null) return;
+            if (tabResults != null && tabResults.TabPages.Count > 0) tabResults.SelectedIndex = 0;
             dgvResults.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             dgvResults.DataSource = table;
             AutoResizeColumns(dgvResults);
