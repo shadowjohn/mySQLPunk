@@ -43,8 +43,8 @@
 | MongoDB 資料編輯器（網格／樹／JSON） | 📋 | 隨 MongoDB provider 實作。 |
 | Redis 資料編輯器 | 📋 | 隨 Redis／Garnet provider 實作。 |
 | 資料分析與互動圖表 | 🆕 | 已完成欄位摘要、Top 值比例與值鑽取的第一版。 |
-| 自動完成程式碼 | 🟡 | 已有關鍵字與資料表名稱；待補欄位、alias、JOIN 與語境感知。 |
-| 程式碼片段 | 📋 | 待補內建／自訂片段、搜尋、插入與同步介面。 |
+| 自動完成程式碼 | ✅ | 已能解析目前 statement 的 FROM／JOIN／UPDATE／INTO 來源與 alias；支援欄位、`alias.column`、資料表、關鍵字與片段捷徑，並依 provider/database 快取資料表、View 與欄位 metadata。 |
+| 程式碼片段 | ✅ | `Ctrl+Shift+P` 開啟片段管理器；支援 8 組內建片段、自訂片段 CRUD、全文搜尋、`$CURSOR$` 定位、保留縮排插入，以及 JSON 匯入／匯出工作區格式。 |
 | 視覺化解釋 | 🟡 | MySQL／MariaDB、PostgreSQL 第一階段已完成；待補 SQL Server／Oracle／SQLite。 |
 | 視覺查詢建構器 | 📋 | 待補拖拉資料表、JOIN、條件與 SQL 雙向更新。 |
 | Procedure／Function 偵錯器（中斷點、逐步、變數、呼叫堆疊） | 📋 | 依 provider 能力分階段實作，優先 PostgreSQL／SQL Server。 |
@@ -79,11 +79,10 @@
 
 ## 接續順序
 
-1. 程式碼片段＋欄位／alias 上下文自動完成。
-2. 資料表設定檔（多組具名篩選／排序／欄顯示）。
-3. 物件 URI 複製、啟動解析與定位。
-4. SQL Server／Oracle／SQLite 原生執行計畫。
-5. 唯讀 ER 圖與兩庫結構差異報告，建立模型／同步共用底層。
-6. Windows 自動執行＋查詢／匯出／備份作業與記錄。
-7. SSH tunnel＋SSL/TLS 選項 UI。
-8. 依序擴充 MongoDB、Redis／Garnet、Snowflake，再接專用編輯器、BI、pipeline、schema analyzer 與 Pub/Sub。
+1. 資料表設定檔（多組具名篩選／排序／欄顯示）。
+2. 物件 URI 複製、啟動解析與定位。
+3. SQL Server／Oracle／SQLite 原生執行計畫。
+4. 唯讀 ER 圖與兩庫結構差異報告，建立模型／同步共用底層。
+5. Windows 自動執行＋查詢／匯出／備份作業與記錄。
+6. SSH tunnel＋SSL/TLS 選項 UI。
+7. 依序擴充 MongoDB、Redis／Garnet、Snowflake，再接專用編輯器、BI、pipeline、schema analyzer 與 Pub/Sub。

@@ -25,6 +25,12 @@ namespace mySQLPunk
         private IDatabase _db;
         private string _databaseName;
         private List<string> _tableNames = new List<string>();
+        private Dictionary<string, List<string>> _columnNamesByTable = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string> _completionRefreshedTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private SqlCompletionMetadataStore _completionMetadataStore;
+        private SqlCompletionMetadataEntry _completionMetadataEntry;
+        private SqlSnippetService _snippetService;
+        private SqlCompletionContext _completionContext;
         private CancellationTokenSource _cts;
 
         // UI 元件 (已現代化)
@@ -180,6 +186,7 @@ namespace mySQLPunk
         private ToolStripMenuItem menuEditPaste;
         private ToolStripMenuItem menuEditSelectAll;
         private ToolStripMenuItem menuEditBeautify;
+        private ToolStripMenuItem menuEditSnippets;
         private ToolStripMenuItem menuViewSqlEditor;
         private ToolStripMenuItem menuViewResults;
         private ToolStripMenuItem menuWindowFloat;
@@ -246,6 +253,8 @@ namespace mySQLPunk
             this._databaseName = dbName ?? string.Empty;
             this.currentDatabase = dbName ?? string.Empty;
             this.connectionHost = host ?? string.Empty;
+            this._completionMetadataStore = new SqlCompletionMetadataStore(Path.Combine(Application.UserAppDataPath, "autocomplete-cache.json"));
+            this._snippetService = new SqlSnippetService(Path.Combine(Application.UserAppDataPath, "sql-snippets.json"));
 
             if (!string.IsNullOrWhiteSpace(this.currentDatabase) || !string.IsNullOrWhiteSpace(this.connectionHost))
             {
@@ -508,8 +517,8 @@ namespace mySQLPunk
             lstCompletion = new ListBox
             {
                 Visible = false,
-                Width = 180,
-                Height = 120,
+                Width = 360,
+                Height = 160,
                 IntegralHeight = false
             };
             lstCompletion.DoubleClick += (s, e) => ApplyCompletion();
@@ -759,6 +768,7 @@ namespace mySQLPunk
             menuEditPaste = new ToolStripMenuItem(null, null, (s, e) => txtSql.Paste()) { ShortcutKeys = Keys.Control | Keys.V };
             menuEditSelectAll = new ToolStripMenuItem(null, null, (s, e) => txtSql.SelectAll()) { ShortcutKeys = Keys.Control | Keys.A };
             menuEditBeautify = new ToolStripMenuItem(null, null, (s, e) => BeautifySql());
+            menuEditSnippets = new ToolStripMenuItem(null, null, (s, e) => ShowSnippetManager()) { ShortcutKeys = Keys.Control | Keys.Shift | Keys.P };
 
             menuViewSqlEditor = new ToolStripMenuItem(null, null, (s, e) => FocusSqlEditor());
             menuViewResults = new ToolStripMenuItem(null, null, (s, e) => FocusResultsGrid());
@@ -789,7 +799,8 @@ namespace mySQLPunk
                 new ToolStripSeparator(),
                 menuEditSelectAll,
                 new ToolStripSeparator(),
-                menuEditBeautify
+                menuEditBeautify,
+                menuEditSnippets
             });
             menuView.DropDownItems.AddRange(new ToolStripItem[] { menuViewSqlEditor, menuViewResults });
             menuWindow.DropDownItems.AddRange(new ToolStripItem[] { menuWindowFloat, menuWindowDock, new ToolStripSeparator(), menuWindowClose });
@@ -973,6 +984,31 @@ namespace mySQLPunk
                 MessageBoxIcon.Information);
         }
 
+        private void ShowSnippetManager()
+        {
+            if (_snippetService == null) _snippetService = new SqlSnippetService(Path.Combine(Application.UserAppDataPath, "sql-snippets.json"));
+            using (SqlSnippetManagerForm dialog = new SqlSnippetManagerForm(_snippetService))
+            {
+                if (dialog.ShowDialog(this) == DialogResult.OK && dialog.SelectedSnippet != null)
+                {
+                    InsertSnippetAtSelection(dialog.SelectedSnippet);
+                }
+            }
+        }
+
+        private void InsertSnippetAtSelection(SqlCodeSnippet snippet)
+        {
+            if (snippet == null || txtSql == null) return;
+            int start = txtSql.SelectionStart;
+            string indentation = GetLineIndentation(txtSql.Text, start);
+            string newLine = txtSql.Text.Contains("\r\n") ? "\r\n" : Environment.NewLine;
+            SqlSnippetExpansion expansion = SqlSnippetService.Expand(snippet.Sql, indentation, newLine);
+            txtSql.SelectedText = expansion.Text;
+            txtSql.SelectionStart = Math.Min(txtSql.TextLength, start + expansion.CursorOffset);
+            txtSql.SelectionLength = 0;
+            txtSql.Focus();
+        }
+
         // 攔截 OS 層級視窗移動，提供 dock 提示框並在放開時自動塞回 tab
         private const int WM_MOVING = 0x0216;
         private const int WM_EXITSIZEMOVE = 0x0232;
@@ -1002,22 +1038,109 @@ namespace mySQLPunk
             }
         }
 
-        // ── 載入資料表名稱供自動補完 ──
+        // ── 載入資料表與快取欄位供上下文自動完成 ──
         private void LoadTableNames()
         {
+            _tableNames = new List<string>();
+            _columnNamesByTable = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                if (ApplicationOptionSettings.GetBool("AutoCompleteEnabled") &&
-                    ApplicationOptionSettings.GetBool("AutoCompleteAutoRefresh") &&
-                    !string.IsNullOrEmpty(_databaseName) && _db != null)
+                if (!ApplicationOptionSettings.GetBool("AutoCompleteEnabled") || string.IsNullOrEmpty(_databaseName) || _db == null) return;
+
+                _completionMetadataEntry = _completionMetadataStore.Load(_db.ProviderName, _databaseName);
+                _tableNames = new List<string>(_completionMetadataEntry.Tables ?? new List<string>());
+                _columnNamesByTable = new Dictionary<string, List<string>>(
+                    _completionMetadataEntry.Columns ?? new Dictionary<string, List<string>>(),
+                    StringComparer.OrdinalIgnoreCase);
+
+                if (ApplicationOptionSettings.GetBool("AutoCompleteAutoRefresh"))
                 {
-                    _tableNames = _db.GetTables(_databaseName);
+                    List<string> completionObjects = new List<string>(_db.GetTables(_databaseName) ?? new List<string>());
+                    try { completionObjects.AddRange(_db.GetViews(_databaseName) ?? new List<string>()); }
+                    catch { }
+                    _tableNames = completionObjects
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    HashSet<string> currentTables = new HashSet<string>(_tableNames, StringComparer.OrdinalIgnoreCase);
+                    foreach (string staleTable in _columnNamesByTable.Keys.Where(name => !currentTables.Contains(name)).ToList())
+                    {
+                        _columnNamesByTable.Remove(staleTable);
+                    }
+                    SaveCompletionMetadata();
                 }
             }
             catch
             {
                 // 取得失敗時靜默忽略，不影響主要功能
             }
+        }
+
+        private void EnsureCompletionColumns(IEnumerable<string> tableNames)
+        {
+            if (_db == null || string.IsNullOrWhiteSpace(_databaseName) || !ApplicationOptionSettings.GetBool("AutoCompleteAutoRefresh")) return;
+            bool changed = false;
+            foreach (string tableName in tableNames ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(tableName) || _completionRefreshedTables.Contains(tableName)) continue;
+                _completionRefreshedTables.Add(tableName);
+                try
+                {
+                    DataTable columns = _db.GetColumns(_databaseName, tableName);
+                    _columnNamesByTable[tableName] = ReadCompletionColumnNames(columns);
+                    changed = true;
+                }
+                catch
+                {
+                    // 個別資料表 metadata 失敗不應中斷編輯器；保留既有快取。
+                }
+            }
+            if (changed) SaveCompletionMetadata();
+        }
+
+        private void SaveCompletionMetadata()
+        {
+            if (_completionMetadataStore == null || _db == null || string.IsNullOrWhiteSpace(_databaseName)) return;
+            if (_completionMetadataEntry == null)
+            {
+                _completionMetadataEntry = new SqlCompletionMetadataEntry
+                {
+                    Provider = _db.ProviderName,
+                    Database = _databaseName
+                };
+            }
+            _completionMetadataEntry.Provider = _db.ProviderName;
+            _completionMetadataEntry.Database = _databaseName;
+            _completionMetadataEntry.Tables = new List<string>(_tableNames);
+            _completionMetadataEntry.Columns = new Dictionary<string, List<string>>(_columnNamesByTable, StringComparer.OrdinalIgnoreCase);
+            try { _completionMetadataStore.Save(_completionMetadataEntry); }
+            catch { }
+        }
+
+        private static List<string> ReadCompletionColumnNames(DataTable columns)
+        {
+            List<string> output = new List<string>();
+            if (columns == null) return output;
+            string[] candidates = { "Name", "name", "COLUMN_NAME", "column_name", "Field" };
+            foreach (DataRow row in columns.Rows)
+            {
+                string value = string.Empty;
+                foreach (string candidate in candidates)
+                {
+                    if (columns.Columns.Contains(candidate) && row[candidate] != DBNull.Value)
+                    {
+                        value = Convert.ToString(row[candidate], CultureInfo.InvariantCulture).Trim();
+                        if (value.Length > 0) break;
+                    }
+                }
+                if (value.Length == 0 && columns.Columns.Count > 0 && row[0] != DBNull.Value)
+                {
+                    value = Convert.ToString(row[0], CultureInfo.InvariantCulture).Trim();
+                }
+                if (value.Length > 0 && !output.Contains(value, StringComparer.OrdinalIgnoreCase)) output.Add(value);
+            }
+            return output.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         // ── SQL 語法高亮 ──
@@ -1539,24 +1662,43 @@ namespace mySQLPunk
             int pos = txtSql.SelectionStart;
             if (pos <= 0) { lstCompletion.Visible = false; return; }
 
-            int start = txtSql.Text.LastIndexOfAny(new[] { ' ', '\n', '\r', '\t' }, pos - 1) + 1;
-            string word = txtSql.Text.Substring(start, pos - start).ToUpperInvariant();
+            _completionContext = SqlEditorCompletionService.Analyze(txtSql.Text, pos);
+            if (_completionContext.Prefix.Length < 2 && string.IsNullOrWhiteSpace(_completionContext.Qualifier))
+            {
+                lstCompletion.Visible = false;
+                return;
+            }
 
-            if (word.Length < 2) { lstCompletion.Visible = false; return; }
-
-            var allWords = new List<string>(Keywords);
-            allWords.AddRange(_tableNames);
-            allWords.Sort(StringComparer.OrdinalIgnoreCase);
-
-            var matches = allWords.FindAll(k => k.ToUpperInvariant().StartsWith(word));
+            EnsureCompletionColumns(_completionContext.ReferencedTables);
+            List<SqlCompletionSuggestion> matches = SqlEditorCompletionService.BuildSuggestions(
+                _completionContext,
+                Keywords,
+                _tableNames,
+                _columnNamesByTable,
+                _snippetService == null ? Enumerable.Empty<SqlCodeSnippet>() : _snippetService.GetAll());
 
             if (matches.Count > 0)
             {
-                lstCompletion.Items.Clear();
-                foreach (var m in matches) lstCompletion.Items.Add(m);
+                lstCompletion.BeginUpdate();
+                try
+                {
+                    lstCompletion.Items.Clear();
+                    foreach (SqlCompletionSuggestion match in matches)
+                    {
+                        match.DisplayText = BuildCompletionDisplayText(match);
+                        lstCompletion.Items.Add(match);
+                    }
+                }
+                finally
+                {
+                    lstCompletion.EndUpdate();
+                }
 
-                Point p = txtSql.GetPositionFromCharIndex(start);
-                lstCompletion.Location = new Point(p.X, p.Y + txtSql.Font.Height + 4);
+                Point p = txtSql.GetPositionFromCharIndex(_completionContext.ReplacementStart);
+                int x = Math.Max(0, Math.Min(p.X, split.Panel1.ClientSize.Width - lstCompletion.Width));
+                int y = p.Y + txtSql.Font.Height + 4;
+                if (y + lstCompletion.Height > split.Panel1.ClientSize.Height) y = Math.Max(0, p.Y - lstCompletion.Height);
+                lstCompletion.Location = new Point(x, y);
                 lstCompletion.Visible = true;
                 lstCompletion.BringToFront();
                 lstCompletion.SelectedIndex = ApplicationOptionSettings.GetBool("AutoCompleteSelectFirst") ? 0 : -1;
@@ -1571,14 +1713,55 @@ namespace mySQLPunk
         {
             if (lstCompletion.SelectedItem == null) return;
 
-            string selected = lstCompletion.SelectedItem.ToString();
-            int pos = txtSql.SelectionStart;
-            int start = txtSql.Text.LastIndexOfAny(new[] { ' ', '\n', '\r', '\t' }, pos - 1) + 1;
+            SqlCompletionSuggestion selected = lstCompletion.SelectedItem as SqlCompletionSuggestion;
+            if (selected == null || _completionContext == null) return;
+            int start = Math.Max(0, Math.Min(_completionContext.ReplacementStart, txtSql.TextLength));
+            int length = Math.Max(0, Math.Min(_completionContext.ReplacementLength, txtSql.TextLength - start));
 
-            txtSql.Select(start, pos - start);
-            txtSql.SelectedText = selected + " ";
+            txtSql.Select(start, length);
+            if (selected.Kind == SqlCompletionKind.Snippet && selected.Snippet != null)
+            {
+                string indentation = GetLineIndentation(txtSql.Text, start);
+                string newLine = txtSql.Text.Contains("\r\n") ? "\r\n" : Environment.NewLine;
+                SqlSnippetExpansion expansion = SqlSnippetService.Expand(selected.Snippet.Sql, indentation, newLine);
+                txtSql.SelectedText = expansion.Text;
+                txtSql.SelectionStart = Math.Min(txtSql.TextLength, start + expansion.CursorOffset);
+                txtSql.SelectionLength = 0;
+            }
+            else
+            {
+                string insertText = selected.InsertText + (selected.AppendSpace ? " " : string.Empty);
+                txtSql.SelectedText = insertText;
+                txtSql.SelectionStart = Math.Min(txtSql.TextLength, start + insertText.Length);
+                txtSql.SelectionLength = 0;
+            }
             lstCompletion.Visible = false;
             txtSql.Focus();
+        }
+
+        private static string GetLineIndentation(string sql, int position)
+        {
+            sql = sql ?? string.Empty;
+            position = Math.Max(0, Math.Min(position, sql.Length));
+            int lineStart = position <= 0 ? 0 : sql.LastIndexOf('\n', position - 1) + 1;
+            int index = lineStart;
+            while (index < position && (sql[index] == ' ' || sql[index] == '\t')) index++;
+            return sql.Substring(lineStart, index - lineStart);
+        }
+
+        private static string BuildCompletionDisplayText(SqlCompletionSuggestion suggestion)
+        {
+            string key;
+            switch (suggestion.Kind)
+            {
+                case SqlCompletionKind.Snippet: key = "Query.CompletionSnippet"; break;
+                case SqlCompletionKind.Alias: key = "Query.CompletionAlias"; break;
+                case SqlCompletionKind.Column: key = "Query.CompletionColumn"; break;
+                case SqlCompletionKind.Table: key = "Query.CompletionTable"; break;
+                default: key = "Query.CompletionKeyword"; break;
+            }
+            string detail = string.IsNullOrWhiteSpace(suggestion.Detail) ? string.Empty : " · " + suggestion.Detail;
+            return suggestion.InsertText + "    [" + Localization.T(key) + detail + "]";
         }
 
         // ── 取得要執行的 SQL 語句 ──
@@ -2429,6 +2612,7 @@ namespace mySQLPunk
             if (menuEditPaste != null) menuEditPaste.Text = Localization.T("Query.Paste");
             if (menuEditSelectAll != null) menuEditSelectAll.Text = Localization.T("Query.SelectAll");
             if (menuEditBeautify != null) menuEditBeautify.Text = Localization.T("Query.Beautify");
+            if (menuEditSnippets != null) menuEditSnippets.Text = Localization.T("Query.Snippets");
             if (menuViewSqlEditor != null) menuViewSqlEditor.Text = Localization.T("Query.SqlEditor");
             if (menuViewResults != null) menuViewResults.Text = Localization.T("Query.Results");
             if (menuWindowFloat != null) menuWindowFloat.Text = Localization.T("Query.Float");

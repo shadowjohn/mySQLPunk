@@ -8,6 +8,12 @@
 
 ### 優先待辦
 
+- **Navicat 對齊：程式碼片段與上下文自動完成 ✅ 已完成**
+  - 自動完成：查詢編輯器會限定在游標所在 statement，略過 SQL 字串與註解後解析 FROM／JOIN／UPDATE／INTO 的資料表與 alias；輸入 `alias.` 只列出對應欄位，多表查詢會提供 `alias.column`，資料表位置則優先列出資料表與 View。
+  - metadata：資料表、View 與實際使用到的欄位會以 provider/database 分區保存到 `autocomplete-cache.json`；啟用自動更新時會刷新物件清單及目前 statement 用到的欄位，避免開啟大型 schema 時一次查詢所有資料表。
+  - 程式碼片段：編輯選單或 `Ctrl+Shift+P` 可開啟管理器，內建 SELECT、JOIN、INSERT、UPDATE、DELETE、CTE、交易與 CREATE TABLE；支援全文搜尋、自訂片段 CRUD、`$CURSOR$` 游標定位、保留目前縮排插入，以及 JSON 匯入／匯出供工作區同步。
+  - 驗證：smoke test 覆蓋 alias 對應、游標後方 FROM 解析、多表欄位、註解／字串排除、片段縮排展開、自訂片段 round-trip、匯入／匯出與 metadata 快取。
+
 - **Navicat 對齊：視覺化執行計畫 🟡 MySQL／PostgreSQL 第一階段已完成**
   - 現況：查詢工具列與檔案選單新增「執行計畫」，會分析選取 SQL 或全文；MySQL／MariaDB 使用 `EXPLAIN FORMAT=JSON`，PostgreSQL 使用 `EXPLAIN (FORMAT JSON, ANALYZE FALSE, ...)`，不會為了取得實際時間而執行 DML。
   - 完成內容：JSON 計畫會解析成可展開的節點樹，顯示 relation、access／join 類型、預估列數、成本與可用的實際統計；相對高成本節點以顏色與文字標示，也能切換原始 JSON、文字計畫與完整節點屬性。

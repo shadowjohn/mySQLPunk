@@ -45,6 +45,7 @@ public static class SmokeTests
         Run("SpatiaLite runtime diagnostics", TestSpatiaLiteRuntimeDiagnostics, ref passed);
         Run("Query result export service", TestQueryResultExportService, ref passed);
         Run("Query execution plan service", TestQueryExecutionPlanService, ref passed);
+        Run("SQL editor completion and snippets", TestSqlEditorCompletionAndSnippets, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
@@ -5616,6 +5617,124 @@ public static class SmokeTests
         SetPrivateField(form, "_isTableDataMode", true);
         Assert(!TryGetQueryFormStreamingExportSql(form, QueryResultExportFormat.Csv, out streamingSql),
             "Query form should not re-query table edit mode because current rows may contain unsaved edits.");
+    }
+
+    private static void TestSqlEditorCompletionAndSnippets()
+    {
+        string sql = "SELECT u.na FROM users AS u WHERE u.active = 1;";
+        int cursor = sql.IndexOf("na", StringComparison.Ordinal) + 2;
+        SqlCompletionContext qualified = SqlEditorCompletionService.Analyze(sql, cursor);
+        AssertEquals("na", qualified.Prefix, "Completion should identify the current identifier prefix.");
+        AssertEquals("u", qualified.Qualifier, "Completion should identify the alias before a dot.");
+        AssertEquals("users", qualified.AliasToTable["u"], "Completion should map SQL aliases to their source tables.");
+        Assert(qualified.ReferencedTables.Contains("users"), "Completion should discover FROM sources that appear after the cursor.");
+
+        Dictionary<string, List<string>> columns = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "users", new List<string> { "id", "name", "active" } },
+            { "orders", new List<string> { "id", "name", "user_id" } }
+        };
+        List<SqlCompletionSuggestion> qualifiedSuggestions = SqlEditorCompletionService.BuildSuggestions(
+            qualified,
+            new[] { "SELECT", "FROM", "WHERE" },
+            new[] { "users", "orders" },
+            columns,
+            SqlSnippetService.GetBuiltIns());
+        Assert(qualifiedSuggestions.Any(item => item.Kind == SqlCompletionKind.Column && item.InsertText == "name"),
+            "Alias-qualified completion should suggest columns from the matching table.");
+        Assert(!qualifiedSuggestions.Any(item => item.InsertText == "user_id"),
+            "Alias-qualified completion should not leak columns from another table.");
+
+        Dictionary<string, List<string>> schemaColumns = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "sales.accounts", new List<string> { "id", "name" } }
+        };
+        string schemaSql = "SELECT a.na FROM [sales].[accounts] AS a;";
+        SqlCompletionContext schemaContext = SqlEditorCompletionService.Analyze(schemaSql, schemaSql.IndexOf("na", StringComparison.Ordinal) + 2);
+        Assert(schemaContext.ReferencedTables.Contains("sales.accounts"), "Completion should preserve schema-qualified source names for provider metadata calls.");
+        Assert(SqlEditorCompletionService.BuildSuggestions(schemaContext, new string[0], new string[0], schemaColumns, new SqlCodeSnippet[0])
+            .Any(item => item.InsertText == "name"), "Schema-qualified aliases should resolve their table columns.");
+
+        string selectListSql = "SELECT na FROM users u JOIN orders o ON o.user_id = u.id;";
+        SqlCompletionContext selectList = SqlEditorCompletionService.Analyze(selectListSql, selectListSql.IndexOf("na", StringComparison.Ordinal) + 2);
+        List<SqlCompletionSuggestion> selectListSuggestions = SqlEditorCompletionService.BuildSuggestions(
+            selectList,
+            new[] { "SELECT", "FROM", "WHERE" },
+            new[] { "users", "orders" },
+            columns,
+            Enumerable.Empty<SqlCodeSnippet>());
+        Assert(selectListSuggestions.Any(item => item.InsertText == "u.name"), "Multi-table completion should offer alias-qualified user columns.");
+        Assert(selectListSuggestions.Any(item => item.InsertText == "o.name"), "Multi-table completion should offer alias-qualified order columns.");
+
+        SqlCompletionContext tableContext = SqlEditorCompletionService.Analyze("SELECT * FROM us", "SELECT * FROM us".Length);
+        Assert(tableContext.IsTableContext, "Completion should recognize FROM/JOIN table positions.");
+        List<SqlCompletionSuggestion> tableSuggestions = SqlEditorCompletionService.BuildSuggestions(
+            tableContext,
+            new[] { "SELECT" },
+            new[] { "users", "orders" },
+            columns,
+            Enumerable.Empty<SqlCodeSnippet>());
+        Assert(tableSuggestions.Any(item => item.Kind == SqlCompletionKind.Table && item.InsertText == "users"),
+            "Table context should prioritize matching table names.");
+
+        string maskedSql = "SELECT 'FROM fake f', u.na FROM users u -- JOIN ghosts g\r\nWHERE 1 = 1;";
+        SqlCompletionContext masked = SqlEditorCompletionService.Analyze(maskedSql, maskedSql.IndexOf("u.na", StringComparison.Ordinal) + 4);
+        Assert(masked.ReferencedTables.Count == 1 && masked.ReferencedTables[0] == "users",
+            "Completion parsing should ignore FROM/JOIN text inside strings and comments.");
+
+        SqlCompletionContext snippetContext = SqlEditorCompletionService.Analyze("sel", 3);
+        List<SqlCompletionSuggestion> snippetSuggestions = SqlEditorCompletionService.BuildSuggestions(
+            snippetContext,
+            new string[0],
+            new string[0],
+            columns,
+            SqlSnippetService.GetBuiltIns());
+        Assert(snippetSuggestions.Any(item => item.Kind == SqlCompletionKind.Snippet && item.InsertText == "sel"),
+            "Built-in snippet shortcuts should appear in completion results.");
+        SqlSnippetExpansion expansion = SqlSnippetService.Expand("SELECT 1;\n$CURSOR$", "    ", "\r\n");
+        AssertEquals("SELECT 1;\r\n    ", expansion.Text, "Snippet expansion should preserve the current line indentation.");
+        AssertEquals(expansion.Text.Length.ToString(), expansion.CursorOffset.ToString(), "Snippet expansion should place the cursor at the marker.");
+
+        string tempRoot = Path.Combine(Path.GetTempPath(), "mysqlpunk-snippet-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            string snippetsPath = Path.Combine(tempRoot, "snippets.json");
+            SqlSnippetService service = new SqlSnippetService(snippetsPath);
+            SqlCodeSnippet saved = service.Save(new SqlCodeSnippet
+            {
+                Name = "Find active users",
+                Shortcut = "active_users",
+                Description = "test",
+                Sql = "SELECT * FROM users WHERE active = 1;"
+            });
+            Assert(service.LoadCustom().Any(item => item.Id == saved.Id && item.Shortcut == "active_users"),
+                "Custom snippets should persist to JSON.");
+
+            string exportPath = Path.Combine(tempRoot, "export.json");
+            service.Export(exportPath);
+            SqlSnippetService importedService = new SqlSnippetService(Path.Combine(tempRoot, "imported.json"));
+            AssertEquals("1", importedService.Import(exportPath).ToString(), "Snippet import should report the imported item count.");
+            Assert(importedService.LoadCustom().Any(item => item.Shortcut == "active_users"),
+                "Snippet export/import should provide a portable synchronization format.");
+
+            string cachePath = Path.Combine(tempRoot, "autocomplete-cache.json");
+            SqlCompletionMetadataStore store = new SqlCompletionMetadataStore(cachePath);
+            store.Save(new SqlCompletionMetadataEntry
+            {
+                Provider = "mysql",
+                Database = "demo",
+                Tables = new List<string> { "users" },
+                Columns = columns
+            });
+            SqlCompletionMetadataEntry cached = store.Load("MYSQL", "DEMO");
+            Assert(cached.Tables.Contains("users") && cached.Columns["users"].Contains("name"),
+                "Completion metadata should persist by provider/database with case-insensitive lookup.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, true);
+        }
     }
 
     private static void TestQueryFormOptionSettings()
