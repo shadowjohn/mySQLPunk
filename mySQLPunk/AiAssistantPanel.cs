@@ -221,6 +221,12 @@ namespace mySQLPunk
             refreshModelsButton.Click += async (s, e) =>
             {
                 AiChatSettings settings = AiChatSettings.Load();
+                if (settings.Preset.AuthStyle == "cli")
+                {
+                    // CLI 沒有模型清單可抓,這是說明不是錯誤,用灰色系統訊息就好
+                    chatView.AddSystem(Localization.T("Ai.CliNoModels"));
+                    return;
+                }
                 if (settings.Preset.NeedsKey && !AiChatService.HasApiKey(settings.Provider))
                 {
                     chatView.AddSystem(Localization.T("Ai.NoApiKeyHint"));

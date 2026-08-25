@@ -167,25 +167,58 @@ namespace mySQLPunk.lib
         {
             string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(settings.Provider);
             string model = (settings.Model ?? "").Trim();
+            string promptText = BuildCliPrompt(messages);
 
-            string arguments;
+            string[] argumentTries;
             switch (settings.Provider)
             {
                 case "codex-cli":
-                    // read-only sandbox + 空的工作目錄：純問答，不讓它動到任何檔案
-                    arguments = "exec --skip-git-repo-check -s read-only" + (model.Length > 0 ? " -m " + model : "") + " -";
+                    // read-only sandbox + 空的工作目錄：純問答，不讓它動到任何檔案。
+                    // 各版本 codex 支援的旗標不一，不吃就逐步降階重試
+                    string modelArgs = model.Length > 0 ? " -m " + model : "";
+                    argumentTries = new[]
+                    {
+                        "exec --skip-git-repo-check -s read-only" + modelArgs + " -",
+                        "exec --skip-git-repo-check" + modelArgs + " -",
+                        "exec" + modelArgs + " -"
+                    };
                     break;
                 case "claude-cli":
-                    arguments = "-p" + (model.Length > 0 ? " --model " + model : "");
+                    argumentTries = new[] { "-p" + (model.Length > 0 ? " --model " + model : "") };
                     break;
                 case "gemini-cli":
-                    arguments = model.Length > 0 ? "-m " + model : "";
+                    argumentTries = new[] { model.Length > 0 ? "-m " + model : "" };
                     break;
                 default:
                     throw new InvalidOperationException("unknown cli provider: " + settings.Provider);
             }
 
-            // CLI 是一次一問，把系統指示、上下文與對話攤平成一份 prompt
+            InvalidOperationException lastError = null;
+            for (int i = 0; i < argumentTries.Length; i++)
+            {
+                try
+                {
+                    return RunCliProcess(exe, argumentTries[i], promptText, 180000);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    lastError = ex;
+                    // 只有「旗標不認得」這類用法錯誤才降階重試，其它錯誤直接回報
+                    string msg = ex.Message ?? "";
+                    bool usageError = msg.IndexOf("unexpected argument", StringComparison.OrdinalIgnoreCase) >= 0
+                        || msg.IndexOf("unrecognized", StringComparison.OrdinalIgnoreCase) >= 0
+                        || msg.IndexOf("invalid option", StringComparison.OrdinalIgnoreCase) >= 0
+                        || msg.IndexOf("USAGE", StringComparison.Ordinal) >= 0
+                        || msg.IndexOf("Usage:", StringComparison.Ordinal) >= 0;
+                    if (!usageError || i == argumentTries.Length - 1) throw;
+                }
+            }
+            throw lastError;
+        }
+
+        /// <summary>CLI 是一次一問，把系統指示、上下文與對話攤平成一份 prompt。</summary>
+        private static string BuildCliPrompt(IList<AiChatMessage> messages)
+        {
             StringBuilder prompt = new StringBuilder();
             foreach (AiChatMessage m in messages)
             {
@@ -206,7 +239,7 @@ namespace mySQLPunk.lib
             }
             if (hasHistory) prompt.AppendLine("請以助理身分直接回覆最後一則使用者訊息，不要重複前面的對話。");
 
-            return RunCliProcess(exe, arguments, prompt.ToString(), 180000);
+            return prompt.ToString();
         }
 
         /// <summary>跑 CLI 的 --version 當「測試連線」：確認裝了、抓得到。</summary>
@@ -261,10 +294,12 @@ namespace mySQLPunk.lib
                 }
                 process.WaitForExit(); // 等非同步輸出讀完
 
-                string output = stdout.ToString().Trim();
+                // CLI 常在輸出裡夾 ANSI 色碼與進度控制字元，不洗掉的話
+                // 錯誤訊息會變成一串亂碼，真正的原因反而看不到
+                string output = SanitizeCliText(stdout.ToString());
                 if (process.ExitCode != 0)
                 {
-                    string detail = stderr.ToString().Trim();
+                    string detail = SanitizeCliText(stderr.ToString());
                     if (detail.Length == 0) detail = output;
                     if (detail.IndexOf("不是內部或外部命令", StringComparison.Ordinal) >= 0
                         || detail.IndexOf("is not recognized", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -275,10 +310,49 @@ namespace mySQLPunk.lib
                 }
                 if (output.Length == 0)
                 {
-                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, Truncate(stderr.ToString().Trim(), 400)));
+                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, Truncate(SanitizeCliText(stderr.ToString()), 400)));
                 }
                 return output;
             }
+        }
+
+        /// <summary>把 ANSI escape（CSI/OSC）與不可列印的控制字元從 CLI 輸出裡清掉。</summary>
+        private static string SanitizeCliText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            StringBuilder sb = new StringBuilder(text.Length);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c == '\x1b')
+                {
+                    if (i + 1 < text.Length && text[i + 1] == '[')
+                    {
+                        // CSI:吃到結尾字母為止
+                        i++;
+                        while (i + 1 < text.Length)
+                        {
+                            i++;
+                            char t = text[i];
+                            if (t >= '@' && t <= '~') break;
+                        }
+                    }
+                    else if (i + 1 < text.Length && text[i + 1] == ']')
+                    {
+                        // OSC:吃到 BEL 或 ST 為止
+                        i++;
+                        while (i + 1 < text.Length)
+                        {
+                            i++;
+                            if (text[i] == '\x07') break;
+                            if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == '\\') { i++; break; }
+                        }
+                    }
+                    continue;
+                }
+                if (c == '\r' || c == '\n' || c == '\t' || c >= ' ') sb.Append(c);
+            }
+            return sb.ToString().Trim();
         }
 
         private static string OpenAiCompatibleChat(AiChatSettings settings, IList<AiChatMessage> messages)
