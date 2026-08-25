@@ -70,6 +70,7 @@ public static class SmokeTests
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
         Run("SQL script splitter", TestSqlScriptSplitter, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
+        Run("Right pane collapse behavior", TestRightPaneCollapseBehavior, ref passed);
         Run("AI assistant compact button glyphs", TestAiAssistantCompactButtonGlyphs, ref passed);
         Run("Main toolbar vector icons", TestMainToolbarVectorIcons, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
@@ -7861,6 +7862,30 @@ public static class SmokeTests
         {
             ThemeManager.SetTheme(originalTheme, false);
         }
+    }
+
+    private static void TestRightPaneCollapseBehavior()
+    {
+        Assert(ApplicationOptionSettings.ResolveAiPanelStartupVisibility(null), "AI assistant should open when no explicit preference exists.");
+        Assert(ApplicationOptionSettings.ResolveAiPanelStartupVisibility(""), "AI assistant should open for a fresh profile.");
+        Assert(ApplicationOptionSettings.ResolveAiPanelStartupVisibility("open"), "Explicit open preference should show the AI assistant.");
+        Assert(!ApplicationOptionSettings.ResolveAiPanelStartupVisibility("closed"), "Explicit close preference should keep the AI assistant closed.");
+
+        MethodInfo widthMethod = typeof(Form1).GetMethod("CalculateRightPaneHostWidth", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert(widthMethod != null, "Right pane host width calculation should be available.");
+        AssertEquals("0", widthMethod.Invoke(null, new object[] { false, false }).ToString(), "Closed right panes should not reserve layout width.");
+        AssertEquals("380", widthMethod.Invoke(null, new object[] { true, false }).ToString(), "Expanded AI pane should keep its full width.");
+        AssertEquals("44", widthMethod.Invoke(null, new object[] { false, true }).ToString(), "Collapsed panes should leave only the right rail visible.");
+        AssertEquals("424", widthMethod.Invoke(null, new object[] { true, true }).ToString(), "Expanded AI pane and collapsed detail pane should share the right edge without overlap.");
+
+        string root = FindRepositoryRootForTest();
+        string formSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
+        string aiSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "AiAssistantPanel.cs"), Encoding.UTF8);
+        string optionsSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "OptionsForm.cs"), Encoding.UTF8);
+        AssertContains(formSource, "CollapseAiPanel", "AI assistant should support temporary collapse.");
+        AssertContains(formSource, "CollapseInfoPane", "Object details should support temporary collapse.");
+        AssertContains(optionsSource, "ViewAiPanelVisibilityPreference", "AI close preference should be stored separately from temporary collapse.");
+        AssertContains(aiSource, "ThemeManager.SetGlyph(collapseButton, UiGlyph.ChevronRight);", "AI assistant header should expose a vector collapse button.");
     }
 
     private static void TestAiAssistantCompactButtonGlyphs()

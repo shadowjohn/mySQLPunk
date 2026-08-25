@@ -20,6 +20,7 @@ namespace mySQLPunk
 
         private Label titleLabel;
         private Button settingsButton;
+        private Button collapseButton;
         private Button closeButton;
         private Panel headerPanel;
         private AiChatView chatView;
@@ -36,7 +37,7 @@ namespace mySQLPunk
         private bool _busy;
         private string _lastAssistantSql;
 
-        public AiAssistantPanel(Func<string> contextProvider, Action<string> insertSqlAction, Action closeAction, Action openSettingsAction)
+        public AiAssistantPanel(Func<string> contextProvider, Action<string> insertSqlAction, Action closeAction, Action collapseAction, Action openSettingsAction)
         {
             _contextProvider = contextProvider;
             _insertSqlAction = insertSqlAction;
@@ -78,11 +79,17 @@ namespace mySQLPunk
             settingsButton.AccessibleName = Localization.T("Menu.Options");
             settingsButton.FlatAppearance.BorderSize = 0;
             settingsButton.Click += (s, e) => _openSettingsAction?.Invoke();
+            collapseButton = new Button { Text = "›", Dock = DockStyle.Right, Width = 32, FlatStyle = FlatStyle.Flat, TabStop = false };
+            collapseButton.AccessibleName = Localization.T("View.CollapseAiPane");
+            collapseButton.FlatAppearance.BorderSize = 0;
+            collapseButton.Click += (s, e) => collapseAction?.Invoke();
             headerPanel.Controls.Add(titleLabel);
             headerPanel.Controls.Add(avatarBox);   // 排在 titleLabel 之後,靠左停靠時才會在最左邊
             headerPanel.Controls.Add(settingsButton);
+            headerPanel.Controls.Add(collapseButton);
             headerPanel.Controls.Add(closeButton);
             ThemeManager.SetGlyph(settingsButton, UiGlyph.Settings);
+            ThemeManager.SetGlyph(collapseButton, UiGlyph.ChevronRight);
             ThemeManager.SetGlyph(closeButton, UiGlyph.Close);
             headerPanel.Paint += (s, e) => UiKit.DrawHairline(e.Graphics, 0, headerPanel.Width, headerPanel.Height - 1, ThemeManager.BorderColor);
 
@@ -173,6 +180,18 @@ namespace mySQLPunk
         private ComboBox modelCombo;
         private Button refreshModelsButton;
         private bool _suppressPickerEvents;
+
+        public void ApplyLanguage()
+        {
+            titleLabel.Text = Localization.T("Ai.PanelTitle");
+            settingsButton.AccessibleName = Localization.T("Menu.Options");
+            collapseButton.AccessibleName = Localization.T("View.CollapseAiPane");
+            closeButton.AccessibleName = Localization.T("Common.Close");
+            refreshModelsButton.AccessibleName = Localization.T("Query.Refresh");
+            includeContextBox.Text = Localization.T("Ai.IncludeContext");
+            sendButton.Text = Localization.T("Ai.Send");
+            insertSqlButton.Text = Localization.T("Ai.InsertSql");
+        }
 
         /// <summary>面板頂端的供應商／模型快速切換：使用者訂閱哪家、本機跑什麼，這裡直接換。</summary>
         private void BuildPickerRow()

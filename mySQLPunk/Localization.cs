@@ -124,6 +124,10 @@ namespace mySQLPunk
             Add("View.TopFilterLabel", "篩選：", "Filter:");
             Add("View.InfoPane", "資訊窗格", "Info Pane");
             Add("View.ShowInfoPane", "顯示資訊窗格", "Show Info Pane");
+            Add("View.CollapseInfoPane", "收合物件詳細資料", "Collapse Object Details");
+            Add("View.ExpandInfoPane", "展開物件詳細資料", "Expand Object Details");
+            Add("View.CollapseAiPane", "收合 AI 助理", "Collapse AI Assistant");
+            Add("View.ExpandAiPane", "展開 AI 助理", "Expand AI Assistant");
             Add("View.ListMode", "清單", "List");
             Add("View.DetailMode", "詳細資料", "Details");
             Add("View.ERDiagram", "ER 圖表", "ER Diagram");
@@ -192,6 +196,10 @@ namespace mySQLPunk
             Add("View.NavigationPaneHidden", "導覽窗格已隱藏。", "Navigation pane hidden.");
             Add("View.InfoPaneShown", "資訊窗格已顯示。", "Info pane shown.");
             Add("View.InfoPaneHidden", "資訊窗格已隱藏。", "Info pane hidden.");
+            Add("View.InfoPaneCollapsed", "物件詳細資料已收合到右側。", "Object details collapsed to the right.");
+            Add("View.InfoPaneExpanded", "物件詳細資料已從右側展開。", "Object details expanded from the right.");
+            Add("View.AiPaneCollapsed", "AI 助理已收合到右側。", "AI assistant collapsed to the right.");
+            Add("View.AiPaneExpanded", "AI 助理已從右側展開。", "AI assistant expanded from the right.");
             Add("View.ConnectionGroupsChanged", "連線群組顯示設定已套用。", "Connection group display setting applied.");
             Add("View.ActiveObjectsOnlyChanged", "活躍物件顯示設定已儲存。", "Active object display setting saved.");
             Add("View.TopFilterChanged", "頂部篩選顯示設定已儲存。", "Top filter display setting saved.");

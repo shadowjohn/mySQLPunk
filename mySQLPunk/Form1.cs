@@ -28,6 +28,8 @@ namespace mySQLPunk
         private const int MainToolbarHeight = 86;
         private const int MainToolbarItemWidth = 76;
         private const int MainToolbarItemHeight = 74;
+        private const int AiPaneExpandedWidth = 380;
+        private const int RightPaneRailWidth = 44;
         // 大型工具列圖示的常見尺寸是 24–32px；40 偏大，會把整條功能列撐得過高
         private const int MainToolbarIconSize = 32;
         // 高度常數要跟著圖示尺寸走，否則縮圖示只是多出空白
@@ -114,6 +116,7 @@ namespace mySQLPunk
         private ToolStripButton btnDDL;
         private Label lblSidebarTitle;
         private UiSectionHeader sidebarHeader;
+        private Button infoPaneCollapseButton;
         private UiSegmentedControl sidebarSwitch;
         private UiEmptyState sidebarEmptyState;
         private UiSectionHeader connectionsHeader;
@@ -122,6 +125,15 @@ namespace mySQLPunk
         private UiInputShell treeSearchShell;
         private string _treeSearchText = "";
         private AiAssistantPanel aiPanel;       // AI 助理右側面板
+        private Panel rightPaneHost;
+        private FlowLayoutPanel rightPaneRail;
+        private Button aiPaneRailButton;
+        private Button infoPaneRailButton;
+        private ToolTip rightPaneToolTip;
+        private bool _aiPaneEnabled;
+        private bool _aiPaneCollapsed;
+        private bool _infoPaneEnabled;
+        private bool _infoPaneCollapsed;
         private UiEmptyState contentEmptyState;
         private ToolStripStatusLabel lblConnectionSummary;
         private readonly Timer _emptyStateTimer = new Timer();
@@ -2754,6 +2766,7 @@ namespace mySQLPunk
 
             // 初始化側邊欄 (Sidebar) 在 Panel2
             InitSidebar();
+            InitRightPaneHost();
             InitShellChrome();
             ApplyViewPaneSettings();
             List<object> d = new List<object>();
@@ -3403,7 +3416,7 @@ namespace mySQLPunk
             ToolStripMenuItem infoPaneMenu = new ToolStripMenuItem(Localization.T("View.InfoPane"));
             ToolStripMenuItem showInfoPaneItem = CreateCheckedViewMenuItem(
                 Localization.T("View.ShowInfoPane"),
-                ApplicationOptionSettings.GetBool("ViewShowInfoPane"),
+                splitContainer5 != null && !splitContainer5.Panel2Collapsed,
                 value => SetInfoPaneVisible(value));
             ToolStripMenuItem generalInfoItem = CreateCheckedViewMenuItem(
                 Localization.T("Common.General"),
@@ -3504,41 +3517,161 @@ namespace mySQLPunk
 
         // ── AI 助理右側面板 ─────────────────────────────────────────
 
-        private void SetAiPanelVisible(bool visible, bool save = true)
+        private void InitRightPaneHost()
         {
-            if (visible && aiPanel == null)
+            if (rightPaneHost != null) return;
+
+            rightPaneToolTip = new ToolTip();
+            if (infoPaneCollapseButton != null)
             {
-                aiPanel = new AiAssistantPanel(
-                    BuildAiSchemaContext,
-                    sql => OpenQueryWithSqlFromCurrentSelection(sql),
-                    () => SetAiPanelVisible(false),
-                    () =>
-                    {
-                        using (OptionsForm form = new OptionsForm())
-                        {
-                            form.ShowDialog(this);
-                        }
-                        // 設定改完把面板上的供應商/模型下拉同步回來
-                        if (aiPanel != null) aiPanel.SyncPickerFromSettings();
-                    })
-                {
-                    Dock = DockStyle.Right,
-                    Width = 380
-                };
-                splitContainer1.Panel2.Controls.Add(aiPanel);
-                // Fill 佈局的內容要排在最後（z 順序最前），右側面板才不會被蓋住
-                splitContainer2.Parent?.Controls.SetChildIndex(splitContainer2, 0);
-                ThemeManager.ApplyTo(aiPanel);
+                rightPaneToolTip.SetToolTip(infoPaneCollapseButton, Localization.T("View.CollapseInfoPane"));
             }
+            rightPaneHost = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 0,
+                Visible = false,
+                BackColor = ThemeManager.WindowBackColor
+            };
+            rightPaneHost.Resize += (s, e) => LayoutRightPaneHost();
+
+            rightPaneRail = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Padding = new Padding(5, UiMetrics.Space2, 5, UiMetrics.Space2),
+                Visible = false,
+                BackColor = ThemeManager.SurfaceColor
+            };
+            rightPaneRail.Paint += (s, e) =>
+                UiKit.DrawVerticalHairline(e.Graphics, 0, 0, rightPaneRail.Height, ThemeManager.BorderColor);
+
+            aiPaneRailButton = CreateRightPaneRailButton(UiGlyph.Model, Localization.T("View.ExpandAiPane"));
+            aiPaneRailButton.Click += (s, e) => ExpandAiPanelFromRail();
+            infoPaneRailButton = CreateRightPaneRailButton(UiGlyph.Info, Localization.T("View.ExpandInfoPane"));
+            infoPaneRailButton.Click += (s, e) => ExpandInfoPaneFromRail();
+            rightPaneRail.Controls.Add(aiPaneRailButton);
+            rightPaneRail.Controls.Add(infoPaneRailButton);
+            rightPaneHost.Controls.Add(rightPaneRail);
+
+            splitContainer1.Panel2.Controls.Add(rightPaneHost);
+            splitContainer2.Parent?.Controls.SetChildIndex(splitContainer2, 0);
+            ThemeManager.ApplyTo(rightPaneHost);
+            UpdateRightPaneLayout();
+        }
+
+        private Button CreateRightPaneRailButton(UiGlyph glyph, string accessibleName)
+        {
+            Button button = new Button
+            {
+                Width = RightPaneRailWidth - 10,
+                Height = RightPaneRailWidth - 10,
+                Margin = new Padding(0, 0, 0, UiMetrics.Space2),
+                Text = string.Empty,
+                AccessibleName = accessibleName,
+                TabStop = false
+            };
+            ThemeManager.SetGlyph(button, glyph);
+            rightPaneToolTip.SetToolTip(button, accessibleName);
+            return button;
+        }
+
+        private void EnsureAiPanel()
+        {
+            if (aiPanel != null) return;
+            InitRightPaneHost();
+
+            aiPanel = new AiAssistantPanel(
+                BuildAiSchemaContext,
+                sql => OpenQueryWithSqlFromCurrentSelection(sql),
+                () => SetAiPanelVisible(false),
+                CollapseAiPanel,
+                () =>
+                {
+                    using (OptionsForm form = new OptionsForm())
+                    {
+                        form.ShowDialog(this);
+                    }
+                    if (aiPanel != null) aiPanel.SyncPickerFromSettings();
+                })
+            {
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            };
+            rightPaneHost.Controls.Add(aiPanel);
+            rightPaneRail.BringToFront();
+            ThemeManager.ApplyTo(aiPanel);
+        }
+
+        private static int CalculateRightPaneHostWidth(bool aiExpanded, bool railVisible)
+        {
+            return (aiExpanded ? AiPaneExpandedWidth : 0) + (railVisible ? RightPaneRailWidth : 0);
+        }
+
+        private void LayoutRightPaneHost()
+        {
+            if (rightPaneHost == null || rightPaneRail == null) return;
+
+            bool aiExpanded = _aiPaneEnabled && !_aiPaneCollapsed && aiPanel != null;
+            bool railVisible = rightPaneRail.Visible;
+            int desiredWidth = CalculateRightPaneHostWidth(aiExpanded, railVisible);
+            if (rightPaneHost.Width != desiredWidth) rightPaneHost.Width = desiredWidth;
+
+            int railWidth = railVisible ? RightPaneRailWidth : 0;
+            rightPaneRail.SetBounds(Math.Max(0, desiredWidth - railWidth), 0, railWidth, rightPaneHost.ClientSize.Height);
             if (aiPanel != null)
             {
-                aiPanel.ApplyThemeColors();
-                aiPanel.Visible = visible;
+                aiPanel.SetBounds(0, 0, Math.Max(0, desiredWidth - railWidth), rightPaneHost.ClientSize.Height);
             }
+        }
+
+        private void UpdateRightPaneLayout()
+        {
+            if (rightPaneHost == null || rightPaneRail == null) return;
+
+            bool showAiRail = _aiPaneEnabled && _aiPaneCollapsed;
+            bool showInfoRail = _infoPaneEnabled && _infoPaneCollapsed;
+            bool railVisible = showAiRail || showInfoRail;
+            bool aiExpanded = _aiPaneEnabled && !_aiPaneCollapsed && aiPanel != null;
+
+            aiPaneRailButton.Visible = showAiRail;
+            infoPaneRailButton.Visible = showInfoRail;
+            rightPaneRail.Visible = railVisible;
+            if (aiPanel != null) aiPanel.Visible = aiExpanded;
+            rightPaneHost.Visible = !_focusMode && (aiExpanded || railVisible);
+            LayoutRightPaneHost();
+            splitContainer2.Parent?.Controls.SetChildIndex(splitContainer2, 0);
+        }
+
+        private void CollapseAiPanel()
+        {
+            if (!_aiPaneEnabled || aiPanel == null || !aiPanel.Visible) return;
+            _aiPaneCollapsed = true;
+            UpdateRightPaneLayout();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("View.AiPaneCollapsed"));
+        }
+
+        private void ExpandAiPanelFromRail()
+        {
+            if (!_aiPaneEnabled) return;
+            EnsureAiPanel();
+            _aiPaneCollapsed = false;
+            UpdateRightPaneLayout();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("View.AiPaneExpanded"));
+        }
+
+        private void SetAiPanelVisible(bool visible, bool save = true)
+        {
+            _aiPaneEnabled = visible;
+            _aiPaneCollapsed = false;
+            if (visible) EnsureAiPanel();
+            if (aiPanel != null) aiPanel.ApplyThemeColors();
+            UpdateRightPaneLayout();
 
             if (save)
             {
-                ApplicationOptionSettings.SetBool("ViewShowAiPanel", visible);
+                ApplicationOptionSettings.SetAiPanelVisibilityPreference(visible);
                 ApplicationOptionSettings.Save();
                 ConfigureMainMenu();
             }
@@ -3656,6 +3789,7 @@ namespace mySQLPunk
                 if (splitContainer5 != null) splitContainer5.Panel2Collapsed = !_focusPrevInfo;
             }
 
+            UpdateRightPaneLayout();
             ConfigureMainMenu();
             UpdateMainStatus(Localization.T(enabled ? "View.FocusModeOn" : "View.FocusModeOff"));
         }
@@ -3705,7 +3839,7 @@ namespace mySQLPunk
             SetObjectListMode(ApplicationOptionSettings.GetString("ViewObjectListMode"), false);
             SetObjectFilterVisible(ApplicationOptionSettings.GetBool("ViewShowTopFilter"), false);
             SetInfoPaneMode(ApplicationOptionSettings.GetBool("ViewInfoPaneAiMode"), false);
-            SetAiPanelVisible(ApplicationOptionSettings.GetBool("ViewShowAiPanel"), false);
+            SetAiPanelVisible(ApplicationOptionSettings.GetAiPanelStartupVisibility(), false);
         }
 
         private void SetNavigationPaneVisible(bool visible, bool save = true)
@@ -3731,10 +3865,13 @@ namespace mySQLPunk
 
         private void SetInfoPaneVisible(bool visible, bool save = true)
         {
+            _infoPaneEnabled = visible;
+            _infoPaneCollapsed = false;
             if (splitContainer5 != null)
             {
                 splitContainer5.Panel2Collapsed = !visible;
             }
+            UpdateRightPaneLayout();
 
             if (save)
             {
@@ -3743,6 +3880,26 @@ namespace mySQLPunk
                 ConfigureMainMenu();
                 UpdateMainStatus(Localization.T(visible ? "View.InfoPaneShown" : "View.InfoPaneHidden"));
             }
+        }
+
+        private void CollapseInfoPane()
+        {
+            if (!_infoPaneEnabled || splitContainer5 == null || splitContainer5.Panel2Collapsed) return;
+            _infoPaneCollapsed = true;
+            splitContainer5.Panel2Collapsed = true;
+            UpdateRightPaneLayout();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("View.InfoPaneCollapsed"));
+        }
+
+        private void ExpandInfoPaneFromRail()
+        {
+            if (!_infoPaneEnabled || splitContainer5 == null) return;
+            _infoPaneCollapsed = false;
+            splitContainer5.Panel2Collapsed = false;
+            UpdateRightPaneLayout();
+            ConfigureMainMenu();
+            UpdateMainStatus(Localization.T("View.InfoPaneExpanded"));
         }
 
         private void SetInfoPaneMode(bool aiMode, bool save = true)
@@ -4725,6 +4882,8 @@ namespace mySQLPunk
             ConfigureMainToolbar(Path.Combine(Application.StartupPath, "image"));
             label1.Text = Localization.T("Sidebar.Connections");
             ApplySidebarLanguage();
+            ApplyRightPaneLanguage();
+            if (aiPanel != null) aiPanel.ApplyLanguage();
             if (pnlObjectFilter != null && pnlObjectFilter.Controls.OfType<Label>().Any())
             {
                 pnlObjectFilter.Controls.OfType<Label>().First().Text = Localization.T("View.TopFilterLabel");
@@ -4768,6 +4927,12 @@ namespace mySQLPunk
                 table_top.GridColor = ThemeManager.GridColor;
             }
             if (pnlSidebar != null) pnlSidebar.BackColor = ThemeManager.WindowBackColor;
+            if (rightPaneHost != null) rightPaneHost.BackColor = ThemeManager.WindowBackColor;
+            if (rightPaneRail != null)
+            {
+                rightPaneRail.BackColor = ThemeManager.SurfaceColor;
+                rightPaneRail.Invalidate();
+            }
             if (rtbDDL != null)
             {
                 rtbDDL.BackColor = ThemeManager.WindowBackColor;
@@ -4933,6 +5098,17 @@ namespace mySQLPunk
                 Title = Localization.T("Sidebar.ObjectDetails"),
                 Glyph = UiGlyph.Info
             };
+            infoPaneCollapseButton = new Button
+            {
+                Dock = DockStyle.Right,
+                Width = 32,
+                Text = "›",
+                AccessibleName = Localization.T("View.CollapseInfoPane"),
+                TabStop = false
+            };
+            infoPaneCollapseButton.Click += (s, e) => CollapseInfoPane();
+            ThemeManager.SetGlyph(infoPaneCollapseButton, UiGlyph.ChevronRight);
+            sidebarHeader.Controls.Add(infoPaneCollapseButton);
 
             // lblSidebarTitle 已被程式各處拿來當標題的資料來源（超過 20 處會寫入 Text），
             // 所以保留它當作「模型」，只是不再顯示，由 TextChanged 同步到新的標題列。
@@ -11428,6 +11604,28 @@ namespace mySQLPunk
         private static string BuildSidebarTitle(string label, string objectName)
         {
             return Localization.Format("Detail.SidebarTitle", label ?? string.Empty, objectName ?? string.Empty);
+        }
+
+        private void ApplyRightPaneLanguage()
+        {
+            if (infoPaneCollapseButton != null)
+            {
+                infoPaneCollapseButton.AccessibleName = Localization.T("View.CollapseInfoPane");
+            }
+            if (aiPaneRailButton != null)
+            {
+                aiPaneRailButton.AccessibleName = Localization.T("View.ExpandAiPane");
+            }
+            if (infoPaneRailButton != null)
+            {
+                infoPaneRailButton.AccessibleName = Localization.T("View.ExpandInfoPane");
+            }
+            if (rightPaneToolTip != null)
+            {
+                if (infoPaneCollapseButton != null) rightPaneToolTip.SetToolTip(infoPaneCollapseButton, Localization.T("View.CollapseInfoPane"));
+                if (aiPaneRailButton != null) rightPaneToolTip.SetToolTip(aiPaneRailButton, Localization.T("View.ExpandAiPane"));
+                if (infoPaneRailButton != null) rightPaneToolTip.SetToolTip(infoPaneRailButton, Localization.T("View.ExpandInfoPane"));
+            }
         }
 
         private void ApplySidebarLanguage()

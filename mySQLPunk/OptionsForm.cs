@@ -1428,6 +1428,24 @@ namespace mySQLPunk
             return StringValues.TryGetValue(key, out value) ? value : GetDefaultString(key);
         }
 
+        public static bool GetAiPanelStartupVisibility()
+        {
+            return ResolveAiPanelStartupVisibility(GetString("ViewAiPanelVisibilityPreference"));
+        }
+
+        public static bool ResolveAiPanelStartupVisibility(string preference)
+        {
+            string normalized = (preference ?? string.Empty).Trim();
+            if (string.Equals(normalized, "closed", StringComparison.OrdinalIgnoreCase)) return false;
+            return true;
+        }
+
+        public static void SetAiPanelVisibilityPreference(bool visible)
+        {
+            SetBool("ViewShowAiPanel", visible);
+            SetString("ViewAiPanelVisibilityPreference", visible ? "open" : "closed");
+        }
+
         public static void SetBool(string key, bool value)
         {
             EnsureLoaded();
@@ -1544,7 +1562,7 @@ namespace mySQLPunk
             BoolValues["RecordShowThousandsSeparator"] = false;
             BoolValues["RecordUseSystemNumberFormat"] = true;
             BoolValues["AiAssistantEnabled"] = false;
-            BoolValues["ViewShowAiPanel"] = false;
+            BoolValues["ViewShowAiPanel"] = true;
             BoolValues["AutoRecoveryQueryEnabled"] = true;
             BoolValues["AutoRecoveryTableDesignEnabled"] = true;
             BoolValues["ConnectionValidateCertificates"] = true;
@@ -1566,6 +1584,7 @@ namespace mySQLPunk
             StringValues["StartupView"] = "connections";
             StringValues["ViewObjectListMode"] = "details";
             StringValues["ViewSortColumn"] = "名稱";
+            StringValues["ViewAiPanelVisibilityPreference"] = "";
             StringValues["EditorFontName"] = "Consolas";
             StringValues["RecordGridFontName"] = "Microsoft JhengHei UI";
             StringValues["RecordRowHeightMode"] = "single";
