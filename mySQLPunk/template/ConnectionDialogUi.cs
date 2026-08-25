@@ -173,6 +173,9 @@ namespace mySQLPunk.template
         /// <summary>底部按鈕列：測試連線靠左，確定／取消靠右；同時掛上 Enter／Esc。</summary>
         public static void Finish(Form form, Shell shell, Button test, Button ok, Button cancel)
         {
+            // 五個連線視窗統一掛應用程式圖示（看板娘 Punky）
+            try { form.Icon = mySQLPunk.lib.AppIconService.AppIcon; } catch { }
+
             StyleButton(test);
             StyleButton(ok);
             StyleButton(cancel);

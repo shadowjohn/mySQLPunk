@@ -5031,20 +5031,19 @@ namespace mySQLPunk
             connection_btn.Click += connection_btn_Click;
             ConfigureConnectionToolbarButton();
 
-            // 主功能列改用同一套向量圖示：粗細、留白、視覺重量一致，
-            // 也不會再因為缺圖而出現破圖佔位符。
-            ThemeManager.SetGlyph(connection_btn, UiGlyph.Plug, MainToolbarIconSize);
-            ThemeManager.SetGlyph(query_btn, UiGlyph.Plus, MainToolbarIconSize);
-            ThemeManager.SetGlyph(table_btn, UiGlyph.Table, MainToolbarIconSize);
-            ThemeManager.SetGlyph(view_btn, UiGlyph.View, MainToolbarIconSize);
-            ThemeManager.SetGlyph(function_btn, UiGlyph.Function, MainToolbarIconSize);
-            ThemeManager.SetGlyph(user_btn, UiGlyph.User, MainToolbarIconSize);
-            ThemeManager.SetGlyph(other_btn, UiGlyph.More, MainToolbarIconSize);
-            ThemeManager.SetGlyph(query_section_btn, UiGlyph.Code, MainToolbarIconSize);
-            ThemeManager.SetGlyph(backup_btn, UiGlyph.Archive, MainToolbarIconSize);
-            ThemeManager.SetGlyph(auto_run_btn, UiGlyph.Clock, MainToolbarIconSize);
-            ThemeManager.SetGlyph(model_btn, UiGlyph.Model, MainToolbarIconSize);
-            ThemeManager.SetGlyph(bi_btn, UiGlyph.Chart, MainToolbarIconSize);
+            // 主功能列使用專用的資料庫工作流圖示；小型操作工具列仍沿用通用 glyph。
+            ThemeManager.SetGlyph(connection_btn, UiGlyph.MainConnection, MainToolbarIconSize);
+            ThemeManager.SetGlyph(query_btn, UiGlyph.MainNewQuery, MainToolbarIconSize);
+            ThemeManager.SetGlyph(table_btn, UiGlyph.MainTable, MainToolbarIconSize);
+            ThemeManager.SetGlyph(view_btn, UiGlyph.MainView, MainToolbarIconSize);
+            ThemeManager.SetGlyph(function_btn, UiGlyph.MainFunction, MainToolbarIconSize);
+            ThemeManager.SetGlyph(user_btn, UiGlyph.MainUser, MainToolbarIconSize);
+            ThemeManager.SetGlyph(other_btn, UiGlyph.MainMore, MainToolbarIconSize);
+            ThemeManager.SetGlyph(query_section_btn, UiGlyph.MainQuery, MainToolbarIconSize);
+            ThemeManager.SetGlyph(backup_btn, UiGlyph.MainBackup, MainToolbarIconSize);
+            ThemeManager.SetGlyph(auto_run_btn, UiGlyph.MainEvent, MainToolbarIconSize);
+            ThemeManager.SetGlyph(model_btn, UiGlyph.MainModel, MainToolbarIconSize);
+            ThemeManager.SetGlyph(bi_btn, UiGlyph.MainBI, MainToolbarIconSize);
 
             tool_Connection.Items.Clear();
             tool_Connection.Items.AddRange(new ToolStripItem[]

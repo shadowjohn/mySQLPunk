@@ -68,6 +68,7 @@ public static class SmokeTests
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
         Run("SQL script splitter", TestSqlScriptSplitter, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
+        Run("Main toolbar vector icons", TestMainToolbarVectorIcons, ref passed);
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
         Run("Windows credential service", TestWindowsCredentialService, ref passed);
@@ -7780,6 +7781,62 @@ public static class SmokeTests
         finally
         {
             ThemeManager.SetTheme(originalTheme, false);
+        }
+    }
+
+    private static void TestMainToolbarVectorIcons()
+    {
+        UiGlyph[] glyphs =
+        {
+            UiGlyph.MainConnection,
+            UiGlyph.MainNewQuery,
+            UiGlyph.MainTable,
+            UiGlyph.MainView,
+            UiGlyph.MainFunction,
+            UiGlyph.MainUser,
+            UiGlyph.MainMore,
+            UiGlyph.MainQuery,
+            UiGlyph.MainBackup,
+            UiGlyph.MainEvent,
+            UiGlyph.MainModel,
+            UiGlyph.MainBI
+        };
+
+        HashSet<string> renderedHashes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (UiGlyph glyph in glyphs)
+        {
+            using (Bitmap bitmap = UiKit.RenderGlyph(glyph, 32, Color.FromArgb(55, 65, 81), 0.85f))
+            {
+                int paintedPixels = 0;
+                int minX = bitmap.Width;
+                int minY = bitmap.Height;
+                int maxX = -1;
+                int maxY = -1;
+                for (int y = 0; y < bitmap.Height; y++)
+                {
+                    for (int x = 0; x < bitmap.Width; x++)
+                    {
+                        if (bitmap.GetPixel(x, y).A == 0) continue;
+                        paintedPixels++;
+                        minX = Math.Min(minX, x);
+                        minY = Math.Min(minY, y);
+                        maxX = Math.Max(maxX, x);
+                        maxY = Math.Max(maxY, y);
+                    }
+                }
+
+                Assert(paintedPixels >= 60, glyph + " should render enough visible pixels.");
+                Assert(minX >= 0 && minY >= 0 && maxX < bitmap.Width && maxY < bitmap.Height, glyph + " should stay inside its canvas.");
+                Assert(maxX - minX >= 15 && maxY - minY >= 15, glyph + " should use the available toolbar icon area.");
+
+                using (MemoryStream stream = new MemoryStream())
+                using (SHA256 sha = SHA256.Create())
+                {
+                    bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+                    string hash = BitConverter.ToString(sha.ComputeHash(stream.ToArray())).Replace("-", string.Empty);
+                    Assert(renderedHashes.Add(hash), glyph + " should not duplicate another main toolbar icon.");
+                }
+            }
         }
     }
 

@@ -95,7 +95,7 @@ namespace mySQLPunk.template
             ConnectionDialogUi.AddField(shell, this.label4, this.mysql_username, ConnectionDialogUi.FieldMedium);
             ConnectionDialogUi.AddField(shell, this.label5, this.mysql_pwd, ConnectionDialogUi.FieldMedium);
             ConnectionDialogUi.Finish(this, shell, this.mysql_add_edit_test_connection, this.mysql_add_edit_ok, this.mysql_add_edit_cancel);
-            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
+            this.Icon = mySQLPunk.lib.AppIconService.AppIcon; // 看板娘 Punky，取代 resx 裡的舊圖示
             this.Name = "mysql_add_edit";
             this.Text = "MySQL";
             this.Load += new System.EventHandler(this.mysql_add_edit_Load);

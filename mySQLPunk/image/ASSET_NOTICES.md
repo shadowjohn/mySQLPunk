@@ -40,6 +40,8 @@ with the image.
 Files:
 
 - `mySQLPunk_avatar_wink.gif`
+- `..\punky.ico` (application icon, generated from `snapshot/mySQLPunk_avatar.png`;
+  small sizes use a face crop so the mascot stays recognizable at 16px)
 
 This animation is derived from the mySQLPunk mascot artwork provided for this
 project. The repository keeps the source still image and MP4 under `snapshot/`;

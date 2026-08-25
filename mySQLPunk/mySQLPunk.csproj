@@ -39,7 +39,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>mysql.ico</ApplicationIcon>
+    <ApplicationIcon>punky.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Microsoft.Bcl.AsyncInterfaces, Version=10.0.0.7, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
@@ -188,6 +188,7 @@
     <Compile Include="lib\BackupRestoreDiffService.cs" />
     <Compile Include="lib\BackupRemoteMirrorService.cs" />
     <Compile Include="lib\AdvancedRegistrationService.cs" />
+    <Compile Include="lib\AppIconService.cs" />
     <Compile Include="lib\AppUpdateService.cs" />
     <Compile Include="lib\AutoRecoveryDraftService.cs" />
     <Compile Include="lib\ConnectionDialogMessageService.cs" />
@@ -464,6 +465,9 @@
     <Content Include="image\up.png" />
     <Content Include="image\view.png" />
     <Content Include="mysql.ico" />
+    <Content Include="punky.ico">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <None Include="image\views_32.png" />
     <None Include="image\tables_32.png" />
     <Content Include="image\user.png">

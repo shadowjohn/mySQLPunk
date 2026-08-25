@@ -200,7 +200,7 @@ namespace mySQLPunk.template
             ConnectionDialogUi.AddField(shell, this.label2, this.oracle_connection_type, ConnectionDialogUi.FieldMedium);
             ConnectionDialogUi.AddSpanRow(shell, panelHost);
             ConnectionDialogUi.Finish(this, shell, this.oracle_add_edit_test_connection, this.oracle_add_edit_ok, this.oracle_add_edit_cancel);
-            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
+            this.Icon = mySQLPunk.lib.AppIconService.AppIcon; // 看板娘 Punky，取代 resx 裡的舊圖示
             this.Name = "oracle_add_edit";
             this.Text = "Oracle";
             this.Load += new System.EventHandler(this.oracle_add_edit_Load);

@@ -94,7 +94,19 @@ namespace mySQLPunk
         Warning,
         Save,
         Copy,
-        More
+        More,
+        MainConnection,
+        MainNewQuery,
+        MainTable,
+        MainView,
+        MainFunction,
+        MainUser,
+        MainMore,
+        MainQuery,
+        MainBackup,
+        MainEvent,
+        MainModel,
+        MainBI
     }
 
     /// <summary>
@@ -708,6 +720,145 @@ namespace mySQLPunk
                     FillRect(g, brush, r, 4.6f, 10.6f, 2.8f, 2.8f, 1.4f);
                     FillRect(g, brush, r, 10.6f, 10.6f, 2.8f, 2.8f, 1.4f);
                     FillRect(g, brush, r, 16.6f, 10.6f, 2.8f, 2.8f, 1.4f);
+                    break;
+
+                case UiGlyph.MainConnection:
+                    // 資料庫端點接上纜線，比單純電源插頭更貼近「資料庫連線」。
+                    g.DrawEllipse(pen, R(r, 2.5f, 4, 11, 4));
+                    Line(g, pen, r, 2.5f, 6, 2.5f, 15.5f);
+                    Line(g, pen, r, 13.5f, 6, 13.5f, 12.5f);
+                    g.DrawArc(pen, R(r, 2.5f, 9.5f, 11, 4), 0, 180);
+                    g.DrawArc(pen, R(r, 2.5f, 13.5f, 11, 4), 0, 180);
+                    Rect(g, pen, r, 15.5f, 10.5f, 6, 6.5f, 2f);
+                    Line(g, pen, r, 17.2f, 10.5f, 17.2f, 8.2f);
+                    Line(g, pen, r, 19.8f, 10.5f, 19.8f, 8.2f);
+                    g.DrawCurve(pen, new[] { P(r, 18.5f, 17), P(r, 18.5f, 20), P(r, 14.5f, 20.5f), P(r, 12.5f, 18.5f) }, 0.5f);
+                    break;
+
+                case UiGlyph.MainNewQuery:
+                    // SQL 文件搭配右上角新增徽章。
+                    Rect(g, pen, r, 3.5f, 3.5f, 13.5f, 17, 2f);
+                    Line(g, pen, r, 6.5f, 9, 9, 11.5f);
+                    Line(g, pen, r, 9, 11.5f, 6.5f, 14);
+                    Line(g, pen, r, 10.8f, 14, 14, 14);
+                    g.DrawEllipse(pen, R(r, 14, 2.5f, 8, 8));
+                    Line(g, pen, r, 18, 4.7f, 18, 8.3f);
+                    Line(g, pen, r, 16.2f, 6.5f, 19.8f, 6.5f);
+                    break;
+
+                case UiGlyph.MainTable:
+                    // 帶有強調表頭的資料格，讓主功能列與一般欄位圖示有所區別。
+                    Rect(g, pen, r, 2.5f, 3.5f, 19, 17, 2.5f);
+                    FillRect(g, brush, r, 4.2f, 5.2f, 15.6f, 3.2f, 1f);
+                    Line(g, pen, r, 2.5f, 10.5f, 21.5f, 10.5f);
+                    Line(g, pen, r, 2.5f, 15.5f, 21.5f, 15.5f);
+                    Line(g, pen, r, 9, 10.5f, 9, 20.5f);
+                    Line(g, pen, r, 15, 10.5f, 15, 20.5f);
+                    break;
+
+                case UiGlyph.MainView:
+                    // 眼睛加上掃描線，表示檢視是資料庫中的可查詢投影。
+                    g.DrawCurve(pen, new[] { P(r, 2, 12), P(r, 7, 6.2f), P(r, 12, 5.5f), P(r, 17, 6.2f), P(r, 22, 12) }, 0.45f);
+                    g.DrawCurve(pen, new[] { P(r, 2, 12), P(r, 7, 17.8f), P(r, 12, 18.5f), P(r, 17, 17.8f), P(r, 22, 12) }, 0.45f);
+                    g.DrawEllipse(pen, R(r, 8.5f, 8.5f, 7, 7));
+                    FillRect(g, brush, r, 10.7f, 10.7f, 2.6f, 2.6f, 1.3f);
+                    Line(g, pen, r, 5, 3.5f, 7, 5.5f);
+                    Line(g, pen, r, 19, 3.5f, 17, 5.5f);
+                    break;
+
+                case UiGlyph.MainFunction:
+                    // 手寫感 f 搭配 (x)，保持數學函式辨識度又不依賴字型。
+                    g.DrawBezier(pen, P(r, 11.5f, 3), P(r, 6, 2.5f), P(r, 9.5f, 17.5f), P(r, 4.5f, 21));
+                    Line(g, pen, r, 5.5f, 10, 12.5f, 10);
+                    g.DrawArc(pen, R(r, 12.5f, 7, 4, 11), 100, 160);
+                    Line(g, pen, r, 15.5f, 10, 19, 15);
+                    Line(g, pen, r, 19, 10, 15.5f, 15);
+                    g.DrawArc(pen, R(r, 18, 7, 4, 11), 280, 160);
+                    break;
+
+                case UiGlyph.MainUser:
+                    // 使用者輪廓搭配權限盾牌，對應資料庫帳號與角色管理。
+                    g.DrawEllipse(pen, R(r, 4.5f, 3, 7, 7));
+                    g.DrawArc(pen, R(r, 1.5f, 11, 14, 12), 195, 150);
+                    using (poly = new GraphicsPath())
+                    {
+                        poly.AddPolygon(new[] { P(r, 15, 11), P(r, 21.5f, 13.2f), P(r, 20.5f, 19), P(r, 18.2f, 21.5f), P(r, 15.8f, 19) });
+                        poly.CloseFigure();
+                        g.DrawPath(pen, poly);
+                    }
+                    Line(g, pen, r, 16.8f, 16.3f, 18, 17.5f);
+                    Line(g, pen, r, 18, 17.5f, 20.2f, 14.8f);
+                    break;
+
+                case UiGlyph.MainMore:
+                    // 2x2 工具模組取代省略號，讓「其它」看起來是功能集合。
+                    Rect(g, pen, r, 3, 3, 7.5f, 7.5f, 2f);
+                    Rect(g, pen, r, 13.5f, 3, 7.5f, 7.5f, 2f);
+                    Rect(g, pen, r, 3, 13.5f, 7.5f, 7.5f, 2f);
+                    Rect(g, pen, r, 13.5f, 13.5f, 7.5f, 7.5f, 2f);
+                    FillRect(g, brush, r, 5.4f, 5.4f, 2.7f, 2.7f, 1.2f);
+                    FillRect(g, brush, r, 15.9f, 15.9f, 2.7f, 2.7f, 1.2f);
+                    break;
+
+                case UiGlyph.MainQuery:
+                    // SQL 終端視窗，以提示符號與游標表達可執行查詢。
+                    Rect(g, pen, r, 2.5f, 3.5f, 19, 17, 2.5f);
+                    Line(g, pen, r, 2.5f, 8, 21.5f, 8);
+                    FillRect(g, brush, r, 5, 5.2f, 1.6f, 1.6f, 0.8f);
+                    FillRect(g, brush, r, 8, 5.2f, 1.6f, 1.6f, 0.8f);
+                    Line(g, pen, r, 6, 11.5f, 9, 14.5f);
+                    Line(g, pen, r, 9, 14.5f, 6, 17.5f);
+                    Line(g, pen, r, 12, 17.5f, 17.5f, 17.5f);
+                    break;
+
+                case UiGlyph.MainBackup:
+                    // 資料庫圓柱加回復箭頭，直接傳達資料庫備份／還原。
+                    g.DrawEllipse(pen, R(r, 2.5f, 4, 11.5f, 4));
+                    Line(g, pen, r, 2.5f, 6, 2.5f, 17.5f);
+                    Line(g, pen, r, 14, 6, 14, 10);
+                    g.DrawArc(pen, R(r, 2.5f, 9, 11.5f, 4), 0, 180);
+                    g.DrawArc(pen, R(r, 2.5f, 14.5f, 11.5f, 4), 0, 180);
+                    g.DrawArc(pen, R(r, 11.5f, 9.5f, 10, 10), 35, 285);
+                    using (poly = new GraphicsPath())
+                    {
+                        poly.AddPolygon(new[] { P(r, 12, 8.5f), P(r, 17.3f, 9.4f), P(r, 14.5f, 13.8f) });
+                        g.FillPath(brush, poly);
+                    }
+                    break;
+
+                case UiGlyph.MainEvent:
+                    // 日曆與時鐘組合，對應排程事件而不是一般時間顯示。
+                    Rect(g, pen, r, 2.5f, 4.5f, 16.5f, 16, 2.5f);
+                    Line(g, pen, r, 2.5f, 9, 19, 9);
+                    Line(g, pen, r, 6.5f, 2.5f, 6.5f, 6.5f);
+                    Line(g, pen, r, 15, 2.5f, 15, 6.5f);
+                    g.DrawEllipse(pen, R(r, 12.5f, 12, 9, 9));
+                    Line(g, pen, r, 17, 14.2f, 17, 16.5f);
+                    Line(g, pen, r, 17, 16.5f, 19, 17.7f);
+                    FillRect(g, brush, r, 5, 12, 2.3f, 2.3f, 1f);
+                    break;
+
+                case UiGlyph.MainModel:
+                    // 兩張實體表以關聯線相接，取代抽象圓點模型。
+                    Rect(g, pen, r, 2.5f, 3.5f, 8.5f, 7.5f, 1.8f);
+                    Line(g, pen, r, 2.5f, 6.8f, 11, 6.8f);
+                    Rect(g, pen, r, 13, 13, 8.5f, 7.5f, 1.8f);
+                    Line(g, pen, r, 13, 16.3f, 21.5f, 16.3f);
+                    Line(g, pen, r, 11, 7.2f, 16.5f, 7.2f);
+                    Line(g, pen, r, 16.5f, 7.2f, 16.5f, 13);
+                    FillRect(g, brush, r, 5, 8.2f, 3.5f, 1.2f, 0.6f);
+                    FillRect(g, brush, r, 15.5f, 17.8f, 3.5f, 1.2f, 0.6f);
+                    break;
+
+                case UiGlyph.MainBI:
+                    // 儀表板同時呈現長條與趨勢線，和一般 Chart 圖示區隔。
+                    Rect(g, pen, r, 2.5f, 3.5f, 19, 17, 2.5f);
+                    Line(g, pen, r, 2.5f, 8, 21.5f, 8);
+                    FillRect(g, brush, r, 5, 14.5f, 2.5f, 3.5f, 0.8f);
+                    FillRect(g, brush, r, 9, 11.5f, 2.5f, 6.5f, 0.8f);
+                    FillRect(g, brush, r, 13, 13.2f, 2.5f, 4.8f, 0.8f);
+                    g.DrawLines(pen, new[] { P(r, 5.5f, 12.5f), P(r, 9.5f, 9.8f), P(r, 14, 11), P(r, 19, 8.8f) });
+                    FillRect(g, brush, r, 17.8f, 7.6f, 2.4f, 2.4f, 1.2f);
                     break;
             }
         }

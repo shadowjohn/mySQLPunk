@@ -337,6 +337,8 @@ namespace mySQLPunk
                 form.BackColor = WindowBackColor;
                 form.ForeColor = TextColor;
                 form.Font = UiKit.Body;
+                // 所有視窗統一掛看板娘 Punky 的應用程式圖示（標題列與工作列都會用到）
+                try { form.Icon = mySQLPunk.lib.AppIconService.AppIcon; } catch { }
             }
             else
             {
