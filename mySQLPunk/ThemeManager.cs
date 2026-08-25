@@ -689,6 +689,9 @@ namespace mySQLPunk
             button.UseVisualStyleBackColor = false;
             button.FlatStyle = FlatStyle.Flat;
             button.FlatAppearance.BorderSize = 0;
+            // 預設按鈕（AcceptButton）即使 BorderSize=0，WinForms 仍會在 Paint 事件之後
+            // 補畫一圈方形邊框，圓角外的四個角落會露出 L 型痕跡；把邊框色設成背景色讓它隱形
+            button.FlatAppearance.BorderColor = GetEffectiveParentBackColor(button);
             button.FlatAppearance.MouseOverBackColor = Color.Transparent;
             button.FlatAppearance.MouseDownBackColor = Color.Transparent;
             button.BackColor = GetEffectiveParentBackColor(button);
@@ -730,10 +733,28 @@ namespace mySQLPunk
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            // 先把系統畫好的方形內容蓋掉，再重畫圓角版本
-            using (SolidBrush clear = new SolidBrush(GetEffectiveParentBackColor(button)))
+            // 系統會在這個事件之後補畫預設按鈕的方形邊框；邊框色要跟著「當下」的
+            // 父容器底色走（套主題時容器底色可能還沒定案），有差異才改以免重繪迴圈
+            Color parentBack = GetEffectiveParentBackColor(button);
+            if (button.FlatAppearance.BorderColor != parentBack)
             {
-                g.FillRectangle(clear, button.ClientRectangle);
+                button.FlatAppearance.BorderColor = parentBack;
+            }
+
+            // 先把系統畫好的方形內容蓋掉，再重畫圓角版本。
+            // 圓角外的四個角落要畫「父容器真正的背景」：用猜色的方式（往上找第一個
+            // 不透明的 BackColor）遇到容器底色與實際背景不同時會露出色差的角框，
+            // 改請 WinForms 直接把父容器背景畫進來才會完全貼合。
+            if (button.Parent != null)
+            {
+                ButtonRenderer.DrawParentBackground(g, button.ClientRectangle, button);
+            }
+            else
+            {
+                using (SolidBrush clear = new SolidBrush(GetEffectiveParentBackColor(button)))
+                {
+                    g.FillRectangle(clear, button.ClientRectangle);
+                }
             }
 
             Rectangle bounds = new Rectangle(0, 0, button.Width - 1, button.Height - 1);

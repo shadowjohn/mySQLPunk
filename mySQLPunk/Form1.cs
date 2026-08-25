@@ -257,8 +257,30 @@ namespace mySQLPunk
         }
 
         /// <summary>
+        /// 優先載入 image/ 下預先繪好的樹狀圖示（品牌剪影版），檔案缺失時退回程式自繪版本。
+        /// </summary>
+        private static Bitmap TreeIconFromFile(string fileName, Func<Bitmap> fallback)
+        {
+            try
+            {
+                string path = Path.Combine(Application.StartupPath, "image", fileName);
+                if (File.Exists(path))
+                {
+                    using (var stream = new MemoryStream(File.ReadAllBytes(path)))
+                    using (Image raw = Image.FromStream(stream))
+                    {
+                        return new Bitmap(raw);
+                    }
+                }
+            }
+            catch { }
+            return fallback();
+        }
+
+        /// <summary>
         /// 樹狀清單的引擎圖示：品牌色圓角 chip 加白色記號（字母或符號），
         /// 16px 下比縮小的原廠 logo 清楚得多。未連線降彩度呈現。
+        /// 目前僅作為 tree_*.png 圖檔缺失時的備援。
         /// </summary>
         private static Bitmap TreeEngineChipIcon(Color engineColor, bool open, string letter)
         {
@@ -1267,16 +1289,17 @@ namespace mySQLPunk
                 ColorDepth = ColorDepth.Depth32Bit,
                 ImageSize = new Size(16, 16)
             };
-            myImageList.Images.Add(TreeEngineChipIcon(TreeMySqlColor, false, "M")); //0 mysql 未連線
-            myImageList.Images.Add(TreeEngineChipIcon(TreeMySqlColor, true, "M")); //1 mysql 已連線
-            myImageList.Images.Add(TreeEngineChipIcon(TreePostgresColor, false, "P")); //2
-            myImageList.Images.Add(TreeEngineChipIcon(TreePostgresColor, true, "P")); //3
-            myImageList.Images.Add(TreeEngineChipIcon(TreeOracleColor, false, "O")); //4
-            myImageList.Images.Add(TreeEngineChipIcon(TreeOracleColor, true, "O")); //5
-            myImageList.Images.Add(TreeSqliteFeatherIcon(TreeSqliteColor, false)); //6
-            myImageList.Images.Add(TreeSqliteFeatherIcon(TreeSqliteColor, true)); //7
-            myImageList.Images.Add(TreeEngineChipIcon(TreeSqlServerColor, false, "S")); //8
-            myImageList.Images.Add(TreeEngineChipIcon(TreeSqlServerColor, true, "S")); //9
+            // 已連線 = 品牌色 chip + 白色官方剪影，未連線 = 灰色 chip（同 Navicat 的作法）
+            myImageList.Images.Add(TreeIconFromFile("tree_mysql_off.png", () => TreeEngineChipIcon(TreeMySqlColor, false, "M"))); //0 mysql 未連線
+            myImageList.Images.Add(TreeIconFromFile("tree_mysql_on.png", () => TreeEngineChipIcon(TreeMySqlColor, true, "M"))); //1 mysql 已連線
+            myImageList.Images.Add(TreeIconFromFile("tree_postgresql_off.png", () => TreeEngineChipIcon(TreePostgresColor, false, "P"))); //2
+            myImageList.Images.Add(TreeIconFromFile("tree_postgresql_on.png", () => TreeEngineChipIcon(TreePostgresColor, true, "P"))); //3
+            myImageList.Images.Add(TreeIconFromFile("tree_oracle_off.png", () => TreeEngineChipIcon(TreeOracleColor, false, "O"))); //4
+            myImageList.Images.Add(TreeIconFromFile("tree_oracle_on.png", () => TreeEngineChipIcon(TreeOracleColor, true, "O"))); //5
+            myImageList.Images.Add(TreeIconFromFile("tree_sqlite_off.png", () => TreeSqliteFeatherIcon(TreeSqliteColor, false))); //6
+            myImageList.Images.Add(TreeIconFromFile("tree_sqlite_on.png", () => TreeSqliteFeatherIcon(TreeSqliteColor, true))); //7
+            myImageList.Images.Add(TreeIconFromFile("tree_sqlserver_off.png", () => TreeEngineChipIcon(TreeSqlServerColor, false, "S"))); //8
+            myImageList.Images.Add(TreeIconFromFile("tree_sqlserver_on.png", () => TreeEngineChipIcon(TreeSqlServerColor, true, "S"))); //9
             myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, false, TreeEngineBadge.None)); //10 資料庫節點
             myImageList.Images.Add(TreeConnectionGlyph(TreeGenericDbColor, true, TreeEngineBadge.None)); //11
 
@@ -1291,8 +1314,8 @@ namespace mySQLPunk
             myImageList.Images.Add(TreeGlyph(UiGlyph.Model)); //20
             myImageList.Images.Add(TreeGlyph(UiGlyph.Chart)); //21 bi
             myImageList.Images.Add(TreeGlyph(UiGlyph.More)); //22 other
-            myImageList.Images.Add(UiKit.RenderGlyph(UiGlyph.Folder, 16, TreeFolderColor)); //23 folder_closed
-            myImageList.Images.Add(UiKit.RenderGlyph(UiGlyph.FolderOpen, 16, TreeFolderColor)); //24 folder_open
+            myImageList.Images.Add(TreeIconFromFile("tree_folder_closed.png", () => UiKit.RenderGlyph(UiGlyph.Folder, 16, TreeFolderColor))); //23 folder_closed
+            myImageList.Images.Add(TreeIconFromFile("tree_folder_open.png", () => UiKit.RenderGlyph(UiGlyph.FolderOpen, 16, TreeFolderColor))); //24 folder_open
 
             // Assign the ImageList to the TreeView.
 

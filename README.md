@@ -133,7 +133,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - Oracle 的部分 DDL 還是會被權限、語法或物件型態擋下來；預覽會附上權限診斷 SQL 跟修復建議，但終究要看帳號實際有什麼權限。
 - 沒有 Primary Key 的資料表，編輯時是拿原始值組 WHERE 條件去比對；欄位有浮點數或大文字時可能比不準。不放心的話選項裡可以改成唯讀開啟。
 - XLSX 匯出要把整份結果放進記憶體；還原 SQL 備份也是整個檔一次讀進來，特別大的備份要留意。
-- 樹狀清單的引擎圖示是自繪的品牌色 chip（橘 M＝MySQL、藍 P＝PostgreSQL、紅 O＝Oracle、紫 S＝SQL Server、藍底羽毛＝SQLite），沒有用各家原廠 logo，因為商標授權不好處理、縮到 16px 也不清楚。
+- 樹狀清單的引擎圖示是自繪的品牌色底加白色剪影（海豚＝MySQL、大象＝PostgreSQL、圓環＝Oracle、羽毛＝SQLite、資料庫圓柱＝SQL Server），已連線顯示品牌色、未連線是灰色。剪影是自己畫的風格化版本，不是各家原廠 logo 原圖，因為商標授權不好處理、原圖縮到 16px 也不清楚。
 - SQL Server 物件名稱本身帶 `.` 的話，`schema.table` 可能會切錯位置。
 - 代理設定目前只有 HTTP 路徑有接（檢查更新、註解字典下載這些）；SOCKS5 跟資料庫連線本身的代理還沒做。
 - 安裝檔還沒上程式碼簽章，第一次下載執行可能會跳 SmartScreen 警告。
