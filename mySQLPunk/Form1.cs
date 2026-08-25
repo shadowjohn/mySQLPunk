@@ -126,6 +126,7 @@ namespace mySQLPunk
         private string _treeSearchText = "";
         private AiAssistantPanel aiPanel;       // AI 助理右側面板
         private Panel rightPaneHost;
+        private UiDivider rightPaneSeparator;
         private FlowLayoutPanel rightPaneRail;
         private Button aiPaneRailButton;
         private Button infoPaneRailButton;
@@ -3546,12 +3547,19 @@ namespace mySQLPunk
             rightPaneRail.Paint += (s, e) =>
                 UiKit.DrawVerticalHairline(e.Graphics, 0, 0, rightPaneRail.Height, ThemeManager.BorderColor);
 
+            rightPaneSeparator = new UiDivider
+            {
+                Visible = false,
+                BackColor = ThemeManager.WindowBackColor
+            };
+
             aiPaneRailButton = CreateRightPaneRailButton(UiGlyph.Model, Localization.T("View.ExpandAiPane"));
             aiPaneRailButton.Click += (s, e) => ExpandAiPanelFromRail();
             infoPaneRailButton = CreateRightPaneRailButton(UiGlyph.Info, Localization.T("View.ExpandInfoPane"));
             infoPaneRailButton.Click += (s, e) => ExpandInfoPaneFromRail();
             rightPaneRail.Controls.Add(aiPaneRailButton);
             rightPaneRail.Controls.Add(infoPaneRailButton);
+            rightPaneHost.Controls.Add(rightPaneSeparator);
             rightPaneHost.Controls.Add(rightPaneRail);
 
             splitContainer1.Panel2.Controls.Add(rightPaneHost);
@@ -3602,9 +3610,19 @@ namespace mySQLPunk
             ThemeManager.ApplyTo(aiPanel);
         }
 
-        private static int CalculateRightPaneHostWidth(bool aiExpanded, bool railVisible)
+        private static int CalculateRightPaneHostWidth(bool aiExpanded, bool railVisible, bool separatorVisible)
         {
-            return (aiExpanded ? AiPaneExpandedWidth : 0) + (railVisible ? RightPaneRailWidth : 0);
+            return (aiExpanded ? AiPaneExpandedWidth : 0)
+                + (railVisible ? RightPaneRailWidth : 0)
+                + (separatorVisible ? 1 : 0);
+        }
+
+        private bool IsInfoPaneExpanded()
+        {
+            return _infoPaneEnabled
+                && !_infoPaneCollapsed
+                && splitContainer5 != null
+                && !splitContainer5.Panel2Collapsed;
         }
 
         private void LayoutRightPaneHost()
@@ -3613,14 +3631,20 @@ namespace mySQLPunk
 
             bool aiExpanded = _aiPaneEnabled && !_aiPaneCollapsed && aiPanel != null;
             bool railVisible = rightPaneRail.Visible;
-            int desiredWidth = CalculateRightPaneHostWidth(aiExpanded, railVisible);
+            bool separatorVisible = aiExpanded && IsInfoPaneExpanded();
+            int desiredWidth = CalculateRightPaneHostWidth(aiExpanded, railVisible, separatorVisible);
             if (rightPaneHost.Width != desiredWidth) rightPaneHost.Width = desiredWidth;
 
+            int separatorWidth = separatorVisible ? 1 : 0;
             int railWidth = railVisible ? RightPaneRailWidth : 0;
+            if (rightPaneSeparator != null)
+            {
+                rightPaneSeparator.SetBounds(0, 0, separatorWidth, rightPaneHost.ClientSize.Height);
+            }
             rightPaneRail.SetBounds(Math.Max(0, desiredWidth - railWidth), 0, railWidth, rightPaneHost.ClientSize.Height);
             if (aiPanel != null)
             {
-                aiPanel.SetBounds(0, 0, Math.Max(0, desiredWidth - railWidth), rightPaneHost.ClientSize.Height);
+                aiPanel.SetBounds(separatorWidth, 0, Math.Max(0, desiredWidth - railWidth - separatorWidth), rightPaneHost.ClientSize.Height);
             }
         }
 
@@ -3637,6 +3661,7 @@ namespace mySQLPunk
             infoPaneRailButton.Visible = showInfoRail;
             rightPaneRail.Visible = railVisible;
             if (aiPanel != null) aiPanel.Visible = aiExpanded;
+            if (rightPaneSeparator != null) rightPaneSeparator.Visible = aiExpanded && IsInfoPaneExpanded();
             rightPaneHost.Visible = !_focusMode && (aiExpanded || railVisible);
             LayoutRightPaneHost();
             splitContainer2.Parent?.Controls.SetChildIndex(splitContainer2, 0);
@@ -4928,6 +4953,11 @@ namespace mySQLPunk
             }
             if (pnlSidebar != null) pnlSidebar.BackColor = ThemeManager.WindowBackColor;
             if (rightPaneHost != null) rightPaneHost.BackColor = ThemeManager.WindowBackColor;
+            if (rightPaneSeparator != null)
+            {
+                rightPaneSeparator.BackColor = ThemeManager.WindowBackColor;
+                rightPaneSeparator.Invalidate();
+            }
             if (rightPaneRail != null)
             {
                 rightPaneRail.BackColor = ThemeManager.SurfaceColor;
