@@ -217,10 +217,15 @@ namespace mySQLPunk
             modelCombo.SelectedIndexChanged += (s, e) => { if (!_suppressPickerEvents) SaveModelFromPicker(); };
             refreshModelsButton.Click += async (s, e) =>
             {
+                AiChatSettings settings = AiChatSettings.Load();
+                if (settings.Preset.NeedsKey && !AiChatService.HasApiKey(settings.Provider))
+                {
+                    chatView.AddSystem(Localization.T("Ai.NoApiKeyHint"));
+                    return;
+                }
                 refreshModelsButton.Enabled = false;
                 try
                 {
-                    AiChatSettings settings = AiChatSettings.Load();
                     var models = await Task.Run(() => AiChatService.ListModels(settings));
                     _suppressPickerEvents = true;
                     string current = modelCombo.Text;
@@ -307,6 +312,15 @@ namespace mySQLPunk
         {
             string text = (inputBox.Text ?? "").Trim();
             if (text.Length == 0 || _busy) return;
+
+            // 沒金鑰就先擋下來，別真的打 API 換來一句原始錯誤；輸入內容保留不清空
+            AiChatSettings settings = AiChatSettings.Load();
+            if (settings.Preset.NeedsKey && !AiChatService.HasApiKey(settings.Provider))
+            {
+                chatView.AddSystem(Localization.T("Ai.NoApiKeyHint"));
+                return;
+            }
+
             inputBox.Text = "";
             suggestionPanel.Visible = false;
             SendAsync(text);
@@ -399,6 +413,18 @@ namespace mySQLPunk
 
         private AiChatBubble Add(AiChatBubble bubble)
         {
+            // 相同的系統/錯誤訊息別重複洗版（例如連按幾次 ↻ 或連續切供應商）
+            if (_bubbles.Count > 0
+                && (bubble.Kind == AiChatBubbleKind.System || bubble.Kind == AiChatBubbleKind.Error))
+            {
+                AiChatBubble last = _bubbles[_bubbles.Count - 1];
+                if (last.Kind == bubble.Kind && last.PlainText == bubble.PlainText)
+                {
+                    bubble.Dispose();
+                    ScrollToBottom();
+                    return last;
+                }
+            }
             _bubbles.Add(bubble);
             Controls.Add(bubble);
             LayoutBubbles();
@@ -467,6 +493,9 @@ namespace mySQLPunk
         private List<KeyValuePair<string, bool>> _segments; // (文字, 是否為 code)
         private string _plainText;
 
+        public AiChatBubbleKind Kind => _kind;
+        public string PlainText => _plainText;
+
         public AiChatBubble(AiChatBubbleKind kind, string header, string text)
         {
             _kind = kind;
@@ -529,7 +558,18 @@ namespace mySQLPunk
         public void RecalculateHeight()
         {
             int rowWidth = Math.Max(60, Width - RowPadding * 2);
-            int maxBubbleWidth = _kind == AiChatBubbleKind.System ? rowWidth : (int)(rowWidth * 0.9);
+
+            // 系統訊息沒有泡泡：量測寬度要跟繪製時一致，不然會多出一截空白
+            if (_kind == AiChatBubbleKind.System)
+            {
+                Size systemSize = TextRenderer.MeasureText(_plainText, UiKit.GetFont(8.5f, FontStyle.Regular),
+                    new Size(rowWidth, int.MaxValue), MeasureFlags);
+                _bubbleWidth = rowWidth;
+                Height = systemSize.Height + 10;
+                return;
+            }
+
+            int maxBubbleWidth = (int)(rowWidth * 0.9);
             int contentWidth = Math.Max(30, ComputeContentWidth(maxBubbleWidth - BubblePadding * 2));
 
             int height = BubblePadding;
