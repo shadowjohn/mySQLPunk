@@ -1329,7 +1329,10 @@ namespace mySQLPunk
 
             // Assign the ImageList to the TreeView.
 
-            db_tree.ShowRootLines = false;
+            // ShowRootLines 要開著：關掉會讓「根層節點」完全沒有展開/收合箭頭，
+            // 根層群組資料夾就只剩雙擊能收合。ShowLines=false 已經把虛線拿掉了，
+            // 開著只會多出箭頭，不會出現連接線。
+            db_tree.ShowRootLines = true;
             // 虛線連接線在現代介面裡只是雜訊，縮排本身已經足以表達層級
             db_tree.ShowLines = false;
             db_tree.ShowNodeToolTips = ShouldShowObjectTooltips();
@@ -15187,7 +15190,8 @@ namespace mySQLPunk
             if (tree.SelectedNode == null) return;
             if (IsConnectionGroupNode(tree.SelectedNode))
             {
-                if (tree.SelectedNode.Nodes.Count > 0) tree.SelectedNode.Toggle();
+                // 不能自己再 Toggle()：TreeView 原生雙擊本來就會切換展開/收合，
+                // 這裡再切一次會跟原生行為抵銷，變成「資料夾雙擊永遠收不起來」
                 return;
             }
 
