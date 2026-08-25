@@ -148,4 +148,9 @@ if (Test-Path -LiteralPath $appConfig) {
 }
 
 & $testExe
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& (Join-Path $PSScriptRoot "Test-AutoReleasePolicy.ps1")
 exit $LASTEXITCODE

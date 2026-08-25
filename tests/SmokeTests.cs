@@ -7781,6 +7781,22 @@ public static class SmokeTests
         AssertContains(releaseNotesScript, "CHANGELOG.md", "Release notes must still be sourced from the changelog.");
         AssertContains(workflow, "api.github.com/repos/$env:REPOSITORY/releases", "Release workflow should create or update a GitHub Release through the API.");
         AssertContains(workflow, "${uploadBaseUrl}?name=$assetName", "Release workflow should preserve the upload host when appending asset query parameters.");
+
+        string autoReleaseWorkflowPath = Path.Combine(root, ".github", "workflows", "auto-release.yml");
+        Assert(File.Exists(autoReleaseWorkflowPath), "Auto-release gate workflow should exist.");
+        string autoReleaseWorkflow = File.ReadAllText(autoReleaseWorkflowPath, Encoding.UTF8);
+        AssertContains(autoReleaseWorkflow, "ScoreThreshold = 5", "Auto-release gate should batch small changes until the score reaches five.");
+        AssertContains(autoReleaseWorkflow, "MaxBatchDays = 7", "Auto-release gate should publish aged user-facing changes after seven days.");
+        AssertContains(autoReleaseWorkflow, "Invoke-AutoReleaseDecision.ps1", "Auto-release gate should use the tested policy script.");
+        AssertContains(autoReleaseWorkflow, "Prepare-AutoRelease.ps1", "Auto-release gate should prepare version files before tagging.");
+        AssertContains(autoReleaseWorkflow, "gh workflow run release.yml", "Auto-release gate should explicitly dispatch the release build after a GITHUB_TOKEN tag push.");
+        AssertContains(autoReleaseWorkflow, "nicklin@gis.fcu.edu.tw", "Automatic release commits should use the configured author email.");
+
+        string policyModule = File.ReadAllText(Path.Combine(root, "scripts", "AutoReleasePolicy.psm1"), Encoding.UTF8);
+        AssertContains(policyModule, "Release-Now", "Auto-release policy should support a one-commit large-update override.");
+        AssertContains(policyModule, "BREAKING", "Auto-release policy should publish breaking Conventional Commits immediately.");
+        AssertContains(policyModule, "Get-NextAutoReleaseVersion", "Auto-release policy should calculate the next version consistently.");
+        Assert(File.Exists(Path.Combine(root, "docs", "RELEASE_AUTOMATION.md")), "Auto-release policy should be documented for maintainers.");
     }
 
     private static string FindRepositoryRootForTest()

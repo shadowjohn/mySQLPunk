@@ -1,0 +1,106 @@
+name: Auto Release Gate
+
+on:
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: "15 10 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "忽略累積門檻，立即發布尚未發版的變更"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: auto-release-master
+  cancel-in-progress: false
+
+jobs:
+  evaluate-and-release:
+    name: Evaluate release batch
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Evaluate release policy
+        id: decision
+        shell: pwsh
+        run: |
+          $force = "${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.force }}" -eq "true"
+          $parameters = @{
+            RepositoryRoot = "."
+            ScoreThreshold = 5
+            MaxBatchDays = 7
+            Force = $force
+          }
+          .\scripts\Invoke-AutoReleaseDecision.ps1 @parameters
+
+      - name: Write decision summary
+        if: always()
+        shell: pwsh
+        run: |
+          @"
+          ## 自動發版判斷
+
+          - 是否發布：`${{ steps.decision.outputs.should_release }}`
+          - 原因：${{ steps.decision.outputs.reason }}
+          - 最新版本：`${{ steps.decision.outputs.latest_tag }}`
+          - 下一版本：`v${{ steps.decision.outputs.next_version }}`
+          - 累積分數：`${{ steps.decision.outputs.score }}/5`
+          - 有效 commit：`${{ steps.decision.outputs.impact_commit_count }}`
+          - 距上次發布：`${{ steps.decision.outputs.age_days }}` 天
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Prepare version files
+        if: steps.decision.outputs.should_release == 'true'
+        shell: pwsh
+        run: |
+          .\scripts\Prepare-AutoRelease.ps1 `
+            -Version "${{ steps.decision.outputs.next_version }}" `
+            -LatestTag "${{ steps.decision.outputs.latest_tag }}" `
+            -RepositoryRoot "."
+
+      - name: Commit and tag release
+        if: steps.decision.outputs.should_release == 'true'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.decision.outputs.next_version }}"
+          $tagName = "v$version"
+          git config user.name "Nick Lin"
+          git config user.email "nicklin@gis.fcu.edu.tw"
+          git add -- .\mySQLPunk\Properties\AssemblyInfo.cs .\README.md
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw "Release preparation diff check failed." }
+          git commit `
+            -m "chore(release): 發佈 $tagName" `
+            -m "原因：已達自動發版門檻，將累積完成的功能與修正一起發布。" `
+            -m "調整：同步程式版本、README 與 Git tag，交由 Release workflow 建置安裝程式。" `
+            -m "影響：GitHub Release 會產生新的 Windows x64 單一安裝程式。"
+          if ($LASTEXITCODE -ne 0) { throw "Cannot create the release commit." }
+          git tag -a $tagName -m "發佈 $tagName"
+          if ($LASTEXITCODE -ne 0) { throw "Cannot create $tagName." }
+          git push origin HEAD:master $tagName
+          if ($LASTEXITCODE -ne 0) { throw "Cannot push the release commit and tag." }
+
+      # 使用 GITHUB_TOKEN 推 tag 不會再觸發另一個 workflow，必須明確 dispatch Release。
+      - name: Dispatch release build
+        if: steps.decision.outputs.should_release == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml `
+            --repo "${{ github.repository }}" `
+            --ref master `
+            -f "version=${{ steps.decision.outputs.next_version }}"
