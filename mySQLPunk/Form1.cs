@@ -376,26 +376,7 @@ namespace mySQLPunk
 
         private static string BuildSqlServerConnectionString(Dictionary<string, object> conn)
         {
-            var builder = new System.Data.SqlClient.SqlConnectionStringBuilder();
-            string host = GetConnectionValue(conn, "host");
-            string port = GetConnectionValue(conn, "port");
-            builder.DataSource = BuildSqlServerDataSource(host, port);
-            builder.InitialCatalog = string.IsNullOrWhiteSpace(GetConnectionValue(conn, "initial_database"))
-                ? "master"
-                : GetConnectionValue(conn, "initial_database");
-            bool trusted = GetConnectionValue(conn, "trusted_connection") == "T";
-            builder.IntegratedSecurity = trusted;
-            builder.TrustServerCertificate = true;
-            builder.MultipleActiveResultSets = true;
-            builder.ConnectTimeout = 8;
-
-            if (!trusted)
-            {
-                builder.UserID = GetConnectionValue(conn, "username");
-                builder.Password = GetConnectionValue(conn, "pwd");
-            }
-
-            return builder.ConnectionString;
+            return ConnectionConfigurationService.BuildSqlServerConnectionString(conn);
         }
 
         private static string BuildConnectionFailureMessage(string providerName, Exception ex)
@@ -468,53 +449,12 @@ namespace mySQLPunk
 
         private static string BuildMySqlConnectionString(Dictionary<string, object> conn)
         {
-            string host = GetConnectionValue(conn, "host");
-            string portText = GetConnectionValue(conn, "port");
-            string user = GetConnectionValue(conn, "username");
-            string password = GetConnectionValue(conn, "pwd");
-            string initialDatabase = GetConnectionValue(conn, "initial_database");
-
-            uint port = 3306;
-            uint parsedMySqlPort;
-            // TryParse 失敗會把 out 參數寫成 0，不能直接 parse 進 port，否則預設值被蓋掉
-            if (!string.IsNullOrWhiteSpace(portText) && uint.TryParse(portText.Trim(), out parsedMySqlPort) && parsedMySqlPort > 0) port = parsedMySqlPort;
-
-            var builder = new MySqlConnectionStringBuilder
-            {
-                Server = host,
-                Port = port,
-                UserID = user,
-                Password = password,
-                Database = string.IsNullOrWhiteSpace(initialDatabase) ? string.Empty : initialDatabase,
-                // Preferred：伺服器支援就走 TLS 加密，不支援自動退回明文，
-                // 對既有連線完全相容；以前寫死 None，遠端連線帳密全裸奔
-                SslMode = MySqlSslMode.Preferred,
-                CharacterSet = "utf8",
-                AllowZeroDateTime = true,
-                ConnectionTimeout = 8
-            };
-
-            return builder.ConnectionString;
+            return ConnectionConfigurationService.BuildMySqlConnectionString(conn);
         }
 
         private static string BuildPostgreSqlConnectionString(Dictionary<string, object> conn)
         {
-            string host = GetConnectionValue(conn, "host");
-            string portText = GetConnectionValue(conn, "port");
-            string user = GetConnectionValue(conn, "username");
-            string password = GetConnectionValue(conn, "pwd");
-
-            int port = 5432;
-            int parsedPgPort;
-            if (!string.IsNullOrWhiteSpace(portText) && int.TryParse(portText.Trim(), out parsedPgPort) && parsedPgPort > 0) port = parsedPgPort;
-
-            // 優先用使用者填的初始資料庫；有些帳號沒有權限連 postgres
-            string initialDatabase = GetConnectionValue(conn, "initial_database");
-            string database = string.IsNullOrWhiteSpace(initialDatabase) ? "postgres" : initialDatabase.Trim();
-            // Timeout=8 只管「建立連線」；Command Timeout 以前也設 8，任何超過 8 秒的查詢
-            // （大表瀏覽、dump）都會逾時失敗，拿掉讓它用 Npgsql 預設的 30 秒，
-            // 個別長查詢再由呼叫端 setTimeout 調整
-            return $"Server={host};Port={port};User Id={user};Password={password};Database={database};Timeout=8;";
+            return ConnectionConfigurationService.BuildPostgreSqlConnectionString(conn);
         }
 
         private void PopulateConnectionDatabaseNodes(TreeNode connectionNode, IEnumerable<string> databaseNames)
@@ -685,11 +625,7 @@ namespace mySQLPunk
 
                 var conn = myN.connections[index];
                 // 用 builder 組字串：路徑含 ; 時字串串接會被拆錯
-                string connString = new System.Data.SQLite.SQLiteConnectionStringBuilder
-                {
-                    DataSource = GetConnectionValue(conn, "path"),
-                    Version = 3
-                }.ConnectionString;
+                string connString = ConnectionConfigurationService.BuildSqliteConnectionString(conn);
 
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
@@ -3262,6 +3198,7 @@ namespace mySQLPunk
             ToolStripMenuItem dataDictionaryMenu = new ToolStripMenuItem(Localization.T("Menu.ToolDataDictionary"));
             ToolStripMenuItem queryHistoryMenu = new ToolStripMenuItem(Localization.T("Menu.ToolQueryHistory"));
             ToolStripMenuItem backupsMenu = new ToolStripMenuItem(Localization.T("Menu.ToolBackups"));
+            ToolStripMenuItem scheduledJobsMenu = new ToolStripMenuItem(Localization.T("Menu.ToolScheduledJobs"));
             ToolStripMenuItem diagnosticsMenu = new ToolStripMenuItem(Localization.T("Menu.ToolConnectionDiagnostics"));
             ToolStripMenuItem capabilitiesMenu = new ToolStripMenuItem(Localization.T("Menu.ToolProviderCapabilities"));
             ToolStripMenuItem maintenanceMenu = new ToolStripMenuItem(Localization.T("Menu.ToolMaintenanceChecklist"));
@@ -3287,6 +3224,7 @@ namespace mySQLPunk
             dataDictionaryMenu.Click += (s, e) => SelectDatabaseGroupNode("Models");
             queryHistoryMenu.Click += (s, e) => ShowQueryHistoryForSelectedDatabase();
             backupsMenu.Click += (s, e) => SelectDatabaseGroupNode("Backups");
+            scheduledJobsMenu.Click += (s, e) => OpenScheduledJobs();
             diagnosticsMenu.Click += (s, e) => ShowSelectedOtherTool("Connection Diagnostics");
             capabilitiesMenu.Click += (s, e) => ShowSelectedOtherTool("Provider Capabilities");
             maintenanceMenu.Click += (s, e) => ShowSelectedOtherTool("Maintenance Checklist");
@@ -3297,6 +3235,7 @@ namespace mySQLPunk
                 dataDictionaryMenu,
                 queryHistoryMenu,
                 backupsMenu,
+                scheduledJobsMenu,
                 new ToolStripSeparator(),
                 diagnosticsMenu,
                 capabilitiesMenu,
@@ -5752,6 +5691,11 @@ namespace mySQLPunk
 
             OpenQuery(db, dbName, host, initialSql, true);
             UpdateMainStatus(Localization.Format(explicitColumns ? "Object.SelectColumnsOpenedStatus" : "Object.SelectStarOpenedStatus", tableName));
+        }
+
+        private void OpenScheduledJobs()
+        {
+            DockDockableForm(new ScheduledJobsForm(myN.ActiveProfileName));
         }
 
         private void OpenSelectedTableDataProfile()
@@ -16504,30 +16448,7 @@ namespace mySQLPunk
 
         private static string BuildOracleConnectionString(Dictionary<string, object> conn)
         {
-            if (conn.ContainsKey("connString") && !string.IsNullOrWhiteSpace(conn["connString"]?.ToString()))
-            {
-                return conn["connString"].ToString();
-            }
-
-            Oracle.ManagedDataAccess.Client.OracleConnectionStringBuilder builder =
-                new Oracle.ManagedDataAccess.Client.OracleConnectionStringBuilder();
-            builder.UserID = GetConnectionValue(conn, "username");
-            builder.Password = GetConnectionValue(conn, "pwd");
-            builder.DataSource = string.Equals(GetConnectionValue(conn, "connection_type"), "TNS", StringComparison.OrdinalIgnoreCase)
-                ? GetConnectionValue(conn, "tns_name")
-                : BuildOracleBasicDataSource(conn);
-            return builder.ConnectionString;
-        }
-
-        private static string BuildOracleBasicDataSource(Dictionary<string, object> conn)
-        {
-            string host = string.IsNullOrWhiteSpace(GetConnectionValue(conn, "host")) ? "localhost" : GetConnectionValue(conn, "host");
-            string port = string.IsNullOrWhiteSpace(GetConnectionValue(conn, "port")) ? "1521" : GetConnectionValue(conn, "port");
-            string value = GetConnectionValue(conn, "service_name");
-            if (string.IsNullOrWhiteSpace(value)) value = GetConnectionValue(conn, "sid");
-            string key = GetConnectionValue(conn, "oracle_identifier_type") == "sid" ? "SID" : "SERVICE_NAME";
-            return "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=" + host + ")(PORT=" + port + "))" +
-                   "(CONNECT_DATA=(" + key + "=" + value + ")))";
+            return ConnectionConfigurationService.BuildOracleConnectionString(conn);
         }
 
         private static string GetConnectionValue(Dictionary<string, object> conn, string key)

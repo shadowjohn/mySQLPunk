@@ -68,6 +68,8 @@ public static class SmokeTests
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("AI CLI process integration", TestAiCliProcessIntegration, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
+        Run("Scheduled job service", TestScheduledJobService, ref passed);
+        Run("Scheduled job manager form", TestScheduledJobManagerForm, ref passed);
         Run("Object URI service", TestObjectUriService, ref passed);
         Run("Application about message", TestApplicationAboutMessage, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
@@ -7675,6 +7677,130 @@ public static class SmokeTests
         finally
         {
             Localization.SetLanguage(previousLanguage, false);
+        }
+    }
+
+    private static void TestScheduledJobService()
+    {
+        string reason;
+        Assert(ScheduledJobValidator.IsReadOnlySql("SELECT ';' AS value;", out reason), "A trailing semicolon and a semicolon inside a literal should be accepted.");
+        Assert(ScheduledJobValidator.IsReadOnlySql("WITH recent AS (SELECT id FROM audit_log) SELECT id FROM recent", out reason), "A read-only CTE should be accepted.");
+        Assert(ScheduledJobValidator.IsReadOnlySql("SHOW TABLES", out reason), "SHOW should be accepted as read-only SQL.");
+        Assert(!ScheduledJobValidator.IsReadOnlySql("SELECT * INTO archive_users FROM users", out reason), "SELECT INTO should be rejected.");
+        Assert(!ScheduledJobValidator.IsReadOnlySql("EXPLAIN ANALYZE SELECT * FROM users", out reason), "EXPLAIN ANALYZE should be rejected.");
+        Assert(!ScheduledJobValidator.IsReadOnlySql("SELECT * FROM users; DELETE FROM users", out reason), "Multiple statements with mutation should be rejected.");
+        Assert(!ScheduledJobValidator.IsReadOnlySql("WITH removed AS (DELETE FROM users RETURNING id) SELECT id FROM removed", out reason), "Mutating CTEs should be rejected.");
+        Assert(!ScheduledJobValidator.IsReadOnlySql("SELECT 1 /*!50000 INTO OUTFILE 'audit.txt' */", out reason), "MySQL executable comments should be rejected.");
+        AssertThrows<InvalidOperationException>(() => ScheduledJobValidator.Validate(new ScheduledJobDefinition
+        {
+            Name = "invalid",
+            Type = (ScheduledJobType)99,
+            ProfileName = "default",
+            ConnectionName = "local-db",
+            DatabaseName = "app",
+            DailyTime = "14:30"
+        }), "Unknown scheduled job types should be rejected.");
+
+        string tempDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk-scheduled-job-smoke-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            ScheduledJobStore store = new ScheduledJobStore(tempDirectory);
+            ScheduledJobDefinition job = new ScheduledJobDefinition
+            {
+                Name = "每日帳號盤點",
+                Type = ScheduledJobType.Query,
+                ProfileName = "default",
+                ConnectionName = "local-db",
+                DatabaseName = "app",
+                Sql = "SELECT id, name FROM users",
+                DailyTime = "14:30",
+                ScheduleEnabled = true
+            };
+            string jobPath = store.SaveJob(job);
+            Assert(File.Exists(jobPath), "Saving a scheduled job should create its JSON file.");
+            string jobJson = File.ReadAllText(jobPath, Encoding.UTF8);
+            AssertContains(jobJson, "dailyTime", "The portable job JSON should include its daily schedule.");
+            Assert(!jobJson.Contains("password") && !jobJson.Contains("connectionString"), "The portable job JSON must not contain credentials or connection strings.");
+
+            ScheduledJobDefinition loaded = store.LoadJob(jobPath);
+            AssertEquals(job.Id, loaded.Id, "The scheduled job ID should round-trip through JSON.");
+            AssertEquals("14:30", loaded.DailyTime, "The daily schedule should round-trip through JSON.");
+
+            FakeExecDatabase database = new FakeExecDatabase("sqlite", null);
+            database.SelectResult = new DataTable();
+            database.SelectResult.Columns.Add("id", typeof(int));
+            database.SelectResult.Rows.Add(1);
+            database.SelectResult.Rows.Add(2);
+            ScheduledJobRunRecord record = ScheduledJobExecutionService.Execute(loaded, store, () => database);
+            AssertEquals("Success", record.Status, "A read-only query job should complete successfully.");
+            Assert(record.Rows == 2L, "The query job should record its result row count.");
+            Assert(File.Exists(record.RecordPath), "The query job should write a run record.");
+            string runJson = File.ReadAllText(record.RecordPath, Encoding.UTF8);
+            Assert(!runJson.Contains(loaded.Sql), "Run records should not copy the SQL text.");
+            Assert(store.LoadRecentRuns(loaded.Id).Count == 1, "The saved run should be discoverable from the job history.");
+
+            DateTime now = new DateTime(2026, 8, 26, 15, 0, 0, DateTimeKind.Local);
+            string executablePath = @"C:\Program Files\mySQLPunk\mySQLPunk.exe";
+            ScheduledTaskRegistrationSpec spec = WindowsScheduledTaskService.BuildRegistration(loaded, executablePath, jobPath, now);
+            AssertEquals("mySQLPunk - " + loaded.Id, spec.TaskName, "The Windows task name should remain stable across edits.");
+            Assert(spec.StartBoundary == new DateTime(2026, 8, 27, 14, 30, 0, DateTimeKind.Local), "A daily time already passed today should start tomorrow.");
+            AssertEquals(ScheduledJobCliService.RunJobCommand + " \"" + Path.GetFullPath(jobPath) + "\"", spec.Arguments, "The job path should be passed as one quoted CLI argument without changing backslashes.");
+            AssertEquals(Path.GetDirectoryName(executablePath), spec.WorkingDirectory, "The task should start in the application directory.");
+
+            Dictionary<string, object> postgresql = new Dictionary<string, object>
+            {
+                { "db_kind", "postgresql" },
+                { "host", "localhost" },
+                { "port", "5432" },
+                { "initial_database", "app" },
+                { "username", "reader" },
+                { "pwd", "p;ss=word" }
+            };
+            string connectionString = ConnectionConfigurationService.BuildConnectionString(postgresql);
+            System.Data.Common.DbConnectionStringBuilder parsed = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = connectionString };
+            AssertEquals("p;ss=word", Convert.ToString(parsed["Password"]), "PostgreSQL scheduled connections should safely escape special-character passwords.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+        }
+    }
+
+    private static void TestScheduledJobManagerForm()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk-scheduled-form-smoke-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            ScheduledJobStore store = new ScheduledJobStore(tempDirectory);
+            ScheduledJobDefinition job = new ScheduledJobDefinition
+            {
+                Name = "每日盤點",
+                Type = ScheduledJobType.Query,
+                ProfileName = "default",
+                ConnectionName = "local-db",
+                DatabaseName = "app",
+                Sql = "SELECT id FROM users",
+                DailyTime = "08:15"
+            };
+            store.SaveJob(job);
+
+            using (ScheduledJobsForm form = new ScheduledJobsForm("default", store))
+            {
+                form.CreateControl();
+                MethodInfo reload = typeof(ScheduledJobsForm).GetMethod("ReloadJobs", BindingFlags.Instance | BindingFlags.NonPublic);
+                reload.Invoke(form, new object[] { job.Id });
+                DataGridView jobsGrid = GetPrivateField<DataGridView>(form, "jobsGrid");
+                Assert(jobsGrid.Rows.Count == 1, "The scheduled-job manager should display saved jobs.");
+                AssertEquals("每日盤點", Convert.ToString(jobsGrid.Rows[0].Cells["Name"].Value), "The scheduled-job manager should display the saved job name.");
+                Assert(!form.HasUnsavedChanges(), "The manager persists edits through a dialog and should not report unsaved state.");
+                Assert(!form.UsesDatabase(null), "The manager should not hold a currently opened Form1 database connection.");
+                form.PrepareForDocking();
+                Assert(!form.TopLevel && form.FormBorderStyle == FormBorderStyle.None, "The scheduled-job manager should support docked tabs.");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
         }
     }
 

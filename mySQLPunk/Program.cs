@@ -29,6 +29,16 @@ namespace mySQLPunk
                 return cliResult.ExitCode;
             }
 
+            ScheduledJobCliResult scheduledJobResult = ScheduledJobCliService.TryRun(args);
+            if (scheduledJobResult.Handled)
+            {
+                if (!string.IsNullOrWhiteSpace(scheduledJobResult.Message))
+                {
+                    Console.WriteLine(scheduledJobResult.Message);
+                }
+                return scheduledJobResult.ExitCode;
+            }
+
             // URL 協定只傳遞連線顯示名稱、database 與物件名稱；參數先嚴格解析，
             // 真正的連線仍由主視窗使用既有設定開啟，不把帳號密碼交給外部 CLI 或 URI。
             if (args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]) &&

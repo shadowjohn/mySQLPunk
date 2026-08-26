@@ -161,6 +161,9 @@
     <Compile Include="SchemaComparisonForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="ScheduledJobsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="entity\mySQLPunk_main.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
@@ -217,6 +220,7 @@
     <Compile Include="lib\AutoRecoveryDraftService.cs" />
     <Compile Include="lib\ConnectionDialogMessageService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
+    <Compile Include="lib\ConnectionConfigurationService.cs" />
     <Compile Include="lib\ConnectionProxySettingsService.cs" />
     <Compile Include="lib\BinaryCellStreamingService.cs" />
     <Compile Include="lib\ExceptionMessageService.cs" />
@@ -247,6 +251,8 @@
     <Compile Include="lib\QueryResultExportService.cs" />
     <Compile Include="lib\SchemaModelService.cs" />
     <Compile Include="lib\SchemaComparisonService.cs" />
+    <Compile Include="lib\ScheduledJobService.cs" />
+    <Compile Include="lib\WindowsScheduledTaskService.cs" />
     <Compile Include="lib\SqlEditorCompletionService.cs" />
     <Compile Include="lib\TableDataProfileService.cs" />
     <Compile Include="lib\SqliteColumnCommentExchangeService.cs" />

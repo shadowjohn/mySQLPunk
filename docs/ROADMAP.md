@@ -58,7 +58,7 @@
 | 資料字典 | 🟡 | HTML 核心已完成，範本／直接 PDF／排程／郵件待補。 |
 | 資料產生器（規則、約束、參照完整性、大量資料） | 🟡 | 已能依欄位型別產生 INSERT；待補規則編輯、FK 順序、唯一性與大量批次。 |
 | 備份／還原與原生工具介面 | 🟡 | 已有邏輯 SQL 備份、隔離還原、差異與完整性排程；待補 MongoDump、Oracle Data Pump、SQL Server native backup 介面。 |
-| 自動執行：查詢、匯入／匯出、傳輸、通知郵件 | 📋 | Windows 工作排程器整合先行，作業定義需可攜並保存執行記錄。 |
+| 自動執行：查詢、匯入／匯出、傳輸、通知郵件 | 🟡 | 已有可攜式查詢／匯出／備份作業、立即執行、每日 Windows 工作排程與 JSON 紀錄；待補匯入、跨庫傳輸、郵件／Webhook、重試及更多觸發條件。 |
 | MongoDB 結構描述分析器 | 📋 | 隨 MongoDB provider 實作 schema 推斷、異常與極端值檢視。 |
 | Redis Pub/Sub | 📋 | 隨 Redis／Garnet provider 實作。 |
 | 協同合作：同步連線、查詢、pipeline、片段、模型、BI、群組 | 📋 | 先做本機可匯出／匯入的工作區格式與 Git 版控，再補可自架同步服務與權限。 |
@@ -80,6 +80,6 @@
 ## 接續順序
 
 1. ✅ 唯讀 ER 圖與兩庫結構差異報告第一版已完成。
-2. Windows 自動執行＋查詢／匯出／備份作業與記錄。
+2. ✅ Windows 自動執行＋查詢／匯出／備份作業與記錄第一版已完成。
 3. SSH tunnel＋SSL/TLS 選項 UI。
 4. 依序擴充 MongoDB、Redis／Garnet、Snowflake，再接專用編輯器、BI、pipeline、schema analyzer 與 Pub/Sub。

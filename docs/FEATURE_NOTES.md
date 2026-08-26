@@ -4,6 +4,12 @@
 
 ## 未完成功能與已知限制
 
+- **Windows 自動執行作業 ✅ 第一版完成**
+  - 完成內容：工具選單新增可停靠管理畫面，可建立唯讀查詢、查詢結果匯出與整庫邏輯 SQL 備份；支援立即執行、最近紀錄、每日 Windows 工作排程註冊與移除。
+  - 可攜與安全：作業以獨立 JSON 保存，只引用設定檔與連線顯示名稱，不複製主機連線字串或帳密；實際執行才由同一個 Windows 使用者的 Credential Manager 取回密碼。執行紀錄不保存 SQL。
+  - 安全邊界：自動查詢只接受單一唯讀 statement，保守拒絕 DML／DDL、`SELECT INTO`、`EXPLAIN ANALYZE` 與多段 SQL；工作排程使用 `InteractiveToken` 與最低權限，只在建立排程的使用者已登入時執行。
+  - 後續方向：加入每小時／每週觸發、失敗重試、匯入、跨庫傳輸與郵件／Webhook 通知。操作與檔案格式見 [`AUTOMATION.md`](AUTOMATION.md)。
+
 以下是從程式碼裡的「尚未支援」、「Unavailable」、「Unsupported」與實作 fallback 掃描出的清單。後續修改請優先參考這裡，把完成狀態同步更新。
 
 ### 優先待辦
