@@ -158,6 +158,9 @@
     <Compile Include="ErDiagramForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="SchemaComparisonForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="entity\mySQLPunk_main.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
@@ -243,6 +246,7 @@
     <Compile Include="lib\QueryPlanService.cs" />
     <Compile Include="lib\QueryResultExportService.cs" />
     <Compile Include="lib\SchemaModelService.cs" />
+    <Compile Include="lib\SchemaComparisonService.cs" />
     <Compile Include="lib\SqlEditorCompletionService.cs" />
     <Compile Include="lib\TableDataProfileService.cs" />
     <Compile Include="lib\SqliteColumnCommentExchangeService.cs" />

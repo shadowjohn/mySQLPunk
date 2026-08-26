@@ -133,6 +133,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | Punky AI 助理 | 可用 | 預設開啟的右側聊天面板，可關閉並從「檢視」選單重開，也能和物件詳細資料暫時收合到右側圖示列；走 OpenAI 相容 API（OpenAI／Ollama 本機模型／自訂端點），可附上目前資料庫結構當上下文，回覆的 SQL 可一鍵插入查詢分頁；金鑰存 Windows 認證管理員。 |
 | 資料字典 | 可用 | 資料庫節點右鍵產生整庫結構文件（欄位、索引、CREATE 語句、目錄），輸出 HTML，瀏覽器可另存 PDF。 |
 | 唯讀 ER 圖 | 可用 | 五種 provider 共用 schema 快照，可顯示資料表、欄位、主鍵與外鍵關聯；支援縮放、適合視窗、中鍵平移、重新整理與完整圖面 PNG 匯出。 |
+| 資料庫結構差異 | 可用 | 可從 Models 或資料庫右鍵選擇另一個已開啟的資料庫，比對資料表、欄位型別、空值、主鍵與外鍵；支援跨 provider、交換方向、重新比較及 HTML 報告。整個流程唯讀，不會執行 DDL。 |
 | 查詢輔助 | 可用 | 釘選查詢結果快照對照比較、連線清單即時搜尋、F11 專注模式。功能對照與後續規劃見 `docs/ROADMAP.md`。 |
 
 ## 已知限制
@@ -146,7 +147,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - 安裝檔還沒上程式碼簽章，第一次下載執行可能會跳 SmartScreen 警告。
 - Table Designer 的 Primary Key 跟 constraint 進階變更，還需要更多實機案例驗證。
 - 資料分析預設使用前 10,000 筆樣本；切換成全表會執行 COUNT／DISTINCT／GROUP BY，對大型資料表可能耗時。BLOB、JSON、geometry 等型別會略過資料庫不支援的極值或分佈統計。
-- ER 圖目前是唯讀自動排列；每張卡片先顯示前 16 個欄位，還沒有拖曳位置保存、關聯篩選或從模型回寫資料庫。
+- ER 圖與結構差異報告目前都只讀取 metadata，不會回寫資料庫；ER 圖每張卡片先顯示前 16 個欄位，還沒有拖曳位置保存、關聯篩選或從模型回寫資料庫，結構差異也還不會產生同步 DDL。
 
 各功能做完的細節紀錄在 [`docs/FEATURE_NOTES.md`](docs/FEATURE_NOTES.md)。
 

@@ -56,6 +56,7 @@ public static class SmokeTests
         Run("Named table data profiles", TestTableDataProfiles, ref passed);
         Run("Data profiling service", TestDataProfilingService, ref passed);
         Run("Schema model and ER diagram", TestSchemaModelAndErDiagram, ref passed);
+        Run("Database schema comparison", TestSchemaComparison, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -8829,6 +8830,114 @@ public static class SmokeTests
             AssertContains(form.GetDisplayTitle(), "sample", "ER diagram workspace title should identify its database.");
             Assert(form.UsesDatabase(formDatabase), "ER diagram workspace should close with its database connection.");
             Assert(!form.HasUnsavedChanges(), "Read-only ER diagrams should never block tab closing as unsaved.");
+        }
+    }
+
+    private static void TestSchemaComparison()
+    {
+        SchemaModelSnapshot source = new SchemaModelSnapshot { DatabaseName = "source_db", ProviderName = "mysql" };
+        SchemaTableModel sourceUsers = new SchemaTableModel { Name = "Users" };
+        sourceUsers.Columns.Add(new SchemaColumnModel { Name = "id", DataType = "INT", IsNullable = false, IsPrimaryKey = true, Ordinal = 1 });
+        sourceUsers.Columns.Add(new SchemaColumnModel { Name = "email", DataType = "varchar(100)", IsNullable = true, Ordinal = 2 });
+        sourceUsers.Columns.Add(new SchemaColumnModel { Name = "legacy_code", DataType = "text", IsNullable = true, Ordinal = 3 });
+        source.Tables.Add(sourceUsers);
+        source.Tables.Add(new SchemaTableModel { Name = "audit_log" });
+        source.Tables.Add(new SchemaTableModel { Name = "orders" });
+        source.Relationships.Add(new SchemaRelationshipModel
+        {
+            Name = "fk_orders_users",
+            FromTable = "orders",
+            FromColumn = "user_id",
+            ToTable = "Users",
+            ToColumn = "id"
+        });
+        source.Relationships.Add(new SchemaRelationshipModel
+        {
+            Name = "fk_payments_orders_source_name",
+            FromTable = "payments",
+            FromColumn = "order_id",
+            ToTable = "orders",
+            ToColumn = "id"
+        });
+        source.Warnings.Add("<metadata & unavailable>");
+
+        SchemaModelSnapshot target = new SchemaModelSnapshot { DatabaseName = "target_db", ProviderName = "postgresql" };
+        SchemaTableModel targetUsers = new SchemaTableModel { Name = "users" };
+        targetUsers.Columns.Add(new SchemaColumnModel { Name = "ID", DataType = "integer", IsNullable = false, IsPrimaryKey = false, Ordinal = 1 });
+        targetUsers.Columns.Add(new SchemaColumnModel { Name = "email", DataType = "varchar ( 200 )", IsNullable = false, Ordinal = 2 });
+        targetUsers.Columns.Add(new SchemaColumnModel { Name = "display_name", DataType = "text", IsNullable = true, Ordinal = 3 });
+        target.Tables.Add(targetUsers);
+        target.Tables.Add(new SchemaTableModel { Name = "configuration" });
+        target.Tables.Add(new SchemaTableModel { Name = "orders" });
+        target.Relationships.Add(new SchemaRelationshipModel
+        {
+            Name = "fk_orders_accounts",
+            FromTable = "orders",
+            FromColumn = "account_id",
+            ToTable = "users",
+            ToColumn = "id"
+        });
+        target.Relationships.Add(new SchemaRelationshipModel
+        {
+            Name = "fk_payments_orders_target_name",
+            FromTable = "payments",
+            FromColumn = "order_id",
+            ToTable = "orders",
+            ToColumn = "id"
+        });
+        target.Warnings.Add("target warning");
+
+        SchemaComparisonResult result = SchemaComparisonService.Compare(source, target);
+        AssertEquals("11", result.Differences.Count.ToString(), "Schema comparison should report table, column, relationship, and warning differences.");
+        AssertEquals("3", result.SourceOnlyCount.ToString(), "Schema comparison should count source-only objects.");
+        AssertEquals("3", result.TargetOnlyCount.ToString(), "Schema comparison should count target-only objects.");
+        AssertEquals("3", result.ChangedCount.ToString(), "Schema comparison should count changed column attributes.");
+        AssertEquals("2", result.WarningCount.ToString(), "Schema comparison should preserve metadata warnings from both sides.");
+        Assert(!result.Differences.Any(item => item.Kind == SchemaDifferenceKind.ColumnTypeChanged && item.DetailName.Equals("id", StringComparison.OrdinalIgnoreCase)),
+            "Equivalent integer aliases should not be reported as a type difference.");
+        Assert(result.Differences.Any(item => item.Kind == SchemaDifferenceKind.ColumnTypeChanged && item.DetailName == "email"),
+            "Different varchar lengths should be reported.");
+        Assert(result.Differences.Any(item => item.Kind == SchemaDifferenceKind.ColumnNullabilityChanged && item.DetailName == "email"),
+            "Different nullability should be reported.");
+        Assert(result.Differences.Any(item => item.Kind == SchemaDifferenceKind.ColumnPrimaryKeyChanged && item.DetailName.Equals("id", StringComparison.OrdinalIgnoreCase)),
+            "Different primary-key settings should be reported.");
+        Assert(!result.Differences.Any(item => item.ObjectName.Equals("payments", StringComparison.OrdinalIgnoreCase)),
+            "Foreign-key constraint names should not create differences when both endpoints match.");
+
+        string firstOrder = string.Join("\n", result.Differences.Select(item => item.Kind + "|" + item.ObjectName + "|" + item.DetailName));
+        string secondOrder = string.Join("\n", SchemaComparisonService.Compare(source, target).Differences.Select(item => item.Kind + "|" + item.ObjectName + "|" + item.DetailName));
+        AssertEquals(firstOrder, secondOrder, "Schema comparison output should have a stable order.");
+
+        string html = SchemaComparisonService.BuildHtml(result, "1.0-test");
+        AssertContains(html, "&lt;metadata &amp; unavailable&gt;", "Schema comparison HTML should encode metadata messages.");
+        Assert(html.IndexOf("<metadata & unavailable>", StringComparison.Ordinal) < 0, "Schema comparison HTML should not emit raw metadata markup.");
+        AssertContains(html, "source_db", "Schema comparison HTML should identify the source database.");
+        AssertContains(html, "target_db", "Schema comparison HTML should identify the target database.");
+
+        FakeSchemaModelDatabase sourceDatabase = new FakeSchemaModelDatabase("mysql");
+        FakeSchemaModelDatabase targetDatabase = new FakeSchemaModelDatabase("postgresql");
+        SchemaComparisonEndpoint sourceEndpoint = new SchemaComparisonEndpoint
+        {
+            ConnectionName = "Source connection",
+            DatabaseName = "source_db",
+            ProviderName = "mysql",
+            Database = sourceDatabase
+        };
+        SchemaComparisonEndpoint targetEndpoint = new SchemaComparisonEndpoint
+        {
+            ConnectionName = "Target connection",
+            DatabaseName = "target_db",
+            ProviderName = "postgresql",
+            Database = targetDatabase
+        };
+        using (SchemaComparisonForm form = new SchemaComparisonForm(sourceEndpoint, targetEndpoint))
+        {
+            form.CreateControl();
+            AssertContains(form.GetDisplayTitle(), "source_db", "Schema comparison workspace title should identify the source database.");
+            AssertContains(form.GetDisplayTitle(), "target_db", "Schema comparison workspace title should identify the target database.");
+            Assert(form.UsesDatabase(sourceDatabase) && form.UsesDatabase(targetDatabase),
+                "Schema comparison workspace should close when either database connection closes.");
+            Assert(!form.HasUnsavedChanges(), "Read-only schema comparisons should never block tab closing as unsaved.");
         }
     }
 

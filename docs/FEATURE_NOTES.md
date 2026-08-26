@@ -10,11 +10,18 @@
 
 - **Navicat 對齊：唯讀 ER 圖 ✅ 第一版已完成**
   - 操作：從「檢視 > ER 圖表」、資料庫右鍵「將資料庫逆向至模型」，或 Models 下的 ER Diagram 開啟可停靠分頁；支援重新整理、10%～200% 縮放、適合視窗、中鍵平移與完整圖面 PNG 匯出。
-  - 共用模型：`SchemaModelService` 會將 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 的資料表、欄位、主鍵與外鍵整理成 provider-neutral 快照，兩庫結構差異與後續同步預覽可直接沿用。
+  - 共用模型：`SchemaModelService` 會將 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 的資料表、欄位、主鍵與外鍵整理成 provider-neutral 快照，兩庫結構差異與後續同步預覽會直接沿用。
   - 顯示：每張資料表以卡片呈現欄位、型別、可空值與 PK，外鍵以帶方向箭頭的折線連接來源及目標欄位；單表超過 16 個欄位時先收合其餘欄位，避免大型 schema 的卡片過高。
   - 容錯：單一資料表欄位或外鍵 metadata 讀取失敗時會保留其餘圖面並在狀態列顯示警告數，不會把整張 ER 圖清空。
   - 驗證：smoke test 覆蓋五種 provider 的原生外鍵查詢、共用欄位／PK／FK mapping、圖面配置、PNG render，以及唯讀 dockable workspace 行為。
-  - 後續方向：兩庫結構差異、卡片拖曳與位置保存、關聯標籤／篩選、多模型工作區及資料庫雙向同步。
+  - 後續方向：卡片拖曳與位置保存、關聯標籤／篩選、多模型工作區及資料庫雙向同步。
+
+- **Navicat 對齊：兩庫結構差異報告 ✅ 第一版已完成**
+  - 操作：從 Models 下的 Schema Comparison 或資料庫右鍵「比較資料庫結構」選擇另一個已開啟的資料庫；比較結果以可停靠分頁呈現，可重新比較、交換來源／目標並匯出 HTML。
+  - 比較範圍：沿用 provider-neutral schema 快照，比對資料表、欄位、資料型別、可空值、Primary Key 與外鍵；外鍵以來源欄位及參照目標的語意比對，不因兩邊 constraint 名稱不同而誤報。
+  - 跨 provider：常見等價型別別名會先正規化，例如 `INT`／`INTEGER`、`BOOLEAN`／`BOOL`，但長度或精度不同仍會列為差異；單邊 metadata 讀取警告會保留在報告內，避免把不完整資料誤當成完全一致。
+  - 安全：目前只讀取 metadata、顯示及匯出報告，不產生也不執行同步 DDL；下一階段才會加入 DDL 預覽與逐項審核。
+  - 驗證：smoke test 覆蓋來源／目標獨有資料表與欄位、型別、NULL、PK、FK、metadata 警告、固定排序、HTML 編碼，以及唯讀 dockable workspace 行為。
 
 - **Navicat 對齊：物件 URI 分享與直接定位 ✅ 已完成**
   - 操作：database 與 Table、View、Function、User、Event、Model、BI、內建工具、Report 可從左側樹或物件清單右鍵複製 `mysqlpunk://object` URI；接收方開啟 URI 後會清除暫時的連線搜尋條件、找到目前設定檔的同名連線並定位物件。

@@ -953,6 +953,7 @@ namespace mySQLPunk
         private static readonly string[] DatabaseModelNames =
         {
             "ER Diagram",
+            "Schema Comparison",
             "Schema Overview",
             "Column Catalog",
             "Index Catalog"
@@ -9783,15 +9784,16 @@ namespace mySQLPunk
             if (pathParts.Length < 2) return null;
 
             TreeNode root = node;
-            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            while (root != null && GetConnectionIndex(root) < 0) root = root.Parent;
+            if (root == null) return null;
             int connIdxTarget = GetConnectionIndex(root);
             if (connIdxTarget < 0 || connIdxTarget >= myN.connections.Count) return null;
             var connInfo = myN.connections[connIdxTarget];
             if (connInfo["isConnect"].ToString() != "T" || !(connInfo["pdo"] is IDatabase db)) return null;
 
             TreeNode dbNode = node;
-            while (dbNode.Parent != null && dbNode.Parent.Parent != null) dbNode = dbNode.Parent;
-            if (dbNode.Parent == null) return null;
+            while (dbNode.Parent != null && !ReferenceEquals(dbNode.Parent, root)) dbNode = dbNode.Parent;
+            if (!ReferenceEquals(dbNode.Parent, root)) return null;
 
             return new TreeDatabaseTarget
             {
@@ -10492,6 +10494,11 @@ namespace mySQLPunk
                 OpenErDiagram(db, dbName);
                 return;
             }
+            if (string.Equals(modelName, "Schema Comparison", StringComparison.OrdinalIgnoreCase))
+            {
+                OpenSelectedSchemaComparison();
+                return;
+            }
             table_top.DataSource = BuildDatabaseModel(db, dbName, modelName);
             ShowModelDetails(db, dbName, modelName);
         }
@@ -10634,6 +10641,10 @@ namespace mySQLPunk
             if (string.Equals(modelName, "ER Diagram", StringComparison.OrdinalIgnoreCase))
             {
                 return Localization.T("DatabaseModel.DescriptionErDiagram");
+            }
+            if (string.Equals(modelName, "Schema Comparison", StringComparison.OrdinalIgnoreCase))
+            {
+                return Localization.T("DatabaseModel.DescriptionSchemaComparison");
             }
             if (string.Equals(modelName, "Column Catalog", StringComparison.OrdinalIgnoreCase))
             {
@@ -13104,6 +13115,10 @@ namespace mySQLPunk
             reverseModelItem.Click += (s, ev) => ReverseEngineerSelectedDatabaseModel();
             menu.Items.Add(reverseModelItem);
 
+            ToolStripMenuItem compareSchemasItem = new ToolStripMenuItem(Localization.T("Tool.CompareSchemas"));
+            compareSchemasItem.Click += (s, ev) => OpenSchemaComparisonForNode(node);
+            menu.Items.Add(compareSchemasItem);
+
             menu.Items.Add(new ToolStripSeparator());
 
             ToolStripMenuItem shareItem = new ToolStripMenuItem(Localization.T("Menu.Share"));
@@ -14408,6 +14423,88 @@ namespace mySQLPunk
             ErDiagramForm form = new ErDiagramForm(db, databaseName);
             DockDockableForm(form);
             UpdateMainStatus(Localization.Format("Database.ModelOpened", databaseName));
+        }
+
+        private void OpenSelectedSchemaComparison()
+        {
+            TreeDatabaseTarget sourceTarget = GetTargetFromCurrentSelection();
+            if (sourceTarget == null)
+            {
+                MessageBox.Show(Localization.T("Object.SelectDatabaseOrConnection"), Localization.T("Tool.CompareSchemas"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            OpenSchemaComparison(sourceTarget);
+        }
+
+        private void OpenSchemaComparisonForNode(TreeNode databaseNode)
+        {
+            TreeDatabaseTarget sourceTarget = BuildTargetFromNode(databaseNode);
+            if (sourceTarget == null)
+            {
+                MessageBox.Show(Localization.T("Object.SelectDatabaseOrConnection"), Localization.T("Tool.CompareSchemas"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            OpenSchemaComparison(sourceTarget);
+        }
+
+        private void OpenSchemaComparison(TreeDatabaseTarget sourceTarget)
+        {
+            SchemaComparisonEndpoint source = BuildSchemaComparisonEndpoint(sourceTarget);
+            List<SchemaComparisonEndpoint> targets = GetOpenSchemaComparisonEndpoints()
+                .Where(candidate => !(ReferenceEquals(candidate.Database, source.Database) &&
+                                      string.Equals(candidate.DatabaseName, source.DatabaseName, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(candidate => candidate.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            if (targets.Count == 0)
+            {
+                MessageBox.Show(Localization.T("SchemaComparison.NoTargets"), Localization.T("Tool.CompareSchemas"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SchemaComparisonTargetDialog dialog = new SchemaComparisonTargetDialog(source, targets))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK || dialog.SelectedTarget == null) return;
+                SchemaComparisonForm form = new SchemaComparisonForm(source, dialog.SelectedTarget);
+                DockDockableForm(form);
+                UpdateMainStatus(Localization.Format("Database.ModelOpened", source.DatabaseName));
+            }
+        }
+
+        private SchemaComparisonEndpoint BuildSchemaComparisonEndpoint(TreeDatabaseTarget target)
+        {
+            return new SchemaComparisonEndpoint
+            {
+                ConnectionName = GetConnectionValue(target.ConnectionInfo, "conn_name"),
+                DatabaseName = target.DatabaseName,
+                ProviderName = target.ProviderName,
+                Database = target.Database
+            };
+        }
+
+        private List<SchemaComparisonEndpoint> GetOpenSchemaComparisonEndpoints()
+        {
+            List<SchemaComparisonEndpoint> endpoints = new List<SchemaComparisonEndpoint>();
+            for (int index = 0; index < myN.connections.Count; index++)
+            {
+                Dictionary<string, object> connectionInfo = myN.connections[index];
+                if (!string.Equals(GetConnectionValue(connectionInfo, "isConnect"), "T", StringComparison.OrdinalIgnoreCase)) continue;
+                IDatabase database = connectionInfo.ContainsKey("pdo") ? connectionInfo["pdo"] as IDatabase : null;
+                TreeNode connectionNode = FindConnectionNode(index);
+                if (database == null || connectionNode == null) continue;
+
+                foreach (TreeNode databaseNode in connectionNode.Nodes)
+                {
+                    if (databaseNode == null || string.IsNullOrWhiteSpace(databaseNode.Text)) continue;
+                    endpoints.Add(new SchemaComparisonEndpoint
+                    {
+                        ConnectionName = GetConnectionValue(connectionInfo, "conn_name"),
+                        DatabaseName = databaseNode.Text,
+                        ProviderName = database.ProviderName,
+                        Database = database
+                    });
+                }
+            }
+            return endpoints;
         }
 
         private void ShareSelectedDatabaseConnection(TreeNode databaseNode)
