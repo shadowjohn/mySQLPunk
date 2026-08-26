@@ -4,6 +4,13 @@
 
 ## 未完成功能與已知限制
 
+- **SSL/TLS 與 SSH Tunnel ✅ 四種網路 provider 已完成**
+  - 連線設定：MySQL／MariaDB、PostgreSQL、SQL Server 與 Oracle 的新增／編輯視窗都可開啟 SSL／TLS 與 SSH Tunnel；SQLite／SpatiaLite 為本機檔案，不套用網路傳輸設定。
+  - 憑證驗證：依 provider 提供 Required、VerifyCA 或 VerifyFull 等模式，可指定 CA、用戶端憑證／私鑰或 Oracle Wallet；Oracle Basic 可改用 TCPS 與伺服器 DN 比對，TNS 則交由 `tnsnames.ora` 管理。
+  - SSH 安全：支援密碼、私鑰或同時使用，連線前必須完全比對 SHA256 主機金鑰指紋；本機轉送只監聽 `127.0.0.1` 動態連接埠，資料庫關閉後一併停止 Tunnel。
+  - 秘密與排程：SSH 密碼、私鑰密語與憑證密碼只存在 Windows Credential Manager；主畫面、測試連線與自動執行作業共用連線開啟流程，刪除連線或設定檔時也會清理對應憑證。
+  - 驗證：smoke test 覆蓋四種 provider 連線字串、秘密 payload round-trip、SSH 指紋正規化、SSH 與 VerifyFull 衝突阻擋及四個連線編輯器入口；目前尚未在專案外的真實 SSH 伺服器和四種資料庫憑證環境做完整實機矩陣。操作方式見 [`CONNECTION_SECURITY.md`](CONNECTION_SECURITY.md)。
+
 - **Windows 自動執行作業 ✅ 第一版完成**
   - 完成內容：工具選單新增可停靠管理畫面，可建立唯讀查詢、查詢結果匯出與整庫邏輯 SQL 備份；支援立即執行、最近紀錄、每日 Windows 工作排程註冊與移除。
   - 可攜與安全：作業以獨立 JSON 保存，只引用設定檔與連線顯示名稱，不複製主機連線字串或帳密；實際執行才由同一個 Windows 使用者的 Credential Manager 取回密碼。執行紀錄不保存 SQL。
