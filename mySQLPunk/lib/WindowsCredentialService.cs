@@ -58,6 +58,11 @@ namespace mySQLPunk.lib
             return "mySQLPunk/" + profile + "/" + kind + "/" + name + "/" + user + "@" + location;
         }
 
+        public static string BuildSecretTargetName(string profileName, IDictionary<string, object> conn, string purpose)
+        {
+            return BuildTargetName(profileName, conn) + "/" + SanitizePart(purpose);
+        }
+
         public static bool TryWritePassword(string targetName, string userName, string password)
         {
             if (string.IsNullOrWhiteSpace(targetName)) return false;

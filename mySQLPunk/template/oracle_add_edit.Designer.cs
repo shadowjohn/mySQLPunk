@@ -54,6 +54,7 @@ namespace mySQLPunk.template
             this.label9 = new System.Windows.Forms.Label();
             this.label10 = new System.Windows.Forms.Label();
             this.oracle_add_edit_test_connection = new System.Windows.Forms.Button();
+            this.oracle_add_edit_security = new System.Windows.Forms.Button();
             this.oracle_add_edit_ok = new System.Windows.Forms.Button();
             this.oracle_add_edit_cancel = new System.Windows.Forms.Button();
             this.SuspendLayout();
@@ -123,6 +124,10 @@ namespace mySQLPunk.template
             this.oracle_add_edit_test_connection.TabIndex = 3;
             this.oracle_add_edit_test_connection.UseVisualStyleBackColor = true;
             this.oracle_add_edit_test_connection.Click += new System.EventHandler(this.button1_Click);
+            this.oracle_add_edit_security.Name = "oracle_add_edit_security";
+            this.oracle_add_edit_security.Text = "SSL / SSH...";
+            this.oracle_add_edit_security.AutoSize = true;
+            this.oracle_add_edit_security.Click += new System.EventHandler(this.securityButton_Click);
             this.oracle_add_edit_ok.Name = "oracle_add_edit_ok";
             this.oracle_add_edit_ok.Text = "OK";
             this.oracle_add_edit_ok.TabIndex = 4;
@@ -199,6 +204,7 @@ namespace mySQLPunk.template
             ConnectionDialogUi.AddField(shell, this.label1, this.oracle_connection_name, ConnectionDialogUi.FieldWide);
             ConnectionDialogUi.AddField(shell, this.label2, this.oracle_connection_type, ConnectionDialogUi.FieldMedium);
             ConnectionDialogUi.AddSpanRow(shell, panelHost);
+            ConnectionDialogUi.AddFieldOnly(shell, this.oracle_add_edit_security);
             ConnectionDialogUi.Finish(this, shell, this.oracle_add_edit_test_connection, this.oracle_add_edit_ok, this.oracle_add_edit_cancel);
             this.Icon = mySQLPunk.lib.AppIconService.AppIcon; // 看板娘 Punky，取代 resx 裡的舊圖示
             this.Name = "oracle_add_edit";
@@ -246,6 +252,7 @@ namespace mySQLPunk.template
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Button oracle_add_edit_test_connection;
+        private System.Windows.Forms.Button oracle_add_edit_security;
         private System.Windows.Forms.Button oracle_add_edit_ok;
         private System.Windows.Forms.Button oracle_add_edit_cancel;
         private System.Windows.Forms.Panel oracle_panel_basic;

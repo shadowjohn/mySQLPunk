@@ -507,6 +507,7 @@ namespace mySQLPunk.lib
                 NormalizeConnection(connection);
                 connection["username"] = Crypto.Decrypt(GetValue(connection, "username"));
                 connection["pwd"] = includeCredential ? LoadPassword(connection) : string.Empty;
+                if (includeCredential) LoadSecuritySecrets(connection);
                 output.Add(connection);
             }
             return output;
@@ -522,6 +523,20 @@ namespace mySQLPunk.lib
                 throw new InvalidOperationException(Localization.Format("Automation.CredentialUnavailable", GetValue(connection, "conn_name")));
             }
             return Crypto.Decrypt(GetValue(connection, "pwd"));
+        }
+
+        private static void LoadSecuritySecrets(Dictionary<string, object> connection)
+        {
+            string target = GetValue(connection, "security_credential_target");
+            string payload;
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                ConnectionSecuritySettingsService.ApplySerializedSecrets(connection, string.Empty);
+                return;
+            }
+            if (!WindowsCredentialService.TryReadPassword(target, out payload))
+                throw new InvalidOperationException(Localization.Format("Automation.CredentialUnavailable", GetValue(connection, "conn_name")));
+            ConnectionSecuritySettingsService.ApplySerializedSecrets(connection, payload);
         }
 
         private static string BuildInitialDatabase(Dictionary<string, object> connection)
@@ -540,6 +555,7 @@ namespace mySQLPunk.lib
             {
                 if (!connection.ContainsKey(key)) connection[key] = string.Empty;
             }
+            ConnectionSecuritySettingsService.Normalize(connection);
         }
 
         private static void CopyIfMissing(Dictionary<string, object> connection, string oldKey, string newKey)
@@ -572,18 +588,7 @@ namespace mySQLPunk.lib
                 {
                     connection["initial_database"] = job.DatabaseName;
                 }
-                IDatabase database = ConnectionConfigurationService.CreateDatabase(provider);
-                try
-                {
-                    database.SetConn(ConnectionConfigurationService.BuildConnectionString(connection));
-                    database.Open();
-                    return database;
-                }
-                catch
-                {
-                    try { database.Dispose(); } catch { }
-                    throw;
-                }
+                return ConnectionOpenService.Open(connection, false).Database;
             });
         }
 

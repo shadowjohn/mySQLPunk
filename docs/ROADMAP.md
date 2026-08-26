@@ -62,7 +62,7 @@
 | MongoDB 結構描述分析器 | 📋 | 隨 MongoDB provider 實作 schema 推斷、異常與極端值檢視。 |
 | Redis Pub/Sub | 📋 | 隨 Redis／Garnet provider 實作。 |
 | 協同合作：同步連線、查詢、pipeline、片段、模型、BI、群組 | 📋 | 先做本機可匯出／匯入的工作區格式與 Git 版控，再補可自架同步服務與權限。 |
-| SSH tunnel、SSL/TLS | 📋 | 高優先安全缺口；先補五種既有連線 UI、憑證驗證與隧道生命週期。 |
+| SSH tunnel、SSL/TLS | ✅ | 四種網路 provider 已有共用安全設定 UI、憑證驗證、SSH SHA256 主機金鑰固定與隧道生命週期；SQLite 為本機檔案，不適用網路層設定。 |
 | PAM／LDAP／Kerberos／MFA／SSO | 📋 | 依 provider 驗證能力分階段加入，不保存明文祕密。 |
 | 深色模式／平台原生設計 | ✅ | Windows 原生 WinForms、淺／深色主題與 DPI 向量圖示已完成。 |
 | 跨平台授權／Windows、macOS、Linux | 📋 | 商業授權本身不適用開源專案；功能等價目標是跨平台建置與同一工作區格式，需 UI 框架遷移。 |
@@ -81,5 +81,5 @@
 
 1. ✅ 唯讀 ER 圖與兩庫結構差異報告第一版已完成。
 2. ✅ Windows 自動執行＋查詢／匯出／備份作業與記錄第一版已完成。
-3. SSH tunnel＋SSL/TLS 選項 UI。
+3. ✅ SSH tunnel＋SSL/TLS 選項 UI、憑證驗證與排程共用連線流程已完成。
 4. 依序擴充 MongoDB、Redis／Garnet、Snowflake，再接專用編輯器、BI、pipeline、schema analyzer 與 Pub/Sub。

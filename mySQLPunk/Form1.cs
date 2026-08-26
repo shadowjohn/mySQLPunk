@@ -486,18 +486,16 @@ namespace mySQLPunk
                 await Task.Yield(); // 讓狀態列與游標有機會先更新，避免 UI 看起來卡住
 
                 var conn = myN.connections[index];
-                string connString = BuildMySqlConnectionString(conn);
-
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
                     try
                     {
-                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_mysql(), connString));
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(conn));
                         IDatabase db = openResult.Database;
                         List<string> databases = openResult.Databases;
 
-                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["connString"] = openResult.ConnectionString;
                         myN.connections[index]["pdo"] = db;
                         myN.connections[index]["isConnect"] = "T";
                         ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
@@ -555,18 +553,16 @@ namespace mySQLPunk
                 await Task.Yield();
 
                 var conn = myN.connections[index];
-                string connString = BuildPostgreSqlConnectionString(conn);
-
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
                     try
                     {
-                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_postgresql(), connString));
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(conn));
                         IDatabase db = openResult.Database;
                         List<string> databases = openResult.Databases;
 
-                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["connString"] = openResult.ConnectionString;
                         myN.connections[index]["pdo"] = db;
                         myN.connections[index]["isConnect"] = "T";
                         ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
@@ -624,19 +620,16 @@ namespace mySQLPunk
                 await Task.Yield();
 
                 var conn = myN.connections[index];
-                // 用 builder 組字串：路徑含 ; 時字串串接會被拆錯
-                string connString = ConnectionConfigurationService.BuildSqliteConnectionString(conn);
-
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
                     try
                     {
-                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_sqlite(), connString));
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(conn));
                         my_sqlite db = openResult.Database as my_sqlite;
                         List<string> databases = openResult.Databases;
 
-                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["connString"] = openResult.ConnectionString;
                         myN.connections[index]["pdo"] = db;
                         myN.connections[index]["isConnect"] = "T";
                         ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
@@ -697,18 +690,16 @@ namespace mySQLPunk
                 await Task.Yield();
 
                 var conn = myN.connections[index];
-                string connString = BuildOracleConnectionString(conn);
-
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
                     try
                     {
-                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_oracle(), connString));
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(conn));
                         IDatabase db = openResult.Database;
                         List<string> databases = openResult.Databases;
 
-                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["connString"] = openResult.ConnectionString;
                         myN.connections[index]["pdo"] = db;
                         myN.connections[index]["isConnect"] = "T";
                         ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
@@ -766,18 +757,16 @@ namespace mySQLPunk
                 await Task.Yield();
 
                 var conn = myN.connections[index];
-                string connString = BuildSqlServerConnectionString(conn);
-
                 Exception lastError = null;
                 for (int attempt = 1; attempt <= 2; attempt++)
                 {
                     try
                     {
-                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(() => new my_mssql(), connString));
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(conn));
                         IDatabase db = openResult.Database;
                         List<string> databases = openResult.Databases;
 
-                        myN.connections[index]["connString"] = connString;
+                        myN.connections[index]["connString"] = openResult.ConnectionString;
                         myN.connections[index]["pdo"] = db;
                         myN.connections[index]["isConnect"] = "T";
                         ApplyConnectionNodeIcon(FindConnectionNode(index), myN.connections[index]["db_kind"].ToString(), true);
@@ -1886,6 +1875,7 @@ namespace mySQLPunk
                         imported["pwd"] = credentialPassword;
                     }
                 }
+                LoadImportedSecuritySecrets(imported);
 
                 string key = BuildConnectionImportKey(imported);
                 int existingIndex;
@@ -1899,6 +1889,13 @@ namespace mySQLPunk
                         // 匯入檔可能帶著別台機器的 credential_target；一律以本機既有值為準，
                         // 否則存檔時會拿外來字串去刪憑證、還留下本機的孤兒憑證
                         imported["credential_target"] = GetConnectionValue(existingConn, "credential_target");
+                    }
+                    if (ConnectionSecuritySettingsService.SecretKeys.All(secret => string.IsNullOrEmpty(GetConnectionValue(imported, secret))))
+                    {
+                        Dictionary<string, object> existingConn = myN.connections[existingIndex];
+                        foreach (string secret in ConnectionSecuritySettingsService.SecretKeys)
+                            imported[secret] = GetConnectionValue(existingConn, secret);
+                        imported["security_credential_target"] = GetConnectionValue(existingConn, "security_credential_target");
                     }
                     myN.connections[existingIndex] = imported;
                 }
@@ -14045,10 +14042,30 @@ namespace mySQLPunk
             if (!conn.ContainsKey("trusted_connection")) conn["trusted_connection"] = "F";
             if (!conn.ContainsKey("conn_group")) conn["conn_group"] = "";
             if (!conn.ContainsKey("credential_target")) conn["credential_target"] = "";
+            ConnectionSecuritySettingsService.Normalize(conn);
             conn["username"] = TryDecryptConnectionImportValue(GetConnectionValue(conn, "username"));
             conn["pwd"] = TryDecryptConnectionImportValue(GetConnectionValue(conn, "pwd"));
             conn["isConnect"] = "F";
             conn["pdo"] = null;
+        }
+
+        private static void LoadImportedSecuritySecrets(Dictionary<string, object> connection)
+        {
+            string target = GetConnectionValue(connection, "security_credential_target");
+            string payload;
+            if (!string.IsNullOrWhiteSpace(target) && WindowsCredentialService.TryReadPassword(target, out payload))
+            {
+                try
+                {
+                    ConnectionSecuritySettingsService.ApplySerializedSecrets(connection, payload);
+                    return;
+                }
+                catch
+                {
+                }
+            }
+            connection["security_credential_target"] = string.Empty;
+            ConnectionSecuritySettingsService.ApplySerializedSecrets(connection, string.Empty);
         }
 
         private static void CopyImportedConnectionValueIfMissing(Dictionary<string, object> conn, string oldKey, string newKey)
@@ -15791,6 +15808,11 @@ namespace mySQLPunk
             {
                 WindowsCredentialService.TryDeletePassword(target);
             }
+            string securityTarget = GetConnectionValue(conn, "security_credential_target");
+            if (!string.IsNullOrWhiteSpace(securityTarget))
+            {
+                WindowsCredentialService.TryDeletePassword(securityTarget);
+            }
         }
 
         private async Task db_tree_second_click(int father_index, int index, string databaseName)
@@ -16503,6 +16525,11 @@ namespace mySQLPunk
                 var existing = myN.connections[index];
                 if (!conn.ContainsKey("conn_group") || conn["conn_group"] == null)
                     conn["conn_group"] = existing.ContainsKey("conn_group") && existing["conn_group"] != null ? existing["conn_group"] : "";
+                foreach (string targetKey in new[] { "credential_target", "security_credential_target" })
+                {
+                    if (!conn.ContainsKey(targetKey) || conn[targetKey] == null)
+                        conn[targetKey] = existing.ContainsKey(targetKey) && existing[targetKey] != null ? existing[targetKey] : "";
+                }
             }
             myN.connections[index] = conn;
             RememberRecentConnectionType(conn);

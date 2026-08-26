@@ -14,6 +14,8 @@ namespace mySQLPunk.template
 {
     public partial class oracle_add_edit : Form
     {
+        private readonly Dictionary<string, object> securitySettings = new Dictionary<string, object>();
+
         public oracle_add_edit()
         {
             InitializeComponent();
@@ -40,6 +42,7 @@ namespace mySQLPunk.template
             radioButton1.Text = Localization.T("Common.ServiceName");
             radioButton2.Text = Localization.T("Common.SID");
             oracle_add_edit_test_connection.Text = Localization.T("Common.TestConnection");
+            oracle_add_edit_security.Text = "SSL / SSH...";
             oracle_add_edit_ok.Text = Localization.T("Common.OK");
             oracle_add_edit_cancel.Text = Localization.T("Common.Cancel");
         }
@@ -73,6 +76,8 @@ namespace mySQLPunk.template
                 textBox6.Text = GetValue(conn, "pwd");
                 radioButton1.Checked = GetValue(conn, "oracle_identifier_type") != "sid";
                 radioButton2.Checked = GetValue(conn, "oracle_identifier_type") == "sid";
+                ConnectionSecuritySettingsService.Copy(conn, securitySettings);
+                UpdateSecuritySummary();
             }
 
             oracle_connection_type_selected_trigger_change();
@@ -94,13 +99,10 @@ namespace mySQLPunk.template
             if (testButton != null) testButton.Enabled = false;
             try
             {
-                string testConnectionString = BuildConnectionString();
                 await System.Threading.Tasks.Task.Run(() =>
                 {
-                    using (my_oracle db = new my_oracle())
+                    using (IDatabase db = ConnectionOpenService.Open(BuildConnection(), false).Database)
                     {
-                        db.SetConn(testConnectionString);
-                        db.Open();
                         db.Close();
                     }
                 });
@@ -227,16 +229,47 @@ namespace mySQLPunk.template
             conn["pwd"] = IsTnsMode() ? textBox6.Text : textBox5.Text;
             conn["connString"] = BuildConnectionString();
             conn["isConnect"] = "F";
+            ConnectionSecuritySettingsService.Copy(securitySettings, conn);
             return conn;
+        }
+
+        private void securityButton_Click(object sender, EventArgs e)
+        {
+            Dictionary<string, object> draft = BuildConnection();
+            if (ConnectionSecurityForm.Edit(this, "oracle", draft))
+            {
+                ConnectionSecuritySettingsService.Copy(draft, securitySettings);
+                UpdateSecuritySummary();
+            }
+        }
+
+        private void UpdateSecuritySummary()
+        {
+            if (oracle_add_edit_security != null)
+                oracle_add_edit_security.Text = "SSL / SSH...  " + ConnectionSecuritySettingsService.GetSummary(securitySettings);
         }
 
         private string BuildConnectionString()
         {
-            OracleConnectionStringBuilder builder = new OracleConnectionStringBuilder();
-            builder.UserID = IsTnsMode() ? textBox7.Text.Trim() : textBox4.Text.Trim();
-            builder.Password = IsTnsMode() ? textBox6.Text : textBox5.Text;
-            builder.DataSource = IsTnsMode() ? comboBox1.Text.Trim() : BuildBasicDataSource();
-            return builder.ConnectionString;
+            Dictionary<string, object> connection = BuildConnectionWithoutConnectionString();
+            return ConnectionConfigurationService.BuildOracleConnectionString(connection);
+        }
+
+        private Dictionary<string, object> BuildConnectionWithoutConnectionString()
+        {
+            Dictionary<string, object> conn = new Dictionary<string, object>();
+            conn["db_kind"] = "oracle";
+            conn["connection_type"] = IsTnsMode() ? "TNS" : "Basic";
+            conn["host"] = textBox1.Text.Trim();
+            conn["port"] = textBox2.Text.Trim();
+            conn["service_name"] = textBox3.Text.Trim();
+            conn["sid"] = textBox3.Text.Trim();
+            conn["oracle_identifier_type"] = radioButton2.Checked ? "sid" : "service_name";
+            conn["tns_name"] = comboBox1.Text.Trim();
+            conn["username"] = IsTnsMode() ? textBox7.Text.Trim() : textBox4.Text.Trim();
+            conn["pwd"] = IsTnsMode() ? textBox6.Text : textBox5.Text;
+            ConnectionSecuritySettingsService.Copy(securitySettings, conn);
+            return conn;
         }
 
         private string BuildBasicDataSource()

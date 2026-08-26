@@ -18,6 +18,9 @@ mySQLPunk uses NuGet packages listed in `mySQLPunk/packages.config`, including:
 - Newtonsoft.Json 13.0.4 - MIT
 - Npgsql 8.0.3 - PostgreSQL License
 - Oracle.ManagedDataAccess 23.26.200 - Oracle Free Distribution, Hosting, and Use Terms
+- BouncyCastle.Cryptography 2.7.0 - MIT
+- Microsoft.Bcl.Cryptography 10.0.10 - MIT
+- SSH.NET 2026.0.0 - MIT
 - Stub.System.Data.SQLite.Core.NetFramework 1.0.119.0 - SQLite/System.Data.SQLite terms
 - System.Data.SQLite.Core 1.0.119.0 - SQLite/System.Data.SQLite terms
 - Microsoft .NET support libraries from the `System.*` and `Microsoft.*`
@@ -29,6 +32,30 @@ from the NuGet package must be included with release packages.
 System.Data.SQLite states that the main System.Data.SQLite code and
 documentation are dedicated to the public domain, with the LINQ SQL generation
 directory under MS-PL.
+
+## SSH.NET License
+
+SSH.NET is distributed under the MIT License.
+
+Copyright (c) 2010-2026 Renci
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ## Native SQLite / SpatiaLite Runtime
 

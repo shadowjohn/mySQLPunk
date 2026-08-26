@@ -33,6 +33,7 @@ mySQLPunk 可以把常用的唯讀查詢、查詢結果匯出與資料庫 SQL �
 - 作業 JSON 只保存連線設定檔名稱與連線顯示名稱，不保存主機連線字串、使用者密碼或 API 金鑰。
 - Windows 工作使用 `InteractiveToken` 與最低權限執行，不要求系統管理員權限。
 - 排程必須在建立排程的同一個 Windows 使用者已登入時執行，才能讀取該使用者的 Windows Credential Manager。
+- 若連線使用 SSL/TLS 或 SSH Tunnel，排程會沿用相同設定；SSH 密碼、私鑰密語與憑證密碼也由同一個 Windows 使用者的 Credential Manager 讀取。
 - 若搬動或重新安裝 `mySQLPunk.exe`，請在管理畫面重新註冊排程，讓執行檔路徑同步更新。
 
 ## 作業與紀錄位置

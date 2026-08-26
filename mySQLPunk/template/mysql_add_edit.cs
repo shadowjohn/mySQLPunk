@@ -16,6 +16,7 @@ namespace mySQLPunk.template
     {
         private Label initialDatabaseLabel;
         private TextBox mysql_initial_database;
+        private readonly Dictionary<string, object> securitySettings = new Dictionary<string, object>();
         // 這兩個控制項的實體在 Designer 的 InitializeComponent 建立
 
         public mysql_add_edit()
@@ -38,6 +39,7 @@ namespace mySQLPunk.template
             label4.Text = Localization.T("Common.UsernameColon");
             label5.Text = Localization.T("Common.PasswordColon");
             mysql_add_edit_test_connection.Text = Localization.T("Common.TestConnection");
+            mysql_add_edit_security.Text = "SSL / SSH...";
             if (initialDatabaseLabel != null) initialDatabaseLabel.Text = Localization.T("Common.InitialDatabaseColon");
             mysql_add_edit_ok.Text = Localization.T("Common.OK");
             mysql_add_edit_cancel.Text = Localization.T("Common.Cancel");
@@ -57,6 +59,8 @@ namespace mySQLPunk.template
             mysql_username.Text = GetValue(conn, "username");
             mysql_pwd.Text = GetValue(conn, "pwd");
             mysql_initial_database.Text = GetValue(conn, "initial_database");
+            ConnectionSecuritySettingsService.Copy(conn, securitySettings);
+            UpdateSecuritySummary();
         }
 
         private static string GetValue(Dictionary<string, object> conn, string key)
@@ -80,6 +84,7 @@ namespace mySQLPunk.template
             conn["username"] = mysql_username.Text.Trim();
             conn["pwd"] = mysql_pwd.Text;
             conn["isConnect"] = "F";
+            ConnectionSecuritySettingsService.Copy(securitySettings, conn);
             return conn;
         }
 
@@ -146,11 +151,9 @@ namespace mySQLPunk.template
                 string testConnectionString = builder.ConnectionString;
                 await System.Threading.Tasks.Task.Run(() =>
                 {
-                    using (my_mysql db = new my_mysql())
+                    using (IDatabase db = ConnectionOpenService.Open(BuildConnection(), false).Database)
                     {
-                        db.SetConn(testConnectionString);
-                        db.MCT.Open();
-                        db.MCT.Close();
+                        db.Close();
                     }
                 });
                 MessageBox.Show(Localization.Format("Connection.TestSucceeded", "MySQL"), Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -196,6 +199,22 @@ namespace mySQLPunk.template
         {
             // Cancel
             this.Close();
+        }
+
+        private void securityButton_Click(object sender, EventArgs e)
+        {
+            Dictionary<string, object> draft = BuildConnection();
+            if (ConnectionSecurityForm.Edit(this, "mysql", draft))
+            {
+                ConnectionSecuritySettingsService.Copy(draft, securitySettings);
+                UpdateSecuritySummary();
+            }
+        }
+
+        private void UpdateSecuritySummary()
+        {
+            if (mysql_add_edit_security != null)
+                mysql_add_edit_security.Text = "SSL / SSH...  " + ConnectionSecuritySettingsService.GetSummary(securitySettings);
         }
     }
 }

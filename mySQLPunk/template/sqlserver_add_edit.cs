@@ -20,8 +20,10 @@ namespace mySQLPunk.template
         private TextBox txtPassword;
         private CheckBox chkWindowsAuth;
         private Button btnTest;
+        private Button btnSecurity;
         private Button btnOk;
         private Button btnCancel;
+        private readonly Dictionary<string, object> securitySettings = new Dictionary<string, object>();
 
         public sqlserver_add_edit()
         {
@@ -48,6 +50,7 @@ namespace mySQLPunk.template
             Label lblPassword = new Label { Text = Localization.T("Common.Password") };
             txtPassword = new TextBox { UseSystemPasswordChar = true };
             btnTest = new Button { Text = Localization.T("Common.TestConnection") };
+            btnSecurity = new Button { Text = "SSL / SSH...", AutoSize = true };
             btnOk = new Button { Text = Localization.T("Common.OK") };
             btnCancel = new Button { Text = Localization.T("Common.Cancel") };
 
@@ -59,11 +62,13 @@ namespace mySQLPunk.template
             ConnectionDialogUi.AddFieldOnly(shell, chkWindowsAuth);
             ConnectionDialogUi.AddField(shell, lblUser, txtUser, ConnectionDialogUi.FieldMedium);
             ConnectionDialogUi.AddField(shell, lblPassword, txtPassword, ConnectionDialogUi.FieldMedium);
+            ConnectionDialogUi.AddFieldOnly(shell, btnSecurity);
             ConnectionDialogUi.Finish(this, shell, btnTest, btnOk, btnCancel);
 
             chkWindowsAuth.CheckedChanged += (s, e) => ToggleAuthFields();
             Load += sqlserver_add_edit_Load;
             btnTest.Click += btnTest_Click;
+            btnSecurity.Click += btnSecurity_Click;
             btnOk.Click += btnOk_Click;
             btnCancel.Click += (s, e) => Close();
         }
@@ -80,6 +85,8 @@ namespace mySQLPunk.template
             txtUser.Text = GetValue(conn, "username");
             txtPassword.Text = GetValue(conn, "pwd");
             chkWindowsAuth.Checked = GetValue(conn, "trusted_connection") == "T";
+            ConnectionSecuritySettingsService.Copy(conn, securitySettings);
+            UpdateSecuritySummary();
             ToggleAuthFields();
         }
 
@@ -128,6 +135,7 @@ namespace mySQLPunk.template
             conn["pwd"] = txtPassword.Text;
             conn["trusted_connection"] = chkWindowsAuth.Checked ? "T" : "F";
             conn["isConnect"] = "F";
+            ConnectionSecuritySettingsService.Copy(securitySettings, conn);
             return conn;
         }
 
@@ -138,21 +146,7 @@ namespace mySQLPunk.template
 
         private string BuildConnectionString()
         {
-            SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder();
-            builder.DataSource = BuildDataSource(txtHost.Text.Trim(), txtPort.Text.Trim());
-            builder.InitialCatalog = GetInitialDatabase();
-            builder.IntegratedSecurity = chkWindowsAuth.Checked;
-            builder.TrustServerCertificate = true;
-            builder.MultipleActiveResultSets = true;
-            builder.ConnectTimeout = 8;
-
-            if (!chkWindowsAuth.Checked)
-            {
-                builder.UserID = txtUser.Text.Trim();
-                builder.Password = txtPassword.Text;
-            }
-
-            return builder.ConnectionString;
+            return ConnectionConfigurationService.BuildSqlServerConnectionString(BuildConnection());
         }
 
         private static string BuildDataSource(string host, string port)
@@ -171,13 +165,10 @@ namespace mySQLPunk.template
             if (testButton != null) testButton.Enabled = false;
             try
             {
-                string testConnectionString = BuildConnectionString();
                 await System.Threading.Tasks.Task.Run(() =>
                 {
-                    using (my_mssql db = new my_mssql())
+                    using (IDatabase db = ConnectionOpenService.Open(BuildConnection(), false).Database)
                     {
-                        db.SetConn(testConnectionString);
-                        db.Open();
                         db.Close();
                     }
                 });
@@ -209,6 +200,21 @@ namespace mySQLPunk.template
             else F1.add_connection(conn);
 
             Close();
+        }
+
+        private void btnSecurity_Click(object sender, EventArgs e)
+        {
+            Dictionary<string, object> draft = BuildConnection();
+            if (ConnectionSecurityForm.Edit(this, "mssql", draft))
+            {
+                ConnectionSecuritySettingsService.Copy(draft, securitySettings);
+                UpdateSecuritySummary();
+            }
+        }
+
+        private void UpdateSecuritySummary()
+        {
+            btnSecurity.Text = "SSL / SSH...  " + ConnectionSecuritySettingsService.GetSummary(securitySettings);
         }
 
         private static string GetValue(Dictionary<string, object> conn, string key)

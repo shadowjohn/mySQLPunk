@@ -13,6 +13,8 @@ namespace mySQLPunk.template
 {
     public partial class postgresql_add_edit : Form
     {
+        private readonly Dictionary<string, object> securitySettings = new Dictionary<string, object>();
+
         public postgresql_add_edit()
         {
             InitializeComponent();
@@ -33,6 +35,7 @@ namespace mySQLPunk.template
             label4.Text = Localization.T("Common.UsernameColon");
             label5.Text = Localization.T("Common.PasswordColon");
             postgresql_add_edit_test_connection.Text = Localization.T("Common.TestConnection");
+            postgresql_add_edit_security.Text = "SSL / SSH...";
             postgresql_add_edit_ok.Text = Localization.T("Common.OK");
             postgresql_add_edit_cancel.Text = Localization.T("Common.Cancel");
         }
@@ -51,6 +54,8 @@ namespace mySQLPunk.template
             postgresql_initial_database.Text = string.IsNullOrWhiteSpace(GetValue(conn, "initial_database")) ? "postgres" : GetValue(conn, "initial_database");
             postgresql_username.Text = GetValue(conn, "username");
             postgresql_pwd.Text = GetValue(conn, "pwd");
+            ConnectionSecuritySettingsService.Copy(conn, securitySettings);
+            UpdateSecuritySummary();
         }
 
         private static string GetValue(Dictionary<string, object> conn, string key)
@@ -114,6 +119,7 @@ namespace mySQLPunk.template
             conn["username"] = postgresql_username.Text.Trim();
             conn["pwd"] = postgresql_pwd.Text;
             conn["isConnect"] = "F";
+            ConnectionSecuritySettingsService.Copy(securitySettings, conn);
             return conn;
         }
 
@@ -150,10 +156,8 @@ namespace mySQLPunk.template
                 string testConnectionString = builder.ConnectionString;
                 await System.Threading.Tasks.Task.Run(() =>
                 {
-                    using (my_postgresql db = new my_postgresql())
+                    using (IDatabase db = ConnectionOpenService.Open(BuildConnection(), false).Database)
                     {
-                        db.SetConn(testConnectionString);
-                        db.Open();
                         db.Close();
                     }
                 });
@@ -194,6 +198,22 @@ namespace mySQLPunk.template
             }
 
             Close();
+        }
+
+        private void securityButton_Click(object sender, EventArgs e)
+        {
+            Dictionary<string, object> draft = BuildConnection();
+            if (ConnectionSecurityForm.Edit(this, "postgresql", draft))
+            {
+                ConnectionSecuritySettingsService.Copy(draft, securitySettings);
+                UpdateSecuritySummary();
+            }
+        }
+
+        private void UpdateSecuritySummary()
+        {
+            if (postgresql_add_edit_security != null)
+                postgresql_add_edit_security.Text = "SSL / SSH...  " + ConnectionSecuritySettingsService.GetSummary(securitySettings);
         }
     }
 }

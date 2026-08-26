@@ -288,7 +288,8 @@ namespace mySQLPunk.entity
                 {
                     JObject conn = token as JObject;
                     string target = conn == null ? null : (string)conn["credential_target"];
-                    if (string.IsNullOrWhiteSpace(target)) continue;
+                    string securityTarget = conn == null ? null : (string)conn["security_credential_target"];
+                    if (string.IsNullOrWhiteSpace(target) && string.IsNullOrWhiteSpace(securityTarget)) continue;
 
                     Dictionary<string, object> connDict = new Dictionary<string, object>();
                     foreach (var property in conn.Properties())
@@ -301,6 +302,11 @@ namespace mySQLPunk.entity
                     if (string.Equals(expected, target, StringComparison.OrdinalIgnoreCase))
                     {
                         WindowsCredentialService.TryDeletePassword(target);
+                    }
+                    string expectedSecurity = WindowsCredentialService.BuildSecretTargetName(profileName, connDict, "connection-security");
+                    if (string.Equals(expectedSecurity, securityTarget, StringComparison.OrdinalIgnoreCase))
+                    {
+                        WindowsCredentialService.TryDeletePassword(securityTarget);
                     }
                 }
             }
@@ -467,6 +473,12 @@ namespace mySQLPunk.entity
                     { "connection_type", GetVal(conn, "connection_type") },
                     { "oracle_identifier_type", GetVal(conn, "oracle_identifier_type") }
                 };
+                foreach (string key in ConnectionSecuritySettingsService.PersistedKeys)
+                {
+                    item[key] = string.Equals(key, "security_credential_target", StringComparison.Ordinal)
+                        ? SaveConnectionSecuritySecrets(conn)
+                        : GetVal(conn, key);
+                }
                 saveList.Add(item);
             }
 
@@ -514,11 +526,13 @@ namespace mySQLPunk.entity
             NormalizeConnection(conn);
             conn["username"] = SafeDecrypt(GetVal(conn, "username"));
             LoadConnectionPassword(conn);
+            LoadConnectionSecuritySecrets(conn);
             if (_importingConnections)
             {
                 // 匯入檔的 target 可能屬於別的 profile / 機器：密碼已讀進記憶體，
                 // 清掉參照讓存檔時建立自己的憑證，而不是把別人的搬走或誤刪
                 conn["credential_target"] = "";
+                conn["security_credential_target"] = "";
             }
             conn["isConnect"] = "F";
             connections.Add(conn);
@@ -581,6 +595,47 @@ namespace mySQLPunk.entity
             conn["pwd"] = "";
         }
 
+        private string SaveConnectionSecuritySecrets(Dictionary<string, object> conn)
+        {
+            string existingTarget = GetVal(conn, "security_credential_target");
+            string payload = ConnectionSecuritySettingsService.SerializeSecrets(conn);
+            if (string.IsNullOrEmpty(payload))
+            {
+                if (!string.IsNullOrWhiteSpace(existingTarget)) WindowsCredentialService.TryDeletePassword(existingTarget);
+                return string.Empty;
+            }
+
+            string target = WindowsCredentialService.BuildSecretTargetName(ActiveProfileName, conn, "connection-security");
+            if (WindowsCredentialService.TryWritePassword(target, GetVal(conn, "ssh_username"), payload))
+            {
+                if (!string.IsNullOrWhiteSpace(existingTarget) &&
+                    !string.Equals(existingTarget, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    WindowsCredentialService.TryDeletePassword(existingTarget);
+                }
+                return target;
+            }
+            return string.IsNullOrWhiteSpace(existingTarget) ? string.Empty : existingTarget;
+        }
+
+        private void LoadConnectionSecuritySecrets(Dictionary<string, object> conn)
+        {
+            string target = GetVal(conn, "security_credential_target");
+            string payload;
+            if (!string.IsNullOrWhiteSpace(target) && WindowsCredentialService.TryReadPassword(target, out payload))
+            {
+                try
+                {
+                    ConnectionSecuritySettingsService.ApplySerializedSecrets(conn, payload);
+                    return;
+                }
+                catch
+                {
+                }
+            }
+            ConnectionSecuritySettingsService.ApplySerializedSecrets(conn, string.Empty);
+        }
+
         private void NormalizeConnection(Dictionary<string, object> conn)
         {
             CopyIfMissing(conn, "name", "conn_name");
@@ -608,6 +663,7 @@ namespace mySQLPunk.entity
             {
                 conn["credential_target"] = "";
             }
+            ConnectionSecuritySettingsService.Normalize(conn);
         }
 
         private void CopyIfMissing(Dictionary<string, object> conn, string oldKey, string newKey)

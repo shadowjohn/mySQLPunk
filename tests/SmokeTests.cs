@@ -61,6 +61,7 @@ public static class SmokeTests
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
         Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
         Run("Provider SQL 執行 fallback", TestDatabaseExecutionResultService, ref passed);
         Run("Connection profile service", TestConnectionProfileService, ref passed);
@@ -7188,6 +7189,7 @@ public static class SmokeTests
                 AssertEquals("Test Connection", GetPrivateField<Button>(mysql, "mysql_add_edit_test_connection").Text, "MySQL connection editor test button should support English.");
                 AssertEquals("OK", GetPrivateField<Button>(mysql, "mysql_add_edit_ok").Text, "MySQL connection editor OK button should support English.");
                 AssertEquals("Cancel", GetPrivateField<Button>(mysql, "mysql_add_edit_cancel").Text, "MySQL connection editor cancel button should support English.");
+                AssertContains(GetPrivateField<Button>(mysql, "mysql_add_edit_security").Text, "SSL / SSH", "MySQL connection editor should expose security settings.");
             }
 
             using (mySQLPunk.template.postgresql_add_edit postgresql = new mySQLPunk.template.postgresql_add_edit())
@@ -7195,6 +7197,7 @@ public static class SmokeTests
                 AssertEquals("Initial Database:", GetPrivateField<Label>(postgresql, "label6").Text, "PostgreSQL connection editor initial database label should support English.");
                 AssertEquals("User Name:", GetPrivateField<Label>(postgresql, "label4").Text, "PostgreSQL connection editor username label should support English.");
                 AssertEquals("Password:", GetPrivateField<Label>(postgresql, "label5").Text, "PostgreSQL connection editor password label should support English.");
+                AssertContains(GetPrivateField<Button>(postgresql, "postgresql_add_edit_security").Text, "SSL / SSH", "PostgreSQL connection editor should expose security settings.");
             }
 
             using (mySQLPunk.template.oracle_add_edit oracle = new mySQLPunk.template.oracle_add_edit())
@@ -7203,6 +7206,7 @@ public static class SmokeTests
                 AssertEquals("Service Name/SID:", GetPrivateField<Label>(oracle, "label5").Text, "Oracle connection editor service label should support English.");
                 AssertEquals("Net Service Name:", GetPrivateField<Label>(oracle, "label8").Text, "Oracle connection editor net service label should support English.");
                 AssertEquals("Service Name", GetPrivateField<RadioButton>(oracle, "radioButton1").Text, "Oracle connection editor service radio should support English.");
+                AssertContains(GetPrivateField<Button>(oracle, "oracle_add_edit_security").Text, "SSL / SSH", "Oracle connection editor should expose security settings.");
             }
 
             using (mySQLPunk.template.sqlserver_add_edit sqlServer = new mySQLPunk.template.sqlserver_add_edit())
@@ -7210,6 +7214,7 @@ public static class SmokeTests
                 AssertEquals("SQL Server Connection", sqlServer.Text, "SQL Server connection editor title should support English.");
                 AssertEquals("Use Windows Authentication", GetPrivateField<CheckBox>(sqlServer, "chkWindowsAuth").Text, "SQL Server Windows auth checkbox should support English.");
                 AssertEquals("Test Connection", GetPrivateField<Button>(sqlServer, "btnTest").Text, "SQL Server connection editor test button should support English.");
+                AssertContains(GetPrivateField<Button>(sqlServer, "btnSecurity").Text, "SSL / SSH", "SQL Server connection editor should expose security settings.");
             }
         }
         finally
@@ -7386,6 +7391,83 @@ public static class SmokeTests
         AssertEquals("HEAD", request.Method, "Connectivity test should use HEAD.");
         Assert(request.Proxy != null, "Connectivity request should include HTTP proxy.");
         AssertEquals("http://proxy.local:3128/", request.Proxy.GetProxy(new Uri("https://example.test/")).ToString(), "Connectivity request proxy URI should match settings.");
+    }
+
+    private static void TestConnectionSecuritySettings()
+    {
+        Dictionary<string, object> mysql = new Dictionary<string, object>
+        {
+            { "db_kind", "mysql" }, { "host", "db.example.com" }, { "port", "3306" },
+            { "username", "app" }, { "pwd", "p;ss=word" }, { "initial_database", "main" },
+            { "tls_mode", "VerifyFull" }, { "tls_ca_path", "C:\\certs\\root.pem" }
+        };
+        string mysqlConnectionString = ConnectionConfigurationService.BuildMySqlConnectionString(mysql);
+        MySqlConnector.MySqlConnectionStringBuilder mysqlBuilder = new MySqlConnector.MySqlConnectionStringBuilder(mysqlConnectionString);
+        AssertEquals("VerifyFull", mysqlBuilder.SslMode.ToString(), "MySQL TLS mode should be included in the connection string.");
+        AssertEquals("C:\\certs\\root.pem", mysqlBuilder.SslCa, "MySQL CA path should be included in the connection string.");
+        AssertEquals("p;ss=word", mysqlBuilder.Password, "MySQL security settings must not break escaped passwords.");
+
+        Dictionary<string, object> postgres = new Dictionary<string, object>
+        {
+            { "db_kind", "postgresql" }, { "host", "pg.example.com" }, { "port", "5432" },
+            { "username", "app" }, { "pwd", "secret" }, { "initial_database", "main" },
+            { "tls_mode", "VerifyCA" }, { "tls_ca_path", "C:\\certs\\postgres-root.pem" },
+            { "tls_check_revocation", "T" }
+        };
+        System.Data.Common.DbConnectionStringBuilder postgresBuilder = new System.Data.Common.DbConnectionStringBuilder
+        {
+            ConnectionString = ConnectionConfigurationService.BuildPostgreSqlConnectionString(postgres)
+        };
+        AssertEquals("VerifyCA", Convert.ToString(postgresBuilder["SSL Mode"]), "PostgreSQL TLS mode should be included in the connection string.");
+        AssertEquals("True", Convert.ToString(postgresBuilder["Check Certificate Revocation"]), "PostgreSQL certificate revocation checks should be configurable.");
+
+        Dictionary<string, object> sqlServer = new Dictionary<string, object>
+        {
+            { "db_kind", "mssql" }, { "host", "sql.example.com" }, { "port", "1433" },
+            { "username", "app" }, { "pwd", "secret" }, { "initial_database", "main" },
+            { "trusted_connection", "F" }, { "tls_mode", "VerifyFull" }
+        };
+        System.Data.SqlClient.SqlConnectionStringBuilder sqlServerBuilder = new System.Data.SqlClient.SqlConnectionStringBuilder(ConnectionConfigurationService.BuildSqlServerConnectionString(sqlServer));
+        Assert(sqlServerBuilder.Encrypt, "SQL Server VerifyFull should enable encryption.");
+        Assert(!sqlServerBuilder.TrustServerCertificate, "SQL Server VerifyFull should validate the server certificate.");
+
+        Dictionary<string, object> oracle = new Dictionary<string, object>
+        {
+            { "db_kind", "oracle" }, { "connection_type", "Basic" }, { "host", "oracle.example.com" },
+            { "port", "2484" }, { "service_name", "ORCLPDB1" }, { "oracle_identifier_type", "service_name" },
+            { "username", "app" }, { "pwd", "secret" }, { "tls_mode", "VerifyFull" },
+            { "tls_wallet_path", "C:\\wallet" }
+        };
+        string oracleConnectionString = ConnectionConfigurationService.BuildOracleConnectionString(oracle);
+        AssertContains(oracleConnectionString, "PROTOCOL=TCPS", "Oracle TLS should use TCPS.");
+        AssertContains(oracleConnectionString, "SSL_SERVER_DN_MATCH=YES", "Oracle VerifyFull should enable DN matching.");
+
+        Dictionary<string, object> security = new Dictionary<string, object>
+        {
+            { "db_kind", "mysql" }, { "ssh_password", "ssh-secret" },
+            { "ssh_key_passphrase", "key-secret" }, { "tls_certificate_password", "cert-secret" }
+        };
+        ConnectionSecuritySettingsService.Normalize(security);
+        string payload = ConnectionSecuritySettingsService.SerializeSecrets(security);
+        AssertContains(payload, "ssh-secret", "Security secrets should be serialized only for Credential Manager storage.");
+        Dictionary<string, object> restored = new Dictionary<string, object>();
+        ConnectionSecuritySettingsService.ApplySerializedSecrets(restored, payload);
+        AssertEquals("key-secret", Convert.ToString(restored["ssh_key_passphrase"]), "SSH key passphrase should round-trip through the protected payload.");
+        AssertEquals("SHA256:abc123", ConnectionSecuritySettingsService.NormalizeSshHostKeyFingerprint("abc123=="), "SSH fingerprints should use the OpenSSH SHA256 format.");
+
+        Dictionary<string, object> incompatible = new Dictionary<string, object>(mysql)
+        {
+            ["ssh_enabled"] = "T"
+        };
+        try
+        {
+            ConnectionOpenService.Open(incompatible, false);
+            Assert(false, "VerifyFull should be rejected before opening an SSH tunnel.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            AssertContains(ex.Message, "VerifyCA", "SSH and VerifyFull validation should explain the safe alternative.");
+        }
     }
 
     private static void TestQueryExecutionPlanService()
@@ -8241,9 +8323,16 @@ public static class SmokeTests
 
         string notices = File.ReadAllText(noticesPath, Encoding.UTF8);
         AssertContains(notices, "Oracle.ManagedDataAccess", "Third-party notices should document Oracle.ManagedDataAccess.");
+        AssertContains(notices, "SSH.NET 2026.0.0", "Third-party notices should document the SSH tunnel runtime.");
+        AssertContains(notices, "BouncyCastle.Cryptography 2.7.0", "Third-party notices should document SSH.NET cryptography dependencies.");
         AssertContains(notices, "GNU Readline", "Third-party notices should document the Readline exclusion.");
         AssertContains(notices, "Devicon", "Third-party notices should document Devicon brand icons.");
         AssertContains(notices, "OpenGameArt", "Third-party notices should document progress runner source.");
+
+        string packagesConfig = File.ReadAllText(Path.Combine(root, "mySQLPunk", "packages.config"), Encoding.UTF8);
+        AssertContains(packagesConfig, "SSH.NET\" version=\"2026.0.0", "SSH.NET should stay on the vulnerability-fixed package line.");
+        AssertContains(packagesConfig, "Microsoft.Bcl.Cryptography\" version=\"10.0.10", "SSH.NET Framework cryptography dependency should be explicit.");
+        AssertContains(packagesConfig, "System.Formats.Asn1\" version=\"10.0.10", "ASN.1 dependencies should stay on one assembly version.");
 
         string assetNoticesPath = Path.Combine(root, "mySQLPunk", "image", "ASSET_NOTICES.md");
         Assert(File.Exists(assetNoticesPath), "Image asset notices should exist.");

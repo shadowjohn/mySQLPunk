@@ -41,6 +41,7 @@ namespace mySQLPunk.template
             this.label4 = new System.Windows.Forms.Label();
             this.label5 = new System.Windows.Forms.Label();
             this.mysql_add_edit_test_connection = new System.Windows.Forms.Button();
+            this.mysql_add_edit_security = new System.Windows.Forms.Button();
             this.mysql_add_edit_ok = new System.Windows.Forms.Button();
             this.mysql_add_edit_cancel = new System.Windows.Forms.Button();
             this.SuspendLayout();
@@ -74,6 +75,10 @@ namespace mySQLPunk.template
             this.mysql_add_edit_test_connection.TabIndex = 6;
             this.mysql_add_edit_test_connection.UseVisualStyleBackColor = true;
             this.mysql_add_edit_test_connection.Click += new System.EventHandler(this.button1_Click);
+            this.mysql_add_edit_security.Name = "mysql_add_edit_security";
+            this.mysql_add_edit_security.Text = "SSL / SSH...";
+            this.mysql_add_edit_security.AutoSize = true;
+            this.mysql_add_edit_security.Click += new System.EventHandler(this.securityButton_Click);
             this.mysql_add_edit_ok.Name = "mysql_add_edit_ok";
             this.mysql_add_edit_ok.Text = "OK";
             this.mysql_add_edit_ok.TabIndex = 7;
@@ -94,6 +99,7 @@ namespace mySQLPunk.template
             ConnectionDialogUi.AddField(shell, this.initialDatabaseLabel, this.mysql_initial_database, ConnectionDialogUi.FieldMedium);
             ConnectionDialogUi.AddField(shell, this.label4, this.mysql_username, ConnectionDialogUi.FieldMedium);
             ConnectionDialogUi.AddField(shell, this.label5, this.mysql_pwd, ConnectionDialogUi.FieldMedium);
+            ConnectionDialogUi.AddFieldOnly(shell, this.mysql_add_edit_security);
             ConnectionDialogUi.Finish(this, shell, this.mysql_add_edit_test_connection, this.mysql_add_edit_ok, this.mysql_add_edit_cancel);
             this.Icon = mySQLPunk.lib.AppIconService.AppIcon; // 看板娘 Punky，取代 resx 裡的舊圖示
             this.Name = "mysql_add_edit";
@@ -116,6 +122,7 @@ namespace mySQLPunk.template
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Button mysql_add_edit_test_connection;
+        private System.Windows.Forms.Button mysql_add_edit_security;
         private System.Windows.Forms.Button mysql_add_edit_ok;
         private System.Windows.Forms.Button mysql_add_edit_cancel;
     }

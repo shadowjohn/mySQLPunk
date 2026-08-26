@@ -10,17 +10,18 @@ mySQLPunk 是一套 Windows 資料庫管理工具（WinForms），用同一個�
 
 Open-source Windows database client, SQL editor, database GUI and DBA workbench for MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, SpatiaLite and Oracle.
 
-[下載最新版](https://github.com/shadowjohn/mySQLPunk/releases/latest) · [功能概況](#目前功能概況) · [自動執行作業](docs/AUTOMATION.md) · [開發與貢獻](CONTRIBUTING.md) · [功能路線圖](docs/ROADMAP.md)
+[下載最新版](https://github.com/shadowjohn/mySQLPunk/releases/latest) · [功能概況](#目前功能概況) · [連線安全](docs/CONNECTION_SECURITY.md) · [自動執行作業](docs/AUTOMATION.md) · [開發與貢獻](CONTRIBUTING.md) · [功能路線圖](docs/ROADMAP.md)
 
 ## 常見用途
 
 - 在同一套 Windows GUI 管理 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite 與 Oracle 連線。
+- 依連線設定 SSL/TLS 憑證驗證，或透過有 SHA256 主機金鑰固定的 SSH Tunnel 連到內網資料庫。
 - 使用具自動完成、程式碼片段、查詢歷史、唯讀執行計畫與多格式匯出的 SQL 編輯器。
 - 編輯資料列、設計資料表、產生 DDL / DML、搬移 Table / View、建立 ER 圖並比較兩個資料庫結構。
 - 建立每日查詢、CSV / Excel / JSON 等格式匯出與 SQL 備份作業，交由 Windows Task Scheduler 執行並保留紀錄。
 - 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Gemini CLI 作為 SQL 助理；沒有 AI 服務也能使用其他資料庫功能。
 
-介面支援繁體中文與英文。連線密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。
+介面支援繁體中文與英文。資料庫密碼、SSH 密碼、私鑰密語與用戶端憑證密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。
 
 <p align="center">
   <img src="snapshot/mySQLPunk_avatar.png" alt="看板娘：Punky 崩琦" width="260">
@@ -90,7 +91,7 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 61 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
+目前 62 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
 
 MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
 
@@ -120,7 +121,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 | 功能 | 狀態 | 說明 |
 | --- | --- | --- |
-| 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，支援連線群組與切換多個連線設定檔；密碼改存 Windows Credential Manager，設定檔只保留 credential target；連線節點右鍵可重新連線、關閉連線。 |
+| 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，支援連線群組與切換多個連線設定檔；資料庫／SSH／憑證密碼改存 Windows Credential Manager，設定檔只保留 credential target；MySQL、PostgreSQL、SQL Server 與 Oracle 可設定 SSL/TLS 與 SSH Tunnel，詳見[連線安全說明](docs/CONNECTION_SECURITY.md)。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | MySQL / MariaDB 使用者管理 | 可用 | 自動偵測 MySQL 5 / MySQL 8 / MariaDB；支援使用者 CRUD、密碼/Plugin/Lock/Expire/SSL/資源限制、Database/Table/View/Routine 權限編輯、SQL 預覽、`SHOW GRANTS` 與安全 DDL，並保留同名不同 Host 的獨立節點。 |
 | MySQL 匯出 / 匯入 | 可用 | 可選 Table/View/Routine/Trigger，支援完整 `SHOW CREATE` 結構、批次資料、DEFINER 移除、DELIMITER、UTF-8 without BOM 與串流檔案處理；匯入可選照 SQL 執行、刪除重建、只建不存在物件、略過既有物件與資料。 |
@@ -160,7 +161,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - XLSX 匯出要把整份結果放進記憶體；還原 SQL 備份也是整個檔一次讀進來，特別大的備份要留意。
 - 樹狀清單的引擎圖示是自繪的品牌色底加白色剪影（海豚＝MySQL、大象＝PostgreSQL、圓環＝Oracle、羽毛＝SQLite、資料庫圓柱＝SQL Server），已連線顯示品牌色、未連線是灰色。剪影是自己畫的風格化版本，不是各家原廠 logo 原圖，因為商標授權不好處理、原圖縮到 16px 也不清楚。
 - SQL Server 物件名稱本身帶 `.` 的話，`schema.table` 可能會切錯位置。
-- 代理設定目前只有 HTTP 路徑有接（檢查更新、註解字典下載這些）；SOCKS5 跟資料庫連線本身的代理還沒做。
+- 一般代理設定目前只有 HTTP 路徑有接（檢查更新、註解字典下載這些）；資料庫連線可用 SSH Tunnel，但還沒有 SOCKS5 代理。
 - 安裝檔還沒上程式碼簽章，第一次下載執行可能會跳 SmartScreen 警告。
 - Table Designer 的 Primary Key 跟 constraint 進階變更，還需要更多實機案例驗證。
 - 資料分析預設使用前 10,000 筆樣本；切換成全表會執行 COUNT／DISTINCT／GROUP BY，對大型資料表可能耗時。BLOB、JSON、geometry 等型別會略過資料庫不支援的極值或分佈統計。
@@ -186,6 +187,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `mySQLPunk/lib/ObjectUriService.cs`: `mysqlpunk://object` URI 建立、驗證、解析與樹狀物件類型對應。
 - `mySQLPunk/lib/ScheduledJobService.cs`: 可攜式作業定義、唯讀 SQL 驗證、作業儲存、CLI 執行與紀錄。
 - `mySQLPunk/lib/WindowsScheduledTaskService.cs`: Windows Task Scheduler 每日排程註冊與移除。
+- `mySQLPunk/lib/ConnectionSecurityService.cs`: TLS 設定、SSH 主機金鑰驗證、Tunnel 生命週期與安全連線包裝。
 - `mySQLPunk/lib/my_mysql.cs`: MySQL provider。
 - `mySQLPunk/lib/my_postgresql.cs`: PostgreSQL provider。
 - `mySQLPunk/lib/my_sqlite.cs`: SQLite provider。
@@ -202,6 +204,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `scripts/`: 打包（`package-release.ps1`）與發版說明（`New-ReleaseNotes.ps1`）腳本。
 - `docs/FEATURE_NOTES.md`: 功能完成紀錄。
 - `docs/AUTOMATION.md`: 自動執行作業的操作、安全設計、檔案位置與命令列說明。
+- `docs/CONNECTION_SECURITY.md`: 各 provider 的 SSL/TLS、SSH Tunnel、憑證與祕密保存方式。
 
 ## 協作規範
 

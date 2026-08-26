@@ -53,7 +53,9 @@ namespace mySQLPunk.lib
                 : GetValue(connection, "initial_database");
             bool trusted = string.Equals(GetValue(connection, "trusted_connection"), "T", StringComparison.OrdinalIgnoreCase);
             builder.IntegratedSecurity = trusted;
-            builder.TrustServerCertificate = true;
+            string tlsMode = NormalizeTlsMode(connection, "Disabled");
+            builder.Encrypt = !string.Equals(tlsMode, "Disabled", StringComparison.OrdinalIgnoreCase);
+            builder.TrustServerCertificate = !string.Equals(tlsMode, "VerifyFull", StringComparison.OrdinalIgnoreCase);
             builder.MultipleActiveResultSets = true;
             builder.ConnectTimeout = 8;
             if (!trusted)
@@ -84,11 +86,25 @@ namespace mySQLPunk.lib
                     ? string.Empty
                     : GetValue(connection, "initial_database").Trim(),
                 // 伺服器支援時使用 TLS；不支援時維持既有連線相容性。
-                SslMode = MySqlSslMode.Preferred,
+                SslMode = ParseMySqlSslMode(NormalizeTlsMode(connection, "Preferred")),
                 CharacterSet = "utf8",
                 AllowZeroDateTime = true,
                 ConnectionTimeout = 8
             };
+            builder.SslCa = GetValue(connection, "tls_ca_path");
+            string clientCertificate = GetValue(connection, "tls_client_certificate_path");
+            string certificateExtension = System.IO.Path.GetExtension(clientCertificate);
+            if (string.Equals(certificateExtension, ".pfx", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(certificateExtension, ".p12", StringComparison.OrdinalIgnoreCase))
+            {
+                builder.CertificateFile = clientCertificate;
+                builder.CertificatePassword = GetValue(connection, "tls_certificate_password");
+            }
+            else
+            {
+                builder.SslCert = clientCertificate;
+                builder.SslKey = GetValue(connection, "tls_client_key_path");
+            }
             return builder.ConnectionString;
         }
 
@@ -114,6 +130,12 @@ namespace mySQLPunk.lib
                 // 只限制建立連線時間，查詢保留 Npgsql 的預設 command timeout。
                 Timeout = 8
             };
+            builder.SslMode = ParseNpgsqlSslMode(NormalizeTlsMode(connection, "Prefer"));
+            builder.RootCertificate = GetValue(connection, "tls_ca_path");
+            builder.SslCertificate = GetValue(connection, "tls_client_certificate_path");
+            builder.SslKey = GetValue(connection, "tls_client_key_path");
+            builder.SslPassword = GetValue(connection, "tls_certificate_password");
+            builder.CheckCertificateRevocation = ConnectionSecuritySettingsService.IsTrue(connection, "tls_check_revocation");
             return builder.ConnectionString;
         }
 
@@ -128,9 +150,6 @@ namespace mySQLPunk.lib
 
         public static string BuildOracleConnectionString(Dictionary<string, object> connection)
         {
-            string existing = GetValue(connection, "connString");
-            if (!string.IsNullOrWhiteSpace(existing)) return existing;
-
             OracleConnectionStringBuilder builder = new OracleConnectionStringBuilder
             {
                 UserID = GetValue(connection, "username"),
@@ -176,8 +195,39 @@ namespace mySQLPunk.lib
             string key = string.Equals(GetValue(connection, "oracle_identifier_type"), "sid", StringComparison.OrdinalIgnoreCase)
                 ? "SID"
                 : "SERVICE_NAME";
-            return "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=" + host + ")(PORT=" + port + "))" +
-                   "(CONNECT_DATA=(" + key + "=" + value + ")))";
+            string tlsMode = NormalizeTlsMode(connection, "Disabled");
+            string protocol = string.Equals(tlsMode, "Disabled", StringComparison.OrdinalIgnoreCase) ? "TCP" : "TCPS";
+            string walletPath = GetValue(connection, "tls_wallet_path").Trim();
+            string security = string.Empty;
+            if (!string.IsNullOrWhiteSpace(walletPath) || string.Equals(tlsMode, "VerifyFull", StringComparison.OrdinalIgnoreCase))
+            {
+                if (walletPath.IndexOf('(') >= 0 || walletPath.IndexOf(')') >= 0)
+                    throw new InvalidOperationException("Oracle Wallet 路徑不能包含括號。");
+                security = "(SECURITY=" +
+                           (string.IsNullOrWhiteSpace(walletPath) ? string.Empty : "(MY_WALLET_DIRECTORY=" + walletPath + ")") +
+                           (string.Equals(tlsMode, "VerifyFull", StringComparison.OrdinalIgnoreCase) ? "(SSL_SERVER_DN_MATCH=YES)" : string.Empty) +
+                           ")";
+            }
+            return "(DESCRIPTION=(ADDRESS=(PROTOCOL=" + protocol + ")(HOST=" + host + ")(PORT=" + port + "))" +
+                   security + "(CONNECT_DATA=(" + key + "=" + value + ")))";
+        }
+
+        private static string NormalizeTlsMode(Dictionary<string, object> connection, string fallback)
+        {
+            string value = GetValue(connection, "tls_mode").Trim();
+            return string.IsNullOrWhiteSpace(value) ? fallback : value;
+        }
+
+        private static MySqlSslMode ParseMySqlSslMode(string value)
+        {
+            MySqlSslMode mode;
+            return Enum.TryParse(value, true, out mode) ? mode : MySqlSslMode.Preferred;
+        }
+
+        private static SslMode ParseNpgsqlSslMode(string value)
+        {
+            SslMode mode;
+            return Enum.TryParse(value, true, out mode) ? mode : SslMode.Prefer;
         }
     }
 }
