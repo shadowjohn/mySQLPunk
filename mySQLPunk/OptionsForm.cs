@@ -289,7 +289,7 @@ namespace mySQLPunk
             };
             AddOptionCheckBox("AllowDuplicateObjects", T("允許重複開啟相同的物件", "Allow opening the same object more than once"), 340);
             AddOptionCheckBox("ShowObjectTooltips", T("顯示工具提示", "Show tooltips"), 372);
-            AddOptionCheckBox("RememberTableSettings", T("開啟前提示儲存新增的資料表設定檔", "Prompt before opening when unsaved table settings exist"), 404);
+            AddOptionCheckBox("RememberTableSettings", T("顯示並記住資料表設定檔", "Show and remember named table profiles"), 404);
             AddOptionCheckBox("AutoCheckUpdates", T("啟動時自動檢查更新", "Check for updates on startup"), 436);
 
             lightThemeRadio.CheckedChanged += (s, e) => UpdateSelection();

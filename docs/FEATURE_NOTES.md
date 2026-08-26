@@ -8,6 +8,18 @@
 
 ### 優先待辦
 
+- **Navicat 對齊：物件 URI 分享與直接定位 ✅ 已完成**
+  - 操作：database 與 Table、View、Function、User、Event、Model、BI、內建工具、Report 可從左側樹或物件清單右鍵複製 `mysqlpunk://object` URI；接收方開啟 URI 後會清除暫時的連線搜尋條件、找到目前設定檔的同名連線並定位物件。
+  - 啟動流程：未開啟的連線會沿用主視窗既有 provider 流程連線，再載入指定 database 的 metadata；物件群組正常顯示、隱藏或只顯示活躍物件時都以節點型別標記定位，不依賴固定樹層級。
+  - 安全：URI 只保存連線顯示名稱、database、物件類型、名稱及 User 的 host 次要鍵，不含主機、連接埠、帳號、密碼或 connection string；解析會拒絕未知／重複／缺漏參數、帳密、fragment、額外路徑、控制字元與非法百分比編碼。
+  - 驗證：smoke test 覆蓋 Unicode 與保留字元 round-trip、database／Table／User URI、樹狀群組對應，以及錯誤 scheme、endpoint、帳密、重複／未知／缺漏參數、不支援類型與畸形 escape 的 fail-closed 行為。
+
+- **Navicat 對齊：具名資料表設定檔 ✅ 已完成**
+  - 操作：資料表資料模式的底部工具列新增設定檔下拉與管理按鈕；每張資料表可新增、修改、刪除多組具名設定，並快速切換目前設定。
+  - 內容：設定檔保存 WHERE 後方的篩選條件、單一主要排序欄位與方向，以及顯示欄位；目前選擇會依 provider／database／table 寫入使用者目錄的 `table-data-profiles.json`，不保存密碼、查詢結果或資料列內容。
+  - 安全與一致性：篩選只接受單一條件，拒絕分號、SQL 註解與頂層 ORDER BY／GROUP BY／UNION 等子句；MySQL、PostgreSQL、SQLite 使用 LIMIT／OFFSET，SQL Server、Oracle 使用 OFFSET／FETCH，且主要排序後會追加 Primary Key 作為穩定分頁 tie-breaker。資料表有未儲存變更時會阻止切換，避免重新載入造成資料遺失。
+  - 驗證：smoke test 覆蓋 JSON round-trip、作用中設定、重名拒絕、欄位可見性、五種 provider 的識別字 quoting／分頁語法、字串內分號與多 statement／頂層排序拒絕。
+
 - **Navicat 對齊：程式碼片段與上下文自動完成 ✅ 已完成**
   - 自動完成：查詢編輯器會限定在游標所在 statement，略過 SQL 字串與註解後解析 FROM／JOIN／UPDATE／INTO 的資料表與 alias；輸入 `alias.` 只列出對應欄位，多表查詢會提供 `alias.column`，資料表位置則優先列出資料表與 View。
   - metadata：資料表、View 與實際使用到的欄位會以 provider/database 分區保存到 `autocomplete-cache.json`；啟用自動更新時會刷新物件清單及目前 statement 用到的欄位，避免開啟大型 schema 時一次查詢所有資料表。

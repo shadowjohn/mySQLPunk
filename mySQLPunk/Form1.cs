@@ -941,6 +941,8 @@ namespace mySQLPunk
 
         private readonly List<QueryHistoryEntry> _queryHistory = new List<QueryHistoryEntry>();
 
+        public static ObjectUriParseResult StartupObjectUriParseResult;
+
         private static readonly string[] DatabaseReportNames =
         {
             "Database Summary",
@@ -4757,6 +4759,11 @@ namespace mySQLPunk
 
         private TreeNode FindDatabaseObjectNode(TreeNode databaseNode, string groupName, string objectName)
         {
+            return FindDatabaseObjectNode(databaseNode, groupName, objectName, string.Empty);
+        }
+
+        private TreeNode FindDatabaseObjectNode(TreeNode databaseNode, string groupName, string objectName, string secondaryName)
+        {
             if (databaseNode == null || string.IsNullOrWhiteSpace(groupName) || string.IsNullOrWhiteSpace(objectName)) return null;
 
             foreach (TreeNode child in databaseNode.Nodes)
@@ -4765,19 +4772,35 @@ namespace mySQLPunk
                 {
                     foreach (TreeNode item in child.Nodes)
                     {
-                        if (item.Text == objectName) return item;
+                        if (TreeObjectNodeMatches(item, groupName, objectName, secondaryName)) return item;
                     }
                     continue;
                 }
 
                 if (string.Equals(GetTreeObjectGroupKey(child), groupName, StringComparison.OrdinalIgnoreCase) &&
-                    child.Text == objectName)
+                    TreeObjectNodeMatches(child, groupName, objectName, secondaryName))
                 {
                     return child;
                 }
             }
 
             return null;
+        }
+
+        private static bool TreeObjectNodeMatches(TreeNode node, string groupName, string objectName, string secondaryName)
+        {
+            if (node == null) return false;
+            TreeObjectNodeTag tag = node.Tag as TreeObjectNodeTag;
+            if (tag != null)
+            {
+                if (!string.Equals(tag.GroupKey, groupName, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(tag.ObjectName, objectName, StringComparison.OrdinalIgnoreCase)) return false;
+                return string.IsNullOrWhiteSpace(secondaryName) ||
+                       string.Equals(tag.SecondaryKey, secondaryName, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!string.IsNullOrWhiteSpace(secondaryName)) return false;
+            return string.Equals(node.Text, objectName, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsTreeGroupKey(string key)
@@ -8308,11 +8331,150 @@ namespace mySQLPunk
             myN.getSettingINI();
             drawLists();
             ArrangeMainLayout();
+            if (StartupObjectUriParseResult != null)
+            {
+                BeginInvoke(new Action(BeginNavigateStartupObjectUri));
+            }
             StartBackupIntegritySchedule();
             if (ApplicationOptionSettings.GetBool("AutoCheckUpdates"))
             {
                 BeginInvoke(new Action(() => CheckForUpdatesAsync(true)));
             }
+        }
+
+        private async void BeginNavigateStartupObjectUri()
+        {
+            ObjectUriParseResult result = StartupObjectUriParseResult;
+            StartupObjectUriParseResult = null;
+            if (result == null) return;
+            if (!result.Success)
+            {
+                ShowObjectUriNavigationError(ObjectUriService.GetValidationMessage(result));
+                return;
+            }
+
+            try
+            {
+                await NavigateToObjectUriAsync(result.Target);
+            }
+            catch (Exception ex)
+            {
+                ShowObjectUriNavigationError(Localization.Format(
+                    "ObjectUri.NavigationFailed",
+                    ExceptionMessageService.GetReason(ex)));
+            }
+        }
+
+        private async Task<bool> NavigateToObjectUriAsync(ObjectUriTarget target)
+        {
+            if (target == null) return false;
+            ClearTreeSearchForObjectUri();
+
+            List<int> connectionMatches = Enumerable.Range(0, myN.connections.Count)
+                .Where(i => string.Equals(
+                    GetConnectionValue(myN.connections[i], "conn_name"),
+                    target.ConnectionName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (connectionMatches.Count == 0)
+            {
+                ShowObjectUriNavigationError(Localization.Format("ObjectUri.ConnectionNotFound", target.ConnectionName));
+                return false;
+            }
+            if (connectionMatches.Count > 1)
+            {
+                ShowObjectUriNavigationError(Localization.Format("ObjectUri.ConnectionAmbiguous", target.ConnectionName));
+                return false;
+            }
+
+            int connectionIndex = connectionMatches[0];
+            TreeNode connectionNode = FindConnectionNode(connectionIndex);
+            if (connectionNode == null)
+            {
+                drawLists();
+                connectionNode = FindConnectionNode(connectionIndex);
+            }
+            if (connectionNode == null)
+            {
+                ShowObjectUriNavigationError(Localization.Format("ObjectUri.ConnectionNotFound", target.ConnectionName));
+                return false;
+            }
+
+            db_tree.SelectedNode = connectionNode;
+            connectionNode.EnsureVisible();
+            if (!await EnsureConnectionOpenAsync(connectionIndex, connectionNode)) return false;
+
+            TreeNode databaseNode = connectionNode.Nodes.Cast<TreeNode>()
+                .FirstOrDefault(n => string.Equals(n.Text, target.DatabaseName, StringComparison.OrdinalIgnoreCase));
+            if (databaseNode == null)
+            {
+                RefreshConnectionDatabaseNodes(connectionNode);
+                databaseNode = connectionNode.Nodes.Cast<TreeNode>()
+                    .FirstOrDefault(n => string.Equals(n.Text, target.DatabaseName, StringComparison.OrdinalIgnoreCase));
+            }
+            if (databaseNode == null)
+            {
+                ShowObjectUriNavigationError(Localization.Format(
+                    "ObjectUri.DatabaseNotFound",
+                    target.DatabaseName,
+                    target.ConnectionName));
+                return false;
+            }
+
+            db_tree.SelectedNode = databaseNode;
+            databaseNode.EnsureVisible();
+            if (string.Equals(target.ObjectKind, "database", StringComparison.OrdinalIgnoreCase))
+            {
+                UpdateMainStatus(Localization.Format("ObjectUri.DatabaseLocated", target.ConnectionName, target.DatabaseName));
+                return true;
+            }
+
+            IDatabase database = myN.connections[connectionIndex]["pdo"] as IDatabase;
+            if (database == null) return false;
+            await LoadDatabaseMetadataAsync(connectionIndex, databaseNode, database, databaseNode.Text);
+
+            string groupKey = ObjectUriService.GetGroupKey(target.ObjectKind);
+            TreeNode objectNode = FindDatabaseObjectNode(databaseNode, groupKey, target.ObjectName, target.SecondaryName);
+            if (objectNode == null)
+            {
+                ShowObjectUriNavigationError(Localization.Format(
+                    "ObjectUri.ObjectNotFound",
+                    target.ObjectName,
+                    target.DatabaseName));
+                return false;
+            }
+
+            bool alreadySelected = ReferenceEquals(db_tree.SelectedNode, objectNode);
+            db_tree.SelectedNode = objectNode;
+            objectNode.EnsureVisible();
+            if (alreadySelected) db_tree_AfterSelect(db_tree, new TreeViewEventArgs(objectNode));
+            UpdateMainStatus(Localization.Format(
+                "ObjectUri.ObjectLocated",
+                target.ConnectionName,
+                target.DatabaseName,
+                target.ObjectName));
+            return true;
+        }
+
+        private void ClearTreeSearchForObjectUri()
+        {
+            if (string.IsNullOrWhiteSpace(_treeSearchText)) return;
+            _treeSearchText = string.Empty;
+            if (treeSearchBox != null && treeSearchBox.Text.Length > 0)
+            {
+                treeSearchBox.Text = string.Empty;
+            }
+            else
+            {
+                drawLists();
+            }
+        }
+
+        private void ShowObjectUriNavigationError(string message)
+        {
+            string display = string.IsNullOrWhiteSpace(message) ? Localization.T("ObjectUri.InvalidFormat") : message;
+            UpdateMainStatus(display);
+            MessageBox.Show(display, Localization.T("ObjectUri.OpenTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         private void StartBackupIntegritySchedule()
@@ -8835,6 +8997,8 @@ namespace mySQLPunk
                 itemOpenDetails.Click += (s, ev) => ShowSelectedTreeNodeDetails();
                 cms.Items.Add(itemOpenDetails);
             }
+
+            AddCopyObjectUriMenuItem(cms, db_tree.SelectedNode);
 
             if (cms.Items.Count == 0)
             {
@@ -11964,6 +12128,8 @@ namespace mySQLPunk
                 }
             }
 
+            AddCopyObjectUriMenuItem(menu, node);
+
             if (menu.Items.Count == 0)
             {
                 menu.Dispose();
@@ -14504,9 +14670,21 @@ namespace mySQLPunk
 
         private void OpenConnectionNode(TreeNode node)
         {
+            _ = OpenConnectionNodeAsync(node);
+        }
+
+        private async Task OpenConnectionNodeAsync(TreeNode node)
+        {
             if (node == null) return;
             db_tree.SelectedNode = node;
             int connIdx = GetConnectionIndex(node);
+            await EnsureConnectionOpenAsync(connIdx, node);
+        }
+
+        private async Task<bool> EnsureConnectionOpenAsync(int connIdx, TreeNode node)
+        {
+            if (node == null || connIdx < 0 || connIdx >= myN.connections.Count) return false;
+            db_tree.SelectedNode = node;
             if (IsConnectionOpen(connIdx))
             {
                 if (node.Nodes.Count == 0)
@@ -14516,10 +14694,34 @@ namespace mySQLPunk
 
                 node.Expand();
                 UpdateMainStatus(Localization.Format("Status.ConnectionAlreadyOpen", node.Text));
-                return;
+                return true;
             }
 
-            db_tree_DoubleClick(db_tree, EventArgs.Empty);
+            node.Nodes.Clear();
+            string kind = GetConnectionValue(myN.connections[connIdx], "db_kind").ToLowerInvariant();
+            switch (kind)
+            {
+                case "postgresql":
+                    await OpenPostgreSqlConnectionAsync(connIdx, db_tree);
+                    break;
+                case "sqlite":
+                    await OpenSqliteConnectionAsync(connIdx, db_tree);
+                    break;
+                case "mysql":
+                    await OpenMySqlConnectionAsync(connIdx, db_tree);
+                    break;
+                case "oracle":
+                    await OpenOracleConnectionAsync(connIdx, db_tree);
+                    break;
+                case "mssql":
+                case "sqlserver":
+                    await OpenSqlServerConnectionAsync(connIdx, db_tree);
+                    break;
+                default:
+                    UpdateMainStatus(Localization.Format("Connection.UnsupportedEdit", kind));
+                    return false;
+            }
+            return IsConnectionOpen(connIdx);
         }
 
         private void DuplicateConnection(int index)
@@ -15335,6 +15537,75 @@ namespace mySQLPunk
             menu.Items.Add(renameItem);
         }
 
+        private void AddCopyObjectUriMenuItem(ContextMenuStrip menu, TreeNode node)
+        {
+            if (menu == null || BuildObjectUriTarget(node) == null) return;
+            if (menu.Items.Count > 0 && !(menu.Items[menu.Items.Count - 1] is ToolStripSeparator))
+            {
+                menu.Items.Add(new ToolStripSeparator());
+            }
+
+            ToolStripMenuItem uriItem = new ToolStripMenuItem(Localization.T("Tool.CopyObjectUri"));
+            uriItem.Click += (s, ev) => CopyObjectUri(node);
+            menu.Items.Add(uriItem);
+        }
+
+        private ObjectUriTarget BuildObjectUriTarget(TreeNode node)
+        {
+            if (node == null || IsConnectionGroupNode(node)) return null;
+            string[] pathParts = GetTreePathParts(node);
+            if (pathParts.Length < 2) return null;
+
+            TreeNode root = node;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int connectionIndex = GetConnectionIndex(root);
+            if (connectionIndex < 0 || connectionIndex >= myN.connections.Count) return null;
+
+            if (pathParts.Length == 2)
+            {
+                return new ObjectUriTarget
+                {
+                    ConnectionName = GetConnectionValue(myN.connections[connectionIndex], "conn_name"),
+                    DatabaseName = pathParts[1],
+                    ObjectKind = "database"
+                };
+            }
+
+            TreeObjectNodeTag objectTag = node.Tag as TreeObjectNodeTag;
+            string groupKey = objectTag == null ? (pathParts.Length >= 4 ? pathParts[2] : string.Empty) : objectTag.GroupKey;
+            string objectKind;
+            if (!ObjectUriService.TryGetObjectKind(groupKey, out objectKind)) return null;
+
+            string objectName = objectTag == null ? (pathParts.Length >= 4 ? pathParts[3] : string.Empty) : objectTag.ObjectName;
+            if (string.IsNullOrWhiteSpace(objectName)) return null;
+            return new ObjectUriTarget
+            {
+                ConnectionName = GetConnectionValue(myN.connections[connectionIndex], "conn_name"),
+                DatabaseName = pathParts[1],
+                ObjectKind = objectKind,
+                ObjectName = objectName,
+                SecondaryName = objectTag == null ? string.Empty : objectTag.SecondaryKey
+            };
+        }
+
+        private void CopyObjectUri(TreeNode node)
+        {
+            try
+            {
+                ObjectUriTarget target = BuildObjectUriTarget(node);
+                if (target == null) throw new InvalidOperationException(Localization.T("ObjectUri.NoTarget"));
+                string uri = ObjectUriService.Build(target);
+                Clipboard.SetText(uri);
+                UpdateMainStatus(Localization.Format("ObjectUri.Copied", uri));
+            }
+            catch (Exception ex)
+            {
+                string message = Localization.Format("ObjectUri.CopyFailed", ExceptionMessageService.GetReason(ex));
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Tool.CopyObjectUri"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void AddPasteObjectMenuItem(ContextMenuStrip menu)
         {
             ToolStripMenuItem pasteItem = new ToolStripMenuItem(Localization.T("Tool.PasteObject"));
@@ -15599,9 +15870,7 @@ namespace mySQLPunk
 
             foreach (string modelName in DatabaseModelNames)
             {
-                TreeNode modelNode = new TreeNode(modelName);
-                modelNode.ImageIndex = 20;
-                modelNode.SelectedImageIndex = 20;
+                TreeNode modelNode = CreateTreeObjectNode(modelName, "Models", 20);
                 newNode.Nodes.Add(modelNode);
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -15610,9 +15879,7 @@ namespace mySQLPunk
 
             foreach (string biName in DatabaseBIReportNames)
             {
-                TreeNode biNode = new TreeNode(biName);
-                biNode.ImageIndex = 21;
-                biNode.SelectedImageIndex = 21;
+                TreeNode biNode = CreateTreeObjectNode(biName, "BI", 21);
                 newNode.Nodes.Add(biNode);
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -15621,9 +15888,7 @@ namespace mySQLPunk
 
             foreach (string toolName in DatabaseOtherToolNames)
             {
-                TreeNode toolNode = new TreeNode(toolName);
-                toolNode.ImageIndex = 22;
-                toolNode.SelectedImageIndex = 22;
+                TreeNode toolNode = CreateTreeObjectNode(toolName, "Other", 22);
                 newNode.Nodes.Add(toolNode);
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -15646,9 +15911,7 @@ namespace mySQLPunk
 
             foreach (string reportName in DatabaseReportNames)
             {
-                TreeNode reportNode = new TreeNode(reportName);
-                reportNode.ImageIndex = 17;
-                reportNode.SelectedImageIndex = 17;
+                TreeNode reportNode = CreateTreeObjectNode(reportName, "Reports", 17);
                 newNode.Nodes.Add(reportNode);
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -15699,9 +15962,7 @@ namespace mySQLPunk
 
             foreach (string modelName in DatabaseModelNames)
             {
-                TreeNode modelNode = new TreeNode(modelName);
-                modelNode.ImageIndex = 20;
-                modelNode.SelectedImageIndex = 20;
+                TreeNode modelNode = CreateTreeObjectNode(modelName, "Models", 20);
                 newNode.Nodes.Add(modelNode);
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -15710,9 +15971,7 @@ namespace mySQLPunk
 
             foreach (string biName in DatabaseBIReportNames)
             {
-                TreeNode biNode = new TreeNode(biName);
-                biNode.ImageIndex = 21;
-                biNode.SelectedImageIndex = 21;
+                TreeNode biNode = CreateTreeObjectNode(biName, "BI", 21);
                 newNode.Nodes.Add(biNode);
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -15721,9 +15980,7 @@ namespace mySQLPunk
 
             foreach (string toolName in DatabaseOtherToolNames)
             {
-                TreeNode toolNode = new TreeNode(toolName);
-                toolNode.ImageIndex = 22;
-                toolNode.SelectedImageIndex = 22;
+                TreeNode toolNode = CreateTreeObjectNode(toolName, "Other", 22);
                 newNode.Nodes.Add(toolNode);
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -15743,9 +16000,7 @@ namespace mySQLPunk
 
             foreach (string reportName in DatabaseReportNames)
             {
-                TreeNode reportNode = new TreeNode(reportName);
-                reportNode.ImageIndex = 17;
-                reportNode.SelectedImageIndex = 17;
+                TreeNode reportNode = CreateTreeObjectNode(reportName, "Reports", 17);
                 newNode.Nodes.Add(reportNode);
             }
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
@@ -15844,41 +16099,8 @@ namespace mySQLPunk
                 }
                 else
                 {
-                    TreeNode connRoot = FindConnectionNode(index);
-                    if (connRoot != null) connRoot.Nodes.Clear();
-
-                    //連線，展開
-	                    switch (db["db_kind"].ToString().ToLower())
-	                    {
-	                    case "postgresql":
-	                        {
-	                            await OpenPostgreSqlConnectionAsync(index, (TreeView)sender);
-	                        }
-	                        break;
-		                    case "sqlite":
-	                        {
-	                            await OpenSqliteConnectionAsync(index, (TreeView)sender);
-	                        }
-	                        break;
-                    case "mysql":
-                        {
-                            await OpenMySqlConnectionAsync(index, (TreeView)sender);
-                        }
-                        break;
-	                    case "oracle":
-	                        {
-	                            await OpenOracleConnectionAsync(index, (TreeView)sender);
-	                        }
-	                        break;
-	                    case "mssql":
-	                    case "sqlserver":
-	                        {
-	                            await OpenSqlServerConnectionAsync(index, (TreeView)sender);
-	                        }
-	                        break;
+                    await EnsureConnectionOpenAsync(index, rootNode);
                 }
-
-            }
             }
             finally
             {

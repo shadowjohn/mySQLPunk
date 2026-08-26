@@ -30,6 +30,10 @@ namespace mySQLPunk
         private SqlCompletionMetadataStore _completionMetadataStore;
         private SqlCompletionMetadataEntry _completionMetadataEntry;
         private SqlSnippetService _snippetService;
+        private TableDataProfileStore _tableProfileStore;
+        private TableDataProfile _activeTableProfile;
+        private string _defaultTableBaseSql = string.Empty;
+        private bool _refreshingTableProfiles;
         private SqlCompletionContext _completionContext;
         private CancellationTokenSource _cts;
 
@@ -163,6 +167,10 @@ namespace mySQLPunk
         private ToolStripButton btnDataApply;
         private ToolStripButton btnDataCancel;
         private ToolStripButton btnDataRefresh;
+        private ToolStripSeparator tableProfileSeparator;
+        private ToolStripLabel lblTableProfile;
+        private ToolStripComboBox cboTableProfile;
+        private ToolStripButton btnTableProfileManage;
         
         private ToolStripLabel lblDataPagination;
         private ToolStripTextBox txtPageSize;
@@ -255,6 +263,7 @@ namespace mySQLPunk
             this.connectionHost = host ?? string.Empty;
             this._completionMetadataStore = new SqlCompletionMetadataStore(Path.Combine(Application.UserAppDataPath, "autocomplete-cache.json"));
             this._snippetService = new SqlSnippetService(Path.Combine(Application.UserAppDataPath, "sql-snippets.json"));
+            this._tableProfileStore = new TableDataProfileStore(Path.Combine(Application.UserAppDataPath, "table-data-profiles.json"));
 
             if (!string.IsNullOrWhiteSpace(this.currentDatabase) || !string.IsNullOrWhiteSpace(this.connectionHost))
             {
@@ -282,6 +291,7 @@ namespace mySQLPunk
             if (TryBuildTableDataBaseSql(initialSql, out tableDataBaseSql))
             {
                 _baseSql = tableDataBaseSql;
+                _defaultTableBaseSql = tableDataBaseSql;
                 SetTableDataMode(true);
                 ExecutePagedQuery(); // 立即載入第一頁資料
             }
@@ -313,12 +323,205 @@ namespace mySQLPunk
                 
                 _isNoPrimaryKeyReadOnlyMode = false;
                 ApplyTableDataEditability();
+                if (string.IsNullOrWhiteSpace(_defaultTableBaseSql)) _defaultTableBaseSql = _baseSql;
+                SetTableProfileControlsVisible(ApplicationOptionSettings.GetBool("RememberTableSettings"));
+                ReloadTableProfileSelection();
 
             }
             else
             {
                 _isNoPrimaryKeyReadOnlyMode = false;
                 if (split != null) split.Panel1Collapsed = false;
+                SetTableProfileControlsVisible(false);
+            }
+        }
+
+        private void SetTableProfileControlsVisible(bool visible)
+        {
+            if (tableProfileSeparator != null) tableProfileSeparator.Visible = visible;
+            if (lblTableProfile != null) lblTableProfile.Visible = visible;
+            if (cboTableProfile != null) cboTableProfile.Visible = visible;
+            if (btnTableProfileManage != null) btnTableProfileManage.Visible = visible;
+        }
+
+        private void ReloadTableProfileSelection()
+        {
+            if (!_isTableDataMode || _tableProfileStore == null || cboTableProfile == null) return;
+            string tableName = GetTableNameFromSql();
+            if (string.IsNullOrWhiteSpace(tableName) || tableName == "Table") return;
+
+            List<TableDataProfile> profiles = _tableProfileStore.GetProfiles(GetProviderName(), _databaseName, tableName);
+            TableDataProfile active = _tableProfileStore.GetActiveProfile(GetProviderName(), _databaseName, tableName);
+            _refreshingTableProfiles = true;
+            try
+            {
+                cboTableProfile.Items.Clear();
+                int selectedIndex = cboTableProfile.Items.Add(new TableProfileComboItem(null));
+                foreach (TableDataProfile profile in profiles)
+                {
+                    int index = cboTableProfile.Items.Add(new TableProfileComboItem(profile));
+                    if (active != null && string.Equals(profile.Id, active.Id, StringComparison.OrdinalIgnoreCase)) selectedIndex = index;
+                }
+                cboTableProfile.SelectedIndex = selectedIndex;
+                _activeTableProfile = active;
+                try
+                {
+                    ApplyActiveTableProfileSql();
+                }
+                catch
+                {
+                    _activeTableProfile = null;
+                    cboTableProfile.SelectedIndex = 0;
+                    ApplyActiveTableProfileSql();
+                }
+            }
+            finally
+            {
+                _refreshingTableProfiles = false;
+            }
+        }
+
+        private void ApplySelectedTableProfile()
+        {
+            if (_refreshingTableProfiles || !_isTableDataMode || _tableProfileStore == null) return;
+            if (_isQueryBusy)
+            {
+                ReloadTableProfileSelection();
+                return;
+            }
+            if (HasUnsavedChanges())
+            {
+                MessageBox.Show(this, Localization.T("TableProfile.SaveChangesFirst"), Localization.T("TableProfile.ErrorTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ReloadTableProfileSelection();
+                return;
+            }
+
+            TableProfileComboItem item = cboTableProfile == null ? null : cboTableProfile.SelectedItem as TableProfileComboItem;
+            string tableName = GetTableNameFromSql();
+            if (string.IsNullOrWhiteSpace(tableName) || tableName == "Table") return;
+            try
+            {
+                _activeTableProfile = item == null || item.Profile == null ? null : item.Profile.Clone();
+                _tableProfileStore.SetActive(
+                    GetProviderName(),
+                    _databaseName,
+                    tableName,
+                    _activeTableProfile == null ? string.Empty : _activeTableProfile.Id);
+                ApplyActiveTableProfileSql();
+                _currentPage = 1;
+                ExecutePagedQuery();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, Localization.T("TableProfile.ErrorTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ReloadTableProfileSelection();
+            }
+        }
+
+        private void ApplyActiveTableProfileSql()
+        {
+            if (!_isTableDataMode || txtSql == null) return;
+            if (_activeTableProfile == null)
+            {
+                _baseSql = _defaultTableBaseSql;
+            }
+            else
+            {
+                string tableName = GetTableNameFromSql();
+                List<string> columns = GetTableColumns(tableName).Select(column => column.Name).ToList();
+                _activeTableProfile = TableDataProfileStore.NormalizeForColumns(_activeTableProfile, columns);
+                _baseSql = TableDataProfileSqlBuilder.BuildBaseSql(
+                    GetProviderName(),
+                    GetQualifiedTableName(tableName),
+                    _activeTableProfile,
+                    columns);
+            }
+
+            txtSql.Text = _baseSql;
+            txtSql.SelectionStart = txtSql.TextLength;
+            txtSql.SelectionLength = 0;
+        }
+
+        private void ShowTableProfileManager()
+        {
+            if (!_isTableDataMode || _tableProfileStore == null || _isQueryBusy) return;
+            if (HasUnsavedChanges())
+            {
+                MessageBox.Show(this, Localization.T("TableProfile.SaveChangesFirst"), Localization.T("TableProfile.ErrorTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string tableName = GetTableNameFromSql();
+            if (string.IsNullOrWhiteSpace(tableName) || tableName == "Table") return;
+            string originalProfileId = _activeTableProfile == null ? string.Empty : (_activeTableProfile.Id ?? string.Empty);
+            List<string> columns;
+            try
+            {
+                columns = GetTableColumns(tableName).Select(column => column.Name).ToList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, Localization.T("TableProfile.ErrorTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            DialogResult result;
+            string selectedProfileId;
+            using (TableDataProfileManagerForm dialog = new TableDataProfileManagerForm(
+                _tableProfileStore,
+                GetProviderName(),
+                _databaseName,
+                tableName,
+                columns,
+                _activeTableProfile == null ? null : _activeTableProfile.Id))
+            {
+                result = dialog.ShowDialog(this);
+                selectedProfileId = dialog.SelectedProfileId;
+            }
+
+            if (result == DialogResult.OK)
+            {
+                _tableProfileStore.SetActive(GetProviderName(), _databaseName, tableName, selectedProfileId ?? string.Empty);
+            }
+
+            ReloadTableProfileSelection();
+            string reloadedProfileId = _activeTableProfile == null ? string.Empty : (_activeTableProfile.Id ?? string.Empty);
+            if (result == DialogResult.OK || !string.Equals(originalProfileId, reloadedProfileId, StringComparison.OrdinalIgnoreCase))
+            {
+                _currentPage = 1;
+                ExecutePagedQuery();
+            }
+        }
+
+        private void ApplyTableProfileColumnVisibility()
+        {
+            if (!_isTableDataMode || _activeTableProfile == null || dgvResults == null) return;
+            HashSet<string> visible = new HashSet<string>(_activeTableProfile.VisibleColumns ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            if (visible.Count == 0) return;
+            foreach (DataGridViewColumn column in dgvResults.Columns)
+            {
+                string name = string.IsNullOrWhiteSpace(column.DataPropertyName) ? column.Name : column.DataPropertyName;
+                column.Visible = visible.Contains(name);
+            }
+        }
+
+        private string GetProviderName()
+        {
+            return _db == null ? string.Empty : (_db.ProviderName ?? string.Empty);
+        }
+
+        private sealed class TableProfileComboItem
+        {
+            public TableDataProfile Profile { get; private set; }
+
+            public TableProfileComboItem(TableDataProfile profile)
+            {
+                Profile = profile;
+            }
+
+            public override string ToString()
+            {
+                return Profile == null ? Localization.T("TableProfile.Default") : (Profile.Name ?? string.Empty);
             }
         }
 
@@ -338,17 +541,9 @@ namespace mySQLPunk
             return "Table";
         }
 
-        private static string ExtractTableNameFromSql(string sql)
+        private string ExtractTableNameFromSql(string sql)
         {
-            if (string.IsNullOrEmpty(sql)) return "";
-            string pattern = @"FROM\s+([`\[\]\w\.\x22]+)";
-            Match match = Regex.Match(sql, pattern, RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                string path = match.Groups[1].Value.Replace("`", "").Replace("\"", "").Replace("[", "").Replace("]", "");
-                return path.Contains(".") ? path.Split('.').Last() : path;
-            }
-            return "";
+            return TableDataProfileSqlBuilder.ExtractTableName(GetProviderName(), sql);
         }
 
         private static bool TryBuildTableDataBaseSql(string sql, out string baseSql)
@@ -459,6 +654,21 @@ namespace mySQLPunk
             btnDataCancel = new ToolStripButton("X", null, (s, e) => ExecutePagedQuery()) { ForeColor = Color.Red, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
             btnDataRefresh = new ToolStripButton("↻", null, (s, e) => ExecutePagedQuery()) { Font = new Font("Segoe UI", 12, FontStyle.Bold) };
             btnPinResult = new ToolStripButton("📌", null, (s, e) => PinCurrentResult()) { Font = new Font("Segoe UI", 10, FontStyle.Regular) };
+            tableProfileSeparator = new ToolStripSeparator { Visible = false };
+            lblTableProfile = new ToolStripLabel(Localization.T("TableProfile.ToolbarLabel")) { Visible = false, Margin = new Padding(10, 0, 2, 0) };
+            cboTableProfile = new ToolStripComboBox
+            {
+                AutoSize = false,
+                Width = 150,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Visible = false
+            };
+            cboTableProfile.SelectedIndexChanged += (s, e) => ApplySelectedTableProfile();
+            btnTableProfileManage = new ToolStripButton(Localization.T("TableProfile.Manage"), null, (s, e) => ShowTableProfileManager())
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.Image,
+                Visible = false
+            };
 
             ToolStripLabel lblLimit = new ToolStripLabel(Localization.T("Query.Limit")) { Margin = new Padding(10, 0, 0, 0) };
             txtPageSize = new ToolStripTextBox { Text = _pageSize.ToString(), Width = 50, TextBoxTextAlign = HorizontalAlignment.Center };
@@ -482,6 +692,7 @@ namespace mySQLPunk
 
             dataToolStrip.Items.AddRange(new ToolStripItem[] {
                 btnDataAdd, btnDataDelete, btnDataApply, btnDataCancel, btnDataRefresh, btnPinResult,
+                tableProfileSeparator, lblTableProfile, cboTableProfile, btnTableProfileManage,
                 lblLimit, txtPageSize, lblRecords,
                 btnDataLast, btnDataNext, lblDataPagination, btnDataPrev, btnDataFirst
             });
@@ -1976,7 +2187,28 @@ namespace mySQLPunk
         private TablePageLoadResult LoadTablePage(string tableName, int requestedOffset, int pageSize, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            long totalRows = _db.CountRows(_databaseName, tableName);
+            long totalRows;
+            List<TableColumnInfo> profileColumns = null;
+            string qualifiedTable = null;
+            TableDataProfile profile = _activeTableProfile == null ? null : _activeTableProfile.Clone();
+            if (profile == null)
+            {
+                totalRows = _db.CountRows(_databaseName, tableName);
+            }
+            else
+            {
+                profileColumns = GetTableColumns(tableName);
+                qualifiedTable = GetQualifiedTableName(tableName);
+                DataTable countResult = _db.SelectSQL(TableDataProfileSqlBuilder.BuildCountSql(GetProviderName(), qualifiedTable, profile));
+                string countError = GetQueryError(countResult);
+                if (!string.IsNullOrWhiteSpace(countError))
+                {
+                    return new TablePageLoadResult { ErrorMessage = countError };
+                }
+                totalRows = countResult != null && countResult.Rows.Count > 0
+                    ? Convert.ToInt64(countResult.Rows[0][0])
+                    : 0;
+            }
             token.ThrowIfCancellationRequested();
 
             int totalPages = totalRows <= 0 ? 1 : (int)Math.Ceiling((double)totalRows / pageSize);
@@ -1985,7 +2217,25 @@ namespace mySQLPunk
             if (page > totalPages) page = totalPages;
 
             int offset = (page - 1) * pageSize;
-            DataTable rows = _db.SelectTablePage(_databaseName, tableName, offset, pageSize);
+            DataTable rows;
+            if (profile == null)
+            {
+                rows = _db.SelectTablePage(_databaseName, tableName, offset, pageSize);
+            }
+            else
+            {
+                List<string> columns = profileColumns.Select(column => column.Name).ToList();
+                List<string> primaryKeys = profileColumns.Where(column => column.IsPrimaryKey).Select(column => column.Name).ToList();
+                string pageSql = TableDataProfileSqlBuilder.BuildPageSql(
+                    GetProviderName(),
+                    qualifiedTable,
+                    profile,
+                    columns,
+                    primaryKeys,
+                    offset,
+                    pageSize);
+                rows = _db.SelectSQL(pageSql);
+            }
             string errorMessage = GetQueryError(rows);
             return new TablePageLoadResult
             {
@@ -2014,6 +2264,8 @@ namespace mySQLPunk
             if (btnDataNext != null) btnDataNext.Enabled = enabled;
             if (btnDataLast != null) btnDataLast.Enabled = enabled;
             if (txtPageSize != null) txtPageSize.Enabled = enabled;
+            if (cboTableProfile != null) cboTableProfile.Enabled = enabled;
+            if (btnTableProfileManage != null) btnTableProfileManage.Enabled = enabled;
         }
 
         private int GetTotalPages()
@@ -2444,6 +2696,9 @@ namespace mySQLPunk
             if (tsBtnExport != null) tsBtnExport.Text = Localization.T("Query.Export");
             if (tsBtnFloat != null) tsBtnFloat.Text = Localization.T("Query.Float");
             if (tsBtnDock != null) tsBtnDock.Text = Localization.T("Query.Dock");
+            if (lblTableProfile != null) lblTableProfile.Text = Localization.T("TableProfile.ToolbarLabel");
+            if (btnTableProfileManage != null) btnTableProfileManage.Text = Localization.T("TableProfile.Manage");
+            if (cboTableProfile != null) cboTableProfile.Invalidate();
             if (tabResults != null && tabResults.TabPages.Count > 0) tabResults.TabPages[0].Text = Localization.T("Query.Results");
             if (queryPlanTab != null) queryPlanTab.Text = Localization.T("Query.ExecutionPlan");
             if (queryPlanView != null) queryPlanView.ApplyLanguage();
@@ -2482,6 +2737,7 @@ namespace mySQLPunk
             SetIconOnlyGlyph(btnDataApply, UiGlyph.Check, ThemeManager.SuccessColor);
             SetIconOnlyGlyph(btnDataCancel, UiGlyph.Close, ThemeManager.DangerColor);
             SetIconOnlyGlyph(btnDataRefresh, UiGlyph.Refresh, Color.Empty);
+            SetIconOnlyGlyph(btnTableProfileManage, UiGlyph.Settings, Color.Empty);
             SetIconOnlyGlyph(btnDataFirst, UiGlyph.PageFirst, Color.Empty);
             SetIconOnlyGlyph(btnDataPrev, UiGlyph.ChevronLeft, Color.Empty);
             SetIconOnlyGlyph(btnDataNext, UiGlyph.ChevronRight, Color.Empty);
@@ -2508,6 +2764,7 @@ namespace mySQLPunk
             ApplyToolStripTooltip(btnDataCancel, Localization.T("Query.DataCancelTooltip"));
             ApplyToolStripTooltip(btnDataRefresh, Localization.T("Query.DataRefreshTooltip"));
             ApplyToolStripTooltip(btnPinResult, Localization.T("Query.PinResultTooltip"));
+            ApplyToolStripTooltip(btnTableProfileManage, Localization.T("TableProfile.ManageTooltip"));
             ApplyToolStripTooltip(btnDataFirst, Localization.T("Query.DataFirstPageTooltip"));
             ApplyToolStripTooltip(btnDataPrev, Localization.T("Query.DataPreviousPageTooltip"));
             ApplyToolStripTooltip(btnDataNext, Localization.T("Query.DataNextPageTooltip"));
@@ -3316,6 +3573,7 @@ namespace mySQLPunk
         private void DgvResults_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
         {
             ConfigureBinaryResultColumns();
+            ApplyTableProfileColumnVisibility();
             ApplyConfiguredResultGridAppearance(dgvResults, dgvResults.DefaultCellStyle.Font);
         }
 
@@ -4149,7 +4407,13 @@ namespace mySQLPunk
                 string name = GetMetadataValue(row, "Name", "NAME", "name", "COLUMN_NAME", "column_name");
                 if (!string.IsNullOrWhiteSpace(name))
                 {
-                    columns.Add(new TableColumnInfo { Name = name });
+                    string columnKey = GetMetadataValue(row, "ColumnKey", "COLUMNKEY", "column_key", "Key", "KEY");
+                    columns.Add(new TableColumnInfo
+                    {
+                        Name = name,
+                        IsPrimaryKey = columnKey.Equals("PRI", StringComparison.OrdinalIgnoreCase) ||
+                                       columnKey.IndexOf("PRIMARY", StringComparison.OrdinalIgnoreCase) >= 0
+                    });
                 }
             }
 

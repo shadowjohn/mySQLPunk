@@ -20,8 +20,8 @@
 | 資料分析：型別、格式、分佈、統計與互動探索 | 🆕 | 資料表右鍵「資料分析」；五種既有 provider 共用，含抽樣／全表、NULL、相異值、極值、平均、Top 10 比例與值鑽取查詢。待補格式異常偵測與更多圖表。 |
 | Query Explain：視覺／JSON／文字／統計計畫與高成本標示 | 🟡 | MySQL／MariaDB、PostgreSQL 的唯讀 JSON 計畫、樹狀節點、屬性、文字計畫與高成本標示已完成；待補 SQL Server／Oracle／SQLite 原生計畫。 |
 | 釘選查詢結果（SQL、耗時、不可變快照） | ✅ | 結果快照分頁可比較並可中鍵／右鍵關閉。 |
-| Table Profile：多組篩選／排序／欄顯示設定 | 🟡 | 已能記住單一資料表設定；待補具名多組設定與快速切換。 |
-| 物件 URI 分享與直接定位 | 🟡 | 已註冊 `mysqlpunk://`；待補「複製物件 URI」、參數驗證與啟動後定位物件。 |
+| Table Profile：多組篩選／排序／欄顯示設定 | ✅ | 每張資料表可保存多組具名設定，從資料工具列快速切換；篩選、排序、欄顯示與目前選擇會寫入本機 JSON，五種既有 provider 都會使用對應分頁語法。 |
+| 物件 URI 分享與直接定位 | ✅ | database 與支援物件可複製 `mysqlpunk://object` URI；啟動時會嚴格驗證參數、沿用目前設定檔的同名連線、載入 metadata 並定位物件，URI 不包含主機或帳密。 |
 | 連線精靈、進階篩選／搜尋、URI 連線 | 🟡 | 已有連線精靈、引擎搜尋、名稱／群組即時搜尋；待補連線 URI 匯入。 |
 | 集中管理多連線、批次操作、星號、顏色、群組 | 🟡 | 已有多設定檔、多層群組、拖曳與連線顏色；待補星號與批次屬性操作。 |
 | BI 圖表互連 | 📋 | 現有 BI 只有物件分佈／列數排名資料表；需新增儀表板與同來源聯動篩選。 |
@@ -79,10 +79,8 @@
 
 ## 接續順序
 
-1. 資料表設定檔（多組具名篩選／排序／欄顯示）。
-2. 物件 URI 複製、啟動解析與定位。
-3. SQL Server／Oracle／SQLite 原生執行計畫。
-4. 唯讀 ER 圖與兩庫結構差異報告，建立模型／同步共用底層。
-5. Windows 自動執行＋查詢／匯出／備份作業與記錄。
-6. SSH tunnel＋SSL/TLS 選項 UI。
-7. 依序擴充 MongoDB、Redis／Garnet、Snowflake，再接專用編輯器、BI、pipeline、schema analyzer 與 Pub/Sub。
+1. SQL Server／Oracle／SQLite 原生執行計畫。
+2. 唯讀 ER 圖與兩庫結構差異報告，建立模型／同步共用底層。
+3. Windows 自動執行＋查詢／匯出／備份作業與記錄。
+4. SSH tunnel＋SSL/TLS 選項 UI。
+5. 依序擴充 MongoDB、Redis／Garnet、Snowflake，再接專用編輯器、BI、pipeline、schema analyzer 與 Pub/Sub。

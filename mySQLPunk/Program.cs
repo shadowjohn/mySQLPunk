@@ -29,6 +29,14 @@ namespace mySQLPunk
                 return cliResult.ExitCode;
             }
 
+            // URL 協定只傳遞連線顯示名稱、database 與物件名稱；參數先嚴格解析，
+            // 真正的連線仍由主視窗使用既有設定開啟，不把帳號密碼交給外部 CLI 或 URI。
+            if (args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]) &&
+                args[0].TrimStart().StartsWith(ObjectUriService.Scheme + ":", StringComparison.OrdinalIgnoreCase))
+            {
+                Form1.StartupObjectUriParseResult = ObjectUriService.Parse(args[0]);
+            }
+
             // 檔案關聯（開啟方式 .sql）啟動時把檔案留給主視窗，等有連線後開進查詢分頁
             if (args.Length > 0 && File.Exists(args[0]) &&
                 string.Equals(Path.GetExtension(args[0]), ".sql", StringComparison.OrdinalIgnoreCase))
@@ -42,7 +50,7 @@ namespace mySQLPunk
             bool allowMultipleInstances = true;
             try { allowMultipleInstances = ApplicationOptionSettings.GetBool("AdvancedAllowMultipleInstances"); }
             catch { }
-            if (!allowMultipleInstances && Form1.StartupSqlFilePath == null)
+            if (!allowMultipleInstances && Form1.StartupSqlFilePath == null && Form1.StartupObjectUriParseResult == null)
             {
                 bool createdNew;
                 instanceMutex = new System.Threading.Mutex(true, @"Local\mySQLPunk_SingleInstance", out createdNew);

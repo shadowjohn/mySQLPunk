@@ -53,6 +53,7 @@ public static class SmokeTests
         Run("Diagnostic log service", TestDiagnosticLogService, ref passed);
         Run("Data view filter service", TestDataViewFilterService, ref passed);
         Run("Data view sort service", TestDataViewSortService, ref passed);
+        Run("Named table data profiles", TestTableDataProfiles, ref passed);
         Run("Data profiling service", TestDataProfilingService, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
@@ -65,6 +66,7 @@ public static class SmokeTests
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("AI CLI process integration", TestAiCliProcessIntegration, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
+        Run("Object URI service", TestObjectUriService, ref passed);
         Run("Application about message", TestApplicationAboutMessage, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
@@ -7605,6 +7607,113 @@ public static class SmokeTests
         }
     }
 
+    private static void TestObjectUriService()
+    {
+        ObjectUriTarget tableTarget = new ObjectUriTarget
+        {
+            ConnectionName = "開發 & 共用",
+            DatabaseName = "sales/2026",
+            ObjectKind = "TABLE",
+            ObjectName = "Order #1"
+        };
+        string tableUri = ObjectUriService.Build(tableTarget);
+        AssertContains(tableUri, "mysqlpunk://object?connection=", "Object URI should use the registered endpoint.");
+        AssertContains(tableUri, "%26", "Object URI should escape reserved characters in connection names.");
+        AssertContains(tableUri, "%2F", "Object URI should escape slashes in database names.");
+        AssertContains(tableUri, "%23", "Object URI should escape fragment characters in object names.");
+        Assert(tableUri.IndexOf("password", StringComparison.OrdinalIgnoreCase) < 0, "Object URI must not contain database credentials.");
+
+        ObjectUriParseResult parsedTable = ObjectUriService.Parse(tableUri);
+        Assert(parsedTable.Success, "A generated table URI should parse successfully.");
+        AssertEquals("開發 & 共用", parsedTable.Target.ConnectionName, "Object URI should round-trip the connection display name.");
+        AssertEquals("sales/2026", parsedTable.Target.DatabaseName, "Object URI should round-trip the database name.");
+        AssertEquals("table", parsedTable.Target.ObjectKind, "Object URI should normalize object kinds.");
+        AssertEquals("Order #1", parsedTable.Target.ObjectName, "Object URI should round-trip the object name.");
+
+        string databaseUri = ObjectUriService.Build(new ObjectUriTarget
+        {
+            ConnectionName = "Local SQLite",
+            DatabaseName = "main",
+            ObjectKind = "database"
+        });
+        ObjectUriParseResult parsedDatabase = ObjectUriService.Parse(databaseUri);
+        Assert(parsedDatabase.Success, "Database-level object URIs should be supported.");
+        AssertEquals("database", parsedDatabase.Target.ObjectKind, "Database URI should retain its type.");
+        AssertEquals(string.Empty, parsedDatabase.Target.ObjectName, "Database URI should not invent an object name.");
+
+        string userUri = ObjectUriService.Build(new ObjectUriTarget
+        {
+            ConnectionName = "Admin",
+            DatabaseName = "mysql",
+            ObjectKind = "user",
+            ObjectName = "reader",
+            SecondaryName = "%"
+        });
+        ObjectUriParseResult parsedUser = ObjectUriService.Parse(userUri);
+        Assert(parsedUser.Success, "User URIs should preserve the host as a secondary key.");
+        AssertEquals("%", parsedUser.Target.SecondaryName, "User URI should round-trip the host key.");
+
+        AssertEquals("Tables", ObjectUriService.GetGroupKey("table"), "Table URI type should map to the tree group key.");
+        string reportKind;
+        Assert(ObjectUriService.TryGetObjectKind("Reports", out reportKind), "Tree report group should be shareable.");
+        AssertEquals("report", reportKind, "Tree report group should map to its canonical URI type.");
+
+        string[] invalidUris =
+        {
+            "https://object?connection=A&database=B&type=table&name=C",
+            "mysqlpunk://other?connection=A&database=B&type=table&name=C",
+            "mysqlpunk://user:secret@object?connection=A&database=B&type=table&name=C",
+            "mysqlpunk://object?connection=A&database=B&type=table&name=C#fragment",
+            "mysqlpunk://object?connection=A&database=B&type=table&name=C&name=D",
+            "mysqlpunk://object?connection=A&database=B&type=table&name=C&unknown=D",
+            "mysqlpunk://object?connection=A&database=B&type=table",
+            "mysqlpunk://object?connection=A&database=B&type=procedure&name=C",
+            "mysqlpunk://object?connection=A&database=B&type=table&name=%ZZ"
+        };
+        foreach (string invalidUri in invalidUris)
+        {
+            Assert(!ObjectUriService.Parse(invalidUri).Success, "Invalid object URI should fail closed: " + invalidUri);
+        }
+        AssertThrows<ArgumentException>(
+            () => ObjectUriService.Build(new ObjectUriTarget
+            {
+                ConnectionName = new string('x', ObjectUriService.MaxValueLength + 1),
+                DatabaseName = "B",
+                ObjectKind = "table",
+                ObjectName = "C"
+            }),
+            "Object URI builders should reject oversized target values.");
+        Assert(!ObjectUriService.Parse(new string('x', ObjectUriService.MaxUriLength + 1)).Success,
+            "Object URI parsers should reject oversized input before URI normalization.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertContains(
+                ObjectUriService.GetValidationMessage(ObjectUriService.Parse("mysqlpunk://object?database=B&type=table&name=C")),
+                "connection",
+                "Object URI validation should identify missing parameters in Traditional Chinese.");
+            Localization.SetLanguage(Localization.English, false);
+            AssertContains(
+                ObjectUriService.GetValidationMessage(ObjectUriService.Parse("mysqlpunk://other")),
+                "endpoint",
+                "Object URI validation should explain invalid endpoints in English.");
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
+
+        string root = FindRepositoryRootForTest();
+        string programSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Program.cs"), Encoding.UTF8);
+        string formSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
+        AssertContains(programSource, "ObjectUriService.Parse(args[0])", "Application startup should parse registered object URIs.");
+        AssertContains(formSource, "NavigateToObjectUriAsync", "Main form should locate URI targets after startup.");
+        AssertContains(formSource, "EnsureConnectionOpenAsync", "URI navigation should reuse the application's existing connection flow.");
+        AssertContains(formSource, "Tool.CopyObjectUri", "Tree context menus should expose the copy URI action.");
+    }
+
     private static void TestApplicationUpdateCheckService()
     {
         string releaseJson = @"{
@@ -8363,6 +8472,120 @@ public static class SmokeTests
         AssertEquals("logs", table.DefaultView[0]["名稱"].ToString(), "Descending object list sort should put the largest value first.");
 
         AssertEquals("", DataViewSortService.BuildSortExpression(table, "不存在", true), "Missing sort column should clear sort expression safely.");
+    }
+
+    private static void TestTableDataProfiles()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk-table-profile-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(tempDirectory, "table-data-profiles.json");
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            TableDataProfileStore store = new TableDataProfileStore(path);
+            string[] columns = { "id", "status", "created at" };
+            AssertEquals("orders", TableDataProfileSqlBuilder.ExtractTableName("mysql", "SELECT * FROM `sales`.`orders`;"), "MySQL table-profile keys should omit the already-known database name.");
+            AssertEquals("audit.orders", TableDataProfileSqlBuilder.ExtractTableName("postgresql", "SELECT * FROM \"audit\".\"orders\";"), "PostgreSQL table-profile keys should preserve the schema name.");
+            AssertEquals("archive.orders", TableDataProfileSqlBuilder.ExtractTableName("mssql", "SELECT * FROM [sales].[archive].[orders];"), "SQL Server table-profile keys should preserve the schema and omit the database prefix.");
+            TableDataProfile saved = store.Save(
+                "mysql",
+                "sales",
+                "orders",
+                new TableDataProfile
+                {
+                    Name = "待處理",
+                    FilterExpression = "WHERE status = 'pending'",
+                    SortColumn = "created at",
+                    SortDescending = true,
+                    VisibleColumns = new List<string> { "id", "status" }
+                },
+                columns);
+
+            Assert(!string.IsNullOrWhiteSpace(saved.Id), "Saved table profiles should receive a stable id.");
+            AssertEquals("status = 'pending'", saved.FilterExpression, "Table profile filters should normalize an optional WHERE prefix.");
+            AssertEquals("2", store.GetProfiles("MYSQL", "sales", "orders").Single().VisibleColumns.Count.ToString(), "Table profiles should persist visible columns case-insensitively.");
+            Assert(store.GetActiveProfile("mysql", "sales", "orders") == null, "Saving a profile should not silently switch the active table view.");
+
+            store.SetActive("mysql", "sales", "orders", saved.Id);
+            AssertEquals(saved.Id, store.GetActiveProfile("mysql", "sales", "orders").Id, "Table profile active selection should round-trip.");
+
+            string baseSql = TableDataProfileSqlBuilder.BuildBaseSql("mysql", "`sales`.`orders`", saved, columns);
+            AssertContains(baseSql, "WHERE status = 'pending'", "Table profile base SQL should apply the saved filter.");
+            AssertContains(baseSql, "ORDER BY `created at` DESC", "MySQL table profile SQL should quote the saved sort column.");
+            string mysqlPage = TableDataProfileSqlBuilder.BuildPageSql("mysql", "`sales`.`orders`", saved, columns, new[] { "id" }, 20, 10);
+            AssertContains(mysqlPage, "ORDER BY `created at` DESC, `id` ASC", "Profile sorting should append the primary key as a stable paging tie-breaker.");
+            AssertContains(mysqlPage, "LIMIT 10 OFFSET 20", "MySQL table profiles should use LIMIT/OFFSET paging.");
+            string postgresPage = TableDataProfileSqlBuilder.BuildPageSql("postgresql", "\"public\".\"orders\"", saved, columns, new[] { "id" }, 10, 10);
+            AssertContains(postgresPage, "ORDER BY \"created at\" DESC, \"id\" ASC LIMIT 10 OFFSET 10", "PostgreSQL table profiles should quote columns and use LIMIT/OFFSET paging.");
+            string sqlitePage = TableDataProfileSqlBuilder.BuildPageSql("sqlite", "\"orders\"", saved, columns, new[] { "id" }, 5, 5);
+            AssertContains(sqlitePage, "ORDER BY \"created at\" DESC, \"id\" ASC LIMIT 5 OFFSET 5", "SQLite table profiles should quote columns and use LIMIT/OFFSET paging.");
+            string sqlServerPage = TableDataProfileSqlBuilder.BuildPageSql(
+                "mssql",
+                "[sales].[dbo].[orders]",
+                new TableDataProfile { Name = "default", VisibleColumns = new List<string> { "id" } },
+                columns,
+                new[] { "id" },
+                40,
+                20);
+            AssertContains(sqlServerPage, "ORDER BY [id] ASC OFFSET 40 ROWS FETCH NEXT 20 ROWS ONLY", "SQL Server table profiles should retain deterministic primary-key paging.");
+            string oraclePage = TableDataProfileSqlBuilder.BuildPageSql("oracle", "\"SALES\".\"ORDERS\"", saved, columns, new[] { "id" }, 0, 25);
+            AssertContains(oraclePage, "ORDER BY \"created at\" DESC, \"id\" ASC OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY", "Oracle table profiles should use quoted identifiers and OFFSET/FETCH.");
+            Assert(!oraclePage.EndsWith(";", StringComparison.Ordinal), "Oracle table-profile paging SQL should omit the unsupported trailing semicolon.");
+            string oracleCount = TableDataProfileSqlBuilder.BuildCountSql("oracle", "\"SALES\".\"ORDERS\"", saved);
+            Assert(!oracleCount.EndsWith(";", StringComparison.Ordinal), "Oracle table-profile count SQL should omit the unsupported trailing semicolon.");
+
+            using (my_sqlite sqlite = new my_sqlite())
+            {
+                sqlite.SetConn("Data Source=:memory:;Version=3;New=True;");
+                sqlite.Open();
+                sqlite.ExecSQL("CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT, \"created at\" INTEGER);");
+                sqlite.ExecSQL("INSERT INTO orders VALUES (1, 'closed', 30), (2, 'pending', 20), (3, 'pending', 20), (4, 'pending', 10);");
+                DataTable liveCount = sqlite.SelectSQL(TableDataProfileSqlBuilder.BuildCountSql("sqlite", "\"orders\"", saved));
+                AssertEquals("3", Convert.ToString(liveCount.Rows[0][0]), "SQLite should execute a saved table-profile count query against live data.");
+                DataTable livePage = sqlite.SelectSQL(TableDataProfileSqlBuilder.BuildPageSql("sqlite", "\"orders\"", saved, columns, new[] { "id" }, 0, 2));
+                AssertEquals("2", livePage.Rows.Count.ToString(), "SQLite should execute table-profile paging against live data.");
+                AssertEquals("2", Convert.ToString(livePage.Rows[0]["id"]), "Profile sorting should return the first pending row by descending timestamp and primary-key tie-breaker.");
+                AssertEquals("3", Convert.ToString(livePage.Rows[1]["id"]), "Profile sorting should keep equal sort values deterministic by primary key.");
+            }
+
+            AssertEquals("note = 'semi;colon'", TableDataProfileStore.NormalizeFilterExpression("note = 'semi;colon'"), "Semicolons inside filter string literals should remain valid.");
+            AssertEquals("status = 1", TableDataProfileStore.NormalizeFilterExpression("WHERE\r\nstatus = 1"), "Table profile filters should normalize a WHERE prefix across line breaks.");
+            AssertThrows<InvalidOperationException>(
+                () => TableDataProfileStore.NormalizeFilterExpression("status = 1; DELETE FROM orders"),
+                "Table profiles must reject multiple SQL statements.");
+            AssertThrows<InvalidOperationException>(
+                () => TableDataProfileStore.NormalizeFilterExpression("status = 1 ORDER BY id"),
+                "Table profiles must reject a top-level ORDER BY inside the filter field.");
+            AssertThrows<InvalidOperationException>(
+                () => TableDataProfileStore.NormalizeFilterExpression("status = 1 # ignored by MySQL"),
+                "Table profiles must reject MySQL line comments.");
+            AssertThrows<InvalidOperationException>(
+                () => store.Save("mysql", "sales", "orders", new TableDataProfile
+                {
+                    Name = "待處理",
+                    VisibleColumns = new List<string> { "id" }
+                }, columns),
+                "Duplicate table profile names should be rejected.");
+
+            using (TableDataProfileManagerForm manager = new TableDataProfileManagerForm(
+                store,
+                "mysql",
+                "sales",
+                "orders",
+                columns,
+                saved.Id))
+            {
+                manager.CreateControl();
+                AssertContains(manager.Text, "orders", "Table profile manager titles should identify the table.");
+            }
+
+            store.Delete("mysql", "sales", "orders", saved.Id);
+            AssertEquals("0", store.GetProfiles("mysql", "sales", "orders").Count.ToString(), "Deleting the last table profile should remove the table entry.");
+            Assert(store.GetActiveProfile("mysql", "sales", "orders") == null, "Deleting an active profile should clear the active selection.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+        }
     }
 
     private static void TestDataProfilingService()
