@@ -1,10 +1,26 @@
 # mySQLPunk
 
-> 資料庫管理 Punky / Universal Database Workbench
+[![Auto Release Gate](https://github.com/shadowjohn/mySQLPunk/actions/workflows/auto-release.yml/badge.svg)](https://github.com/shadowjohn/mySQLPunk/actions/workflows/auto-release.yml)
+[![Latest release](https://img.shields.io/github/v/release/shadowjohn/mySQLPunk?display_name=tag)](https://github.com/shadowjohn/mySQLPunk/releases/latest)
+[![License](https://img.shields.io/github/license/shadowjohn/mySQLPunk)](LICENSE)
 
-mySQLPunk 是一套免費開源的 Windows 資料庫管理工具（WinForms），用同一個介面就能連多種資料庫：瀏覽資料表、下 SQL、改資料、設計資料表、搬 Table/View、產生常用的 DDL/DML。
+> 免費開源的 Windows 多資料庫 GUI、SQL 編輯器與 DBA 工作台
 
-主要支援 MySQL / MariaDB、PostgreSQL、SQLite（含 SpatiaLite）、SQL Server；Oracle 也大致可用，但還有些限制。介面有繁體中文跟英文，連線密碼存在 Windows 認證管理員，不會以明文留在設定檔。
+mySQLPunk 是一套 Windows 資料庫管理工具（WinForms），用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite 與 Oracle。可以瀏覽與編輯資料、撰寫 SQL、查看執行計畫、設計資料表、比較結構、匯出與備份，也能用 Windows 工作排程器定時執行唯讀查詢。
+
+Open-source Windows database client, SQL editor, database GUI and DBA workbench for MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, SpatiaLite and Oracle.
+
+[下載最新版](https://github.com/shadowjohn/mySQLPunk/releases/latest) · [功能概況](#目前功能概況) · [自動執行作業](docs/AUTOMATION.md) · [開發與貢獻](CONTRIBUTING.md) · [功能路線圖](docs/ROADMAP.md)
+
+## 常見用途
+
+- 在同一套 Windows GUI 管理 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite 與 Oracle 連線。
+- 使用具自動完成、程式碼片段、查詢歷史、唯讀執行計畫與多格式匯出的 SQL 編輯器。
+- 編輯資料列、設計資料表、產生 DDL / DML、搬移 Table / View、建立 ER 圖並比較兩個資料庫結構。
+- 建立每日查詢、CSV / Excel / JSON 等格式匯出與 SQL 備份作業，交由 Windows Task Scheduler 執行並保留紀錄。
+- 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Gemini CLI 作為 SQL 助理；沒有 AI 服務也能使用其他資料庫功能。
+
+介面支援繁體中文與英文。連線密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。
 
 <p align="center">
   <img src="snapshot/mySQLPunk_avatar.png" alt="看板娘：Punky 崩琦" width="260">
@@ -74,7 +90,7 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder 的 MySQL / SQLite 建表與 MySQL / PostgreSQL / SQL Server / Oracle / SQLite 既有資料表 ALTER 輸出，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
+目前 61 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
 
 MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
 
@@ -125,6 +141,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | Table/View 複製 | 可用 | 跨 provider 複製 Table/View；View SQL 無法安全轉換時會改用 table snapshot。 |
 | SQL Dump | 可用 | 支援多 provider Table dump；SQLite 欄位註解 sidecar metadata 會隨結構匯出；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
 | 匯出 / Dump / Backup service | 可用 | 查詢結果多格式匯出、SQL dump 與邏輯 SQL 備份已抽出 service，Form UI 只負責觸發、檔案對話框與狀態呈現。 |
+| 自動執行作業 | 可用 | 「工具 > 自動執行作業」可建立唯讀查詢、查詢結果匯出與 SQL 備份；支援立即執行、每日 Windows 工作排程與 JSON 執行紀錄。排程使用同一個已登入的 Windows 帳號讀取 Credential Manager，不把帳密寫進作業檔。詳見 [`docs/AUTOMATION.md`](docs/AUTOMATION.md)。 |
 | 連線與 metadata service | 可用 | 連線開啟、retry 判斷與 database metadata snapshot 已抽出 service，Form UI 保留 TreeView 呈現與錯誤提示。 |
 | 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、大型 SQL 停用編輯器輔助、資料表儲存自動交易、SQL 檔案位置、匯出位置、還原差異抽樣列數、結果網格字型與列高度、日期/時間與數字格式、工具提示顯示開關、診斷記錄、自動復原草稿、索引標籤開啟偏好、HTTP 代理與進階註冊設定。 |
 | 單一實例、檔案關聯與物件 URI | 可用 | 「允許重複執行 mySQLPunk」選項關掉時強制單一實例（預設允許多開）；`.sql` 檔可以用「開啟方式」直接開進查詢分頁。database、Table、View、Function、User、Event 與內建工具物件可複製 `mysqlpunk://object` URI，啟動後會沿用目前設定檔的同名連線定位；URI 不保存主機、帳號或密碼。 |
@@ -162,10 +179,13 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `mySQLPunk/AnimatedRunnerProgressBar.cs`: 跑者動畫進度條控制項。
 - `mySQLPunk/AutoCommentMode.cs`: 補註解模式定義。
 - `mySQLPunk/OptionsForm.cs`: 選項中心。
+- `mySQLPunk/ScheduledJobsForm.cs`: 查詢、匯出與備份作業的管理、編輯與執行紀錄畫面。
 - `mySQLPunk/Localization.cs`: 繁中／英文語系字串。
 - `mySQLPunk/entity/mySQLPunk_main.cs`: 連線設定載入／儲存、設定檔與憑證管理。
 - `mySQLPunk/lib/IDatabase.cs`: database provider 介面。
 - `mySQLPunk/lib/ObjectUriService.cs`: `mysqlpunk://object` URI 建立、驗證、解析與樹狀物件類型對應。
+- `mySQLPunk/lib/ScheduledJobService.cs`: 可攜式作業定義、唯讀 SQL 驗證、作業儲存、CLI 執行與紀錄。
+- `mySQLPunk/lib/WindowsScheduledTaskService.cs`: Windows Task Scheduler 每日排程註冊與移除。
 - `mySQLPunk/lib/my_mysql.cs`: MySQL provider。
 - `mySQLPunk/lib/my_postgresql.cs`: PostgreSQL provider。
 - `mySQLPunk/lib/my_sqlite.cs`: SQLite provider。
@@ -181,6 +201,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `tests/`: smoke test（`Run-SmokeTests.ps1`）與 Docker 實機整合測試。
 - `scripts/`: 打包（`package-release.ps1`）與發版說明（`New-ReleaseNotes.ps1`）腳本。
 - `docs/FEATURE_NOTES.md`: 功能完成紀錄。
+- `docs/AUTOMATION.md`: 自動執行作業的操作、安全設計、檔案位置與命令列說明。
 
 ## 協作規範
 
