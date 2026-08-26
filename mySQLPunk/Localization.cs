@@ -1267,10 +1267,11 @@ namespace mySQLPunk
             Add("Query.FloatUndock", "{0} / {1}", "{0} / {1}");
             Add("Query.Results", "結果", "Results");
             Add("Query.ExplainPlan", "執行計畫", "Explain Plan");
-            Add("Query.ExplainPlanTooltip", "產生 MySQL／PostgreSQL 的唯讀 JSON 執行計畫", "Generate a read-only JSON execution plan for MySQL/PostgreSQL");
+            Add("Query.ExplainPlanTooltip", "產生目前資料庫的唯讀原生執行計畫", "Generate a read-only native execution plan for the current database");
             Add("Query.ExecutionPlan", "執行計畫", "Execution Plan");
             Add("Query.PlanVisual", "視覺", "Visual");
             Add("Query.PlanJson", "JSON", "JSON");
+            Add("Query.PlanRaw", "原始資料", "Raw Plan");
             Add("Query.PlanText", "文字", "Text");
             Add("Query.PlanProperty", "屬性", "Property");
             Add("Query.PlanValue", "值", "Value");
@@ -1302,11 +1303,12 @@ namespace mySQLPunk
             Add("Query.PlanLoadedStatus", "執行計畫已載入：{0} 個節點 | {1} ms", "Execution plan loaded: {0} nodes | {1} ms");
             Add("Query.PlanFailedStatus", "執行計畫失敗：{0}", "Execution plan failed: {0}");
             Add("Query.PlanErrorTitle", "無法產生執行計畫", "Cannot Generate Execution Plan");
-            Add("Query.PlanUnsupportedProvider", "視覺化執行計畫目前先支援 MySQL／MariaDB 與 PostgreSQL；目前連線為 {0}。", "Visual execution plans currently support MySQL/MariaDB and PostgreSQL; current provider: {0}.");
+            Add("Query.PlanUnsupportedProvider", "視覺化執行計畫不支援目前的連線類型：{0}。", "Visual execution plans do not support the current provider: {0}.");
             Add("Query.PlanUnsupportedStatement", "執行計畫只接受 SELECT／WITH／INSERT／UPDATE／DELETE／REPLACE，不會執行 DDL。", "Execution plans accept SELECT/WITH/INSERT/UPDATE/DELETE/REPLACE only; DDL is not executed.");
             Add("Query.PlanEmptySql", "請先輸入或選取要分析的 SQL。", "Enter or select SQL to analyze first.");
             Add("Query.PlanMultipleStatements", "執行計畫一次只能分析一個 SQL statement，請先選取其中一段。", "Only one SQL statement can be analyzed at a time. Select one statement first.");
             Add("Query.PlanMissingJson", "資料庫沒有回傳可解析的 JSON 執行計畫。", "The database did not return a parseable JSON execution plan.");
+            Add("Query.PlanMissingData", "資料庫沒有回傳可解析的執行計畫資料。", "The database did not return parseable execution plan data.");
             Add("Query.PlanInvalidJson", "執行計畫 JSON 格式無法解析：{0}", "The execution plan JSON could not be parsed: {0}");
             Add("Query.CloseResultTab", "關閉結果分頁", "Close Result Tab");
             Add("Query.Limit", " 筆數限制：", " Limit: ");

@@ -26,10 +26,11 @@
   - 程式碼片段：編輯選單或 `Ctrl+Shift+P` 可開啟管理器，內建 SELECT、JOIN、INSERT、UPDATE、DELETE、CTE、交易與 CREATE TABLE；支援全文搜尋、自訂片段 CRUD、`$CURSOR$` 游標定位、保留目前縮排插入，以及 JSON 匯入／匯出供工作區同步。
   - 驗證：smoke test 覆蓋 alias 對應、游標後方 FROM 解析、多表欄位、註解／字串排除、片段縮排展開、自訂片段 round-trip、匯入／匯出與 metadata 快取。
 
-- **Navicat 對齊：視覺化執行計畫 🟡 MySQL／PostgreSQL 第一階段已完成**
-  - 現況：查詢工具列與檔案選單新增「執行計畫」，會分析選取 SQL 或全文；MySQL／MariaDB 使用 `EXPLAIN FORMAT=JSON`，PostgreSQL 使用 `EXPLAIN (FORMAT JSON, ANALYZE FALSE, ...)`，不會為了取得實際時間而執行 DML。
-  - 完成內容：JSON 計畫會解析成可展開的節點樹，顯示 relation、access／join 類型、預估列數、成本與可用的實際統計；相對高成本節點以顏色與文字標示，也能切換原始 JSON、文字計畫與完整節點屬性。
-  - 安全與限制：一次只接受一個 SELECT／WITH／INSERT／UPDATE／DELETE／REPLACE，拒絕 DDL 與多 statement；SQL Server、Oracle、SQLite 的原生計畫格式留待下一階段。
+- **Navicat 對齊：視覺化執行計畫 ✅ 五種 provider 已完成**
+  - 現況：查詢工具列與檔案選單的「執行計畫」會分析選取 SQL 或全文；MySQL／MariaDB 使用 `EXPLAIN FORMAT=JSON`，PostgreSQL 使用 `EXPLAIN (FORMAT JSON, ANALYZE FALSE, ...)`，SQLite 使用 `EXPLAIN QUERY PLAN`。
+  - 原生格式：SQL Server 會在同一連線暫時啟用 `SHOWPLAN_ALL`；Oracle 以每次產生的 statement ID 寫入 `PLAN_TABLE`，只讀取該次資料後刪除。各 provider 都會轉成可展開節點樹，顯示 relation、access／join 類型、預估列數、成本與完整節點屬性，也能切換原始資料與文字計畫。
+  - 安全：一次只接受一個 SELECT／WITH／INSERT／UPDATE／DELETE／REPLACE，拒絕 DDL 與多 statement；不使用 PostgreSQL `ANALYZE`，SQL Server 成功或失敗都會關閉 `SHOWPLAN_ALL`，Oracle `EXPLAIN PLAN` 與 SQLite `EXPLAIN QUERY PLAN` 也不會執行原本 DML。
+  - 驗證：smoke test 覆蓋 MySQL／PostgreSQL JSON 階層、SQL Server session 清理、Oracle statement ID 與 `PLAN_TABLE` 清理、SQLite 記憶體資料庫原生計畫，以及三種視圖與 provider 顯示。
 
 - **右側 AI 助理與物件詳細資料收合 ✅ 已完成**
   - 現況：新使用者第一次啟動時會直接顯示 AI 助理；按關閉後會記住選擇，下次啟動維持關閉，仍可從「檢視 > AI 助理」重新開啟。

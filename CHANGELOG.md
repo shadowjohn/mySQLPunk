@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.0.19] - 2026-08-26
+
+### 🚀 新增功能
+
+- **五種資料庫執行計畫**：SQL Server、Oracle、SQLite 加入原生唯讀執行計畫，現在可和 MySQL／MariaDB、PostgreSQL 一樣查看節點樹、原始資料、文字計畫、預估列數與可用成本。
+
+### 🛠️ 問題修正與優化
+
+- SQL Server 會在同一連線開啟 `SHOWPLAN_ALL` 並於成功或失敗後關閉；Oracle 的 `PLAN_TABLE` 資料使用獨立 statement ID 並在讀取後清理；SQLite 使用 `EXPLAIN QUERY PLAN`，三者都不會執行原本的 DML。
+
 ## [1.0.0.18] - 2026-08-26
 
 ### 🚀 新增功能

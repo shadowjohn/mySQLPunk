@@ -13,11 +13,11 @@ namespace mySQLPunk
         private readonly Label summaryLabel;
         private readonly TabControl views;
         private readonly TabPage visualPage;
-        private readonly TabPage jsonPage;
+        private readonly TabPage rawPage;
         private readonly TabPage textPage;
         private readonly TreeView planTree;
         private readonly DataGridView detailsGrid;
-        private readonly RichTextBox jsonText;
+        private readonly RichTextBox rawText;
         private readonly RichTextBox planText;
         private QueryPlanDocument document;
 
@@ -36,7 +36,7 @@ namespace mySQLPunk
 
             views = new TabControl { Dock = DockStyle.Fill };
             visualPage = new TabPage();
-            jsonPage = new TabPage();
+            rawPage = new TabPage();
             textPage = new TabPage();
 
             SplitContainer visualSplit = new SplitContainer
@@ -79,12 +79,12 @@ namespace mySQLPunk
             visualSplit.Panel2.Controls.Add(detailsGrid);
             visualPage.Controls.Add(visualSplit);
 
-            jsonText = CreateReadOnlyTextBox();
+            rawText = CreateReadOnlyTextBox();
             planText = CreateReadOnlyTextBox();
-            jsonPage.Controls.Add(jsonText);
+            rawPage.Controls.Add(rawText);
             textPage.Controls.Add(planText);
             views.TabPages.Add(visualPage);
-            views.TabPages.Add(jsonPage);
+            views.TabPages.Add(rawPage);
             views.TabPages.Add(textPage);
 
             Controls.Add(views);
@@ -118,7 +118,7 @@ namespace mySQLPunk
                 planTree.EndUpdate();
             }
 
-            jsonText.Text = document == null ? string.Empty : document.RawJson ?? string.Empty;
+            rawText.Text = document == null ? string.Empty : document.RawPlan;
             planText.Text = document == null ? string.Empty : document.TextPlan ?? string.Empty;
             UpdateSummary();
             if (planTree.Nodes.Count > 0) planTree.SelectedNode = planTree.Nodes[0];
@@ -129,7 +129,11 @@ namespace mySQLPunk
         public void ApplyLanguage()
         {
             visualPage.Text = Localization.T("Query.PlanVisual");
-            jsonPage.Text = Localization.T("Query.PlanJson");
+            rawPage.Text = Localization.T("Query.PlanRaw");
+            if (document != null && !string.IsNullOrWhiteSpace(document.RawFormat))
+            {
+                rawPage.Text += " (" + document.RawFormat + ")";
+            }
             textPage.Text = Localization.T("Query.PlanText");
             detailsGrid.Columns[0].HeaderText = Localization.T("Query.PlanProperty");
             detailsGrid.Columns[1].HeaderText = Localization.T("Query.PlanValue");
@@ -146,8 +150,8 @@ namespace mySQLPunk
             summaryLabel.ForeColor = ThemeManager.TextColor;
             planTree.BackColor = ThemeManager.WindowBackColor;
             planTree.ForeColor = ThemeManager.TextColor;
-            jsonText.BackColor = ThemeManager.TextBoxBackColor;
-            jsonText.ForeColor = ThemeManager.TextColor;
+            rawText.BackColor = ThemeManager.TextBoxBackColor;
+            rawText.ForeColor = ThemeManager.TextColor;
             planText.BackColor = ThemeManager.TextBoxBackColor;
             planText.ForeColor = ThemeManager.TextColor;
             detailsGrid.BackgroundColor = ThemeManager.WindowBackColor;
@@ -309,6 +313,9 @@ namespace mySQLPunk
         {
             if (string.Equals(provider, "mysql", StringComparison.OrdinalIgnoreCase)) return "MySQL / MariaDB";
             if (string.Equals(provider, "postgresql", StringComparison.OrdinalIgnoreCase)) return "PostgreSQL";
+            if (string.Equals(provider, "sqlserver", StringComparison.OrdinalIgnoreCase)) return "SQL Server";
+            if (string.Equals(provider, "oracle", StringComparison.OrdinalIgnoreCase)) return "Oracle";
+            if (string.Equals(provider, "sqlite", StringComparison.OrdinalIgnoreCase)) return "SQLite";
             return provider ?? string.Empty;
         }
 

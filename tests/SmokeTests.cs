@@ -7400,9 +7400,16 @@ public static class SmokeTests
         AssertThrows<InvalidOperationException>(
             () => QueryPlanService.BuildExplainSql("mysql", "SELECT 1; SELECT 2"),
             "Plan generation should reject multiple statements.");
+        string sqlServerSql = QueryPlanService.BuildExplainSql("mssql", "SELECT * FROM dbo.orders;");
+        AssertContains(sqlServerSql, "SET SHOWPLAN_ALL ON", "SQL Server plans should use compile-only SHOWPLAN_ALL mode.");
+        AssertContains(sqlServerSql, "SET SHOWPLAN_ALL OFF", "SQL Server plan previews should show that session mode is restored.");
+        string oracleSql = QueryPlanService.BuildExplainSql("oracle", "SELECT * FROM orders;");
+        AssertEquals("EXPLAIN PLAN FOR SELECT * FROM orders", oracleSql, "Oracle plans should use EXPLAIN PLAN without executing the statement.");
+        string sqliteSql = QueryPlanService.BuildExplainSql("sqlite", "SELECT * FROM users;");
+        AssertEquals("EXPLAIN QUERY PLAN SELECT * FROM users", sqliteSql, "SQLite plans should use EXPLAIN QUERY PLAN.");
         AssertThrows<NotSupportedException>(
-            () => QueryPlanService.BuildExplainSql("sqlite", "SELECT 1"),
-            "Unsupported providers should return a clear first-phase fallback.");
+            () => QueryPlanService.BuildExplainSql("mongodb", "SELECT 1"),
+            "Unknown providers should return a clear fallback.");
         AssertThrows<InvalidOperationException>(
             () => QueryPlanService.BuildExplainSql("mysql", "DROP TABLE users"),
             "Plan generation should reject DDL.");
@@ -7458,11 +7465,73 @@ public static class SmokeTests
         AssertEquals("0.45", postgresPlan.PlanningTimeMs.Value.ToString("0.00"), "PostgreSQL planning statistics should be parsed.");
         AssertEquals("8.5", postgresPlan.ExecutionTimeMs.Value.ToString("0.0"), "PostgreSQL execution statistics should be parsed when present.");
 
+        DataTable sqlServerResult = new DataTable();
+        sqlServerResult.Columns.Add("NodeId", typeof(int));
+        sqlServerResult.Columns.Add("Parent", typeof(int));
+        sqlServerResult.Columns.Add("PhysicalOp");
+        sqlServerResult.Columns.Add("LogicalOp");
+        sqlServerResult.Columns.Add("Argument");
+        sqlServerResult.Columns.Add("EstimateRows", typeof(double));
+        sqlServerResult.Columns.Add("EstimateIO", typeof(double));
+        sqlServerResult.Columns.Add("EstimateCPU", typeof(double));
+        sqlServerResult.Columns.Add("TotalSubtreeCost", typeof(double));
+        sqlServerResult.Columns.Add("StmtText");
+        sqlServerResult.Columns.Add("Type");
+        sqlServerResult.Rows.Add(1, 0, "SELECT", "SELECT", "", 100d, 0.05d, 0.05d, 0.8d, "SELECT * FROM dbo.orders", "SELECT");
+        sqlServerResult.Rows.Add(2, 1, "Clustered Index Scan", "Clustered Index Scan", "OBJECT:([sales].[dbo].[orders].[PK_orders])", 100d, 0.4d, 0.1d, 0.6d, "Clustered Index Scan", "PLAN_ROW");
+        FakeExecDatabase sqlServerDb = new FakeExecDatabase("mssql", "0") { SelectResult = sqlServerResult };
+        QueryPlanDocument sqlServerPlan = QueryPlanService.Execute(sqlServerDb, "SELECT * FROM dbo.orders;");
+        AssertEquals("sqlserver", sqlServerPlan.Provider, "SQL Server aliases should normalize in execution plans.");
+        AssertEquals("2", sqlServerPlan.NodeCount.ToString(), "SQL Server SHOWPLAN_ALL rows should become a hierarchy.");
+        AssertEquals("Clustered Index Scan", sqlServerPlan.Roots[0].Children[0].NodeType, "SQL Server physical operations should be retained.");
+        AssertEquals("sales.dbo.orders.PK_orders", sqlServerPlan.Roots[0].Children[0].RelationName, "SQL Server OBJECT arguments should remain visible.");
+        AssertEquals("SET SHOWPLAN_ALL ON", sqlServerDb.ExecutedSql[0], "SQL Server should enable SHOWPLAN before submitting the statement.");
+        AssertEquals("SET SHOWPLAN_ALL OFF", sqlServerDb.ExecutedSql[1], "SQL Server should restore the session after reading the plan.");
+        AssertEquals("SELECT * FROM dbo.orders", sqlServerDb.SelectedSql[0], "SQL Server should submit the normalized single statement while SHOWPLAN is enabled.");
+
+        FakeExecDatabase failingSqlServerDb = new FakeExecDatabase("mssql", "0");
+        failingSqlServerDb.SelectHandler = sql => { throw new InvalidOperationException("synthetic SHOWPLAN failure"); };
+        AssertThrows<InvalidOperationException>(
+            () => QueryPlanService.Execute(failingSqlServerDb, "SELECT 1"),
+            "SQL Server plan errors should reach the caller.");
+        AssertEquals("SET SHOWPLAN_ALL OFF", failingSqlServerDb.ExecutedSql.Last(), "SQL Server should restore SHOWPLAN mode after a query error.");
+
+        DataTable oracleResult = new DataTable();
+        oracleResult.Columns.Add("ID", typeof(int));
+        oracleResult.Columns.Add("PARENT_ID", typeof(int));
+        oracleResult.Columns.Add("OPERATION");
+        oracleResult.Columns.Add("OPTIONS");
+        oracleResult.Columns.Add("OBJECT_OWNER");
+        oracleResult.Columns.Add("OBJECT_NAME");
+        oracleResult.Columns.Add("OBJECT_ALIAS");
+        oracleResult.Columns.Add("COST", typeof(double));
+        oracleResult.Columns.Add("CARDINALITY", typeof(double));
+        oracleResult.Rows.Add(0, DBNull.Value, "SELECT STATEMENT", "", "", "", "", 10d, 25d);
+        oracleResult.Rows.Add(1, 0, "TABLE ACCESS", "FULL", "HR", "ORDERS", "O", 10d, 25d);
+        FakeExecDatabase oracleDb = new FakeExecDatabase("oracle", "0") { SelectResult = oracleResult };
+        QueryPlanDocument oraclePlan = QueryPlanService.Execute(oracleDb, "SELECT * FROM orders;");
+        AssertEquals("TABLE ACCESS", oraclePlan.Roots[0].Children[0].NodeType, "Oracle PLAN_TABLE operations should be retained.");
+        AssertEquals("HR.ORDERS", oraclePlan.Roots[0].Children[0].RelationName, "Oracle owner and object names should be combined.");
+        Assert(oracleDb.ExecutedSql[0].StartsWith("EXPLAIN PLAN SET STATEMENT_ID = 'MYSQLPUNK_", StringComparison.Ordinal), "Oracle should isolate each plan with a generated statement ID.");
+        Assert(oracleDb.SelectedSql[0].IndexOf("FROM PLAN_TABLE", StringComparison.OrdinalIgnoreCase) >= 0, "Oracle should read only the generated PLAN_TABLE rows.");
+        Assert(oracleDb.ExecutedSql.Last().StartsWith("DELETE FROM PLAN_TABLE WHERE STATEMENT_ID = 'MYSQLPUNK_", StringComparison.Ordinal), "Oracle should clean up its PLAN_TABLE rows.");
+
+        using (my_sqlite sqliteDb = new my_sqlite())
+        {
+            sqliteDb.SetConn("Data Source=:memory:;Version=3;New=True;");
+            sqliteDb.Open();
+            sqliteDb.ExecSQL("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);");
+            QueryPlanDocument sqlitePlan = QueryPlanService.Execute(sqliteDb, "SELECT * FROM users WHERE id = 1;");
+            Assert(sqlitePlan.NodeCount > 0, "SQLite should return a native EXPLAIN QUERY PLAN tree.");
+            Assert(sqlitePlan.Roots.Any(root => root.RelationName == "users"), "SQLite plan parsing should expose scanned or searched relations.");
+            AssertEquals("EXPLAIN QUERY PLAN", sqlitePlan.RawFormat, "SQLite raw plan format should be identified.");
+        }
+
         using (QueryPlanView view = new QueryPlanView())
         {
             view.LoadDocument(postgresPlan);
             TabControl planTabs = view.Controls.OfType<TabControl>().Single();
-            AssertEquals("3", planTabs.TabPages.Count.ToString(), "Execution plan UI should expose visual, JSON, and text views.");
+            AssertEquals("3", planTabs.TabPages.Count.ToString(), "Execution plan UI should expose visual, raw, and text views.");
             SplitContainer visualSplit = planTabs.TabPages[0].Controls.OfType<SplitContainer>().Single();
             TreeView planTree = visualSplit.Panel1.Controls.OfType<TreeView>().Single();
             AssertEquals("1", planTree.Nodes.Count.ToString(), "Execution plan UI should render the root operation.");
@@ -7474,7 +7543,7 @@ public static class SmokeTests
         string viewSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "QueryPlanView.cs"), Encoding.UTF8);
         AssertContains(querySource, "ExplainQueryAsync", "Query window should expose an execution-plan action.");
         AssertContains(viewSource, "Query.PlanVisual", "Execution plans should include a visual view.");
-        AssertContains(viewSource, "Query.PlanJson", "Execution plans should include raw JSON.");
+        AssertContains(viewSource, "Query.PlanRaw", "Execution plans should include the provider's raw plan data.");
         AssertContains(viewSource, "Query.PlanText", "Execution plans should include a text view.");
     }
 

@@ -2523,18 +2523,15 @@ namespace mySQLPunk
                 btnDataRefresh.Enabled = false;
                 UpdateStatus(Localization.T("Query.PlanGenerating"));
 
-                DataTable result = await Task.Run(() => _db.SelectSQL(explainSql), _cts.Token);
+                QueryPlanDocument plan = await Task.Run(() => QueryPlanService.Execute(_db, rawSql), _cts.Token);
                 if (!CanUpdateUi()) return;
-                if (result == null) result = new DataTable();
-                string queryError = GetQueryError(result);
-                if (!string.IsNullOrWhiteSpace(queryError)) throw new InvalidOperationException(queryError);
-
-                QueryPlanDocument plan = QueryPlanService.Parse(_db.ProviderName, result, explainSql);
+                explainSql = plan.ExplainSql;
+                lblSqlPreview.Text = explainSql;
                 sw.Stop();
                 ShowQueryPlan(plan);
                 string status = Localization.Format("Query.PlanLoadedStatus", plan.NodeCount, sw.ElapsedMilliseconds);
                 UpdateStatus(status);
-                _mainHost?.RecordQueryHistory(_databaseName, explainSql, status, sw.ElapsedMilliseconds, result.Rows.Count, true);
+                _mainHost?.RecordQueryHistory(_databaseName, explainSql, status, sw.ElapsedMilliseconds, plan.NodeCount, true);
             }
             catch (OperationCanceledException)
             {
