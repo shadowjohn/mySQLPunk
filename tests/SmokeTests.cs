@@ -55,6 +55,7 @@ public static class SmokeTests
         Run("Data view sort service", TestDataViewSortService, ref passed);
         Run("Named table data profiles", TestTableDataProfiles, ref passed);
         Run("Data profiling service", TestDataProfilingService, ref passed);
+        Run("Schema model and ER diagram", TestSchemaModelAndErDiagram, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -8741,6 +8742,96 @@ public static class SmokeTests
         }
     }
 
+    private static void TestSchemaModelAndErDiagram()
+    {
+        Dictionary<string, string> providerQueryTokens = new Dictionary<string, string>
+        {
+            { "mysql", "KEY_COLUMN_USAGE" },
+            { "postgresql", "pg_constraint" },
+            { "mssql", "sys.foreign_keys" },
+            { "oracle", "ALL_CONSTRAINTS" },
+            { "sqlite", "foreign_key_list" }
+        };
+
+        SchemaModelSnapshot renderSnapshot = null;
+        foreach (KeyValuePair<string, string> item in providerQueryTokens)
+        {
+            FakeSchemaModelDatabase database = new FakeSchemaModelDatabase(item.Key);
+            SchemaModelSnapshot snapshot = SchemaModelService.Load(database, item.Key == "oracle" ? "APP" : "sample");
+            AssertEquals("2", snapshot.Tables.Count.ToString(), item.Key + " schema model should include every table.");
+            AssertEquals("1", snapshot.Relationships.Count.ToString(), item.Key + " schema model should include the foreign key.");
+            Assert(database.Queries.Any(sql => sql.IndexOf(item.Value, StringComparison.OrdinalIgnoreCase) >= 0),
+                item.Key + " schema model should query provider-native foreign-key metadata.");
+
+            SchemaTableModel users = snapshot.Tables.First(table => table.Name == "users");
+            SchemaColumnModel id = users.Columns.First(column => column.Name == "id");
+            Assert(id.IsPrimaryKey, item.Key + " schema model should mark primary-key columns from index metadata.");
+            SchemaRelationshipModel relationship = snapshot.Relationships[0];
+            AssertEquals("orders", relationship.FromTable, item.Key + " relationship should preserve the child table.");
+            AssertEquals("user_id", relationship.FromColumn, item.Key + " relationship should preserve the child column.");
+            AssertEquals("users", relationship.ToTable, item.Key + " relationship should preserve the parent table.");
+            AssertEquals("id", relationship.ToColumn, item.Key + " relationship should preserve the parent column.");
+            Assert(snapshot.Warnings.Count == 0, item.Key + " schema model should load without warnings in the supported metadata shape.");
+            if (item.Key == "mysql") renderSnapshot = snapshot;
+        }
+
+        using (my_sqlite sqlite = new my_sqlite())
+        {
+            sqlite.SetConn("Data Source=:memory:;Version=3;New=True;");
+            sqlite.Open();
+            sqlite.ExecSQL("PRAGMA foreign_keys = ON;");
+            sqlite.ExecSQL("CREATE TABLE users (id INTEGER PRIMARY KEY, display_name TEXT NOT NULL);");
+            sqlite.ExecSQL("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id));");
+            SchemaModelSnapshot liveSqliteSnapshot = SchemaModelService.Load(sqlite, "main");
+            Assert(liveSqliteSnapshot.Tables.Any(table => table.Name == "users") && liveSqliteSnapshot.Tables.Any(table => table.Name == "orders"),
+                "SQLite live schema model should read actual tables.");
+            Assert(liveSqliteSnapshot.Relationships.Any(relationship => relationship.FromTable == "orders" && relationship.ToTable == "users"),
+                "SQLite live schema model should read PRAGMA foreign_key_list metadata.");
+            Assert(liveSqliteSnapshot.Tables.First(table => table.Name == "users").Columns.First(column => column.Name == "id").IsPrimaryKey,
+                "SQLite live schema model should preserve PRAGMA primary-key metadata.");
+            AssertEquals("id", liveSqliteSnapshot.Tables.First(table => table.Name == "users").Columns[0].Name,
+                "SQLite live schema model should convert zero-based cid values into the original column order.");
+        }
+
+        using (ErDiagramCanvas canvas = new ErDiagramCanvas { Size = new Size(1000, 700) })
+        {
+            canvas.CreateControl();
+            canvas.SetSnapshot(renderSnapshot);
+            Assert(canvas.HasDiagram, "ER diagram canvas should accept a schema snapshot.");
+            Assert(canvas.LogicalDiagramSize.Width > 300 && canvas.LogicalDiagramSize.Height > 100,
+                "ER diagram layout should allocate visible cards and margins.");
+            using (Bitmap bitmap = canvas.RenderDiagramToBitmap())
+            {
+                Assert(bitmap.Width == canvas.LogicalDiagramSize.Width && bitmap.Height == canvas.LogicalDiagramSize.Height,
+                    "ER diagram PNG rendering should use the complete logical diagram size.");
+                Color background = ThemeManager.WindowBackColor;
+                bool foundDiagramPixel = false;
+                for (int y = 0; y < bitmap.Height && !foundDiagramPixel; y += Math.Max(1, bitmap.Height / 40))
+                {
+                    for (int x = 0; x < bitmap.Width; x += Math.Max(1, bitmap.Width / 40))
+                    {
+                        Color pixel = bitmap.GetPixel(x, y);
+                        if (pixel.ToArgb() != background.ToArgb())
+                        {
+                            foundDiagramPixel = true;
+                            break;
+                        }
+                    }
+                }
+                Assert(foundDiagramPixel, "ER diagram PNG should contain rendered table cards or relationships.");
+            }
+        }
+
+        FakeSchemaModelDatabase formDatabase = new FakeSchemaModelDatabase("mysql");
+        using (ErDiagramForm form = new ErDiagramForm(formDatabase, "sample"))
+        {
+            form.CreateControl();
+            AssertContains(form.GetDisplayTitle(), "sample", "ER diagram workspace title should identify its database.");
+            Assert(form.UsesDatabase(formDatabase), "ER diagram workspace should close with its database connection.");
+            Assert(!form.HasUnsavedChanges(), "Read-only ER diagrams should never block tab closing as unsaved.");
+        }
+    }
+
     private static void TestDatabaseGroupVisibilityService()
     {
         Assert(DatabaseGroupVisibilityService.ShouldShowGroup("Functions", 0, false), "Inactive-only off should show empty function group.");
@@ -9495,6 +9586,105 @@ public static class SmokeTests
         public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
 
         private static DataTable Table(string[] columns, params object[][] rows)
+        {
+            DataTable table = new DataTable();
+            foreach (string column in columns) table.Columns.Add(column, typeof(object));
+            foreach (object[] row in rows) table.Rows.Add(row);
+            return table;
+        }
+    }
+
+    private sealed class FakeSchemaModelDatabase : IDatabase
+    {
+        private readonly string providerName;
+        public readonly List<string> Queries = new List<string>();
+
+        public FakeSchemaModelDatabase(string providerName)
+        {
+            this.providerName = providerName;
+        }
+
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => providerName;
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            Queries.Add(sql);
+            if (providerName == "sqlite" && sql.IndexOf("foreign_key_list", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (sql.IndexOf("orders", StringComparison.OrdinalIgnoreCase) < 0)
+                    return MakeTable(new[] { "id", "seq", "table", "from", "to" });
+                return MakeTable(
+                    new[] { "id", "seq", "table", "from", "to" },
+                    new object[] { 0, 0, "users", "user_id", "id" });
+            }
+
+            string expectedToken = providerName == "mysql" ? "KEY_COLUMN_USAGE" :
+                                   providerName == "postgresql" ? "pg_constraint" :
+                                   providerName == "mssql" ? "sys.foreign_keys" :
+                                   providerName == "oracle" ? "ALL_CONSTRAINTS" : string.Empty;
+            if (!string.IsNullOrEmpty(expectedToken) && sql.IndexOf(expectedToken, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return MakeTable(
+                    new[] { "RelationshipName", "FromTable", "FromColumn", "ToTable", "ToColumn", "ColumnOrdinal" },
+                    new object[] { "fk_orders_users", "orders", "user_id", "users", "id", 1 });
+            }
+            throw new InvalidOperationException("Unexpected schema metadata SQL for " + providerName + ": " + sql);
+        }
+
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { return System.Threading.Tasks.Task.FromResult(SelectSQL(sql, parameters)); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { throw new NotSupportedException(); }
+        public List<string> GetDatabases() { return new List<string> { "sample" }; }
+        public List<string> GetTables(string databaseName) { return new List<string> { "users", "orders" }; }
+        public List<string> GetViews(string databaseName) { return new List<string>(); }
+
+        public DataTable GetColumns(string databaseName, string tableName)
+        {
+            if (tableName == "users")
+            {
+                return MakeTable(
+                    new[] { "COLUMN_NAME", "DATA_TYPE", "IS_NULLABLE", "ORDINAL_POSITION" },
+                    new object[] { "id", "integer", "NO", 1 },
+                    new object[] { "display_name", "varchar(100)", "YES", 2 });
+            }
+            return MakeTable(
+                new[] { "COLUMN_NAME", "DATA_TYPE", "IS_NULLABLE", "ORDINAL_POSITION" },
+                new object[] { "id", "integer", "NO", 1 },
+                new object[] { "user_id", "integer", "NO", 2 },
+                new object[] { "total", "decimal(12,2)", "YES", 3 });
+        }
+
+        public DataTable GetIndexes(string databaseName, string tableName)
+        {
+            return MakeTable(
+                new[] { "Key_name", "Column_name", "Non_unique", "Seq_in_index" },
+                new object[] { "PRIMARY", "id", 0, 1 });
+        }
+
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return string.Empty; }
+        public bool TableExists(string databaseName, string tableName) { return true; }
+        public bool ViewExists(string databaseName, string viewName) { return false; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 0L; }
+        public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void DropTableForCopy(string databaseName, string tableName) { }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { throw new NotSupportedException(); }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return string.Empty; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
+
+        private static DataTable MakeTable(string[] columns, params object[][] rows)
         {
             DataTable table = new DataTable();
             foreach (string column in columns) table.Columns.Add(column, typeof(object));

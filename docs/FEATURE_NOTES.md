@@ -8,6 +8,14 @@
 
 ### 優先待辦
 
+- **Navicat 對齊：唯讀 ER 圖 ✅ 第一版已完成**
+  - 操作：從「檢視 > ER 圖表」、資料庫右鍵「將資料庫逆向至模型」，或 Models 下的 ER Diagram 開啟可停靠分頁；支援重新整理、10%～200% 縮放、適合視窗、中鍵平移與完整圖面 PNG 匯出。
+  - 共用模型：`SchemaModelService` 會將 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 的資料表、欄位、主鍵與外鍵整理成 provider-neutral 快照，兩庫結構差異與後續同步預覽可直接沿用。
+  - 顯示：每張資料表以卡片呈現欄位、型別、可空值與 PK，外鍵以帶方向箭頭的折線連接來源及目標欄位；單表超過 16 個欄位時先收合其餘欄位，避免大型 schema 的卡片過高。
+  - 容錯：單一資料表欄位或外鍵 metadata 讀取失敗時會保留其餘圖面並在狀態列顯示警告數，不會把整張 ER 圖清空。
+  - 驗證：smoke test 覆蓋五種 provider 的原生外鍵查詢、共用欄位／PK／FK mapping、圖面配置、PNG render，以及唯讀 dockable workspace 行為。
+  - 後續方向：兩庫結構差異、卡片拖曳與位置保存、關聯標籤／篩選、多模型工作區及資料庫雙向同步。
+
 - **Navicat 對齊：物件 URI 分享與直接定位 ✅ 已完成**
   - 操作：database 與 Table、View、Function、User、Event、Model、BI、內建工具、Report 可從左側樹或物件清單右鍵複製 `mysqlpunk://object` URI；接收方開啟 URI 後會清除暫時的連線搜尋條件、找到目前設定檔的同名連線並定位物件。
   - 啟動流程：未開啟的連線會沿用主視窗既有 provider 流程連線，再載入指定 database 的 metadata；物件群組正常顯示、隱藏或只顯示活躍物件時都以節點型別標記定位，不依賴固定樹層級。

@@ -5,10 +5,12 @@
 ### 🚀 新增功能
 
 - **五種資料庫執行計畫**：SQL Server、Oracle、SQLite 加入原生唯讀執行計畫，現在可和 MySQL／MariaDB、PostgreSQL 一樣查看節點樹、原始資料、文字計畫、預估列數與可用成本。
+- **唯讀 ER 圖**：五種 provider 共用 schema 快照，能在可停靠分頁顯示資料表欄位、主鍵與外鍵關聯，並提供縮放、適合視窗、中鍵平移、重新整理與 PNG 匯出。
 
 ### 🛠️ 問題修正與優化
 
 - SQL Server 會在同一連線開啟 `SHOWPLAN_ALL` 並於成功或失敗後關閉；Oracle 的 `PLAN_TABLE` 資料使用獨立 statement ID 並在讀取後清理；SQLite 使用 `EXPLAIN QUERY PLAN`，三者都不會執行原本的 DML。
+- 外鍵 metadata 依 MySQL `KEY_COLUMN_USAGE`、PostgreSQL `pg_constraint`、SQL Server `sys.foreign_keys`、Oracle `ALL_CONSTRAINTS` 與 SQLite `foreign_key_list` 正規化；個別 metadata 失敗時保留其餘圖面並回報警告數。
 
 ## [1.0.0.18] - 2026-08-26
 

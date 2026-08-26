@@ -952,6 +952,7 @@ namespace mySQLPunk
 
         private static readonly string[] DatabaseModelNames =
         {
+            "ER Diagram",
             "Schema Overview",
             "Column Catalog",
             "Index Catalog"
@@ -3439,7 +3440,8 @@ namespace mySQLPunk
                 Localization.T("View.DetailMode"),
                 !string.Equals(ApplicationOptionSettings.GetString("ViewObjectListMode"), "list", StringComparison.OrdinalIgnoreCase),
                 value => SetObjectListMode("details"));
-            ToolStripMenuItem erDiagramItem = new ToolStripMenuItem(Localization.T("View.ERDiagram")) { Enabled = false };
+            ToolStripMenuItem erDiagramItem = new ToolStripMenuItem(Localization.T("View.ERDiagram"));
+            erDiagramItem.Click += (s, e) => OpenSelectedErDiagram();
             ToolStripMenuItem hideObjectGroupsItem = CreateCheckedViewMenuItem(
                 Localization.T("View.HideObjectGroups"),
                 ApplicationOptionSettings.GetBool("ViewHideObjectGroups"),
@@ -10485,6 +10487,11 @@ namespace mySQLPunk
 
         private void ShowDatabaseModel(IDatabase db, string dbName, string modelName)
         {
+            if (string.Equals(modelName, "ER Diagram", StringComparison.OrdinalIgnoreCase))
+            {
+                OpenErDiagram(db, dbName);
+                return;
+            }
             table_top.DataSource = BuildDatabaseModel(db, dbName, modelName);
             ShowModelDetails(db, dbName, modelName);
         }
@@ -10624,6 +10631,10 @@ namespace mySQLPunk
 
         private static string GetDatabaseModelDescription(string modelName)
         {
+            if (string.Equals(modelName, "ER Diagram", StringComparison.OrdinalIgnoreCase))
+            {
+                return Localization.T("DatabaseModel.DescriptionErDiagram");
+            }
             if (string.Equals(modelName, "Column Catalog", StringComparison.OrdinalIgnoreCase))
             {
                 return Localization.T("DatabaseModel.DescriptionColumnCatalog");
@@ -14377,9 +14388,26 @@ namespace mySQLPunk
             if (target == null) return;
 
             EnsureDatabaseGroupNodes(target.DatabaseNode);
-            SelectDatabaseGroupNode("Models");
-            ShowDatabaseModel(target.Database, target.DatabaseName, "Schema Overview");
-            UpdateMainStatus(Localization.Format("Database.ModelOpened", target.DatabaseName));
+            OpenErDiagram(target.Database, target.DatabaseName);
+        }
+
+        private void OpenSelectedErDiagram()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Object.SelectDatabaseOrConnection"), Localization.T("View.ERDiagram"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            OpenErDiagram(target.Database, target.DatabaseName);
+        }
+
+        private void OpenErDiagram(IDatabase db, string databaseName)
+        {
+            if (db == null || string.IsNullOrWhiteSpace(databaseName)) return;
+            ErDiagramForm form = new ErDiagramForm(db, databaseName);
+            DockDockableForm(form);
+            UpdateMainStatus(Localization.Format("Database.ModelOpened", databaseName));
         }
 
         private void ShareSelectedDatabaseConnection(TreeNode databaseNode)

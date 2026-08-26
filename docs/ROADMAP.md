@@ -12,7 +12,7 @@
 | 詢問 AI：可自訂／釘選動作 | 🟡 | 已能提問、插入回覆 SQL；待補動作管理、釘選與查詢編輯器快捷入口。 |
 | 解釋／最佳化／格式化／跨資料庫轉換 SQL，差異並排確認 | 🟡 | 已有格式化、AI 對話及 View SQL 跨 provider 轉換；待補統一動作、差異檢視與確認後套用。 |
 | AI 修正 SQL 錯誤 | 🟡 | AI 面板可處理錯誤文字；待補執行失敗後一鍵附上 SQL／provider 錯誤並回寫差異。 |
-| 同一工作區多模型、Function／Procedure 物件 | 📋 | 先完成唯讀 ER 圖，再擴充多模型工作區與 routine 物件。 |
+| 同一工作區多模型、Function／Procedure 物件 | 🟡 | 唯讀 ER 圖第一版已完成，可顯示資料表、欄位、主鍵與外鍵；待擴充多模型工作區與 routine 物件。 |
 | 圖表樣式、圖層、鎖定、群組、自動排列、連接線重導 | 📋 | 納入模型工作區第二階段。 |
 | 模型與資料庫雙向比較／同步 | 📋 | 先共用「結構差異引擎」，再支援 DB→模型與模型→DB。 |
 | 關聯式／維度／Data Vault 2.0 模型 | 📋 | 納入模型工作區第三階段。 |
@@ -45,14 +45,14 @@
 | 資料分析與互動圖表 | 🆕 | 已完成欄位摘要、Top 值比例與值鑽取的第一版。 |
 | 自動完成程式碼 | ✅ | 已能解析目前 statement 的 FROM／JOIN／UPDATE／INTO 來源與 alias；支援欄位、`alias.column`、資料表、關鍵字與片段捷徑，並依 provider/database 快取資料表、View 與欄位 metadata。 |
 | 程式碼片段 | ✅ | `Ctrl+Shift+P` 開啟片段管理器；支援 8 組內建片段、自訂片段 CRUD、全文搜尋、`$CURSOR$` 定位、保留縮排插入，以及 JSON 匯入／匯出工作區格式。 |
-| 視覺化解釋 | 🟡 | MySQL／MariaDB、PostgreSQL 第一階段已完成；待補 SQL Server／Oracle／SQLite。 |
+| 視覺化解釋 | ✅ | MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 都有原生唯讀計畫，可查看節點樹、屬性、原始資料、文字與可用成本。 |
 | 視覺查詢建構器 | 📋 | 待補拖拉資料表、JOIN、條件與 SQL 雙向更新。 |
 | Procedure／Function 偵錯器（中斷點、逐步、變數、呼叫堆疊） | 📋 | 依 provider 能力分階段實作，優先 PostgreSQL／SQL Server。 |
 | AI 助理／詢問 AI | 🟡 | 核心聊天與 schema 上下文已完成，進階動作見上表。 |
 | 資料傳輸／遷移（跨 DBMS） | 🟡 | 已有 Table／View 跨 provider 複製；待補整庫精靈、mapping、續傳與驗證報告。 |
 | 資料同步 | 📋 | 先做唯讀資料差異、方向選擇與 SQL 預覽，再開放同步執行。 |
 | 結構同步 | 📋 | 先做兩庫結構差異報告，再產生／審核 DDL。 |
-| 模型 | 📋 | 見 Navicat 17 模型路線。 |
+| 模型 | 🟡 | 已有五種 provider 共用的唯讀 ER 圖，可縮放、適合視窗並匯出 PNG；拖曳編排、多模型與雙向同步仍在後續排程。 |
 | BI | 📋 | 見 Navicat 17 BI 路線。 |
 | 匯入／匯出（Excel、Access、CSV、ODBC 等） | 🟡 | MySQL SQL 匯入／匯出完整，查詢結果有常用格式；待補五種 provider 精靈對等化、Access／ODBC。 |
 | 資料字典 | 🟡 | HTML 核心已完成，範本／直接 PDF／排程／郵件待補。 |
@@ -79,7 +79,7 @@
 
 ## 接續順序
 
-1. 唯讀 ER 圖與兩庫結構差異報告，建立模型／同步共用底層。
+1. ✅ 唯讀 ER 圖第一版已完成；接著以同一份 schema 快照完成兩庫結構差異報告。
 2. Windows 自動執行＋查詢／匯出／備份作業與記錄。
 3. SSH tunnel＋SSL/TLS 選項 UI。
 4. 依序擴充 MongoDB、Redis／Garnet、Snowflake，再接專用編輯器、BI、pipeline、schema analyzer 與 Pub/Sub。
