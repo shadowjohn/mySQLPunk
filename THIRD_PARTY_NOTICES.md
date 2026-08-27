@@ -7,7 +7,8 @@ each component. Release packages also include available license files under
 
 ## NuGet Packages
 
-mySQLPunk uses NuGet packages listed in `mySQLPunk/packages.config`, including:
+mySQLPunk uses NuGet packages listed in `mySQLPunk/packages.config` and the
+cross-platform SDK projects, including:
 
 - Google.Protobuf 3.34.1 - BSD-3-Clause
 - Microsoft.Bcl.AsyncInterfaces 10.0.7 - MIT
@@ -20,15 +21,21 @@ mySQLPunk uses NuGet packages listed in `mySQLPunk/packages.config`, including:
 - SharpCompress 0.48.1 - MIT
 - Snappier 1.3.1 - BSD-3-Clause
 - ZstdSharp.Port 0.7.3 - MIT
-- MySqlConnector 2.3.7 - MIT
+- MySqlConnector 2.3.7 (Windows project) - MIT
 - Newtonsoft.Json 13.0.4 - MIT
-- Npgsql 8.0.3 - PostgreSQL License
+- Npgsql 8.0.3 (Windows project) - PostgreSQL License
 - Oracle.ManagedDataAccess 23.26.200 - Oracle Free Distribution, Hosting, and Use Terms
 - BouncyCastle.Cryptography 2.7.0 - MIT
 - Microsoft.Bcl.Cryptography 10.0.10 - MIT
 - SSH.NET 2026.0.0 - MIT
 - Stub.System.Data.SQLite.Core.NetFramework 1.0.119.0 - SQLite/System.Data.SQLite terms
 - System.Data.SQLite.Core 1.0.119.0 - SQLite/System.Data.SQLite terms
+- Avalonia 12.1.1 packages (Desktop, Fluent theme and DataGrid) - MIT
+- Inter font distributed by Avalonia.Fonts.Inter 12.1.1 - SIL Open Font License 1.1
+- MySqlConnector 2.6.2 (cross-platform project) - MIT
+- Npgsql 8.0.9 (cross-platform project) - PostgreSQL License
+- Microsoft.Data.Sqlite 8.0.30 and SQLitePCLRaw dependencies - MIT / Apache-2.0 / SQLite terms
+- SkiaSharp and HarfBuzzSharp runtime dependencies distributed by Avalonia - MIT
 - Microsoft .NET support libraries from the `System.*` and `Microsoft.*`
   package families - MIT or package-specific Microsoft/.NET notices
 

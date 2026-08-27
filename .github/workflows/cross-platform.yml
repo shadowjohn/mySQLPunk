@@ -1,0 +1,68 @@
+name: Cross-platform Desktop
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "mySQLPunk.Core/**"
+      - "mySQLPunk.Desktop/**"
+      - "mySQLPunk.CrossPlatform.SmokeTests/**"
+      - "tests/Run-CrossPlatformLiveTests.sh"
+      - "mySQLPunk.CrossPlatform.sln"
+      - ".github/workflows/cross-platform.yml"
+  pull_request:
+    paths:
+      - "mySQLPunk.Core/**"
+      - "mySQLPunk.Desktop/**"
+      - "mySQLPunk.CrossPlatform.SmokeTests/**"
+      - "tests/Run-CrossPlatformLiveTests.sh"
+      - "mySQLPunk.CrossPlatform.sln"
+      - ".github/workflows/cross-platform.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+            runtimes: linux-x64
+          - name: macOS Intel + Apple Silicon
+            os: macos-latest
+            runtimes: osx-x64 osx-arm64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore mySQLPunk.CrossPlatform.sln
+
+      - name: Build
+        run: dotnet build mySQLPunk.CrossPlatform.sln -c Release --no-restore
+
+      - name: Run cross-platform smoke tests
+        run: dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj -c Release --no-build
+
+      - name: Run MySQL and PostgreSQL live round-trip
+        if: runner.os == 'Linux'
+        run: ./tests/Run-CrossPlatformLiveTests.sh
+
+      - name: Publish desktop runtimes
+        run: |
+          for runtime in ${{ matrix.runtimes }}; do
+            dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r "$runtime" --self-contained false
+          done

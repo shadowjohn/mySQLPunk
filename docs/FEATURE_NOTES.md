@@ -4,6 +4,13 @@
 
 ## 未完成功能與已知限制
 
+- **Linux / macOS 跨平台預覽 🟡 第一階段完成**
+  - 架構：保留 `mySQLPunk.sln` 的 .NET Framework 4.7.2 WinForms 完整版，另以 `mySQLPunk.CrossPlatform.sln` 建立 .NET 8 Core、Avalonia Desktop 與獨立 smoke tests。跨平台 UI 不引用 `System.Windows.Forms`、Windows Credential Manager、Task Scheduler 或 `SQLite.Interop.dll`。
+  - Provider：MySqlConnector、Npgsql 與 Microsoft.Data.Sqlite 共用 provider-neutral session contract，涵蓋連線測試、database 清單、Table / View metadata、識別字引用、前 200 列預覽，以及 DDL / DML / SELECT 執行。結果以欄位與列模型回傳，UI 不依賴 provider-specific `DataTable`。
+  - UI：連線設定新增／編輯／刪除、SQLite 檔案選擇、資料庫切換、Table / View 物件樹、雙擊產生預覽 SQL、Ctrl+Enter／按鈕執行、取消操作、動態結果網格與狀態／錯誤顯示。Linux X11 已實際建立 SQLite、插入兩列並查回結果網格。
+  - 安全：跨平台連線設定寫入使用者 application-data 下的 `mySQLPunk/connections.json`；`Password` 明確排除序列化，非 Windows 檔案權限會嘗試限制為 `0600`。程式關閉後需重新輸入密碼，待接 Linux Secret Service / KWallet 與 macOS Keychain 才開放持久化祕密。
+  - 驗證與發佈：Core smoke tests 覆蓋密碼不落地、SQLite DDL / DML / UTF-8 SELECT、metadata、預覽 SQL與 provider 驗證；本機驗證 `linux-x64`、`osx-x64`、`osx-arm64` publish，GitHub Actions 另在 Ubuntu 與 macOS 原生建置／測試。正式安裝套件、簽署、自動更新、Linux ARM64 實機與 Windows 完整版其餘 provider／工作台能力留待後續。
+
 - **Snowflake provider 🟡 第二期完成（查詢編輯器 DML／DDL）**
   - 架構選擇：不引入官方 `Snowflake.Data` 驅動——5.x 已退出 .NET Framework 4.7.2，4.x 只剩 netstandard2.0 且會把 Apache.Arrow、AWSSDK.S3、Azure.Storage、Google Cloud Storage 等整串相依拖進 packages.config 專案。改以內建 `SnowflakeRestClient` 直連 [SQL REST API v2](https://docs.snowflake.com/en/developer-guide/sql-api/intro)：POST statements、202 輪詢與多 partition 讀取，零新增套件。
   - 連線與驗證：連線設定頁提供帳戶識別碼、使用者、token、database、schema、warehouse、role 與 OAuth 切換；驗證使用 Programmatic Access Token（預設）或 OAuth token（`X-Snowflake-Authorization-Token-Type`），token 由 Windows Credential Manager 保存。`snowflake://user:token@account/db?warehouse=&role=&schema=&auth=` URI 可匯入，未知參數一律拒絕；`endpoint` 覆寫僅接受 loopback，供測試使用。

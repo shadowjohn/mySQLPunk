@@ -1,0 +1,139 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MySqlPunk.Desktop.MainWindow"
+        Title="mySQLPunk — Linux / macOS Preview"
+        Icon="avares://mySQLPunk/Assets/punky.ico"
+        Width="1280"
+        Height="820"
+        MinWidth="960"
+        MinHeight="620"
+        WindowStartupLocation="CenterScreen">
+  <Grid RowDefinitions="Auto,*">
+    <Border Grid.Row="0" Background="#172033" Padding="18,12">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="2">
+          <TextBlock Text="mySQLPunk" Foreground="White" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="跨平台資料庫工作台 · Linux / macOS Preview" Foreground="#B9C7E8" />
+        </StackPanel>
+        <Border Grid.Column="1" Background="#263451" CornerRadius="14" Padding="12,6" VerticalAlignment="Center">
+          <TextBlock x:Name="ConnectionBadge" Text="尚未連線" Foreground="#DCE5FA" />
+        </Border>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="280,*">
+      <Border Grid.Column="0" BorderBrush="#CDD5E0" BorderThickness="0,0,1,0" Padding="12">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
+          <TextBlock Grid.Row="0" Text="連線設定" FontSize="17" FontWeight="SemiBold" Margin="4,2,4,10" />
+          <Grid Grid.Row="1" ColumnDefinitions="*,*,*" Margin="0,0,0,8">
+            <Button Grid.Column="0" Content="新增" Click="AddProfile_Click" Margin="2" HorizontalContentAlignment="Center" />
+            <Button Grid.Column="1" Content="編輯" Click="EditProfile_Click" Margin="2" HorizontalContentAlignment="Center" />
+            <Button Grid.Column="2" Content="刪除" Click="DeleteProfile_Click" Margin="2" HorizontalContentAlignment="Center" />
+          </Grid>
+          <ListBox x:Name="ProfilesList"
+                   Grid.Row="2"
+                   DoubleTapped="ProfilesList_DoubleTapped"
+                   SelectionChanged="ProfilesList_SelectionChanged">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Grid RowDefinitions="Auto,Auto" Margin="4,7">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                  <TextBlock Grid.Row="1" Text="{Binding ProviderDisplayName}" FontSize="12" Foreground="#667085" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <Button x:Name="ConnectButton"
+                  Grid.Row="3"
+                  Content="連線"
+                  Click="ConnectProfile_Click"
+                  Margin="2,10,2,2"
+                  Padding="12,8"
+                  HorizontalContentAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
+        <Border Grid.Row="0" BorderBrush="#CDD5E0" BorderThickness="0,0,0,1" Padding="12,9">
+          <Grid ColumnDefinitions="Auto,280,Auto,*,Auto,Auto">
+            <TextBlock Grid.Column="0" Text="資料庫" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox x:Name="DatabaseCombo"
+                      Grid.Column="1"
+                      SelectionChanged="DatabaseCombo_SelectionChanged"
+                      MinWidth="220" />
+            <Button x:Name="RefreshButton"
+                    Grid.Column="2"
+                    Content="重新整理"
+                    Click="RefreshObjects_Click"
+                    Margin="8,0,0,0" />
+            <Button x:Name="ExecuteButton"
+                    Grid.Column="4"
+                    Content="執行 SQL  (Ctrl/Cmd+Enter)"
+                    Click="ExecuteSql_Click"
+                    Padding="14,6"
+                    Margin="8,0,0,0" />
+            <Button x:Name="CancelButton"
+                    Grid.Column="5"
+                    Content="取消"
+                    Click="CancelOperation_Click"
+                    Margin="8,0,0,0"
+                    IsEnabled="False" />
+          </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" ColumnDefinitions="250,5,*">
+          <Border Grid.Column="0" Padding="10" BorderBrush="#CDD5E0" BorderThickness="0,0,1,0">
+            <Grid RowDefinitions="Auto,*">
+              <TextBlock Grid.Row="0" Text="資料庫物件" FontWeight="SemiBold" Margin="3,2,3,8" />
+              <TreeView x:Name="ObjectsTree" Grid.Row="1" DoubleTapped="ObjectsTree_DoubleTapped">
+                <TreeView.ItemTemplate>
+                  <TreeDataTemplate ItemsSource="{Binding Children}">
+                    <TextBlock Text="{Binding Text}" />
+                  </TreeDataTemplate>
+                </TreeView.ItemTemplate>
+              </TreeView>
+            </Grid>
+          </Border>
+          <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="#E4E7EC" />
+          <Grid Grid.Column="2" RowDefinitions="Auto,220,5,*">
+            <Border Grid.Row="0" Padding="12,10,12,7">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="SQL 編輯器" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="1" Text="雙擊資料表可產生預覽查詢" Foreground="#667085" FontSize="12" />
+              </Grid>
+            </Border>
+            <TextBox x:Name="SqlEditor"
+                     Grid.Row="1"
+                     AcceptsReturn="True"
+                     AcceptsTab="True"
+                     TextWrapping="NoWrap"
+                     FontFamily="Cascadia Mono, JetBrains Mono, Menlo, monospace"
+                     FontSize="14"
+                     Padding="12"
+                     Margin="10,0,10,8"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     Text="SELECT 1;" />
+            <GridSplitter Grid.Row="2" ResizeDirection="Rows" Background="#E4E7EC" />
+            <Grid Grid.Row="3" RowDefinitions="Auto,*">
+              <TextBlock Grid.Row="0" Text="查詢結果" FontWeight="SemiBold" Margin="12,10,12,7" />
+              <DataGrid x:Name="ResultsGrid"
+                        Grid.Row="1"
+                        Margin="10,0,10,10"
+                        AutoGenerateColumns="False"
+                        IsReadOnly="True"
+                        CanUserResizeColumns="True"
+                        CanUserSortColumns="True"
+                        GridLinesVisibility="All"
+                        HeadersVisibility="All" />
+            </Grid>
+          </Grid>
+        </Grid>
+
+        <Border Grid.Row="2" Background="#F2F4F7" BorderBrush="#CDD5E0" BorderThickness="0,1,0,0" Padding="12,7">
+          <TextBlock x:Name="StatusText" Text="請新增或選擇連線設定。" TextTrimming="CharacterEllipsis" />
+        </Border>
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

@@ -30,6 +30,7 @@ git push origin master
 ## 測試
 
 - `tests/Run-SmokeTests.ps1` 是基本盤，任何行為變更都要全過。改了行為導致既有測試的預期跟著變，就把測試一起更新，並在 commit message 說明為什麼。
+- 跨平台 Core / Avalonia 有變更時，執行 `dotnet build mySQLPunk.CrossPlatform.sln -c Release` 與 `dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj -c Release`；動到 MySQL / PostgreSQL provider 時再跑 `./tests/Run-CrossPlatformLiveTests.sh`。UI 變更還要在 Linux 或 macOS 實際開啟並走一次連線、SQL 與結果網格。
 - 動到 provider 實際行為（匯出匯入、使用者管理、rename）時，視影響跑對應的 Docker 整合測試：`Run-MySqlUserIntegrationTests.ps1`、`Run-MySqlExportRenameIntegrationTests.ps1`、`Run-DatabaseRenameProviderIntegrationTests.ps1`。
 - UI 有變的話，除了測試，最好實際開起來看一眼。
 

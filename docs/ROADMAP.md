@@ -31,7 +31,7 @@
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 🟡 | 第二期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視、SELECT／SHOW，以及查詢編輯器單一 DML／DDL；待補實機驗收、key-pair JWT、參數綁定、資料網格寫回、模型與 BI 能力。 |
 | Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 第三期完成：瀏覽、受限查詢，加上 key 編輯器的 string 與 hash／list／set／zset 安全編輯（WATCH/MULTI/EXEC）、TTL 與刪除；Redis 6.2／7 與 Garnet 各 39 項實機矩陣通過。待補 Cluster、Sentinel、list 元素刪除、監控與 Pub/Sub。 |
-| Linux ARM | 📋 | 現有 WinForms 僅 Windows；需先抽離 UI／provider core，再評估跨平台桌面 UI。 |
+| Linux ARM | 🟡 | 已建立 .NET 8 Core 與 Avalonia 桌面預覽版；Linux x64 已完成 UI 實際操作，Avalonia / managed provider 架構可產生 `linux-arm64`，待 ARM64 實機執行、安裝套件與其餘 provider 遷移。 |
 
 ## Navicat Premium 功能頁對照
 
@@ -65,7 +65,7 @@
 | SSH tunnel、SSL/TLS | ✅ | 四種網路 provider 已有共用安全設定 UI、憑證驗證、SSH SHA256 主機金鑰固定與隧道生命週期；SQLite 為本機檔案，不適用網路層設定。 |
 | PAM／LDAP／Kerberos／MFA／SSO | 📋 | 依 provider 驗證能力分階段加入，不保存明文祕密。 |
 | 深色模式／平台原生設計 | ✅ | Windows 原生 WinForms、淺／深色主題與 DPI 向量圖示已完成。 |
-| 跨平台授權／Windows、macOS、Linux | 📋 | 商業授權本身不適用開源專案；功能等價目標是跨平台建置與同一工作區格式，需 UI 框架遷移。 |
+| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；已完成 Avalonia 第一階段，Linux / macOS 可使用 MySQL / MariaDB、PostgreSQL、SQLite 的連線、metadata 與 SQL 工作流程。待補其餘 provider、進階功能、平台祕密儲存與正式安裝／簽署。 |
 
 ## Provider 與服務覆蓋
 
@@ -87,3 +87,4 @@
 4. ✅ RDBMS、MongoDB 與 Redis 的連線 URI 匯入及設定頁確認流程已完成。
 5. ✅ 連線星號、持久化色彩與批次屬性操作已完成。
 6. 🟡 MongoDB 第一～三期、Redis／Garnet 第三期（string＋集合型別安全編輯，含實機矩陣）、Snowflake 第二期（SQL REST API 查詢＋查詢編輯器 DML／DDL）已完成。下一步候選：Snowflake 實機驗收、key-pair JWT、參數綁定與網格寫回，MongoDB Atlas／SRV 驗證矩陣與 Aggregation Pipeline，Redis Cluster／Sentinel／Pub/Sub，或回頭補模型／BI 路線。
+7. 🟡 Linux / macOS 跨平台第一階段已完成：獨立 Core、Avalonia UI、MySQL / PostgreSQL / SQLite metadata 與 SQL 工作流程。下一步依序補平台祕密儲存、SQL Server、結果匯出／資料編輯，以及 Linux / macOS 安裝與簽署。

@@ -4,9 +4,9 @@
 [![Latest release](https://img.shields.io/github/v/release/shadowjohn/mySQLPunk?display_name=tag)](https://github.com/shadowjohn/mySQLPunk/releases/latest)
 [![License](https://img.shields.io/github/license/shadowjohn/mySQLPunk)](LICENSE)
 
-> 免費開源的 Windows 多資料庫 GUI、SQL 編輯器與 DBA 工作台
+> 免費開源的多資料庫 GUI、SQL 編輯器與 DBA 工作台；提供 Windows 完整版，以及 Linux / macOS 跨平台預覽版
 
-mySQLPunk 是一套 Windows 資料庫管理工具（WinForms），用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Microsoft Garnet，以及 Snowflake。關聯式資料庫可瀏覽與編輯資料、撰寫 SQL、查看執行計畫、設計資料表、比較結構、匯出與備份；MongoDB 提供文件工作流程，Redis / Garnet 提供 key 瀏覽、受限查詢與五種型別的安全編輯，Snowflake 第二階段以 SQL REST API 提供瀏覽、查詢與查詢編輯器 DML／DDL。
+mySQLPunk 的 Windows 完整版（WinForms）可用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Microsoft Garnet，以及 Snowflake。新的 Avalonia 跨平台預覽版可原生執行於 Linux 與 macOS，第一階段已提供 MySQL / MariaDB、PostgreSQL、SQLite 的連線管理、物件瀏覽、SQL DDL / DML / 查詢與結果網格；其餘 Windows 完整版功能正分階段遷移。
 
 Open-source Windows database client, SQL editor, database GUI and DBA workbench for MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, SpatiaLite, Oracle, MongoDB, Redis, Microsoft Garnet and Snowflake workflows.
 
@@ -14,14 +14,14 @@ Open-source Windows database client, SQL editor, database GUI and DBA workbench 
 
 ## 常見用途
 
-- 在同一套 Windows GUI 管理 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Garnet 與 Snowflake 連線。
+- 在 Windows 完整版管理 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Garnet 與 Snowflake 連線；或在 Linux / macOS 預覽版管理 MySQL / MariaDB、PostgreSQL 與 SQLite。
 - 依連線設定 SSL/TLS 憑證驗證，或透過有 SHA256 主機金鑰固定的 SSH Tunnel 連到內網資料庫。
 - 使用具自動完成、程式碼片段、查詢歷史、唯讀執行計畫與多格式匯出的 SQL 編輯器。
 - 編輯資料列、設計資料表、產生 DDL / DML、搬移 Table / View、建立 ER 圖並比較兩個資料庫結構。
 - 建立每日查詢、CSV / Excel / JSON 等格式匯出與 SQL 備份作業，交由 Windows Task Scheduler 執行並保留紀錄。
 - 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Gemini CLI 作為 SQL 助理；沒有 AI 服務也能使用其他資料庫功能。
 
-介面支援繁體中文與英文。資料庫密碼、SSH 密碼、私鑰密語與用戶端憑證密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。
+Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密碼、私鑰密語與用戶端憑證密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。跨平台預覽版目前使用繁體中文介面，連線設定採 JSON 保存，但密碼只存在程式記憶體，關閉後需重新輸入。
 
 <p align="center">
   <img src="snapshot/mySQLPunk_avatar.png" alt="看板娘：Punky 崩琦" width="260">
@@ -37,9 +37,38 @@ Open-source Windows database client, SQL editor, database GUI and DBA workbench 
 
 目前發版版本：`v1.0.0.19`，最新版請看 [GitHub Releases](https://github.com/shadowjohn/mySQLPunk/releases)。
 
-目前 GitHub Release 會只提供一個 `mySQLPunk-<version>-win-x64-setup.exe`。安裝程式內含程式運作所需的 managed DLL、SQLite／SpatiaLite 原生 runtime、素材與第三方授權檔；使用者不需要另外下載 ZIP 或 manifest。完整變更請見 `CHANGELOG.md`。
+目前 GitHub Release 仍只提供 Windows 完整版的 `mySQLPunk-<version>-win-x64-setup.exe`。安裝程式內含程式運作所需的 managed DLL、SQLite／SpatiaLite 原生 runtime、素材與第三方授權檔；使用者不需要另外下載 ZIP 或 manifest。Linux / macOS 預覽版目前由原始碼建置，正式安裝套件與簽署流程尚未發布。完整變更請見 `CHANGELOG.md`。
 
 ## 開發環境
+
+### Linux / macOS 跨平台預覽版
+
+需求：.NET 8 SDK。桌面 UI 使用 Avalonia，資料庫驅動使用純 managed 的 MySqlConnector、Npgsql 與 Microsoft.Data.Sqlite，因此不依賴 WinForms 或 Windows SQLite interop。
+
+```bash
+dotnet restore mySQLPunk.CrossPlatform.sln
+dotnet build mySQLPunk.CrossPlatform.sln -c Release --no-restore
+dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj -c Release --no-build
+dotnet run --project mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release
+```
+
+若已安裝 Docker，可再跑 MySQL 8 / PostgreSQL 16 實機 round-trip；腳本只會建立並清理 `mysqlpunk-cross-*-test` 測試容器與測試自行建立的暫存 database：
+
+```bash
+./tests/Run-CrossPlatformLiveTests.sh
+```
+
+產生 framework-dependent 發佈目錄：
+
+```bash
+dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r linux-x64 --self-contained false
+dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r osx-x64 --self-contained false
+dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r osx-arm64 --self-contained false
+```
+
+目前預覽版包含：連線設定與測試、資料庫選擇、Table / View metadata、物件預覽 SQL、DDL / DML / SELECT、取消執行與動態結果網格。單次結果最多載入 10,000 列，避免誤查大表拖垮桌面程式；密碼刻意不落地，正式發佈前會再接 Linux Secret Service / KWallet 與 macOS Keychain。
+
+### Windows 完整版
 
 - Windows
 - Visual Studio 2017 或更新版本，或 Visual Studio Build Tools
@@ -123,6 +152,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 | 功能 | 狀態 | 說明 |
 | --- | --- | --- |
+| Linux / macOS 跨平台預覽 | 第一階段可用 | 新增 .NET 8 Core 與 Avalonia 桌面程式，支援 MySQL / MariaDB、PostgreSQL、SQLite 的連線設定／測試、database 與 Table / View 瀏覽、SQL DDL / DML / 查詢、結果網格與取消操作；Linux x64、macOS x64／Apple Silicon 可建置。密碼不落地，其餘 provider 與 Windows 完整版進階工作台功能待遷移。 |
 | 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，支援多設定檔、多層群組、拖曳、持久化星號／色彩，以及批次修改星號、群組與色彩；新增精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、MongoDB、Redis 與 Snowflake URI，解析後先開設定頁確認；資料庫／SSH／憑證密碼改存 Windows Credential Manager，設定檔只保留 credential target；四種既有網路 RDBMS provider 可設定 SSL/TLS 與 SSH Tunnel，詳見[連線安全說明](docs/CONNECTION_SECURITY.md)。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | MySQL / MariaDB 使用者管理 | 可用 | 自動偵測 MySQL 5 / MySQL 8 / MariaDB；支援使用者 CRUD、密碼/Plugin/Lock/Expire/SSL/資源限制、Database/Table/View/Routine 權限編輯、SQL 預覽、`SHOW GRANTS` 與安全 DDL，並保留同名不同 Host 的獨立節點。 |
@@ -161,6 +191,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 ## 已知限制
 
+- Linux / macOS 目前是第一階段預覽版，只涵蓋 MySQL / MariaDB、PostgreSQL、SQLite 的連線、metadata 與 SQL 工作流程；SQL Server、Oracle、MongoDB、Redis、Snowflake、資料編輯器、匯出、模型與 AI 等功能仍需從 Windows 完整版遷移。跨平台連線密碼不寫入磁碟，程式重開後需重新輸入；安裝套件、簽署與自動更新也尚未發布。
 - Oracle 的部分 DDL 還是會被權限、語法或物件型態擋下來；預覽會附上權限診斷 SQL 跟修復建議，但終究要看帳號實際有什麼權限。
 - 沒有 Primary Key 的資料表，編輯時是拿原始值組 WHERE 條件去比對；欄位有浮點數或大文字時可能比不準。不放心的話選項裡可以改成唯讀開啟。
 - XLSX 匯出要把整份結果放進記憶體；還原 SQL 備份也是整個檔一次讀進來，特別大的備份要留意。
@@ -179,6 +210,10 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 ## 專案檔案導覽
 
+- `mySQLPunk.CrossPlatform.sln`: Linux / macOS 預覽版的獨立 .NET 8 solution，不會改動 Windows 完整版的建置與發版。
+- `mySQLPunk.Core/`: 跨平台連線設定、安全保存、MySQL / PostgreSQL / SQLite provider、metadata 與 SQL 執行核心。
+- `mySQLPunk.Desktop/`: Avalonia 跨平台桌面 UI，包含連線、物件樹、SQL 編輯器與結果網格。
+- `mySQLPunk.CrossPlatform.SmokeTests/`: 跨平台 Core smoke tests，涵蓋密碼不落地與 SQLite 端到端操作。
 - `mySQLPunk/Program.cs`: 程式進入點、單一實例與 .sql 檔案參數處理。
 - `mySQLPunk/Form1.cs`: 主視窗、左側連線樹、右鍵選單、metadata 瀏覽、資料庫級操作。
 - `mySQLPunk/AboutDialog.cs`: 自訂關於視窗，顯示版本、作者資訊與看板娘 Punky 崩琦眨眼動畫。

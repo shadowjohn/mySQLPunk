@@ -1,0 +1,36 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "mySQLPunk.Core", "mySQLPunk.Core\mySQLPunk.Core.csproj", "{C7D7B55B-8D52-48D9-96DA-2F9D523A8877}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "mySQLPunk.Desktop", "mySQLPunk.Desktop\mySQLPunk.Desktop.csproj", "{8B79C2BF-D1E9-43CE-A20B-FED204ACACAD}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "mySQLPunk.CrossPlatform.SmokeTests", "mySQLPunk.CrossPlatform.SmokeTests\mySQLPunk.CrossPlatform.SmokeTests.csproj", "{0404605E-960B-4EE8-9871-1643C4CE31E4}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C7D7B55B-8D52-48D9-96DA-2F9D523A8877}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C7D7B55B-8D52-48D9-96DA-2F9D523A8877}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C7D7B55B-8D52-48D9-96DA-2F9D523A8877}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C7D7B55B-8D52-48D9-96DA-2F9D523A8877}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8B79C2BF-D1E9-43CE-A20B-FED204ACACAD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8B79C2BF-D1E9-43CE-A20B-FED204ACACAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8B79C2BF-D1E9-43CE-A20B-FED204ACACAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8B79C2BF-D1E9-43CE-A20B-FED204ACACAD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0404605E-960B-4EE8-9871-1643C4CE31E4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0404605E-960B-4EE8-9871-1643C4CE31E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0404605E-960B-4EE8-9871-1643C4CE31E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0404605E-960B-4EE8-9871-1643C4CE31E4}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5B08DC1A-07B4-4237-B11D-B7F30F08F715}
+	EndGlobalSection
+EndGlobal

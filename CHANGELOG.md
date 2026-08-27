@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **Linux / macOS 跨平台預覽第一階段**：保留既有 Windows WinForms 完整版，新增獨立 .NET 8 Core 與 Avalonia 桌面程式，可在 Linux / macOS 管理 MySQL / MariaDB、PostgreSQL 與 SQLite 連線，瀏覽 database、Table / View，執行 DDL / DML / SELECT 並顯示結果網格；連線設定使用跨平台 JSON，密碼只留在記憶體、不寫入磁碟。加入 SQLite 端到端 smoke tests、Linux UI 實際操作驗證、Linux x64 與 macOS x64 / Apple Silicon 發佈建置，以及 Ubuntu / macOS CI 矩陣。其餘 provider、進階資料編輯與正式安裝／簽署流程留待後續。
 - **Snowflake 查詢編輯器寫入第二期**：保留 SELECT／SHOW 等結果集路徑，新增單一 INSERT／UPDATE／DELETE／MERGE 與 DDL 的 SQL REST API 執行，並從 DML ResultSet 回報 affected rows；帶參數呼叫會 fail closed，避免參數綁定尚未完成時靜默忽略值。loopback HTTP 測試加入實際 UPDATE request、回覆與 MERGE 多計數欄位驗證；資料網格寫回、bulk load 與真實帳戶矩陣仍留待後續。
 - **Redis／Garnet 集合型別安全編輯**：key 編輯器依型別切換，hash 欄位新增／更新／刪除、list 既有元素編輯與尾端新增、set 成員新增／移除、zset 分數新增／更新／移除；所有寫入共用 WATCH＋MULTI/EXEC 交易，項目被其他連線改過、型別被重建或 EXEC 落空都回報衝突且不覆蓋，zset 分數以數值比較。Redis 6.2、Redis 7 與 Garnet standalone 實機矩陣擴充為各 39 項檢查；list 元素刪除因 Redis 無依索引刪除命令留待後續。
 - **Snowflake 唯讀 provider 第一期**：新增 Snowflake 連線類型，以 SQL REST API v2 直連（Programmatic Access Token 或 OAuth token，token 存 Windows Credential Manager），不引入官方驅動的大型相依樹。支援 SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table／view 瀏覽、欄位與列數、GET_DDL、分頁資料檢視與唯讀 SELECT／SHOW 查詢；`snowflake://` URI 可匯入，未知參數一律拒絕。REST client 內建 202 輪詢與多 partition 合併；寫入於上方第二期接續完成，key-pair JWT 與真實帳戶實機驗收仍待後續。
