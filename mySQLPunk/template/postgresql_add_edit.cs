@@ -11,7 +11,7 @@ using mySQLPunk.lib;
 
 namespace mySQLPunk.template
 {
-    public partial class postgresql_add_edit : Form
+    public partial class postgresql_add_edit : Form, IConnectionDraftForm
     {
         private readonly Dictionary<string, object> securitySettings = new Dictionary<string, object>();
 
@@ -66,6 +66,19 @@ namespace mySQLPunk.template
             }
 
             return string.Empty;
+        }
+
+        public void ApplyConnectionDraft(Dictionary<string, object> conn)
+        {
+            if (conn == null) return;
+            postgresql_connection_name.Text = GetValue(conn, "conn_name");
+            postgresql_host.Text = GetValue(conn, "host");
+            postgresql_port.Text = GetValue(conn, "port");
+            postgresql_initial_database.Text = GetValue(conn, "initial_database");
+            postgresql_username.Text = GetValue(conn, "username");
+            postgresql_pwd.Text = GetValue(conn, "pwd");
+            ConnectionSecuritySettingsService.Copy(conn, securitySettings);
+            UpdateSecuritySummary();
         }
 
         private string GetInitialDatabase()

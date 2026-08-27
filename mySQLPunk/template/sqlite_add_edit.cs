@@ -8,7 +8,7 @@ using mySQLPunk.lib;
 
 namespace mySQLPunk.template
 {
-    public class sqlite_add_edit : Form
+    public class sqlite_add_edit : Form, IConnectionDraftForm
     {
         public Form1 F1 { get; set; }
         public int editIndex { get; set; } = -1;
@@ -85,6 +85,15 @@ namespace mySQLPunk.template
             txtName.Text = GetValue(conn, "conn_name");
             txtPath.Text = GetValue(conn, "path");
             chkInitGeospatial.Checked = GetValue(conn, "init_geospatial") != "F";
+        }
+
+        public void ApplyConnectionDraft(Dictionary<string, object> conn)
+        {
+            if (conn == null) return;
+            txtName.Text = GetValue(conn, "conn_name");
+            txtPath.Text = GetValue(conn, "path");
+            chkInitGeospatial.Checked = GetValue(conn, "init_geospatial") == "T";
+            _selectedNewFile = false;
         }
 
         private void btnBrowse_Click(object sender, EventArgs e)

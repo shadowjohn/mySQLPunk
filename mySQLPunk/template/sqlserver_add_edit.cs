@@ -7,7 +7,7 @@ using mySQLPunk.lib;
 
 namespace mySQLPunk.template
 {
-    public class sqlserver_add_edit : Form
+    public class sqlserver_add_edit : Form, IConnectionDraftForm
     {
         public Form1 F1 { get; set; }
         public int editIndex { get; set; } = -1;
@@ -95,6 +95,21 @@ namespace mySQLPunk.template
             bool enabled = !chkWindowsAuth.Checked;
             txtUser.Enabled = enabled;
             txtPassword.Enabled = enabled;
+        }
+
+        public void ApplyConnectionDraft(Dictionary<string, object> conn)
+        {
+            if (conn == null) return;
+            txtName.Text = GetValue(conn, "conn_name");
+            txtHost.Text = GetValue(conn, "host");
+            txtPort.Text = GetValue(conn, "port");
+            txtDatabase.Text = GetValue(conn, "initial_database");
+            txtUser.Text = GetValue(conn, "username");
+            txtPassword.Text = GetValue(conn, "pwd");
+            chkWindowsAuth.Checked = GetValue(conn, "trusted_connection") == "T";
+            ConnectionSecuritySettingsService.Copy(conn, securitySettings);
+            UpdateSecuritySummary();
+            ToggleAuthFields();
         }
 
         private bool ValidateInput()

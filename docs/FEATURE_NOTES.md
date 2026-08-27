@@ -4,6 +4,12 @@
 
 ## 未完成功能與已知限制
 
+- **連線 URI 匯入 ✅ 五種既有 provider 已完成**
+  - 操作：新增連線精靈可從 URI 匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle 與 SQLite；解析完成後會開啟原本的 provider 設定頁供使用者檢查、測試與保存，不會自動連線或直接寫入設定。
+  - 格式：網路資料庫使用 `scheme://user:password@host:port/database`，支援百分比編碼、`name` 與 `sslmode`；SQL Server 另支援 Windows 驗證及憑證信任參數，Oracle 可用路徑指定 Service Name 或以 `sid`／`service_name` 參數指定識別值，SQLite 使用絕對檔案 URI。
+  - 安全：原始 URI 不會保存；畫面預設遮蔽可能含密碼的內容，只有使用者勾選才顯示。解析會拒絕未知／重複／衝突參數、fragment、錯誤 percent escape、控制字元、額外資料庫路徑與不支援 scheme；密碼仍沿用正常儲存流程寫入 Windows Credential Manager。
+  - 驗證：smoke test 覆蓋 provider alias、預設與自訂連接埠、帳密／名稱 percent decode、TLS 對應、SQL Server Windows 驗證、Oracle SID、SQLite 路徑、表單預填及 fail-closed 錯誤案例。
+
 - **SSL/TLS 與 SSH Tunnel ✅ 四種網路 provider 已完成**
   - 連線設定：MySQL／MariaDB、PostgreSQL、SQL Server 與 Oracle 的新增／編輯視窗都可開啟 SSL／TLS 與 SSH Tunnel；SQLite／SpatiaLite 為本機檔案，不套用網路傳輸設定。
   - 憑證驗證：依 provider 提供 Required、VerifyCA 或 VerifyFull 等模式，可指定 CA、用戶端憑證／私鑰或 Oracle Wallet；Oracle Basic 可改用 TCPS 與伺服器 DN 比對，TNS 則交由 `tnsnames.ora` 管理。

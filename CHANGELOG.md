@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **連線 URI 匯入**：新增連線精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle 與 SQLite URI，支援 percent encoding、常用 TLS／Windows 驗證參數，解析後會先開啟原本的設定頁供確認；原始 URI 不會保存，密碼仍交由 Windows Credential Manager 儲存。
 - **SSL/TLS 與 SSH 安全連線**：MySQL／MariaDB、PostgreSQL、SQL Server 與 Oracle 連線可設定憑證驗證和 SSH Tunnel；Tunnel 會固定 SHA256 主機金鑰指紋，測試連線、主畫面與自動執行作業共用同一套安全設定。
 - **Windows 自動執行作業**：可從工具選單建立唯讀查詢、查詢結果匯出與 SQL 備份作業，支援立即執行、每日工作排程與 JSON 執行紀錄；作業檔不保存帳密，排程沿用同一個 Windows 使用者的 Credential Manager。
 

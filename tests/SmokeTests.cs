@@ -61,6 +61,7 @@ public static class SmokeTests
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
+        Run("Connection URI import", TestConnectionUriImport, ref passed);
         Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
         Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
         Run("Provider SQL 執行 fallback", TestDatabaseExecutionResultService, ref passed);
@@ -7391,6 +7392,85 @@ public static class SmokeTests
         AssertEquals("HEAD", request.Method, "Connectivity test should use HEAD.");
         Assert(request.Proxy != null, "Connectivity request should include HTTP proxy.");
         AssertEquals("http://proxy.local:3128/", request.Proxy.GetProxy(new Uri("https://example.test/")).ToString(), "Connectivity request proxy URI should match settings.");
+    }
+
+    private static void TestConnectionUriImport()
+    {
+        ConnectionUriParseResult mysqlResult = ConnectionUriImportService.Parse(
+            "mariadb://app%40team:p%3Bass%3Dword@db.example.com:3307/sales?sslmode=verify-full&name=Sales%20DB");
+        Assert(mysqlResult.Success, "MariaDB aliases should import as MySQL connections.");
+        AssertEquals("mysql", Convert.ToString(mysqlResult.Connection["db_kind"]), "MariaDB URI should normalize to MySQL.");
+        AssertEquals("app@team", Convert.ToString(mysqlResult.Connection["username"]), "URI usernames should be percent-decoded.");
+        AssertEquals("p;ass=word", Convert.ToString(mysqlResult.Connection["pwd"]), "URI passwords should be percent-decoded without connection-string parsing.");
+        AssertEquals("3307", Convert.ToString(mysqlResult.Connection["port"]), "Explicit MySQL ports should be preserved.");
+        AssertEquals("sales", Convert.ToString(mysqlResult.Connection["initial_database"]), "MySQL database paths should be imported.");
+        AssertEquals("Sales DB", Convert.ToString(mysqlResult.Connection["conn_name"]), "Connection names should support percent-encoded spaces.");
+        AssertEquals("VerifyFull", Convert.ToString(mysqlResult.Connection["tls_mode"]), "MySQL sslmode should map to provider TLS settings.");
+
+        ConnectionUriParseResult postgresResult = ConnectionUriImportService.Parse("postgres://report:secret@pg.example.com/warehouse?sslmode=require");
+        Assert(postgresResult.Success, "Postgres aliases should be accepted.");
+        AssertEquals("5432", Convert.ToString(postgresResult.Connection["port"]), "PostgreSQL should apply the provider default port.");
+        AssertEquals("Require", Convert.ToString(postgresResult.Connection["tls_mode"]), "PostgreSQL sslmode should use Npgsql naming.");
+
+        ConnectionUriParseResult sqlServerResult = ConnectionUriImportService.Parse(
+            "sqlserver://sql.example.com/main?integratedsecurity=true&encrypt=true&trustservercertificate=false");
+        Assert(sqlServerResult.Success, "SQL Server Windows Authentication URIs should be accepted.");
+        AssertEquals("T", Convert.ToString(sqlServerResult.Connection["trusted_connection"]), "SQL Server integrated security should preselect Windows Authentication.");
+        AssertEquals("VerifyFull", Convert.ToString(sqlServerResult.Connection["tls_mode"]), "SQL Server encryption options should require certificate verification.");
+
+        ConnectionUriParseResult oracleResult = ConnectionUriImportService.Parse("oracle://system:secret@ora.example.com:1522?sid=XE&sslmode=required");
+        Assert(oracleResult.Success, "Oracle SID URIs should be accepted.");
+        AssertEquals("sid", Convert.ToString(oracleResult.Connection["oracle_identifier_type"]), "Oracle SID parameters should select SID mode.");
+        AssertEquals("XE", Convert.ToString(oracleResult.Connection["sid"]), "Oracle SID values should be pre-filled.");
+        AssertEquals("Required", Convert.ToString(oracleResult.Connection["tls_mode"]), "Oracle sslmode should enable TCPS settings.");
+
+        string sqlitePath = Path.Combine(Path.GetTempPath(), "uri import", "sample.sqlite");
+        string sqliteUri = new Uri(sqlitePath).AbsoluteUri.Replace("file:", "sqlite:");
+        ConnectionUriParseResult sqliteResult = ConnectionUriImportService.Parse(sqliteUri + "?name=Local%20Sample");
+        Assert(sqliteResult.Success, "Absolute SQLite file URIs should be accepted.");
+        AssertEquals(sqlitePath, Convert.ToString(sqliteResult.Connection["path"]), "SQLite URI paths should round-trip on Windows.");
+        AssertEquals("F", Convert.ToString(sqliteResult.Connection["init_geospatial"]), "URI import should not opt existing SQLite files into geospatial initialization.");
+
+        string[] invalidUris =
+        {
+            "",
+            "redis://localhost/cache",
+            "mysql://user:secret@/main",
+            "mysql://localhost:70000/main",
+            "mysql://localhost/one/two",
+            "mysql://localhost/main#fragment",
+            "mysql://localhost/main?name=one&name=two",
+            "mysql://localhost/main?password=secret",
+            "mysql://localhost/main?sslmode=maybe",
+            "mysql://localhost/main?name=%ZZ",
+            "mysql://localhost/main?name=line%0Abreak",
+            "sqlserver://localhost/main?sslmode=required&encrypt=true",
+            "oracle://localhost/main?sid=XE",
+            "sqlite://remote/share/main.sqlite"
+        };
+        foreach (string invalidUri in invalidUris)
+        {
+            Assert(!ConnectionUriImportService.Parse(invalidUri).Success, "Invalid connection URI should fail closed: " + invalidUri);
+        }
+
+        ConnectionUriParseResult secretError = ConnectionUriImportService.Parse("mysql://user:super-secret@localhost/main?unsupported=1");
+        Assert(!secretError.Success, "Unsupported parameters should be rejected.");
+        Assert(secretError.Detail.IndexOf("super-secret", StringComparison.Ordinal) < 0, "URI validation details must not echo passwords.");
+
+        using (mySQLPunk.template.mysql_add_edit mysqlForm = new mySQLPunk.template.mysql_add_edit())
+        {
+            mysqlForm.ApplyConnectionDraft(mysqlResult.Connection);
+            MethodInfo buildConnection = typeof(mySQLPunk.template.mysql_add_edit).GetMethod("BuildConnection", BindingFlags.Instance | BindingFlags.NonPublic);
+            Dictionary<string, object> applied = (Dictionary<string, object>)buildConnection.Invoke(mysqlForm, new object[0]);
+            AssertEquals("Sales DB", Convert.ToString(applied["conn_name"]), "Imported URI values should reach the provider connection form.");
+            AssertEquals("p;ass=word", Convert.ToString(applied["pwd"]), "Provider forms should preserve imported passwords until the normal save flow.");
+        }
+
+        string root = FindRepositoryRootForTest();
+        string wizardSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "ConnectionTypeSelectionForm.cs"), Encoding.UTF8);
+        string mainSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
+        AssertContains(wizardSource, "ConnectionWizard.ImportUri", "The connection wizard should expose URI import.");
+        AssertContains(mainSource, "CreateConnectionFormFromDraft = CreateNewConnectionForm", "URI imports should reuse the normal provider form flow.");
     }
 
     private static void TestConnectionSecuritySettings()

@@ -32,6 +32,7 @@ namespace mySQLPunk
 
         public string SelectedConnectionType { get; private set; }
         public Func<string, Form> CreateConnectionForm { get; set; }
+        public Func<Dictionary<string, object>, Form> CreateConnectionFormFromDraft { get; set; }
 
         public ConnectionTypeSelectionForm()
             : this(null)
@@ -208,6 +209,13 @@ namespace mySQLPunk
                 Margin = new Padding(UiMetrics.Space2, 0, 0, 0),
                 Enabled = false
             };
+            Button importUriButton = new Button
+            {
+                Text = Localization.T("ConnectionWizard.ImportUri"),
+                AutoSize = true,
+                MinimumSize = new Size(124, UiMetrics.ControlHeight),
+                Dock = DockStyle.Left
+            };
 
             FlowLayoutPanel footerButtons = new FlowLayoutPanel
             {
@@ -220,10 +228,12 @@ namespace mySQLPunk
             footerButtons.Controls.Add(cancelButton);
             footerButtons.Controls.Add(nextButton);
             footer.Controls.Add(footerButtons);
+            footer.Controls.Add(importUriButton);
 
             gridButton.Click += (s, e) => SetListMode(false);
             listButton.Click += (s, e) => SetListMode(true);
             nextButton.Click += (s, e) => ShowSelectedConnectionForm();
+            importUriButton.Click += (s, e) => ImportConnectionUri();
 
             selectionPage.Controls.Add(body);
             selectionPage.Controls.Add(footer);
@@ -365,6 +375,38 @@ namespace mySQLPunk
             }
 
             Form form = CreateConnectionForm(SelectedConnectionType);
+            if (form == null) return;
+
+            ShowConnectionForm(form);
+        }
+
+        private void ImportConnectionUri()
+        {
+            using (ConnectionUriImportForm dialog = new ConnectionUriImportForm())
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK || dialog.ConnectionDraft == null) return;
+
+                object kindValue;
+                string kind = dialog.ConnectionDraft.TryGetValue("db_kind", out kindValue) && kindValue != null
+                    ? NormalizeKind(kindValue.ToString())
+                    : string.Empty;
+                if (string.IsNullOrEmpty(kind)) return;
+
+                SelectedConnectionType = kind;
+                if (CreateConnectionFormFromDraft == null)
+                {
+                    DialogResult = DialogResult.OK;
+                    Close();
+                    return;
+                }
+
+                Form form = CreateConnectionFormFromDraft(dialog.ConnectionDraft);
+                if (form != null) ShowConnectionForm(form);
+            }
+        }
+
+        private void ShowConnectionForm(Form form)
+        {
             if (form == null) return;
 
             embeddedConnectionForm = form;

@@ -12,7 +12,7 @@ using MySqlConnector;
 
 namespace mySQLPunk.template
 {
-    public partial class mysql_add_edit : Form
+    public partial class mysql_add_edit : Form, IConnectionDraftForm
     {
         private Label initialDatabaseLabel;
         private TextBox mysql_initial_database;
@@ -71,6 +71,19 @@ namespace mySQLPunk.template
             }
 
             return string.Empty;
+        }
+
+        public void ApplyConnectionDraft(Dictionary<string, object> conn)
+        {
+            if (conn == null) return;
+            mysql_connection_name.Text = GetValue(conn, "conn_name");
+            mysql_host.Text = GetValue(conn, "host");
+            mysql_port.Text = GetValue(conn, "port");
+            mysql_initial_database.Text = GetValue(conn, "initial_database");
+            mysql_username.Text = GetValue(conn, "username");
+            mysql_pwd.Text = GetValue(conn, "pwd");
+            ConnectionSecuritySettingsService.Copy(conn, securitySettings);
+            UpdateSecuritySummary();
         }
 
         private Dictionary<string, object> BuildConnection()

@@ -91,7 +91,7 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 62 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
+目前 63 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、連線 URI 匯入、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
 
 MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
 
@@ -121,7 +121,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 | 功能 | 狀態 | 說明 |
 | --- | --- | --- |
-| 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，支援連線群組與切換多個連線設定檔；資料庫／SSH／憑證密碼改存 Windows Credential Manager，設定檔只保留 credential target；MySQL、PostgreSQL、SQL Server 與 Oracle 可設定 SSL/TLS 與 SSH Tunnel，詳見[連線安全說明](docs/CONNECTION_SECURITY.md)。 |
+| 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，支援連線群組與切換多個連線設定檔；新增精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite URI，解析後先開設定頁確認；資料庫／SSH／憑證密碼改存 Windows Credential Manager，設定檔只保留 credential target；四種網路 provider 可設定 SSL/TLS 與 SSH Tunnel，詳見[連線安全說明](docs/CONNECTION_SECURITY.md)。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | MySQL / MariaDB 使用者管理 | 可用 | 自動偵測 MySQL 5 / MySQL 8 / MariaDB；支援使用者 CRUD、密碼/Plugin/Lock/Expire/SSL/資源限制、Database/Table/View/Routine 權限編輯、SQL 預覽、`SHOW GRANTS` 與安全 DDL，並保留同名不同 Host 的獨立節點。 |
 | MySQL 匯出 / 匯入 | 可用 | 可選 Table/View/Routine/Trigger，支援完整 `SHOW CREATE` 結構、批次資料、DEFINER 移除、DELIMITER、UTF-8 without BOM 與串流檔案處理；匯入可選照 SQL 執行、刪除重建、只建不存在物件、略過既有物件與資料。 |
@@ -185,6 +185,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `mySQLPunk/entity/mySQLPunk_main.cs`: 連線設定載入／儲存、設定檔與憑證管理。
 - `mySQLPunk/lib/IDatabase.cs`: database provider 介面。
 - `mySQLPunk/lib/ObjectUriService.cs`: `mysqlpunk://object` URI 建立、驗證、解析與樹狀物件類型對應。
+- `mySQLPunk/lib/ConnectionUriImportService.cs`: 五種既有 provider 的連線 URI 驗證、解析與安全設定對應。
 - `mySQLPunk/lib/ScheduledJobService.cs`: 可攜式作業定義、唯讀 SQL 驗證、作業儲存、CLI 執行與紀錄。
 - `mySQLPunk/lib/WindowsScheduledTaskService.cs`: Windows Task Scheduler 每日排程註冊與移除。
 - `mySQLPunk/lib/ConnectionSecurityService.cs`: TLS 設定、SSH 主機金鑰驗證、Tunnel 生命週期與安全連線包裝。

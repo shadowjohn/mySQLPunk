@@ -152,6 +152,9 @@
     <Compile Include="ConnectionTypeSelectionForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="ConnectionUriImportForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="AboutDialog.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -230,6 +233,7 @@
     <Compile Include="lib\ConnectionDialogMessageService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
     <Compile Include="lib\ConnectionConfigurationService.cs" />
+    <Compile Include="lib\ConnectionUriImportService.cs" />
     <Compile Include="lib\ConnectionSecurityService.cs" />
     <Compile Include="lib\ConnectionProxySettingsService.cs" />
     <Compile Include="lib\BinaryCellStreamingService.cs" />
@@ -288,6 +292,7 @@
     <Compile Include="template\ConnectionSecurityForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="template\IConnectionDraftForm.cs" />
     <Compile Include="template\oracle_add_edit.cs">
       <SubType>Form</SubType>
     </Compile>

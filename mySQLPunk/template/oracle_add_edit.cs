@@ -12,7 +12,7 @@ using mySQLPunk.lib;
 
 namespace mySQLPunk.template
 {
-    public partial class oracle_add_edit : Form
+    public partial class oracle_add_edit : Form, IConnectionDraftForm
     {
         private readonly Dictionary<string, object> securitySettings = new Dictionary<string, object>();
 
@@ -88,6 +88,23 @@ namespace mySQLPunk.template
             
             this.Close();
             //Form1.ActiveForm.Parent.Parent.Parent.Parent.Parent.Enabled = true;
+        }
+
+        public void ApplyConnectionDraft(Dictionary<string, object> conn)
+        {
+            if (conn == null) return;
+            oracle_connection_name.Text = GetValue(conn, "conn_name");
+            oracle_connection_type.Text = "Basic";
+            textBox1.Text = GetValue(conn, "host");
+            textBox2.Text = GetValue(conn, "port");
+            textBox3.Text = GetServiceValue(conn);
+            textBox4.Text = GetValue(conn, "username");
+            textBox5.Text = GetValue(conn, "pwd");
+            radioButton2.Checked = GetValue(conn, "oracle_identifier_type") == "sid";
+            radioButton1.Checked = !radioButton2.Checked;
+            ConnectionSecuritySettingsService.Copy(conn, securitySettings);
+            UpdateSecuritySummary();
+            oracle_connection_type_selected_trigger_change();
         }
 
         private async void button1_Click(object sender, EventArgs e)

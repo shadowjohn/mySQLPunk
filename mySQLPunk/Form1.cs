@@ -16409,6 +16409,7 @@ namespace mySQLPunk
             using (ConnectionTypeSelectionForm form = new ConnectionTypeSelectionForm(GetRecentConnectionTypesForWizard()))
             {
                 form.CreateConnectionForm = CreateNewConnectionForm;
+                form.CreateConnectionFormFromDraft = CreateNewConnectionForm;
                 form.ShowDialog(this);
             }
         }
@@ -16441,6 +16442,27 @@ namespace mySQLPunk
                 default:
                     return null;
             }
+        }
+
+        private Form CreateNewConnectionForm(Dictionary<string, object> connectionDraft)
+        {
+            if (connectionDraft == null) return null;
+
+            Dictionary<string, object> draft = new Dictionary<string, object>(connectionDraft);
+            string kind = GetConnectionValue(draft, "db_kind");
+            if (string.Equals(kind, "mssql", StringComparison.OrdinalIgnoreCase)) kind = ConnectionTypeSelectionForm.SqlServer;
+            draft["conn_name"] = GetUniqueConnectionName(GetConnectionValue(draft, "conn_name"));
+
+            Form form = CreateNewConnectionForm(kind);
+            IConnectionDraftForm draftForm = form as IConnectionDraftForm;
+            if (draftForm == null)
+            {
+                if (form != null) form.Dispose();
+                return null;
+            }
+
+            draftForm.ApplyConnectionDraft(draft);
+            return form;
         }
 
         private void OpenMySqlConnectionForm()
