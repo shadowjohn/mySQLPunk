@@ -155,6 +155,11 @@ namespace mySQLPunk.lib
                 ConnectionUriParseResult error = ApplyRedisOptions(uri, database, connection);
                 if (error != null) return error;
             }
+            else if (provider == "snowflake")
+            {
+                ConnectionUriParseResult error = ApplySnowflakeOptions(query, connection);
+                if (error != null) return error;
+            }
 
             if (provider != "sqlserver" && provider != "mongodb")
             {
@@ -237,6 +242,25 @@ namespace mySQLPunk.lib
             int parsed;
             if (!int.TryParse(index, out parsed) || parsed < 0) return Fail(ConnectionUriError.InvalidFormat);
             connection["initial_database"] = parsed.ToString();
+            return null;
+        }
+
+        private static ConnectionUriParseResult ApplySnowflakeOptions(
+            Dictionary<string, string> query,
+            Dictionary<string, object> connection)
+        {
+            string value;
+            connection["snowflake_schema"] = query.TryGetValue("schema", out value) ? value.Trim() : string.Empty;
+            connection["snowflake_warehouse"] = query.TryGetValue("warehouse", out value) ? value.Trim() : string.Empty;
+            connection["snowflake_role"] = query.TryGetValue("role", out value) ? value.Trim() : string.Empty;
+            if (query.TryGetValue("auth", out value))
+            {
+                if (string.Equals(value.Trim(), "oauth", StringComparison.OrdinalIgnoreCase)) connection["snowflake_oauth"] = "T";
+                else if (string.Equals(value.Trim(), "pat", StringComparison.OrdinalIgnoreCase)) connection["snowflake_oauth"] = "F";
+                else return Fail(ConnectionUriError.InvalidQuery, "auth");
+            }
+            else connection["snowflake_oauth"] = "F";
+            connection["tls_mode"] = "Required";
             return null;
         }
 
@@ -394,6 +418,15 @@ namespace mySQLPunk.lib
                 // TLS 由 rediss:// scheme 決定，不接受任何額外連線參數。
                 values.Remove("sslmode");
             }
+            if (provider == "snowflake")
+            {
+                // Snowflake 固定走 HTTPS；TLS 相關參數不適用。
+                values.Remove("sslmode");
+                values.Add("schema");
+                values.Add("warehouse");
+                values.Add("role");
+                values.Add("auth");
+            }
             return values;
         }
 
@@ -413,6 +446,7 @@ namespace mySQLPunk.lib
                 case "mongodb+srv": return "mongodb";
                 case "redis":
                 case "rediss": return "redis";
+                case "snowflake": return "snowflake";
                 default: return string.Empty;
             }
         }
@@ -427,6 +461,7 @@ namespace mySQLPunk.lib
                 case "oracle": return "1521";
                 case "mongodb": return "27017";
                 case "redis": return "6379";
+                case "snowflake": return "443";
                 default: return string.Empty;
             }
         }

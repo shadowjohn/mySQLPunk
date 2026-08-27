@@ -4,6 +4,12 @@
 
 ## 未完成功能與已知限制
 
+- **Snowflake provider 🟡 第一期完成（SQL REST API 唯讀直連）**
+  - 架構選擇：不引入官方 `Snowflake.Data` 驅動——5.x 已退出 .NET Framework 4.7.2，4.x 只剩 netstandard2.0 且會把 Apache.Arrow、AWSSDK.S3、Azure.Storage、Google Cloud Storage 等整串相依拖進 packages.config 專案。改以內建 `SnowflakeRestClient` 直連 [SQL REST API v2](https://docs.snowflake.com/en/developer-guide/sql-api/intro)：POST statements、202 輪詢與多 partition 讀取，零新增套件。
+  - 連線與驗證：連線設定頁提供帳戶識別碼、使用者、token、database、schema、warehouse、role 與 OAuth 切換；驗證使用 Programmatic Access Token（預設）或 OAuth token（`X-Snowflake-Authorization-Token-Type`），token 由 Windows Credential Manager 保存。`snowflake://user:token@account/db?warehouse=&role=&schema=&auth=` URI 可匯入，未知參數一律拒絕；`endpoint` 覆寫僅接受 loopback，供測試使用。
+  - Metadata 與查詢：SHOW DATABASES 列出資料庫，INFORMATION_SCHEMA 提供 schema.table／view、欄位型別、列數與位元組數；資料表可分頁瀏覽（LIMIT/OFFSET），查詢分頁接受 SELECT／SHOW／DESC／EXPLAIN／WITH，其餘 statement 直接拒絕，寫入與複製入口全部關閉。GET_DDL 供檢視 table／view 定義。
+  - 驗證與限制：69 項 smoke test 含 loopback HTTP 伺服器，實際走過 bearer token 與 token type header、100-continue、202 輪詢、partition 合併、SHOW／INFORMATION_SCHEMA 解析、唯讀拒寫、URI 匯入與設定保存。所有值以字串呈現（SQL API JSON 格式）；尚未對真實 Snowflake 帳戶實機驗收，key-pair JWT、寫入、暫存區、bulk load 與 BI 整合留待後續。
+
 - **Redis／Microsoft Garnet provider 🟡 第二期完成（string 安全編輯與實機矩陣）**
   - 連線：新增 Redis / Garnet 選項與設定頁，支援 `redis://`／`rediss://` URI、ACL username＋password、舊版 password-only URI 匯入相容、TLS 與 logical database index；密碼仍由 Windows Credential Manager 保存，設定檔另保留驗證需求旗標以便憑證遺失時提示補輸入。
   - 瀏覽：每個 logical db 提供 `keys` 虛擬表，透過 SCAN 顯示 key、type、TTL 與內容摘要；單次 traversal 會去除重複 key，type filter 會先於 offset／limit 套用，避免前一批不同型別吃掉結果額度。

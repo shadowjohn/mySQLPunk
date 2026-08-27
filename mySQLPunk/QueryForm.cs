@@ -341,7 +341,7 @@ namespace mySQLPunk
                 _isNoPrimaryKeyReadOnlyMode = false;
                 ApplyTableDataEditability();
                 if (string.IsNullOrWhiteSpace(_defaultTableBaseSql)) _defaultTableBaseSql = _baseSql;
-                SetTableProfileControlsVisible(!IsMongoDbProvider() && !IsRedisProvider() && ApplicationOptionSettings.GetBool("RememberTableSettings"));
+                SetTableProfileControlsVisible(!IsMongoDbProvider() && !IsRedisProvider() && !IsSnowflakeProvider() && ApplicationOptionSettings.GetBool("RememberTableSettings"));
                 ReloadTableProfileSelection();
 
             }
@@ -535,6 +535,11 @@ namespace mySQLPunk
         private bool IsRedisProvider()
         {
             return string.Equals(GetProviderName(), "redis", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsSnowflakeProvider()
+        {
+            return string.Equals(GetProviderName(), "snowflake", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>查詢分頁以 JSON 規格（而非 SQL）執行的 provider。</summary>
@@ -3443,7 +3448,7 @@ namespace mySQLPunk
             if (resultsDeleteRowItem != null) resultsDeleteRowItem.Text = Localization.T("Query.Delete");
             if (resultsSaveRowsItem != null) resultsSaveRowsItem.Text = Localization.T("Query.Save");
 
-            bool showEditActions = _isTableDataMode && !IsJsonQueryProvider();
+            bool showEditActions = _isTableDataMode && !IsJsonQueryProvider() && !IsSnowflakeProvider();
             if (resultsEditSeparator != null) resultsEditSeparator.Visible = showEditActions;
             if (resultsAddRowItem != null) resultsAddRowItem.Visible = showEditActions;
             if (resultsDeleteRowItem != null) resultsDeleteRowItem.Visible = showEditActions;
@@ -4638,7 +4643,7 @@ namespace mySQLPunk
 
         private bool CanEditTableData()
         {
-            return !IsJsonQueryProvider() && _isTableDataMode && _gridBoundToBaseTable && !_isNoPrimaryKeyReadOnlyMode;
+            return !IsJsonQueryProvider() && !IsSnowflakeProvider() && _isTableDataMode && _gridBoundToBaseTable && !_isNoPrimaryKeyReadOnlyMode;
         }
 
         private bool ShouldOpenNoPrimaryKeyAsReadOnly(string tableName)

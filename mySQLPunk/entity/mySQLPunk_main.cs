@@ -481,7 +481,11 @@ namespace mySQLPunk.entity
                     { "mongo_retry_writes", GetVal(conn, "mongo_retry_writes") },
                     { "mongo_tls", GetVal(conn, "mongo_tls") },
                     { "redis_tls", GetVal(conn, "redis_tls") },
-                    { "redis_auth_required", GetVal(conn, "redis_auth_required") }
+                    { "redis_auth_required", GetVal(conn, "redis_auth_required") },
+                    { "snowflake_schema", GetVal(conn, "snowflake_schema") },
+                    { "snowflake_warehouse", GetVal(conn, "snowflake_warehouse") },
+                    { "snowflake_role", GetVal(conn, "snowflake_role") },
+                    { "snowflake_oauth", GetVal(conn, "snowflake_oauth") }
                 };
                 foreach (string key in ConnectionSecuritySettingsService.PersistedKeys)
                 {
@@ -685,6 +689,10 @@ namespace mySQLPunk.entity
             if (!conn.ContainsKey("mongo_tls")) conn["mongo_tls"] = "F";
             if (!conn.ContainsKey("redis_tls")) conn["redis_tls"] = "F";
             if (!conn.ContainsKey("redis_auth_required")) conn["redis_auth_required"] = "F";
+            if (!conn.ContainsKey("snowflake_schema")) conn["snowflake_schema"] = "";
+            if (!conn.ContainsKey("snowflake_warehouse")) conn["snowflake_warehouse"] = "";
+            if (!conn.ContainsKey("snowflake_role")) conn["snowflake_role"] = "";
+            if (!conn.ContainsKey("snowflake_oauth")) conn["snowflake_oauth"] = "F";
             ConnectionSecuritySettingsService.Normalize(conn);
         }
 

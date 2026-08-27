@@ -273,6 +273,8 @@ namespace mySQLPunk
                 case "redis":
                 case "garnet":
                     return isConnected ? 28 : 27;
+                case "snowflake":
+                    return isConnected ? 30 : 29;
                 default:
                     return isConnected ? 11 : 10;
             }
@@ -1277,6 +1279,7 @@ namespace mySQLPunk
         private static readonly Color TreeGenericDbColor = Color.FromArgb(0x64, 0x74, 0x8B);  // 資料庫節點 石板灰
         private static readonly Color TreeMongoDbColor = Color.FromArgb(0x00, 0xA8, 0x59);     // MongoDB 綠
         private static readonly Color TreeRedisColor = Color.FromArgb(0xDC, 0x38, 0x2D);       // Redis 紅
+        private static readonly Color TreeSnowflakeColor = Color.FromArgb(0x29, 0xB5, 0xE8);   // Snowflake 藍
         private static readonly Color TreeGroupIconColor = Color.FromArgb(0x7A, 0x86, 0x99);  // 群組圖示
         private static readonly Color TreeFolderColor = Color.FromArgb(0xD9, 0xA0, 0x38);     // 資料夾 琥珀
 
@@ -1393,6 +1396,8 @@ namespace mySQLPunk
             myImageList.Images.Add(TreeIconFromFile("tree_mongodb_on.png", () => TreeEngineChipIcon(TreeMongoDbColor, true, "M"))); //26
             myImageList.Images.Add(TreeIconFromFile("tree_redis_off.png", () => TreeEngineChipIcon(TreeRedisColor, false, "R"))); //27
             myImageList.Images.Add(TreeIconFromFile("tree_redis_on.png", () => TreeEngineChipIcon(TreeRedisColor, true, "R"))); //28
+            myImageList.Images.Add(TreeIconFromFile("tree_snowflake_off.png", () => TreeEngineChipIcon(TreeSnowflakeColor, false, "S"))); //29
+            myImageList.Images.Add(TreeIconFromFile("tree_snowflake_on.png", () => TreeEngineChipIcon(TreeSnowflakeColor, true, "S"))); //30
 
             // Assign the ImageList to the TreeView.
 
@@ -2540,6 +2545,9 @@ namespace mySQLPunk
                 case "redis":
                     return IsTrueConnectionValue(GetConnectionValue(conn, "redis_auth_required")) ||
                            !string.IsNullOrWhiteSpace(GetConnectionValue(conn, "username"));
+                case "snowflake":
+                    // Snowflake 一律以 token 驗證，匯入沒帶密碼就必須補輸入。
+                    return true;
                 default:
                     return false;
             }
@@ -6720,10 +6728,16 @@ namespace mySQLPunk
                    string.Equals(target.ProviderName, "redis", StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>MongoDB／Redis 這類非關聯式 provider：樹與清單只保留唯讀開啟入口。</summary>
+        private static bool IsSnowflakeTarget(TreeDatabaseTarget target)
+        {
+            return target != null &&
+                   string.Equals(target.ProviderName, "snowflake", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>MongoDB／Redis／Snowflake 這類第一期唯讀 provider：樹與清單只保留唯讀開啟入口。</summary>
         private static bool IsNonRelationalTarget(TreeDatabaseTarget target)
         {
-            return IsMongoDbTarget(target) || IsRedisTarget(target);
+            return IsMongoDbTarget(target) || IsRedisTarget(target) || IsSnowflakeTarget(target);
         }
 
         private static string BuildSqliteColumnCommentExchangeFileName(string databaseName, string tableName)
@@ -15181,11 +15195,69 @@ namespace mySQLPunk
                 case "garnet":
                     await OpenRedisConnectionAsync(connIdx, db_tree);
                     break;
+                case "snowflake":
+                    await OpenSnowflakeConnectionAsync(connIdx, db_tree);
+                    break;
                 default:
                     UpdateMainStatus(Localization.Format("Connection.UnsupportedEdit", kind));
                     return false;
             }
             return IsConnectionOpen(connIdx);
+        }
+
+        private async Task OpenSnowflakeConnectionAsync(int index, TreeView tree)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            if (!TryEnterConnectionOpenScope(index)) return;
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = tree?.Enabled ?? true;
+            try
+            {
+                if (tree != null) tree.Enabled = false;
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield();
+
+                Dictionary<string, object> conn = myN.connections[index];
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    try
+                    {
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(conn));
+                        myN.connections[index]["connString"] = openResult.ConnectionString;
+                        myN.connections[index]["pdo"] = openResult.Database;
+                        myN.connections[index]["isConnect"] = "T";
+                        ApplyConnectionNodeIcon(FindConnectionNode(index), "snowflake", true);
+                        TreeNode connectionNode = FindConnectionNode(index);
+                        PopulateConnectionDatabaseNodes(connectionNode, openResult.Databases);
+                        if (connectionNode != null) connectionNode.Expand();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
+                        if (canRetry && MessageBox.Show(
+                                BuildConnectionRetryPromptMessage("Snowflake", ex),
+                                "Snowflake",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning) == DialogResult.Yes)
+                            continue;
+
+                        myN.connections[index]["pdo"] = null;
+                        myN.connections[index]["isConnect"] = "F";
+                        HandleConnectionOpenFailure(index, tree, "Snowflake", lastError);
+                        return;
+                    }
+                }
+            }
+            finally
+            {
+                if (tree != null) tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
+                ExitConnectionOpenScope(index);
+            }
         }
 
         private void DuplicateConnection(int index)
@@ -16166,6 +16238,14 @@ namespace mySQLPunk
                         form.ShowDialog();
                     }
                     break;
+                case "snowflake":
+                    {
+                        snowflake_add_edit form = new snowflake_add_edit();
+                        form.F1 = this;
+                        form.editIndex = index;
+                        form.ShowDialog();
+                    }
+                    break;
                 default:
                     MessageBox.Show(BuildUnsupportedConnectionEditMessage(kind), Localization.T("Tool.EditConnection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     break;
@@ -16336,7 +16416,7 @@ namespace mySQLPunk
             AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
             string connKind = ConnectionConfigurationService.NormalizeProvider(GetConnectionValue(connInfo, "db_kind"));
-            if (connKind == "mongodb" || connKind == "redis")
+            if (connKind == "mongodb" || connKind == "redis" || connKind == "snowflake")
             {
                 PopulateMongoDbUtilityGroups(databaseNode);
                 return;
@@ -16437,7 +16517,7 @@ namespace mySQLPunk
             AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
             string providerKind = db == null ? string.Empty : (db.ProviderName ?? string.Empty).ToLowerInvariant();
-            if (providerKind == "mongodb" || providerKind == "redis")
+            if (providerKind == "mongodb" || providerKind == "redis" || providerKind == "snowflake")
             {
                 PopulateMongoDbUtilityGroups(databaseNode);
                 return;
@@ -16873,6 +16953,8 @@ namespace mySQLPunk
                     return new mongodb_add_edit { F1 = this };
                 case ConnectionTypeSelectionForm.Redis:
                     return new redis_add_edit { F1 = this };
+                case ConnectionTypeSelectionForm.Snowflake:
+                    return new snowflake_add_edit { F1 = this };
                 default:
                     return null;
             }

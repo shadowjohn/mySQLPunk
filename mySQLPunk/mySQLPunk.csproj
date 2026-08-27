@@ -290,6 +290,8 @@
     <Compile Include="lib\MongoDocumentEditService.cs" />
     <Compile Include="lib\my_redis.cs" />
     <Compile Include="lib\RedisRespClient.cs" />
+    <Compile Include="lib\my_snowflake.cs" />
+    <Compile Include="lib\SnowflakeRestClient.cs" />
     <Compile Include="lib\MetadataLoadService.cs" />
     <Compile Include="lib\include.cs" />
     <Compile Include="lib\ObjectVisibilityService.cs" />
@@ -335,6 +337,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="template\redis_add_edit.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="template\snowflake_add_edit.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="template\oracle_add_edit.cs">

@@ -17,6 +17,7 @@ namespace mySQLPunk
         public const string Sqlite = "sqlite";
         public const string MongoDb = "mongodb";
         public const string Redis = "redis";
+        public const string Snowflake = "snowflake";
 
         private readonly TextBox searchBox;
         private readonly Button gridButton;
@@ -60,7 +61,8 @@ namespace mySQLPunk
                 new ConnectionTypeOption(Oracle, "Oracle", Color.FromArgb(198, 24, 24), Path.Combine(imagePath, "brand_oracle.png")),
                 new ConnectionTypeOption(Sqlite, "SQLite", Color.FromArgb(0, 109, 165), Path.Combine(imagePath, "brand_sqlite.png")),
                 new ConnectionTypeOption(MongoDb, "MongoDB", Color.FromArgb(0, 168, 89), Path.Combine(imagePath, "brand_mongodb.png")),
-                new ConnectionTypeOption(Redis, "Redis / Garnet", Color.FromArgb(220, 56, 45), Path.Combine(imagePath, "brand_redis.png"))
+                new ConnectionTypeOption(Redis, "Redis / Garnet", Color.FromArgb(220, 56, 45), Path.Combine(imagePath, "brand_redis.png")),
+                new ConnectionTypeOption(Snowflake, "Snowflake", Color.FromArgb(41, 181, 232), Path.Combine(imagePath, "brand_snowflake.png"))
             };
 
             recentConnectionTypes.AddRange(BuildRecentConnectionTypes(recentTypes));
@@ -511,6 +513,8 @@ namespace mySQLPunk
                 case "redis":
                 case "garnet":
                     return Redis;
+                case "snowflake":
+                    return Snowflake;
                 default:
                     return string.Empty;
             }

@@ -68,6 +68,7 @@ public static class SmokeTests
         Run("MongoDB document tree and safe edit", TestMongoDbDocumentEditing, ref passed);
         Run("Redis provider foundation", TestRedisProviderFoundation, ref passed);
         Run("Redis safe editing", TestRedisSafeEditing, ref passed);
+        Run("Snowflake provider foundation", TestSnowflakeProviderFoundation, ref passed);
         Run("Connection stars and batch properties", TestConnectionBatchProperties, ref passed);
         Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
         Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
@@ -7847,6 +7848,121 @@ public static class SmokeTests
         AssertContains(csprojSource, "RedisKeyEditorForm.cs", "The key editor form should be part of the project.");
     }
 
+    private static void TestSnowflakeProviderFoundation()
+    {
+        AssertEquals("snowflake://user:t%40ken@myorg-acct/ANALYTICS?schema=PUBLIC&warehouse=WH&role=DEV&auth=oauth",
+            my_snowflake.BuildConnectionString("myorg-acct", "user", "t@ken", "ANALYTICS", "PUBLIC", "WH", "DEV", true),
+            "Snowflake connection strings should percent-encode tokens and keep options in the query.");
+        AssertEquals("snowflake://:tok@acct/", my_snowflake.BuildConnectionString("acct", "", "tok", "", "", "", "", false),
+            "Minimal Snowflake connection strings should omit unused options.");
+
+        string schemaName, objectName;
+        my_snowflake.SplitSchemaObject("PUBLIC.ORDERS", out schemaName, out objectName);
+        Assert(schemaName == "PUBLIC" && objectName == "ORDERS", "schema.table names should split at the first dot.");
+        bool invalidName = false;
+        try { my_snowflake.SplitSchemaObject("ORDERS", out schemaName, out objectName); }
+        catch (ArgumentException) { invalidName = true; }
+        Assert(invalidName, "Object names without a schema should be rejected.");
+        AssertEquals("\"my\"\"db\"", my_snowflake.QuoteIdentifier("my\"db"), "Identifiers should double embedded quotes.");
+
+        using (my_snowflake guard = new my_snowflake())
+        {
+            AssertEquals("ERROR", guard.ExecSQL("DELETE FROM t")["status"], "Snowflake phase one should reject writes explicitly.");
+            bool readOnly = false;
+            try { guard.SelectSQL("UPDATE t SET a = 1"); }
+            catch (NotSupportedException) { readOnly = true; }
+            Assert(readOnly, "Non read-only statements should be rejected before reaching the server.");
+            bool endpointRejected = false;
+            try { guard.SetConn("snowflake://:tok@acct/db?endpoint=http%3A%2F%2Fevil.example.com"); }
+            catch (ArgumentException) { endpointRejected = true; }
+            Assert(endpointRejected, "Endpoint overrides must be loopback-only.");
+        }
+
+        string sampleResult = "{ \"statementHandle\": \"h-1\", \"resultSetMetaData\": { \"numRows\": 3, "
+            + "\"partitionInfo\": [ { \"rowCount\": 2 }, { \"rowCount\": 1 } ], "
+            + "\"rowType\": [ { \"name\": \"ID\", \"type\": \"fixed\" }, { \"name\": \"NAME\", \"type\": \"text\" } ] }, "
+            + "\"data\": [ [ \"1\", \"a\" ], [ \"2\", null ] ] }";
+        SnowflakeStatementResult parsed = SnowflakeRestClient.ParseStatementResult(sampleResult);
+        Assert(parsed.ColumnNames.Count == 2 && parsed.ColumnNames[1] == "NAME", "rowType should provide column names.");
+        Assert(parsed.PartitionCount == 2 && parsed.StatementHandle == "h-1", "partitionInfo and handle should be parsed.");
+        Assert(parsed.Rows.Count == 2 && parsed.Rows[1][1] == DBNull.Value, "JSON null cells should map to DBNull.");
+        List<object[]> partitionRows = SnowflakeRestClient.ParsePartitionRows("{ \"data\": [ [ \"3\", \"c\" ] ] }", 2);
+        Assert(partitionRows.Count == 1 && Convert.ToString(partitionRows[0][0]) == "3", "Partition replies should parse data rows.");
+
+        ConnectionUriParseResult imported = ConnectionUriImportService.Parse(
+            "snowflake://user:t%40ken@myorg-acct/ANALYTICS?warehouse=WH&role=DEV&schema=PUBLIC&auth=oauth&name=Snow");
+        Assert(imported.Success, "Snowflake URIs should import.");
+        AssertEquals("snowflake", Convert.ToString(imported.Connection["db_kind"]), "Snowflake URIs should select the Snowflake provider.");
+        AssertEquals("t@ken", Convert.ToString(imported.Connection["pwd"]), "Snowflake tokens should be percent-decoded.");
+        AssertEquals("WH", Convert.ToString(imported.Connection["snowflake_warehouse"]), "Warehouse options should be preserved.");
+        AssertEquals("T", Convert.ToString(imported.Connection["snowflake_oauth"]), "auth=oauth should mark the OAuth token type.");
+        Assert(!ConnectionUriImportService.Parse("snowflake://acct/db?ssl=true").Success,
+            "Unknown Snowflake URI parameters should be rejected.");
+        Assert(!ConnectionUriImportService.Parse("snowflake://acct/db?auth=jwt").Success,
+            "Unsupported Snowflake auth types should be rejected.");
+
+        string built = ConnectionConfigurationService.BuildSnowflakeConnectionString(new Dictionary<string, object>
+        {
+            { "db_kind", "snowflake" }, { "host", "myorg-acct" }, { "username", "user" }, { "pwd", "tok" },
+            { "initial_database", "ANALYTICS" }, { "snowflake_schema", "PUBLIC" },
+            { "snowflake_warehouse", "WH" }, { "snowflake_role", "" }, { "snowflake_oauth", "F" }
+        });
+        AssertEquals("snowflake://user:tok@myorg-acct/ANALYTICS?schema=PUBLIC&warehouse=WH", built,
+            "Connection settings should build standard Snowflake URIs.");
+
+        using (IDatabase provider = ConnectionConfigurationService.CreateDatabase("snowflake"))
+        {
+            AssertEquals("snowflake", provider.ProviderName, "The factory should create the Snowflake provider.");
+            Assert(provider.State == ConnectionState.Closed, "A new Snowflake provider should start closed.");
+        }
+
+        using (mySQLPunk.template.snowflake_add_edit form = new mySQLPunk.template.snowflake_add_edit())
+        {
+            form.ApplyConnectionDraft(new Dictionary<string, object>
+            {
+                { "conn_name", "Snow" }, { "host", "myorg-acct" }, { "pwd", "tok" },
+                { "initial_database", "ANALYTICS" }, { "snowflake_warehouse", "WH" }, { "snowflake_oauth", "T" }
+            });
+            MethodInfo buildConnection = typeof(mySQLPunk.template.snowflake_add_edit).GetMethod("BuildConnection", BindingFlags.Instance | BindingFlags.NonPublic);
+            Dictionary<string, object> applied = (Dictionary<string, object>)buildConnection.Invoke(form, null);
+            AssertEquals("snowflake", Convert.ToString(applied["db_kind"]), "Snowflake drafts should reach the provider connection form.");
+            AssertEquals("WH", Convert.ToString(applied["snowflake_warehouse"]), "Snowflake forms should preserve the warehouse.");
+            AssertEquals("T", Convert.ToString(applied["snowflake_oauth"]), "Snowflake forms should preserve the token type.");
+        }
+
+        using (FakeSnowflakeServer server = new FakeSnowflakeServer())
+        using (my_snowflake liveProvider = new my_snowflake())
+        {
+            liveProvider.SetConn(my_snowflake.BuildConnectionString(
+                "test-acct", "user", "test-token", "ANALYTICS", "", "WH", "",
+                false, "http://127.0.0.1:" + server.Port));
+            liveProvider.Open();
+            Assert(liveProvider.State == ConnectionState.Open, "The Snowflake provider should open over the REST API.");
+            List<string> databases = liveProvider.GetDatabases();
+            Assert(databases.Count == 2 && databases.Contains("ANALYTICS") && databases.Contains("DEMO"),
+                "SHOW DATABASES should populate database nodes.");
+            List<string> tables = liveProvider.GetTables("ANALYTICS");
+            Assert(tables.Count == 1 && tables[0] == "PUBLIC.ORDERS", "INFORMATION_SCHEMA should list schema.table names.");
+            DataTable merged = liveProvider.SelectSQL("SELECT * FROM PARTITIONED");
+            Assert(merged.Rows.Count == 3 && Convert.ToString(merged.Rows[2]["NAME"]) == "c",
+                "Multi-partition results should be merged in order.");
+            DataTable asyncResult = liveProvider.SelectSQL("SELECT * FROM ASYNC_TEST");
+            Assert(asyncResult.Rows.Count == 1, "202 responses should be polled until the statement completes.");
+            liveProvider.Close();
+            server.AssertHealthy();
+            Assert(server.SawBearerToken, "Requests should send the bearer token.");
+            Assert(server.SawTokenTypeHeader, "Requests should declare the PAT token type header.");
+            Assert(server.SawWarehouse, "Statement bodies should include the configured warehouse.");
+        }
+
+        string root = FindRepositoryRootForTest();
+        string form1Source = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
+        AssertContains(form1Source, "OpenSnowflakeConnectionAsync", "The main window should open Snowflake connections.");
+        AssertContains(form1Source, "IsSnowflakeTarget", "Snowflake objects should share the read-only tree menus.");
+        string entitySource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "entity", "mySQLPunk_main.cs"), Encoding.UTF8);
+        AssertContains(entitySource, "snowflake_warehouse", "Snowflake settings should persist in connection profiles.");
+    }
+
     private static object ReadResp(string payload)
     {
         using (MemoryStream stream = new MemoryStream(Encoding.UTF8.GetBytes(payload)))
@@ -10773,6 +10889,203 @@ public static class SmokeTests
             try { listener.Stop(); } catch { }
             worker.Join(1000);
             if (failure != null) throw new Exception("Fake Redis edit server failed.", failure);
+        }
+    }
+
+    /// <summary>loopback 上的最小 HTTP/1.1 伺服器，模擬 Snowflake SQL API：驗證 header、202 輪詢與 partition 讀取。</summary>
+    private sealed class FakeSnowflakeServer : IDisposable
+    {
+        private readonly TcpListener listener;
+        private readonly Thread worker;
+        private Exception failure;
+        private volatile bool stopping;
+        public volatile bool SawBearerToken;
+        public volatile bool SawTokenTypeHeader;
+        public volatile bool SawWarehouse;
+
+        public FakeSnowflakeServer()
+        {
+            listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            worker = new Thread(Run) { IsBackground = true, Name = "mySQLPunk fake Snowflake" };
+            worker.Start();
+        }
+
+        public int Port { get; private set; }
+
+        public void AssertHealthy()
+        {
+            if (failure != null) throw new Exception("Fake Snowflake server failed.", failure);
+        }
+
+        private void Run()
+        {
+            try
+            {
+                while (!stopping)
+                {
+                    TcpClient connection;
+                    try { connection = listener.AcceptTcpClient(); }
+                    catch (SocketException) { break; }
+                    catch (ObjectDisposedException) { break; }
+                    using (connection)
+                    using (NetworkStream stream = connection.GetStream())
+                    {
+                        try { HandleRequest(stream); }
+                        catch (IOException) { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!stopping) failure = ex;
+            }
+        }
+
+        private void HandleRequest(NetworkStream stream)
+        {
+            string requestLine = ReadHttpLine(stream);
+            if (string.IsNullOrEmpty(requestLine)) return;
+            string[] parts = requestLine.Split(' ');
+            string method = parts[0];
+            string target = parts.Length > 1 ? parts[1] : string.Empty;
+
+            Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string headerLine;
+            while (!string.IsNullOrEmpty(headerLine = ReadHttpLine(stream)))
+            {
+                int colon = headerLine.IndexOf(':');
+                if (colon > 0) headers[headerLine.Substring(0, colon).Trim()] = headerLine.Substring(colon + 1).Trim();
+            }
+
+            string authorization;
+            if (headers.TryGetValue("Authorization", out authorization) && authorization == "Bearer test-token")
+                SawBearerToken = true;
+            string tokenType;
+            if (headers.TryGetValue("X-Snowflake-Authorization-Token-Type", out tokenType) && tokenType == "PROGRAMMATIC_ACCESS_TOKEN")
+                SawTokenTypeHeader = true;
+
+            string body = string.Empty;
+            if (method == "POST")
+            {
+                string expect;
+                if (headers.TryGetValue("Expect", out expect) && expect.IndexOf("100-continue", StringComparison.OrdinalIgnoreCase) >= 0)
+                    WriteAsciiHttp(stream, "HTTP/1.1 100 Continue\r\n\r\n");
+                int contentLength = 0;
+                string lengthText;
+                if (headers.TryGetValue("Content-Length", out lengthText)) int.TryParse(lengthText, out contentLength);
+                byte[] buffer = new byte[contentLength];
+                int offset = 0;
+                while (offset < contentLength)
+                {
+                    int read = stream.Read(buffer, offset, contentLength - offset);
+                    if (read <= 0) throw new IOException("Request body ended early.");
+                    offset += read;
+                }
+                body = Encoding.UTF8.GetString(buffer);
+            }
+
+            if (method == "POST" && target == "/api/v2/statements") DispatchStatement(stream, body);
+            else if (method == "GET" && target == "/api/v2/statements/h-async")
+                WriteJson(stream, 200, BuildSingleColumnResult("h-async2", "STATUS", new[] { "done" }));
+            else if (method == "GET" && target == "/api/v2/statements/h-part?partition=1")
+                WriteJson(stream, 200, "{ \"data\": [ [ \"3\", \"c\" ] ] }");
+            else
+                WriteJson(stream, 400, "{ \"message\": \"unexpected request " + target + "\", \"code\": \"390100\" }");
+        }
+
+        private void DispatchStatement(NetworkStream stream, string body)
+        {
+            Newtonsoft.Json.Linq.JObject request = Newtonsoft.Json.Linq.JObject.Parse(body);
+            string statement = (string)request["statement"] ?? string.Empty;
+            if ((string)request["warehouse"] == "WH") SawWarehouse = true;
+
+            if (statement.IndexOf("CURRENT_VERSION", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                WriteJson(stream, 200, BuildSingleColumnResult("h-ver", "CURRENT_VERSION()", new[] { "9.9.0-test" }));
+                return;
+            }
+            if (statement.IndexOf("SHOW DATABASES", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                WriteJson(stream, 200, "{ \"statementHandle\": \"h-db\", \"resultSetMetaData\": { \"numRows\": 2, "
+                    + "\"partitionInfo\": [ { \"rowCount\": 2 } ], "
+                    + "\"rowType\": [ { \"name\": \"created_on\", \"type\": \"timestamp_ltz\" }, { \"name\": \"name\", \"type\": \"text\" } ] }, "
+                    + "\"data\": [ [ \"2026-01-01\", \"ANALYTICS\" ], [ \"2026-01-02\", \"DEMO\" ] ] }");
+                return;
+            }
+            if (statement.IndexOf("INFORMATION_SCHEMA.TABLES", StringComparison.OrdinalIgnoreCase) >= 0
+                && statement.IndexOf("BASE TABLE", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                WriteJson(stream, 200, BuildSingleColumnResult("h-tables", "NAME", new[] { "PUBLIC.ORDERS" }));
+                return;
+            }
+            if (statement.IndexOf("PARTITIONED", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                WriteJson(stream, 200, "{ \"statementHandle\": \"h-part\", \"resultSetMetaData\": { \"numRows\": 3, "
+                    + "\"partitionInfo\": [ { \"rowCount\": 2 }, { \"rowCount\": 1 } ], "
+                    + "\"rowType\": [ { \"name\": \"ID\", \"type\": \"fixed\" }, { \"name\": \"NAME\", \"type\": \"text\" } ] }, "
+                    + "\"data\": [ [ \"1\", \"a\" ], [ \"2\", \"b\" ] ] }");
+                return;
+            }
+            if (statement.IndexOf("ASYNC_TEST", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                WriteJson(stream, 202, "{ \"statementHandle\": \"h-async\", \"message\": \"still running\" }");
+                return;
+            }
+            WriteJson(stream, 422, "{ \"message\": \"unexpected statement " + statement.Replace("\"", "'") + "\", \"code\": \"390100\" }");
+        }
+
+        private static string BuildSingleColumnResult(string handle, string columnName, string[] values)
+        {
+            StringBuilder rows = new StringBuilder();
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (i > 0) rows.Append(", ");
+                rows.Append("[ \"").Append(values[i]).Append("\" ]");
+            }
+            return "{ \"statementHandle\": \"" + handle + "\", \"resultSetMetaData\": { \"numRows\": " + values.Length
+                + ", \"partitionInfo\": [ { \"rowCount\": " + values.Length + " } ], "
+                + "\"rowType\": [ { \"name\": \"" + columnName + "\", \"type\": \"text\" } ] }, "
+                + "\"data\": [ " + rows + " ] }";
+        }
+
+        private static void WriteJson(NetworkStream stream, int status, string json)
+        {
+            byte[] payload = Encoding.UTF8.GetBytes(json);
+            string reason = status == 200 ? "OK" : status == 202 ? "Accepted" : "Error";
+            WriteAsciiHttp(stream, "HTTP/1.1 " + status + " " + reason + "\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Length: " + payload.Length + "\r\n"
+                + "Connection: close\r\n\r\n");
+            stream.Write(payload, 0, payload.Length);
+            stream.Flush();
+        }
+
+        private static void WriteAsciiHttp(NetworkStream stream, string value)
+        {
+            byte[] payload = Encoding.ASCII.GetBytes(value);
+            stream.Write(payload, 0, payload.Length);
+        }
+
+        private static string ReadHttpLine(Stream stream)
+        {
+            StringBuilder line = new StringBuilder();
+            while (true)
+            {
+                int value = stream.ReadByte();
+                if (value < 0) return line.Length == 0 ? null : line.ToString();
+                if (value == '\n') return line.ToString().TrimEnd('\r');
+                line.Append((char)value);
+            }
+        }
+
+        public void Dispose()
+        {
+            stopping = true;
+            try { listener.Stop(); } catch { }
+            worker.Join(2000);
+            if (failure != null) throw new Exception("Fake Snowflake server failed.", failure);
         }
     }
 

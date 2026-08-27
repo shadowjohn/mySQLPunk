@@ -27,6 +27,7 @@ namespace mySQLPunk.lib
                 case "sqlite": return new my_sqlite();
                 case "mongodb": return new my_mongodb();
                 case "redis": return new my_redis();
+                case "snowflake": return new my_snowflake();
                 default: throw new NotSupportedException(Localization.Format("Automation.UnsupportedProvider", provider ?? string.Empty));
             }
         }
@@ -44,6 +45,7 @@ namespace mySQLPunk.lib
                 case "sqlite": return BuildSqliteConnectionString(connection);
                 case "mongodb": return BuildMongoDbConnectionString(connection);
                 case "redis": return BuildRedisConnectionString(connection);
+                case "snowflake": return BuildSnowflakeConnectionString(connection);
                 default: throw new NotSupportedException(Localization.Format("Automation.UnsupportedProvider", provider));
             }
         }
@@ -199,6 +201,22 @@ namespace mySQLPunk.lib
                 GetValue(connection, "pwd"),
                 IsTrue(connection, "redis_tls"),
                 databaseIndex);
+        }
+
+        public static string BuildSnowflakeConnectionString(Dictionary<string, object> connection)
+        {
+            if (connection == null) throw new ArgumentNullException("connection");
+            string account = GetValue(connection, "host").Trim();
+            if (string.IsNullOrWhiteSpace(account)) throw new InvalidOperationException(Localization.T("Snowflake.AccountRequired"));
+            return my_snowflake.BuildConnectionString(
+                account,
+                GetValue(connection, "username").Trim(),
+                GetValue(connection, "pwd"),
+                GetValue(connection, "initial_database").Trim(),
+                GetValue(connection, "snowflake_schema").Trim(),
+                GetValue(connection, "snowflake_warehouse").Trim(),
+                GetValue(connection, "snowflake_role").Trim(),
+                IsTrue(connection, "snowflake_oauth"));
         }
 
         public static string BuildOracleConnectionString(Dictionary<string, object> connection)
