@@ -635,6 +635,8 @@ namespace mySQLPunk
                     table.AcceptChanges();
                     return;
                 }
+                // 集合項目變更沒有單一「值」可回寫；清單顯示的摘要維持原樣，重新查詢即可更新。
+                if (!args.IsStringValue) return;
                 if (table.Columns.Contains("value")) rowView.Row["value"] = args.SavedValue;
                 if (table.Columns.Contains("preview"))
                     rowView.Row["preview"] = args.SavedValue.Length > 256 ? args.SavedValue.Substring(0, 256) + "…" : args.SavedValue;

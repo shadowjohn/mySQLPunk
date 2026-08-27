@@ -130,6 +130,42 @@ internal static class RedisLiveMatrixTests
             catch (InvalidOperationException) { missing = true; }
             Check(missing, "TTL updates on missing keys fail loudly");
 
+            provider.SaveHashField("db0", "mtx:hash", "f1", "v1", true, "v1x");
+            Check(Convert.ToString(raw.Execute("HGET", "mtx:hash", "f1")) == "v1x", "hash field update writes by field");
+            bool hashConflict = false;
+            try { provider.SaveHashField("db0", "mtx:hash", "f1", "v1", true, "stale"); }
+            catch (RedisEditConflictException) { hashConflict = true; }
+            Check(hashConflict, "stale hash field values raise an edit conflict");
+            Check(Convert.ToString(raw.Execute("HGET", "mtx:hash", "f1")) == "v1x", "hash conflicts never overwrite");
+            provider.SaveHashField("db0", "mtx:hash", "f3", null, false, "new");
+            Check(Convert.ToString(raw.Execute("HGET", "mtx:hash", "f3")) == "new", "hash field add creates the field");
+            provider.DeleteHashField("db0", "mtx:hash", "f3", "new");
+            Check(raw.Execute("HGET", "mtx:hash", "f3") == null, "hash field delete removes the field");
+
+            provider.SaveListElement("db0", "mtx:list", 1, "b", "b2");
+            Check(Convert.ToString(raw.Execute("LINDEX", "mtx:list", "1")) == "b2", "list element update writes by index");
+            bool listConflict = false;
+            try { provider.SaveListElement("db0", "mtx:list", 1, "b", "x"); }
+            catch (RedisEditConflictException) { listConflict = true; }
+            Check(listConflict, "stale list elements raise an edit conflict");
+            provider.AppendListElement("db0", "mtx:list", "d");
+            Check(Convert.ToInt64(raw.Execute("LLEN", "mtx:list"), CultureInfo.InvariantCulture) == 4, "list append RPUSHes to the end");
+
+            provider.AddSetMember("db0", "mtx:set", "m3");
+            Check(Convert.ToInt64(raw.Execute("SISMEMBER", "mtx:set", "m3"), CultureInfo.InvariantCulture) == 1, "set member add SADDs");
+            provider.RemoveSetMember("db0", "mtx:set", "m3");
+            Check(Convert.ToInt64(raw.Execute("SISMEMBER", "mtx:set", "m3"), CultureInfo.InvariantCulture) == 0, "set member remove SREMs");
+
+            provider.SaveZSetMember("db0", "mtx:zset", "z1", "1.5", true, "9.5");
+            Check(Convert.ToString(raw.Execute("ZSCORE", "mtx:zset", "z1")) == "9.5", "zset score update ZADDs");
+            provider.RemoveZSetMember("db0", "mtx:zset", "z2");
+            Check(raw.Execute("ZSCORE", "mtx:zset", "z2") == null, "zset member remove ZREMs");
+
+            bool typeConflict = false;
+            try { provider.SaveHashField("db0", "mtx:string", "f", null, false, "v"); }
+            catch (RedisEditConflictException) { typeConflict = true; }
+            Check(typeConflict, "collection writes on the wrong type raise an edit conflict");
+
             Check(provider.DeleteKey("db0", "mtx:zset"), "DeleteKey removes an existing key");
             Check(!provider.DeleteKey("db0", "mtx:zset"), "DeleteKey reports false when already gone");
             Check(Convert.ToInt64(raw.Execute("EXISTS", "mtx:zset"), CultureInfo.InvariantCulture) == 0,

@@ -10,6 +10,11 @@
   - Metadata 與查詢：SHOW DATABASES 列出資料庫，INFORMATION_SCHEMA 提供 schema.table／view、欄位型別、列數與位元組數；資料表可分頁瀏覽（LIMIT/OFFSET），查詢分頁接受 SELECT／SHOW／DESC／EXPLAIN／WITH，其餘 statement 直接拒絕，寫入與複製入口全部關閉。GET_DDL 供檢視 table／view 定義。
   - 驗證與限制：69 項 smoke test 含 loopback HTTP 伺服器，實際走過 bearer token 與 token type header、100-continue、202 輪詢、partition 合併、SHOW／INFORMATION_SCHEMA 解析、唯讀拒寫、URI 匯入與設定保存。所有值以字串呈現（SQL API JSON 格式）；尚未對真實 Snowflake 帳戶實機驗收，key-pair JWT、寫入、暫存區、bulk load 與 BI 整合留待後續。
 
+- **Redis／Microsoft Garnet provider 🟡 第三期完成（集合型別編輯）**
+  - key 編輯器依型別切換：hash／list／set／zset 以項目網格＋輸入列操作——hash 欄位新增／更新／刪除、list 既有元素編輯與尾端新增（RPUSH）、set 成員新增／移除、zset 成員分數新增／更新／移除；TTL 與刪除 key 對所有型別可用。
+  - 並行安全：所有集合寫入共用 WATCH＋MULTI／EXEC 交易——型別被改變、項目被其他連線建立／刪除／改值、或 EXEC 落空都會回報衝突且不寫入；zset 分數以數值比較避免字串表示差異誤判。list 因 Redis 無「依索引刪除」命令，元素刪除留待後續。
+  - 實機矩陣（2026-08-27）：Redis 6.2、Redis 7、Garnet 各通過 39 項檢查（原 26 項＋13 項集合寫入：欄位／元素／成員的更新、新增、刪除、stale 衝突不覆蓋與型別衝突）。
+
 - **Redis／Microsoft Garnet provider 🟡 第二期完成（string 安全編輯與實機矩陣）**
   - 連線：新增 Redis / Garnet 選項與設定頁，支援 `redis://`／`rediss://` URI、ACL username＋password、舊版 password-only URI 匯入相容、TLS 與 logical database index；密碼仍由 Windows Credential Manager 保存，設定檔另保留驗證需求旗標以便憑證遺失時提示補輸入。
   - 瀏覽：每個 logical db 提供 `keys` 虛擬表，透過 SCAN 顯示 key、type、TTL 與內容摘要；單次 traversal 會去除重複 key，type filter 會先於 offset／limit 套用，避免前一批不同型別吃掉結果額度。

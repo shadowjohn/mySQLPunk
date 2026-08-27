@@ -68,6 +68,7 @@ public static class SmokeTests
         Run("MongoDB document tree and safe edit", TestMongoDbDocumentEditing, ref passed);
         Run("Redis provider foundation", TestRedisProviderFoundation, ref passed);
         Run("Redis safe editing", TestRedisSafeEditing, ref passed);
+        Run("Redis collection editing", TestRedisCollectionEditing, ref passed);
         Run("Snowflake provider foundation", TestSnowflakeProviderFoundation, ref passed);
         Run("Connection stars and batch properties", TestConnectionBatchProperties, ref passed);
         Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
@@ -7848,6 +7849,96 @@ public static class SmokeTests
         AssertContains(csprojSource, "RedisKeyEditorForm.cs", "The key editor form should be part of the project.");
     }
 
+    private static void TestRedisCollectionEditing()
+    {
+        using (FakeRedisEditServer server = new FakeRedisEditServer())
+        using (my_redis provider = new my_redis())
+        {
+            server.SeedHash("h1", "f1", "v1");
+            server.SeedList("l1", "a", "b");
+            server.SeedSet("s1", "m1");
+            server.SeedZSet("z1", "m1", 1.5);
+            provider.SetConn(my_redis.BuildConnectionString("127.0.0.1", server.Port, "", "", false, 0));
+            provider.Open();
+
+            AssertEquals("hash", provider.GetKeyTypeForEdit("db0", "h1"), "The editor should detect hash keys.");
+            Assert(provider.GetKeyTtlMs("db0", "h1") == -1, "Collections without expiry should report -1 TTL.");
+            DataTable hashDetail = provider.GetKeyDetailForEdit("db0", "h1", 100);
+            Assert(hashDetail.Rows.Count == 1 && Convert.ToString(hashDetail.Rows[0]["field"]) == "f1",
+                "Hash details should load fields for the editor grid.");
+
+            provider.SaveHashField("db0", "h1", "f1", "v1", true, "v2");
+            AssertEquals("v2", server.HashValue("h1", "f1"), "Updating a hash field should write the new value.");
+            bool conflict = false;
+            try { provider.SaveHashField("db0", "h1", "f1", "stale", true, "x"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "Stale hash field values should raise an edit conflict.");
+            AssertEquals("v2", server.HashValue("h1", "f1"), "Hash conflicts must not overwrite the server value.");
+            provider.SaveHashField("db0", "h1", "f2", null, false, "new");
+            AssertEquals("new", server.HashValue("h1", "f2"), "Adding a hash field should create it.");
+            conflict = false;
+            try { provider.SaveHashField("db0", "h1", "f2", null, false, "again"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "Adding an existing hash field should conflict instead of overwriting.");
+            provider.DeleteHashField("db0", "h1", "f2", "new");
+            Assert(server.HashValue("h1", "f2") == null, "Deleting a hash field should remove it.");
+            conflict = false;
+            try { provider.DeleteHashField("db0", "h1", "f2", "new"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "Deleting a missing hash field should conflict.");
+
+            provider.SaveListElement("db0", "l1", 1, "b", "b2");
+            AssertEquals("b2", server.ListAt("l1", 1), "Updating a list element should write by index.");
+            conflict = false;
+            try { provider.SaveListElement("db0", "l1", 1, "b", "x"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "Stale list elements should raise an edit conflict.");
+            provider.AppendListElement("db0", "l1", "c");
+            Assert(server.ListLength("l1") == 3 && server.ListAt("l1", 2) == "c",
+                "Appending should RPUSH to the end of the list.");
+
+            provider.AddSetMember("db0", "s1", "m2");
+            Assert(server.SetHas("s1", "m2"), "Adding a set member should SADD it.");
+            provider.RemoveSetMember("db0", "s1", "m2");
+            Assert(!server.SetHas("s1", "m2"), "Removing a set member should SREM it.");
+            conflict = false;
+            try { provider.RemoveSetMember("db0", "s1", "m2"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "Removing a missing set member should conflict.");
+
+            provider.SaveZSetMember("db0", "z1", "m1", "1.5", true, "2.5");
+            Assert(server.ZScore("z1", "m1") == 2.5, "Updating a zset member should change its score.");
+            provider.SaveZSetMember("db0", "z1", "m2", null, false, "7");
+            Assert(server.ZScore("z1", "m2") == 7, "Adding a zset member should set its score.");
+            provider.RemoveZSetMember("db0", "z1", "m2");
+            Assert(server.ZScore("z1", "m2") == null, "Removing a zset member should ZREM it.");
+            bool badScore = false;
+            try { provider.SaveZSetMember("db0", "z1", "m1", "2.5", true, "abc"); }
+            catch (ArgumentException) { badScore = true; }
+            Assert(badScore, "Non-numeric scores should be rejected before any write.");
+
+            conflict = false;
+            try { provider.SaveHashField("db0", "l1", "f", null, false, "v"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "Type mismatches should surface as edit conflicts.");
+
+            server.AbortNextExec = true;
+            conflict = false;
+            try { provider.SaveHashField("db0", "h1", "f1", "v2", true, "raced"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "A null EXEC reply should surface as an edit conflict for collection writes.");
+            AssertEquals("v2", server.HashValue("h1", "f1"), "Aborted collection transactions must leave the value untouched.");
+
+            provider.Close();
+        }
+
+        string root = FindRepositoryRootForTest();
+        string editorSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "RedisKeyEditorForm.cs"), Encoding.UTF8);
+        AssertContains(editorSource, "GetKeyDetailForEdit", "The key editor should load collection entries.");
+        AssertContains(editorSource, "SaveHashField", "The key editor should save hash fields.");
+        AssertContains(editorSource, "AppendListElement", "The key editor should append list elements.");
+    }
+
     private static void TestSnowflakeProviderFoundation()
     {
         AssertEquals("snowflake://user:t%40ken@myorg-acct/ANALYTICS?schema=PUBLIC&warehouse=WH&role=DEV&auth=oauth",
@@ -10682,6 +10773,10 @@ public static class SmokeTests
         private readonly Thread worker;
         private readonly object sync = new object();
         private readonly Dictionary<string, string> store = new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Dictionary<string, string>> hashes = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<string>> lists = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, HashSet<string>> sets = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Dictionary<string, double>> zsets = new Dictionary<string, Dictionary<string, double>>(StringComparer.Ordinal);
         private readonly Dictionary<string, long> ttls = new Dictionary<string, long>(StringComparer.Ordinal);
         private readonly List<string> commands = new List<string>();
         private List<string[]> queued;
@@ -10708,6 +10803,94 @@ public static class SmokeTests
                 store[key] = value;
                 if (ttlMs > 0) ttls[key] = ttlMs; else ttls.Remove(key);
             }
+        }
+
+        public void SeedHash(string key, string field, string value)
+        {
+            lock (sync)
+            {
+                Dictionary<string, string> hash;
+                if (!hashes.TryGetValue(key, out hash)) hashes[key] = hash = new Dictionary<string, string>(StringComparer.Ordinal);
+                hash[field] = value;
+            }
+        }
+
+        public void SeedList(string key, params string[] values)
+        {
+            lock (sync) { lists[key] = new List<string>(values); }
+        }
+
+        public void SeedSet(string key, params string[] members)
+        {
+            lock (sync) { sets[key] = new HashSet<string>(members, StringComparer.Ordinal); }
+        }
+
+        public void SeedZSet(string key, string member, double score)
+        {
+            lock (sync)
+            {
+                Dictionary<string, double> zset;
+                if (!zsets.TryGetValue(key, out zset)) zsets[key] = zset = new Dictionary<string, double>(StringComparer.Ordinal);
+                zset[member] = score;
+            }
+        }
+
+        public string HashValue(string key, string field)
+        {
+            lock (sync)
+            {
+                Dictionary<string, string> hash;
+                string value;
+                return hashes.TryGetValue(key, out hash) && hash.TryGetValue(field, out value) ? value : null;
+            }
+        }
+
+        public string ListAt(string key, int index)
+        {
+            lock (sync)
+            {
+                List<string> list;
+                return lists.TryGetValue(key, out list) && index >= 0 && index < list.Count ? list[index] : null;
+            }
+        }
+
+        public int ListLength(string key)
+        {
+            lock (sync) { List<string> list; return lists.TryGetValue(key, out list) ? list.Count : 0; }
+        }
+
+        public bool SetHas(string key, string member)
+        {
+            lock (sync) { HashSet<string> set; return sets.TryGetValue(key, out set) && set.Contains(member); }
+        }
+
+        public double? ZScore(string key, string member)
+        {
+            lock (sync)
+            {
+                Dictionary<string, double> zset;
+                double score;
+                if (zsets.TryGetValue(key, out zset) && zset.TryGetValue(member, out score)) return score;
+                return null;
+            }
+        }
+
+        private bool KeyExists(string key)
+        {
+            return store.ContainsKey(key) || hashes.ContainsKey(key) || lists.ContainsKey(key)
+                || sets.ContainsKey(key) || zsets.ContainsKey(key);
+        }
+
+        private string TypeOf(string key)
+        {
+            if (hashes.ContainsKey(key)) return "hash";
+            if (lists.ContainsKey(key)) return "list";
+            if (sets.ContainsKey(key)) return "set";
+            if (zsets.ContainsKey(key)) return "zset";
+            if (store.ContainsKey(key)) return "string";
+            // 舊測試相容：hash: 前綴的未播種 key 視為 hash。
+            if (key.StartsWith("hash:", StringComparison.Ordinal)) return "hash";
+            return "none";
         }
 
         public string ValueOf(string key)
@@ -10781,11 +10964,7 @@ public static class SmokeTests
                         return;
                     }
                 case "TYPE":
-                    lock (sync)
-                    {
-                        if (args[1].StartsWith("hash:", StringComparison.Ordinal)) WriteSimple(stream, "hash", true);
-                        else WriteSimple(stream, store.ContainsKey(args[1]) ? "string" : "none", true);
-                    }
+                    lock (sync) { WriteSimple(stream, TypeOf(args[1]), true); }
                     return;
                 case "GET":
                     lock (sync)
@@ -10795,21 +10974,68 @@ public static class SmokeTests
                         else WriteAscii(stream, "$-1\r\n");
                     }
                     return;
+                case "HGET":
+                    lock (sync)
+                    {
+                        string value = HashValueUnlocked(args[1], args[2]);
+                        if (value != null) WriteBulk(stream, value);
+                        else WriteAscii(stream, "$-1\r\n");
+                    }
+                    return;
+                case "HSCAN":
+                    lock (sync)
+                    {
+                        Dictionary<string, string> hash;
+                        List<string> flattened = new List<string>();
+                        if (hashes.TryGetValue(args[1], out hash))
+                            foreach (KeyValuePair<string, string> pair in hash) { flattened.Add(pair.Key); flattened.Add(pair.Value); }
+                        WriteAscii(stream, "*2\r\n");
+                        WriteBulk(stream, "0");
+                        WriteAscii(stream, "*" + flattened.Count + "\r\n");
+                        foreach (string item in flattened) WriteBulk(stream, item);
+                    }
+                    return;
+                case "LINDEX":
+                    lock (sync)
+                    {
+                        List<string> list;
+                        int index = int.Parse(args[2]);
+                        if (lists.TryGetValue(args[1], out list) && index >= 0 && index < list.Count) WriteBulk(stream, list[index]);
+                        else WriteAscii(stream, "$-1\r\n");
+                    }
+                    return;
+                case "SISMEMBER":
+                    lock (sync)
+                    {
+                        HashSet<string> set;
+                        WriteInteger(stream, sets.TryGetValue(args[1], out set) && set.Contains(args[2]) ? 1 : 0);
+                    }
+                    return;
+                case "ZSCORE":
+                    lock (sync)
+                    {
+                        Dictionary<string, double> zset;
+                        double score;
+                        if (zsets.TryGetValue(args[1], out zset) && zset.TryGetValue(args[2], out score))
+                            WriteBulk(stream, score.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                        else WriteAscii(stream, "$-1\r\n");
+                    }
+                    return;
                 case "PTTL":
                     lock (sync)
                     {
                         long ttl;
-                        if (!store.ContainsKey(args[1])) WriteInteger(stream, -2);
+                        if (!KeyExists(args[1])) WriteInteger(stream, -2);
                         else WriteInteger(stream, ttls.TryGetValue(args[1], out ttl) ? ttl : -1);
                     }
                     return;
                 case "EXISTS":
-                    lock (sync) { WriteInteger(stream, store.ContainsKey(args[1]) ? 1 : 0); }
+                    lock (sync) { WriteInteger(stream, KeyExists(args[1]) ? 1 : 0); }
                     return;
                 case "EXPIRE":
                     lock (sync)
                     {
-                        if (!store.ContainsKey(args[1])) { WriteInteger(stream, 0); return; }
+                        if (!KeyExists(args[1])) { WriteInteger(stream, 0); return; }
                         ttls[args[1]] = long.Parse(args[2]) * 1000L;
                         WriteInteger(stream, 1);
                     }
@@ -10823,7 +11049,9 @@ public static class SmokeTests
                         int removed = 0;
                         for (int i = 1; i < args.Length; i++)
                         {
-                            if (store.Remove(args[i])) removed++;
+                            bool existed = store.Remove(args[i]) | hashes.Remove(args[i]) | lists.Remove(args[i])
+                                | sets.Remove(args[i]) | zsets.Remove(args[i]);
+                            if (existed) removed++;
                             ttls.Remove(args[i]);
                         }
                         WriteInteger(stream, removed);
@@ -10848,14 +11076,84 @@ public static class SmokeTests
                         WriteSimple(stream, "OK", true);
                         return;
                     case "PEXPIRE":
-                        if (store.ContainsKey(args[1])) { ttls[args[1]] = long.Parse(args[2]); WriteInteger(stream, 1); }
+                        if (KeyExists(args[1])) { ttls[args[1]] = long.Parse(args[2]); WriteInteger(stream, 1); }
                         else WriteInteger(stream, 0);
                         return;
+                    case "HSET":
+                        {
+                            Dictionary<string, string> hash;
+                            if (!hashes.TryGetValue(args[1], out hash)) hashes[args[1]] = hash = new Dictionary<string, string>(StringComparer.Ordinal);
+                            bool added = !hash.ContainsKey(args[2]);
+                            hash[args[2]] = args[3];
+                            WriteInteger(stream, added ? 1 : 0);
+                            return;
+                        }
+                    case "HDEL":
+                        {
+                            Dictionary<string, string> hash;
+                            WriteInteger(stream, hashes.TryGetValue(args[1], out hash) && hash.Remove(args[2]) ? 1 : 0);
+                            return;
+                        }
+                    case "LSET":
+                        {
+                            List<string> list;
+                            int index = int.Parse(args[2]);
+                            if (lists.TryGetValue(args[1], out list) && index >= 0 && index < list.Count)
+                            {
+                                list[index] = args[3];
+                                WriteSimple(stream, "OK", true);
+                            }
+                            else WriteSimple(stream, "ERR index out of range", false);
+                            return;
+                        }
+                    case "RPUSH":
+                        {
+                            List<string> list;
+                            if (!lists.TryGetValue(args[1], out list)) lists[args[1]] = list = new List<string>();
+                            for (int i = 2; i < args.Length; i++) list.Add(args[i]);
+                            WriteInteger(stream, list.Count);
+                            return;
+                        }
+                    case "SADD":
+                        {
+                            HashSet<string> set;
+                            if (!sets.TryGetValue(args[1], out set)) sets[args[1]] = set = new HashSet<string>(StringComparer.Ordinal);
+                            WriteInteger(stream, set.Add(args[2]) ? 1 : 0);
+                            return;
+                        }
+                    case "SREM":
+                        {
+                            HashSet<string> set;
+                            WriteInteger(stream, sets.TryGetValue(args[1], out set) && set.Remove(args[2]) ? 1 : 0);
+                            return;
+                        }
+                    case "ZADD":
+                        {
+                            Dictionary<string, double> zset;
+                            if (!zsets.TryGetValue(args[1], out zset)) zsets[args[1]] = zset = new Dictionary<string, double>(StringComparer.Ordinal);
+                            bool added = !zset.ContainsKey(args[3]);
+                            zset[args[3]] = double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture);
+                            WriteInteger(stream, added ? 1 : 0);
+                            return;
+                        }
+                    case "ZREM":
+                        {
+                            Dictionary<string, double> zset;
+                            WriteInteger(stream, zsets.TryGetValue(args[1], out zset) && zset.Remove(args[2]) ? 1 : 0);
+                            return;
+                        }
                     default:
                         WriteSimple(stream, "ERR unsupported queued command " + command, false);
                         return;
                 }
             }
+        }
+
+        private string HashValueUnlocked(string key, string field)
+        {
+            Dictionary<string, string> hash;
+            string value;
+            return hashes.TryGetValue(key, out hash) && hash.TryGetValue(field, out value) ? value : null;
         }
 
         private static void WriteSimple(NetworkStream stream, string value, bool success)

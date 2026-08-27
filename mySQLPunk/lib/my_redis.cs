@@ -389,6 +389,211 @@ namespace mySQLPunk.lib
             }
         }
 
+        /// <summary>取得 key 的實際型別；key 不存在時擲回錯誤，供編輯器決定顯示模式。</summary>
+        public string GetKeyTypeForEdit(string databaseName, string key)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                string type = GetKeyType(key);
+                if (type == "none") throw new InvalidOperationException(Localization.T("Redis.EditKeyDeleted"));
+                return type;
+            }
+        }
+
+        /// <summary>以單鍵內容表載入集合項目（與查詢分頁同一種表結構），供編輯器顯示。</summary>
+        public DataTable GetKeyDetailForEdit(string databaseName, string key, int limit)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                return BuildKeyDetailTable(key, NormalizeLimit(limit));
+            }
+        }
+
+        /// <summary>取得 key 的剩餘 TTL（毫秒；-1 代表不會過期），供編輯器顯示各型別的 TTL。</summary>
+        public long GetKeyTtlMs(string databaseName, string key)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                long ttlMs = Convert.ToInt64(client.Execute("PTTL", key), CultureInfo.InvariantCulture);
+                if (ttlMs == -2) throw new InvalidOperationException(Localization.T("Redis.EditKeyDeleted"));
+                return ttlMs;
+            }
+        }
+
+        /// <summary>新增或更新 hash 欄位；expectExisting 決定「必須已存在且值相符」或「必須不存在」。</summary>
+        public void SaveHashField(string databaseName, string key, string field, string expectedValue, bool expectExisting, string newValue)
+        {
+            if (string.IsNullOrEmpty(field)) throw new ArgumentException(Localization.T("Redis.EntryRequired"), "field");
+            RejectBinary(newValue);
+            RunWatchedWrite(databaseName, key, "hash",
+                () =>
+                {
+                    string current = client.Execute("HGET", key, field) as string;
+                    ValidateEntryExpectation(current, expectedValue, expectExisting);
+                },
+                () => client.Execute("HSET", key, field, newValue ?? string.Empty));
+        }
+
+        /// <summary>刪除 hash 欄位；欄位值已被改過或欄位已消失時回報衝突。</summary>
+        public void DeleteHashField(string databaseName, string key, string field, string expectedValue)
+        {
+            if (string.IsNullOrEmpty(field)) throw new ArgumentException(Localization.T("Redis.EntryRequired"), "field");
+            RunWatchedWrite(databaseName, key, "hash",
+                () =>
+                {
+                    string current = client.Execute("HGET", key, field) as string;
+                    ValidateEntryExpectation(current, expectedValue, true);
+                },
+                () => client.Execute("HDEL", key, field));
+        }
+
+        /// <summary>更新 list 指定索引的元素；索引超出範圍或元素已被改過時回報衝突。</summary>
+        public void SaveListElement(string databaseName, string key, long index, string expectedValue, string newValue)
+        {
+            RejectBinary(newValue);
+            RunWatchedWrite(databaseName, key, "list",
+                () =>
+                {
+                    string current = client.Execute("LINDEX", key, index.ToString(CultureInfo.InvariantCulture)) as string;
+                    ValidateEntryExpectation(current, expectedValue, true);
+                },
+                () => client.Execute("LSET", key, index.ToString(CultureInfo.InvariantCulture), newValue ?? string.Empty));
+        }
+
+        /// <summary>在 list 尾端加入元素（RPUSH）；只驗證型別，不需比對舊值。</summary>
+        public void AppendListElement(string databaseName, string key, string newValue)
+        {
+            RejectBinary(newValue);
+            RunWatchedWrite(databaseName, key, "list", null,
+                () => client.Execute("RPUSH", key, newValue ?? string.Empty));
+        }
+
+        /// <summary>加入 set 成員（SADD；已存在時為 no-op）。</summary>
+        public void AddSetMember(string databaseName, string key, string member)
+        {
+            if (string.IsNullOrEmpty(member)) throw new ArgumentException(Localization.T("Redis.EntryRequired"), "member");
+            RejectBinary(member);
+            RunWatchedWrite(databaseName, key, "set", null,
+                () => client.Execute("SADD", key, member));
+        }
+
+        /// <summary>移除 set 成員；成員已不存在時回報衝突。</summary>
+        public void RemoveSetMember(string databaseName, string key, string member)
+        {
+            if (string.IsNullOrEmpty(member)) throw new ArgumentException(Localization.T("Redis.EntryRequired"), "member");
+            RunWatchedWrite(databaseName, key, "set",
+                () =>
+                {
+                    long exists = Convert.ToInt64(client.Execute("SISMEMBER", key, member), CultureInfo.InvariantCulture);
+                    if (exists != 1) throw new RedisEditConflictException(Localization.T("Redis.EditEntryMissing"));
+                },
+                () => client.Execute("SREM", key, member));
+        }
+
+        /// <summary>新增或更新 zset 成員分數；expectExisting 語意同 hash 欄位。</summary>
+        public void SaveZSetMember(string databaseName, string key, string member, string expectedScore, bool expectExisting, string newScore)
+        {
+            if (string.IsNullOrEmpty(member)) throw new ArgumentException(Localization.T("Redis.EntryRequired"), "member");
+            RejectBinary(member);
+            double parsedScore;
+            if (!double.TryParse((newScore ?? string.Empty).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out parsedScore))
+                throw new ArgumentException(Localization.T("Redis.ScoreInvalid"), "newScore");
+            RunWatchedWrite(databaseName, key, "zset",
+                () =>
+                {
+                    string current = client.Execute("ZSCORE", key, member) as string;
+                    ValidateEntryExpectation(current, expectedScore, expectExisting, ScoresEqual);
+                },
+                () => client.Execute("ZADD", key, parsedScore.ToString("R", CultureInfo.InvariantCulture), member));
+        }
+
+        /// <summary>移除 zset 成員；成員已不存在時回報衝突。</summary>
+        public void RemoveZSetMember(string databaseName, string key, string member)
+        {
+            if (string.IsNullOrEmpty(member)) throw new ArgumentException(Localization.T("Redis.EntryRequired"), "member");
+            RunWatchedWrite(databaseName, key, "zset",
+                () =>
+                {
+                    if (client.Execute("ZSCORE", key, member) == null)
+                        throw new RedisEditConflictException(Localization.T("Redis.EditEntryMissing"));
+                },
+                () => client.Execute("ZREM", key, member));
+        }
+
+        /// <summary>
+        /// 集合寫入共用交易：WATCH key → 型別檢查 → 呼叫端驗證 → MULTI／queue → EXEC。
+        /// EXEC 落空（其他連線改過 key）或驗證失敗都不會寫入。
+        /// </summary>
+        private void RunWatchedWrite(string databaseName, string key, string expectedType, Action validate, Action queueCommands)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                client.Execute("WATCH", key);
+                bool inMulti = false;
+                try
+                {
+                    string type = GetKeyType(key);
+                    if (type == "none") throw new RedisEditConflictException(Localization.T("Redis.EditKeyDeleted"));
+                    if (!string.Equals(type, expectedType, StringComparison.OrdinalIgnoreCase))
+                        throw new RedisEditConflictException(Localization.Format("Redis.EditTypeChanged", expectedType, type));
+                    if (validate != null) validate();
+                    client.Execute("MULTI");
+                    inMulti = true;
+                    queueCommands();
+                    object execReply = client.Execute("EXEC");
+                    inMulti = false;
+                    if (execReply == null) throw new RedisEditConflictException(Localization.T("Redis.EditConflict"));
+                }
+                catch
+                {
+                    if (inMulti) { try { client.Execute("DISCARD"); } catch { } }
+                    else { try { client.Execute("UNWATCH"); } catch { } }
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>驗證項目現值符合編輯基準：新增時必須不存在，更新／刪除時必須存在且值相符。</summary>
+        private static void ValidateEntryExpectation(string current, string expected, bool expectExisting, Func<string, string, bool> equals = null)
+        {
+            if (!expectExisting)
+            {
+                if (current != null) throw new RedisEditConflictException(Localization.T("Redis.EditEntryExists"));
+                return;
+            }
+            if (current == null) throw new RedisEditConflictException(Localization.T("Redis.EditEntryMissing"));
+            bool match = equals != null ? equals(current, expected ?? string.Empty) : string.Equals(current, expected, StringComparison.Ordinal);
+            if (!match) throw new RedisEditConflictException(Localization.T("Redis.EditConflict"));
+        }
+
+        /// <summary>zset 分數以數值比較：伺服器可能把 1.5 正規化成不同字串表示。</summary>
+        private static bool ScoresEqual(string current, string expected)
+        {
+            double currentScore, expectedScore;
+            if (double.TryParse(current, NumberStyles.Float, CultureInfo.InvariantCulture, out currentScore) &&
+                double.TryParse(expected, NumberStyles.Float, CultureInfo.InvariantCulture, out expectedScore))
+                return currentScore.Equals(expectedScore);
+            return string.Equals(current, expected, StringComparison.Ordinal);
+        }
+
+        private static void RejectBinary(string value)
+        {
+            if (value != null && value.IndexOf('\uFFFD') >= 0)
+                throw new NotSupportedException(Localization.T("Redis.EditBinaryUnsupported"));
+        }
+
         /// <summary>設定 key 的存活時間（秒）；key 不存在時擲回錯誤而不是默默略過。</summary>
         public void SetKeyTtl(string databaseName, string key, long ttlSeconds)
         {
