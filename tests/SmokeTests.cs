@@ -21,6 +21,8 @@ using Newtonsoft.Json.Linq;
 
 public static class SmokeTests
 {
+    private static readonly string SmokeFilter = (Environment.GetEnvironmentVariable("MYSQLPUNK_SMOKE_FILTER") ?? string.Empty).Trim();
+
     [STAThread]
     public static int Main()
     {
@@ -95,12 +97,18 @@ public static class SmokeTests
         Run("Connection export signature helpers", TestConnectionExportSignatureHelpers, ref passed);
         Run("Connection import password helpers", TestConnectionImportPasswordHelpers, ref passed);
         Run("Windows credential service", TestWindowsCredentialService, ref passed);
+        if (!string.IsNullOrEmpty(SmokeFilter) && passed == 0)
+        {
+            Console.Error.WriteLine("No smoke test matched filter: " + SmokeFilter);
+            return 2;
+        }
         Console.WriteLine("Smoke tests passed: " + passed);
         return 0;
     }
 
     private static void Run(string name, Action test, ref int passed)
     {
+        if (!string.IsNullOrEmpty(SmokeFilter) && name.IndexOf(SmokeFilter, StringComparison.OrdinalIgnoreCase) < 0) return;
         try
         {
             test();
@@ -7958,11 +7966,12 @@ public static class SmokeTests
 
         using (my_snowflake guard = new my_snowflake())
         {
-            AssertEquals("ERROR", guard.ExecSQL("DELETE FROM t")["status"], "Snowflake phase one should reject writes explicitly.");
             bool readOnly = false;
             try { guard.SelectSQL("UPDATE t SET a = 1"); }
             catch (NotSupportedException) { readOnly = true; }
-            Assert(readOnly, "Non read-only statements should be rejected before reaching the server.");
+            Assert(readOnly, "Writes sent through the result-set entry point should be rejected before reaching the server.");
+            Dictionary<string, string> parameterized = guard.ExecSQL("UPDATE t SET a = ?p0", new Dictionary<string, object> { { "p0", 1 } });
+            AssertEquals("NO", parameterized["status"], "Snowflake should fail closed instead of silently ignoring parameters.");
             bool endpointRejected = false;
             try { guard.SetConn("snowflake://:tok@acct/db?endpoint=http%3A%2F%2Fevil.example.com"); }
             catch (ArgumentException) { endpointRejected = true; }
@@ -7979,6 +7988,12 @@ public static class SmokeTests
         Assert(parsed.Rows.Count == 2 && parsed.Rows[1][1] == DBNull.Value, "JSON null cells should map to DBNull.");
         List<object[]> partitionRows = SnowflakeRestClient.ParsePartitionRows("{ \"data\": [ [ \"3\", \"c\" ] ] }", 2);
         Assert(partitionRows.Count == 1 && Convert.ToString(partitionRows[0][0]) == "3", "Partition replies should parse data rows.");
+        SnowflakeStatementResult mergeResult = SnowflakeRestClient.ParseStatementResult(
+            "{ \"statementHandle\": \"h-merge\", \"resultSetMetaData\": { \"numRows\": 1, \"partitionInfo\": [ { \"rowCount\": 1 } ], "
+            + "\"rowType\": [ { \"name\": \"number of rows inserted\", \"type\": \"fixed\" }, "
+            + "{ \"name\": \"number of rows updated\", \"type\": \"fixed\" }, { \"name\": \"status\", \"type\": \"text\" } ] }, "
+            + "\"data\": [ [ \"2\", \"3\", \"ok\" ] ] }");
+        Assert(my_snowflake.ExtractAffectedRows(mergeResult) == 5L, "Snowflake MERGE affected-row columns should be summed.");
 
         ConnectionUriParseResult imported = ConnectionUriImportService.Parse(
             "snowflake://user:t%40ken@myorg-acct/ANALYTICS?warehouse=WH&role=DEV&schema=PUBLIC&auth=oauth&name=Snow");
@@ -8039,11 +8054,22 @@ public static class SmokeTests
                 "Multi-partition results should be merged in order.");
             DataTable asyncResult = liveProvider.SelectSQL("SELECT * FROM ASYNC_TEST");
             Assert(asyncResult.Rows.Count == 1, "202 responses should be polled until the statement completes.");
+            Dictionary<string, string> writeResult = liveProvider.ExecSQL("UPDATE PUBLIC.ORDERS SET STATUS = 'done' WHERE ID = 1");
+            AssertEquals("OK", writeResult["status"], "Snowflake DML should execute through the query-editor write path.");
+            AssertEquals("1", writeResult["rowsAffected"], "Snowflake DML should expose the affected-row count.");
+            Dictionary<string, string> ddlResult = liveProvider.ExecSQL("CREATE TABLE PUBLIC.NEW_TABLE (ID NUMBER)");
+            AssertEquals("OK", ddlResult["status"], "Snowflake DDL should execute through the query-editor write path.");
+            AssertEquals("0", ddlResult["rowsAffected"], "Snowflake DDL without affected-row columns should report zero.");
+            Dictionary<string, string> failedWrite = liveProvider.ExecSQL("DELETE FROM UNKNOWN_TABLE");
+            AssertEquals("NO", failedWrite["status"], "Snowflake server errors should return the common failed execution shape.");
+            AssertContains(failedWrite["reason"], "unexpected statement", "Snowflake write errors should preserve the server reason.");
             liveProvider.Close();
             server.AssertHealthy();
             Assert(server.SawBearerToken, "Requests should send the bearer token.");
             Assert(server.SawTokenTypeHeader, "Requests should declare the PAT token type header.");
             Assert(server.SawWarehouse, "Statement bodies should include the configured warehouse.");
+            Assert(server.SawWrite, "The loopback SQL API should receive the DML statement.");
+            Assert(server.SawDdl, "The loopback SQL API should receive the DDL statement.");
         }
 
         string root = FindRepositoryRootForTest();
@@ -11200,6 +11226,8 @@ public static class SmokeTests
         public volatile bool SawBearerToken;
         public volatile bool SawTokenTypeHeader;
         public volatile bool SawWarehouse;
+        public volatile bool SawWrite;
+        public volatile bool SawDdl;
 
         public FakeSnowflakeServer()
         {
@@ -11329,6 +11357,18 @@ public static class SmokeTests
             if (statement.IndexOf("ASYNC_TEST", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 WriteJson(stream, 202, "{ \"statementHandle\": \"h-async\", \"message\": \"still running\" }");
+                return;
+            }
+            if (statement.StartsWith("UPDATE PUBLIC.ORDERS", StringComparison.OrdinalIgnoreCase))
+            {
+                SawWrite = true;
+                WriteJson(stream, 200, BuildSingleColumnResult("h-write", "number of rows updated", new[] { "1" }));
+                return;
+            }
+            if (statement.StartsWith("CREATE TABLE PUBLIC.NEW_TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                SawDdl = true;
+                WriteJson(stream, 200, BuildSingleColumnResult("h-ddl", "status", new[] { "Table NEW_TABLE successfully created." }));
                 return;
             }
             WriteJson(stream, 422, "{ \"message\": \"unexpected statement " + statement.Replace("\"", "'") + "\", \"code\": \"390100\" }");

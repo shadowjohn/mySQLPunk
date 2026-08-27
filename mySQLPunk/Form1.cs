@@ -6734,7 +6734,7 @@ namespace mySQLPunk
                    string.Equals(target.ProviderName, "snowflake", StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>MongoDB／Redis／Snowflake 這類第一期唯讀 provider：樹與清單只保留唯讀開啟入口。</summary>
+        /// <summary>MongoDB／Redis／Snowflake 這類受限 provider：樹與清單只保留各自已驗證的安全入口。</summary>
         private static bool IsNonRelationalTarget(TreeDatabaseTarget target)
         {
             return IsMongoDbTarget(target) || IsRedisTarget(target) || IsSnowflakeTarget(target);

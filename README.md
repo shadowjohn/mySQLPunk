@@ -6,7 +6,7 @@
 
 > 免費開源的 Windows 多資料庫 GUI、SQL 編輯器與 DBA 工作台
 
-mySQLPunk 是一套 Windows 資料庫管理工具（WinForms），用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Microsoft Garnet，以及 Snowflake。關聯式資料庫可瀏覽與編輯資料、撰寫 SQL、查看執行計畫、設計資料表、比較結構、匯出與備份；MongoDB 提供文件工作流程，Redis / Garnet 提供 key 瀏覽、受限查詢與五種型別的安全編輯，Snowflake 第一期以 SQL REST API 提供唯讀瀏覽與查詢。
+mySQLPunk 是一套 Windows 資料庫管理工具（WinForms），用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Microsoft Garnet，以及 Snowflake。關聯式資料庫可瀏覽與編輯資料、撰寫 SQL、查看執行計畫、設計資料表、比較結構、匯出與備份；MongoDB 提供文件工作流程，Redis / Garnet 提供 key 瀏覽、受限查詢與五種型別的安全編輯，Snowflake 第二階段以 SQL REST API 提供瀏覽、查詢與查詢編輯器 DML／DDL。
 
 Open-source Windows database client, SQL editor, database GUI and DBA workbench for MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, SpatiaLite, Oracle, MongoDB, Redis, Microsoft Garnet and Snowflake workflows.
 
@@ -91,7 +91,9 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 70 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、連線 URI 匯入、MongoDB provider 基礎與文件樹／安全編輯規則、Redis RESP／URI／provider 瀏覽與 WATCH/MULTI/EXEC string／集合安全編輯的 loopback 連線流程、Snowflake SQL REST API 的 loopback HTTP 流程（bearer 驗證、202 輪詢、partition 合併與唯讀邊界）、連線星號／色彩／批次屬性、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
+目前 70 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、連線 URI 匯入、MongoDB provider 基礎與文件樹／安全編輯規則、Redis RESP／URI／provider 瀏覽與 WATCH/MULTI/EXEC string／集合安全編輯的 loopback 連線流程、Snowflake SQL REST API 的 loopback HTTP 流程（bearer 驗證、202 輪詢、partition 合併、唯讀結果入口與 DML 寫入）、連線星號／色彩／批次屬性、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
+
+需要只重跑單一測試群組時，可在執行測試程式前設定 `MYSQLPUNK_SMOKE_FILTER`（不分大小寫比對測試名稱）；沒有任何項目符合時會以錯誤碼結束，避免空跑誤判成功。
 
 MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
 
@@ -132,7 +134,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
 | MongoDB | 第三期可用 | 支援一般與 SRV 連線、URI 匯入、database／collection／view metadata、抽樣 schema 推斷、索引與統計資訊、分頁文件瀏覽與 JSON find 查詢；文件檢視器提供可展開文件樹、單一文件安全編輯（`_id` 鎖定＋樂觀並行比對）、文件新增與安全刪除。standalone 4.4／7.0／8.0 已通過實機矩陣；Atlas／SRV 驗證環境與 Aggregation Pipeline 仍在後續階段。 |
 | Redis / Microsoft Garnet | 第三期可用 | 支援 `redis://`／`rediss://`、ACL／密碼驗證、logical db、TLS 直連、key 型別／TTL／摘要瀏覽與 pattern／type／單一 key 受限查詢；key 編輯器依型別切換，string 值、hash 欄位、list 元素（含尾端新增）、set 成員與 zset 分數都以 WATCH/MULTI/EXEC 並行保護寫入，另有 TTL 設定／移除與刪除 key。Redis 6.2、Redis 7 與 Garnet standalone 各 39 項實機矩陣通過；Cluster／Sentinel、list 元素刪除、Pub/Sub 與監控仍待補。 |
-| Snowflake | 第一期可用 | 以 SQL REST API v2 直連（Programmatic Access Token 或 OAuth token），支援 SHOW DATABASES、INFORMATION_SCHEMA metadata、schema.table／view 瀏覽、欄位與列數、分頁資料檢視與唯讀 SELECT／SHOW 查詢；URI 匯入與設定保存沿用既有流程。所有值以字串呈現；真實帳戶實機驗收、key-pair JWT 與寫入仍待補。 |
+| Snowflake | 第二期可用 | 以 SQL REST API v2 直連（Programmatic Access Token 或 OAuth token），支援 SHOW DATABASES、INFORMATION_SCHEMA metadata、schema.table／view 瀏覽、欄位與列數、分頁資料檢視、SELECT／SHOW，以及查詢編輯器的單一 DML／DDL；URI 匯入與設定保存沿用既有流程。所有值以字串呈現；真實帳戶實機驗收、key-pair JWT、參數綁定、資料網格寫回與 bulk load 仍待補。 |
 | SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、多格式匯出、語法格式化、查詢歷史；MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 都可產生唯讀原生執行計畫，以樹狀、原始資料、文字與可用成本統計檢視。 |
 | SQL 編輯輔助 | 可用 | 自動完成會解析目前 statement 的資料表與 alias，提供欄位、`alias.column`、資料表、關鍵字與片段捷徑；metadata 依 provider/database 快取。`Ctrl+Shift+P` 可搜尋、插入、新增、刪除自訂 SQL 片段，並以 JSON 匯入／匯出。 |
 | 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；可為每張資料表保存多組具名篩選、排序與顯示欄位設定，並從底部工具列快速切換。若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
@@ -171,7 +173,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - ER 圖與結構差異報告目前都只讀取 metadata，不會回寫資料庫；ER 圖每張卡片先顯示前 16 個欄位，還沒有拖曳位置保存、關聯篩選或從模型回寫資料庫，結構差異也還不會產生同步 DDL。
 - MongoDB 查詢分頁維持唯讀，寫入只能走文件檢視器的安全編輯、新增與刪除；schema 由前 100 筆文件推斷。尚未提供 Aggregation Pipeline 視覺設計、SSH Tunnel 或 Atlas 專用驗證；standalone 4.4／7.0／8.0 實機矩陣已通過，Atlas／SRV 與帳號驗證環境仍待驗收。
 - Redis / Garnet 目前只支援 standalone 直連；寫入僅限 key 編輯器（string 值、hash 欄位、list 元素編輯與尾端新增、set 成員、zset 分數、TTL 與刪除 key），list 元素刪除因 Redis 無依索引刪除命令暫不提供，值含非 UTF-8 位元組時不開放編輯。SCAN 的 `COUNT` 只是提示，程式會在單次 traversal 內去重，但資料同時變更時跨頁仍可能變動。Cluster、Sentinel、Pub/Sub 與監控尚未提供；Redis 6.2／7 與 Garnet standalone 實機矩陣可用 `tests/Run-RedisLiveMatrixTests.ps1` 重跑。
-- Snowflake 第一期為唯讀，僅接受 SELECT／SHOW／DESC／EXPLAIN／WITH；以 SQL API JSON 讀取，所有欄位值以字串顯示，物件名稱採 schema.table 拆解（名稱內含點號者不支援）。查詢會使用連線設定的 database／warehouse／role；尚未對真實 Snowflake 帳戶實機驗收，key-pair JWT、寫入、暫存區與 bulk load 未提供。
+- Snowflake 結果集入口僅接受 SELECT／SHOW／DESC／EXPLAIN／WITH，DML／DDL 必須從查詢編輯器執行；以 SQL API JSON 讀取時所有欄位值以字串顯示，物件名稱採 schema.table 拆解（名稱內含點號者不支援）。查詢會使用連線設定的 database／warehouse／role；尚未對真實 Snowflake 帳戶實機驗收，key-pair JWT、參數綁定、資料網格寫回、暫存區與 bulk load 未提供。
 
 各功能做完的細節紀錄在 [`docs/FEATURE_NOTES.md`](docs/FEATURE_NOTES.md)。
 
@@ -189,7 +191,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `mySQLPunk/lib/my_redis.cs`: Redis / Garnet provider、logical db、SCAN key 瀏覽、受限查詢與 WATCH/MULTI/EXEC 安全編輯。
 - `mySQLPunk/RedisKeyEditorForm.cs`: Redis key 編輯器（string 值、TTL 與刪除）。
 - `mySQLPunk/template/redis_add_edit.cs`: Redis / Garnet 連線設定與測試畫面。
-- `mySQLPunk/lib/my_snowflake.cs`: Snowflake 唯讀 provider、metadata 與分頁查詢（SQL REST API）。
+- `mySQLPunk/lib/my_snowflake.cs`: Snowflake provider、metadata、分頁查詢與查詢編輯器 DML／DDL（SQL REST API）。
 - `mySQLPunk/lib/SnowflakeRestClient.cs`: Snowflake SQL API v2 client：bearer 驗證、202 輪詢與 partition 讀取。
 - `mySQLPunk/template/snowflake_add_edit.cs`: Snowflake 連線設定與測試畫面。
 - `mySQLPunk/TableDesignerForm.cs`: 資料表設計器、欄位/索引/SQL 預覽。

@@ -773,7 +773,9 @@ namespace mySQLPunk
             Add("Snowflake.AccountRequired", "請輸入 Snowflake 帳戶識別碼。", "Enter the Snowflake account identifier.");
             Add("Snowflake.TokenRequired", "請輸入 Programmatic Access Token 或 OAuth token。", "Enter a programmatic access token or OAuth token.");
             Add("Snowflake.ConnectionNotOpen", "Snowflake 連線尚未開啟。", "The Snowflake connection is not open.");
-            Add("Snowflake.ReadOnlyFirstPhase", "Snowflake 第一階段僅支援唯讀查詢（SELECT／SHOW／DESC／EXPLAIN）；不支援寫入。", "The first Snowflake phase supports read-only queries (SELECT/SHOW/DESC/EXPLAIN); writes are not supported.");
+            Add("Snowflake.UseExecuteForWrite", "這個入口只接受會回傳結果集的 Snowflake 查詢；DML／DDL 請從查詢編輯器執行。", "This entry point only accepts Snowflake queries that return result sets; run DML/DDL from the query editor.");
+            Add("Snowflake.ParametersUnsupported", "Snowflake SQL REST API 的參數綁定尚未支援；為避免忽略參數造成錯誤寫入，已取消執行。", "Snowflake SQL REST API parameter binding is not supported yet. Execution was cancelled rather than silently ignoring parameters.");
+            Add("Snowflake.StructuredWriteUnsupported", "Snowflake 第二階段可從查詢編輯器執行 DML／DDL；資料網格寫回、物件複製與批次寫入尚未支援。", "Snowflake phase two can run DML/DDL from the query editor; data-grid writes, object copying, and batch writes are not supported yet.");
             Add("Snowflake.QueryRequired", "請輸入 Snowflake 查詢。", "Enter a Snowflake query.");
             Add("Snowflake.StatementTimeout", "Snowflake statement 執行逾時。", "The Snowflake statement timed out.");
             Add("Snowflake.ResponseMissingMetadata", "Snowflake 回覆缺少結果 metadata。", "The Snowflake response is missing result metadata.");
@@ -790,7 +792,7 @@ namespace mySQLPunk
             Add("Snowflake.SchemaColon", "Schema（可留空）：", "Schema (optional):");
             Add("Snowflake.DatabaseColon", "資料庫（可留空）：", "Database (optional):");
             Add("Snowflake.UseOAuth", "使用 OAuth token（預設為 Programmatic Access Token）", "Use an OAuth token (defaults to a programmatic access token)");
-            Add("Snowflake.ReadOnlyNote", "第一階段為唯讀：以 SQL REST API 直連，可瀏覽 database、schema.table／view、欄位與列數，執行 SELECT／SHOW 查詢。驗證使用 Programmatic Access Token 或 OAuth token（於 Snowsight 產生）；寫入、暫存區與大量載入留待後續。", "Phase one is read-only over the SQL REST API: browse databases, schema.table/view objects, columns and row counts, and run SELECT/SHOW queries. Authenticate with a programmatic access token or OAuth token generated in Snowsight; writes, stages, and bulk loading come later.");
+            Add("Snowflake.ReadOnlyNote", "第二階段以 SQL REST API 直連：可瀏覽 database、schema.table／view、執行 SELECT／SHOW，並從查詢編輯器執行單一 DML／DDL。驗證使用 Programmatic Access Token 或 OAuth token；資料網格寫回、參數綁定、暫存區與大量載入仍在後續。", "Phase two connects through the SQL REST API: browse database and schema.table/view objects, run SELECT/SHOW, and execute a single DML/DDL statement from the query editor. Authenticate with a programmatic access token or OAuth token; data-grid writes, parameter binding, stages, and bulk loading come later.");
             Add("Connection.MainWindowNotInitialized", "主視窗未初始化。", "The main window is not initialized.");
             Add("Connection.TestSucceeded", "{0} 連線成功。", "{0} connection succeeded.");
             Add("Connection.TestFailed", "{0} 連線失敗：{1}", "{0} connection failed: {1}");

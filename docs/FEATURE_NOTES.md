@@ -4,11 +4,12 @@
 
 ## 未完成功能與已知限制
 
-- **Snowflake provider 🟡 第一期完成（SQL REST API 唯讀直連）**
+- **Snowflake provider 🟡 第二期完成（查詢編輯器 DML／DDL）**
   - 架構選擇：不引入官方 `Snowflake.Data` 驅動——5.x 已退出 .NET Framework 4.7.2，4.x 只剩 netstandard2.0 且會把 Apache.Arrow、AWSSDK.S3、Azure.Storage、Google Cloud Storage 等整串相依拖進 packages.config 專案。改以內建 `SnowflakeRestClient` 直連 [SQL REST API v2](https://docs.snowflake.com/en/developer-guide/sql-api/intro)：POST statements、202 輪詢與多 partition 讀取，零新增套件。
   - 連線與驗證：連線設定頁提供帳戶識別碼、使用者、token、database、schema、warehouse、role 與 OAuth 切換；驗證使用 Programmatic Access Token（預設）或 OAuth token（`X-Snowflake-Authorization-Token-Type`），token 由 Windows Credential Manager 保存。`snowflake://user:token@account/db?warehouse=&role=&schema=&auth=` URI 可匯入，未知參數一律拒絕；`endpoint` 覆寫僅接受 loopback，供測試使用。
-  - Metadata 與查詢：SHOW DATABASES 列出資料庫，INFORMATION_SCHEMA 提供 schema.table／view、欄位型別、列數與位元組數；資料表可分頁瀏覽（LIMIT/OFFSET），查詢分頁接受 SELECT／SHOW／DESC／EXPLAIN／WITH，其餘 statement 直接拒絕，寫入與複製入口全部關閉。GET_DDL 供檢視 table／view 定義。
-  - 驗證與限制：69 項 smoke test 含 loopback HTTP 伺服器，實際走過 bearer token 與 token type header、100-continue、202 輪詢、partition 合併、SHOW／INFORMATION_SCHEMA 解析、唯讀拒寫、URI 匯入與設定保存。所有值以字串呈現（SQL API JSON 格式）；尚未對真實 Snowflake 帳戶實機驗收，key-pair JWT、寫入、暫存區、bulk load 與 BI 整合留待後續。
+  - Metadata 與查詢：SHOW DATABASES 列出資料庫，INFORMATION_SCHEMA 提供 schema.table／view、欄位型別、列數與位元組數；資料表可分頁瀏覽（LIMIT/OFFSET），查詢分頁接受 SELECT／SHOW／DESC／EXPLAIN／WITH。GET_DDL 供檢視 table／view 定義。
+  - 第二期寫入：查詢編輯器會把 INSERT／UPDATE／DELETE／MERGE 與 DDL 交給 SQL REST API 執行，並從 DML ResultSet 的 affected-row 欄位回報筆數；結果集入口仍拒絕寫入。帶參數的呼叫會 fail closed，避免在參數綁定尚未實作時靜默忽略值而誤寫。
+  - 驗證與限制：70 項 smoke test 含 loopback HTTP 伺服器，實際走過 bearer token 與 token type header、100-continue、202 輪詢、partition 合併、SHOW／INFORMATION_SCHEMA 解析、DML 寫入與 affected-row 解析、URI 匯入及設定保存。所有值以字串呈現（SQL API JSON 格式）；尚未對真實 Snowflake 帳戶實機驗收，key-pair JWT、參數綁定、資料網格寫回、物件複製、暫存區、bulk load 與 BI 整合留待後續。
 
 - **Redis／Microsoft Garnet provider 🟡 第三期完成（集合型別編輯）**
   - key 編輯器依型別切換：hash／list／set／zset 以項目網格＋輸入列操作——hash 欄位新增／更新／刪除、list 既有元素編輯與尾端新增（RPUSH）、set 成員新增／移除、zset 成員分數新增／更新／移除；TTL 與刪除 key 對所有型別可用。

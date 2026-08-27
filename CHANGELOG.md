@@ -4,8 +4,9 @@
 
 ### 🚀 新增功能
 
+- **Snowflake 查詢編輯器寫入第二期**：保留 SELECT／SHOW 等結果集路徑，新增單一 INSERT／UPDATE／DELETE／MERGE 與 DDL 的 SQL REST API 執行，並從 DML ResultSet 回報 affected rows；帶參數呼叫會 fail closed，避免參數綁定尚未完成時靜默忽略值。loopback HTTP 測試加入實際 UPDATE request、回覆與 MERGE 多計數欄位驗證；資料網格寫回、bulk load 與真實帳戶矩陣仍留待後續。
 - **Redis／Garnet 集合型別安全編輯**：key 編輯器依型別切換，hash 欄位新增／更新／刪除、list 既有元素編輯與尾端新增、set 成員新增／移除、zset 分數新增／更新／移除；所有寫入共用 WATCH＋MULTI/EXEC 交易，項目被其他連線改過、型別被重建或 EXEC 落空都回報衝突且不覆蓋，zset 分數以數值比較。Redis 6.2、Redis 7 與 Garnet standalone 實機矩陣擴充為各 39 項檢查；list 元素刪除因 Redis 無依索引刪除命令留待後續。
-- **Snowflake 唯讀 provider 第一期**：新增 Snowflake 連線類型，以 SQL REST API v2 直連（Programmatic Access Token 或 OAuth token，token 存 Windows Credential Manager），不引入官方驅動的大型相依樹。支援 SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table／view 瀏覽、欄位與列數、GET_DDL、分頁資料檢視與唯讀 SELECT／SHOW 查詢；`snowflake://` URI 可匯入，未知參數一律拒絕。REST client 內建 202 輪詢與多 partition 合併；寫入、key-pair JWT 與真實帳戶實機驗收留待後續。
+- **Snowflake 唯讀 provider 第一期**：新增 Snowflake 連線類型，以 SQL REST API v2 直連（Programmatic Access Token 或 OAuth token，token 存 Windows Credential Manager），不引入官方驅動的大型相依樹。支援 SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table／view 瀏覽、欄位與列數、GET_DDL、分頁資料檢視與唯讀 SELECT／SHOW 查詢；`snowflake://` URI 可匯入，未知參數一律拒絕。REST client 內建 202 輪詢與多 partition 合併；寫入於上方第二期接續完成，key-pair JWT 與真實帳戶實機驗收仍待後續。
 - **Redis／Garnet string 安全編輯與實機矩陣**：查詢結果雙擊 key 或右鍵可開啟 key 編輯器，支援 string 值編輯、TTL 設定／移除與確認後刪除 key；儲存以 WATCH＋MULTI／EXEC 樂觀並行保護，被其他連線改過會回報衝突且不覆蓋，保留 TTL 時在同一交易內補 PEXPIRE，非 UTF-8 值標示唯讀避免損毀。Redis 6.2、Redis 7 與 Microsoft Garnet standalone 各通過 26 項實機檢查，可用 `tests/Run-RedisLiveMatrixTests.ps1` 重跑；集合型別寫入、Cluster／Sentinel 留待後續。
 - **Redis／Microsoft Garnet 唯讀 provider 第一期**：新增 `redis://`／`rediss://` URI 匯入、ACL／密碼驗證、TLS 直連與 logical db 瀏覽；可用 SCAN 檢視 key 型別、TTL、文字摘要，並以 pattern、type 或單一 key 執行受限唯讀查詢。RESP 解析加入大小／巢狀防護，SCAN 單次 traversal 會去重且先套用型別篩選；目前完成 loopback RESP 整合測試，外部 Redis／Garnet 實機矩陣、Cluster／Sentinel、寫入、監控與 Pub/Sub 留待後續。
 - **MongoDB 文件新增／刪除與實機矩陣**：結果網格右鍵可新增文件（空白文件插入模式、未給 `_id` 時自動產生、成功後轉一般編輯）與刪除文件（先依 `_id` 重讀完整文件、確認後以重讀比對＋完整文件過濾安全刪除）；view 一律擋下。standalone MongoDB 4.4／7.0／8.0 各通過 24 項實機檢查，涵蓋 metadata、查詢、型別保真、編輯／插入／刪除與各種並行衝突。

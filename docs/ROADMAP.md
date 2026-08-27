@@ -29,7 +29,7 @@
 | BI 連接 MongoDB／Snowflake | 📋 | 等對應 provider 與 BI 基礎儀表板完成。 |
 | MongoDB Aggregation Pipeline 視覺設計 | 📋 | MongoDB provider 後續階段：拖放 stage、逐步預覽與結果驗證。 |
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
-| Snowflake | 🟡 | 第一期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視與唯讀 SELECT／SHOW 查詢；待補實機驗收、key-pair JWT、寫入、模型與 BI 能力。 |
+| Snowflake | 🟡 | 第二期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視、SELECT／SHOW，以及查詢編輯器單一 DML／DDL；待補實機驗收、key-pair JWT、參數綁定、資料網格寫回、模型與 BI 能力。 |
 | Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 第三期完成：瀏覽、受限查詢，加上 key 編輯器的 string 與 hash／list／set／zset 安全編輯（WATCH/MULTI/EXEC）、TTL 與刪除；Redis 6.2／7 與 Garnet 各 39 項實機矩陣通過。待補 Cluster、Sentinel、list 元素刪除、監控與 Pub/Sub。 |
 | Linux ARM | 📋 | 現有 WinForms 僅 Windows；需先抽離 UI／provider core，再評估跨平台桌面 UI。 |
 
@@ -75,7 +75,7 @@
 | PostgreSQL、SQL Server、Oracle、SQLite | 🟡 | 核心 metadata／查詢／編輯／DDL／備份可用，進階功能持續對等化。 |
 | MongoDB | 🟡 | 第三期完成：連線、metadata、JSON find 查詢、文件樹、安全編輯與文件新增／刪除都已具備；standalone 4.4／7.0／8.0 實機矩陣通過。待補 Atlas／SRV 驗證環境矩陣與 Aggregation Pipeline。 |
 | Redis／Garnet | 🟡 | 第三期完成：URI、ACL／密碼、TLS、logical db、key 瀏覽、受限查詢與五種型別的安全編輯／TTL／刪除；Redis 6.2、Redis 7 與 Garnet standalone 各 39 項實機矩陣通過。Cluster／Sentinel、監控與 Pub/Sub 待補。 |
-| Snowflake | 🟡 | 第一期唯讀 provider 完成（SQL REST API、PAT／OAuth、metadata、分頁瀏覽與 SELECT／SHOW 查詢）；真實帳戶實機矩陣與寫入待補。 |
+| Snowflake | 🟡 | 第二期 provider 完成（SQL REST API、PAT／OAuth、metadata、分頁瀏覽、SELECT／SHOW 與查詢編輯器單一 DML／DDL）；真實帳戶實機矩陣、key-pair JWT、參數綁定、網格寫回與 bulk load 待補。 |
 | AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS、MongoDB 與 Redis 可先用標準主機連線；待補各家 IAM／SSO／MFA 與雲端專用驗證。 |
 | OceanBase、PingCAP／TiDB、Dameng、Fujitsu、Kingbase、HighGo | 📋 | 建立實機相容矩陣；能沿用 MySQL／PostgreSQL 協定者先驗證差異，其餘再建立專用 provider。 |
 
@@ -86,4 +86,4 @@
 3. ✅ SSH tunnel＋SSL/TLS 選項 UI、憑證驗證與排程共用連線流程已完成。
 4. ✅ RDBMS、MongoDB 與 Redis 的連線 URI 匯入及設定頁確認流程已完成。
 5. ✅ 連線星號、持久化色彩與批次屬性操作已完成。
-6. 🟡 MongoDB 第一～三期、Redis／Garnet 第三期（string＋集合型別安全編輯，含實機矩陣）、Snowflake 第一期（SQL REST API 唯讀直連）已完成。下一步候選：Snowflake 實機驗收與寫入、MongoDB Atlas／SRV 驗證矩陣與 Aggregation Pipeline、Redis Cluster／Sentinel／Pub/Sub，或回頭補模型／BI 路線。
+6. 🟡 MongoDB 第一～三期、Redis／Garnet 第三期（string＋集合型別安全編輯，含實機矩陣）、Snowflake 第二期（SQL REST API 查詢＋查詢編輯器 DML／DDL）已完成。下一步候選：Snowflake 實機驗收、key-pair JWT、參數綁定與網格寫回，MongoDB Atlas／SRV 驗證矩陣與 Aggregation Pipeline，Redis Cluster／Sentinel／Pub/Sub，或回頭補模型／BI 路線。

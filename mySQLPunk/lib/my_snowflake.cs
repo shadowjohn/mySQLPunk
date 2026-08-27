@@ -8,15 +8,15 @@ using System.Threading.Tasks;
 namespace mySQLPunk.lib
 {
     /// <summary>
-    /// Snowflake 第一階段 provider：SQL REST API v2 直連（PAT／OAuth bearer），
-    /// 提供 database／schema.table metadata 與唯讀 SELECT／SHOW 查詢。
+    /// Snowflake provider：SQL REST API v2 直連（PAT／OAuth bearer），
+    /// 提供 database／schema.table metadata、查詢，以及查詢編輯器的單一 DML／DDL 執行。
     /// 不引入官方 .NET 驅動：5.x 已退出 net472，4.x 會帶進 Arrow／AWS／Azure／GCS 相依樹。
     /// </summary>
     public sealed class my_snowflake : IDatabase
     {
         private const int DefaultPageLimit = 1000;
 
-        /// <summary>唯讀第一期允許的 statement 開頭。</summary>
+        /// <summary>會回傳結果集的唯讀 statement 開頭。</summary>
         private static readonly Regex ReadOnlyStatement = new Regex(
             @"^\s*(SELECT|SHOW|DESC|DESCRIBE|EXPLAIN|WITH)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -322,8 +322,10 @@ namespace mySQLPunk.lib
         public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
         {
             if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException(Localization.T("Snowflake.QueryRequired"), "sql");
+            if (parameters != null && parameters.Count > 0)
+                throw new NotSupportedException(Localization.T("Snowflake.ParametersUnsupported"));
             if (!ReadOnlyStatement.IsMatch(sql))
-                throw new NotSupportedException(Localization.T("Snowflake.ReadOnlyFirstPhase"));
+                throw new NotSupportedException(Localization.T("Snowflake.UseExecuteForWrite"));
             return BuildDataTable(ExecuteLocked(sql));
         }
 
@@ -334,16 +336,28 @@ namespace mySQLPunk.lib
 
         public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
         {
-            return new Dictionary<string, string>
+            Dictionary<string, string> output = new Dictionary<string, string>();
+            try
             {
-                { "status", "ERROR" },
-                { "reason", Localization.T("Snowflake.ReadOnlyFirstPhase") }
-            };
+                if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException(Localization.T("Snowflake.QueryRequired"), "sql");
+                if (parameters != null && parameters.Count > 0)
+                    throw new NotSupportedException(Localization.T("Snowflake.ParametersUnsupported"));
+
+                SnowflakeStatementResult result = ExecuteLocked(sql);
+                output["status"] = "OK";
+                output["rowsAffected"] = ExtractAffectedRows(result).ToString(CultureInfo.InvariantCulture);
+            }
+            catch (Exception ex)
+            {
+                output["status"] = "NO";
+                output["reason"] = ExceptionMessageService.GetReason(ex);
+            }
+            return output;
         }
 
         public Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null)
         {
-            return Task.FromResult(ExecSQL(sql, parameters));
+            return Task.Run(() => ExecSQL(sql, parameters));
         }
 
         public DataTable GetCopyColumns(string databaseName, string tableName) { throw UnsupportedWrite(); }
@@ -392,6 +406,32 @@ namespace mySQLPunk.lib
         public static string EscapeLiteral(string value)
         {
             return (value ?? string.Empty).Replace("'", "''");
+        }
+
+        /// <summary>
+        /// Snowflake 的 DML ResultSet 會以「number of rows inserted／updated／deleted」欄位回傳計數；
+        /// MERGE 可能同時含多欄，因此加總所有符合欄位。DDL 沒有這類欄位時回傳 0。
+        /// </summary>
+        public static long ExtractAffectedRows(SnowflakeStatementResult result)
+        {
+            if (result == null || result.Rows.Count == 0) return 0L;
+            long total = 0L;
+            object[] row = result.Rows[0];
+            for (int i = 0; i < result.ColumnNames.Count && i < row.Length; i++)
+            {
+                string name = (result.ColumnNames[i] ?? string.Empty).Trim().ToLowerInvariant();
+                if (!name.StartsWith("number of rows ", StringComparison.Ordinal) ||
+                    !(name.EndsWith(" inserted", StringComparison.Ordinal) ||
+                      name.EndsWith(" updated", StringComparison.Ordinal) ||
+                      name.EndsWith(" deleted", StringComparison.Ordinal) ||
+                      name.EndsWith(" affected", StringComparison.Ordinal)))
+                    continue;
+
+                long count;
+                if (long.TryParse(Convert.ToString(row[i], CultureInfo.InvariantCulture), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out count)) total += count;
+            }
+            return total;
         }
 
         private static bool IsLoopbackEndpoint(string value)
@@ -493,7 +533,7 @@ namespace mySQLPunk.lib
 
         private static Exception UnsupportedWrite()
         {
-            return new NotSupportedException(Localization.T("Snowflake.ReadOnlyFirstPhase"));
+            return new NotSupportedException(Localization.T("Snowflake.StructuredWriteUnsupported"));
         }
     }
 }
