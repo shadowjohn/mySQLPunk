@@ -4,11 +4,13 @@
 
 ## 未完成功能與已知限制
 
-- **MongoDB provider 🟡 唯讀第一期完成**
+- **MongoDB provider 🟡 第二期完成（文件樹與安全編輯）**
   - 連線：新增一般 `mongodb://` 與 Atlas 常用 `mongodb+srv://` 設定，可保存 auth source、replica set、direct connection、retry writes 與 TLS；URI 匯入會拒絕未知、重複或互相衝突的參數，原始 URI 不會保存，密碼仍交由 Windows Credential Manager。
   - Metadata：左側樹可列出 database、collection 與 view；collection metadata 包含索引、統計資訊，並抽樣前 100 筆文件推斷頂層欄位、BSON 型別、NULL 與 `_id` key。
-  - 唯讀查詢：雙擊 collection 會用分頁網格顯示頂層欄位與 `_json` 完整文件；查詢分頁接受受限 JSON find 規格（collection、filter、projection、sort、skip、limit），上限 10,000 筆。provider 會明確拒絕新增、修改、刪除、DDL、跨庫複製與 Dump，避免 RDBMS UI 誤寫入文件庫。
-  - 後續方向：加入可展開 JSON 樹、schema 路徑統計、Aggregation Pipeline、經驗證的文件寫回，以及 MongoDB／Atlas 實機版本矩陣；目前 smoke test 只驗證 URI、連線字串、provider factory、唯讀邊界、查詢範本、表單與設定保存，不代表真實伺服器驗收。
+  - 唯讀查詢：雙擊 collection 會用分頁網格顯示頂層欄位與 `_json` 完整文件；查詢分頁接受受限 JSON find 規格（collection、filter、projection、sort、skip、limit），上限 10,000 筆。查詢分頁本身仍拒絕新增、修改、刪除、DDL、跨庫複製與 Dump，寫入只能走文件檢視器。
+  - 文件檢視器：雙擊結果列或右鍵「開啟文件」可開啟文件檢視器，左側是可展開的欄位／陣列／型別樹，右側是 Canonical Extended JSON 編輯區（型別不會被 relaxed 表示法默默改掉）。開啟時會依 `_id` 重新讀取伺服器上的完整文件，查詢 projection 不會造成欄位遺失。
+  - 安全寫回：儲存前驗證 JSON 與 `_id` 不可變更，寫回以「編輯前完整文件」做樂觀並行比對（頂層值可能被解讀成查詢運算子的文件改用 `_id` 過濾＋寫入前重讀比對）；文件被別人改過或刪除時直接回報衝突、不寫入。View 與缺 `_id` 的文件維持唯讀。
+  - 後續方向：文件新增／刪除、schema 路徑統計、Aggregation Pipeline，以及 MongoDB／Atlas 實機版本矩陣；目前 smoke test 驗證 URI、連線字串、provider factory、唯讀邊界、文件樹、編輯驗證與並行規則，不代表真實伺服器驗收。
 
 - **連線星號、色彩與批次屬性 ✅ 已完成**
   - 顯示與排序：連線右鍵可加上／移除星號；加星連線會顯示 `★` 並在同一層置頂。連線色彩改用穩定的 palette key 保存，不再只改目前 TreeNode 而在重繪或重開後消失。

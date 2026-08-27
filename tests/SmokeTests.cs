@@ -63,6 +63,7 @@ public static class SmokeTests
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Run("Connection URI import", TestConnectionUriImport, ref passed);
         Run("MongoDB provider foundation", TestMongoDbProviderFoundation, ref passed);
+        Run("MongoDB document tree and safe edit", TestMongoDbDocumentEditing, ref passed);
         Run("Connection stars and batch properties", TestConnectionBatchProperties, ref passed);
         Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
         Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
@@ -7525,6 +7526,84 @@ public static class SmokeTests
         string entitySource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "entity", "mySQLPunk_main.cs"), Encoding.UTF8);
         AssertContains(entitySource, "mongo_auth_source", "MongoDB authentication settings should persist in connection profiles.");
         AssertContains(entitySource, "mongo_replica_set", "MongoDB replica set settings should persist in connection profiles.");
+    }
+
+    private static void TestMongoDbDocumentEditing()
+    {
+        string original = "{ \"_id\": { \"$oid\": \"64b5f0aa1234567890abcdef\" }, \"name\": \"Punky\", " +
+            "\"tags\": [ \"a\", \"b\" ], \"meta\": { \"score\": { \"$numberLong\": \"12\" }, \"active\": true } }";
+
+        MongoDocumentTreeNode root = MongoDocumentEditService.BuildTree(original);
+        Assert(root.Children.Count == 4, "Document trees should list every top-level field.");
+        AssertEquals("_id", root.Children[0].Name, "Document trees should keep the original field order.");
+        MongoDocumentTreeNode tags = root.Children.First(node => node.Name == "tags");
+        Assert(tags.Children.Count == 2, "Array nodes should expand each element.");
+        AssertEquals("[0]", tags.Children[0].Name, "Array elements should be labeled by index.");
+        MongoDocumentTreeNode score = root.Children.First(node => node.Name == "meta").Children.First(node => node.Name == "score");
+        AssertEquals("Int64", score.BsonType, "Canonical Extended JSON should preserve field types in the tree.");
+
+        string filterJson;
+        Assert(MongoDocumentEditService.TryGetIdFilterJson(original, out filterJson), "Documents with _id should produce an id filter.");
+        AssertContains(filterJson, "64b5f0aa1234567890abcdef", "Id filters should carry the original _id value.");
+        Assert(!MongoDocumentEditService.TryGetIdFilterJson("{ \"name\": \"x\" }", out filterJson),
+            "Documents without _id should not produce an id filter.");
+
+        MongoDocumentEditValidation valid = MongoDocumentEditService.ValidateEdit(original,
+            original.Replace("\"Punky\"", "\"Punky II\""));
+        Assert(valid.Success, "Editing a normal field should validate.");
+        Assert(valid.HasChanges, "Edited documents should report changes.");
+        AssertContains(valid.NormalizedJson, "Punky II", "Validation should return the normalized edited document.");
+
+        MongoDocumentEditValidation unchanged = MongoDocumentEditService.ValidateEdit(original, original);
+        Assert(unchanged.Success && !unchanged.HasChanges, "Identical documents should validate without changes.");
+
+        Assert(!MongoDocumentEditService.ValidateEdit(original, "{ not json").Success,
+            "Invalid JSON should be rejected.");
+        Assert(!MongoDocumentEditService.ValidateEdit(original, "[ 1, 2 ]").Success,
+            "Top-level arrays should be rejected.");
+        Assert(!MongoDocumentEditService.ValidateEdit(original,
+            original.Replace("64b5f0aa1234567890abcdef", "64b5f0aa1234567890abcd00")).Success,
+            "Changing _id should be rejected.");
+        Assert(!MongoDocumentEditService.ValidateEdit(original, "{ \"name\": \"Punky\" }").Success,
+            "Removing _id should be rejected.");
+        Assert(!MongoDocumentEditService.ValidateEdit("{ \"name\": \"no id\" }", "{ \"name\": \"still none\" }").Success,
+            "Documents without _id should stay read-only.");
+
+        Assert(MongoDocumentEditService.CanUseFullDocumentFilter(original),
+            "Normal documents should allow the full-document concurrency filter.");
+        Assert(!MongoDocumentEditService.CanUseFullDocumentFilter(
+            "{ \"_id\": 1, \"range\": { \"$gt\": 5 } }"),
+            "Top-level values that parse as operators should fall back to the id filter.");
+
+        string collectionName;
+        Assert(my_mongodb.TryGetQueryCollection("{ \"collection\": \"items\", \"limit\": 5 }", out collectionName)
+            && collectionName == "items", "JSON queries should reveal the target collection.");
+        Assert(my_mongodb.TryGetQueryCollection("SELECT * FROM logs", out collectionName)
+            && collectionName == "logs", "Generated SELECT queries should reveal the target collection.");
+        Assert(!my_mongodb.TryGetQueryCollection("{ \"filter\": {} }", out collectionName),
+            "Queries without a collection should not guess one.");
+
+        DataTable rowTable = my_mongodb.ConvertJsonDocumentToDataTable(original);
+        Assert(rowTable.Rows.Count == 1, "Single documents should convert to a single grid row.");
+        Assert(rowTable.Columns.Contains("_json"), "Converted rows should include the full document JSON column.");
+        AssertContains(Convert.ToString(rowTable.Rows[0]["name"]), "Punky", "Converted rows should render top-level fields.");
+
+        using (IDatabase provider = ConnectionConfigurationService.CreateDatabase("mongodb"))
+        using (MongoDocumentViewerForm viewer = new MongoDocumentViewerForm(
+            (my_mongodb)provider, "shop", "orders", original, true, Localization.T("MongoDB.ViewReadOnly")))
+        {
+            Assert(viewer.IsReadOnly, "Views should open the document viewer in read-only mode.");
+            AssertContains(viewer.DocumentJson, "Punky", "The viewer should show the formatted document.");
+        }
+
+        string root2 = FindRepositoryRootForTest();
+        string queryFormSource = File.ReadAllText(Path.Combine(root2, "mySQLPunk", "QueryForm.cs"), Encoding.UTF8);
+        AssertContains(queryFormSource, "OpenMongoDocumentViewer", "The query grid should offer the document viewer entry.");
+        AssertContains(queryFormSource, "CellDoubleClick += DgvResults_CellDoubleClick",
+            "Double-clicking a MongoDB result row should open the document viewer.");
+        string providerSource = File.ReadAllText(Path.Combine(root2, "mySQLPunk", "lib", "my_mongodb.cs"), Encoding.UTF8);
+        AssertContains(providerSource, "ReplaceDocumentChecked", "The provider should expose the checked replace method.");
+        AssertContains(providerSource, "MatchedCount == 0", "Safe writes should detect concurrency conflicts.");
     }
 
     private static void TestConnectionBatchProperties()

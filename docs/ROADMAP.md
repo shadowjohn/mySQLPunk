@@ -40,7 +40,7 @@
 | 主要視窗、樹狀導覽、物件清單、分頁 | ✅ | 已具備可停靠／浮動分頁、多連線樹與物件清單。 |
 | 物件設計器 | 🟡 | 五種 provider 已能建表與主要 ALTER；進階 constraint／索引仍需更多實機矩陣。 |
 | RDBMS 資料編輯器（網格） | ✅ | 分頁瀏覽、篩選、排序、欄顯示、寫回、無主鍵安全模式、多格式匯出。 |
-| MongoDB 資料編輯器（網格／樹／JSON） | 🟡 | 第一期已有唯讀分頁網格、頂層欄位與 `_json` 完整文件，以及 JSON find 查詢；待補可展開文件樹、編輯驗證與安全寫回。 |
+| MongoDB 資料編輯器（網格／樹／JSON） | 🆕 | 文件檢視器提供可展開文件樹與 Canonical Extended JSON 編輯；儲存會鎖定 `_id` 並以完整原始文件做並行比對，view 與缺 `_id` 文件唯讀。待補文件新增／刪除與網格內編輯。 |
 | Redis 資料編輯器 | 📋 | 隨 Redis／Garnet provider 實作。 |
 | 資料分析與互動圖表 | 🆕 | 已完成欄位摘要、Top 值比例與值鑽取的第一版。 |
 | 自動完成程式碼 | ✅ | 已能解析目前 statement 的 FROM／JOIN／UPDATE／INTO 來源與 alias；支援欄位、`alias.column`、資料表、關鍵字與片段捷徑，並依 provider/database 快取資料表、View 與欄位 metadata。 |
@@ -73,7 +73,7 @@
 | --- | --- | --- |
 | MySQL／MariaDB | ✅ | 共用 MySQL provider，已有實機版本矩陣。 |
 | PostgreSQL、SQL Server、Oracle、SQLite | 🟡 | 核心 metadata／查詢／編輯／DDL／備份可用，進階功能持續對等化。 |
-| MongoDB | 🟡 | 唯讀 provider 第一期完成：一般／SRV 連線、URI 匯入、database／collection／view metadata、索引、統計、文件分頁與 JSON find 查詢；待補實機矩陣與專用編輯器。 |
+| MongoDB | 🟡 | 第二期完成：除第一期的連線、metadata、JSON find 查詢外，文件檢視器可展開文件樹並安全編輯單一文件（`_id` 鎖定＋並行比對）；待補實機矩陣、文件新增／刪除與 Aggregation Pipeline。 |
 | Redis／Garnet、Snowflake | 📋 | 不再排除，分別建立 provider 與專用資料介面。 |
 | AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS 可先用標準主機連線；待補各家 IAM／SSO／MFA、MongoDB／Redis provider 與雲端專用驗證。 |
 | OceanBase、PingCAP／TiDB、Dameng、Fujitsu、Kingbase、HighGo | 📋 | 建立實機相容矩陣；能沿用 MySQL／PostgreSQL 協定者先驗證差異，其餘再建立專用 provider。 |
@@ -85,4 +85,4 @@
 3. ✅ SSH tunnel＋SSL/TLS 選項 UI、憑證驗證與排程共用連線流程已完成。
 4. ✅ 五種既有 provider 的連線 URI 匯入與設定頁確認流程已完成。
 5. ✅ 連線星號、持久化色彩與批次屬性操作已完成。
-6. 🟡 MongoDB 唯讀 provider 第一期已完成；接著補文件樹／安全編輯、實機矩陣，再依序擴充 Redis／Garnet、Snowflake 及其專用編輯器。
+6. 🟡 MongoDB 第一期（唯讀 provider）與第二期（文件樹＋安全編輯）已完成；接著補實機矩陣與文件新增／刪除，再依序擴充 Redis／Garnet、Snowflake 及其專用編輯器。

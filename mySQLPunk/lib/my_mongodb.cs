@@ -277,6 +277,77 @@ namespace mySQLPunk.lib
             return ConvertDocumentsToDataTable(find.ToList());
         }
 
+        /// <summary>以 _id 過濾器重新讀取完整文件；文件不存在時回傳 null。</summary>
+        public string FindDocumentJson(string databaseName, string collectionName, string idFilterJson)
+        {
+            EnsureOpen();
+            BsonDocument filter = BsonDocument.Parse(idFilterJson);
+            BsonDocument document = GetCollection(databaseName, collectionName).Find(filter).Limit(1).FirstOrDefault();
+            // 直接輸出 Canonical Extended JSON；經過 relaxed 表示法再轉會讓 Int64 這類型別變質。
+            return document == null
+                ? null
+                : document.ToJson(new JsonWriterSettings { Indent = true, OutputMode = JsonOutputMode.CanonicalExtendedJson });
+        }
+
+        /// <summary>
+        /// 安全寫回單一文件：先驗證 _id 未變，再以「編輯前的完整文件」當過濾器做樂觀並行比對；
+        /// 文件在編輯期間被別人改過或刪除時，這裡不會寫入，而是丟出衝突錯誤。
+        /// 頂層值可能被查詢引擎解讀成運算子的文件，改用 _id 過濾＋寫入前重新讀取比對。
+        /// </summary>
+        public void ReplaceDocumentChecked(string databaseName, string collectionName, string originalDocumentJson, string editedDocumentJson)
+        {
+            EnsureOpen();
+            MongoDocumentEditValidation validation = MongoDocumentEditService.ValidateEdit(originalDocumentJson, editedDocumentJson);
+            if (!validation.Success) throw new InvalidOperationException(validation.Error);
+            if (!validation.HasChanges) return;
+
+            BsonDocument original = BsonDocument.Parse(originalDocumentJson);
+            BsonDocument replacement = BsonDocument.Parse(validation.NormalizedJson);
+            IMongoCollection<BsonDocument> collection = GetCollection(databaseName, collectionName);
+
+            // 先重讀比對一次：完整比對（含欄位新增）在這裡完成，寫入過濾器負責堵住之後的競態。
+            BsonDocument idFilter = new BsonDocument("_id", original["_id"]);
+            BsonDocument current = collection.Find(idFilter).Limit(1).FirstOrDefault();
+            if (current == null || !current.Equals(original))
+                throw new InvalidOperationException(Localization.T("MongoDB.DocumentConcurrencyConflict"));
+
+            FilterDefinition<BsonDocument> filter;
+            if (MongoDocumentEditService.CanUseFullDocumentFilter(originalDocumentJson))
+            {
+                // 全文件等值只驗證既有欄位；補上頂層欄位數量檢查，別人在競態期間「新增」欄位也會落空。
+                BsonDocument fieldCountGuard = new BsonDocument("$expr", new BsonDocument("$eq", new BsonArray
+                {
+                    new BsonDocument("$size", new BsonDocument("$objectToArray", "$$ROOT")),
+                    original.ElementCount
+                }));
+                filter = new BsonDocument("$and", new BsonArray { original, fieldCountGuard });
+            }
+            else
+            {
+                filter = idFilter;
+            }
+
+            ReplaceOneResult result = collection.ReplaceOne(filter, replacement);
+            if (result.MatchedCount == 0)
+                throw new InvalidOperationException(Localization.T("MongoDB.DocumentConcurrencyConflict"));
+        }
+
+        /// <summary>從查詢分頁目前的內容取出目標 collection 名稱；解析失敗時回傳 false。</summary>
+        public static bool TryGetQueryCollection(string query, out string collectionName)
+        {
+            collectionName = string.Empty;
+            try
+            {
+                MongoReadQuery request = MongoReadQuery.Parse(query);
+                collectionName = request.Collection;
+                return !string.IsNullOrWhiteSpace(collectionName);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
         {
             return SelectJsonQuery(initialDatabase, sql);
@@ -323,6 +394,12 @@ namespace mySQLPunk.lib
                 { "limit", DefaultQueryLimit }
             };
             return template.ToJson(new JsonWriterSettings { Indent = true, OutputMode = JsonOutputMode.RelaxedExtendedJson });
+        }
+
+        /// <summary>把單一文件 JSON 轉成與查詢結果相同格式的單列 DataTable，供文件儲存後回寫網格顯示。</summary>
+        public static DataTable ConvertJsonDocumentToDataTable(string documentJson)
+        {
+            return ConvertDocumentsToDataTable(new[] { BsonDocument.Parse(documentJson) });
         }
 
         internal static DataTable ConvertDocumentsToDataTable(IEnumerable<BsonDocument> source)

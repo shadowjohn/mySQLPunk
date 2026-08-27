@@ -219,6 +219,8 @@ namespace mySQLPunk
         private ToolStripMenuItem resultsAddRowItem;
         private ToolStripMenuItem resultsDeleteRowItem;
         private ToolStripMenuItem resultsSaveRowsItem;
+        private ToolStripMenuItem resultsOpenDocumentItem;
+        private ToolStripSeparator resultsMongoSeparator;
         private bool _isClosing;
         private System.Windows.Forms.Timer _autoRecoveryTimer;
         private string _lastAutoRecoverySqlHash = string.Empty;
@@ -521,6 +523,161 @@ namespace mySQLPunk
             return string.Equals(GetProviderName(), "mongodb", StringComparison.OrdinalIgnoreCase);
         }
 
+        private void DgvResults_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || !IsMongoDbProvider()) return;
+            OpenMongoDocumentViewer();
+        }
+
+        /// <summary>結果 DataTable 中完整文件 JSON 的欄位；provider 一律把它加在最後，欄名衝突時會帶序號。</summary>
+        private static string FindMongoJsonColumnName(DataTable table)
+        {
+            if (table == null) return null;
+            for (int i = table.Columns.Count - 1; i >= 0; i--)
+            {
+                string name = table.Columns[i].ColumnName;
+                if (name == "_json" || name.StartsWith("_json_", StringComparison.Ordinal)) return name;
+            }
+            return null;
+        }
+
+        private string GetMongoCollectionName()
+        {
+            if (_isTableDataMode)
+            {
+                string tableName = GetTableNameFromSql();
+                return tableName == "Table" ? string.Empty : tableName;
+            }
+            string collection;
+            if (!string.IsNullOrWhiteSpace(_lastResultSql) && my_mongodb.TryGetQueryCollection(_lastResultSql, out collection))
+                return collection;
+            return string.Empty;
+        }
+
+        private async void OpenMongoDocumentViewer()
+        {
+            if (!IsMongoDbProvider() || dgvResults == null) return;
+            DataGridViewRow gridRow = dgvResults.CurrentRow;
+            if (gridRow == null || gridRow.IsNewRow) return;
+            DataTable table = dgvResults.DataSource as DataTable;
+            string jsonColumn = FindMongoJsonColumnName(table);
+            if (jsonColumn == null)
+            {
+                UpdateStatus(Localization.T("MongoDB.DocumentJsonMissing"));
+                return;
+            }
+            DataRowView rowView = gridRow.DataBoundItem as DataRowView;
+            object jsonValue = rowView == null ? null : rowView.Row[jsonColumn];
+            string documentJson = jsonValue == null || jsonValue == DBNull.Value ? string.Empty : jsonValue.ToString();
+            if (string.IsNullOrWhiteSpace(documentJson))
+            {
+                UpdateStatus(Localization.T("MongoDB.DocumentJsonMissing"));
+                return;
+            }
+
+            string collectionName = GetMongoCollectionName();
+            if (string.IsNullOrWhiteSpace(collectionName))
+            {
+                UpdateStatus(Localization.T("MongoDB.CollectionUnknown"));
+                return;
+            }
+
+            my_mongodb mongo = (my_mongodb)_db;
+            string databaseName = _databaseName;
+            bool readOnly = false;
+            string readOnlyReason = string.Empty;
+            string filterJson;
+            if (!MongoDocumentEditService.TryGetIdFilterJson(documentJson, out filterJson))
+            {
+                // 查詢 projection 可能排除 _id；沒有 _id 就無法安全定位文件，僅提供唯讀檢視。
+                readOnly = true;
+                readOnlyReason = Localization.T("MongoDB.DocumentIdRequired");
+            }
+
+            string fullJson = documentJson;
+            try
+            {
+                UpdateStatus(Localization.T("MongoDB.LoadingDocument"));
+                bool isView = false;
+                string latest = null;
+                bool needFetch = !readOnly;
+                await Task.Run(() =>
+                {
+                    isView = mongo.ViewExists(databaseName, collectionName);
+                    if (needFetch && !isView) latest = mongo.FindDocumentJson(databaseName, collectionName, filterJson);
+                });
+                if (isView)
+                {
+                    readOnly = true;
+                    readOnlyReason = Localization.T("MongoDB.ViewReadOnly");
+                }
+                else if (!readOnly)
+                {
+                    if (latest == null)
+                    {
+                        UpdateStatus(Localization.T("MongoDB.DocumentDeleted"));
+                        return;
+                    }
+                    // 以伺服器上的完整最新文件為編輯基準，查詢的 projection 不會造成欄位遺失。
+                    fullJson = latest;
+                }
+                UpdateStatus(string.Empty);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus(ex.Message);
+                return;
+            }
+
+            using (MongoDocumentViewerForm viewer = new MongoDocumentViewerForm(mongo, databaseName, collectionName, fullJson, readOnly, readOnlyReason))
+            {
+                viewer.DocumentSaved += (s, args) => OnMongoDocumentSaved(gridRow, args.SavedDocumentJson);
+                viewer.ShowDialog(this);
+            }
+        }
+
+        private void OnMongoDocumentSaved(DataGridViewRow gridRow, string savedDocumentJson)
+        {
+            if (_isTableDataMode)
+            {
+                ExecutePagedQuery();
+                return;
+            }
+            // 一般查詢結果沒有可重跑的分頁，改把儲存後的文件回寫到目前這一列的顯示欄位。
+            try
+            {
+                DataTable table = dgvResults == null ? null : dgvResults.DataSource as DataTable;
+                DataRowView rowView = gridRow == null ? null : gridRow.DataBoundItem as DataRowView;
+                if (table == null || rowView == null) return;
+                DataTable converted = my_mongodb.ConvertJsonDocumentToDataTable(savedDocumentJson);
+                if (converted.Rows.Count == 0) return;
+                DataRow sourceRow = converted.Rows[0];
+                string targetJsonColumn = FindMongoJsonColumnName(table);
+                string sourceJsonColumn = FindMongoJsonColumnName(converted);
+                foreach (DataColumn column in table.Columns)
+                {
+                    if (string.Equals(column.ColumnName, targetJsonColumn, StringComparison.Ordinal))
+                    {
+                        rowView.Row[column] = sourceJsonColumn == null ? (object)savedDocumentJson : sourceRow[sourceJsonColumn];
+                    }
+                    else if (converted.Columns.Contains(column.ColumnName)
+                        && !string.Equals(column.ColumnName, sourceJsonColumn, StringComparison.Ordinal))
+                    {
+                        rowView.Row[column] = sourceRow[column.ColumnName];
+                    }
+                    else if (!converted.Columns.Contains(column.ColumnName))
+                    {
+                        rowView.Row[column] = DBNull.Value;
+                    }
+                }
+                rowView.Row.AcceptChanges();
+            }
+            catch (Exception)
+            {
+                // 只影響網格顯示；文件本身已成功寫入伺服器。
+            }
+        }
+
         private sealed class TableProfileComboItem
         {
             public TableDataProfile Profile { get; private set; }
@@ -765,6 +922,7 @@ namespace mySQLPunk
             };
             EnableGridDoubleBuffer(dgvResults);
             dgvResults.CellMouseDown += DgvResults_CellMouseDown;
+            dgvResults.CellDoubleClick += DgvResults_CellDoubleClick;
             dgvResults.CellFormatting += DgvResults_CellFormatting;
             dgvResults.DataBindingComplete += DgvResults_DataBindingComplete;
             dgvResults.DataError += DgvResults_DataError;
@@ -2965,6 +3123,9 @@ namespace mySQLPunk
             {
                 resultsContextMenu = new ContextMenuStrip();
                 resultsContextMenu.Opening += ResultsContextMenu_Opening;
+                resultsOpenDocumentItem = AddResultsMenuItem(resultsContextMenu, "openDocument", (s, e) => OpenMongoDocumentViewer());
+                resultsMongoSeparator = new ToolStripSeparator();
+                resultsContextMenu.Items.Add(resultsMongoSeparator);
                 resultsCopyCellsItem = AddResultsMenuItem(resultsContextMenu, "copyCells", (s, e) => CopyResultsSelectionToClipboard(false));
                 resultsCopyHeadersItem = AddResultsMenuItem(resultsContextMenu, "copyHeaders", (s, e) => CopyResultsSelectionToClipboard(true));
                 resultsCopyRowsItem = AddResultsMenuItem(resultsContextMenu, "copyRows", (s, e) => CopySelectedResultRowsToClipboard());
@@ -3043,6 +3204,14 @@ namespace mySQLPunk
             if (resultsAddRowItem != null) resultsAddRowItem.Visible = showEditActions;
             if (resultsDeleteRowItem != null) resultsDeleteRowItem.Visible = showEditActions;
             if (resultsSaveRowsItem != null) resultsSaveRowsItem.Visible = showEditActions;
+
+            bool showMongoViewer = IsMongoDbProvider();
+            if (resultsOpenDocumentItem != null)
+            {
+                resultsOpenDocumentItem.Text = Localization.T("MongoDB.OpenDocument");
+                resultsOpenDocumentItem.Visible = showMongoViewer;
+            }
+            if (resultsMongoSeparator != null) resultsMongoSeparator.Visible = showMongoViewer;
         }
 
         private static ToolStripMenuItem AddResultsMenuItem(ContextMenuStrip menu, string name, EventHandler onClick)
@@ -3078,6 +3247,8 @@ namespace mySQLPunk
             SetResultsMenuItemEnabled(menu, "importBlobFile", canImportBlob && CanEditTableData());
             SetResultsMenuItemEnabled(menu, "copyGeometryWkt", canCopyGeometryWkt);
             SetResultsMenuItemEnabled(menu, "copyWktGeometrySql", canCopyWktGeometrySql);
+            SetResultsMenuItemEnabled(menu, "openDocument",
+                IsMongoDbProvider() && dgvResults != null && dgvResults.CurrentRow != null && !dgvResults.CurrentRow.IsNewRow);
             SetResultsMenuItemEnabled(menu, "addRow", CanEditTableData() && dgvResults != null && dgvResults.DataSource is DataTable);
             SetResultsMenuItemEnabled(menu, "deleteRow", CanEditTableData() && GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "saveRows", CanEditTableData() && dgvResults != null && dgvResults.DataSource is DataTable);

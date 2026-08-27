@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **MongoDB 文件樹與安全編輯**：查詢結果列可雙擊或右鍵「開啟文件」開啟文件檢視器，左側為可展開的欄位／陣列／型別樹，右側以 Canonical Extended JSON 編輯（欄位型別不會被改變）；儲存前會鎖定 `_id`，寫回時以編輯前的完整文件做樂觀並行比對，文件被他人修改或刪除時回報衝突不寫入。View 與缺 `_id` 的文件維持唯讀，開啟時會依 `_id` 重新讀取完整文件，查詢 projection 不會造成欄位遺失。
 - **MongoDB 唯讀 provider 第一期**：新增一般／SRV 連線與 URI 匯入，可瀏覽 database、collection、view、索引與統計資訊，抽樣推斷 schema，並以唯讀網格或受限 JSON find 查詢檢視文件；寫入及專用文件編輯器仍留在後續階段。
 - **連線星號與批次屬性**：星號與色彩會隨目前連線設定檔保存，加星連線在樹中顯示 `★` 並置頂；工具選單與連線右鍵可勾選多筆連線，批次加／移星號、移動群組或套用色彩。
 - **連線 URI 匯入**：新增連線精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle 與 SQLite URI，支援 percent encoding、常用 TLS／Windows 驗證參數，解析後會先開啟原本的設定頁供確認；原始 URI 不會保存，密碼仍交由 Windows Credential Manager 儲存。
