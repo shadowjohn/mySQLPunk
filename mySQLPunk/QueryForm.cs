@@ -222,6 +222,8 @@ namespace mySQLPunk
         private ToolStripMenuItem resultsOpenDocumentItem;
         private ToolStripMenuItem resultsInsertDocumentItem;
         private ToolStripMenuItem resultsDeleteDocumentItem;
+        private ToolStripMenuItem resultsRedisEditKeyItem;
+        private ToolStripMenuItem resultsRedisDeleteKeyItem;
         private ToolStripSeparator resultsMongoSeparator;
         private bool _isClosing;
         private System.Windows.Forms.Timer _autoRecoveryTimer;
@@ -543,8 +545,100 @@ namespace mySQLPunk
 
         private void DgvResults_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex < 0 || !IsMongoDbProvider()) return;
-            OpenMongoDocumentViewer();
+            if (e.RowIndex < 0) return;
+            if (IsMongoDbProvider()) OpenMongoDocumentViewer();
+            else if (IsRedisProvider()) OpenRedisKeyEditor();
+        }
+
+        /// <summary>目前結果列的 Redis key；keys 清單與單鍵內容表都以 key 欄位定位。</summary>
+        private string GetCurrentRedisKey()
+        {
+            if (dgvResults == null) return string.Empty;
+            DataGridViewRow gridRow = dgvResults.CurrentRow;
+            if (gridRow == null || gridRow.IsNewRow) return string.Empty;
+            DataTable table = dgvResults.DataSource as DataTable;
+            DataRowView rowView = gridRow.DataBoundItem as DataRowView;
+            if (table == null || rowView == null || !table.Columns.Contains("key")) return string.Empty;
+            object value = rowView.Row["key"];
+            return value == null || value == DBNull.Value ? string.Empty : value.ToString();
+        }
+
+        private void OpenRedisKeyEditor()
+        {
+            if (!IsRedisProvider()) return;
+            string key = GetCurrentRedisKey();
+            if (string.IsNullOrEmpty(key))
+            {
+                UpdateStatus(Localization.T("Redis.KeyColumnMissing"));
+                return;
+            }
+            DataGridViewRow gridRow = dgvResults.CurrentRow;
+            using (RedisKeyEditorForm editor = new RedisKeyEditorForm((my_redis)_db, _databaseName, key))
+            {
+                editor.KeySaved += (s, args) => OnRedisKeySaved(gridRow, args);
+                editor.ShowDialog(this);
+            }
+        }
+
+        private async void DeleteSelectedRedisKey()
+        {
+            if (!IsRedisProvider()) return;
+            string key = GetCurrentRedisKey();
+            if (string.IsNullOrEmpty(key))
+            {
+                UpdateStatus(Localization.T("Redis.KeyColumnMissing"));
+                return;
+            }
+            DialogResult confirm = MessageBox.Show(
+                this,
+                Localization.Format("Redis.ConfirmDeleteKey", key),
+                Localization.T("Redis.DeleteKeyAction"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (confirm != DialogResult.Yes) return;
+            DataGridViewRow gridRow = dgvResults.CurrentRow;
+            my_redis redis = (my_redis)_db;
+            string databaseName = _databaseName;
+            try
+            {
+                await Task.Run(() => redis.DeleteKey(databaseName, key));
+                OnRedisKeySaved(gridRow, new RedisKeySavedEventArgs { Key = key, Deleted = true });
+                UpdateStatus(Localization.T("Redis.KeyDeleted"));
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus(ex.Message);
+            }
+        }
+
+        private void OnRedisKeySaved(DataGridViewRow gridRow, RedisKeySavedEventArgs args)
+        {
+            if (_isTableDataMode)
+            {
+                ExecutePagedQuery();
+                return;
+            }
+            // 一般查詢結果沒有可重跑的分頁：刪除就移掉這一列，儲存則更新顯示欄位。
+            try
+            {
+                DataTable table = dgvResults == null ? null : dgvResults.DataSource as DataTable;
+                DataRowView rowView = gridRow == null ? null : gridRow.DataBoundItem as DataRowView;
+                if (table == null || rowView == null) return;
+                if (args.Deleted)
+                {
+                    rowView.Row.Delete();
+                    table.AcceptChanges();
+                    return;
+                }
+                if (table.Columns.Contains("value")) rowView.Row["value"] = args.SavedValue;
+                if (table.Columns.Contains("preview"))
+                    rowView.Row["preview"] = args.SavedValue.Length > 256 ? args.SavedValue.Substring(0, 256) + "…" : args.SavedValue;
+                rowView.Row.AcceptChanges();
+            }
+            catch (Exception)
+            {
+                // 只影響網格顯示；伺服器端的變更已完成。
+            }
         }
 
         /// <summary>結果 DataTable 中完整文件 JSON 的欄位；provider 一律把它加在最後，欄名衝突時會帶序號。</summary>
@@ -3272,6 +3366,8 @@ namespace mySQLPunk
                 resultsOpenDocumentItem = AddResultsMenuItem(resultsContextMenu, "openDocument", (s, e) => OpenMongoDocumentViewer());
                 resultsInsertDocumentItem = AddResultsMenuItem(resultsContextMenu, "insertDocument", (s, e) => OpenMongoDocumentInsert());
                 resultsDeleteDocumentItem = AddResultsMenuItem(resultsContextMenu, "deleteDocument", (s, e) => DeleteSelectedMongoDocument());
+                resultsRedisEditKeyItem = AddResultsMenuItem(resultsContextMenu, "redisEditKey", (s, e) => OpenRedisKeyEditor());
+                resultsRedisDeleteKeyItem = AddResultsMenuItem(resultsContextMenu, "redisDeleteKey", (s, e) => DeleteSelectedRedisKey());
                 resultsMongoSeparator = new ToolStripSeparator();
                 resultsContextMenu.Items.Add(resultsMongoSeparator);
                 resultsCopyCellsItem = AddResultsMenuItem(resultsContextMenu, "copyCells", (s, e) => CopyResultsSelectionToClipboard(false));
@@ -3369,7 +3465,18 @@ namespace mySQLPunk
                 resultsDeleteDocumentItem.Text = Localization.T("MongoDB.DeleteDocument");
                 resultsDeleteDocumentItem.Visible = showMongoViewer;
             }
-            if (resultsMongoSeparator != null) resultsMongoSeparator.Visible = showMongoViewer;
+            bool showRedisEditor = IsRedisProvider();
+            if (resultsRedisEditKeyItem != null)
+            {
+                resultsRedisEditKeyItem.Text = Localization.T("Redis.OpenKeyEditor");
+                resultsRedisEditKeyItem.Visible = showRedisEditor;
+            }
+            if (resultsRedisDeleteKeyItem != null)
+            {
+                resultsRedisDeleteKeyItem.Text = Localization.T("Redis.DeleteKeyAction");
+                resultsRedisDeleteKeyItem.Visible = showRedisEditor;
+            }
+            if (resultsMongoSeparator != null) resultsMongoSeparator.Visible = showMongoViewer || showRedisEditor;
         }
 
         private static ToolStripMenuItem AddResultsMenuItem(ContextMenuStrip menu, string name, EventHandler onClick)
@@ -3410,6 +3517,9 @@ namespace mySQLPunk
             SetResultsMenuItemEnabled(menu, "insertDocument",
                 IsMongoDbProvider() && !string.IsNullOrWhiteSpace(GetMongoCollectionName()));
             SetResultsMenuItemEnabled(menu, "deleteDocument", mongoRowReady);
+            bool redisKeyReady = IsRedisProvider() && !string.IsNullOrEmpty(GetCurrentRedisKey());
+            SetResultsMenuItemEnabled(menu, "redisEditKey", redisKeyReady);
+            SetResultsMenuItemEnabled(menu, "redisDeleteKey", redisKeyReady);
             SetResultsMenuItemEnabled(menu, "addRow", CanEditTableData() && dgvResults != null && dgvResults.DataSource is DataTable);
             SetResultsMenuItemEnabled(menu, "deleteRow", CanEditTableData() && GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "saveRows", CanEditTableData() && dgvResults != null && dgvResults.DataSource is DataTable);

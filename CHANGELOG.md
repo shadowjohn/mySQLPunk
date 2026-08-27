@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **Redis／Garnet string 安全編輯與實機矩陣**：查詢結果雙擊 key 或右鍵可開啟 key 編輯器，支援 string 值編輯、TTL 設定／移除與確認後刪除 key；儲存以 WATCH＋MULTI／EXEC 樂觀並行保護，被其他連線改過會回報衝突且不覆蓋，保留 TTL 時在同一交易內補 PEXPIRE，非 UTF-8 值標示唯讀避免損毀。Redis 6.2、Redis 7 與 Microsoft Garnet standalone 各通過 26 項實機檢查，可用 `tests/Run-RedisLiveMatrixTests.ps1` 重跑；集合型別寫入、Cluster／Sentinel 留待後續。
 - **Redis／Microsoft Garnet 唯讀 provider 第一期**：新增 `redis://`／`rediss://` URI 匯入、ACL／密碼驗證、TLS 直連與 logical db 瀏覽；可用 SCAN 檢視 key 型別、TTL、文字摘要，並以 pattern、type 或單一 key 執行受限唯讀查詢。RESP 解析加入大小／巢狀防護，SCAN 單次 traversal 會去重且先套用型別篩選；目前完成 loopback RESP 整合測試，外部 Redis／Garnet 實機矩陣、Cluster／Sentinel、寫入、監控與 Pub/Sub 留待後續。
 - **MongoDB 文件新增／刪除與實機矩陣**：結果網格右鍵可新增文件（空白文件插入模式、未給 `_id` 時自動產生、成功後轉一般編輯）與刪除文件（先依 `_id` 重讀完整文件、確認後以重讀比對＋完整文件過濾安全刪除）；view 一律擋下。standalone MongoDB 4.4／7.0／8.0 各通過 24 項實機檢查，涵蓋 metadata、查詢、型別保真、編輯／插入／刪除與各種並行衝突。
 - **MongoDB 文件樹與安全編輯**：查詢結果列可雙擊或右鍵「開啟文件」開啟文件檢視器，左側為可展開的欄位／陣列／型別樹，右側以 Canonical Extended JSON 編輯（欄位型別不會被改變）；儲存前會鎖定 `_id`，寫回時以編輯前的完整文件做樂觀並行比對，文件被他人修改或刪除時回報衝突不寫入。View 與缺 `_id` 的文件維持唯讀，開啟時會依 `_id` 重新讀取完整文件，查詢 projection 不會造成欄位遺失。

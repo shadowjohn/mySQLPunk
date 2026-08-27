@@ -67,6 +67,7 @@ public static class SmokeTests
         Run("MongoDB provider foundation", TestMongoDbProviderFoundation, ref passed);
         Run("MongoDB document tree and safe edit", TestMongoDbDocumentEditing, ref passed);
         Run("Redis provider foundation", TestRedisProviderFoundation, ref passed);
+        Run("Redis safe editing", TestRedisSafeEditing, ref passed);
         Run("Connection stars and batch properties", TestConnectionBatchProperties, ref passed);
         Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
         Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
@@ -7769,6 +7770,83 @@ public static class SmokeTests
         AssertContains(form1Source, "IsNonRelationalTarget", "Redis objects should share the read-only tree menus.");
     }
 
+    private static void TestRedisSafeEditing()
+    {
+        using (FakeRedisEditServer server = new FakeRedisEditServer())
+        using (my_redis provider = new my_redis())
+        {
+            server.Seed("edit:ok", "old value", 60000);
+            server.Seed("edit:stale", "server changed", -1);
+            server.Seed("edit:raced", "old", -1);
+            server.Seed("edit:binary", "a\uFFFDb", -1);
+            provider.SetConn(my_redis.BuildConnectionString("127.0.0.1", server.Port, "", "", false, 0));
+            provider.Open();
+
+            my_redis.RedisStringEditContext context = provider.GetStringForEdit("db0", "edit:ok");
+            AssertEquals("old value", context.Value, "The edit context should load the current string value.");
+            Assert(context.TtlMs == 60000, "The edit context should report the remaining TTL.");
+            Assert(!context.IsBinaryUnsafe, "Plain UTF-8 values should stay editable.");
+            Assert(provider.GetStringForEdit("db0", "edit:binary").IsBinaryUnsafe,
+                "Values with non-UTF-8 bytes should be flagged view-only.");
+
+            provider.SaveStringValue("db0", "edit:ok", "old value", "new value", true);
+            AssertEquals("new value", server.ValueOf("edit:ok"), "Saving should write the new string value.");
+            Assert(server.TtlOf("edit:ok") == 60000, "Preserving the TTL should re-apply PEXPIRE inside the transaction.");
+            Assert(server.ReceivedCommand("WATCH") && server.ReceivedCommand("MULTI") && server.ReceivedCommand("EXEC"),
+                "Saving should run inside a WATCH/MULTI/EXEC transaction.");
+
+            bool conflict = false;
+            try { provider.SaveStringValue("db0", "edit:stale", "old value", "x", false); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "A stale expected value should raise an edit conflict.");
+            AssertEquals("server changed", server.ValueOf("edit:stale"), "Conflicts must not overwrite the server value.");
+            Assert(server.ReceivedCommand("UNWATCH"), "Conflicts detected before MULTI should release the WATCH.");
+
+            server.AbortNextExec = true;
+            conflict = false;
+            try { provider.SaveStringValue("db0", "edit:raced", "old", "x", false); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "A null EXEC reply should surface as an edit conflict.");
+            AssertEquals("old", server.ValueOf("edit:raced"), "Aborted transactions must leave the value untouched.");
+
+            bool notSupported = false;
+            try { provider.SaveStringValue("db0", "hash:key", "a", "b", false); }
+            catch (NotSupportedException) { notSupported = true; }
+            Assert(notSupported, "Editing non-string keys should be rejected for now.");
+
+            bool deletedConflict = false;
+            try { provider.GetStringForEdit("db0", "edit:absent"); }
+            catch (InvalidOperationException) { deletedConflict = true; }
+            Assert(deletedConflict, "Opening a missing key for edit should fail clearly.");
+
+            provider.SetKeyTtl("db0", "edit:ok", 120);
+            Assert(server.TtlOf("edit:ok") == 120000, "Applying a TTL should use EXPIRE seconds.");
+            provider.RemoveKeyTtl("db0", "edit:ok");
+            Assert(server.TtlOf("edit:ok") == -1, "Removing a TTL should PERSIST the key.");
+            bool missing = false;
+            try { provider.SetKeyTtl("db0", "edit:absent", 30); }
+            catch (InvalidOperationException) { missing = true; }
+            Assert(missing, "Setting a TTL on a missing key should fail instead of silently skipping.");
+
+            Assert(provider.DeleteKey("db0", "edit:raced"), "Deleting an existing key should report success.");
+            Assert(!provider.DeleteKey("db0", "edit:raced"), "Deleting a missing key should report false.");
+            Assert(server.ValueOf("edit:raced") == null, "Deleted keys should be removed from the server.");
+
+            using (RedisKeyEditorForm form = new RedisKeyEditorForm(provider, "db0", "edit:ok"))
+            {
+                AssertContains(form.Text, "edit:ok", "The key editor should show the key in its title.");
+            }
+            provider.Close();
+        }
+
+        string root = FindRepositoryRootForTest();
+        string queryFormSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "QueryForm.cs"), Encoding.UTF8);
+        AssertContains(queryFormSource, "OpenRedisKeyEditor", "The query results should open the Redis key editor.");
+        AssertContains(queryFormSource, "DeleteSelectedRedisKey", "The query results should offer Redis key deletion.");
+        string csprojSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "mySQLPunk.csproj"), Encoding.UTF8);
+        AssertContains(csprojSource, "RedisKeyEditorForm.cs", "The key editor form should be part of the project.");
+    }
+
     private static object ReadResp(string payload)
     {
         using (MemoryStream stream = new MemoryStream(Encoding.UTF8.GetBytes(payload)))
@@ -10478,6 +10556,223 @@ public static class SmokeTests
             try { if (acceptedClient != null) acceptedClient.Close(); } catch { }
             try { listener.Stop(); } catch { }
             worker.Join(1000);
+        }
+    }
+
+    /// <summary>帶內存 key/value 狀態的 loopback RESP 伺服器，專測 WATCH/MULTI/EXEC 安全編輯流程。</summary>
+    private sealed class FakeRedisEditServer : IDisposable
+    {
+        private readonly TcpListener listener;
+        private readonly Thread worker;
+        private readonly object sync = new object();
+        private readonly Dictionary<string, string> store = new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, long> ttls = new Dictionary<string, long>(StringComparer.Ordinal);
+        private readonly List<string> commands = new List<string>();
+        private List<string[]> queued;
+        private TcpClient acceptedClient;
+        private Exception failure;
+        private volatile bool stopping;
+        public volatile bool AbortNextExec;
+
+        public FakeRedisEditServer()
+        {
+            listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            worker = new Thread(Run) { IsBackground = true, Name = "mySQLPunk fake Redis edit" };
+            worker.Start();
+        }
+
+        public int Port { get; private set; }
+
+        public void Seed(string key, string value, long ttlMs)
+        {
+            lock (sync)
+            {
+                store[key] = value;
+                if (ttlMs > 0) ttls[key] = ttlMs; else ttls.Remove(key);
+            }
+        }
+
+        public string ValueOf(string key)
+        {
+            lock (sync) { string value; return store.TryGetValue(key, out value) ? value : null; }
+        }
+
+        public long TtlOf(string key)
+        {
+            lock (sync) { long ttl; return ttls.TryGetValue(key, out ttl) ? ttl : -1; }
+        }
+
+        public bool ReceivedCommand(string name)
+        {
+            lock (sync) { return commands.Contains(name); }
+        }
+
+        private void Run()
+        {
+            try
+            {
+                acceptedClient = listener.AcceptTcpClient();
+                using (NetworkStream stream = acceptedClient.GetStream())
+                {
+                    while (!stopping)
+                    {
+                        object reply;
+                        try { reply = RedisRespProtocol.ReadReply(stream); }
+                        catch (EndOfStreamException) { break; }
+                        object[] raw = reply as object[];
+                        if (raw == null || raw.Length == 0) throw new FormatException("Expected a RESP command array.");
+                        string[] command = raw.Select(value => Convert.ToString(value)).ToArray();
+                        lock (sync) { commands.Add(command[0].ToUpperInvariant()); }
+                        Dispatch(stream, command);
+                    }
+                }
+            }
+            catch (SocketException) { if (!stopping) failure = new Exception("The fake Redis edit listener stopped unexpectedly."); }
+            catch (ObjectDisposedException) { if (!stopping) failure = new Exception("The fake Redis edit connection was disposed unexpectedly."); }
+            catch (Exception ex) { if (!stopping) failure = ex; }
+        }
+
+        private void Dispatch(NetworkStream stream, string[] args)
+        {
+            string command = args[0].ToUpperInvariant();
+            if (queued != null && command != "EXEC" && command != "DISCARD" && command != "MULTI")
+            {
+                queued.Add(args);
+                WriteSimple(stream, "QUEUED", true);
+                return;
+            }
+            switch (command)
+            {
+                case "PING": WriteSimple(stream, "PONG", true); return;
+                case "WATCH":
+                case "UNWATCH": WriteSimple(stream, "OK", true); return;
+                case "MULTI": queued = new List<string[]>(); WriteSimple(stream, "OK", true); return;
+                case "DISCARD": queued = null; WriteSimple(stream, "OK", true); return;
+                case "EXEC":
+                    {
+                        List<string[]> batch = queued ?? new List<string[]>();
+                        queued = null;
+                        if (AbortNextExec)
+                        {
+                            AbortNextExec = false;
+                            WriteAscii(stream, "*-1\r\n");
+                            return;
+                        }
+                        WriteAscii(stream, "*" + batch.Count + "\r\n");
+                        foreach (string[] queuedCommand in batch) ExecuteWrite(stream, queuedCommand);
+                        return;
+                    }
+                case "TYPE":
+                    lock (sync)
+                    {
+                        if (args[1].StartsWith("hash:", StringComparison.Ordinal)) WriteSimple(stream, "hash", true);
+                        else WriteSimple(stream, store.ContainsKey(args[1]) ? "string" : "none", true);
+                    }
+                    return;
+                case "GET":
+                    lock (sync)
+                    {
+                        string value;
+                        if (store.TryGetValue(args[1], out value)) WriteBulk(stream, value);
+                        else WriteAscii(stream, "$-1\r\n");
+                    }
+                    return;
+                case "PTTL":
+                    lock (sync)
+                    {
+                        long ttl;
+                        if (!store.ContainsKey(args[1])) WriteInteger(stream, -2);
+                        else WriteInteger(stream, ttls.TryGetValue(args[1], out ttl) ? ttl : -1);
+                    }
+                    return;
+                case "EXISTS":
+                    lock (sync) { WriteInteger(stream, store.ContainsKey(args[1]) ? 1 : 0); }
+                    return;
+                case "EXPIRE":
+                    lock (sync)
+                    {
+                        if (!store.ContainsKey(args[1])) { WriteInteger(stream, 0); return; }
+                        ttls[args[1]] = long.Parse(args[2]) * 1000L;
+                        WriteInteger(stream, 1);
+                    }
+                    return;
+                case "PERSIST":
+                    lock (sync) { WriteInteger(stream, ttls.Remove(args[1]) ? 1 : 0); }
+                    return;
+                case "DEL":
+                    lock (sync)
+                    {
+                        int removed = 0;
+                        for (int i = 1; i < args.Length; i++)
+                        {
+                            if (store.Remove(args[i])) removed++;
+                            ttls.Remove(args[i]);
+                        }
+                        WriteInteger(stream, removed);
+                    }
+                    return;
+                default:
+                    WriteSimple(stream, "ERR unsupported fake edit command " + command, false);
+                    return;
+            }
+        }
+
+        private void ExecuteWrite(NetworkStream stream, string[] args)
+        {
+            string command = args[0].ToUpperInvariant();
+            lock (sync)
+            {
+                switch (command)
+                {
+                    case "SET":
+                        store[args[1]] = args[2];
+                        ttls.Remove(args[1]);
+                        WriteSimple(stream, "OK", true);
+                        return;
+                    case "PEXPIRE":
+                        if (store.ContainsKey(args[1])) { ttls[args[1]] = long.Parse(args[2]); WriteInteger(stream, 1); }
+                        else WriteInteger(stream, 0);
+                        return;
+                    default:
+                        WriteSimple(stream, "ERR unsupported queued command " + command, false);
+                        return;
+                }
+            }
+        }
+
+        private static void WriteSimple(NetworkStream stream, string value, bool success)
+        {
+            WriteAscii(stream, (success ? "+" : "-") + value + "\r\n");
+        }
+
+        private static void WriteInteger(NetworkStream stream, long value)
+        {
+            WriteAscii(stream, ":" + value + "\r\n");
+        }
+
+        private static void WriteBulk(NetworkStream stream, string value)
+        {
+            byte[] payload = Encoding.UTF8.GetBytes(value ?? string.Empty);
+            WriteAscii(stream, "$" + payload.Length + "\r\n");
+            stream.Write(payload, 0, payload.Length);
+            WriteAscii(stream, "\r\n");
+        }
+
+        private static void WriteAscii(NetworkStream stream, string value)
+        {
+            byte[] payload = Encoding.ASCII.GetBytes(value);
+            stream.Write(payload, 0, payload.Length);
+        }
+
+        public void Dispose()
+        {
+            stopping = true;
+            try { if (acceptedClient != null) acceptedClient.Close(); } catch { }
+            try { listener.Stop(); } catch { }
+            worker.Join(1000);
+            if (failure != null) throw new Exception("Fake Redis edit server failed.", failure);
         }
     }
 

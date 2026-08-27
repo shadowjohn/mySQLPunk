@@ -232,6 +232,9 @@
     <Compile Include="MongoDocumentViewerForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="RedisKeyEditorForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="TableDataProfileManagerForm.cs">
       <SubType>Form</SubType>
     </Compile>

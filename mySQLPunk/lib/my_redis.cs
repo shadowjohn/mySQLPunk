@@ -8,6 +8,12 @@ using Newtonsoft.Json.Linq;
 
 namespace mySQLPunk.lib
 {
+    /// <summary>編輯基準載入後 key 被其他連線改動或刪除；呼叫端應重新載入再決定是否重試。</summary>
+    public sealed class RedisEditConflictException : Exception
+    {
+        public RedisEditConflictException(string message) : base(message) { }
+    }
+
     /// <summary>
     /// Redis／Garnet 第一階段 provider：連線、db 清單、keys 瀏覽與受限唯讀查詢。
     /// 與 my_mongodb 相同原則：不假裝相容關聯式 DDL／寫入，避免 RDBMS UI 誤送命令。
@@ -310,6 +316,119 @@ namespace mySQLPunk.lib
             }
         }
 
+        /// <summary>讀取單一 string key 的編輯基準：值、剩餘 TTL 與是否含無法以 UTF-8 呈現的位元組。</summary>
+        public RedisStringEditContext GetStringForEdit(string databaseName, string key)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                string type = GetKeyType(key);
+                if (type == "none") throw new InvalidOperationException(Localization.T("Redis.EditKeyDeleted"));
+                if (!string.Equals(type, "string", StringComparison.OrdinalIgnoreCase))
+                    throw new NotSupportedException(Localization.Format("Redis.EditStringOnly", type));
+                string value = Convert.ToString(client.Execute("GET", key), CultureInfo.InvariantCulture);
+                long ttlMs = Convert.ToInt64(client.Execute("PTTL", key), CultureInfo.InvariantCulture);
+                return new RedisStringEditContext
+                {
+                    Key = key,
+                    Value = value,
+                    TtlMs = ttlMs,
+                    // RESP 讀取一律以 UTF-8 解碼；出現替換字元代表原值不是合法 UTF-8，
+                    // 寫回會把原始位元組換成 U+FFFD 而損毀資料，因此標成唯讀。
+                    IsBinaryUnsafe = value != null && value.IndexOf('\uFFFD') >= 0
+                };
+            }
+        }
+
+        /// <summary>
+        /// 以 WATCH＋MULTI／EXEC 儲存 string 值：載入後被其他連線改過（比對值不同或 EXEC 落空）就丟
+        /// RedisEditConflictException，不會蓋掉別人的寫入。preserveTtl 會在同一交易內以 PEXPIRE 保留剩餘 TTL。
+        /// </summary>
+        public void SaveStringValue(string databaseName, string key, string expectedValue, string newValue, bool preserveTtl)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            if (newValue == null) newValue = string.Empty;
+            if (newValue.IndexOf('\uFFFD') >= 0)
+                throw new NotSupportedException(Localization.T("Redis.EditBinaryUnsupported"));
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                client.Execute("WATCH", key);
+                bool inMulti = false;
+                try
+                {
+                    string type = GetKeyType(key);
+                    if (type == "none") throw new RedisEditConflictException(Localization.T("Redis.EditKeyDeleted"));
+                    if (!string.Equals(type, "string", StringComparison.OrdinalIgnoreCase))
+                        throw new NotSupportedException(Localization.Format("Redis.EditStringOnly", type));
+                    string current = Convert.ToString(client.Execute("GET", key), CultureInfo.InvariantCulture);
+                    if (!string.Equals(current, expectedValue, StringComparison.Ordinal))
+                        throw new RedisEditConflictException(Localization.T("Redis.EditConflict"));
+                    if (current != null && current.IndexOf('\uFFFD') >= 0)
+                        throw new NotSupportedException(Localization.T("Redis.EditBinaryUnsupported"));
+                    // SET 會清掉 TTL，保留時要在同一交易內補 PEXPIRE；WATCH 保證讀到的 TTL 沒被其他寫入動過。
+                    long ttlMs = preserveTtl ? Convert.ToInt64(client.Execute("PTTL", key), CultureInfo.InvariantCulture) : -1;
+                    client.Execute("MULTI");
+                    inMulti = true;
+                    client.Execute("SET", key, newValue);
+                    if (preserveTtl && ttlMs > 0)
+                        client.Execute("PEXPIRE", key, ttlMs.ToString(CultureInfo.InvariantCulture));
+                    object execReply = client.Execute("EXEC");
+                    inMulti = false;
+                    if (execReply == null) throw new RedisEditConflictException(Localization.T("Redis.EditConflict"));
+                }
+                catch
+                {
+                    if (inMulti) { try { client.Execute("DISCARD"); } catch { } }
+                    else { try { client.Execute("UNWATCH"); } catch { } }
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>設定 key 的存活時間（秒）；key 不存在時擲回錯誤而不是默默略過。</summary>
+        public void SetKeyTtl(string databaseName, string key, long ttlSeconds)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            if (ttlSeconds <= 0) throw new ArgumentException(Localization.T("Redis.TtlInvalid"), "ttlSeconds");
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                long applied = Convert.ToInt64(client.Execute("EXPIRE", key, ttlSeconds.ToString(CultureInfo.InvariantCulture)), CultureInfo.InvariantCulture);
+                if (applied != 1) throw new InvalidOperationException(Localization.T("Redis.EditKeyDeleted"));
+            }
+        }
+
+        /// <summary>移除 key 的存活時間（PERSIST）；key 不存在時擲回錯誤。</summary>
+        public void RemoveKeyTtl(string databaseName, string key)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                if (Convert.ToInt64(client.Execute("EXISTS", key), CultureInfo.InvariantCulture) != 1)
+                    throw new InvalidOperationException(Localization.T("Redis.EditKeyDeleted"));
+                client.Execute("PERSIST", key);
+            }
+        }
+
+        /// <summary>刪除單一 key；回傳是否真的刪掉（false 代表 key 已不存在）。</summary>
+        public bool DeleteKey(string databaseName, string key)
+        {
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException(Localization.T("Redis.EditKeyRequired"), "key");
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+                return Convert.ToInt64(client.Execute("DEL", key), CultureInfo.InvariantCulture) > 0;
+            }
+        }
+
         public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
         {
             return SelectJsonQuery("db" + initialDatabaseIndex.ToString(CultureInfo.InvariantCulture), sql);
@@ -595,6 +714,17 @@ namespace mySQLPunk.lib
         {
             if (limit <= 0) return DefaultQueryLimit;
             return Math.Min(limit, MaxQueryLimit);
+        }
+
+        /// <summary>string key 的編輯基準快照。</summary>
+        public sealed class RedisStringEditContext
+        {
+            public string Key = string.Empty;
+            public string Value = string.Empty;
+            /// <summary>剩餘毫秒；-1 代表不會過期。</summary>
+            public long TtlMs = -1;
+            /// <summary>值含無法以 UTF-8 呈現的位元組時只允許檢視，避免寫回損毀資料。</summary>
+            public bool IsBinaryUnsafe;
         }
 
         /// <summary>查詢分頁接受的受限唯讀規格；未知欄位一律拒絕。</summary>

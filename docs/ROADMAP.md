@@ -30,7 +30,7 @@
 | MongoDB Aggregation Pipeline 視覺設計 | 📋 | MongoDB provider 後續階段：拖放 stage、逐步預覽與結果驗證。 |
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 📋 | 新 provider，需連線、metadata、查詢、資料檢視、模型與 BI 能力。 |
-| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 直連唯讀第一期已完成：ACL／密碼、TLS、logical db、SCAN key 瀏覽、型別／TTL／摘要及受限查詢；待補 Redis／Garnet 外部實機矩陣、Cluster、Sentinel、資料編輯、監控與 Pub/Sub。 |
+| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 第二期完成：ACL／密碼、TLS、logical db、SCAN key 瀏覽、受限查詢，加上 key 編輯器的 string 安全編輯（WATCH/MULTI/EXEC）、TTL 與刪除；Redis 6.2／7 與 Garnet 實機矩陣通過。待補 Cluster、Sentinel、集合型別編輯、監控與 Pub/Sub。 |
 | Linux ARM | 📋 | 現有 WinForms 僅 Windows；需先抽離 UI／provider core，再評估跨平台桌面 UI。 |
 
 ## Navicat Premium 功能頁對照
@@ -41,7 +41,7 @@
 | 物件設計器 | 🟡 | 五種 provider 已能建表與主要 ALTER；進階 constraint／索引仍需更多實機矩陣。 |
 | RDBMS 資料編輯器（網格） | ✅ | 分頁瀏覽、篩選、排序、欄顯示、寫回、無主鍵安全模式、多格式匯出。 |
 | MongoDB 資料編輯器（網格／樹／JSON） | 🆕 | 文件檢視器提供可展開文件樹與 Canonical Extended JSON 編輯；儲存會鎖定 `_id` 並以完整原始文件做並行比對，並支援文件新增（自動 `_id`）與安全刪除；view 與缺 `_id` 文件唯讀。待補網格內編輯。 |
-| Redis 資料編輯器 | 🟡 | 已有唯讀 key 清單、型別／TTL／摘要與 string/list/hash/set/zset 單鍵內容檢視；待補安全寫入與專用編輯互動。 |
+| Redis 資料編輯器 | 🟡 | key 清單、型別／TTL／摘要與五種型別單鍵內容檢視之外，key 編輯器已支援 string 值安全編輯（並行衝突保護）、TTL 設定／移除與刪除 key；待補 list／hash／set／zset 寫入。 |
 | 資料分析與互動圖表 | 🆕 | 已完成欄位摘要、Top 值比例與值鑽取的第一版。 |
 | 自動完成程式碼 | ✅ | 已能解析目前 statement 的 FROM／JOIN／UPDATE／INTO 來源與 alias；支援欄位、`alias.column`、資料表、關鍵字與片段捷徑，並依 provider/database 快取資料表、View 與欄位 metadata。 |
 | 程式碼片段 | ✅ | `Ctrl+Shift+P` 開啟片段管理器；支援 8 組內建片段、自訂片段 CRUD、全文搜尋、`$CURSOR$` 定位、保留縮排插入，以及 JSON 匯入／匯出工作區格式。 |
@@ -74,7 +74,7 @@
 | MySQL／MariaDB | ✅ | 共用 MySQL provider，已有實機版本矩陣。 |
 | PostgreSQL、SQL Server、Oracle、SQLite | 🟡 | 核心 metadata／查詢／編輯／DDL／備份可用，進階功能持續對等化。 |
 | MongoDB | 🟡 | 第三期完成：連線、metadata、JSON find 查詢、文件樹、安全編輯與文件新增／刪除都已具備；standalone 4.4／7.0／8.0 實機矩陣通過。待補 Atlas／SRV 驗證環境矩陣與 Aggregation Pipeline。 |
-| Redis／Garnet | 🟡 | RESP2 standalone 直連唯讀第一期完成，具備 URI、ACL／密碼、TLS、logical db、key 瀏覽與受限查詢；外部實機矩陣、Cluster／Sentinel、寫入、監控與 Pub/Sub 待補。 |
+| Redis／Garnet | 🟡 | 第二期完成：URI、ACL／密碼、TLS、logical db、key 瀏覽、受限查詢與 string 安全編輯／TTL／刪除；Redis 6.2、Redis 7 與 Garnet standalone 實機矩陣通過。Cluster／Sentinel、集合型別寫入、監控與 Pub/Sub 待補。 |
 | Snowflake | 📋 | 建立 provider、metadata、查詢與專用資料介面。 |
 | AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS、MongoDB 與 Redis 可先用標準主機連線；待補各家 IAM／SSO／MFA 與雲端專用驗證。 |
 | OceanBase、PingCAP／TiDB、Dameng、Fujitsu、Kingbase、HighGo | 📋 | 建立實機相容矩陣；能沿用 MySQL／PostgreSQL 協定者先驗證差異，其餘再建立專用 provider。 |
@@ -86,4 +86,4 @@
 3. ✅ SSH tunnel＋SSL/TLS 選項 UI、憑證驗證與排程共用連線流程已完成。
 4. ✅ RDBMS、MongoDB 與 Redis 的連線 URI 匯入及設定頁確認流程已完成。
 5. ✅ 連線星號、持久化色彩與批次屬性操作已完成。
-6. 🟡 MongoDB 第一～三期已完成；Redis／Garnet standalone 直連唯讀第一期也已完成。下一步補 Redis／Garnet 外部實機矩陣與專用安全編輯，再擴充 Snowflake；Atlas／SRV 驗證矩陣與 Aggregation Pipeline 留在 MongoDB 後續。
+6. 🟡 MongoDB 第一～三期、Redis／Garnet 第二期（string 安全編輯＋Redis 6.2／7／Garnet 實機矩陣）已完成。下一步擴充 Snowflake provider；Redis 集合型別寫入、Cluster／Sentinel，以及 MongoDB Atlas／SRV 驗證矩陣與 Aggregation Pipeline 留在後續。

@@ -4,12 +4,14 @@
 
 ## 未完成功能與已知限制
 
-- **Redis／Microsoft Garnet provider 🟡 第一期完成（standalone 直連唯讀）**
+- **Redis／Microsoft Garnet provider 🟡 第二期完成（string 安全編輯與實機矩陣）**
   - 連線：新增 Redis / Garnet 選項與設定頁，支援 `redis://`／`rediss://` URI、ACL username＋password、舊版 password-only URI 匯入相容、TLS 與 logical database index；密碼仍由 Windows Credential Manager 保存，設定檔另保留驗證需求旗標以便憑證遺失時提示補輸入。
   - 瀏覽：每個 logical db 提供 `keys` 虛擬表，透過 SCAN 顯示 key、type、TTL 與內容摘要；單次 traversal 會去除重複 key，type filter 會先於 offset／limit 套用，避免前一批不同型別吃掉結果額度。
   - 唯讀查詢：接受 `SELECT * FROM keys` 相容入口，或只含 `pattern`、`key`、`type`、`limit` 的 JSON；可檢視 string、list、hash、set、zset 內容，拒絕未知欄位、混用 key／pattern 與所有寫入命令。
   - 協定安全：內建 RESP2 TCP／TLS client，限制 bulk string／array 大小及巢狀深度；連線流程涵蓋 AUTH、PING、SELECT，metadata 以 CONFIG／DBSIZE／INFO 讀取並對不支援的 INFO 區段降級。
-  - 驗證與限制：67 項 smoke test 已含 loopback TCP/RESP 整合路徑，實際走過 ACL AUTH、logical db、SCAN 去重／型別篩選、單鍵內容與 INFO。尚未執行外部 Redis／Garnet 實機版本矩陣；目前不支援 Cluster、Sentinel、Pub/Sub、監控、二進位預覽或寫入，SCAN 分頁在資料同時變更時仍屬 best effort。
+  - key 編輯器：查詢結果雙擊 key 或右鍵「編輯 Key」可開啟編輯器，支援 string 值編輯、TTL 設定（秒）／移除與確認後刪除 key；右鍵另有直接刪除入口。儲存以 WATCH＋MULTI／EXEC 樂觀並行保護：載入後被其他連線改過（比對值不同或 EXEC 落空）會回報衝突且不覆蓋，「保留剩餘 TTL」會在同一交易內補 PEXPIRE。值含無法以 UTF-8 呈現的位元組時標示唯讀，避免寫回把原始位元組換成替換字元。查詢分頁本身仍拒絕所有寫入命令。
+  - 實機矩陣（2026-08-27，Docker standalone）：Redis 6.2、Redis 7、Microsoft Garnet 各通過 26 項實機檢查——連線、INFO 版本、DBSIZE、pattern／type 掃描、五種型別單鍵內容、TTL 欄位、編輯基準載入、保留／清除 TTL 儲存、並行衝突不覆蓋、衝突後重載可續存、非 string 拒編輯、EXPIRE／PERSIST、缺 key 失敗與刪除 round-trip；可用 `tests/Run-RedisLiveMatrixTests.ps1` 重跑。
+  - 驗證與限制：68 項 smoke test 含兩座 loopback TCP/RESP 伺服器，覆蓋 ACL AUTH、SCAN 去重／型別篩選、單鍵內容、INFO 與 WATCH/MULTI/EXEC 編輯流程（含 EXEC 落空與 UNWATCH）。尚不支援 Cluster、Sentinel、Pub/Sub、監控、二進位值編輯，以及 list／hash／set／zset 的寫入；SCAN 分頁在資料同時變更時仍屬 best effort。
 
 - **MongoDB provider 🟡 第三期完成（文件新增／刪除與實機矩陣）**
   - 連線：新增一般 `mongodb://` 與 Atlas 常用 `mongodb+srv://` 設定，可保存 auth source、replica set、direct connection、retry writes 與 TLS；URI 匯入會拒絕未知、重複或互相衝突的參數，原始 URI 不會保存，密碼仍交由 Windows Credential Manager。
