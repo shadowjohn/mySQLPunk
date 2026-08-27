@@ -28,14 +28,28 @@ namespace mySQLPunk
         private readonly Button _reloadButton;
         private readonly Button _saveButton;
         private string _originalJson;
+        private bool _insertMode;
 
         public event EventHandler<MongoDocumentSavedEventArgs> DocumentSaved;
 
         public bool IsReadOnly { get { return _readOnly; } }
+        public bool IsInsertMode { get { return _insertMode; } }
         public string DocumentJson { get { return _jsonBox.Text; } }
 
-        public MongoDocumentViewerForm(my_mongodb db, string databaseName, string collectionName, string documentJson, bool readOnly, string readOnlyReason)
+        /// <summary>開啟「新增文件」模式：從空白文件開始，儲存改走 InsertDocumentChecked。</summary>
+        public static MongoDocumentViewerForm CreateForInsert(my_mongodb db, string databaseName, string collectionName)
         {
+            return new MongoDocumentViewerForm(db, databaseName, collectionName, "{ }", false, string.Empty, true);
+        }
+
+        public MongoDocumentViewerForm(my_mongodb db, string databaseName, string collectionName, string documentJson, bool readOnly, string readOnlyReason)
+            : this(db, databaseName, collectionName, documentJson, readOnly, readOnlyReason, false)
+        {
+        }
+
+        private MongoDocumentViewerForm(my_mongodb db, string databaseName, string collectionName, string documentJson, bool readOnly, string readOnlyReason, bool insertMode)
+        {
+            _insertMode = insertMode;
             if (db == null) throw new ArgumentNullException("db");
             _db = db;
             _databaseName = databaseName ?? string.Empty;
@@ -43,7 +57,9 @@ namespace mySQLPunk
             _readOnly = readOnly;
             _originalJson = documentJson ?? string.Empty;
 
-            Text = Localization.Format("MongoDB.DocumentViewerTitle", _databaseName, _collectionName);
+            Text = _insertMode
+                ? Localization.Format("MongoDB.DocumentViewerInsertTitle", _databaseName, _collectionName)
+                : Localization.Format("MongoDB.DocumentViewerTitle", _databaseName, _collectionName);
             StartPosition = FormStartPosition.CenterParent;
             MinimumSize = new Size(720, 480);
             Size = new Size(960, 640);
@@ -130,6 +146,7 @@ namespace mySQLPunk
                 _validateButton.Visible = false;
                 _saveButton.Visible = false;
             }
+            if (_insertMode) _reloadButton.Visible = false;
             actions.Controls.AddRange(new Control[] { _validateButton, _reloadButton, _saveButton, closeButton });
             root.Controls.Add(actions, 0, 2);
 
@@ -189,7 +206,9 @@ namespace mySQLPunk
 
         private void ValidateOnly()
         {
-            MongoDocumentEditValidation validation = MongoDocumentEditService.ValidateEdit(_originalJson, _jsonBox.Text);
+            MongoDocumentEditValidation validation = _insertMode
+                ? MongoDocumentEditService.ValidateInsert(_jsonBox.Text)
+                : MongoDocumentEditService.ValidateEdit(_originalJson, _jsonBox.Text);
             if (!validation.Success)
             {
                 _statusLabel.Text = validation.Error;
@@ -246,6 +265,12 @@ namespace mySQLPunk
 
         private async Task SaveDocumentAsync()
         {
+            if (_insertMode)
+            {
+                await InsertDocumentAsync();
+                return;
+            }
+
             MongoDocumentEditValidation validation = MongoDocumentEditService.ValidateEdit(_originalJson, _jsonBox.Text);
             if (!validation.Success)
             {
@@ -274,6 +299,46 @@ namespace mySQLPunk
                 _statusLabel.Text = Localization.T("MongoDB.DocumentSaved");
                 EventHandler<MongoDocumentSavedEventArgs> handler = DocumentSaved;
                 if (handler != null) handler(this, new MongoDocumentSavedEventArgs { SavedDocumentJson = editedJson });
+            }
+            catch (Exception ex)
+            {
+                _statusLabel.Text = ex.Message;
+                MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+        }
+
+        private async Task InsertDocumentAsync()
+        {
+            MongoDocumentEditValidation validation = MongoDocumentEditService.ValidateInsert(_jsonBox.Text);
+            if (!validation.Success)
+            {
+                _statusLabel.Text = validation.Error;
+                return;
+            }
+
+            DialogResult confirm = MessageBox.Show(this,
+                Localization.Format("MongoDB.ConfirmInsertDocument", _databaseName, _collectionName),
+                Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes) return;
+
+            string documentJson = validation.NormalizedJson;
+            SetBusy(true);
+            try
+            {
+                string insertedJson = await Task.Run(() => _db.InsertDocumentChecked(_databaseName, _collectionName, documentJson));
+                // 新增成功後轉成一般編輯模式，接著的儲存走安全寫回。
+                _insertMode = false;
+                _reloadButton.Visible = true;
+                _originalJson = insertedJson;
+                Text = Localization.Format("MongoDB.DocumentViewerTitle", _databaseName, _collectionName);
+                ShowDocument(insertedJson);
+                _statusLabel.Text = Localization.T("MongoDB.DocumentInserted");
+                EventHandler<MongoDocumentSavedEventArgs> handler = DocumentSaved;
+                if (handler != null) handler(this, new MongoDocumentSavedEventArgs { SavedDocumentJson = insertedJson });
             }
             catch (Exception ex)
             {

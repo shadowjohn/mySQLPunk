@@ -686,6 +686,13 @@ namespace mySQLPunk
             Add("MongoDB.LoadingDocument", "正在載入文件…", "Loading document…");
             Add("MongoDB.DocumentJsonMissing", "這一列沒有完整文件 JSON，無法開啟文件檢視器。", "This row has no full document JSON, so the document viewer cannot open.");
             Add("MongoDB.CollectionUnknown", "無法從目前查詢判斷 collection，請先執行單一 collection 查詢。", "The collection could not be determined from the current query; run a single-collection query first.");
+            Add("MongoDB.InsertDocument", "新增文件", "Insert Document");
+            Add("MongoDB.DeleteDocument", "刪除文件", "Delete Document");
+            Add("MongoDB.DocumentViewerInsertTitle", "{0}.{1} - 新增文件", "{0}.{1} - New Document");
+            Add("MongoDB.ConfirmInsertDocument", "確定要在 {0}.{1} 新增這份文件嗎？", "Insert this document into {0}.{1}?");
+            Add("MongoDB.ConfirmDeleteDocument", "確定要刪除 {0}.{1} 中的這份文件嗎？此動作無法復原。", "Delete this document from {0}.{1}? This cannot be undone.");
+            Add("MongoDB.DocumentInserted", "文件已新增。", "The document was inserted.");
+            Add("MongoDB.DocumentDeletedDone", "文件已刪除。", "The document was deleted.");
             Add("Connection.MainWindowNotInitialized", "主視窗未初始化。", "The main window is not initialized.");
             Add("Connection.TestSucceeded", "{0} 連線成功。", "{0} connection succeeded.");
             Add("Connection.TestFailed", "{0} 連線失敗：{1}", "{0} connection failed: {1}");

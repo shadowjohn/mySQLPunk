@@ -304,32 +304,61 @@ namespace mySQLPunk.lib
             BsonDocument original = BsonDocument.Parse(originalDocumentJson);
             BsonDocument replacement = BsonDocument.Parse(validation.NormalizedJson);
             IMongoCollection<BsonDocument> collection = GetCollection(databaseName, collectionName);
+            FilterDefinition<BsonDocument> filter = BuildCheckedWriteFilter(collection, original, originalDocumentJson);
 
-            // 先重讀比對一次：完整比對（含欄位新增）在這裡完成，寫入過濾器負責堵住之後的競態。
+            ReplaceOneResult result = collection.ReplaceOne(filter, replacement);
+            if (result.MatchedCount == 0)
+                throw new InvalidOperationException(Localization.T("MongoDB.DocumentConcurrencyConflict"));
+        }
+
+        /// <summary>新增單一文件；未提供 _id 時由驅動產生 ObjectId，回傳含 _id 的完整文件 JSON。</summary>
+        public string InsertDocumentChecked(string databaseName, string collectionName, string documentJson)
+        {
+            EnsureOpen();
+            MongoDocumentEditValidation validation = MongoDocumentEditService.ValidateInsert(documentJson);
+            if (!validation.Success) throw new InvalidOperationException(validation.Error);
+            BsonDocument document = BsonDocument.Parse(validation.NormalizedJson);
+            GetCollection(databaseName, collectionName).InsertOne(document);
+            return document.ToJson(new JsonWriterSettings { Indent = true, OutputMode = JsonOutputMode.CanonicalExtendedJson });
+        }
+
+        /// <summary>安全刪除單一文件：與寫回共用重讀比對＋完整文件過濾；被別人改過或已刪除時回報衝突。</summary>
+        public void DeleteDocumentChecked(string databaseName, string collectionName, string originalDocumentJson)
+        {
+            EnsureOpen();
+            BsonDocument original = BsonDocument.Parse(originalDocumentJson);
+            if (!original.Contains("_id") || original["_id"].IsBsonNull)
+                throw new InvalidOperationException(Localization.T("MongoDB.DocumentIdRequired"));
+            IMongoCollection<BsonDocument> collection = GetCollection(databaseName, collectionName);
+            FilterDefinition<BsonDocument> filter = BuildCheckedWriteFilter(collection, original, originalDocumentJson);
+
+            DeleteResult result = collection.DeleteOne(filter);
+            if (result.DeletedCount == 0)
+                throw new InvalidOperationException(Localization.T("MongoDB.DocumentConcurrencyConflict"));
+        }
+
+        /// <summary>
+        /// 寫入前的樂觀並行防線：先重讀完整比對（含欄位新增），
+        /// 再回傳原子寫入用的過濾器堵住重讀之後的競態。
+        /// </summary>
+        private FilterDefinition<BsonDocument> BuildCheckedWriteFilter(
+            IMongoCollection<BsonDocument> collection, BsonDocument original, string originalDocumentJson)
+        {
             BsonDocument idFilter = new BsonDocument("_id", original["_id"]);
             BsonDocument current = collection.Find(idFilter).Limit(1).FirstOrDefault();
             if (current == null || !current.Equals(original))
                 throw new InvalidOperationException(Localization.T("MongoDB.DocumentConcurrencyConflict"));
 
-            FilterDefinition<BsonDocument> filter;
-            if (MongoDocumentEditService.CanUseFullDocumentFilter(originalDocumentJson))
-            {
-                // 全文件等值只驗證既有欄位；補上頂層欄位數量檢查，別人在競態期間「新增」欄位也會落空。
-                BsonDocument fieldCountGuard = new BsonDocument("$expr", new BsonDocument("$eq", new BsonArray
-                {
-                    new BsonDocument("$size", new BsonDocument("$objectToArray", "$$ROOT")),
-                    original.ElementCount
-                }));
-                filter = new BsonDocument("$and", new BsonArray { original, fieldCountGuard });
-            }
-            else
-            {
-                filter = idFilter;
-            }
+            // 頂層值可能被查詢引擎解讀成運算子的文件，退回 _id 過濾（重讀比對已完成大部分防護）。
+            if (!MongoDocumentEditService.CanUseFullDocumentFilter(originalDocumentJson)) return idFilter;
 
-            ReplaceOneResult result = collection.ReplaceOne(filter, replacement);
-            if (result.MatchedCount == 0)
-                throw new InvalidOperationException(Localization.T("MongoDB.DocumentConcurrencyConflict"));
+            // 全文件等值只驗證既有欄位；補上頂層欄位數量檢查，別人在競態期間「新增」欄位也會落空。
+            BsonDocument fieldCountGuard = new BsonDocument("$expr", new BsonDocument("$eq", new BsonArray
+            {
+                new BsonDocument("$size", new BsonDocument("$objectToArray", "$$ROOT")),
+                original.ElementCount
+            }));
+            return new BsonDocument("$and", new BsonArray { original, fieldCountGuard });
         }
 
         /// <summary>從查詢分頁目前的內容取出目標 collection 名稱；解析失敗時回傳 false。</summary>

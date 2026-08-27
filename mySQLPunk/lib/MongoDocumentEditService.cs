@@ -59,6 +59,23 @@ namespace mySQLPunk.lib
             return true;
         }
 
+        /// <summary>驗證要新增的文件：只要求最外層是 JSON object，_id 可留給伺服器產生。</summary>
+        public static MongoDocumentEditValidation ValidateInsert(string documentJson)
+        {
+            MongoDocumentEditValidation result = new MongoDocumentEditValidation();
+            BsonDocument document;
+            try { document = ParseDocument(documentJson); }
+            catch (Exception ex)
+            {
+                result.Error = Localization.Format("MongoDB.DocumentInvalid", ex.Message);
+                return result;
+            }
+            result.Success = true;
+            result.HasChanges = true;
+            result.NormalizedJson = document.ToJson(CanonicalIndented);
+            return result;
+        }
+
         public static MongoDocumentEditValidation ValidateEdit(string originalJson, string editedJson)
         {
             MongoDocumentEditValidation result = new MongoDocumentEditValidation();

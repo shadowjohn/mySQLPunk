@@ -220,6 +220,8 @@ namespace mySQLPunk
         private ToolStripMenuItem resultsDeleteRowItem;
         private ToolStripMenuItem resultsSaveRowsItem;
         private ToolStripMenuItem resultsOpenDocumentItem;
+        private ToolStripMenuItem resultsInsertDocumentItem;
+        private ToolStripMenuItem resultsDeleteDocumentItem;
         private ToolStripSeparator resultsMongoSeparator;
         private bool _isClosing;
         private System.Windows.Forms.Timer _autoRecoveryTimer;
@@ -675,6 +677,132 @@ namespace mySQLPunk
             catch (Exception)
             {
                 // 只影響網格顯示；文件本身已成功寫入伺服器。
+            }
+        }
+
+        private async void OpenMongoDocumentInsert()
+        {
+            if (!IsMongoDbProvider()) return;
+            string collectionName = GetMongoCollectionName();
+            if (string.IsNullOrWhiteSpace(collectionName))
+            {
+                UpdateStatus(Localization.T("MongoDB.CollectionUnknown"));
+                return;
+            }
+
+            my_mongodb mongo = (my_mongodb)_db;
+            string databaseName = _databaseName;
+            try
+            {
+                bool isView = await Task.Run(() => mongo.ViewExists(databaseName, collectionName));
+                if (isView)
+                {
+                    UpdateStatus(Localization.T("MongoDB.ViewReadOnly"));
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus(ex.Message);
+                return;
+            }
+
+            using (MongoDocumentViewerForm viewer = MongoDocumentViewerForm.CreateForInsert(mongo, databaseName, collectionName))
+            {
+                viewer.DocumentSaved += (s, args) => OnMongoDocumentSaved(null, args.SavedDocumentJson);
+                viewer.ShowDialog(this);
+            }
+        }
+
+        private async void DeleteSelectedMongoDocument()
+        {
+            if (!IsMongoDbProvider() || dgvResults == null) return;
+            DataGridViewRow gridRow = dgvResults.CurrentRow;
+            if (gridRow == null || gridRow.IsNewRow) return;
+            DataTable table = dgvResults.DataSource as DataTable;
+            string jsonColumn = FindMongoJsonColumnName(table);
+            DataRowView rowView = gridRow.DataBoundItem as DataRowView;
+            object jsonValue = jsonColumn == null || rowView == null ? null : rowView.Row[jsonColumn];
+            string documentJson = jsonValue == null || jsonValue == DBNull.Value ? string.Empty : jsonValue.ToString();
+            if (string.IsNullOrWhiteSpace(documentJson))
+            {
+                UpdateStatus(Localization.T("MongoDB.DocumentJsonMissing"));
+                return;
+            }
+
+            string collectionName = GetMongoCollectionName();
+            if (string.IsNullOrWhiteSpace(collectionName))
+            {
+                UpdateStatus(Localization.T("MongoDB.CollectionUnknown"));
+                return;
+            }
+
+            string filterJson;
+            if (!MongoDocumentEditService.TryGetIdFilterJson(documentJson, out filterJson))
+            {
+                UpdateStatus(Localization.T("MongoDB.DocumentIdRequired"));
+                return;
+            }
+
+            my_mongodb mongo = (my_mongodb)_db;
+            string databaseName = _databaseName;
+            string fullJson;
+            try
+            {
+                UpdateStatus(Localization.T("MongoDB.LoadingDocument"));
+                bool isView = false;
+                string latest = null;
+                await Task.Run(() =>
+                {
+                    isView = mongo.ViewExists(databaseName, collectionName);
+                    if (!isView) latest = mongo.FindDocumentJson(databaseName, collectionName, filterJson);
+                });
+                if (isView)
+                {
+                    UpdateStatus(Localization.T("MongoDB.ViewReadOnly"));
+                    return;
+                }
+                if (latest == null)
+                {
+                    UpdateStatus(Localization.T("MongoDB.DocumentDeleted"));
+                    return;
+                }
+                fullJson = latest;
+                UpdateStatus(string.Empty);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus(ex.Message);
+                return;
+            }
+
+            DialogResult confirm = MessageBox.Show(this,
+                Localization.Format("MongoDB.ConfirmDeleteDocument", databaseName, collectionName),
+                Localization.T("MongoDB.DeleteDocument"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (confirm != DialogResult.Yes) return;
+
+            try
+            {
+                await Task.Run(() => mongo.DeleteDocumentChecked(databaseName, collectionName, fullJson));
+                if (_isTableDataMode)
+                {
+                    ExecutePagedQuery();
+                }
+                else if (rowView != null)
+                {
+                    try
+                    {
+                        rowView.Row.Delete();
+                        rowView.Row.Table.AcceptChanges();
+                    }
+                    catch (Exception) { }
+                }
+                UpdateStatus(Localization.T("MongoDB.DocumentDeletedDone"));
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus(ex.Message);
+                MessageBox.Show(this, ex.Message, Localization.T("MongoDB.DeleteDocument"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -3124,6 +3252,8 @@ namespace mySQLPunk
                 resultsContextMenu = new ContextMenuStrip();
                 resultsContextMenu.Opening += ResultsContextMenu_Opening;
                 resultsOpenDocumentItem = AddResultsMenuItem(resultsContextMenu, "openDocument", (s, e) => OpenMongoDocumentViewer());
+                resultsInsertDocumentItem = AddResultsMenuItem(resultsContextMenu, "insertDocument", (s, e) => OpenMongoDocumentInsert());
+                resultsDeleteDocumentItem = AddResultsMenuItem(resultsContextMenu, "deleteDocument", (s, e) => DeleteSelectedMongoDocument());
                 resultsMongoSeparator = new ToolStripSeparator();
                 resultsContextMenu.Items.Add(resultsMongoSeparator);
                 resultsCopyCellsItem = AddResultsMenuItem(resultsContextMenu, "copyCells", (s, e) => CopyResultsSelectionToClipboard(false));
@@ -3211,6 +3341,16 @@ namespace mySQLPunk
                 resultsOpenDocumentItem.Text = Localization.T("MongoDB.OpenDocument");
                 resultsOpenDocumentItem.Visible = showMongoViewer;
             }
+            if (resultsInsertDocumentItem != null)
+            {
+                resultsInsertDocumentItem.Text = Localization.T("MongoDB.InsertDocument");
+                resultsInsertDocumentItem.Visible = showMongoViewer;
+            }
+            if (resultsDeleteDocumentItem != null)
+            {
+                resultsDeleteDocumentItem.Text = Localization.T("MongoDB.DeleteDocument");
+                resultsDeleteDocumentItem.Visible = showMongoViewer;
+            }
             if (resultsMongoSeparator != null) resultsMongoSeparator.Visible = showMongoViewer;
         }
 
@@ -3247,8 +3387,11 @@ namespace mySQLPunk
             SetResultsMenuItemEnabled(menu, "importBlobFile", canImportBlob && CanEditTableData());
             SetResultsMenuItemEnabled(menu, "copyGeometryWkt", canCopyGeometryWkt);
             SetResultsMenuItemEnabled(menu, "copyWktGeometrySql", canCopyWktGeometrySql);
-            SetResultsMenuItemEnabled(menu, "openDocument",
-                IsMongoDbProvider() && dgvResults != null && dgvResults.CurrentRow != null && !dgvResults.CurrentRow.IsNewRow);
+            bool mongoRowReady = IsMongoDbProvider() && dgvResults != null && dgvResults.CurrentRow != null && !dgvResults.CurrentRow.IsNewRow;
+            SetResultsMenuItemEnabled(menu, "openDocument", mongoRowReady);
+            SetResultsMenuItemEnabled(menu, "insertDocument",
+                IsMongoDbProvider() && !string.IsNullOrWhiteSpace(GetMongoCollectionName()));
+            SetResultsMenuItemEnabled(menu, "deleteDocument", mongoRowReady);
             SetResultsMenuItemEnabled(menu, "addRow", CanEditTableData() && dgvResults != null && dgvResults.DataSource is DataTable);
             SetResultsMenuItemEnabled(menu, "deleteRow", CanEditTableData() && GetSelectedResultRows().Count > 0);
             SetResultsMenuItemEnabled(menu, "saveRows", CanEditTableData() && dgvResults != null && dgvResults.DataSource is DataTable);

@@ -7596,6 +7596,21 @@ public static class SmokeTests
             AssertContains(viewer.DocumentJson, "Punky", "The viewer should show the formatted document.");
         }
 
+        MongoDocumentEditValidation insert = MongoDocumentEditService.ValidateInsert("{ \"name\": \"new doc\" }");
+        Assert(insert.Success, "Insert validation should accept documents without _id.");
+        AssertContains(insert.NormalizedJson, "new doc", "Insert validation should normalize the document.");
+        Assert(!MongoDocumentEditService.ValidateInsert("[ 1 ]").Success,
+            "Insert validation should reject top-level arrays.");
+        Assert(!MongoDocumentEditService.ValidateInsert("{ broken").Success,
+            "Insert validation should reject invalid JSON.");
+
+        using (IDatabase provider = ConnectionConfigurationService.CreateDatabase("mongodb"))
+        using (MongoDocumentViewerForm insertViewer = MongoDocumentViewerForm.CreateForInsert((my_mongodb)provider, "shop", "orders"))
+        {
+            Assert(insertViewer.IsInsertMode, "The insert factory should open the viewer in insert mode.");
+            Assert(!insertViewer.IsReadOnly, "Insert mode should allow editing.");
+        }
+
         string root2 = FindRepositoryRootForTest();
         string queryFormSource = File.ReadAllText(Path.Combine(root2, "mySQLPunk", "QueryForm.cs"), Encoding.UTF8);
         AssertContains(queryFormSource, "OpenMongoDocumentViewer", "The query grid should offer the document viewer entry.");
@@ -7604,6 +7619,11 @@ public static class SmokeTests
         string providerSource = File.ReadAllText(Path.Combine(root2, "mySQLPunk", "lib", "my_mongodb.cs"), Encoding.UTF8);
         AssertContains(providerSource, "ReplaceDocumentChecked", "The provider should expose the checked replace method.");
         AssertContains(providerSource, "MatchedCount == 0", "Safe writes should detect concurrency conflicts.");
+        AssertContains(providerSource, "InsertDocumentChecked", "The provider should expose the checked insert method.");
+        AssertContains(providerSource, "DeleteDocumentChecked", "The provider should expose the checked delete method.");
+        AssertContains(providerSource, "DeletedCount == 0", "Safe deletes should detect concurrency conflicts.");
+        AssertContains(queryFormSource, "OpenMongoDocumentInsert", "The query grid should offer the insert document entry.");
+        AssertContains(queryFormSource, "DeleteSelectedMongoDocument", "The query grid should offer the delete document entry.");
     }
 
     private static void TestConnectionBatchProperties()
