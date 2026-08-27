@@ -155,6 +155,9 @@
     <Compile Include="ConnectionUriImportForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="ConnectionBatchPropertiesForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="AboutDialog.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -233,6 +236,7 @@
     <Compile Include="lib\ConnectionDialogMessageService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
     <Compile Include="lib\ConnectionConfigurationService.cs" />
+    <Compile Include="lib\ConnectionBatchPropertiesService.cs" />
     <Compile Include="lib\ConnectionUriImportService.cs" />
     <Compile Include="lib\ConnectionSecurityService.cs" />
     <Compile Include="lib\ConnectionProxySettingsService.cs" />

@@ -1348,11 +1348,15 @@ namespace mySQLPunk
 
             // 建立連線節點並記錄至 _connectionTreeNodes
             _connectionTreeNodes = new TreeNode[myN.connections.Count];
-            for (int i = 0, max_i = myN.connections.Count; i < max_i; i++)
+            IEnumerable<int> visualConnectionIndexes = Enumerable.Range(0, myN.connections.Count)
+                .Where(connectionVisible)
+                .OrderByDescending(i => ConnectionBatchPropertiesService.IsStarred(myN.connections[i]));
+            foreach (int i in visualConnectionIndexes)
             {
-                if (!connectionVisible(i)) continue; // 搜尋時只顯示比對到的連線
-                TreeNode newNode = new TreeNode(myN.connections[i]["conn_name"].ToString());
+                TreeNode newNode = new TreeNode(ConnectionBatchPropertiesService.BuildDisplayName(myN.connections[i]));
                 newNode.Tag = i; // 以整數 Tag 儲存連線索引
+                newNode.ForeColor = ConnectionBatchPropertiesService.GetColor(
+                    GetConnectionValue(myN.connections[i], ConnectionBatchPropertiesService.ColorKey));
                 ApplyConnectionNodeIcon(
                     newNode,
                     myN.connections[i]["db_kind"].ToString(),
@@ -3196,6 +3200,7 @@ namespace mySQLPunk
             ToolStripMenuItem queryHistoryMenu = new ToolStripMenuItem(Localization.T("Menu.ToolQueryHistory"));
             ToolStripMenuItem backupsMenu = new ToolStripMenuItem(Localization.T("Menu.ToolBackups"));
             ToolStripMenuItem scheduledJobsMenu = new ToolStripMenuItem(Localization.T("Menu.ToolScheduledJobs"));
+            ToolStripMenuItem connectionBatchMenu = new ToolStripMenuItem(Localization.T("ConnectionBatch.Menu"));
             ToolStripMenuItem diagnosticsMenu = new ToolStripMenuItem(Localization.T("Menu.ToolConnectionDiagnostics"));
             ToolStripMenuItem capabilitiesMenu = new ToolStripMenuItem(Localization.T("Menu.ToolProviderCapabilities"));
             ToolStripMenuItem maintenanceMenu = new ToolStripMenuItem(Localization.T("Menu.ToolMaintenanceChecklist"));
@@ -3222,6 +3227,7 @@ namespace mySQLPunk
             queryHistoryMenu.Click += (s, e) => ShowQueryHistoryForSelectedDatabase();
             backupsMenu.Click += (s, e) => SelectDatabaseGroupNode("Backups");
             scheduledJobsMenu.Click += (s, e) => OpenScheduledJobs();
+            connectionBatchMenu.Click += (s, e) => OpenConnectionBatchProperties();
             diagnosticsMenu.Click += (s, e) => ShowSelectedOtherTool("Connection Diagnostics");
             capabilitiesMenu.Click += (s, e) => ShowSelectedOtherTool("Provider Capabilities");
             maintenanceMenu.Click += (s, e) => ShowSelectedOtherTool("Maintenance Checklist");
@@ -3233,6 +3239,7 @@ namespace mySQLPunk
                 queryHistoryMenu,
                 backupsMenu,
                 scheduledJobsMenu,
+                connectionBatchMenu,
                 new ToolStripSeparator(),
                 diagnosticsMenu,
                 capabilitiesMenu,
@@ -4130,7 +4137,25 @@ namespace mySQLPunk
             favoriteMenu.DropDownItems.Add(addCurrentItem);
             favoriteMenu.DropDownItems.Add(new ToolStripSeparator());
 
-            if (_favoriteNodePaths.Count == 0)
+            List<int> starredConnections = Enumerable.Range(0, myN.connections.Count)
+                .Where(index => ConnectionBatchPropertiesService.IsStarred(myN.connections[index]))
+                .ToList();
+            foreach (int index in starredConnections)
+            {
+                int capturedIndex = index;
+                Dictionary<string, object> connection = myN.connections[index];
+                string name = GetConnectionValue(connection, "conn_name");
+                string group = GetConnectionValue(connection, "conn_group");
+                ToolStripMenuItem item = new ToolStripMenuItem("★ " + name +
+                    (string.IsNullOrWhiteSpace(group) ? string.Empty : " (" + group + ")"));
+                item.Click += (s, e) => OpenStarredConnection(capturedIndex);
+                favoriteMenu.DropDownItems.Add(item);
+            }
+
+            if (starredConnections.Count > 0 && _favoriteNodePaths.Count > 0)
+                favoriteMenu.DropDownItems.Add(new ToolStripSeparator());
+
+            if (starredConnections.Count == 0 && _favoriteNodePaths.Count == 0)
             {
                 ToolStripMenuItem emptyItem = new ToolStripMenuItem(Localization.T("Menu.NoFavorites"));
                 emptyItem.Enabled = false;
@@ -4150,7 +4175,7 @@ namespace mySQLPunk
 
             favoriteMenu.DropDownItems.Add(new ToolStripSeparator());
             ToolStripMenuItem clearItem = new ToolStripMenuItem(Localization.T("Menu.ClearFavorites"));
-            clearItem.Enabled = _favoriteNodePaths.Count > 0;
+            clearItem.Enabled = _favoriteNodePaths.Count > 0 || starredConnections.Count > 0;
             clearItem.Click += (s, e) => ClearFavorites();
             favoriteMenu.DropDownItems.Add(clearItem);
         }
@@ -4163,7 +4188,21 @@ namespace mySQLPunk
                 return;
             }
 
-            string path = db_tree.SelectedNode.FullPath;
+            int connectionIndex = GetConnectionIndex(db_tree.SelectedNode);
+            if (connectionIndex >= 0 && connectionIndex < myN.connections.Count)
+            {
+                if (!ConnectionBatchPropertiesService.IsStarred(myN.connections[connectionIndex]))
+                {
+                    myN.connections[connectionIndex][ConnectionBatchPropertiesService.StarredKey] = "T";
+                    myN.setSettingINI();
+                    drawLists();
+                    ConfigureMainMenu();
+                }
+                UpdateMainStatus(BuildFavoriteStatusText("Added", GetConnectionValue(myN.connections[connectionIndex], "conn_name")));
+                return;
+            }
+
+            string path = GetStableFavoriteNodePath(db_tree.SelectedNode);
             if (!_favoriteNodePaths.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase)))
             {
                 _favoriteNodePaths.Add(path);
@@ -4177,9 +4216,32 @@ namespace mySQLPunk
         private void ClearFavorites()
         {
             _favoriteNodePaths.Clear();
+            bool clearedConnectionStar = false;
+            foreach (Dictionary<string, object> connection in myN.connections)
+            {
+                if (!ConnectionBatchPropertiesService.IsStarred(connection)) continue;
+                connection[ConnectionBatchPropertiesService.StarredKey] = "F";
+                clearedConnectionStar = true;
+            }
             SaveFavoriteNodePaths();
+            if (clearedConnectionStar)
+            {
+                myN.setSettingINI();
+                drawLists();
+            }
             ConfigureMainMenu();
             UpdateMainStatus(BuildFavoriteStatusText("Cleared", string.Empty));
+        }
+
+        private void OpenStarredConnection(int index)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            ClearTreeSearchForObjectUri();
+            TreeNode node = FindConnectionNode(index);
+            if (node == null) return;
+            db_tree.SelectedNode = node;
+            node.EnsureVisible();
+            UpdateMainStatus(BuildFavoriteStatusText("Opened", GetConnectionValue(myN.connections[index], "conn_name")));
         }
 
         private async void OpenFavoriteNodePath(string path)
@@ -4270,6 +4332,10 @@ namespace mySQLPunk
         {
             if (node == null || string.IsNullOrEmpty(part)) return false;
             if (string.Equals(node.Text, part, StringComparison.OrdinalIgnoreCase)) return true;
+            int connectionIndex = GetConnectionIndex(node);
+            if (connectionIndex >= 0 && connectionIndex < myN.connections.Count &&
+                string.Equals(GetConnectionValue(myN.connections[connectionIndex], "conn_name"), part, StringComparison.OrdinalIgnoreCase))
+                return true;
             string groupKey = GetTreeGroupKey(node);
             if (string.IsNullOrEmpty(groupKey)) return false;
             if (string.Equals(groupKey, part, StringComparison.OrdinalIgnoreCase)) return true;
@@ -4335,6 +4401,28 @@ namespace mySQLPunk
             }
         }
 
+        private void MigrateConnectionFavoritesFromPaths()
+        {
+            bool changed = false;
+            foreach (Dictionary<string, object> connection in myN.connections)
+            {
+                string name = GetConnectionValue(connection, "conn_name");
+                string group = GetConnectionValue(connection, "conn_group").Replace('/', '\\');
+                string legacyPath = string.IsNullOrWhiteSpace(group) ? name : group + "\\" + name;
+                string existing = _favoriteNodePaths.FirstOrDefault(path =>
+                    string.Equals(path, legacyPath, StringComparison.OrdinalIgnoreCase));
+                if (existing == null) continue;
+
+                connection[ConnectionBatchPropertiesService.StarredKey] = "T";
+                _favoriteNodePaths.Remove(existing);
+                changed = true;
+            }
+
+            if (!changed) return;
+            SaveFavoriteNodePaths();
+            myN.setSettingINI();
+        }
+
         private static string GetFavoritesFilePath()
         {
             return Path.Combine(Application.UserAppDataPath, "favorites.txt");
@@ -4346,6 +4434,22 @@ namespace mySQLPunk
             string[] parts = path.Split('\\');
             if (parts.Length <= 1) return parts[0];
             return parts[parts.Length - 1] + " (" + parts[0] + ")";
+        }
+
+        private string GetStableFavoriteNodePath(TreeNode node)
+        {
+            if (node == null) return string.Empty;
+            List<string> parts = new List<string>();
+            TreeNode current = node;
+            while (current != null)
+            {
+                int connectionIndex = GetConnectionIndex(current);
+                parts.Insert(0, connectionIndex >= 0 && connectionIndex < myN.connections.Count
+                    ? GetConnectionValue(myN.connections[connectionIndex], "conn_name")
+                    : current.Text);
+                current = current.Parent;
+            }
+            return string.Join(db_tree.PathSeparator, parts.ToArray());
         }
 
         private static string BuildFavoriteStatusText(string action, string path)
@@ -4429,6 +4533,46 @@ namespace mySQLPunk
                 if (!string.IsNullOrWhiteSpace(g)) result.Add(g);
             }
             return result.OrderBy(g => g).ToList();
+        }
+
+        private void OpenConnectionBatchProperties(int initiallySelectedIndex = -1)
+        {
+            if (myN.connections.Count == 0)
+            {
+                MessageBox.Show(
+                    Localization.T("ConnectionBatch.NoConnections"),
+                    Localization.T("ConnectionBatch.Title"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            using (ConnectionBatchPropertiesForm form = new ConnectionBatchPropertiesForm(
+                myN.connections,
+                GetAllGroupNames(),
+                initiallySelectedIndex))
+            {
+                if (form.ShowDialog(this) != DialogResult.OK || form.Change == null) return;
+
+                int changed = ConnectionBatchPropertiesService.Apply(
+                    myN.connections,
+                    form.SelectedConnectionIndexes,
+                    form.Change);
+                if (changed == 0)
+                {
+                    UpdateMainStatus(Localization.T("ConnectionBatch.NoActualChanges"));
+                    return;
+                }
+
+                string group = ConnectionBatchPropertiesService.NormalizeGroupPath(form.Change.Group);
+                if (form.Change.ApplyGroup && !string.IsNullOrWhiteSpace(group) && !myN.groups.Contains(group))
+                    myN.groups.Add(group);
+
+                myN.setSettingINI();
+                drawLists();
+                ConfigureMainMenu();
+                UpdateMainStatus(Localization.Format("ConnectionBatch.Applied", changed));
+            }
         }
 
         /// <summary>
@@ -4652,6 +4796,13 @@ namespace mySQLPunk
                 // 跳過連線群組節點，不納入路徑
                 if (IsConnectionGroupNode(current))
                 {
+                    current = current.Parent;
+                    continue;
+                }
+                int connectionIndex = GetConnectionIndex(current);
+                if (connectionIndex >= 0 && connectionIndex < myN.connections.Count)
+                {
+                    parts.Insert(0, GetConnectionValue(myN.connections[connectionIndex], "conn_name"));
                     current = current.Parent;
                     continue;
                 }
@@ -8273,7 +8424,9 @@ namespace mySQLPunk
             LoadFavoriteNodePaths();
             UI_init();
             myN.getSettingINI();
+            MigrateConnectionFavoritesFromPaths();
             drawLists();
+            ConfigureMainMenu();
             ArrangeMainLayout();
             if (StartupObjectUriParseResult != null)
             {
@@ -11919,6 +12072,10 @@ namespace mySQLPunk
             newGroupItem.Click += (s, ev) => ShowCreateGroupDialog();
             menu.Items.Add(newGroupItem);
 
+            ToolStripMenuItem batchPropertiesItem = new ToolStripMenuItem(Localization.T("ConnectionBatch.Menu"));
+            batchPropertiesItem.Click += (s, ev) => OpenConnectionBatchProperties();
+            menu.Items.Add(batchPropertiesItem);
+
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
             refreshItem.Click += (s, ev) => RefreshConnectionList();
             menu.Items.Add(refreshItem);
@@ -14041,6 +14198,10 @@ namespace mySQLPunk
             if (!conn.ContainsKey("initial_database")) conn["initial_database"] = "";
             if (!conn.ContainsKey("trusted_connection")) conn["trusted_connection"] = "F";
             if (!conn.ContainsKey("conn_group")) conn["conn_group"] = "";
+            conn[ConnectionBatchPropertiesService.StarredKey] =
+                ConnectionBatchPropertiesService.IsStarred(conn) ? "T" : "F";
+            conn[ConnectionBatchPropertiesService.ColorKey] = ConnectionBatchPropertiesService.NormalizeColorKey(
+                GetConnectionValue(conn, ConnectionBatchPropertiesService.ColorKey));
             if (!conn.ContainsKey("credential_target")) conn["credential_target"] = "";
             ConnectionSecuritySettingsService.Normalize(conn);
             conn["username"] = TryDecryptConnectionImportValue(GetConnectionValue(conn, "username"));
@@ -14098,6 +14259,14 @@ namespace mySQLPunk
 
         private static bool ConnectionImportEquivalent(Dictionary<string, object> left, Dictionary<string, object> right)
         {
+            if (ConnectionBatchPropertiesService.IsStarred(left) != ConnectionBatchPropertiesService.IsStarred(right))
+                return false;
+            if (!string.Equals(
+                ConnectionBatchPropertiesService.NormalizeColorKey(GetConnectionValue(left, ConnectionBatchPropertiesService.ColorKey)),
+                ConnectionBatchPropertiesService.NormalizeColorKey(GetConnectionValue(right, ConnectionBatchPropertiesService.ColorKey)),
+                StringComparison.Ordinal))
+                return false;
+
             string[] keys =
             {
                 "conn_name", "db_kind", "host", "port", "initial_database", "path",
@@ -14554,12 +14723,16 @@ namespace mySQLPunk
 
             menu.Items.Add(new ToolStripSeparator());
 
-            bool isFavorite = _favoriteNodePaths.Any(p => string.Equals(p, node.FullPath, StringComparison.OrdinalIgnoreCase));
+            bool isFavorite = ConnectionBatchPropertiesService.IsStarred(myN.connections[connIdx]);
             ToolStripMenuItem starItem = new ToolStripMenuItem(isFavorite ? Localization.T("Menu.UnstarConnection") : Localization.T("Menu.StarConnection"));
             starItem.Click += (s, ev) => ToggleConnectionFavorite(node);
             menu.Items.Add(starItem);
 
             AddConnectionColorMenu(menu, node);
+
+            ToolStripMenuItem batchPropertiesItem = new ToolStripMenuItem(Localization.T("ConnectionBatch.Menu"));
+            batchPropertiesItem.Click += (s, ev) => OpenConnectionBatchProperties(connIdx);
+            menu.Items.Add(batchPropertiesItem);
 
             // 群組管理：移至群組 / 移出群組
             ToolStripMenuItem moveToGroupItem = new ToolStripMenuItem(Localization.T("Menu.MoveToGroup"));
@@ -15167,41 +15340,43 @@ namespace mySQLPunk
         private void ToggleConnectionFavorite(TreeNode node)
         {
             if (node == null) return;
-            string path = node.FullPath;
-            string existing = _favoriteNodePaths.FirstOrDefault(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
-            if (existing == null)
-            {
-                _favoriteNodePaths.Add(path);
-            }
-            else
-            {
-                _favoriteNodePaths.Remove(existing);
-            }
-
-            SaveFavoriteNodePaths();
+            int index = GetConnectionIndex(node);
+            if (index < 0 || index >= myN.connections.Count) return;
+            Dictionary<string, object> connection = myN.connections[index];
+            bool wasStarred = ConnectionBatchPropertiesService.IsStarred(connection);
+            connection[ConnectionBatchPropertiesService.StarredKey] = wasStarred ? "F" : "T";
+            myN.setSettingINI();
+            drawLists();
             ConfigureMainMenu();
-            UpdateMainStatus(BuildFavoriteStatusText(existing == null ? "Added" : "Removed", path));
+            UpdateMainStatus(BuildFavoriteStatusText(
+                wasStarred ? "Removed" : "Added",
+                GetConnectionValue(connection, "conn_name")));
         }
 
         private void AddConnectionColorMenu(ContextMenuStrip menu, TreeNode node)
         {
             ToolStripMenuItem colorItem = new ToolStripMenuItem(Localization.T("Menu.Color"));
-            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorDefault"), Color.Empty);
-            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorRed"), Color.FromArgb(190, 44, 44));
-            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorOrange"), Color.FromArgb(204, 120, 50));
-            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorYellow"), Color.FromArgb(170, 140, 20));
-            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorGreen"), Color.FromArgb(50, 135, 90));
-            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorBlue"), Color.FromArgb(51, 103, 145));
-            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorPurple"), Color.FromArgb(125, 80, 160));
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorDefault"), "default");
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorRed"), "red");
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorOrange"), "orange");
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorYellow"), "yellow");
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorGreen"), "green");
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorBlue"), "blue");
+            AddConnectionColorMenuItem(colorItem, node, Localization.T("Menu.ColorPurple"), "purple");
             menu.Items.Add(colorItem);
         }
 
-        private void AddConnectionColorMenuItem(ToolStripMenuItem parent, TreeNode node, string text, Color color)
+        private void AddConnectionColorMenuItem(ToolStripMenuItem parent, TreeNode node, string text, string colorKey)
         {
             ToolStripMenuItem item = new ToolStripMenuItem(text);
             item.Click += (s, ev) =>
             {
-                node.ForeColor = color;
+                int index = GetConnectionIndex(node);
+                if (index < 0 || index >= myN.connections.Count) return;
+                myN.connections[index][ConnectionBatchPropertiesService.ColorKey] =
+                    ConnectionBatchPropertiesService.NormalizeColorKey(colorKey);
+                myN.setSettingINI();
+                drawLists();
                 UpdateMainStatus(Localization.Format("Connection.MarkedColor", text));
             };
             parent.DropDownItems.Add(item);
@@ -15252,7 +15427,10 @@ namespace mySQLPunk
                 "tns_name",
                 "service_name",
                 "sid",
-                "oracle_identifier_type"
+                "oracle_identifier_type",
+                "conn_group",
+                ConnectionBatchPropertiesService.StarredKey,
+                ConnectionBatchPropertiesService.ColorKey
             };
 
             foreach (string key in keys)
@@ -16541,12 +16719,15 @@ namespace mySQLPunk
 
         public void update_connection(int index, Dictionary<string, object> conn)
         {
-            // 保留舊連線的 conn_group，避免編輯時群組資訊消失
+            // 保留舊連線的顯示屬性，避免編輯連線內容時群組、星號或色彩消失
             if (index >= 0 && index < myN.connections.Count)
             {
                 var existing = myN.connections[index];
-                if (!conn.ContainsKey("conn_group") || conn["conn_group"] == null)
-                    conn["conn_group"] = existing.ContainsKey("conn_group") && existing["conn_group"] != null ? existing["conn_group"] : "";
+                foreach (string displayKey in new[] { "conn_group", ConnectionBatchPropertiesService.StarredKey, ConnectionBatchPropertiesService.ColorKey })
+                {
+                    if (!conn.ContainsKey(displayKey) || conn[displayKey] == null)
+                        conn[displayKey] = existing.ContainsKey(displayKey) && existing[displayKey] != null ? existing[displayKey] : "";
+                }
                 foreach (string targetKey in new[] { "credential_target", "security_credential_target" })
                 {
                     if (!conn.ContainsKey(targetKey) || conn[targetKey] == null)

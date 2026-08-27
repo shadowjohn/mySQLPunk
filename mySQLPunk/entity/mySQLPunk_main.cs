@@ -466,6 +466,8 @@ namespace mySQLPunk.entity
                     { "init_geospatial", GetVal(conn, "init_geospatial") },
                     { "trusted_connection", GetVal(conn, "trusted_connection") },
                     { "conn_group", GetVal(conn, "conn_group") },
+                    { ConnectionBatchPropertiesService.StarredKey, GetVal(conn, ConnectionBatchPropertiesService.StarredKey) },
+                    { ConnectionBatchPropertiesService.ColorKey, GetVal(conn, ConnectionBatchPropertiesService.ColorKey) },
                     // Oracle 連線靠這幾個欄位組 TNS 描述；漏存的話重開程式後連線全數失效
                     { "service_name", GetVal(conn, "service_name") },
                     { "sid", GetVal(conn, "sid") },
@@ -659,6 +661,10 @@ namespace mySQLPunk.entity
             {
                 conn["conn_group"] = "";
             }
+            conn[ConnectionBatchPropertiesService.StarredKey] =
+                ConnectionBatchPropertiesService.IsStarred(conn) ? "T" : "F";
+            conn[ConnectionBatchPropertiesService.ColorKey] = ConnectionBatchPropertiesService.NormalizeColorKey(
+                GetVal(conn, ConnectionBatchPropertiesService.ColorKey));
             if (!conn.ContainsKey("credential_target"))
             {
                 conn["credential_target"] = "";

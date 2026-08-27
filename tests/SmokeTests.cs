@@ -62,6 +62,7 @@ public static class SmokeTests
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Run("Connection URI import", TestConnectionUriImport, ref passed);
+        Run("Connection stars and batch properties", TestConnectionBatchProperties, ref passed);
         Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
         Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
         Run("Provider SQL 執行 fallback", TestDatabaseExecutionResultService, ref passed);
@@ -7471,6 +7472,108 @@ public static class SmokeTests
         string mainSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
         AssertContains(wizardSource, "ConnectionWizard.ImportUri", "The connection wizard should expose URI import.");
         AssertContains(mainSource, "CreateConnectionFormFromDraft = CreateNewConnectionForm", "URI imports should reuse the normal provider form flow.");
+    }
+
+    private static void TestConnectionBatchProperties()
+    {
+        List<Dictionary<string, object>> connections = new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object>
+            {
+                { "conn_name", "Primary" }, { "db_kind", "mysql" }, { "conn_group", "Legacy" }, { "pwd", "do-not-display" }
+            },
+            new Dictionary<string, object>
+            {
+                { "conn_name", "Reporting" }, { "db_kind", "postgresql" }, { "conn_group", "Reports" }
+            },
+            new Dictionary<string, object>
+            {
+                { "conn_name", "Local" }, { "db_kind", "sqlite" }, { "conn_group", "" },
+                { ConnectionBatchPropertiesService.StarredKey, "F" }, { ConnectionBatchPropertiesService.ColorKey, "red" }
+            }
+        };
+
+        ConnectionBatchPropertiesChange apply = new ConnectionBatchPropertiesChange
+        {
+            Starred = true,
+            ApplyGroup = true,
+            Group = " Operations // Production ",
+            ApplyColor = true,
+            ColorKey = "blue"
+        };
+        int changed = ConnectionBatchPropertiesService.Apply(connections, new[] { 0, 2, 2, -1, 99 }, apply);
+        AssertEquals("2", changed.ToString(), "Batch properties should update each valid selected connection once.");
+        Assert(ConnectionBatchPropertiesService.IsStarred(connections[0]), "Batch properties should add connection stars.");
+        AssertEquals("Operations/Production", Convert.ToString(connections[0]["conn_group"]), "Batch groups should normalize empty and padded path segments.");
+        AssertEquals("blue", Convert.ToString(connections[2][ConnectionBatchPropertiesService.ColorKey]), "Batch colors should use stable palette keys.");
+        AssertEquals("Reports", Convert.ToString(connections[1]["conn_group"]), "Unselected connections must stay unchanged.");
+        AssertEquals(
+            "0",
+            ConnectionBatchPropertiesService.Apply(
+                connections,
+                new[] { 1 },
+                new ConnectionBatchPropertiesChange { Starred = false }).ToString(),
+            "Missing legacy star fields should behave like an unstarred connection.");
+        AssertEquals("★ Primary", ConnectionBatchPropertiesService.BuildDisplayName(connections[0]), "Starred connections should have a visible tree marker.");
+        AssertSameColor(Color.FromArgb(51, 103, 145), ConnectionBatchPropertiesService.GetColor("BLUE"), "Connection colors should normalize case.");
+        AssertEquals("default", ConnectionBatchPropertiesService.NormalizeColorKey("unknown"), "Unknown connection colors should fall back safely.");
+
+        int unchanged = ConnectionBatchPropertiesService.Apply(
+            connections,
+            new[] { 0, 2 },
+            new ConnectionBatchPropertiesChange
+            {
+                Starred = true,
+                ApplyGroup = true,
+                Group = "Operations/Production",
+                ApplyColor = true,
+                ColorKey = "blue"
+            });
+        AssertEquals("0", unchanged.ToString(), "Applying identical batch properties should not report changes.");
+
+        int cleared = ConnectionBatchPropertiesService.Apply(
+            connections,
+            new[] { 0 },
+            new ConnectionBatchPropertiesChange
+            {
+                Starred = false,
+                ApplyGroup = true,
+                Group = "",
+                ApplyColor = true,
+                ColorKey = "default"
+            });
+        AssertEquals("1", cleared.ToString(), "Batch properties should clear display properties together.");
+        Assert(!ConnectionBatchPropertiesService.IsStarred(connections[0]), "Batch properties should remove stars.");
+        AssertEquals("", Convert.ToString(connections[0]["conn_group"]), "Batch properties should remove connections from groups.");
+
+        using (ConnectionBatchPropertiesForm form = new ConnectionBatchPropertiesForm(connections, new[] { "Reports" }, 1))
+        {
+            CheckedListBox list = GetPrivateField<CheckedListBox>(form, "connectionList");
+            Assert(list.CheckedIndices.Contains(1), "The connection context menu should preselect its connection in the batch form.");
+            AssertContains(list.Items[0].ToString(), "Primary", "Batch form rows should show connection names.");
+            AssertNotContains(list.Items[0].ToString(), "do-not-display", "Batch form rows must not display connection passwords.");
+        }
+
+        string root = FindRepositoryRootForTest();
+        string entitySource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "entity", "mySQLPunk_main.cs"), Encoding.UTF8);
+        string formSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
+        AssertContains(entitySource, "ConnectionBatchPropertiesService.StarredKey", "Connection stars should persist in connection profiles.");
+        AssertContains(entitySource, "ConnectionBatchPropertiesService.ColorKey", "Connection colors should persist in connection profiles.");
+        AssertContains(formSource, "ConnectionBatchPropertiesService.BuildDisplayName", "Connection trees should render persistent star markers.");
+        AssertContains(formSource, "OpenConnectionBatchProperties", "Connection menus should expose batch properties.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            AssertEquals("批次設定連線屬性", Localization.T("ConnectionBatch.Title"), "Batch properties should localize Traditional Chinese.");
+            Localization.SetLanguage(Localization.English, false);
+            AssertEquals("Batch Connection Properties", Localization.T("ConnectionBatch.Title"), "Batch properties should localize English.");
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
     }
 
     private static void TestConnectionSecuritySettings()

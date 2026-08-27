@@ -4,6 +4,12 @@
 
 ## 未完成功能與已知限制
 
+- **連線星號、色彩與批次屬性 ✅ 已完成**
+  - 顯示與排序：連線右鍵可加上／移除星號；加星連線會顯示 `★` 並在同一層置頂。連線色彩改用穩定的 palette key 保存，不再只改目前 TreeNode 而在重繪或重開後消失。
+  - 批次操作：工具選單、連線樹空白處或單一連線右鍵可開啟批次屬性視窗，勾選多筆連線後統一加／移星號、移動／移出群組，以及設定／清除色彩；每個屬性都能選擇維持不變，避免覆蓋未指定內容。
+  - 相容與安全：`conn_starred`、`conn_color` 隨目前連線設定檔匯出／匯入，舊設定缺少欄位時正規化為未加星號與預設色，不會產生假差異；舊版以 `favorites.txt` 保存的連線最愛會在啟動時遷移成星號。批次畫面只顯示名稱、provider 與群組，不顯示帳號密碼。
+  - 驗證：smoke test 覆蓋多選去重、群組路徑正規化、加星／移星、色彩套用／清除、無實際變更、未選連線保持不變、表單預選、密碼不顯示、設定保存欄位與繁中／英文語系。
+
 - **連線 URI 匯入 ✅ 五種既有 provider 已完成**
   - 操作：新增連線精靈可從 URI 匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle 與 SQLite；解析完成後會開啟原本的 provider 設定頁供使用者檢查、測試與保存，不會自動連線或直接寫入設定。
   - 格式：網路資料庫使用 `scheme://user:password@host:port/database`，支援百分比編碼、`name` 與 `sslmode`；SQL Server 另支援 Windows 驗證及憑證信任參數，Oracle 可用路徑指定 Service Name 或以 `sid`／`service_name` 參數指定識別值，SQLite 使用絕對檔案 URI。
