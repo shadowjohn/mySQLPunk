@@ -6,15 +6,15 @@
 
 > 免費開源的 Windows 多資料庫 GUI、SQL 編輯器與 DBA 工作台
 
-mySQLPunk 是一套 Windows 資料庫管理工具（WinForms），用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite 與 Oracle。可以瀏覽與編輯資料、撰寫 SQL、查看執行計畫、設計資料表、比較結構、匯出與備份，也能用 Windows 工作排程器定時執行唯讀查詢。
+mySQLPunk 是一套 Windows 資料庫管理工具（WinForms），用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle 與 MongoDB。關聯式資料庫可瀏覽與編輯資料、撰寫 SQL、查看執行計畫、設計資料表、比較結構、匯出與備份；MongoDB 目前提供唯讀連線、metadata、文件瀏覽與 JSON 查詢第一版。
 
-Open-source Windows database client, SQL editor, database GUI and DBA workbench for MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, SpatiaLite and Oracle.
+Open-source Windows database client, SQL editor, database GUI and DBA workbench for MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, SpatiaLite, Oracle and read-only MongoDB workflows.
 
 [下載最新版](https://github.com/shadowjohn/mySQLPunk/releases/latest) · [功能概況](#目前功能概況) · [連線安全](docs/CONNECTION_SECURITY.md) · [自動執行作業](docs/AUTOMATION.md) · [開發與貢獻](CONTRIBUTING.md) · [功能路線圖](docs/ROADMAP.md)
 
 ## 常見用途
 
-- 在同一套 Windows GUI 管理 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite 與 Oracle 連線。
+- 在同一套 Windows GUI 管理 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle 與唯讀 MongoDB 連線。
 - 依連線設定 SSL/TLS 憑證驗證，或透過有 SHA256 主機金鑰固定的 SSH Tunnel 連到內網資料庫。
 - 使用具自動完成、程式碼片段、查詢歷史、唯讀執行計畫與多格式匯出的 SQL 編輯器。
 - 編輯資料列、設計資料表、產生 DDL / DML、搬移 Table / View、建立 ER 圖並比較兩個資料庫結構。
@@ -91,7 +91,7 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 64 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、連線 URI 匯入、連線星號／色彩／批次屬性、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
+目前 65 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、連線 URI 匯入、MongoDB provider 基礎、連線星號／色彩／批次屬性、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
 
 MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
 
@@ -121,7 +121,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 | 功能 | 狀態 | 說明 |
 | --- | --- | --- |
-| 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，支援多設定檔、多層群組、拖曳、持久化星號／色彩，以及批次修改星號、群組與色彩；新增精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite URI，解析後先開設定頁確認；資料庫／SSH／憑證密碼改存 Windows Credential Manager，設定檔只保留 credential target；四種網路 provider 可設定 SSL/TLS 與 SSH Tunnel，詳見[連線安全說明](docs/CONNECTION_SECURITY.md)。 |
+| 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，支援多設定檔、多層群組、拖曳、持久化星號／色彩，以及批次修改星號、群組與色彩；新增精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 與 MongoDB URI，解析後先開設定頁確認；資料庫／SSH／憑證密碼改存 Windows Credential Manager，設定檔只保留 credential target；四種既有網路 RDBMS provider 可設定 SSL/TLS 與 SSH Tunnel，詳見[連線安全說明](docs/CONNECTION_SECURITY.md)。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | MySQL / MariaDB 使用者管理 | 可用 | 自動偵測 MySQL 5 / MySQL 8 / MariaDB；支援使用者 CRUD、密碼/Plugin/Lock/Expire/SSL/資源限制、Database/Table/View/Routine 權限編輯、SQL 預覽、`SHOW GRANTS` 與安全 DDL，並保留同名不同 Host 的獨立節點。 |
 | MySQL 匯出 / 匯入 | 可用 | 可選 Table/View/Routine/Trigger，支援完整 `SHOW CREATE` 結構、批次資料、DEFINER 移除、DELIMITER、UTF-8 without BOM 與串流檔案處理；匯入可選照 SQL 執行、刪除重建、只建不存在物件、略過既有物件與資料。 |
@@ -130,6 +130,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；欄位註解以 mySQLPunk sidecar metadata table 保存。 |
 | SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`dbo` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作。 |
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
+| MongoDB | 第一期可用 | 支援一般與 SRV 連線、URI 匯入、database／collection／view metadata、抽樣 schema 推斷、索引與統計資訊、唯讀分頁文件瀏覽，以及 JSON find 查詢；寫入、完整文件樹編輯、Aggregation Pipeline 設計與進階驗證仍在後續階段。 |
 | SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、多格式匯出、語法格式化、查詢歷史；MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 都可產生唯讀原生執行計畫，以樹狀、原始資料、文字與可用成本統計檢視。 |
 | SQL 編輯輔助 | 可用 | 自動完成會解析目前 statement 的資料表與 alias，提供欄位、`alias.column`、資料表、關鍵字與片段捷徑；metadata 依 provider/database 快取。`Ctrl+Shift+P` 可搜尋、插入、新增、刪除自訂 SQL 片段，並以 JSON 匯入／匯出。 |
 | 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；可為每張資料表保存多組具名篩選、排序與顯示欄位設定，並從底部工具列快速切換。若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
@@ -166,6 +167,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - Table Designer 的 Primary Key 跟 constraint 進階變更，還需要更多實機案例驗證。
 - 資料分析預設使用前 10,000 筆樣本；切換成全表會執行 COUNT／DISTINCT／GROUP BY，對大型資料表可能耗時。BLOB、JSON、geometry 等型別會略過資料庫不支援的極值或分佈統計。
 - ER 圖與結構差異報告目前都只讀取 metadata，不會回寫資料庫；ER 圖每張卡片先顯示前 16 個欄位，還沒有拖曳位置保存、關聯篩選或從模型回寫資料庫，結構差異也還不會產生同步 DDL。
+- MongoDB 第一期刻意維持唯讀：schema 由前 100 筆文件推斷，巢狀物件與陣列先以型別及 `_json` 完整內容呈現；尚未提供文件新增／修改／刪除、Aggregation Pipeline 視覺設計、SSH Tunnel 或 Atlas 專用驗證。實機 MongoDB／Atlas 相容矩陣仍待建立。
 
 各功能做完的細節紀錄在 [`docs/FEATURE_NOTES.md`](docs/FEATURE_NOTES.md)。
 
@@ -175,6 +177,8 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `mySQLPunk/Form1.cs`: 主視窗、左側連線樹、右鍵選單、metadata 瀏覽、資料庫級操作。
 - `mySQLPunk/AboutDialog.cs`: 自訂關於視窗，顯示版本、作者資訊與看板娘 Punky 崩琦眨眼動畫。
 - `mySQLPunk/QueryForm.cs`: SQL 編輯器、查詢結果、資料表資料瀏覽與儲存。
+- `mySQLPunk/lib/my_mongodb.cs`: MongoDB 唯讀 provider、metadata、schema 推斷、文件分頁與 JSON find 查詢。
+- `mySQLPunk/template/mongodb_add_edit.cs`: MongoDB 一般／SRV 連線設定與測試畫面。
 - `mySQLPunk/TableDesignerForm.cs`: 資料表設計器、欄位/索引/SQL 預覽。
 - `mySQLPunk/RunnerProgressOverlay.cs`: 補註解遮罩進度視窗。
 - `mySQLPunk/AnimatedRunnerProgressBar.cs`: 跑者動畫進度條控制項。

@@ -14,6 +14,12 @@ mySQLPunk uses NuGet packages listed in `mySQLPunk/packages.config`, including:
 - Microsoft.Bcl.HashCode 6.0.0 - MIT
 - Microsoft.Extensions.DependencyInjection.Abstractions 8.0.2 - MIT
 - Microsoft.Extensions.Logging.Abstractions 8.0.3 - MIT
+- MongoDB.Bson 3.11.0 - Apache-2.0
+- MongoDB.Driver 3.11.0 - Apache-2.0
+- DnsClient 1.6.1 - Apache-2.0
+- SharpCompress 0.48.1 - MIT
+- Snappier 1.3.1 - BSD-3-Clause
+- ZstdSharp.Port 0.7.3 - MIT
 - MySqlConnector 2.3.7 - MIT
 - Newtonsoft.Json 13.0.4 - MIT
 - Npgsql 8.0.3 - PostgreSQL License

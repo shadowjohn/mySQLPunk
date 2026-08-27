@@ -473,7 +473,13 @@ namespace mySQLPunk.entity
                     { "sid", GetVal(conn, "sid") },
                     { "tns_name", GetVal(conn, "tns_name") },
                     { "connection_type", GetVal(conn, "connection_type") },
-                    { "oracle_identifier_type", GetVal(conn, "oracle_identifier_type") }
+                    { "oracle_identifier_type", GetVal(conn, "oracle_identifier_type") },
+                    { "mongo_srv", GetVal(conn, "mongo_srv") },
+                    { "mongo_auth_source", GetVal(conn, "mongo_auth_source") },
+                    { "mongo_replica_set", GetVal(conn, "mongo_replica_set") },
+                    { "mongo_direct_connection", GetVal(conn, "mongo_direct_connection") },
+                    { "mongo_retry_writes", GetVal(conn, "mongo_retry_writes") },
+                    { "mongo_tls", GetVal(conn, "mongo_tls") }
                 };
                 foreach (string key in ConnectionSecuritySettingsService.PersistedKeys)
                 {
@@ -669,6 +675,12 @@ namespace mySQLPunk.entity
             {
                 conn["credential_target"] = "";
             }
+            if (!conn.ContainsKey("mongo_srv")) conn["mongo_srv"] = "F";
+            if (!conn.ContainsKey("mongo_auth_source")) conn["mongo_auth_source"] = "";
+            if (!conn.ContainsKey("mongo_replica_set")) conn["mongo_replica_set"] = "";
+            if (!conn.ContainsKey("mongo_direct_connection")) conn["mongo_direct_connection"] = "F";
+            if (!conn.ContainsKey("mongo_retry_writes")) conn["mongo_retry_writes"] = "T";
+            if (!conn.ContainsKey("mongo_tls")) conn["mongo_tls"] = "F";
             ConnectionSecuritySettingsService.Normalize(conn);
         }
 

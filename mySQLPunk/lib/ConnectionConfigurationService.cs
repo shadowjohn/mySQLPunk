@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Data.SqlClient;
 using MySqlConnector;
+using MongoDB.Driver;
+using MongoDB.Driver.Core.Configuration;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
 
@@ -23,6 +25,7 @@ namespace mySQLPunk.lib
                 case "mssql": return new my_mssql();
                 case "oracle": return new my_oracle();
                 case "sqlite": return new my_sqlite();
+                case "mongodb": return new my_mongodb();
                 default: throw new NotSupportedException(Localization.Format("Automation.UnsupportedProvider", provider ?? string.Empty));
             }
         }
@@ -38,6 +41,7 @@ namespace mySQLPunk.lib
                 case "mssql": return BuildSqlServerConnectionString(connection);
                 case "oracle": return BuildOracleConnectionString(connection);
                 case "sqlite": return BuildSqliteConnectionString(connection);
+                case "mongodb": return BuildMongoDbConnectionString(connection);
                 default: throw new NotSupportedException(Localization.Format("Automation.UnsupportedProvider", provider));
             }
         }
@@ -148,6 +152,34 @@ namespace mySQLPunk.lib
             }.ConnectionString;
         }
 
+        public static string BuildMongoDbConnectionString(Dictionary<string, object> connection)
+        {
+            if (connection == null) throw new ArgumentNullException("connection");
+            bool useSrv = IsTrue(connection, "mongo_srv");
+            string host = GetValue(connection, "host").Trim();
+            if (string.IsNullOrWhiteSpace(host)) throw new InvalidOperationException(Localization.T("Connection.EnterHost"));
+
+            MongoUrlBuilder builder = new MongoUrlBuilder
+            {
+                Scheme = useSrv ? ConnectionStringScheme.MongoDBPlusSrv : ConnectionStringScheme.MongoDB,
+                Server = useSrv
+                    ? new MongoServerAddress(host)
+                    : new MongoServerAddress(host, ParsePort(GetValue(connection, "port"), 27017)),
+                DatabaseName = NullIfWhiteSpace(GetValue(connection, "initial_database")),
+                Username = NullIfWhiteSpace(GetValue(connection, "username")),
+                Password = GetValue(connection, "pwd"),
+                AuthenticationSource = NullIfWhiteSpace(GetValue(connection, "mongo_auth_source")),
+                ReplicaSetName = NullIfWhiteSpace(GetValue(connection, "mongo_replica_set")),
+                DirectConnection = IsTrue(connection, "mongo_direct_connection"),
+                RetryWrites = !connection.ContainsKey("mongo_retry_writes") || IsTrue(connection, "mongo_retry_writes"),
+                UseTls = useSrv || IsTrue(connection, "mongo_tls"),
+                ConnectTimeout = TimeSpan.FromSeconds(8),
+                ServerSelectionTimeout = TimeSpan.FromSeconds(8),
+                ApplicationName = "mySQLPunk"
+            };
+            return builder.ToString();
+        }
+
         public static string BuildOracleConnectionString(Dictionary<string, object> connection)
         {
             OracleConnectionStringBuilder builder = new OracleConnectionStringBuilder
@@ -167,6 +199,7 @@ namespace mySQLPunk.lib
             if (value == "postgres" || value == "pgsql" || value == "npgsql") return "postgresql";
             if (value == "sqlserver" || value == "sql server") return "mssql";
             if (value == "mariadb") return "mysql";
+            if (value == "mongo") return "mongodb";
             return value;
         }
 
@@ -184,6 +217,25 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(port)) return host;
             if ((host ?? string.Empty).Contains(",") || (host ?? string.Empty).Contains("\\")) return host;
             return host + "," + port;
+        }
+
+        private static int ParsePort(string value, int fallback)
+        {
+            int port;
+            return int.TryParse((value ?? string.Empty).Trim(), out port) && port > 0 && port <= 65535 ? port : fallback;
+        }
+
+        private static bool IsTrue(Dictionary<string, object> connection, string key)
+        {
+            string value = GetValue(connection, key);
+            return string.Equals(value, "T", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                   value == "1";
+        }
+
+        private static string NullIfWhiteSpace(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
 
         private static string BuildOracleBasicDataSource(Dictionary<string, object> connection)

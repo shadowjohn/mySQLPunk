@@ -15,6 +15,7 @@ namespace mySQLPunk
         public const string SqlServer = "sqlserver";
         public const string Oracle = "oracle";
         public const string Sqlite = "sqlite";
+        public const string MongoDb = "mongodb";
 
         private readonly TextBox searchBox;
         private readonly Button gridButton;
@@ -56,7 +57,8 @@ namespace mySQLPunk
                 new ConnectionTypeOption(PostgreSql, "PostgreSQL", Color.FromArgb(51, 103, 145), Path.Combine(imagePath, "brand_postgresql.png")),
                 new ConnectionTypeOption(SqlServer, "SQL Server", Color.FromArgb(190, 44, 44), Path.Combine(imagePath, "brand_sqlserver.png")),
                 new ConnectionTypeOption(Oracle, "Oracle", Color.FromArgb(198, 24, 24), Path.Combine(imagePath, "brand_oracle.png")),
-                new ConnectionTypeOption(Sqlite, "SQLite", Color.FromArgb(0, 109, 165), Path.Combine(imagePath, "brand_sqlite.png"))
+                new ConnectionTypeOption(Sqlite, "SQLite", Color.FromArgb(0, 109, 165), Path.Combine(imagePath, "brand_sqlite.png")),
+                new ConnectionTypeOption(MongoDb, "MongoDB", Color.FromArgb(0, 168, 89), Path.Combine(imagePath, "brand_mongodb.png"))
             };
 
             recentConnectionTypes.AddRange(BuildRecentConnectionTypes(recentTypes));
@@ -501,6 +503,9 @@ namespace mySQLPunk
                     return Oracle;
                 case "sqlite":
                     return Sqlite;
+                case "mongodb":
+                case "mongo":
+                    return MongoDb;
                 default:
                     return string.Empty;
             }

@@ -136,8 +136,14 @@ namespace mySQLPunk.lib
                 ConnectionUriParseResult error = ApplyOracleOptions(query, database, connection);
                 if (error != null) return error;
             }
+            else if (provider == "mongodb")
+            {
+                connection["mongo_srv"] = string.Equals(uri.Scheme, "mongodb+srv", StringComparison.OrdinalIgnoreCase) ? "T" : "F";
+                ConnectionUriParseResult error = ApplyMongoDbOptions(query, connection);
+                if (error != null) return error;
+            }
 
-            if (provider != "sqlserver")
+            if (provider != "sqlserver" && provider != "mongodb")
             {
                 string sslMode;
                 if (query.TryGetValue("sslmode", out sslMode))
@@ -148,6 +154,54 @@ namespace mySQLPunk.lib
                 }
             }
 
+            return null;
+        }
+
+        private static ConnectionUriParseResult ApplyMongoDbOptions(
+            Dictionary<string, string> query,
+            Dictionary<string, object> connection)
+        {
+            string value;
+            connection["mongo_auth_source"] = query.TryGetValue("authsource", out value) ? value.Trim() : string.Empty;
+            connection["mongo_replica_set"] = query.TryGetValue("replicaset", out value) ? value.Trim() : string.Empty;
+
+            bool parsed;
+            if (query.TryGetValue("directconnection", out value))
+            {
+                if (!TryParseBoolean(value, out parsed)) return Fail(ConnectionUriError.InvalidQuery, "directConnection");
+                if (parsed && string.Equals(GetObjectValue(connection, "mongo_srv"), "T", StringComparison.OrdinalIgnoreCase))
+                    return Fail(ConnectionUriError.ConflictingParameter, "directConnection");
+                connection["mongo_direct_connection"] = parsed ? "T" : "F";
+            }
+            else connection["mongo_direct_connection"] = "F";
+
+            if (query.TryGetValue("retrywrites", out value))
+            {
+                if (!TryParseBoolean(value, out parsed)) return Fail(ConnectionUriError.InvalidQuery, "retryWrites");
+                connection["mongo_retry_writes"] = parsed ? "T" : "F";
+            }
+            else connection["mongo_retry_writes"] = "T";
+
+            string tlsValue;
+            string sslValue;
+            bool hasTls = query.TryGetValue("tls", out tlsValue);
+            bool hasSsl = query.TryGetValue("ssl", out sslValue);
+            bool tls = string.Equals(GetObjectValue(connection, "mongo_srv"), "T", StringComparison.OrdinalIgnoreCase);
+            if (hasTls)
+            {
+                if (!TryParseBoolean(tlsValue, out tls)) return Fail(ConnectionUriError.InvalidQuery, "tls");
+            }
+            if (hasSsl)
+            {
+                bool ssl;
+                if (!TryParseBoolean(sslValue, out ssl)) return Fail(ConnectionUriError.InvalidQuery, "ssl");
+                if (hasTls && ssl != tls) return Fail(ConnectionUriError.ConflictingParameter, "tls/ssl");
+                tls = ssl;
+            }
+            if (string.Equals(GetObjectValue(connection, "mongo_srv"), "T", StringComparison.OrdinalIgnoreCase) && !tls)
+                return Fail(ConnectionUriError.ConflictingParameter, "mongodb+srv/tls");
+            connection["mongo_tls"] = tls ? "T" : "F";
+            connection["tls_mode"] = tls ? "Required" : "Disabled";
             return null;
         }
 
@@ -290,6 +344,16 @@ namespace mySQLPunk.lib
                 values.Add("sid");
                 values.Add("service_name");
             }
+            if (provider == "mongodb")
+            {
+                values.Remove("sslmode");
+                values.Add("authsource");
+                values.Add("replicaset");
+                values.Add("directconnection");
+                values.Add("retrywrites");
+                values.Add("tls");
+                values.Add("ssl");
+            }
             return values;
         }
 
@@ -305,6 +369,8 @@ namespace mySQLPunk.lib
                 case "sqlserver": return "sqlserver";
                 case "oracle": return "oracle";
                 case "sqlite": return "sqlite";
+                case "mongodb":
+                case "mongodb+srv": return "mongodb";
                 default: return string.Empty;
             }
         }
@@ -317,6 +383,7 @@ namespace mySQLPunk.lib
                 case "postgresql": return "5432";
                 case "sqlserver": return "1433";
                 case "oracle": return "1521";
+                case "mongodb": return "27017";
                 default: return string.Empty;
             }
         }
@@ -384,6 +451,11 @@ namespace mySQLPunk.lib
             }
             result = false;
             return false;
+        }
+
+        private static string GetObjectValue(Dictionary<string, object> values, string key)
+        {
+            return values != null && values.ContainsKey(key) && values[key] != null ? values[key].ToString() : string.Empty;
         }
 
         private static bool HasValidPercentEncoding(string value)

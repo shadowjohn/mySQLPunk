@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **MongoDB 唯讀 provider 第一期**：新增一般／SRV 連線與 URI 匯入，可瀏覽 database、collection、view、索引與統計資訊，抽樣推斷 schema，並以唯讀網格或受限 JSON find 查詢檢視文件；寫入及專用文件編輯器仍留在後續階段。
 - **連線星號與批次屬性**：星號與色彩會隨目前連線設定檔保存，加星連線在樹中顯示 `★` 並置頂；工具選單與連線右鍵可勾選多筆連線，批次加／移星號、移動群組或套用色彩。
 - **連線 URI 匯入**：新增連線精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle 與 SQLite URI，支援 percent encoding、常用 TLS／Windows 驗證參數，解析後會先開啟原本的設定頁供確認；原始 URI 不會保存，密碼仍交由 Windows Credential Manager 儲存。
 - **SSL/TLS 與 SSH 安全連線**：MySQL／MariaDB、PostgreSQL、SQL Server 與 Oracle 連線可設定憑證驗證和 SSH Tunnel；Tunnel 會固定 SHA256 主機金鑰指紋，測試連線、主畫面與自動執行作業共用同一套安全設定。

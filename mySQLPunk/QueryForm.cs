@@ -265,6 +265,12 @@ namespace mySQLPunk
             this._snippetService = new SqlSnippetService(Path.Combine(Application.UserAppDataPath, "sql-snippets.json"));
             this._tableProfileStore = new TableDataProfileStore(Path.Combine(Application.UserAppDataPath, "table-data-profiles.json"));
 
+            if (IsMongoDbProvider())
+            {
+                tsBtnExplain.Visible = false;
+                if (string.IsNullOrWhiteSpace(initialSql)) initialSql = my_mongodb.BuildQueryTemplate(string.Empty);
+            }
+
             if (!string.IsNullOrWhiteSpace(this.currentDatabase) || !string.IsNullOrWhiteSpace(this.connectionHost))
             {
                 string title = Localization.T("Query.Query");
@@ -324,7 +330,7 @@ namespace mySQLPunk
                 _isNoPrimaryKeyReadOnlyMode = false;
                 ApplyTableDataEditability();
                 if (string.IsNullOrWhiteSpace(_defaultTableBaseSql)) _defaultTableBaseSql = _baseSql;
-                SetTableProfileControlsVisible(ApplicationOptionSettings.GetBool("RememberTableSettings"));
+                SetTableProfileControlsVisible(!IsMongoDbProvider() && ApplicationOptionSettings.GetBool("RememberTableSettings"));
                 ReloadTableProfileSelection();
 
             }
@@ -508,6 +514,11 @@ namespace mySQLPunk
         private string GetProviderName()
         {
             return _db == null ? string.Empty : (_db.ProviderName ?? string.Empty);
+        }
+
+        private bool IsMongoDbProvider()
+        {
+            return string.Equals(GetProviderName(), "mongodb", StringComparison.OrdinalIgnoreCase);
         }
 
         private sealed class TableProfileComboItem
@@ -1481,6 +1492,22 @@ namespace mySQLPunk
             string sql = txtSql.Text;
             if (string.IsNullOrEmpty(sql)) return;
 
+            if (IsMongoDbProvider())
+            {
+                try
+                {
+                    string formattedJson = Newtonsoft.Json.Linq.JToken.Parse(sql).ToString(Formatting.Indented);
+                    if (string.Equals(formattedJson, sql, StringComparison.Ordinal)) return;
+                    txtSql.SelectAll();
+                    txtSql.SelectedText = formattedJson;
+                }
+                catch (JsonException ex)
+                {
+                    UpdateStatus(Localization.Format("MongoDB.InvalidJsonQuery", ex.Message));
+                }
+                return;
+            }
+
             if (ContainsUnformattableSyntax(sql, IsMySqlProvider()))
             {
                 // 寧可不動也不能改壞，但要讓使用者知道為什麼沒反應
@@ -2346,7 +2373,7 @@ namespace mySQLPunk
 
                 // 判斷是否為 SELECT/SHOW/EXPLAIN/DESC (顯示結果集) 或 DML (顯示影響行數)
                 string firstWord = GetFirstWord(rawSql);
-                bool isQuery = IsSelectStatement(firstWord);
+                bool isQuery = IsMongoDbProvider() || IsSelectStatement(firstWord);
 
                 if (isQuery)
                 {
@@ -2364,7 +2391,9 @@ namespace mySQLPunk
                     }
 
                     DataTable dt = await Task.Run(
-                        () => _db.SelectSQL(sql),
+                        () => IsMongoDbProvider()
+                            ? ((my_mongodb)_db).SelectJsonQuery(_databaseName, rawSql)
+                            : _db.SelectSQL(sql),
                         _cts.Token);
                     if (!CanUpdateUi()) return;
                     if (dt == null) dt = new DataTable();
@@ -3009,10 +3038,11 @@ namespace mySQLPunk
             if (resultsDeleteRowItem != null) resultsDeleteRowItem.Text = Localization.T("Query.Delete");
             if (resultsSaveRowsItem != null) resultsSaveRowsItem.Text = Localization.T("Query.Save");
 
-            if (resultsEditSeparator != null) resultsEditSeparator.Visible = _isTableDataMode;
-            if (resultsAddRowItem != null) resultsAddRowItem.Visible = _isTableDataMode;
-            if (resultsDeleteRowItem != null) resultsDeleteRowItem.Visible = _isTableDataMode;
-            if (resultsSaveRowsItem != null) resultsSaveRowsItem.Visible = _isTableDataMode;
+            bool showEditActions = _isTableDataMode && !IsMongoDbProvider();
+            if (resultsEditSeparator != null) resultsEditSeparator.Visible = showEditActions;
+            if (resultsAddRowItem != null) resultsAddRowItem.Visible = showEditActions;
+            if (resultsDeleteRowItem != null) resultsDeleteRowItem.Visible = showEditActions;
+            if (resultsSaveRowsItem != null) resultsSaveRowsItem.Visible = showEditActions;
         }
 
         private static ToolStripMenuItem AddResultsMenuItem(ContextMenuStrip menu, string name, EventHandler onClick)
@@ -4166,7 +4196,7 @@ namespace mySQLPunk
 
         private bool CanEditTableData()
         {
-            return _isTableDataMode && _gridBoundToBaseTable && !_isNoPrimaryKeyReadOnlyMode;
+            return !IsMongoDbProvider() && _isTableDataMode && _gridBoundToBaseTable && !_isNoPrimaryKeyReadOnlyMode;
         }
 
         private bool ShouldOpenNoPrimaryKeyAsReadOnly(string tableName)

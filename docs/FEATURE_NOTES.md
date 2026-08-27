@@ -4,6 +4,12 @@
 
 ## 未完成功能與已知限制
 
+- **MongoDB provider 🟡 唯讀第一期完成**
+  - 連線：新增一般 `mongodb://` 與 Atlas 常用 `mongodb+srv://` 設定，可保存 auth source、replica set、direct connection、retry writes 與 TLS；URI 匯入會拒絕未知、重複或互相衝突的參數，原始 URI 不會保存，密碼仍交由 Windows Credential Manager。
+  - Metadata：左側樹可列出 database、collection 與 view；collection metadata 包含索引、統計資訊，並抽樣前 100 筆文件推斷頂層欄位、BSON 型別、NULL 與 `_id` key。
+  - 唯讀查詢：雙擊 collection 會用分頁網格顯示頂層欄位與 `_json` 完整文件；查詢分頁接受受限 JSON find 規格（collection、filter、projection、sort、skip、limit），上限 10,000 筆。provider 會明確拒絕新增、修改、刪除、DDL、跨庫複製與 Dump，避免 RDBMS UI 誤寫入文件庫。
+  - 後續方向：加入可展開 JSON 樹、schema 路徑統計、Aggregation Pipeline、經驗證的文件寫回，以及 MongoDB／Atlas 實機版本矩陣；目前 smoke test 只驗證 URI、連線字串、provider factory、唯讀邊界、查詢範本、表單與設定保存，不代表真實伺服器驗收。
+
 - **連線星號、色彩與批次屬性 ✅ 已完成**
   - 顯示與排序：連線右鍵可加上／移除星號；加星連線會顯示 `★` 並在同一層置頂。連線色彩改用穩定的 palette key 保存，不再只改目前 TreeNode 而在重繪或重開後消失。
   - 批次操作：工具選單、連線樹空白處或單一連線右鍵可開啟批次屬性視窗，勾選多筆連線後統一加／移星號、移動／移出群組，以及設定／清除色彩；每個屬性都能選擇維持不變，避免覆蓋未指定內容。

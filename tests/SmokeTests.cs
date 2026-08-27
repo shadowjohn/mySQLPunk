@@ -62,6 +62,7 @@ public static class SmokeTests
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
         Run("Connection and metadata services", TestConnectionAndMetadataServices, ref passed);
         Run("Connection URI import", TestConnectionUriImport, ref passed);
+        Run("MongoDB provider foundation", TestMongoDbProviderFoundation, ref passed);
         Run("Connection stars and batch properties", TestConnectionBatchProperties, ref passed);
         Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
         Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
@@ -7472,6 +7473,58 @@ public static class SmokeTests
         string mainSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
         AssertContains(wizardSource, "ConnectionWizard.ImportUri", "The connection wizard should expose URI import.");
         AssertContains(mainSource, "CreateConnectionFormFromDraft = CreateNewConnectionForm", "URI imports should reuse the normal provider form flow.");
+    }
+
+    private static void TestMongoDbProviderFoundation()
+    {
+        ConnectionUriParseResult standard = ConnectionUriImportService.Parse(
+            "mongodb://report:p%40ss@mongo.example.com:27018/analytics?authSource=admin&replicaSet=rs0&retryWrites=true&tls=true&name=Analytics");
+        Assert(standard.Success, "MongoDB connection URIs should import.");
+        AssertEquals("mongodb", Convert.ToString(standard.Connection["db_kind"]), "MongoDB URIs should select the MongoDB provider.");
+        AssertEquals("analytics", Convert.ToString(standard.Connection["initial_database"]), "MongoDB URI database paths should be preserved.");
+        AssertEquals("admin", Convert.ToString(standard.Connection["mongo_auth_source"]), "MongoDB authSource should be preserved.");
+        AssertEquals("rs0", Convert.ToString(standard.Connection["mongo_replica_set"]), "MongoDB replica sets should be preserved.");
+        AssertEquals("T", Convert.ToString(standard.Connection["mongo_tls"]), "MongoDB TLS options should be preserved.");
+        AssertEquals("p@ss", Convert.ToString(standard.Connection["pwd"]), "MongoDB URI passwords should be percent-decoded.");
+
+        ConnectionUriParseResult srv = ConnectionUriImportService.Parse(
+            "mongodb+srv://atlas-user:secret@cluster.example.mongodb.net/app?retryWrites=true&tls=true");
+        Assert(srv.Success, "MongoDB SRV URIs should import.");
+        AssertEquals("T", Convert.ToString(srv.Connection["mongo_srv"]), "MongoDB SRV imports should preserve the SRV scheme.");
+        Assert(!ConnectionUriImportService.Parse(
+            "mongodb+srv://cluster.example.mongodb.net/app?directConnection=true").Success,
+            "MongoDB SRV imports should reject directConnection conflicts.");
+
+        string connectionString = ConnectionConfigurationService.BuildMongoDbConnectionString(standard.Connection);
+        Assert(connectionString.StartsWith("mongodb://", StringComparison.OrdinalIgnoreCase), "MongoDB settings should build a standard connection string.");
+        AssertContains(connectionString, "replicaSet=rs0", "MongoDB connection strings should include replica set settings.");
+        AssertContains(connectionString, "authSource=admin", "MongoDB connection strings should include the authentication database.");
+
+        using (IDatabase provider = ConnectionConfigurationService.CreateDatabase("mongo"))
+        {
+            AssertEquals("mongodb", provider.ProviderName, "Mongo aliases should create the MongoDB provider.");
+            Assert(provider.State == ConnectionState.Closed, "A new MongoDB provider should start closed.");
+            Dictionary<string, string> writeResult = provider.ExecSQL("{ \"insert\": \"items\" }");
+            AssertEquals("ERROR", writeResult["status"], "MongoDB phase one should reject writes explicitly.");
+        }
+
+        string template = my_mongodb.BuildQueryTemplate("items");
+        AssertContains(template, "\"collection\"", "MongoDB query templates should name the collection field.");
+        AssertContains(template, "items", "MongoDB query templates should preserve the selected collection.");
+
+        using (mySQLPunk.template.mongodb_add_edit form = new mySQLPunk.template.mongodb_add_edit())
+        {
+            form.ApplyConnectionDraft(standard.Connection);
+            MethodInfo buildConnection = typeof(mySQLPunk.template.mongodb_add_edit).GetMethod("BuildConnection", BindingFlags.Instance | BindingFlags.NonPublic);
+            Dictionary<string, object> applied = (Dictionary<string, object>)buildConnection.Invoke(form, new object[0]);
+            AssertEquals("mongodb", Convert.ToString(applied["db_kind"]), "MongoDB drafts should reach the provider connection form.");
+            AssertEquals("rs0", Convert.ToString(applied["mongo_replica_set"]), "MongoDB forms should preserve replica set settings.");
+        }
+
+        string root = FindRepositoryRootForTest();
+        string entitySource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "entity", "mySQLPunk_main.cs"), Encoding.UTF8);
+        AssertContains(entitySource, "mongo_auth_source", "MongoDB authentication settings should persist in connection profiles.");
+        AssertContains(entitySource, "mongo_replica_set", "MongoDB replica set settings should persist in connection profiles.");
     }
 
     private static void TestConnectionBatchProperties()

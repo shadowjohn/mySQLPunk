@@ -268,6 +268,8 @@ namespace mySQLPunk
                 case "mssql":
                 case "sqlserver":
                     return isConnected ? 9 : 8;
+                case "mongodb":
+                    return isConnected ? 26 : 25;
                 default:
                     return isConnected ? 11 : 10;
             }
@@ -469,6 +471,61 @@ namespace mySQLPunk
                 newNode.ImageIndex = 10;
                 newNode.SelectedImageIndex = 10;
                 connectionNode.Nodes.Add(newNode);
+            }
+        }
+
+        private async Task OpenMongoDbConnectionAsync(int index, TreeView tree)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            if (!TryEnterConnectionOpenScope(index)) return;
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = tree?.Enabled ?? true;
+            try
+            {
+                if (tree != null) tree.Enabled = false;
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield();
+
+                Dictionary<string, object> conn = myN.connections[index];
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    try
+                    {
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(conn));
+                        myN.connections[index]["connString"] = openResult.ConnectionString;
+                        myN.connections[index]["pdo"] = openResult.Database;
+                        myN.connections[index]["isConnect"] = "T";
+                        ApplyConnectionNodeIcon(FindConnectionNode(index), "mongodb", true);
+                        TreeNode connectionNode = FindConnectionNode(index);
+                        PopulateConnectionDatabaseNodes(connectionNode, openResult.Databases);
+                        if (connectionNode != null) connectionNode.Expand();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
+                        if (canRetry && MessageBox.Show(
+                                BuildConnectionRetryPromptMessage("MongoDB", ex),
+                                "MongoDB",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning) == DialogResult.Yes)
+                            continue;
+
+                        myN.connections[index]["pdo"] = null;
+                        myN.connections[index]["isConnect"] = "F";
+                        HandleConnectionOpenFailure(index, tree, "MongoDB", lastError);
+                        return;
+                    }
+                }
+            }
+            finally
+            {
+                if (tree != null) tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
+                ExitConnectionOpenScope(index);
             }
         }
 
@@ -1160,6 +1217,7 @@ namespace mySQLPunk
         private static readonly Color TreeSqliteColor = Color.FromArgb(0x0F, 0x80, 0xCC);     // SQLite 亮藍
         private static readonly Color TreeSqlServerColor = Color.FromArgb(0x8E, 0x44, 0xAD);  // SQL Server 紫
         private static readonly Color TreeGenericDbColor = Color.FromArgb(0x64, 0x74, 0x8B);  // 資料庫節點 石板灰
+        private static readonly Color TreeMongoDbColor = Color.FromArgb(0x00, 0xA8, 0x59);     // MongoDB 綠
         private static readonly Color TreeGroupIconColor = Color.FromArgb(0x7A, 0x86, 0x99);  // 群組圖示
         private static readonly Color TreeFolderColor = Color.FromArgb(0xD9, 0xA0, 0x38);     // 資料夾 琥珀
 
@@ -1272,6 +1330,8 @@ namespace mySQLPunk
             myImageList.Images.Add(TreeGlyph(UiGlyph.More)); //22 other
             myImageList.Images.Add(TreeIconFromFile("tree_folder_closed.png", () => UiKit.RenderGlyph(UiGlyph.Folder, 16, TreeFolderColor))); //23 folder_closed
             myImageList.Images.Add(TreeIconFromFile("tree_folder_open.png", () => UiKit.RenderGlyph(UiGlyph.FolderOpen, 16, TreeFolderColor))); //24 folder_open
+            myImageList.Images.Add(TreeIconFromFile("tree_mongodb_off.png", () => TreeEngineChipIcon(TreeMongoDbColor, false, "M"))); //25
+            myImageList.Images.Add(TreeIconFromFile("tree_mongodb_on.png", () => TreeEngineChipIcon(TreeMongoDbColor, true, "M"))); //26
 
             // Assign the ImageList to the TreeView.
 
@@ -2414,6 +2474,7 @@ namespace mySQLPunk
                 case "oracle":
                 case "mssql":
                 case "sqlserver":
+                case "mongodb":
                     return !string.IsNullOrWhiteSpace(GetConnectionValue(conn, "username"));
                 default:
                     return false;
@@ -6576,6 +6637,12 @@ namespace mySQLPunk
                    string.Equals(target.Database.ProviderName, "sqlite", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsMongoDbTarget(TreeDatabaseTarget target)
+        {
+            return target != null &&
+                   string.Equals(target.ProviderName, "mongodb", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static string BuildSqliteColumnCommentExchangeFileName(string databaseName, string tableName)
         {
             string baseName = string.IsNullOrWhiteSpace(tableName)
@@ -8996,25 +9063,29 @@ namespace mySQLPunk
         private ContextMenuStrip BuildGridContextMenu(string groupName)
         {
             var cms = new ContextMenuStrip();
+            bool mongoDbTarget = IsMongoDbTarget(BuildTargetFromNode(db_tree.SelectedNode));
             if (groupName == "Views")
             {
                 var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenView"));
                 itemOpen.Click += (s, ev) => OpenSelectedViewInQuery();
                 cms.Items.Add(itemOpen);
 
-                var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
-                itemDesign.Click += (s, ev) => ShowSelectedViewDefinition();
-                cms.Items.Add(itemDesign);
+                if (!mongoDbTarget)
+                {
+                    var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
+                    itemDesign.Click += (s, ev) => ShowSelectedViewDefinition();
+                    cms.Items.Add(itemDesign);
 
-                var itemDump = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
-                itemDump.Click += (s, ev) => DumpSelectedViewSql();
-                cms.Items.Add(itemDump);
+                    var itemDump = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                    itemDump.Click += (s, ev) => DumpSelectedViewSql();
+                    cms.Items.Add(itemDump);
 
-                var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
-                itemDrop.Click += (s, ev) => DeleteSelectedView();
-                cms.Items.Add(itemDrop);
+                    var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
+                    itemDrop.Click += (s, ev) => DeleteSelectedView();
+                    cms.Items.Add(itemDrop);
 
-                AddCopyRenameObjectMenuItems(cms);
+                    AddCopyRenameObjectMenuItems(cms);
+                }
             }
             else if (groupName == "Tables")
             {
@@ -9022,25 +9093,28 @@ namespace mySQLPunk
                 itemOpen.Click += (s, ev) => OpenSelectedTableInQuery();
                 cms.Items.Add(itemOpen);
 
-                var itemSelectColumns = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
-                itemSelectColumns.Click += (s, ev) => OpenSelectedTableAllColumnsInQuery();
-                cms.Items.Add(itemSelectColumns);
+                if (!mongoDbTarget)
+                {
+                    var itemSelectColumns = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
+                    itemSelectColumns.Click += (s, ev) => OpenSelectedTableAllColumnsInQuery();
+                    cms.Items.Add(itemSelectColumns);
 
-                var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
-                itemDesign.Click += (s, ev) => DesignSelectedTable();
-                cms.Items.Add(itemDesign);
+                    var itemDesign = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
+                    itemDesign.Click += (s, ev) => DesignSelectedTable();
+                    cms.Items.Add(itemDesign);
 
-                var itemProfile = new ToolStripMenuItem(Localization.T("Tool.DataProfile"));
-                itemProfile.Click += (s, ev) => OpenSelectedTableDataProfile();
-                cms.Items.Add(itemProfile);
+                    var itemProfile = new ToolStripMenuItem(Localization.T("Tool.DataProfile"));
+                    itemProfile.Click += (s, ev) => OpenSelectedTableDataProfile();
+                    cms.Items.Add(itemProfile);
 
-                cms.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
+                    cms.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
 
-                var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
-                itemDrop.Click += (s, ev) => DeleteSelectedTable();
-                cms.Items.Add(itemDrop);
+                    var itemDrop = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
+                    itemDrop.Click += (s, ev) => DeleteSelectedTable();
+                    cms.Items.Add(itemDrop);
 
-                AddCopyRenameObjectMenuItems(cms);
+                    AddCopyRenameObjectMenuItems(cms);
+                }
             }
             else if (groupName == "Backups")
             {
@@ -12165,42 +12239,46 @@ namespace mySQLPunk
                 }
                 if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                 {
+                    TreeDatabaseTarget tableTarget = BuildTargetFromNode(node);
+                    bool mongoDbTarget = IsMongoDbTarget(tableTarget);
                     ToolStripMenuItem openTableItem = new ToolStripMenuItem(Localization.T("Tool.SelectStar"));
                     openTableItem.Click += (s, ev) => OpenSelectedTableInQuery();
                     menu.Items.Add(openTableItem);
 
-                    ToolStripMenuItem selectColumnsItem = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
-                    selectColumnsItem.Click += (s, ev) => OpenSelectedTableAllColumnsInQuery();
-                    menu.Items.Add(selectColumnsItem);
-
-                    ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
-                    designTableItem.Click += (s, ev) => DesignSelectedTable();
-                    menu.Items.Add(designTableItem);
-
-                    ToolStripMenuItem dataProfileItem = new ToolStripMenuItem(Localization.T("Tool.DataProfile"));
-                    dataProfileItem.Click += (s, ev) => OpenSelectedTableDataProfile();
-                    menu.Items.Add(dataProfileItem);
-
-                    menu.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
-
-                    TreeDatabaseTarget tableTarget = BuildTargetFromNode(node);
-                    if (IsSqliteTarget(tableTarget))
+                    if (!mongoDbTarget)
                     {
-                        string selectedTableName = pathParts[3];
-                        ToolStripMenuItem exportSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ExportSqliteColumnComments"));
-                        exportSqliteCommentsItem.Click += (s, ev) => ExportSqliteColumnCommentsWithDialog(selectedTableName);
-                        menu.Items.Add(exportSqliteCommentsItem);
+                        ToolStripMenuItem selectColumnsItem = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
+                        selectColumnsItem.Click += (s, ev) => OpenSelectedTableAllColumnsInQuery();
+                        menu.Items.Add(selectColumnsItem);
 
-                        ToolStripMenuItem importSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ImportSqliteColumnComments"));
-                        importSqliteCommentsItem.Click += (s, ev) => ImportSqliteColumnCommentsWithDialog(selectedTableName);
-                        menu.Items.Add(importSqliteCommentsItem);
+                        ToolStripMenuItem designTableItem = new ToolStripMenuItem(Localization.T("Tool.DesignTable"));
+                        designTableItem.Click += (s, ev) => DesignSelectedTable();
+                        menu.Items.Add(designTableItem);
+
+                        ToolStripMenuItem dataProfileItem = new ToolStripMenuItem(Localization.T("Tool.DataProfile"));
+                        dataProfileItem.Click += (s, ev) => OpenSelectedTableDataProfile();
+                        menu.Items.Add(dataProfileItem);
+
+                        menu.Items.Add(CreateAutoCommentModeMenuItem(mode => FillSelectedTableComments(mode)));
+
+                        if (IsSqliteTarget(tableTarget))
+                        {
+                            string selectedTableName = pathParts[3];
+                            ToolStripMenuItem exportSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ExportSqliteColumnComments"));
+                            exportSqliteCommentsItem.Click += (s, ev) => ExportSqliteColumnCommentsWithDialog(selectedTableName);
+                            menu.Items.Add(exportSqliteCommentsItem);
+
+                            ToolStripMenuItem importSqliteCommentsItem = new ToolStripMenuItem(Localization.T("Tool.ImportSqliteColumnComments"));
+                            importSqliteCommentsItem.Click += (s, ev) => ImportSqliteColumnCommentsWithDialog(selectedTableName);
+                            menu.Items.Add(importSqliteCommentsItem);
+                        }
+
+                        ToolStripMenuItem deleteTableItem = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
+                        deleteTableItem.Click += (s, ev) => DeleteSelectedTable();
+                        menu.Items.Add(deleteTableItem);
+
+                        AddCopyRenameObjectMenuItems(menu);
                     }
-
-                    ToolStripMenuItem deleteTableItem = new ToolStripMenuItem(Localization.T("Tool.DeleteTable"));
-                    deleteTableItem.Click += (s, ev) => DeleteSelectedTable();
-                    menu.Items.Add(deleteTableItem);
-
-                    AddCopyRenameObjectMenuItems(menu);
                 }
                 else if (pathParts.Length >= 4 && pathParts[2] == "Views")
                 {
@@ -12208,19 +12286,22 @@ namespace mySQLPunk
                     openViewItem.Click += (s, ev) => OpenSelectedViewInQuery();
                     menu.Items.Add(openViewItem);
 
-                    ToolStripMenuItem designViewItem = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
-                    designViewItem.Click += (s, ev) => ShowSelectedViewDefinition();
-                    menu.Items.Add(designViewItem);
+                    if (!IsMongoDbTarget(BuildTargetFromNode(node)))
+                    {
+                        ToolStripMenuItem designViewItem = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
+                        designViewItem.Click += (s, ev) => ShowSelectedViewDefinition();
+                        menu.Items.Add(designViewItem);
 
-                    ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
-                    dumpSqlItem.Click += (s, ev) => DumpSelectedViewSql();
-                    menu.Items.Add(dumpSqlItem);
+                        ToolStripMenuItem dumpSqlItem = new ToolStripMenuItem(Localization.T("Tool.DumpSql"));
+                        dumpSqlItem.Click += (s, ev) => DumpSelectedViewSql();
+                        menu.Items.Add(dumpSqlItem);
 
-                    ToolStripMenuItem deleteViewItem = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
-                    deleteViewItem.Click += (s, ev) => DeleteSelectedView();
-                    menu.Items.Add(deleteViewItem);
+                        ToolStripMenuItem deleteViewItem = new ToolStripMenuItem(Localization.T("Tool.DeleteView"));
+                        deleteViewItem.Click += (s, ev) => DeleteSelectedView();
+                        menu.Items.Add(deleteViewItem);
 
-                    AddCopyRenameObjectMenuItems(menu);
+                        AddCopyRenameObjectMenuItems(menu);
+                    }
                 }
                 else if (pathParts.Length >= 4 && pathParts[2] == "Functions")
                 {
@@ -12607,6 +12688,23 @@ namespace mySQLPunk
 
         private void AddTableGroupMenuItems(ContextMenuStrip menu, TreeNode node)
         {
+            if (IsMongoDbTarget(BuildTargetFromNode(node)))
+            {
+                ToolStripMenuItem mongoDictionaryItem = new ToolStripMenuItem(Localization.T("Tool.DataDictionary"));
+                mongoDictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();
+                menu.Items.Add(mongoDictionaryItem);
+
+                ToolStripMenuItem mongoFindItem = new ToolStripMenuItem(Localization.T("Tool.FindInDatabase"));
+                mongoFindItem.Click += (s, ev) => FindInSelectedDatabase();
+                menu.Items.Add(mongoFindItem);
+
+                menu.Items.Add(new ToolStripSeparator());
+                ToolStripMenuItem mongoRefreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
+                mongoRefreshItem.Click += (s, ev) => RefreshDatabaseGroupNode(node, "Tables");
+                menu.Items.Add(mongoRefreshItem);
+                return;
+            }
+
             ToolStripMenuItem newTableItem = new ToolStripMenuItem(Localization.T("Tool.NewTable"));
             newTableItem.Click += (s, ev) => CreateNewTable();
             menu.Items.Add(newTableItem);
@@ -13132,6 +13230,23 @@ namespace mySQLPunk
             menu.Items.Add(closeItem);
 
             menu.Items.Add(new ToolStripSeparator());
+
+            if (IsMongoDbTarget(BuildTargetFromNode(node)))
+            {
+                ToolStripMenuItem mongoQueryItem = new ToolStripMenuItem(Localization.T("Toolbar.NewQuery"));
+                mongoQueryItem.Click += (s, ev) => Query_btn_Click(s, ev);
+                menu.Items.Add(mongoQueryItem);
+
+                ToolStripMenuItem mongoDictionaryItem = new ToolStripMenuItem(Localization.T("Dict.MenuItem"));
+                mongoDictionaryItem.Click += (s, ev) => GenerateDataDictionaryForNode(node);
+                menu.Items.Add(mongoDictionaryItem);
+
+                menu.Items.Add(new ToolStripSeparator());
+                ToolStripMenuItem mongoRefreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
+                mongoRefreshItem.Click += (s, ev) => RefreshDatabaseObjectNodes(node);
+                menu.Items.Add(mongoRefreshItem);
+                return;
+            }
 
             ToolStripMenuItem editItem = new ToolStripMenuItem(Localization.T("Tool.EditDatabase"));
             editItem.Click += (s, ev) => EditSelectedDatabase();
@@ -14976,6 +15091,9 @@ namespace mySQLPunk
                 case "sqlserver":
                     await OpenSqlServerConnectionAsync(connIdx, db_tree);
                     break;
+                case "mongodb":
+                    await OpenMongoDbConnectionAsync(connIdx, db_tree);
+                    break;
                 default:
                     UpdateMainStatus(Localization.Format("Connection.UnsupportedEdit", kind));
                     return false;
@@ -15944,6 +16062,14 @@ namespace mySQLPunk
                         form.ShowDialog();
                     }
                     break;
+                case "mongodb":
+                    {
+                        mongodb_add_edit form = new mongodb_add_edit();
+                        form.F1 = this;
+                        form.editIndex = index;
+                        form.ShowDialog();
+                    }
+                    break;
                 default:
                     MessageBox.Show(BuildUnsupportedConnectionEditMessage(kind), Localization.T("Tool.EditConnection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     break;
@@ -16113,6 +16239,12 @@ namespace mySQLPunk
             }
             AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
+            if (string.Equals(GetConnectionValue(connInfo, "db_kind"), "mongodb", StringComparison.OrdinalIgnoreCase))
+            {
+                PopulateMongoDbUtilityGroups(databaseNode);
+                return;
+            }
+
             TreeNode newNode = CreateTreeGroupNode("Functions", 14);
 
             if (snapshot.Functions != null)
@@ -16207,6 +16339,12 @@ namespace mySQLPunk
             }
             AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
+            if (string.Equals(db == null ? string.Empty : db.ProviderName, "mongodb", StringComparison.OrdinalIgnoreCase))
+            {
+                PopulateMongoDbUtilityGroups(databaseNode);
+                return;
+            }
+
             TreeNode newNode = CreateTreeGroupNode("Functions", 14);
 
             foreach (DataRow functionRow in GetDatabaseFunctions(db, databaseName).Rows)
@@ -16276,6 +16414,22 @@ namespace mySQLPunk
 
             newNode = CreateTreeGroupNode("Backups", 18);
             AddTreeGroupNodeIfVisible(databaseNode, newNode);
+        }
+
+        private void PopulateMongoDbUtilityGroups(TreeNode databaseNode)
+        {
+            TreeNode queries = CreateTreeGroupNode("Queries", 16);
+            AddTreeGroupNodeIfVisible(databaseNode, queries);
+
+            TreeNode reports = CreateTreeGroupNode("Reports", 17);
+            foreach (string reportName in DatabaseReportNames)
+                reports.Nodes.Add(CreateTreeObjectNode(reportName, "Reports", 17));
+            AddTreeGroupNodeIfVisible(databaseNode, reports);
+
+            TreeNode other = CreateTreeGroupNode("Other", 22);
+            foreach (string toolName in DatabaseOtherToolNames)
+                other.Nodes.Add(CreateTreeObjectNode(toolName, "Other", 22));
+            AddTreeGroupNodeIfVisible(databaseNode, other);
         }
         private void db_tree_third_click(int father_index, int index, string databaseName, string name)
         {
@@ -16617,6 +16771,8 @@ namespace mySQLPunk
                     return oracleForm;
                 case ConnectionTypeSelectionForm.Sqlite:
                     return new sqlite_add_edit { F1 = this };
+                case ConnectionTypeSelectionForm.MongoDb:
+                    return new mongodb_add_edit { F1 = this };
                 default:
                     return null;
             }
