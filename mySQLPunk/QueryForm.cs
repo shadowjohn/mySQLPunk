@@ -274,6 +274,11 @@ namespace mySQLPunk
                 tsBtnExplain.Visible = false;
                 if (string.IsNullOrWhiteSpace(initialSql)) initialSql = my_mongodb.BuildQueryTemplate(string.Empty);
             }
+            else if (IsRedisProvider())
+            {
+                tsBtnExplain.Visible = false;
+                if (string.IsNullOrWhiteSpace(initialSql)) initialSql = my_redis.BuildQueryTemplate();
+            }
 
             if (!string.IsNullOrWhiteSpace(this.currentDatabase) || !string.IsNullOrWhiteSpace(this.connectionHost))
             {
@@ -334,7 +339,7 @@ namespace mySQLPunk
                 _isNoPrimaryKeyReadOnlyMode = false;
                 ApplyTableDataEditability();
                 if (string.IsNullOrWhiteSpace(_defaultTableBaseSql)) _defaultTableBaseSql = _baseSql;
-                SetTableProfileControlsVisible(!IsMongoDbProvider() && ApplicationOptionSettings.GetBool("RememberTableSettings"));
+                SetTableProfileControlsVisible(!IsMongoDbProvider() && !IsRedisProvider() && ApplicationOptionSettings.GetBool("RememberTableSettings"));
                 ReloadTableProfileSelection();
 
             }
@@ -523,6 +528,17 @@ namespace mySQLPunk
         private bool IsMongoDbProvider()
         {
             return string.Equals(GetProviderName(), "mongodb", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsRedisProvider()
+        {
+            return string.Equals(GetProviderName(), "redis", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>查詢分頁以 JSON 規格（而非 SQL）執行的 provider。</summary>
+        private bool IsJsonQueryProvider()
+        {
+            return IsMongoDbProvider() || IsRedisProvider();
         }
 
         private void DgvResults_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
@@ -1778,7 +1794,7 @@ namespace mySQLPunk
             string sql = txtSql.Text;
             if (string.IsNullOrEmpty(sql)) return;
 
-            if (IsMongoDbProvider())
+            if (IsJsonQueryProvider())
             {
                 try
                 {
@@ -2659,7 +2675,7 @@ namespace mySQLPunk
 
                 // 判斷是否為 SELECT/SHOW/EXPLAIN/DESC (顯示結果集) 或 DML (顯示影響行數)
                 string firstWord = GetFirstWord(rawSql);
-                bool isQuery = IsMongoDbProvider() || IsSelectStatement(firstWord);
+                bool isQuery = IsJsonQueryProvider() || IsSelectStatement(firstWord);
 
                 if (isQuery)
                 {
@@ -2679,7 +2695,9 @@ namespace mySQLPunk
                     DataTable dt = await Task.Run(
                         () => IsMongoDbProvider()
                             ? ((my_mongodb)_db).SelectJsonQuery(_databaseName, rawSql)
-                            : _db.SelectSQL(sql),
+                            : IsRedisProvider()
+                                ? ((my_redis)_db).SelectJsonQuery(_databaseName, rawSql)
+                                : _db.SelectSQL(sql),
                         _cts.Token);
                     if (!CanUpdateUi()) return;
                     if (dt == null) dt = new DataTable();
@@ -3329,7 +3347,7 @@ namespace mySQLPunk
             if (resultsDeleteRowItem != null) resultsDeleteRowItem.Text = Localization.T("Query.Delete");
             if (resultsSaveRowsItem != null) resultsSaveRowsItem.Text = Localization.T("Query.Save");
 
-            bool showEditActions = _isTableDataMode && !IsMongoDbProvider();
+            bool showEditActions = _isTableDataMode && !IsJsonQueryProvider();
             if (resultsEditSeparator != null) resultsEditSeparator.Visible = showEditActions;
             if (resultsAddRowItem != null) resultsAddRowItem.Visible = showEditActions;
             if (resultsDeleteRowItem != null) resultsDeleteRowItem.Visible = showEditActions;
@@ -4510,7 +4528,7 @@ namespace mySQLPunk
 
         private bool CanEditTableData()
         {
-            return !IsMongoDbProvider() && _isTableDataMode && _gridBoundToBaseTable && !_isNoPrimaryKeyReadOnlyMode;
+            return !IsJsonQueryProvider() && _isTableDataMode && _gridBoundToBaseTable && !_isNoPrimaryKeyReadOnlyMode;
         }
 
         private bool ShouldOpenNoPrimaryKeyAsReadOnly(string tableName)

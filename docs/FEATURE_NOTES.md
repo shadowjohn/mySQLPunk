@@ -4,6 +4,13 @@
 
 ## 未完成功能與已知限制
 
+- **Redis／Microsoft Garnet provider 🟡 第一期完成（standalone 直連唯讀）**
+  - 連線：新增 Redis / Garnet 選項與設定頁，支援 `redis://`／`rediss://` URI、ACL username＋password、舊版 password-only URI 匯入相容、TLS 與 logical database index；密碼仍由 Windows Credential Manager 保存，設定檔另保留驗證需求旗標以便憑證遺失時提示補輸入。
+  - 瀏覽：每個 logical db 提供 `keys` 虛擬表，透過 SCAN 顯示 key、type、TTL 與內容摘要；單次 traversal 會去除重複 key，type filter 會先於 offset／limit 套用，避免前一批不同型別吃掉結果額度。
+  - 唯讀查詢：接受 `SELECT * FROM keys` 相容入口，或只含 `pattern`、`key`、`type`、`limit` 的 JSON；可檢視 string、list、hash、set、zset 內容，拒絕未知欄位、混用 key／pattern 與所有寫入命令。
+  - 協定安全：內建 RESP2 TCP／TLS client，限制 bulk string／array 大小及巢狀深度；連線流程涵蓋 AUTH、PING、SELECT，metadata 以 CONFIG／DBSIZE／INFO 讀取並對不支援的 INFO 區段降級。
+  - 驗證與限制：67 項 smoke test 已含 loopback TCP/RESP 整合路徑，實際走過 ACL AUTH、logical db、SCAN 去重／型別篩選、單鍵內容與 INFO。尚未執行外部 Redis／Garnet 實機版本矩陣；目前不支援 Cluster、Sentinel、Pub/Sub、監控、二進位預覽或寫入，SCAN 分頁在資料同時變更時仍屬 best effort。
+
 - **MongoDB provider 🟡 第三期完成（文件新增／刪除與實機矩陣）**
   - 連線：新增一般 `mongodb://` 與 Atlas 常用 `mongodb+srv://` 設定，可保存 auth source、replica set、direct connection、retry writes 與 TLS；URI 匯入會拒絕未知、重複或互相衝突的參數，原始 URI 不會保存，密碼仍交由 Windows Credential Manager。
   - Metadata：左側樹可列出 database、collection 與 view；collection metadata 包含索引、統計資訊，並抽樣前 100 筆文件推斷頂層欄位、BSON 型別、NULL 與 `_id` key。
@@ -20,11 +27,11 @@
   - 相容與安全：`conn_starred`、`conn_color` 隨目前連線設定檔匯出／匯入，舊設定缺少欄位時正規化為未加星號與預設色，不會產生假差異；舊版以 `favorites.txt` 保存的連線最愛會在啟動時遷移成星號。批次畫面只顯示名稱、provider 與群組，不顯示帳號密碼。
   - 驗證：smoke test 覆蓋多選去重、群組路徑正規化、加星／移星、色彩套用／清除、無實際變更、未選連線保持不變、表單預選、密碼不顯示、設定保存欄位與繁中／英文語系。
 
-- **連線 URI 匯入 ✅ 五種既有 provider 已完成**
-  - 操作：新增連線精靈可從 URI 匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle 與 SQLite；解析完成後會開啟原本的 provider 設定頁供使用者檢查、測試與保存，不會自動連線或直接寫入設定。
+- **連線 URI 匯入 ✅ RDBMS、MongoDB 與 Redis 已完成**
+  - 操作：新增連線精靈可從 URI 匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、MongoDB 與 Redis；解析完成後會開啟原本的 provider 設定頁供使用者檢查、測試與保存，不會自動連線或直接寫入設定。
   - 格式：網路資料庫使用 `scheme://user:password@host:port/database`，支援百分比編碼、`name` 與 `sslmode`；SQL Server 另支援 Windows 驗證及憑證信任參數，Oracle 可用路徑指定 Service Name 或以 `sid`／`service_name` 參數指定識別值，SQLite 使用絕對檔案 URI。
   - 安全：原始 URI 不會保存；畫面預設遮蔽可能含密碼的內容，只有使用者勾選才顯示。解析會拒絕未知／重複／衝突參數、fragment、錯誤 percent escape、控制字元、額外資料庫路徑與不支援 scheme；密碼仍沿用正常儲存流程寫入 Windows Credential Manager。
-  - 驗證：smoke test 覆蓋 provider alias、預設與自訂連接埠、帳密／名稱 percent decode、TLS 對應、SQL Server Windows 驗證、Oracle SID、SQLite 路徑、表單預填及 fail-closed 錯誤案例。
+  - 驗證：smoke test 覆蓋 provider alias、預設與自訂連接埠、帳密／名稱 percent decode、TLS 對應、SQL Server Windows 驗證、Oracle SID、SQLite 路徑、MongoDB SRV、Redis logical db／password-only 相容、表單預填及 fail-closed 錯誤案例。
 
 - **SSL/TLS 與 SSH Tunnel ✅ 四種網路 provider 已完成**
   - 連線設定：MySQL／MariaDB、PostgreSQL、SQL Server 與 Oracle 的新增／編輯視窗都可開啟 SSL／TLS 與 SSH Tunnel；SQLite／SpatiaLite 為本機檔案，不套用網路傳輸設定。

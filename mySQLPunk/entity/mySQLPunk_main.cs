@@ -479,7 +479,9 @@ namespace mySQLPunk.entity
                     { "mongo_replica_set", GetVal(conn, "mongo_replica_set") },
                     { "mongo_direct_connection", GetVal(conn, "mongo_direct_connection") },
                     { "mongo_retry_writes", GetVal(conn, "mongo_retry_writes") },
-                    { "mongo_tls", GetVal(conn, "mongo_tls") }
+                    { "mongo_tls", GetVal(conn, "mongo_tls") },
+                    { "redis_tls", GetVal(conn, "redis_tls") },
+                    { "redis_auth_required", GetVal(conn, "redis_auth_required") }
                 };
                 foreach (string key in ConnectionSecuritySettingsService.PersistedKeys)
                 {
@@ -681,6 +683,8 @@ namespace mySQLPunk.entity
             if (!conn.ContainsKey("mongo_direct_connection")) conn["mongo_direct_connection"] = "F";
             if (!conn.ContainsKey("mongo_retry_writes")) conn["mongo_retry_writes"] = "T";
             if (!conn.ContainsKey("mongo_tls")) conn["mongo_tls"] = "F";
+            if (!conn.ContainsKey("redis_tls")) conn["redis_tls"] = "F";
+            if (!conn.ContainsKey("redis_auth_required")) conn["redis_auth_required"] = "F";
             ConnectionSecuritySettingsService.Normalize(conn);
         }
 

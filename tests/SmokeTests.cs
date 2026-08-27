@@ -9,8 +9,10 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using mySQLPunk;
 using mySQLPunk.lib;
@@ -64,6 +66,7 @@ public static class SmokeTests
         Run("Connection URI import", TestConnectionUriImport, ref passed);
         Run("MongoDB provider foundation", TestMongoDbProviderFoundation, ref passed);
         Run("MongoDB document tree and safe edit", TestMongoDbDocumentEditing, ref passed);
+        Run("Redis provider foundation", TestRedisProviderFoundation, ref passed);
         Run("Connection stars and batch properties", TestConnectionBatchProperties, ref passed);
         Run("Connection SSL and SSH settings", TestConnectionSecuritySettings, ref passed);
         Run("Connection editor localization", TestConnectionEditorLocalization, ref passed);
@@ -7626,6 +7629,160 @@ public static class SmokeTests
         AssertContains(queryFormSource, "DeleteSelectedMongoDocument", "The query grid should offer the delete document entry.");
     }
 
+    private static void TestRedisProviderFoundation()
+    {
+        byte[] command = RedisRespProtocol.BuildCommand(new[] { "SCAN", "0" });
+        AssertEquals("*2\r\n$4\r\nSCAN\r\n$1\r\n0\r\n", Encoding.UTF8.GetString(command),
+            "RESP commands should encode as bulk string arrays.");
+
+        Assert(Equals("OK", ReadResp("+OK\r\n")), "RESP simple strings should parse.");
+        Assert(Equals(42L, ReadResp(":42\r\n")), "RESP integers should parse.");
+        Assert(Equals("hello", ReadResp("$5\r\nhello\r\n")), "RESP bulk strings should parse.");
+        Assert(ReadResp("$-1\r\n") == null, "RESP null bulk strings should map to null.");
+        object[] array = (object[])ReadResp("*2\r\n$3\r\nfoo\r\n:7\r\n");
+        Assert(array.Length == 2 && Equals("foo", array[0]) && Equals(7L, array[1]),
+            "RESP arrays should parse mixed element types.");
+        object[] nested = (object[])ReadResp("*2\r\n$1\r\n0\r\n*1\r\n$4\r\nuser\r\n");
+        Assert(((object[])nested[1]).Length == 1, "RESP nested arrays should parse.");
+        bool threw = false;
+        try { ReadResp("-ERR boom\r\n"); }
+        catch (RedisServerException ex) { threw = ex.Message.Contains("boom"); }
+        Assert(threw, "RESP error replies should surface as server exceptions.");
+
+        AssertEquals("redis://:p%40ss@localhost:6380/2",
+            my_redis.BuildConnectionString("localhost", 6380, "", "p@ss", false, 2),
+            "Redis password-only connection strings should use an empty username and percent-encode passwords.");
+        AssertEquals("rediss://acl:secret@cache:6379/0",
+            my_redis.BuildConnectionString("cache", 6379, "acl", "secret", true, 0),
+            "TLS connections should use the rediss scheme.");
+        AssertEquals("redis://[::1]:6379/0",
+            my_redis.BuildConnectionString("::1", 6379, "", "", false, 0),
+            "Redis connection strings should bracket IPv6 hosts.");
+        Assert(my_redis.ParseDatabaseIndex("db3") == 3 && my_redis.ParseDatabaseIndex("7") == 7,
+            "Database node names should map to indexes.");
+        bool badIndex = false;
+        try { my_redis.ParseDatabaseIndex("dbX"); }
+        catch (ArgumentException) { badIndex = true; }
+        Assert(badIndex, "Invalid database names should be rejected.");
+
+        ConnectionUriParseResult imported = ConnectionUriImportService.Parse(
+            "redis://user:p%40ss@cache.example.com:6380/2?name=Cache");
+        Assert(imported.Success, "Redis URIs should import.");
+        AssertEquals("redis", Convert.ToString(imported.Connection["db_kind"]), "Redis URIs should select the Redis provider.");
+        AssertEquals("6380", Convert.ToString(imported.Connection["port"]), "Redis URI ports should be preserved.");
+        AssertEquals("2", Convert.ToString(imported.Connection["initial_database"]), "Redis URI db indexes should be preserved.");
+        AssertEquals("p@ss", Convert.ToString(imported.Connection["pwd"]), "Redis URI passwords should be percent-decoded.");
+        AssertEquals("F", Convert.ToString(imported.Connection["redis_tls"]), "redis:// should not enable TLS.");
+        AssertEquals("T", Convert.ToString(imported.Connection["redis_auth_required"]), "Authenticated Redis URI imports should retain the password prompt requirement.");
+
+        ConnectionUriParseResult legacyPassword = ConnectionUriImportService.Parse("redis://legacy-secret@cache.example.com/0");
+        Assert(legacyPassword.Success, "Legacy password-only Redis URIs should remain importable.");
+        AssertEquals("", Convert.ToString(legacyPassword.Connection["username"]), "Legacy Redis password-only URIs should not become ACL usernames.");
+        AssertEquals("legacy-secret", Convert.ToString(legacyPassword.Connection["pwd"]), "Legacy Redis password-only URIs should retain their password.");
+
+        ConnectionUriParseResult tls = ConnectionUriImportService.Parse("rediss://cache.example.com/");
+        Assert(tls.Success, "rediss URIs should import.");
+        AssertEquals("T", Convert.ToString(tls.Connection["redis_tls"]), "rediss:// should enable TLS.");
+        AssertEquals("6379", Convert.ToString(tls.Connection["port"]), "Redis default ports should apply.");
+        AssertEquals("0", Convert.ToString(tls.Connection["initial_database"]), "Missing db paths should default to 0.");
+        Assert(!ConnectionUriImportService.Parse("redis://cache.example.com/abc").Success,
+            "Non-numeric Redis db paths should be rejected.");
+        Assert(!ConnectionUriImportService.Parse("redis://cache.example.com/0?ssl=true").Success,
+            "Unknown Redis URI parameters should be rejected.");
+
+        string built = ConnectionConfigurationService.BuildRedisConnectionString(new Dictionary<string, object>
+        {
+            { "host", "cache" }, { "port", "6380" }, { "username", "" }, { "pwd", "s3cret" },
+            { "initial_database", "5" }, { "redis_tls", "F" }
+        });
+        AssertEquals("redis://:s3cret@cache:6380/5", built, "Connection settings should build standard password-only Redis URIs.");
+
+        using (IDatabase provider = ConnectionConfigurationService.CreateDatabase("garnet"))
+        {
+            AssertEquals("redis", provider.ProviderName, "Garnet aliases should create the Redis provider.");
+            Assert(provider.State == ConnectionState.Closed, "A new Redis provider should start closed.");
+            AssertEquals("ERROR", provider.ExecSQL("SET a 1")["status"], "Redis phase one should reject writes explicitly.");
+        }
+
+        my_redis.RedisReadQuery pattern = my_redis.RedisReadQuery.Parse("{ \"pattern\": \"user:*\", \"type\": \"hash\", \"limit\": 50 }");
+        Assert(pattern.Pattern == "user:*" && pattern.Type == "hash" && pattern.Limit == 50,
+            "Pattern queries should parse all supported fields.");
+        my_redis.RedisReadQuery keyQuery = my_redis.RedisReadQuery.Parse("{ \"key\": \"user:1\" }");
+        Assert(keyQuery.Key == "user:1", "Key detail queries should parse.");
+        Assert(my_redis.RedisReadQuery.Parse("SELECT * FROM keys").Pattern == "*",
+            "Generated SELECT queries should scan all keys.");
+        Assert(ThrowsFormat(() => my_redis.RedisReadQuery.Parse("SELECT FLUSHALL")),
+            "Redis SELECT compatibility input should accept only SELECT * FROM keys.");
+        Assert(ThrowsFormat(() => my_redis.RedisReadQuery.Parse("{ \"command\": \"FLUSHALL\" }")),
+            "Unknown Redis query fields should be rejected.");
+        Assert(ThrowsFormat(() => my_redis.RedisReadQuery.Parse("{ \"key\": \"a\", \"pattern\": \"*\" }")),
+            "key and pattern together should be rejected.");
+        Assert(ThrowsFormat(() => my_redis.RedisReadQuery.Parse("{ \"type\": \"json\" }")),
+            "Unsupported type filters should be rejected.");
+        Assert(ThrowsFormat(() => my_redis.RedisReadQuery.Parse("{ \"limit\": 0 }")),
+            "Zero limits should be rejected.");
+        AssertContains(my_redis.BuildQueryTemplate(), "pattern", "Redis query templates should show the pattern field.");
+
+        using (mySQLPunk.template.redis_add_edit form = new mySQLPunk.template.redis_add_edit())
+        {
+            form.ApplyConnectionDraft(imported.Connection);
+            MethodInfo buildConnection = typeof(mySQLPunk.template.redis_add_edit).GetMethod("BuildConnection", BindingFlags.Instance | BindingFlags.NonPublic);
+            Dictionary<string, object> applied = (Dictionary<string, object>)buildConnection.Invoke(form, new object[0]);
+            AssertEquals("redis", Convert.ToString(applied["db_kind"]), "Redis drafts should reach the provider connection form.");
+            AssertEquals("2", Convert.ToString(applied["initial_database"]), "Redis forms should preserve the db index.");
+            AssertEquals("F", Convert.ToString(applied["redis_tls"]), "Redis forms should preserve the TLS setting.");
+            AssertEquals("T", Convert.ToString(applied["redis_auth_required"]), "Redis forms should retain whether authentication is required.");
+        }
+
+        Assert(ThrowsFormat(() => ReadResp("$67108865\r\n")), "Oversized RESP bulk strings should be rejected before allocation.");
+        Assert(ThrowsFormat(() => ReadResp("*-2\r\n")), "Invalid negative RESP lengths should be rejected.");
+        StringBuilder nestedReply = new StringBuilder();
+        for (int i = 0; i < 66; i++) nestedReply.Append("*1\r\n");
+        nestedReply.Append("+OK\r\n");
+        Assert(ThrowsFormat(() => ReadResp(nestedReply.ToString())), "Excessively nested RESP arrays should be rejected.");
+
+        using (FakeRedisServer server = new FakeRedisServer())
+        using (my_redis liveProvider = new my_redis())
+        {
+            liveProvider.SetConn(my_redis.BuildConnectionString("127.0.0.1", server.Port, "acl", "secret", false, 2));
+            liveProvider.Open();
+            Assert(liveProvider.State == ConnectionState.Open, "The Redis provider should complete AUTH, PING, and SELECT over RESP.");
+            Assert(liveProvider.GetDatabases().Contains("db3"), "CONFIG GET databases should populate logical database nodes.");
+            Assert(liveProvider.SelectTablePage("db2", "keys", 0, 100).Rows.Count == 4,
+                "SCAN browsing should remove duplicate keys within a traversal.");
+            DataTable hashes = liveProvider.SelectJsonQuery("db2", "{ \"pattern\": \"*\", \"type\": \"hash\", \"limit\": 2 }");
+            Assert(hashes.Rows.Count == 2 && Convert.ToString(hashes.Rows[0]["type"]) == "hash" && Convert.ToString(hashes.Rows[1]["type"]) == "hash",
+                "Type filters should be applied before the requested Redis result limit.");
+            DataTable keyDetail = liveProvider.SelectJsonQuery("db2", "{ \"key\": \"string:key\" }");
+            AssertEquals("string value", Convert.ToString(keyDetail.Rows[0]["value"]), "Single-key queries should return string values.");
+            AssertEquals("7.2-test", liveProvider.GetDatabaseInfo("db2")["redis_version"], "INFO server metadata should be parsed.");
+            liveProvider.Close();
+            server.AssertHealthy();
+        }
+
+        string root = FindRepositoryRootForTest();
+        string entitySource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "entity", "mySQLPunk_main.cs"), Encoding.UTF8);
+        AssertContains(entitySource, "redis_tls", "Redis TLS settings should persist in connection profiles.");
+        AssertContains(entitySource, "redis_auth_required", "Redis password prompt metadata should persist in connection profiles.");
+        string form1Source = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
+        AssertContains(form1Source, "OpenRedisConnectionAsync", "The main window should open Redis connections.");
+        AssertContains(form1Source, "IsNonRelationalTarget", "Redis objects should share the read-only tree menus.");
+    }
+
+    private static object ReadResp(string payload)
+    {
+        using (MemoryStream stream = new MemoryStream(Encoding.UTF8.GetBytes(payload)))
+        {
+            return RedisRespProtocol.ReadReply(stream);
+        }
+    }
+
+    private static bool ThrowsFormat(Action action)
+    {
+        try { action(); return false; }
+        catch (FormatException) { return true; }
+    }
+
     private static void TestConnectionBatchProperties()
     {
         List<Dictionary<string, object>> connections = new List<Dictionary<string, object>>
@@ -9717,6 +9874,16 @@ public static class SmokeTests
         };
         Assert(!(bool)needsPasswordMethod.Invoke(null, new object[] { trustedSqlServer }), "Trusted SQL Server imports should not prompt for a password.");
 
+        Dictionary<string, object> passwordOnlyRedis = new Dictionary<string, object>
+        {
+            { "db_kind", "redis" },
+            { "username", "" },
+            { "pwd", "" },
+            { "redis_auth_required", "T" }
+        };
+        Assert((bool)needsPasswordMethod.Invoke(null, new object[] { passwordOnlyRedis }),
+            "Password-only Redis imports should still prompt when exported credentials are absent.");
+
         DataTable passwordTable = new DataTable();
         passwordTable.Columns.Add("_index", typeof(int));
         passwordTable.Columns.Add("Password");
@@ -10158,6 +10325,159 @@ public static class SmokeTests
         using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
         {
             return reader.ReadToEnd();
+        }
+    }
+
+    private sealed class FakeRedisServer : IDisposable
+    {
+        private readonly TcpListener listener;
+        private readonly Thread worker;
+        private TcpClient acceptedClient;
+        private Exception failure;
+        private volatile bool stopping;
+        private bool authenticated;
+        private int selectedDatabase = -1;
+
+        public FakeRedisServer()
+        {
+            listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            worker = new Thread(Run) { IsBackground = true, Name = "mySQLPunk fake Redis" };
+            worker.Start();
+        }
+
+        public int Port { get; private set; }
+
+        public void AssertHealthy()
+        {
+            worker.Join(1000);
+            if (failure != null) throw new Exception("Fake Redis server failed.", failure);
+            Assert(authenticated, "The Redis provider should send ACL AUTH before browsing.");
+            Assert(selectedDatabase == 2, "The Redis provider should select the requested logical database.");
+        }
+
+        private void Run()
+        {
+            try
+            {
+                acceptedClient = listener.AcceptTcpClient();
+                using (NetworkStream stream = acceptedClient.GetStream())
+                {
+                    while (!stopping)
+                    {
+                        object reply;
+                        try { reply = RedisRespProtocol.ReadReply(stream); }
+                        catch (EndOfStreamException) { break; }
+                        object[] raw = reply as object[];
+                        if (raw == null || raw.Length == 0) throw new FormatException("Expected a RESP command array.");
+                        string[] command = raw.Select(value => Convert.ToString(value)).ToArray();
+                        Dispatch(stream, command);
+                    }
+                }
+            }
+            catch (SocketException)
+            {
+                if (!stopping) failure = new Exception("The fake Redis listener stopped unexpectedly.");
+            }
+            catch (ObjectDisposedException)
+            {
+                if (!stopping) failure = new Exception("The fake Redis connection was disposed unexpectedly.");
+            }
+            catch (Exception ex)
+            {
+                if (!stopping) failure = ex;
+            }
+        }
+
+        private void Dispatch(NetworkStream stream, string[] args)
+        {
+            string command = args[0].ToUpperInvariant();
+            switch (command)
+            {
+                case "AUTH":
+                    authenticated = args.Length == 3 && args[1] == "acl" && args[2] == "secret";
+                    WriteSimple(stream, authenticated ? "OK" : "ERR invalid credentials", authenticated);
+                    return;
+                case "PING": WriteSimple(stream, "PONG", true); return;
+                case "SELECT":
+                    selectedDatabase = int.Parse(args[1]);
+                    WriteSimple(stream, "OK", true);
+                    return;
+                case "CONFIG": WriteArray(stream, new[] { "databases", "4" }); return;
+                case "DBSIZE": WriteInteger(stream, 4); return;
+                case "SCAN":
+                    if (args[1] == "0") WriteScan(stream, "1", new[] { "duplicate", "hash:key", "string:key" });
+                    else WriteScan(stream, "0", new[] { "duplicate", "other:hash" });
+                    return;
+                case "TYPE":
+                    WriteSimple(stream, args[1].EndsWith("hash", StringComparison.Ordinal) || args[1] == "hash:key" ? "hash" : "string", true);
+                    return;
+                case "PTTL": WriteInteger(stream, -1); return;
+                case "GETRANGE": WriteBulk(stream, ValueFor(args[1])); return;
+                case "STRLEN": WriteInteger(stream, Encoding.UTF8.GetByteCount(ValueFor(args[1]))); return;
+                case "GET": WriteBulk(stream, ValueFor(args[1])); return;
+                case "HLEN": WriteInteger(stream, 2); return;
+                case "INFO":
+                    WriteBulk(stream, args.Length > 1 && args[1] == "memory"
+                        ? "# Memory\r\nused_memory_human:1.25M\r\n"
+                        : "# Server\r\nredis_version:7.2-test\r\nredis_mode:standalone\r\ntcp_port:" + Port + "\r\n");
+                    return;
+                default:
+                    WriteSimple(stream, "ERR unsupported fake command " + command, false);
+                    return;
+            }
+        }
+
+        private static string ValueFor(string key)
+        {
+            if (key == "string:key") return "string value";
+            return key + " value";
+        }
+
+        private static void WriteSimple(NetworkStream stream, string value, bool success)
+        {
+            WriteAscii(stream, (success ? "+" : "-") + value + "\r\n");
+        }
+
+        private static void WriteInteger(NetworkStream stream, long value)
+        {
+            WriteAscii(stream, ":" + value + "\r\n");
+        }
+
+        private static void WriteBulk(NetworkStream stream, string value)
+        {
+            byte[] payload = Encoding.UTF8.GetBytes(value ?? string.Empty);
+            WriteAscii(stream, "$" + payload.Length + "\r\n");
+            stream.Write(payload, 0, payload.Length);
+            WriteAscii(stream, "\r\n");
+        }
+
+        private static void WriteArray(NetworkStream stream, string[] values)
+        {
+            WriteAscii(stream, "*" + values.Length + "\r\n");
+            foreach (string value in values) WriteBulk(stream, value);
+        }
+
+        private static void WriteScan(NetworkStream stream, string cursor, string[] keys)
+        {
+            WriteAscii(stream, "*2\r\n");
+            WriteBulk(stream, cursor);
+            WriteArray(stream, keys);
+        }
+
+        private static void WriteAscii(NetworkStream stream, string value)
+        {
+            byte[] payload = Encoding.ASCII.GetBytes(value);
+            stream.Write(payload, 0, payload.Length);
+        }
+
+        public void Dispose()
+        {
+            stopping = true;
+            try { if (acceptedClient != null) acceptedClient.Close(); } catch { }
+            try { listener.Stop(); } catch { }
+            worker.Join(1000);
         }
     }
 

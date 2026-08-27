@@ -108,8 +108,16 @@ namespace mySQLPunk.lib
             if (!string.IsNullOrEmpty(uri.UserInfo))
             {
                 int separator = uri.UserInfo.IndexOf(':');
-                username = Decode(separator < 0 ? uri.UserInfo : uri.UserInfo.Substring(0, separator));
-                password = separator < 0 ? string.Empty : Decode(uri.UserInfo.Substring(separator + 1));
+                if (provider == "redis" && separator < 0)
+                {
+                    // 舊版 mySQLPunk 曾輸出 redis://password@host；保留匯入相容性。
+                    password = Decode(uri.UserInfo);
+                }
+                else
+                {
+                    username = Decode(separator < 0 ? uri.UserInfo : uri.UserInfo.Substring(0, separator));
+                    password = separator < 0 ? string.Empty : Decode(uri.UserInfo.Substring(separator + 1));
+                }
             }
 
             string database = path;
@@ -140,6 +148,11 @@ namespace mySQLPunk.lib
             {
                 connection["mongo_srv"] = string.Equals(uri.Scheme, "mongodb+srv", StringComparison.OrdinalIgnoreCase) ? "T" : "F";
                 ConnectionUriParseResult error = ApplyMongoDbOptions(query, connection);
+                if (error != null) return error;
+            }
+            else if (provider == "redis")
+            {
+                ConnectionUriParseResult error = ApplyRedisOptions(uri, database, connection);
                 if (error != null) return error;
             }
 
@@ -202,6 +215,28 @@ namespace mySQLPunk.lib
                 return Fail(ConnectionUriError.ConflictingParameter, "mongodb+srv/tls");
             connection["mongo_tls"] = tls ? "T" : "F";
             connection["tls_mode"] = tls ? "Required" : "Disabled";
+            return null;
+        }
+
+        private static ConnectionUriParseResult ApplyRedisOptions(
+            Uri uri,
+            string database,
+            Dictionary<string, object> connection)
+        {
+            // rediss:// 代表 TLS；db 索引走 URI path（redis://host:6379/2），必須是非負整數。
+            bool tls = string.Equals(uri.Scheme, "rediss", StringComparison.OrdinalIgnoreCase);
+            connection["redis_tls"] = tls ? "T" : "F";
+            connection["redis_auth_required"] = string.IsNullOrEmpty(uri.UserInfo) ? "F" : "T";
+            connection["tls_mode"] = tls ? "Required" : "Disabled";
+            string index = (database ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(index))
+            {
+                connection["initial_database"] = "0";
+                return null;
+            }
+            int parsed;
+            if (!int.TryParse(index, out parsed) || parsed < 0) return Fail(ConnectionUriError.InvalidFormat);
+            connection["initial_database"] = parsed.ToString();
             return null;
         }
 
@@ -354,6 +389,11 @@ namespace mySQLPunk.lib
                 values.Add("tls");
                 values.Add("ssl");
             }
+            if (provider == "redis")
+            {
+                // TLS 由 rediss:// scheme 決定，不接受任何額外連線參數。
+                values.Remove("sslmode");
+            }
             return values;
         }
 
@@ -371,6 +411,8 @@ namespace mySQLPunk.lib
                 case "sqlite": return "sqlite";
                 case "mongodb":
                 case "mongodb+srv": return "mongodb";
+                case "redis":
+                case "rediss": return "redis";
                 default: return string.Empty;
             }
         }
@@ -384,6 +426,7 @@ namespace mySQLPunk.lib
                 case "sqlserver": return "1433";
                 case "oracle": return "1521";
                 case "mongodb": return "27017";
+                case "redis": return "6379";
                 default: return string.Empty;
             }
         }

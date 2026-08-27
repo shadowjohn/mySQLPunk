@@ -26,6 +26,7 @@ namespace mySQLPunk.lib
                 case "oracle": return new my_oracle();
                 case "sqlite": return new my_sqlite();
                 case "mongodb": return new my_mongodb();
+                case "redis": return new my_redis();
                 default: throw new NotSupportedException(Localization.Format("Automation.UnsupportedProvider", provider ?? string.Empty));
             }
         }
@@ -42,6 +43,7 @@ namespace mySQLPunk.lib
                 case "oracle": return BuildOracleConnectionString(connection);
                 case "sqlite": return BuildSqliteConnectionString(connection);
                 case "mongodb": return BuildMongoDbConnectionString(connection);
+                case "redis": return BuildRedisConnectionString(connection);
                 default: throw new NotSupportedException(Localization.Format("Automation.UnsupportedProvider", provider));
             }
         }
@@ -180,6 +182,25 @@ namespace mySQLPunk.lib
             return builder.ToString();
         }
 
+        public static string BuildRedisConnectionString(Dictionary<string, object> connection)
+        {
+            if (connection == null) throw new ArgumentNullException("connection");
+            string host = GetValue(connection, "host").Trim();
+            if (string.IsNullOrWhiteSpace(host)) throw new InvalidOperationException(Localization.T("Connection.EnterHost"));
+            int databaseIndex;
+            string indexText = GetValue(connection, "initial_database").Trim();
+            if (string.IsNullOrWhiteSpace(indexText)) databaseIndex = 0;
+            else if (!int.TryParse(indexText, out databaseIndex) || databaseIndex < 0)
+                throw new InvalidOperationException(Localization.T("Redis.InvalidDatabaseIndex"));
+            return my_redis.BuildConnectionString(
+                host,
+                ParsePort(GetValue(connection, "port"), 6379),
+                GetValue(connection, "username").Trim(),
+                GetValue(connection, "pwd"),
+                IsTrue(connection, "redis_tls"),
+                databaseIndex);
+        }
+
         public static string BuildOracleConnectionString(Dictionary<string, object> connection)
         {
             OracleConnectionStringBuilder builder = new OracleConnectionStringBuilder
@@ -200,6 +221,7 @@ namespace mySQLPunk.lib
             if (value == "sqlserver" || value == "sql server") return "mssql";
             if (value == "mariadb") return "mysql";
             if (value == "mongo") return "mongodb";
+            if (value == "garnet") return "redis";
             return value;
         }
 

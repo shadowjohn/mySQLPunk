@@ -270,6 +270,9 @@ namespace mySQLPunk
                     return isConnected ? 9 : 8;
                 case "mongodb":
                     return isConnected ? 26 : 25;
+                case "redis":
+                case "garnet":
+                    return isConnected ? 28 : 27;
                 default:
                     return isConnected ? 11 : 10;
             }
@@ -471,6 +474,61 @@ namespace mySQLPunk
                 newNode.ImageIndex = 10;
                 newNode.SelectedImageIndex = 10;
                 connectionNode.Nodes.Add(newNode);
+            }
+        }
+
+        private async Task OpenRedisConnectionAsync(int index, TreeView tree)
+        {
+            if (index < 0 || index >= myN.connections.Count) return;
+            if (!TryEnterConnectionOpenScope(index)) return;
+
+            Cursor previousCursor = Cursor;
+            bool previousEnabled = tree?.Enabled ?? true;
+            try
+            {
+                if (tree != null) tree.Enabled = false;
+                Cursor = Cursors.WaitCursor;
+                await Task.Yield();
+
+                Dictionary<string, object> conn = myN.connections[index];
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    try
+                    {
+                        ConnectionOpenResult openResult = await Task.Run(() => ConnectionOpenService.Open(conn));
+                        myN.connections[index]["connString"] = openResult.ConnectionString;
+                        myN.connections[index]["pdo"] = openResult.Database;
+                        myN.connections[index]["isConnect"] = "T";
+                        ApplyConnectionNodeIcon(FindConnectionNode(index), "redis", true);
+                        TreeNode connectionNode = FindConnectionNode(index);
+                        PopulateConnectionDatabaseNodes(connectionNode, openResult.Databases);
+                        if (connectionNode != null) connectionNode.Expand();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        bool canRetry = attempt == 1 && ShouldOfferRetryForConnectionOpen(ex);
+                        if (canRetry && MessageBox.Show(
+                                BuildConnectionRetryPromptMessage("Redis", ex),
+                                "Redis",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning) == DialogResult.Yes)
+                            continue;
+
+                        myN.connections[index]["pdo"] = null;
+                        myN.connections[index]["isConnect"] = "F";
+                        HandleConnectionOpenFailure(index, tree, "Redis", lastError);
+                        return;
+                    }
+                }
+            }
+            finally
+            {
+                if (tree != null) tree.Enabled = previousEnabled;
+                Cursor = previousCursor;
+                ExitConnectionOpenScope(index);
             }
         }
 
@@ -1218,6 +1276,7 @@ namespace mySQLPunk
         private static readonly Color TreeSqlServerColor = Color.FromArgb(0x8E, 0x44, 0xAD);  // SQL Server 紫
         private static readonly Color TreeGenericDbColor = Color.FromArgb(0x64, 0x74, 0x8B);  // 資料庫節點 石板灰
         private static readonly Color TreeMongoDbColor = Color.FromArgb(0x00, 0xA8, 0x59);     // MongoDB 綠
+        private static readonly Color TreeRedisColor = Color.FromArgb(0xDC, 0x38, 0x2D);       // Redis 紅
         private static readonly Color TreeGroupIconColor = Color.FromArgb(0x7A, 0x86, 0x99);  // 群組圖示
         private static readonly Color TreeFolderColor = Color.FromArgb(0xD9, 0xA0, 0x38);     // 資料夾 琥珀
 
@@ -1332,6 +1391,8 @@ namespace mySQLPunk
             myImageList.Images.Add(TreeIconFromFile("tree_folder_open.png", () => UiKit.RenderGlyph(UiGlyph.FolderOpen, 16, TreeFolderColor))); //24 folder_open
             myImageList.Images.Add(TreeIconFromFile("tree_mongodb_off.png", () => TreeEngineChipIcon(TreeMongoDbColor, false, "M"))); //25
             myImageList.Images.Add(TreeIconFromFile("tree_mongodb_on.png", () => TreeEngineChipIcon(TreeMongoDbColor, true, "M"))); //26
+            myImageList.Images.Add(TreeIconFromFile("tree_redis_off.png", () => TreeEngineChipIcon(TreeRedisColor, false, "R"))); //27
+            myImageList.Images.Add(TreeIconFromFile("tree_redis_on.png", () => TreeEngineChipIcon(TreeRedisColor, true, "R"))); //28
 
             // Assign the ImageList to the TreeView.
 
@@ -2476,9 +2537,19 @@ namespace mySQLPunk
                 case "sqlserver":
                 case "mongodb":
                     return !string.IsNullOrWhiteSpace(GetConnectionValue(conn, "username"));
+                case "redis":
+                    return IsTrueConnectionValue(GetConnectionValue(conn, "redis_auth_required")) ||
+                           !string.IsNullOrWhiteSpace(GetConnectionValue(conn, "username"));
                 default:
                     return false;
             }
+        }
+
+        private static bool IsTrueConnectionValue(string value)
+        {
+            return string.Equals(value, "T", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, "1", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string BuildImportedConnectionPasswordTargetText(Dictionary<string, object> conn)
@@ -6643,6 +6714,18 @@ namespace mySQLPunk
                    string.Equals(target.ProviderName, "mongodb", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsRedisTarget(TreeDatabaseTarget target)
+        {
+            return target != null &&
+                   string.Equals(target.ProviderName, "redis", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>MongoDB／Redis 這類非關聯式 provider：樹與清單只保留唯讀開啟入口。</summary>
+        private static bool IsNonRelationalTarget(TreeDatabaseTarget target)
+        {
+            return IsMongoDbTarget(target) || IsRedisTarget(target);
+        }
+
         private static string BuildSqliteColumnCommentExchangeFileName(string databaseName, string tableName)
         {
             string baseName = string.IsNullOrWhiteSpace(tableName)
@@ -9063,7 +9146,7 @@ namespace mySQLPunk
         private ContextMenuStrip BuildGridContextMenu(string groupName)
         {
             var cms = new ContextMenuStrip();
-            bool mongoDbTarget = IsMongoDbTarget(BuildTargetFromNode(db_tree.SelectedNode));
+            bool mongoDbTarget = IsNonRelationalTarget(BuildTargetFromNode(db_tree.SelectedNode));
             if (groupName == "Views")
             {
                 var itemOpen = new ToolStripMenuItem(Localization.T("Tool.OpenView"));
@@ -12240,7 +12323,7 @@ namespace mySQLPunk
                 if (pathParts.Length >= 4 && pathParts[2] == "Tables")
                 {
                     TreeDatabaseTarget tableTarget = BuildTargetFromNode(node);
-                    bool mongoDbTarget = IsMongoDbTarget(tableTarget);
+                    bool mongoDbTarget = IsNonRelationalTarget(tableTarget);
                     ToolStripMenuItem openTableItem = new ToolStripMenuItem(Localization.T("Tool.SelectStar"));
                     openTableItem.Click += (s, ev) => OpenSelectedTableInQuery();
                     menu.Items.Add(openTableItem);
@@ -12286,7 +12369,7 @@ namespace mySQLPunk
                     openViewItem.Click += (s, ev) => OpenSelectedViewInQuery();
                     menu.Items.Add(openViewItem);
 
-                    if (!IsMongoDbTarget(BuildTargetFromNode(node)))
+                    if (!IsNonRelationalTarget(BuildTargetFromNode(node)))
                     {
                         ToolStripMenuItem designViewItem = new ToolStripMenuItem(Localization.T("Tool.DesignView"));
                         designViewItem.Click += (s, ev) => ShowSelectedViewDefinition();
@@ -12688,7 +12771,7 @@ namespace mySQLPunk
 
         private void AddTableGroupMenuItems(ContextMenuStrip menu, TreeNode node)
         {
-            if (IsMongoDbTarget(BuildTargetFromNode(node)))
+            if (IsNonRelationalTarget(BuildTargetFromNode(node)))
             {
                 ToolStripMenuItem mongoDictionaryItem = new ToolStripMenuItem(Localization.T("Tool.DataDictionary"));
                 mongoDictionaryItem.Click += (s, ev) => OpenSelectedDatabaseDictionary();
@@ -13231,7 +13314,7 @@ namespace mySQLPunk
 
             menu.Items.Add(new ToolStripSeparator());
 
-            if (IsMongoDbTarget(BuildTargetFromNode(node)))
+            if (IsNonRelationalTarget(BuildTargetFromNode(node)))
             {
                 ToolStripMenuItem mongoQueryItem = new ToolStripMenuItem(Localization.T("Toolbar.NewQuery"));
                 mongoQueryItem.Click += (s, ev) => Query_btn_Click(s, ev);
@@ -15094,6 +15177,10 @@ namespace mySQLPunk
                 case "mongodb":
                     await OpenMongoDbConnectionAsync(connIdx, db_tree);
                     break;
+                case "redis":
+                case "garnet":
+                    await OpenRedisConnectionAsync(connIdx, db_tree);
+                    break;
                 default:
                     UpdateMainStatus(Localization.Format("Connection.UnsupportedEdit", kind));
                     return false;
@@ -16070,6 +16157,15 @@ namespace mySQLPunk
                         form.ShowDialog();
                     }
                     break;
+                case "redis":
+                case "garnet":
+                    {
+                        redis_add_edit form = new redis_add_edit();
+                        form.F1 = this;
+                        form.editIndex = index;
+                        form.ShowDialog();
+                    }
+                    break;
                 default:
                     MessageBox.Show(BuildUnsupportedConnectionEditMessage(kind), Localization.T("Tool.EditConnection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     break;
@@ -16239,7 +16335,8 @@ namespace mySQLPunk
             }
             AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
-            if (string.Equals(GetConnectionValue(connInfo, "db_kind"), "mongodb", StringComparison.OrdinalIgnoreCase))
+            string connKind = ConnectionConfigurationService.NormalizeProvider(GetConnectionValue(connInfo, "db_kind"));
+            if (connKind == "mongodb" || connKind == "redis")
             {
                 PopulateMongoDbUtilityGroups(databaseNode);
                 return;
@@ -16339,7 +16436,8 @@ namespace mySQLPunk
             }
             AddTreeGroupNodeIfVisible(databaseNode, viewsNode);
 
-            if (string.Equals(db == null ? string.Empty : db.ProviderName, "mongodb", StringComparison.OrdinalIgnoreCase))
+            string providerKind = db == null ? string.Empty : (db.ProviderName ?? string.Empty).ToLowerInvariant();
+            if (providerKind == "mongodb" || providerKind == "redis")
             {
                 PopulateMongoDbUtilityGroups(databaseNode);
                 return;
@@ -16773,6 +16871,8 @@ namespace mySQLPunk
                     return new sqlite_add_edit { F1 = this };
                 case ConnectionTypeSelectionForm.MongoDb:
                     return new mongodb_add_edit { F1 = this };
+                case ConnectionTypeSelectionForm.Redis:
+                    return new redis_add_edit { F1 = this };
                 default:
                     return null;
             }

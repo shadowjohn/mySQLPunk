@@ -4,11 +4,12 @@
 
 ### 🚀 新增功能
 
+- **Redis／Microsoft Garnet 唯讀 provider 第一期**：新增 `redis://`／`rediss://` URI 匯入、ACL／密碼驗證、TLS 直連與 logical db 瀏覽；可用 SCAN 檢視 key 型別、TTL、文字摘要，並以 pattern、type 或單一 key 執行受限唯讀查詢。RESP 解析加入大小／巢狀防護，SCAN 單次 traversal 會去重且先套用型別篩選；目前完成 loopback RESP 整合測試，外部 Redis／Garnet 實機矩陣、Cluster／Sentinel、寫入、監控與 Pub/Sub 留待後續。
 - **MongoDB 文件新增／刪除與實機矩陣**：結果網格右鍵可新增文件（空白文件插入模式、未給 `_id` 時自動產生、成功後轉一般編輯）與刪除文件（先依 `_id` 重讀完整文件、確認後以重讀比對＋完整文件過濾安全刪除）；view 一律擋下。standalone MongoDB 4.4／7.0／8.0 各通過 24 項實機檢查，涵蓋 metadata、查詢、型別保真、編輯／插入／刪除與各種並行衝突。
 - **MongoDB 文件樹與安全編輯**：查詢結果列可雙擊或右鍵「開啟文件」開啟文件檢視器，左側為可展開的欄位／陣列／型別樹，右側以 Canonical Extended JSON 編輯（欄位型別不會被改變）；儲存前會鎖定 `_id`，寫回時以編輯前的完整文件做樂觀並行比對，文件被他人修改或刪除時回報衝突不寫入。View 與缺 `_id` 的文件維持唯讀，開啟時會依 `_id` 重新讀取完整文件，查詢 projection 不會造成欄位遺失。
 - **MongoDB 唯讀 provider 第一期**：新增一般／SRV 連線與 URI 匯入，可瀏覽 database、collection、view、索引與統計資訊，抽樣推斷 schema，並以唯讀網格或受限 JSON find 查詢檢視文件；寫入及專用文件編輯器仍留在後續階段。
 - **連線星號與批次屬性**：星號與色彩會隨目前連線設定檔保存，加星連線在樹中顯示 `★` 並置頂；工具選單與連線右鍵可勾選多筆連線，批次加／移星號、移動群組或套用色彩。
-- **連線 URI 匯入**：新增連線精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle 與 SQLite URI，支援 percent encoding、常用 TLS／Windows 驗證參數，解析後會先開啟原本的設定頁供確認；原始 URI 不會保存，密碼仍交由 Windows Credential Manager 儲存。
+- **連線 URI 匯入**：新增連線精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、MongoDB 與 Redis URI，支援 percent encoding 與各 provider 對應的安全參數，解析後會先開啟原本的設定頁供確認；原始 URI 不會保存，密碼仍交由 Windows Credential Manager 儲存。
 - **SSL/TLS 與 SSH 安全連線**：MySQL／MariaDB、PostgreSQL、SQL Server 與 Oracle 連線可設定憑證驗證和 SSH Tunnel；Tunnel 會固定 SHA256 主機金鑰指紋，測試連線、主畫面與自動執行作業共用同一套安全設定。
 - **Windows 自動執行作業**：可從工具選單建立唯讀查詢、查詢結果匯出與 SQL 備份作業，支援立即執行、每日工作排程與 JSON 執行紀錄；作業檔不保存帳密，排程沿用同一個 Windows 使用者的 Credential Manager。
 

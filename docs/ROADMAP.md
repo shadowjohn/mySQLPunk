@@ -22,7 +22,7 @@
 | 釘選查詢結果（SQL、耗時、不可變快照） | ✅ | 結果快照分頁可比較並可中鍵／右鍵關閉。 |
 | Table Profile：多組篩選／排序／欄顯示設定 | ✅ | 每張資料表可保存多組具名設定，從資料工具列快速切換；篩選、排序、欄顯示與目前選擇會寫入本機 JSON，五種既有 provider 都會使用對應分頁語法。 |
 | 物件 URI 分享與直接定位 | ✅ | database 與支援物件可複製 `mysqlpunk://object` URI；啟動時會嚴格驗證參數、沿用目前設定檔的同名連線、載入 metadata 並定位物件，URI 不包含主機或帳密。 |
-| 連線精靈、進階篩選／搜尋、URI 連線 | ✅ | 連線精靈支援引擎搜尋、名稱／群組即時搜尋，以及 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite URI 匯入；解析後先開啟原生設定頁供確認。 |
+| 連線精靈、進階篩選／搜尋、URI 連線 | ✅ | 連線精靈支援引擎搜尋、名稱／群組即時搜尋，以及 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、MongoDB 與 Redis URI 匯入；解析後先開啟原生設定頁供確認。 |
 | 集中管理多連線、批次操作、星號、顏色、群組 | ✅ | 支援多設定檔、多層群組、拖曳、持久化星號與色彩；可從工具選單或連線右鍵勾選多筆，一次加／移星號、移動群組或套用色彩。 |
 | BI 圖表互連 | 📋 | 現有 BI 只有物件分佈／列數排名資料表；需新增儀表板與同來源聯動篩選。 |
 | BI 自訂運算式 | 📋 | 納入 BI 運算式引擎。 |
@@ -30,7 +30,7 @@
 | MongoDB Aggregation Pipeline 視覺設計 | 📋 | MongoDB provider 後續階段：拖放 stage、逐步預覽與結果驗證。 |
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 📋 | 新 provider，需連線、metadata、查詢、資料檢視、模型與 BI 能力。 |
-| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 📋 | 新 provider，需連線、命令、資料編輯、監控、Pub/Sub。 |
+| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 直連唯讀第一期已完成：ACL／密碼、TLS、logical db、SCAN key 瀏覽、型別／TTL／摘要及受限查詢；待補 Redis／Garnet 外部實機矩陣、Cluster、Sentinel、資料編輯、監控與 Pub/Sub。 |
 | Linux ARM | 📋 | 現有 WinForms 僅 Windows；需先抽離 UI／provider core，再評估跨平台桌面 UI。 |
 
 ## Navicat Premium 功能頁對照
@@ -41,7 +41,7 @@
 | 物件設計器 | 🟡 | 五種 provider 已能建表與主要 ALTER；進階 constraint／索引仍需更多實機矩陣。 |
 | RDBMS 資料編輯器（網格） | ✅ | 分頁瀏覽、篩選、排序、欄顯示、寫回、無主鍵安全模式、多格式匯出。 |
 | MongoDB 資料編輯器（網格／樹／JSON） | 🆕 | 文件檢視器提供可展開文件樹與 Canonical Extended JSON 編輯；儲存會鎖定 `_id` 並以完整原始文件做並行比對，並支援文件新增（自動 `_id`）與安全刪除；view 與缺 `_id` 文件唯讀。待補網格內編輯。 |
-| Redis 資料編輯器 | 📋 | 隨 Redis／Garnet provider 實作。 |
+| Redis 資料編輯器 | 🟡 | 已有唯讀 key 清單、型別／TTL／摘要與 string/list/hash/set/zset 單鍵內容檢視；待補安全寫入與專用編輯互動。 |
 | 資料分析與互動圖表 | 🆕 | 已完成欄位摘要、Top 值比例與值鑽取的第一版。 |
 | 自動完成程式碼 | ✅ | 已能解析目前 statement 的 FROM／JOIN／UPDATE／INTO 來源與 alias；支援欄位、`alias.column`、資料表、關鍵字與片段捷徑，並依 provider/database 快取資料表、View 與欄位 metadata。 |
 | 程式碼片段 | ✅ | `Ctrl+Shift+P` 開啟片段管理器；支援 8 組內建片段、自訂片段 CRUD、全文搜尋、`$CURSOR$` 定位、保留縮排插入，以及 JSON 匯入／匯出工作區格式。 |
@@ -74,8 +74,9 @@
 | MySQL／MariaDB | ✅ | 共用 MySQL provider，已有實機版本矩陣。 |
 | PostgreSQL、SQL Server、Oracle、SQLite | 🟡 | 核心 metadata／查詢／編輯／DDL／備份可用，進階功能持續對等化。 |
 | MongoDB | 🟡 | 第三期完成：連線、metadata、JSON find 查詢、文件樹、安全編輯與文件新增／刪除都已具備；standalone 4.4／7.0／8.0 實機矩陣通過。待補 Atlas／SRV 驗證環境矩陣與 Aggregation Pipeline。 |
-| Redis／Garnet、Snowflake | 📋 | 不再排除，分別建立 provider 與專用資料介面。 |
-| AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS 可先用標準主機連線；待補各家 IAM／SSO／MFA、MongoDB／Redis provider 與雲端專用驗證。 |
+| Redis／Garnet | 🟡 | RESP2 standalone 直連唯讀第一期完成，具備 URI、ACL／密碼、TLS、logical db、key 瀏覽與受限查詢；外部實機矩陣、Cluster／Sentinel、寫入、監控與 Pub/Sub 待補。 |
+| Snowflake | 📋 | 建立 provider、metadata、查詢與專用資料介面。 |
+| AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS、MongoDB 與 Redis 可先用標準主機連線；待補各家 IAM／SSO／MFA 與雲端專用驗證。 |
 | OceanBase、PingCAP／TiDB、Dameng、Fujitsu、Kingbase、HighGo | 📋 | 建立實機相容矩陣；能沿用 MySQL／PostgreSQL 協定者先驗證差異，其餘再建立專用 provider。 |
 
 ## 接續順序
@@ -83,6 +84,6 @@
 1. ✅ 唯讀 ER 圖與兩庫結構差異報告第一版已完成。
 2. ✅ Windows 自動執行＋查詢／匯出／備份作業與記錄第一版已完成。
 3. ✅ SSH tunnel＋SSL/TLS 選項 UI、憑證驗證與排程共用連線流程已完成。
-4. ✅ 五種既有 provider 的連線 URI 匯入與設定頁確認流程已完成。
+4. ✅ RDBMS、MongoDB 與 Redis 的連線 URI 匯入及設定頁確認流程已完成。
 5. ✅ 連線星號、持久化色彩與批次屬性操作已完成。
-6. 🟡 MongoDB 第一～三期已完成（唯讀 provider、文件樹＋安全編輯、文件新增／刪除＋standalone 實機矩陣）；接著依序擴充 Redis／Garnet、Snowflake 及其專用編輯器，Atlas／SRV 驗證矩陣與 Aggregation Pipeline 留在 MongoDB 後續。
+6. 🟡 MongoDB 第一～三期已完成；Redis／Garnet standalone 直連唯讀第一期也已完成。下一步補 Redis／Garnet 外部實機矩陣與專用安全編輯，再擴充 Snowflake；Atlas／SRV 驗證矩陣與 Aggregation Pipeline 留在 MongoDB 後續。
