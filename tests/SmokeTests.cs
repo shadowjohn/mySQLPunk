@@ -8447,6 +8447,42 @@ public static class SmokeTests
         Assert(Array.IndexOf(codexModels, "gpt-5.6-sol") >= 0, "Codex CLI model suggestions should include the current default family.");
         Assert(Array.IndexOf(codexModels, "gpt-5.1-codex") < 0, "Codex CLI model suggestions should not offer deprecated subscription models.");
 
+        string claims = Convert.ToBase64String(Encoding.UTF8.GetBytes("{\"email\":\"developer@example.com\"}"))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        AiCliAccountInfo codexAccount = AiChatService.ParseCliAccountInfo(
+            "codex-cli",
+            "{\"auth_mode\":\"chatgpt\",\"tokens\":{\"id_token\":\"header." + claims + ".signature\",\"access_token\":\"must-not-escape\"}}");
+        Assert(codexAccount.State == AiCliAccountState.SignedIn, "Codex account metadata should detect a ChatGPT sign-in.");
+        AssertEquals("developer@example.com", codexAccount.Label, "Codex account metadata should expose only the account label.");
+        AssertEquals("ChatGPT", codexAccount.Method, "Codex account metadata should report the sign-in method.");
+        Assert((codexAccount.Label ?? "").IndexOf("must-not-escape", StringComparison.Ordinal) < 0, "Codex tokens must never escape account parsing.");
+
+        AiCliAccountInfo claudeAccount = AiChatService.ParseCliAccountInfo(
+            "claude-cli",
+            "{\"oauthAccount\":{\"emailAddress\":\"claude@example.com\"},\"token\":\"must-not-escape\"}");
+        Assert(claudeAccount.State == AiCliAccountState.SignedIn, "Claude account metadata should detect a Claude.ai sign-in.");
+        AssertEquals("claude@example.com", claudeAccount.Label, "Claude account metadata should expose only the account label.");
+        AssertEquals("Claude.ai", claudeAccount.Method, "Claude account metadata should report the sign-in method.");
+
+        AiCliAccountInfo geminiAccount = AiChatService.ParseCliAccountInfo(
+            "gemini-cli",
+            "{\"active\":\"gemini@example.com\",\"oauth\":\"must-not-escape\"}");
+        Assert(geminiAccount.State == AiCliAccountState.SignedIn, "Gemini account metadata should detect a Google sign-in.");
+        AssertEquals("gemini@example.com", geminiAccount.Label, "Gemini account metadata should expose only the account label.");
+        AssertEquals("Google", geminiAccount.Method, "Gemini account metadata should report the sign-in method.");
+
+        AiCliAccountInfo malformedAccount = AiChatService.ParseCliAccountInfo("codex-cli", "not-json");
+        Assert(malformedAccount.State == AiCliAccountState.Unknown, "Malformed account metadata should fail closed.");
+        List<AiCliDetectionResult> cliDetections = AiChatService.DetectCliProviders();
+        Assert(cliDetections.Count == 3, "AI CLI detection should return all three supported subscription providers.");
+        Assert(cliDetections.All(item => item.Account != null), "AI CLI detection should always return a safe account state.");
+
+        string root = FindRepositoryRootForTest();
+        string optionsSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "OptionsForm.cs"), Encoding.UTF8);
+        AssertContains(optionsSource, "bool showEndpoint = !isCli || !selectedCliInstalled", "Installed subscription CLIs should hide the unnecessary custom-path field.");
+        AssertContains(optionsSource, "keyLabel.Visible = showKey", "API key controls should only appear for providers that need them.");
+        AssertContains(optionsSource, "detectButton.Visible = isLocal", "Local model detection should only appear for local providers.");
+
         string cliWorkspace = AiChatService.EnsureCliWorkspaceDirectory();
         Assert(Directory.Exists(cliWorkspace), "AI CLI workspace should be created before launching a provider.");
         Assert(cliWorkspace.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), StringComparison.OrdinalIgnoreCase), "AI CLI workspace should stay under the application's local data folder.");

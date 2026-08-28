@@ -110,6 +110,12 @@
   - 安全：一次只接受一個 SELECT／WITH／INSERT／UPDATE／DELETE／REPLACE，拒絕 DDL 與多 statement；不使用 PostgreSQL `ANALYZE`，SQL Server 成功或失敗都會關閉 `SHOWPLAN_ALL`，Oracle `EXPLAIN PLAN` 與 SQLite `EXPLAIN QUERY PLAN` 也不會執行原本 DML。
   - 驗證：smoke test 覆蓋 MySQL／PostgreSQL JSON 階層、SQL Server session 清理、Oracle statement ID 與 `PLAN_TABLE` 清理、SQLite 記憶體資料庫原生計畫，以及三種視圖與 provider 顯示。
 
+- **AI 訂閱 CLI 偵測與選項卡片 ✅ 已完成**
+  - 畫面：「選項 > AI」以三張卡片顯示 OpenAI Codex、Claude Code 與 Gemini CLI 的安裝狀態、實際執行路徑、帳號標籤、登入方式及目前選用狀態；可重新偵測或直接切換服務。卡片下方只保留目前服務需要的設定：CLI 顯示模型與測試，API 顯示端點、模型與金鑰，本機模型顯示端點、模型與偵測；CLI 找不到執行檔或已有自訂路徑時才顯示路徑欄。
+  - 帳號來源：Codex 只取 `.codex/auth.json` 的登入模式與 ID token 內 email，Claude 只取 `.claude.json` 的 `oauthAccount.emailAddress`，Gemini 只取 `.gemini/google_accounts.json` 的 active 帳號；解析結果不含 token、OAuth credential 或 API key。
+  - 安全邊界：畫面明確區分「找到登入資料」與「已驗證訂閱權限」，不會因本機留有帳號資料就宣稱遠端訂閱可用；JSON 損毀、欄位缺漏或帳號標籤含控制字元時會保守顯示無法判定。
+  - 驗證：smoke test 覆蓋三家帳號解析、JWT Base64URL、敏感欄位不外洩、錯誤 JSON fail closed 與三個 CLI provider 全數回傳安全狀態；實際 WinForms QA 確認三張卡片、垂直捲動及進階設定沒有水平溢出。
+
 - **右側 AI 助理與物件詳細資料收合 ✅ 已完成**
   - 現況：新使用者第一次啟動時會直接顯示 AI 助理；按關閉後會記住選擇，下次啟動維持關閉，仍可從「檢視 > AI 助理」重新開啟。
   - 完成內容：AI 助理與物件詳細資料各自提供暫時收合按鈕，收合後會留在右側圖示列，不改動長期顯示偏好；可由圖示列或「檢視」選單再次展開。兩者同時展開時會以主題化細線分隔，任一窗格收合後分隔線會一起隱藏。

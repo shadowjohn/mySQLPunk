@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **AI 訂閱 CLI 卡片與帳號偵測**：重做「選項 > AI」，用卡片列出 OpenAI Codex、Claude Code 與 Gemini CLI 的安裝狀態、實際執行路徑、帳號標籤和登入方式，可直接切換目前使用的 CLI；API、Ollama、LM Studio 與 OpenRouter 設定保留在同頁下方，並依目前服務隱藏不適用的欄位。帳號偵測只解析 CLI 自己保存的非敏感欄位，不會把 token 或金鑰帶進畫面，也不把找到登入資料誤當成已驗證訂閱權限。
 - **Linux / macOS 跨平台預覽第一階段**：保留既有 Windows WinForms 完整版，新增獨立 .NET 8 Core 與 Avalonia 桌面程式，可在 Linux / macOS 管理 MySQL / MariaDB、PostgreSQL 與 SQLite 連線，瀏覽 database、Table / View，執行 DDL / DML / SELECT 並顯示結果網格；連線設定使用跨平台 JSON，密碼只留在記憶體、不寫入磁碟。加入 SQLite 端到端 smoke tests、Linux UI 實際操作驗證、Linux x64 與 macOS x64 / Apple Silicon 發佈建置，以及 Ubuntu / macOS CI 矩陣。其餘 provider、進階資料編輯與正式安裝／簽署流程留待後續。
 - **Snowflake 查詢編輯器寫入第二期**：保留 SELECT／SHOW 等結果集路徑，新增單一 INSERT／UPDATE／DELETE／MERGE 與 DDL 的 SQL REST API 執行，並從 DML ResultSet 回報 affected rows；帶參數呼叫會 fail closed，避免參數綁定尚未完成時靜默忽略值。loopback HTTP 測試加入實際 UPDATE request、回覆與 MERGE 多計數欄位驗證；資料網格寫回、bulk load 與真實帳戶矩陣仍留待後續。
 - **Redis／Garnet 集合型別安全編輯**：key 編輯器依型別切換，hash 欄位新增／更新／刪除、list 既有元素編輯與尾端新增、set 成員新增／移除、zset 分數新增／更新／移除；所有寫入共用 WATCH＋MULTI/EXEC 交易，項目被其他連線改過、型別被重建或 EXEC 落空都回報衝突且不覆蓋，zset 分數以數值比較。Redis 6.2、Redis 7 與 Garnet standalone 實機矩陣擴充為各 39 項檢查；list 元素刪除因 Redis 無依索引刪除命令留待後續。

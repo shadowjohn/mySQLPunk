@@ -394,27 +394,103 @@ namespace mySQLPunk
             AddOptionTitle(T("AI 助理", "AI Assistant"));
             lib.AiChatSettings initialAiSettings = lib.AiChatSettings.Load();
 
-            // 供應商清單直接取自 AiChatService.Presets：使用者訂閱哪家就選哪家
+            Label introduction = new Label
+            {
+                Text = T("優先使用你已登入的 AI CLI 訂閱；也可以在下方設定 API 或本機模型服務。",
+                    "Use an AI CLI subscription you are already signed in to, or configure an API or local model below."),
+                AutoSize = true,
+                MaximumSize = new Size(630, 0),
+                Location = new Point(18, 42),
+                ForeColor = ThemeManager.MutedTextColor
+            };
+            contentPanel.Controls.Add(introduction);
+
+            Label cliTitle = new Label
+            {
+                Text = T("訂閱 CLI", "Subscription CLIs"),
+                AutoSize = true,
+                Font = UiKit.Subtitle,
+                Location = new Point(18, 82)
+            };
+            contentPanel.Controls.Add(cliTitle);
+
+            Button refreshCliButton = new Button
+            {
+                Text = T("重新偵測", "Refresh"),
+                Size = new Size(96, UiMetrics.ControlHeight),
+                Location = new Point(482, 74),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            contentPanel.Controls.Add(refreshCliButton);
+
+            FlowLayoutPanel cliCards = new FlowLayoutPanel
+            {
+                Location = new Point(18, 112),
+                Size = new Size(560, 178),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                WrapContents = false,
+                AutoScroll = false,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            contentPanel.Controls.Add(cliCards);
+
+            Label cliPrivacyHint = new Label
+            {
+                Text = T("只讀取 CLI 保存的帳號標籤與登入方式，不會顯示 token 或金鑰；找到登入資料不代表已驗證訂閱權限。",
+                    "Only the account label and sign-in method saved by each CLI are read. Tokens and keys are never shown; detected sign-in data does not verify subscription access."),
+                AutoSize = true,
+                MaximumSize = new Size(560, 0),
+                Location = new Point(18, 296),
+                ForeColor = ThemeManager.MutedTextColor
+            };
+            contentPanel.Controls.Add(cliPrivacyHint);
+
+            Label advancedTitle = new Label
+            {
+                Text = T("目前服務與進階設定", "Current service and advanced settings"),
+                AutoSize = true,
+                Font = UiKit.Subtitle,
+                Location = new Point(18, 340)
+            };
+            contentPanel.Controls.Add(advancedTitle);
+
             var providerChoices = new List<OptionChoice>();
             foreach (lib.AiProviderPreset preset in lib.AiChatService.Presets)
             {
                 providerChoices.Add(new OptionChoice(preset.Id, preset.DisplayName));
             }
-            ComboBox providerCombo = AddOptionCombo("AiProvider", T("服務提供者:", "Provider:"), providerChoices.ToArray(), 72, 260);
+            ComboBox providerCombo = AddOptionCombo("AiProvider", T("服務提供者:", "Provider:"), providerChoices.ToArray(), 374, 350);
+            providerCombo.Left = 220;
 
-            TextBox endpointBox = AddOptionTextBox("AiEndpoint", T("端點 URL（留空用預設）:", "Endpoint URL (blank = default):"), 116, 360);
+            Label endpointLabel = new Label
+            {
+                Text = T("端點 URL:", "Endpoint URL:"),
+                AutoSize = true,
+                Location = new Point(18, 420)
+            };
+            TextBox endpointBox = new TextBox
+            {
+                Text = ApplicationOptionSettings.GetString("AiEndpoint"),
+                Location = new Point(220, 416),
+                Width = 350
+            };
+            endpointBox.TextChanged += (s, e) => ApplicationOptionSettings.SetString("AiEndpoint", endpointBox.Text);
+            optionTextBoxes["AiEndpoint"] = endpointBox;
+            contentPanel.Controls.Add(endpointLabel);
+            contentPanel.Controls.Add(endpointBox);
 
-            // 模型用可輸入的下拉：按「測試連線」會把服務端的模型清單抓回來
-            contentPanel.Controls.Add(new Label
+            Label modelLabel = new Label
             {
                 Text = T("模型（留空用預設）:", "Model (blank = default):"),
                 AutoSize = true,
-                Location = new Point(18, 162)
-            });
+                Location = new Point(18, 462)
+            };
+            contentPanel.Controls.Add(modelLabel);
             ComboBox modelCombo = new ComboBox
             {
-                Location = new Point(250, 158),
-                Width = 360,
+                Location = new Point(220, 458),
+                Width = 350,
                 DropDownStyle = ComboBoxStyle.DropDown,
                 Text = initialAiSettings.Model
             };
@@ -422,23 +498,24 @@ namespace mySQLPunk
             contentPanel.Controls.Add(modelCombo);
 
             // API 金鑰不落地設定檔，直接進 Windows 認證管理員；一家一把
-            contentPanel.Controls.Add(new Label
+            Label keyLabel = new Label
             {
                 Text = T("API 金鑰:", "API key:"),
                 AutoSize = true,
-                Location = new Point(18, 204)
-            });
+                Location = new Point(18, 504)
+            };
+            contentPanel.Controls.Add(keyLabel);
             TextBox keyBox = new TextBox
             {
-                Location = new Point(250, 200),
-                Width = 360,
+                Location = new Point(220, 500),
+                Width = 350,
                 UseSystemPasswordChar = true
             };
             Label keyState = new Label
             {
                 AutoSize = true,
-                MaximumSize = new Size(620, 0),
-                Location = new Point(250, 228),
+                MaximumSize = new Size(350, 0),
+                Location = new Point(220, 528),
                 ForeColor = SystemColors.GrayText
             };
             Func<string> currentProviderId = () =>
@@ -449,10 +526,11 @@ namespace mySQLPunk
             Action refreshKeyState = () =>
             {
                 lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
+                keyBox.Enabled = preset.NeedsKey;
                 if (preset.AuthStyle == "cli")
                 {
-                    keyState.Text = T("這個服務走本機 CLI 的登入身分（你的訂閱），不需要 API 金鑰、不另外計費；端點欄可留空（自動從 PATH 找），或填執行檔完整路徑。",
-                        "This service uses the local CLI's signed-in identity (your subscription) — no API key, no separate billing. Leave the endpoint blank (found via PATH) or set the full executable path.");
+                    keyState.Text = T("使用 CLI 自己的登入身分；端點欄可留空自動偵測，或填入執行檔完整路徑。",
+                        "Uses the CLI's own sign-in identity. Leave the endpoint blank for auto-detection or enter the full executable path.");
                 }
                 else if (!preset.NeedsKey)
                 {
@@ -493,7 +571,7 @@ namespace mySQLPunk
             {
                 Text = T("前往取得金鑰／認證頁面", "Open the provider's key / sign-up page"),
                 AutoSize = true,
-                Location = new Point(18, 228),
+                Location = new Point(18, 528),
                 LinkColor = SystemColors.HotTrack
             };
             keyLink.LinkClicked += (s, e) =>
@@ -512,29 +590,27 @@ namespace mySQLPunk
             Label probeResult = new Label
             {
                 AutoSize = true,
-                MaximumSize = new Size(620, 0),
-                Location = new Point(18, 300),
+                MaximumSize = new Size(560, 0),
+                Location = new Point(18, 608),
                 ForeColor = SystemColors.GrayText
             };
             Button detectButton = new Button
             {
-                Text = T("偵測本機服務", "Detect local services"),
-                Location = new Point(18, 260),
+                Text = T("偵測本機模型", "Detect local models"),
+                Location = new Point(18, 568),
                 AutoSize = true
             };
             Button testButton = new Button
             {
                 Text = T("測試連線並列出模型", "Test connection && list models"),
-                Location = new Point(160, 260),
-                AutoSize = true
+                Location = new Point(152, 568),
+                Size = new Size(174, UiMetrics.ControlHeight)
             };
-            // OpenRouter 有官方 PKCE 流程，可以做到「跳瀏覽器授權、自動拿金鑰」，
-            // 其它模型商不開放第三方桌面程式 OAuth，只能手動貼金鑰
             Button oauthButton = new Button
             {
                 Text = T("🔑 用瀏覽器授權連結 OpenRouter", "🔑 Connect OpenRouter via browser"),
-                Location = new Point(340, 260),
-                AutoSize = true
+                Location = new Point(334, 568),
+                Size = new Size(230, UiMetrics.ControlHeight)
             };
             oauthButton.Click += async (s, e) =>
             {
@@ -570,39 +646,19 @@ namespace mySQLPunk
                 probeResult.Text = T("偵測中…", "Detecting…");
                 try
                 {
-                    // 一次掃兩類:已登入的 AI CLI(走訂閱免金鑰)與本機推論服務
-                    var clis = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.DetectInstalledClis());
                     var found = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.DetectLocalServices());
-
-                    Action<string> selectProvider = id =>
-                    {
-                        for (int i = 0; i < providerCombo.Items.Count; i++)
-                        {
-                            OptionChoice choice = providerCombo.Items[i] as OptionChoice;
-                            if (choice != null && choice.Value == id) { providerCombo.SelectedIndex = i; break; }
-                        }
-                    };
-
                     var summary = new List<string>();
-                    foreach (var cli in clis) summary.Add(cli.DisplayName);
                     foreach (var server in found) summary.Add(server.Key.DisplayName + "（" + server.Value.Count + T(" 個模型）", " models)"));
 
                     if (summary.Count == 0)
                     {
-                        probeResult.Text = T("沒偵測到本機 CLI 或推論服務。想免費使用：安裝並登入 Codex CLI／Claude Code／Gemini CLI（走訂閱），或安裝 Ollama（ollama.com）跑本機模型。",
-                            "No local CLI or inference service detected. For free usage: install and sign in to Codex CLI / Claude Code / Gemini CLI (uses your subscription), or install Ollama (ollama.com) for local models.");
-                    }
-                    else if (clis.Count > 0)
-                    {
-                        // 優先選 CLI:走使用者既有訂閱,零設定
-                        selectProvider(clis[0].Id);
-                        probeResult.Text = T("偵測到：", "Detected: ") + string.Join("、", summary)
-                            + T("。已自動選用 ", ". Auto-selected ") + clis[0].DisplayName + T("，不需要金鑰。", " — no key needed.");
+                        probeResult.Text = T("沒有偵測到正在執行的 Ollama 或 LM Studio。上方訂閱 CLI 會另外自動偵測。",
+                            "No running Ollama or LM Studio service was detected. Subscription CLIs are detected separately above.");
                     }
                     else
                     {
                         var first = found[0];
-                        selectProvider(first.Key.Id);
+                        SelectAiProvider(providerCombo, first.Key.Id);
                         modelCombo.Items.Clear();
                         foreach (string m in first.Value) modelCombo.Items.Add(m);
                         if (first.Value.Count > 0 && string.IsNullOrWhiteSpace(modelCombo.Text)) modelCombo.Text = first.Value[0];
@@ -646,6 +702,134 @@ namespace mySQLPunk
                 }
             };
 
+            List<lib.AiCliDetectionResult> cliDetections = lib.AiChatService.DetectCliProviders();
+            Action updateAdvancedLayout = () => { };
+            Action renderCliCards = () =>
+            {
+                cliCards.SuspendLayout();
+                cliCards.Controls.Clear();
+                int cardWidth = Math.Max(178, (cliCards.ClientSize.Width - 18) / 3);
+                string selectedProvider = currentProviderId();
+                foreach (lib.AiCliDetectionResult result in cliDetections)
+                {
+                    Control card = CreateAiCliCard(result,
+                        string.Equals(result.Preset.Id, selectedProvider, StringComparison.OrdinalIgnoreCase),
+                        id => SelectAiProvider(providerCombo, id));
+                    card.Width = cardWidth;
+                    cliCards.Controls.Add(card);
+                }
+                cliCards.ResumeLayout();
+            };
+            cliCards.SizeChanged += (s, e) => renderCliCards();
+            refreshCliButton.Click += async (s, e) =>
+            {
+                refreshCliButton.Enabled = false;
+                refreshCliButton.Text = T("偵測中…", "Detecting…");
+                try
+                {
+                    cliDetections = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.DetectCliProviders());
+                    renderCliCards();
+                    updateAdvancedLayout();
+                }
+                finally
+                {
+                    refreshCliButton.Text = T("重新偵測", "Refresh");
+                    refreshCliButton.Enabled = true;
+                }
+            };
+            renderCliCards();
+
+            contentPanel.Controls.Add(detectButton);
+            contentPanel.Controls.Add(testButton);
+            contentPanel.Controls.Add(oauthButton);
+            contentPanel.Controls.Add(probeResult);
+
+            Label hint = new Label
+            {
+                Text = T("除 Anthropic Claude 走原生 API 外，其餘服務都走 OpenAI 相容的 chat/completions 介面。Azure OpenAI 的端點請填到 deployment 為止（…/openai/deployments/<名稱>），金鑰用資源的 api-key。",
+                         "All providers use the OpenAI-compatible chat/completions API except Anthropic Claude (native API). For Azure OpenAI, fill the endpoint down to the deployment (…/openai/deployments/<name>) and use the resource api-key."),
+                AutoSize = true,
+                MaximumSize = new Size(560, 0),
+                Location = new Point(18, 658)
+            };
+            contentPanel.Controls.Add(hint);
+
+            updateAdvancedLayout = () =>
+            {
+                lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
+                bool isCli = string.Equals(preset.AuthStyle, "cli", StringComparison.OrdinalIgnoreCase);
+                bool isLocal = !preset.NeedsKey && !isCli;
+                bool isOpenRouter = string.Equals(preset.Id, "openrouter", StringComparison.OrdinalIgnoreCase);
+                bool selectedCliInstalled = false;
+                foreach (lib.AiCliDetectionResult result in cliDetections)
+                {
+                    if (string.Equals(result.Preset.Id, preset.Id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedCliInstalled = result.Installed;
+                        break;
+                    }
+                }
+
+                bool showEndpoint = !isCli || !selectedCliInstalled || !string.IsNullOrWhiteSpace(endpointBox.Text);
+                bool showKey = preset.NeedsKey;
+                int nextTop = 416;
+
+                endpointLabel.Visible = showEndpoint;
+                endpointBox.Visible = showEndpoint;
+                if (showEndpoint)
+                {
+                    endpointLabel.Text = isCli
+                        ? T("自訂 CLI 路徑:", "Custom CLI path:")
+                        : T("端點 URL:", "Endpoint URL:");
+                    endpointLabel.Top = nextTop + 4;
+                    endpointBox.Top = nextTop;
+                    nextTop += 42;
+                }
+
+                modelLabel.Text = isCli
+                    ? T("模型（留空由 CLI 決定）:", "Model (blank = CLI default):")
+                    : T("模型（留空用預設）:", "Model (blank = default):");
+                modelLabel.Top = nextTop + 4;
+                modelCombo.Top = nextTop;
+                nextTop += 42;
+
+                keyLabel.Visible = showKey;
+                keyBox.Visible = showKey;
+                keyLink.Visible = showKey;
+                keyState.Visible = showKey;
+                if (showKey)
+                {
+                    keyLabel.Top = nextTop + 4;
+                    keyBox.Top = nextTop;
+                    keyLink.Top = nextTop + 32;
+                    keyState.Top = nextTop + 32;
+                    nextTop += 74;
+                }
+
+                int buttonTop = nextTop + 8;
+                detectButton.Visible = isLocal;
+                oauthButton.Visible = isOpenRouter;
+                testButton.Text = isCli ? T("測試 CLI", "Test CLI") : T("測試連線並列出模型", "Test connection && list models");
+                testButton.Width = isCli ? 120 : 174;
+
+                if (isLocal)
+                {
+                    detectButton.Location = new Point(18, buttonTop);
+                    testButton.Location = new Point(152, buttonTop);
+                }
+                else
+                {
+                    testButton.Location = new Point(18, buttonTop);
+                }
+                if (isOpenRouter) oauthButton.Location = new Point(200, buttonTop);
+
+                probeResult.Top = buttonTop + 40;
+                hint.Visible = showKey;
+                if (hint.Visible) hint.Top = probeResult.Top + 50;
+                int contentBottom = hint.Visible ? hint.Bottom + 24 : probeResult.Top + 64;
+                contentPanel.AutoScrollMinSize = new Size(0, Math.Max(540, contentBottom));
+            };
+
             providerCombo.SelectedIndexChanged += (s, e) =>
             {
                 lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
@@ -660,23 +844,175 @@ namespace mySQLPunk
                     ? T("這個選項需要自行填端點 URL。", "This option requires you to fill in the endpoint URL.")
                     : T("預設端點：", "Default endpoint: ") + preset.Endpoint +
                       (string.IsNullOrWhiteSpace(preset.DefaultModel) ? "" : T("；預設模型：", "; default model: ") + preset.DefaultModel);
+                updateAdvancedLayout();
+                renderCliCards();
             };
             refreshKeyState();
+            updateAdvancedLayout();
+        }
 
-            contentPanel.Controls.Add(detectButton);
-            contentPanel.Controls.Add(testButton);
-            contentPanel.Controls.Add(oauthButton);
-            contentPanel.Controls.Add(probeResult);
-
-            Label hint = new Label
+        private static void SelectAiProvider(ComboBox providerCombo, string providerId)
+        {
+            for (int i = 0; i < providerCombo.Items.Count; i++)
             {
-                Text = T("除 Anthropic Claude 走原生 API 外，其餘服務都走 OpenAI 相容的 chat/completions 介面。Azure OpenAI 的端點請填到 deployment 為止（…/openai/deployments/<名稱>），金鑰用資源的 api-key。",
-                         "All providers use the OpenAI-compatible chat/completions API except Anthropic Claude (native API). For Azure OpenAI, fill the endpoint down to the deployment (…/openai/deployments/<name>) and use the resource api-key."),
-                AutoSize = true,
-                MaximumSize = new Size(620, 0),
-                Location = new Point(18, 356)
+                OptionChoice choice = providerCombo.Items[i] as OptionChoice;
+                if (choice != null && string.Equals(choice.Value, providerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    providerCombo.SelectedIndex = i;
+                    return;
+                }
+            }
+        }
+
+        private Control CreateAiCliCard(lib.AiCliDetectionResult result, bool selected, Action<string> selectProvider)
+        {
+            AiCliCardPanel card = new AiCliCardPanel
+            {
+                Height = 174,
+                Margin = new Padding(0, 0, 8, 0),
+                IsSelected = selected
             };
-            contentPanel.Controls.Add(hint);
+
+            AiCliGlyph glyph = new AiCliGlyph
+            {
+                Location = new Point(12, 12),
+                Size = new Size(30, 30)
+            };
+            card.Controls.Add(glyph);
+
+            Label title = new Label
+            {
+                Text = AiCliProductName(result.Preset.Id),
+                AutoEllipsis = true,
+                Font = UiKit.Subtitle,
+                Location = new Point(50, 11),
+                Size = new Size(card.Width - 62, 21),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            card.Controls.Add(title);
+
+            AiStatusPill status = new AiStatusPill
+            {
+                Text = result.Installed ? T("可使用", "Available") : T("未偵測", "Missing"),
+                Positive = result.Installed,
+                Size = new Size(56, 22),
+                Location = new Point(12, 53),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
+            };
+            card.Controls.Add(status);
+
+            Label executable = new Label
+            {
+                Text = result.Executable,
+                AutoEllipsis = true,
+                Font = UiKit.GetMonoFont(UiMetrics.FontSizeCaption),
+                Location = new Point(50, 31),
+                Size = new Size(118, 18),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            card.Controls.Add(executable);
+
+            Label path = new Label
+            {
+                Text = result.Installed ? result.ExecutablePath : T("PATH 中找不到可直接執行的程式", "Executable was not found in PATH"),
+                AutoEllipsis = true,
+                Location = new Point(76, 55),
+                Size = new Size(card.Width - 88, 19),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            card.Controls.Add(path);
+
+            Label accountCaption = new Label
+            {
+                Text = T("偵測到登入資料", "Detected sign-in"),
+                AutoSize = true,
+                Location = new Point(12, 80),
+                Font = UiKit.Caption
+            };
+            card.Controls.Add(accountCaption);
+
+            Label account = new Label
+            {
+                Text = AiCliAccountText(result),
+                AutoEllipsis = true,
+                Location = new Point(12, 99),
+                Size = new Size(card.Width - 24, 19),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            card.Controls.Add(account);
+
+            Label method = new Label
+            {
+                Text = result.Account == null ? string.Empty : result.Account.Method ?? string.Empty,
+                AutoEllipsis = true,
+                Location = new Point(12, 118),
+                Size = new Size(card.Width - 24, 17),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = UiKit.Caption
+            };
+            card.Controls.Add(method);
+
+            Button action = new Button
+            {
+                Text = result.Installed
+                    ? selected ? T("目前使用中", "Currently selected") : T("設為目前使用", "Use this CLI")
+                    : T("開啟安裝頁", "Open install page"),
+                Location = new Point(12, 137),
+                Size = new Size(card.Width - 24, 27),
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
+                Enabled = !selected
+            };
+            action.Click += (s, e) =>
+            {
+                if (result.Installed)
+                {
+                    selectProvider(result.Preset.Id);
+                    return;
+                }
+                OpenExternalUrl(result.Preset.KeySignupUrl);
+            };
+            card.Controls.Add(action);
+            return card;
+        }
+
+        private string AiCliAccountText(lib.AiCliDetectionResult result)
+        {
+            if (!result.Installed) return T("安裝後才會檢查帳號", "Account is checked after installation");
+            if (result.Account == null) return T("無法安全判定帳號", "Account could not be determined safely");
+            switch (result.Account.State)
+            {
+                case lib.AiCliAccountState.SignedIn:
+                    return string.IsNullOrWhiteSpace(result.Account.Label)
+                        ? T("已找到登入資料", "Sign-in data found")
+                        : result.Account.Label;
+                case lib.AiCliAccountState.NotFound:
+                    return T("尚未找到登入資料", "No sign-in data found");
+                case lib.AiCliAccountState.Unsupported:
+                    return T("此 CLI 尚未支援帳號偵測", "Account detection is not supported");
+                default:
+                    return T("無法安全判定帳號", "Account could not be determined safely");
+            }
+        }
+
+        private static string AiCliProductName(string providerId)
+        {
+            switch ((providerId ?? string.Empty).ToLowerInvariant())
+            {
+                case "codex-cli": return "OpenAI Codex";
+                case "claude-cli": return "Claude Code";
+                case "gemini-cli": return "Gemini CLI";
+                default: return providerId;
+            }
+        }
+
+        private static void OpenExternalUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return;
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch { }
         }
 
         private void RenderAutoRecoveryPage()
@@ -786,6 +1122,7 @@ namespace mySQLPunk
         private void ClearOptionPage()
         {
             contentPanel.Controls.Clear();
+            contentPanel.AutoScrollMinSize = Size.Empty;
             optionCheckBoxes.Clear();
             optionNumbers.Clear();
             optionCombos.Clear();
@@ -1298,6 +1635,100 @@ namespace mySQLPunk
             public override string ToString()
             {
                 return Text;
+            }
+        }
+
+        private sealed class AiCliCardPanel : Panel
+        {
+            private bool isSelected;
+
+            public bool IsSelected
+            {
+                get { return isSelected; }
+                set
+                {
+                    isSelected = value;
+                    Invalidate();
+                }
+            }
+
+            public AiCliCardPanel()
+            {
+                DoubleBuffered = true;
+                BackColor = ThemeManager.SurfaceColor;
+            }
+
+            protected override void OnResize(EventArgs eventArgs)
+            {
+                base.OnResize(eventArgs);
+                if (Width <= 0 || Height <= 0) return;
+                using (System.Drawing.Drawing2D.GraphicsPath path = UiKit.RoundedRect(
+                    new RectangleF(0, 0, Width, Height), UiMetrics.RadiusLg))
+                {
+                    Region oldRegion = Region;
+                    Region = new Region(path);
+                    if (oldRegion != null) oldRegion.Dispose();
+                }
+            }
+
+            protected override void OnPaintBackground(PaintEventArgs eventArgs)
+            {
+                eventArgs.Graphics.Clear(ThemeManager.SurfaceColor);
+            }
+
+            protected override void OnPaint(PaintEventArgs eventArgs)
+            {
+                base.OnPaint(eventArgs);
+                Rectangle border = new Rectangle(0, 0, Math.Max(0, Width - 1), Math.Max(0, Height - 1));
+                UiKit.DrawRounded(eventArgs.Graphics, border, UiMetrics.RadiusLg,
+                    IsSelected ? ThemeManager.AccentColor : ThemeManager.BorderColor,
+                    IsSelected ? 2f : 1f);
+            }
+        }
+
+        private sealed class AiStatusPill : Control
+        {
+            public bool Positive { get; set; }
+
+            public AiStatusPill()
+            {
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.SupportsTransparentBackColor, true);
+                BackColor = Color.Transparent;
+                Font = UiKit.Caption;
+            }
+
+            protected override void OnPaint(PaintEventArgs eventArgs)
+            {
+                base.OnPaint(eventArgs);
+                Color back = Positive
+                    ? UiKit.Mix(ThemeManager.SurfaceColor, ThemeManager.SuccessColor, ThemeManager.IsDark ? 0.24f : 0.12f)
+                    : UiKit.Mix(ThemeManager.SurfaceColor, ThemeManager.MutedTextColor, ThemeManager.IsDark ? 0.18f : 0.08f);
+                Color fore = Positive ? ThemeManager.SuccessColor : ThemeManager.MutedTextColor;
+                UiKit.FillRounded(eventArgs.Graphics,
+                    new RectangleF(0, 0, Math.Max(0, Width - 1), Math.Max(0, Height - 1)),
+                    UiMetrics.RadiusPill,
+                    back);
+                TextRenderer.DrawText(eventArgs.Graphics, Text, Font, ClientRectangle, fore,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            }
+        }
+
+        private sealed class AiCliGlyph : Control
+        {
+            public AiCliGlyph()
+            {
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.SupportsTransparentBackColor, true);
+                BackColor = Color.Transparent;
+            }
+
+            protected override void OnPaint(PaintEventArgs eventArgs)
+            {
+                base.OnPaint(eventArgs);
+                RectangleF bounds = new RectangleF(0, 0, Math.Max(0, Width - 1), Math.Max(0, Height - 1));
+                UiKit.FillRounded(eventArgs.Graphics, bounds, UiMetrics.RadiusMd, ThemeManager.AccentSoftColor);
+                UiKit.DrawGlyph(eventArgs.Graphics, UiGlyph.Code, RectangleF.Inflate(bounds, -7, -7), ThemeManager.AccentColor, 1.1f);
             }
         }
 

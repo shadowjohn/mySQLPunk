@@ -19,7 +19,7 @@ Open-source Windows database client, SQL editor, database GUI and DBA workbench 
 - 使用具自動完成、程式碼片段、查詢歷史、唯讀執行計畫與多格式匯出的 SQL 編輯器。
 - 編輯資料列、設計資料表、產生 DDL / DML、搬移 Table / View、建立 ER 圖並比較兩個資料庫結構。
 - 建立每日查詢、CSV / Excel / JSON 等格式匯出與 SQL 備份作業，交由 Windows Task Scheduler 執行並保留紀錄。
-- 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Gemini CLI 作為 SQL 助理；沒有 AI 服務也能使用其他資料庫功能。
+- 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Gemini CLI 作為 SQL 助理；選項頁會列出三種 CLI 的安裝路徑與非敏感登入帳號資訊，沒有 AI 服務也能使用其他資料庫功能。
 
 Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密碼、私鑰密語與用戶端憑證密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。跨平台預覽版目前使用繁體中文介面，連線設定採 JSON 保存，但密碼只存在程式記憶體，關閉後需重新輸入。
 
@@ -183,7 +183,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | 單一實例、檔案關聯與物件 URI | 可用 | 「允許重複執行 mySQLPunk」選項關掉時強制單一實例（預設允許多開）；`.sql` 檔可以用「開啟方式」直接開進查詢分頁。database、Table、View、Function、User、Event 與內建工具物件可複製 `mysqlpunk://object` URI，啟動後會沿用目前設定檔的同名連線定位；URI 不保存主機、帳號或密碼。 |
 | 介面與語系 | 可用 | 圖示全面向量繪製（引擎專屬色＋形狀徽章），支援淺色／深色主題，繁中／英文可即時切換；「說明 > 關於」會播放去背的看板娘 Punky 崩琦眨眼動畫。 |
 | 應用程式更新 | 可用 | GitHub Release 只發布一個 setup EXE；說明選單可手動檢查，也可在啟動時背景檢查。程式會讀取 GitHub release asset 的 SHA-256 digest，下載後先校驗再啟動安裝程式；舊版 portable ZIP 更新仍保留相容處理。 |
-| Punky AI 助理 | 可用 | 預設開啟的右側聊天面板，可關閉並從「檢視」選單重開，也能和物件詳細資料暫時收合到右側圖示列；走 OpenAI 相容 API（OpenAI／Ollama 本機模型／自訂端點），可附上目前資料庫結構當上下文，回覆的 SQL 可一鍵插入查詢分頁；金鑰存 Windows 認證管理員。 |
+| Punky AI 助理 | 可用 | 預設開啟的右側聊天面板，可關閉並從「檢視」選單重開，也能和物件詳細資料暫時收合到右側圖示列；支援 OpenAI 相容 API、Ollama／LM Studio，以及 Codex／Claude Code／Gemini CLI。選項頁以卡片顯示 CLI 路徑、帳號標籤與登入方式，可直接切換目前服務，進階區只顯示該服務需要的欄位；只讀取非敏感帳號欄位，不顯示 token 或金鑰。可附上目前資料庫結構當上下文，回覆的 SQL 可一鍵插入查詢分頁；API 金鑰存 Windows 認證管理員。 |
 | 資料字典 | 可用 | 資料庫節點右鍵產生整庫結構文件（欄位、索引、CREATE 語句、目錄），輸出 HTML，瀏覽器可另存 PDF。 |
 | 唯讀 ER 圖 | 可用 | 五種 provider 共用 schema 快照，可顯示資料表、欄位、主鍵與外鍵關聯；支援縮放、適合視窗、中鍵平移、重新整理與完整圖面 PNG 匯出。 |
 | 資料庫結構差異 | 可用 | 可從 Models 或資料庫右鍵選擇另一個已開啟的資料庫，比對資料表、欄位型別、空值、主鍵與外鍵；支援跨 provider、交換方向、重新比較及 HTML 報告。整個流程唯讀，不會執行 DDL。 |

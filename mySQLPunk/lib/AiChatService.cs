@@ -42,6 +42,38 @@ namespace mySQLPunk.lib
         }
     }
 
+    public enum AiCliAccountState
+    {
+        SignedIn,
+        NotFound,
+        Unknown,
+        Unsupported
+    }
+
+    /// <summary>
+    /// 從 CLI 自己的本機設定檔讀到的非敏感帳號資訊。
+    /// 只保留帳號標籤與登入方式，token、金鑰和 credential 值一律不離開解析流程。
+    /// </summary>
+    public sealed class AiCliAccountInfo
+    {
+        public AiCliAccountState State;
+        public string Label;
+        public string Method;
+    }
+
+    public sealed class AiCliDetectionResult
+    {
+        public AiProviderPreset Preset;
+        public string Executable;
+        public string ExecutablePath;
+        public AiCliAccountInfo Account;
+
+        public bool Installed
+        {
+            get { return !string.IsNullOrWhiteSpace(ExecutablePath); }
+        }
+    }
+
     /// <summary>AI 助理的服務設定。除 Anthropic 走原生 Messages API 外，其餘都走 OpenAI 相容介面。</summary>
     public class AiChatSettings
     {
@@ -806,12 +838,152 @@ namespace mySQLPunk.lib
         public static List<AiProviderPreset> DetectInstalledClis()
         {
             var found = new List<AiProviderPreset>();
+            foreach (AiCliDetectionResult result in DetectCliProviders())
+            {
+                if (result.Installed) found.Add(result.Preset);
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// 列出所有支援的訂閱型 CLI，包含可執行檔路徑與非敏感登入資訊。
+        /// 此方法不執行 CLI，也不驗證遠端訂閱權限。
+        /// </summary>
+        public static List<AiCliDetectionResult> DetectCliProviders()
+        {
+            var results = new List<AiCliDetectionResult>();
             foreach (AiProviderPreset preset in Presets)
             {
                 if (preset.AuthStyle != "cli") continue;
-                if (ResolveCliExecutablePath(CliExecutableFor(preset.Id)) != null) found.Add(preset);
+                string executable = CliExecutableFor(preset.Id);
+                results.Add(new AiCliDetectionResult
+                {
+                    Preset = preset,
+                    Executable = executable,
+                    ExecutablePath = ResolveCliExecutablePath(executable),
+                    Account = DetectCliAccount(preset.Id)
+                });
             }
-            return found;
+            return results;
+        }
+
+        public static AiCliAccountInfo ParseCliAccountInfo(string providerId, string rawJson)
+        {
+            try
+            {
+                JObject document = JObject.Parse(rawJson ?? "");
+                switch ((providerId ?? "").ToLowerInvariant())
+                {
+                    case "codex-cli":
+                        return ParseCodexAccount(document);
+                    case "claude-cli":
+                        string claudeEmail = SafeAccountLabel((string)document.SelectToken("oauthAccount.emailAddress"));
+                        return BuildAccount(
+                            AiCliAccountState.SignedIn,
+                            claudeEmail,
+                            "Claude.ai",
+                            claudeEmail != null);
+                    case "gemini-cli":
+                        string geminiAccount = SafeAccountLabel((string)document["active"]);
+                        return BuildAccount(
+                            AiCliAccountState.SignedIn,
+                            geminiAccount,
+                            "Google",
+                            geminiAccount != null);
+                    default:
+                        return BuildAccount(AiCliAccountState.Unsupported, null, null, false);
+                }
+            }
+            catch
+            {
+                return BuildAccount(AiCliAccountState.Unknown, null, null, false);
+            }
+        }
+
+        private static AiCliAccountInfo DetectCliAccount(string providerId)
+        {
+            string relativePath;
+            switch ((providerId ?? "").ToLowerInvariant())
+            {
+                case "codex-cli": relativePath = Path.Combine(".codex", "auth.json"); break;
+                case "claude-cli": relativePath = ".claude.json"; break;
+                case "gemini-cli": relativePath = Path.Combine(".gemini", "google_accounts.json"); break;
+                default: return BuildAccount(AiCliAccountState.Unsupported, null, null, false);
+            }
+
+            try
+            {
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if (string.IsNullOrWhiteSpace(home)) home = Environment.GetEnvironmentVariable("USERPROFILE");
+                if (string.IsNullOrWhiteSpace(home))
+                    return BuildAccount(AiCliAccountState.Unknown, null, null, false);
+
+                string path = Path.Combine(home, relativePath);
+                if (!File.Exists(path))
+                    return BuildAccount(AiCliAccountState.NotFound, null, null, false);
+                return ParseCliAccountInfo(providerId, File.ReadAllText(path, Encoding.UTF8));
+            }
+            catch
+            {
+                return BuildAccount(AiCliAccountState.Unknown, null, null, false);
+            }
+        }
+
+        private static AiCliAccountInfo ParseCodexAccount(JObject document)
+        {
+            string mode = ((string)document["auth_mode"] ?? "").Trim();
+            string method = mode.Equals("chatgpt", StringComparison.OrdinalIgnoreCase)
+                ? "ChatGPT"
+                : mode.IndexOf("api", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? "OpenAI API Key"
+                    : "OpenAI Codex";
+            string email = TryReadJwtEmail((string)document.SelectToken("tokens.id_token"));
+            bool hasLoginMetadata = email != null || mode.Length > 0;
+            return BuildAccount(AiCliAccountState.SignedIn, email, method, hasLoginMetadata);
+        }
+
+        private static string TryReadJwtEmail(string token)
+        {
+            try
+            {
+                string[] parts = (token ?? "").Split('.');
+                if (parts.Length < 2) return null;
+                string payload = parts[1].Replace('-', '+').Replace('_', '/');
+                while (payload.Length % 4 != 0) payload += "=";
+                string json = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+                return SafeAccountLabel((string)JObject.Parse(json)["email"]);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string SafeAccountLabel(string value)
+        {
+            string label = (value ?? "").Trim();
+            if (label.Length == 0 || label.Length > 320) return null;
+            for (int i = 0; i < label.Length; i++)
+            {
+                if (char.IsControl(label[i])) return null;
+            }
+            return label;
+        }
+
+        private static AiCliAccountInfo BuildAccount(
+            AiCliAccountState requestedState,
+            string label,
+            string method,
+            bool hasLoginMetadata)
+        {
+            return new AiCliAccountInfo
+            {
+                State = requestedState == AiCliAccountState.SignedIn && !hasLoginMetadata
+                    ? AiCliAccountState.Unknown
+                    : requestedState,
+                Label = label,
+                Method = hasLoginMetadata ? method : null
+            };
         }
 
         /// <summary>偵測本機推論服務（Ollama / LM Studio），回傳偵測到的供應商與其模型。</summary>
