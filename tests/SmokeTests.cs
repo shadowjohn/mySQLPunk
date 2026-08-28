@@ -51,6 +51,7 @@ public static class SmokeTests
         Run("Query execution plan service", TestQueryExecutionPlanService, ref passed);
         Run("SQL editor completion and snippets", TestSqlEditorCompletionAndSnippets, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
+        Run("Query editor AI actions", TestQueryEditorAiActions, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
@@ -5929,6 +5930,71 @@ public static class SmokeTests
             ApplicationOptionSettings.SetString("RecordRowHeightMode", oldRowHeightMode);
             ApplicationOptionSettings.SetString("FileExportDirectory", oldExportDirectory);
             ApplicationOptionSettings.Save();
+        }
+    }
+
+    private static void TestQueryEditorAiActions()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            string explain = QueryAiPromptService.BuildPrompt(
+                QueryAiAction.Explain,
+                "mysql",
+                "sales",
+                "SELECT id FROM orders;",
+                null);
+            AssertContains(explain, "請解釋以下 SQL", "Explain action should use a Traditional Chinese instruction.");
+            AssertContains(explain, "資料庫引擎：mysql", "AI prompt should include the provider without connection details.");
+            AssertContains(explain, "<sql>", "AI prompt should open a SQL data boundary.");
+            AssertContains(explain, "SELECT id FROM orders;", "AI prompt should preserve the selected SQL.");
+            AssertContains(explain, "</sql>", "AI prompt should close the SQL data boundary.");
+
+            string fix = QueryAiPromptService.BuildPrompt(
+                QueryAiAction.FixError,
+                "postgresql",
+                "warehouse",
+                "SELEC * FROM inventory;",
+                "syntax error; password=\"hunter two\"; access_token: abc123; Authorization: Bearer abc.def.ghi; https://user:pass@example.test/db");
+            AssertContains(fix, "資料庫錯誤：", "Fix action should include the database error.");
+            Assert(fix.IndexOf("hunter two", StringComparison.Ordinal) < 0, "AI error drafts must redact quoted password assignments.");
+            Assert(fix.IndexOf("abc123", StringComparison.Ordinal) < 0, "AI error drafts must redact access tokens.");
+            Assert(fix.IndexOf("abc.def.ghi", StringComparison.Ordinal) < 0, "AI error drafts must redact bearer credentials.");
+            Assert(fix.IndexOf("user:pass", StringComparison.Ordinal) < 0, "AI error drafts must redact URI user info.");
+            AssertContains(fix, "password=[redacted]", "AI error drafts should make redaction visible.");
+
+            string longPrompt = QueryAiPromptService.BuildPrompt(
+                QueryAiAction.Optimize,
+                "sqlite",
+                "main",
+                new string('x', QueryAiPromptService.MaxSqlLength + 100),
+                null);
+            AssertContains(longPrompt, "[truncated]", "Oversized SQL should be bounded before entering an AI draft.");
+
+            using (QueryForm form = new QueryForm(new FakeExecDatabase("mysql", "0"), "sales"))
+            {
+                ToolStripDropDownButton askAi = GetPrivateField<ToolStripDropDownButton>(form, "tsBtnAskAi");
+                ToolStripMenuItem fixItem = GetPrivateField<ToolStripMenuItem>(form, "tsAiFixErrorItem");
+                Assert(askAi != null && askAi.DropDownItems.Count == 4, "Query toolbar should expose explain, optimize, and fix-error AI actions.");
+                Assert(!fixItem.Enabled, "Fix-error action should stay disabled before a query failure.");
+
+                MethodInfo rememberFailure = typeof(QueryForm).GetMethod("RememberQueryFailure", BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo clearFailure = typeof(QueryForm).GetMethod("ClearQueryFailure", BindingFlags.Instance | BindingFlags.NonPublic);
+                rememberFailure.Invoke(form, new object[] { "SELECT broken", "syntax error" });
+                Assert(fixItem.Enabled, "Fix-error action should become available after a query failure.");
+                clearFailure.Invoke(form, null);
+                Assert(!fixItem.Enabled, "A new query run should clear the previous fix-error action.");
+
+                Localization.SetLanguage(Localization.English, false);
+                form.ApplyLanguage();
+                AssertEquals("Ask AI", askAi.Text, "Query AI toolbar should support English.");
+                AssertEquals("Fix last execution error", fixItem.Text, "Fix-error action should support English.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
         }
     }
 

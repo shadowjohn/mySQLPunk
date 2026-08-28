@@ -59,6 +59,8 @@ namespace mySQLPunk
         private bool _recordLimitEnabled = true;
         private string _lastResultSql = "";
         private bool _lastResultCanStreamExport;
+        private string _lastFailedSql = "";
+        private string _lastFailureReason = "";
         private const int GridFullAutoResizeRowLimit = 200;
         private const int GridRowHeightApplyLimit = 500;
         private const int WM_SETREDRAW = 0x000B;
@@ -153,6 +155,10 @@ namespace mySQLPunk
         private ToolStripButton tsBtnExplain;
         private ToolStripButton tsBtnCancel;
         private ToolStripButton tsBtnBeautify;
+        private ToolStripDropDownButton tsBtnAskAi;
+        private ToolStripMenuItem tsAiExplainItem;
+        private ToolStripMenuItem tsAiOptimizeItem;
+        private ToolStripMenuItem tsAiFixErrorItem;
         private ToolStripButton tsBtnSave;
         private ToolStripButton tsBtnAdd;
         private ToolStripButton tsBtnDelete;
@@ -1013,6 +1019,11 @@ namespace mySQLPunk
             tsBtnExplain = new ToolStripButton(Localization.T("Query.ExplainPlan"), null, (s, e) => ExplainQueryAsync()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             tsBtnCancel = new ToolStripButton(Localization.T("Query.Stop"), null, (s, e) => CancelQuery()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Enabled = false };
             tsBtnBeautify = new ToolStripButton(Localization.T("Query.Beautify"), null, (s, e) => BeautifySql()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsBtnAskAi = new ToolStripDropDownButton(Localization.T("Query.AskAi")) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
+            tsAiExplainItem = new ToolStripMenuItem(Localization.T("Query.AiExplain"), null, (s, e) => OpenAiDraft(QueryAiAction.Explain));
+            tsAiOptimizeItem = new ToolStripMenuItem(Localization.T("Query.AiOptimize"), null, (s, e) => OpenAiDraft(QueryAiAction.Optimize));
+            tsAiFixErrorItem = new ToolStripMenuItem(Localization.T("Query.AiFixError"), null, (s, e) => OpenAiDraft(QueryAiAction.FixError)) { Enabled = false };
+            tsBtnAskAi.DropDownItems.AddRange(new ToolStripItem[] { tsAiExplainItem, tsAiOptimizeItem, new ToolStripSeparator(), tsAiFixErrorItem });
             
             tsBtnSave = new ToolStripButton(Localization.T("Query.Save"), null, (s, e) => SaveChanges()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
             tsBtnAdd = new ToolStripButton(Localization.T("Query.Add"), null, (s, e) => AddNewRow()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
@@ -1024,7 +1035,7 @@ namespace mySQLPunk
             tsBtnDock = new ToolStripButton(Localization.T("Query.Dock"), null, (s, e) => DockToMainWindow()) { DisplayStyle = ToolStripItemDisplayStyle.Image, Visible = false };
 
             mainToolStrip.Items.AddRange(new ToolStripItem[] { 
-                tsBtnExecute, tsBtnExplain, tsBtnCancel, tsBtnBeautify,
+                tsBtnExecute, tsBtnExplain, tsBtnCancel, tsBtnBeautify, tsBtnAskAi,
                 new ToolStripSeparator(), 
                 tsBtnSave, tsBtnAdd, tsBtnDelete, tsBtnRefresh, 
                 new ToolStripSeparator(), 
@@ -2540,6 +2551,7 @@ namespace mySQLPunk
             if (_isQueryBusy) return;
 
             Stopwatch sw = Stopwatch.StartNew();
+            ClearQueryFailure();
             _isQueryBusy = true;
             try
             {
@@ -2592,6 +2604,7 @@ namespace mySQLPunk
                 string reason = BuildQueryExceptionMessage(ex);
                 UpdateStatus(Localization.Format("Query.LoadFailed", reason));
                 ShowResultFeedback(Localization.T("Query.QueryError"), Localization.Format("Query.LoadTableFailed", reason));
+                RememberQueryFailure(GetSqlForAi(), reason);
             }
             finally
             {
@@ -2755,6 +2768,7 @@ namespace mySQLPunk
 
             string sql = GetSqlToExecute(rawSql);
             Stopwatch sw = Stopwatch.StartNew();
+            ClearQueryFailure();
 
             // busy 設定後立刻進 try：UI 狀態變更也要在 finally 的保護傘下，
             // 否則中途丟例外會留下停用的執行鈕與掛著的遮罩
@@ -2885,6 +2899,7 @@ namespace mySQLPunk
                         string status = Localization.Format("Query.ErrorStatus", reason);
                         UpdateStatus(status);
                         ShowResultFeedback(Localization.T("Query.ExecuteError"), reason);
+                        RememberQueryFailure(sql, reason);
                         _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
                     }
                 }
@@ -2903,6 +2918,7 @@ namespace mySQLPunk
                 string status = Localization.Format("Query.ErrorStatus", reason);
                 UpdateStatus(status);
                 ShowResultFeedback(Localization.T("Query.QueryError"), reason);
+                RememberQueryFailure(sql, reason);
                 _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
             }
             finally
@@ -3112,6 +3128,54 @@ namespace mySQLPunk
             return string.IsNullOrWhiteSpace(reason) ? Localization.T("Query.UnknownError") : reason;
         }
 
+        private string GetSqlForAi()
+        {
+            if (txtSql == null) return string.Empty;
+            return (txtSql.SelectionLength > 0 ? txtSql.SelectedText : txtSql.Text).Trim();
+        }
+
+        private void OpenAiDraft(QueryAiAction action)
+        {
+            string sql = action == QueryAiAction.FixError ? _lastFailedSql : GetSqlForAi();
+            string errorReason = action == QueryAiAction.FixError ? _lastFailureReason : string.Empty;
+            if (string.IsNullOrWhiteSpace(sql))
+            {
+                UpdateStatus(Localization.T(action == QueryAiAction.FixError ? "Query.AiNoError" : "Query.AiNoSql"));
+                return;
+            }
+            if (_mainHost == null)
+            {
+                UpdateStatus(Localization.T("Query.AiNeedsMainWindow"));
+                return;
+            }
+
+            string prompt = QueryAiPromptService.BuildPrompt(
+                action,
+                _db == null ? string.Empty : _db.ProviderName,
+                _databaseName,
+                sql,
+                errorReason);
+            if (string.IsNullOrWhiteSpace(prompt)) return;
+
+            _mainHost.ShowAiAssistantDraft(prompt);
+            UpdateStatus(Localization.T("Query.AiDraftReady"));
+        }
+
+        private void RememberQueryFailure(string sql, string reason)
+        {
+            _lastFailedSql = (sql ?? string.Empty).Trim();
+            _lastFailureReason = BuildQueryFailureReason(reason);
+            if (tsAiFixErrorItem != null)
+                tsAiFixErrorItem.Enabled = _lastFailedSql.Length > 0;
+        }
+
+        private void ClearQueryFailure()
+        {
+            _lastFailedSql = string.Empty;
+            _lastFailureReason = string.Empty;
+            if (tsAiFixErrorItem != null) tsAiFixErrorItem.Enabled = false;
+        }
+
         public void ApplyLanguage()
         {
             ApplyMenuLanguage();
@@ -3120,6 +3184,10 @@ namespace mySQLPunk
             if (tsBtnExplain != null) tsBtnExplain.Text = Localization.T("Query.ExplainPlan");
             if (tsBtnCancel != null) tsBtnCancel.Text = Localization.T("Query.Stop");
             if (tsBtnBeautify != null) tsBtnBeautify.Text = Localization.T("Query.Beautify");
+            if (tsBtnAskAi != null) tsBtnAskAi.Text = Localization.T("Query.AskAi");
+            if (tsAiExplainItem != null) tsAiExplainItem.Text = Localization.T("Query.AiExplain");
+            if (tsAiOptimizeItem != null) tsAiOptimizeItem.Text = Localization.T("Query.AiOptimize");
+            if (tsAiFixErrorItem != null) tsAiFixErrorItem.Text = Localization.T("Query.AiFixError");
             if (tsBtnSave != null) tsBtnSave.Text = Localization.T("Query.Save");
             if (tsBtnAdd != null) tsBtnAdd.Text = Localization.T("Query.Add");
             if (tsBtnDelete != null) tsBtnDelete.Text = Localization.T("Query.Delete");
@@ -3154,6 +3222,7 @@ namespace mySQLPunk
             ThemeManager.SetGlyph(tsBtnExplain, UiGlyph.Chart, size, ThemeManager.AccentColor);
             ThemeManager.SetGlyph(tsBtnCancel, UiGlyph.Stop, size);
             ThemeManager.SetGlyph(tsBtnBeautify, UiGlyph.Code, size);
+            ThemeManager.SetGlyph(tsBtnAskAi, UiGlyph.Model, size, ThemeManager.AccentColor);
             ThemeManager.SetGlyph(tsBtnSave, UiGlyph.Save, size);
             ThemeManager.SetGlyph(tsBtnAdd, UiGlyph.Plus, size);
             ThemeManager.SetGlyph(tsBtnDelete, UiGlyph.Trash, size);

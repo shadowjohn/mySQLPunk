@@ -258,6 +258,7 @@
     <Compile Include="lib\ObjectUriService.cs" />
     <Compile Include="lib\AiChatService.cs" />
     <Compile Include="lib\AiOAuthService.cs" />
+    <Compile Include="lib\QueryAiPromptService.cs" />
     <Compile Include="lib\DataDictionaryService.cs" />
     <Compile Include="lib\DataProfilingService.cs" />
     <Compile Include="lib\AppIconService.cs" />

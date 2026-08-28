@@ -1545,6 +1545,10 @@ namespace mySQLPunk
             Add("Query.Execute", "執行", "Execute");
             Add("Query.Stop", "停止", "Stop");
             Add("Query.Beautify", "美化", "Beautify");
+            Add("Query.AskAi", "詢問 AI", "Ask AI");
+            Add("Query.AiExplain", "解釋選取／目前 SQL", "Explain selected / current SQL");
+            Add("Query.AiOptimize", "最佳化選取／目前 SQL", "Optimize selected / current SQL");
+            Add("Query.AiFixError", "修正上次執行錯誤", "Fix last execution error");
             Add("Query.Snippets", "程式碼片段...", "Code Snippets...");
             Add("Query.CompletionSnippet", "片段", "Snippet");
             Add("Query.CompletionAlias", "別名", "Alias");
@@ -1699,6 +1703,10 @@ namespace mySQLPunk
             Add("Query.ErrorStatus", "錯誤：{0}", "Error: {0}");
             Add("Query.ExecuteError", "執行錯誤", "Execute Error");
             Add("Query.QueryError", "查詢錯誤", "Query Error");
+            Add("Query.AiNoSql", "請先選取 SQL，或在編輯器輸入 SQL。", "Select SQL or enter SQL in the editor first.");
+            Add("Query.AiNoError", "目前沒有可交給 AI 修正的執行錯誤。", "There is no execution error to send to AI.");
+            Add("Query.AiNeedsMainWindow", "詢問 AI 需要由 mySQLPunk 主視窗開啟查詢。", "Ask AI requires a query opened from the mySQLPunk main window.");
+            Add("Query.AiDraftReady", "SQL 與相關資訊已帶入 AI 草稿，確認內容後再送出。", "The SQL and related details are in the AI draft. Review them before sending.");
             Add("Query.SaveTableDataOnly", "只有開啟資料表資料時才能儲存變更。", "Changes can only be saved when table data is open.");
             Add("Query.NoDataToSave", "目前沒有可儲存的資料。", "There is no data to save.");
             Add("Query.NoChangesDetected", "沒有偵測到資料變更。", "No data changes were detected.");

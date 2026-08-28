@@ -181,6 +181,20 @@ namespace mySQLPunk
         private Button refreshModelsButton;
         private bool _suppressPickerEvents;
 
+        public void SetDraft(string text)
+        {
+            string draft = (text ?? string.Empty).Trim();
+            if (draft.Length == 0 || inputBox == null) return;
+
+            inputBox.Text = draft;
+            inputBox.SelectionStart = inputBox.Text.Length;
+            inputBox.SelectionLength = 0;
+            includeContextBox.Checked = true;
+            _lastAssistantSql = null;
+            actionPanel.Visible = false;
+            inputBox.Focus();
+        }
+
         public void ApplyLanguage()
         {
             titleLabel.Text = Localization.T("Ai.PanelTitle");

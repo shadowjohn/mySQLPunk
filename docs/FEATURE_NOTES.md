@@ -110,6 +110,12 @@
   - 安全：一次只接受一個 SELECT／WITH／INSERT／UPDATE／DELETE／REPLACE，拒絕 DDL 與多 statement；不使用 PostgreSQL `ANALYZE`，SQL Server 成功或失敗都會關閉 `SHOWPLAN_ALL`，Oracle `EXPLAIN PLAN` 與 SQLite `EXPLAIN QUERY PLAN` 也不會執行原本 DML。
   - 驗證：smoke test 覆蓋 MySQL／PostgreSQL JSON 階層、SQL Server session 清理、Oracle statement ID 與 `PLAN_TABLE` 清理、SQLite 記憶體資料庫原生計畫，以及三種視圖與 provider 顯示。
 
+- **查詢編輯器詢問 AI 與錯誤交接 ✅ 已完成**
+  - 入口：查詢工具列的「詢問 AI」可對選取範圍或整份 SQL 建立解釋、最佳化草稿；使用者仍能在 Punky 輸入框檢查內容，再自行決定是否送出。
+  - 錯誤修正：SELECT／DML／DDL 執行失敗後才會啟用「修正上次執行錯誤」，使用當次實際 SQL、provider、資料庫名稱與錯誤原因組成草稿；開始下一次查詢時會清除舊錯誤，避免修到不相干的 SQL。
+  - 安全：不帶主機、帳號或連線字串；錯誤文字中的 password／pwd、token、API key、secret 與 Bearer credential 會先遮蔽，SQL 限制 20,000 字元、錯誤限制 4,000 字元，且只建立草稿、不自動呼叫外部模型。
+  - 尚未包含：AI 回覆與原 SQL 的差異並排、逐段勾選及確認後覆寫，留在下一階段。
+
 - **AI 訂閱 CLI 偵測與選項卡片 ✅ 已完成**
   - 畫面：「選項 > AI」以三張卡片顯示 OpenAI Codex、Claude Code 與 Gemini CLI 的安裝狀態、實際執行路徑、帳號標籤、登入方式及目前選用狀態；可重新偵測或直接切換服務。卡片下方只保留目前服務需要的設定：CLI 顯示模型與測試，API 顯示端點、模型與金鑰，本機模型顯示端點、模型與偵測；CLI 找不到執行檔或已有自訂路徑時才顯示路徑欄。
   - 帳號來源：Codex 只取 `.codex/auth.json` 的登入模式與 ID token 內 email，Claude 只取 `.claude.json` 的 `oauthAccount.emailAddress`，Gemini 只取 `.gemini/google_accounts.json` 的 active 帳號；解析結果不含 token、OAuth credential 或 API key。
