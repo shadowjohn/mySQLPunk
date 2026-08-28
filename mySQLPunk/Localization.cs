@@ -490,10 +490,13 @@ namespace mySQLPunk
             Add("Ai.ReviewSql", "比較並套用", "Compare and apply");
             Add("Ai.SqlReviewTitle", "確認 AI SQL 變更", "Review AI SQL changes");
             Add("Ai.SqlReviewSubtitle", "逐行比較原始內容與 AI 建議", "Compare the original and AI suggestion line by line");
-            Add("Ai.SqlReviewIntro", "AI 建議尚未執行；請確認完整差異後再套用到編輯器。", "The AI suggestion has not been executed. Review the full diff before applying it to the editor.");
+            Add("Ai.SqlReviewIntro", "AI 建議尚未執行；勾選要採用的變更區段，確認後再套用到編輯器。", "The AI suggestion has not been executed. Select the change groups to keep, then apply them to the editor.");
             Add("Ai.SqlReviewOriginal", "原始 SQL", "Original SQL");
             Add("Ai.SqlReviewSuggested", "AI 建議 SQL", "AI suggestion");
-            Add("Ai.SqlReviewApply", "確認套用", "Apply changes");
+            Add("Ai.SqlReviewApplyGroup", "套用", "Apply");
+            Add("Ai.SqlReviewGroupTooltip", "變更區段 {0}；同一區段會一起切換", "Change group {0}; the whole group is toggled together");
+            Add("Ai.SqlReviewSelectedGroups", "已選 {0}/{1} 個變更區段", "Selected {0} of {1} change groups");
+            Add("Ai.SqlReviewApply", "套用已選變更", "Apply selected changes");
             Add("Ai.SuggestGenerate", "幫我寫一段查詢：", "Write a query for me: ");
             Add("Ai.SuggestExplain", "解釋這段 SQL 在做什麼：", "Explain what this SQL does: ");
             Add("Ai.SuggestOptimize", "這個查詢可以怎麼最佳化？", "How can this query be optimized?");

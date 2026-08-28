@@ -6013,10 +6013,45 @@ public static class SmokeTests
         Assert(diff[0].Kind == AiSqlDiffKind.Same, "Unchanged SQL lines should stay aligned.");
         Assert(diff[1].Kind == AiSqlDiffKind.Changed, "Rewritten SQL lines should appear as a side-by-side change.");
         Assert(diff[4].Kind == AiSqlDiffKind.Added, "New SQL lines should be marked as added.");
+        Assert(diff[1].ChangeGroup == 1, "The first contiguous SQL change should be assigned to group one.");
+        Assert(diff[3].ChangeGroup == 2 && diff[4].ChangeGroup == 2,
+            "Adjacent changed and added lines should be toggled as one change group.");
+
+        AssertEquals(
+            suggested,
+            AiSqlReviewService.BuildSelectedSql(diff, new HashSet<int> { 1, 2 }, original),
+            "Selecting every change group should rebuild the complete AI suggestion.");
+        AssertEquals(
+            original,
+            AiSqlReviewService.BuildSelectedSql(diff, new HashSet<int>(), original),
+            "Selecting no change group should rebuild the original SQL.");
+        AssertEquals(
+            "SELECT id,\n       display_name\nFROM users\nWHERE active = 1;",
+            AiSqlReviewService.BuildSelectedSql(diff, new HashSet<int> { 1 }, original),
+            "Selecting only the first group should keep later original SQL and omit later additions.");
+        AssertEquals(
+            "SELECT id,\n       name\nFROM users\nWHERE active = 1\nORDER BY id;",
+            AiSqlReviewService.BuildSelectedSql(diff, new HashSet<int> { 2 }, original),
+            "Selecting only the second group should preserve the first original SQL line.");
+
+        string originalCrLf = "A\r\nB\r\nC";
+        List<AiSqlDiffRow> crLfDiff = AiSqlReviewService.BuildDiff(originalCrLf, "A\r\nX\r\nC");
+        AssertEquals(
+            "A\r\nX\r\nC",
+            AiSqlReviewService.BuildSelectedSql(crLfDiff, new HashSet<int> { 1 }, originalCrLf),
+            "Partially rebuilt SQL should preserve the original editor newline style.");
 
         List<AiSqlDiffRow> removed = AiSqlReviewService.BuildDiff("A\nB\nC", "A\nC");
         Assert(removed.Any(row => row.Kind == AiSqlDiffKind.Removed && row.OriginalText == "B"),
             "Deleted SQL lines should remain visible on the original side.");
+        AssertEquals(
+            "A\nC",
+            AiSqlReviewService.BuildSelectedSql(removed, new HashSet<int> { 1 }, "A\nB\nC"),
+            "Selecting a removal group should omit the removed original line.");
+        AssertEquals(
+            "A\nB\nC",
+            AiSqlReviewService.BuildSelectedSql(removed, new HashSet<int>(), "A\nB\nC"),
+            "Cancelling a removal group should keep the original line.");
 
         string updated;
         AiSqlApplyFailure failure;
@@ -6054,10 +6089,19 @@ public static class SmokeTests
             {
                 DataGridView grid = GetPrivateField<DataGridView>(form, "_diffGrid");
                 Button applyButton = GetPrivateField<Button>(form, "_applyButton");
-                Assert(grid.Columns.Count == 4, "The review dialog should show original and suggested SQL side by side.");
+                Assert(grid.Columns.Count == 5, "The review dialog should show change selection plus original and suggested SQL side by side.");
                 Assert(grid.Rows.Count == diff.Count, "The review dialog should render every aligned diff row.");
-                AssertEquals("確認套用", applyButton.Text, "The review dialog should require an explicit apply action.");
+                AssertEquals("套用已選變更", applyButton.Text, "The review dialog should make partial apply explicit.");
                 Assert(form.AcceptButton == applyButton, "The reviewed apply action should be the dialog's explicit default action.");
+                AssertEquals(suggested, form.SelectedSql, "All change groups should be selected by default.");
+
+                grid.Rows[1].Cells["ApplyChange"].Value = false;
+                AssertEquals(
+                    "SELECT id,\n       name\nFROM users\nWHERE active = 1\nORDER BY id;",
+                    form.SelectedSql,
+                    "Unchecking one group in the dialog should preserve only that group's original SQL.");
+                grid.Rows[3].Cells["ApplyChange"].Value = false;
+                Assert(!applyButton.Enabled, "The apply action should be disabled when no change group is selected.");
             }
 
             string reviewedSql = null;
@@ -6091,6 +6135,15 @@ public static class SmokeTests
                 typeof(AiAssistantPanel).GetMethod("UpdateSqlActions", BindingFlags.Instance | BindingFlags.NonPublic)
                     .Invoke(panel, null);
                 Assert(!reviewButton.Visible, "A normal AI chat must not reuse an editor review callback from an earlier request.");
+            }
+
+            Localization.SetLanguage(Localization.English, false);
+            using (AiSqlReviewForm englishForm = new AiSqlReviewForm(original, suggested))
+            {
+                DataGridView englishGrid = GetPrivateField<DataGridView>(englishForm, "_diffGrid");
+                Button englishApply = GetPrivateField<Button>(englishForm, "_applyButton");
+                AssertEquals("Apply", englishGrid.Columns["ApplyChange"].HeaderText, "The change selector should support English.");
+                AssertEquals("Apply selected changes", englishApply.Text, "The partial apply action should support English.");
             }
         }
         finally

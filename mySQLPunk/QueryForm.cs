@@ -3237,9 +3237,11 @@ namespace mySQLPunk
             }
 
             IWin32Window owner = _mainHost != null ? (IWin32Window)_mainHost : this;
+            string reviewedSql;
             using (AiSqlReviewForm dialog = new AiSqlReviewForm(target.OriginalSql, suggestedSql))
             {
                 if (dialog.ShowDialog(owner) != DialogResult.OK) return;
+                reviewedSql = dialog.SelectedSql;
             }
 
             // 使用者看差異時仍可能回頭改 SQL，因此在真正寫入前再檢查一次快照。
@@ -3248,7 +3250,7 @@ namespace mySQLPunk
                 target.EditorSnapshot,
                 target.SelectionStart,
                 target.SelectionLength,
-                suggestedSql,
+                reviewedSql,
                 out updatedText,
                 out failure))
             {
@@ -3260,11 +3262,11 @@ namespace mySQLPunk
             if (target.SelectionLength > 0)
             {
                 txtSql.SelectionStart = target.SelectionStart;
-                txtSql.SelectionLength = suggestedSql.Length;
+                txtSql.SelectionLength = reviewedSql.Length;
             }
             else
             {
-                txtSql.SelectionStart = Math.Min(suggestedSql.Length, txtSql.Text.Length);
+                txtSql.SelectionStart = Math.Min(reviewedSql.Length, txtSql.Text.Length);
                 txtSql.SelectionLength = 0;
             }
             txtSql.Focus();

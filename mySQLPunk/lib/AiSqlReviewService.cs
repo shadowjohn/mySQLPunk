@@ -18,6 +18,7 @@ namespace mySQLPunk.lib
         public int? SuggestedLineNumber { get; set; }
         public string SuggestedText { get; set; }
         public AiSqlDiffKind Kind { get; set; }
+        public int ChangeGroup { get; set; }
     }
 
     public enum AiSqlApplyFailure
@@ -53,7 +54,7 @@ namespace mySQLPunk.lib
                 || suggestedLines.Length > MaximumLcsLines
                 || (long)originalLines.Length * suggestedLines.Length > MaximumLcsCells)
             {
-                return BuildLineByLineDiff(originalLines, suggestedLines);
+                return AssignChangeGroups(BuildLineByLineDiff(originalLines, suggestedLines));
             }
 
             int[,] lcs = new int[originalLines.Length + 1, suggestedLines.Length + 1];
@@ -131,7 +132,41 @@ namespace mySQLPunk.lib
                 newLine++;
             }
 
-            return AlignChangedLines(changes);
+            return AssignChangeGroups(AlignChangedLines(changes));
+        }
+
+        public static string BuildSelectedSql(
+            IList<AiSqlDiffRow> rows,
+            ISet<int> selectedChangeGroups,
+            string originalSql)
+        {
+            if (rows == null || rows.Count == 0) return string.Empty;
+
+            ISet<int> selected = selectedChangeGroups ?? new HashSet<int>();
+            List<string> lines = new List<string>();
+            foreach (AiSqlDiffRow row in rows)
+            {
+                if (row == null) continue;
+                bool useSuggestion = row.ChangeGroup > 0 && selected.Contains(row.ChangeGroup);
+                switch (row.Kind)
+                {
+                    case AiSqlDiffKind.Added:
+                        if (useSuggestion) lines.Add(row.SuggestedText ?? string.Empty);
+                        break;
+                    case AiSqlDiffKind.Removed:
+                        if (!useSuggestion) lines.Add(row.OriginalText ?? string.Empty);
+                        break;
+                    case AiSqlDiffKind.Changed:
+                        lines.Add(useSuggestion
+                            ? row.SuggestedText ?? string.Empty
+                            : row.OriginalText ?? string.Empty);
+                        break;
+                    default:
+                        lines.Add(row.OriginalText ?? string.Empty);
+                        break;
+                }
+            }
+            return string.Join(DetectNewLine(originalSql), lines);
         }
 
         public static bool TryApply(
@@ -250,6 +285,37 @@ namespace mySQLPunk.lib
                     rows.Add(ToDiffRow(added[addedIndex]));
             }
             return rows;
+        }
+
+        private static List<AiSqlDiffRow> AssignChangeGroups(List<AiSqlDiffRow> rows)
+        {
+            int group = 0;
+            bool inChange = false;
+            foreach (AiSqlDiffRow row in rows)
+            {
+                if (row.Kind == AiSqlDiffKind.Same)
+                {
+                    row.ChangeGroup = 0;
+                    inChange = false;
+                    continue;
+                }
+
+                if (!inChange)
+                {
+                    group++;
+                    inChange = true;
+                }
+                row.ChangeGroup = group;
+            }
+            return rows;
+        }
+
+        private static string DetectNewLine(string sql)
+        {
+            string text = sql ?? string.Empty;
+            if (text.IndexOf("\r\n", StringComparison.Ordinal) >= 0) return "\r\n";
+            if (text.IndexOf('\r') >= 0) return "\r";
+            return "\n";
         }
 
         private static AiSqlDiffRow ToDiffRow(LineChange change)
