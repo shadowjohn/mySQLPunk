@@ -8,6 +8,8 @@ namespace mySQLPunk.lib
     {
         Explain,
         Optimize,
+        Format,
+        ConvertDialect,
         FixError
     }
 
@@ -38,7 +40,8 @@ namespace mySQLPunk.lib
             string providerName,
             string databaseName,
             string sql,
-            string errorReason)
+            string errorReason,
+            string targetProviderName = null)
         {
             string safeSql = Limit((sql ?? string.Empty).Trim(), MaxSqlLength);
             if (safeSql.Length == 0) return string.Empty;
@@ -49,7 +52,9 @@ namespace mySQLPunk.lib
                 StringComparison.OrdinalIgnoreCase);
             string provider = SafeLabel(providerName, 120);
             string database = SafeLabel(databaseName, 240);
+            string targetProvider = SafeLabel(targetProviderName, 120);
             string error = Limit(RedactSensitiveError(errorReason), MaxErrorLength);
+            if (action == QueryAiAction.ConvertDialect && targetProvider.Length == 0) return string.Empty;
 
             StringBuilder prompt = new StringBuilder();
             switch (action)
@@ -58,6 +63,16 @@ namespace mySQLPunk.lib
                     prompt.AppendLine(english
                         ? "Optimize the SQL below. Explain the issues first, then provide a complete revised SQL statement. Do not invent tables or columns that are not shown."
                         : "請最佳化以下 SQL。先說明問題，再提供完整的修改後 SQL；不要臆測未提供的資料表或欄位。");
+                    break;
+                case QueryAiAction.Format:
+                    prompt.AppendLine(english
+                        ? "Format only the layout, indentation, and SQL keyword casing. Do not change identifiers, literals, conditions, column order, or query logic. Return only the complete formatted SQL and do not execute it."
+                        : "請只調整以下 SQL 的排版、縮排與關鍵字大小寫；不要改變識別字、字面值、條件、欄位順序或查詢邏輯。只回傳完整的格式化 SQL，且不要實際執行。");
+                    break;
+                case QueryAiAction.ConvertDialect:
+                    prompt.AppendLine(english
+                        ? "Convert the SQL below to the target database dialect. Preserve its behavior and result columns. Explain any feature without a direct equivalent, then provide a complete converted SQL statement. Do not execute it."
+                        : "請將以下 SQL 轉換成目標資料庫語法，保留原本行為與輸出欄位。若有無法直接對應的功能，先說明差異，再提供完整的轉換後 SQL；不要實際執行。");
                     break;
                 case QueryAiAction.FixError:
                     prompt.AppendLine(english
@@ -75,6 +90,8 @@ namespace mySQLPunk.lib
                 prompt.AppendLine((english ? "Database engine: " : "資料庫引擎：") + provider);
             if (database.Length > 0)
                 prompt.AppendLine((english ? "Database: " : "資料庫：") + database);
+            if (action == QueryAiAction.ConvertDialect)
+                prompt.AppendLine((english ? "Target database engine: " : "目標資料庫引擎：") + targetProvider);
             if (action == QueryAiAction.FixError && error.Length > 0)
             {
                 prompt.AppendLine(english ? "Database error:" : "資料庫錯誤：");

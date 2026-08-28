@@ -168,6 +168,13 @@ namespace mySQLPunk
         private ToolStripDropDownButton tsBtnAskAi;
         private ToolStripMenuItem tsAiExplainItem;
         private ToolStripMenuItem tsAiOptimizeItem;
+        private ToolStripMenuItem tsAiFormatItem;
+        private ToolStripMenuItem tsAiConvertItem;
+        private ToolStripMenuItem tsAiConvertMySqlItem;
+        private ToolStripMenuItem tsAiConvertPostgreSqlItem;
+        private ToolStripMenuItem tsAiConvertSqlServerItem;
+        private ToolStripMenuItem tsAiConvertOracleItem;
+        private ToolStripMenuItem tsAiConvertSqliteItem;
         private ToolStripMenuItem tsAiFixErrorItem;
         private ToolStripSeparator tsAiFixSeparator;
         private ToolStripSeparator tsAiCustomSeparator;
@@ -1038,6 +1045,21 @@ namespace mySQLPunk
             tsBtnAskAi = new ToolStripDropDownButton(Localization.T("Query.AskAi")) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText };
             tsAiExplainItem = new ToolStripMenuItem(Localization.T("Query.AiExplain"), null, (s, e) => OpenAiDraft(QueryAiAction.Explain));
             tsAiOptimizeItem = new ToolStripMenuItem(Localization.T("Query.AiOptimize"), null, (s, e) => OpenAiDraft(QueryAiAction.Optimize));
+            tsAiFormatItem = new ToolStripMenuItem(Localization.T("Query.AiFormat"), null, (s, e) => OpenAiDraft(QueryAiAction.Format));
+            tsAiConvertItem = new ToolStripMenuItem(Localization.T("Query.AiConvert"));
+            tsAiConvertMySqlItem = new ToolStripMenuItem(Localization.T("Query.AiTargetMySql"), null, (s, e) => OpenAiDraft(QueryAiAction.ConvertDialect, "MySQL / MariaDB"));
+            tsAiConvertPostgreSqlItem = new ToolStripMenuItem(Localization.T("Query.AiTargetPostgreSql"), null, (s, e) => OpenAiDraft(QueryAiAction.ConvertDialect, "PostgreSQL"));
+            tsAiConvertSqlServerItem = new ToolStripMenuItem(Localization.T("Query.AiTargetSqlServer"), null, (s, e) => OpenAiDraft(QueryAiAction.ConvertDialect, "SQL Server"));
+            tsAiConvertOracleItem = new ToolStripMenuItem(Localization.T("Query.AiTargetOracle"), null, (s, e) => OpenAiDraft(QueryAiAction.ConvertDialect, "Oracle"));
+            tsAiConvertSqliteItem = new ToolStripMenuItem(Localization.T("Query.AiTargetSqlite"), null, (s, e) => OpenAiDraft(QueryAiAction.ConvertDialect, "SQLite"));
+            tsAiConvertItem.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                tsAiConvertMySqlItem,
+                tsAiConvertPostgreSqlItem,
+                tsAiConvertSqlServerItem,
+                tsAiConvertOracleItem,
+                tsAiConvertSqliteItem
+            });
             tsAiFixErrorItem = new ToolStripMenuItem(Localization.T("Query.AiFixError"), null, (s, e) => OpenAiDraft(QueryAiAction.FixError)) { Enabled = false };
             tsAiFixSeparator = new ToolStripSeparator();
             tsAiCustomSeparator = new ToolStripSeparator();
@@ -3170,6 +3192,7 @@ namespace mySQLPunk
         private void RefreshAiActionMenu()
         {
             if (tsBtnAskAi == null || tsAiExplainItem == null || tsAiOptimizeItem == null ||
+                tsAiFormatItem == null || tsAiConvertItem == null ||
                 tsAiFixErrorItem == null || tsAiFixSeparator == null ||
                 tsAiCustomSeparator == null || tsAiManageActionsItem == null) return;
 
@@ -3184,10 +3207,13 @@ namespace mySQLPunk
             {
                 tsAiExplainItem,
                 tsAiOptimizeItem,
+                tsAiFormatItem,
+                tsAiConvertItem,
                 tsAiFixSeparator,
                 tsAiFixErrorItem,
                 tsAiCustomSeparator
             });
+            UpdateAiConvertTargetState();
 
             IEnumerable<QueryAiCustomAction> pinned = _queryAiActionService == null
                 ? Enumerable.Empty<QueryAiCustomAction>()
@@ -3202,6 +3228,32 @@ namespace mySQLPunk
                 tsBtnAskAi.DropDownItems.Add(item);
             }
             tsBtnAskAi.DropDownItems.Add(tsAiManageActionsItem);
+        }
+
+        private void UpdateAiConvertTargetState()
+        {
+            string currentProvider = NormalizeAiProviderName(GetProviderName());
+            SetAiConvertTargetEnabled(tsAiConvertMySqlItem, currentProvider, "mysql");
+            SetAiConvertTargetEnabled(tsAiConvertPostgreSqlItem, currentProvider, "postgresql");
+            SetAiConvertTargetEnabled(tsAiConvertSqlServerItem, currentProvider, "mssql");
+            SetAiConvertTargetEnabled(tsAiConvertOracleItem, currentProvider, "oracle");
+            SetAiConvertTargetEnabled(tsAiConvertSqliteItem, currentProvider, "sqlite");
+        }
+
+        private static void SetAiConvertTargetEnabled(ToolStripMenuItem item, string currentProvider, string targetProvider)
+        {
+            if (item != null) item.Enabled = !string.Equals(currentProvider, targetProvider, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeAiProviderName(string providerName)
+        {
+            string provider = (providerName ?? string.Empty).Trim().ToLowerInvariant();
+            if (provider.Contains("mysql") || provider.Contains("maria")) return "mysql";
+            if (provider == "postgres" || provider == "pgsql" || provider.Contains("postgresql")) return "postgresql";
+            if (provider == "mssql" || provider.Contains("sql server") || provider.Contains("sqlserver")) return "mssql";
+            if (provider.Contains("oracle")) return "oracle";
+            if (provider.Contains("sqlite")) return "sqlite";
+            return provider;
         }
 
         private void OpenAiActionManager()
@@ -3245,7 +3297,7 @@ namespace mySQLPunk
             UpdateStatus(Localization.T("Query.AiDraftReady"));
         }
 
-        private void OpenAiDraft(QueryAiAction action)
+        private void OpenAiDraft(QueryAiAction action, string targetProviderName = null)
         {
             AiEditorTarget target = action == QueryAiAction.FixError
                 ? _lastFailedAiTarget
@@ -3270,7 +3322,8 @@ namespace mySQLPunk
                 _db == null ? string.Empty : _db.ProviderName,
                 _databaseName,
                 sql,
-                errorReason);
+                errorReason,
+                targetProviderName);
             if (string.IsNullOrWhiteSpace(prompt)) return;
 
             if (action == QueryAiAction.Explain)
@@ -3383,6 +3436,13 @@ namespace mySQLPunk
             if (tsBtnAskAi != null) tsBtnAskAi.Text = Localization.T("Query.AskAi");
             if (tsAiExplainItem != null) tsAiExplainItem.Text = Localization.T("Query.AiExplain");
             if (tsAiOptimizeItem != null) tsAiOptimizeItem.Text = Localization.T("Query.AiOptimize");
+            if (tsAiFormatItem != null) tsAiFormatItem.Text = Localization.T("Query.AiFormat");
+            if (tsAiConvertItem != null) tsAiConvertItem.Text = Localization.T("Query.AiConvert");
+            if (tsAiConvertMySqlItem != null) tsAiConvertMySqlItem.Text = Localization.T("Query.AiTargetMySql");
+            if (tsAiConvertPostgreSqlItem != null) tsAiConvertPostgreSqlItem.Text = Localization.T("Query.AiTargetPostgreSql");
+            if (tsAiConvertSqlServerItem != null) tsAiConvertSqlServerItem.Text = Localization.T("Query.AiTargetSqlServer");
+            if (tsAiConvertOracleItem != null) tsAiConvertOracleItem.Text = Localization.T("Query.AiTargetOracle");
+            if (tsAiConvertSqliteItem != null) tsAiConvertSqliteItem.Text = Localization.T("Query.AiTargetSqlite");
             if (tsAiFixErrorItem != null) tsAiFixErrorItem.Text = Localization.T("Query.AiFixError");
             if (tsAiManageActionsItem != null) tsAiManageActionsItem.Text = Localization.T("Query.AiManageActions");
             RefreshAiActionMenu();

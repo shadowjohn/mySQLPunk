@@ -1559,6 +1559,13 @@ namespace mySQLPunk
             Add("Query.AskAi", "詢問 AI", "Ask AI");
             Add("Query.AiExplain", "解釋選取／目前 SQL", "Explain selected / current SQL");
             Add("Query.AiOptimize", "最佳化選取／目前 SQL", "Optimize selected / current SQL");
+            Add("Query.AiFormat", "格式化選取／目前 SQL", "Format selected / current SQL");
+            Add("Query.AiConvert", "轉換資料庫語法", "Convert database dialect");
+            Add("Query.AiTargetMySql", "轉成 MySQL／MariaDB", "Convert to MySQL/MariaDB");
+            Add("Query.AiTargetPostgreSql", "轉成 PostgreSQL", "Convert to PostgreSQL");
+            Add("Query.AiTargetSqlServer", "轉成 SQL Server", "Convert to SQL Server");
+            Add("Query.AiTargetOracle", "轉成 Oracle", "Convert to Oracle");
+            Add("Query.AiTargetSqlite", "轉成 SQLite", "Convert to SQLite");
             Add("Query.AiFixError", "修正上次執行錯誤", "Fix last execution error");
             Add("Query.AiManageActions", "管理自訂動作…", "Manage custom actions...");
             Add("Query.Snippets", "程式碼片段...", "Code Snippets...");

@@ -52,6 +52,7 @@ public static class SmokeTests
         Run("SQL editor completion and snippets", TestSqlEditorCompletionAndSnippets, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
         Run("Query editor AI actions", TestQueryEditorAiActions, ref passed);
+        Run("Query AI SQL tools", TestQueryAiSqlTools, ref passed);
         Run("Query AI custom actions", TestQueryAiCustomActions, ref passed);
         Run("AI SQL diff review", TestAiSqlDiffReview, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
@@ -6003,6 +6004,82 @@ public static class SmokeTests
                 AssertEquals("Fix last execution error", fixItem.Text, "Fix-error action should support English.");
                 AssertEquals("Manage custom actions...", manageItem.Text, "Custom AI action management should support English.");
             }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
+    }
+
+    private static void TestQueryAiSqlTools()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            string formatPrompt = QueryAiPromptService.BuildPrompt(
+                QueryAiAction.Format,
+                "mysql",
+                "sales",
+                "select id,name from orders where active=1;",
+                null);
+            AssertContains(formatPrompt, "只調整以下 SQL 的排版", "AI format action should constrain changes to presentation.");
+            AssertContains(formatPrompt, "不要改變識別字", "AI format action should explicitly preserve SQL behavior.");
+            AssertContains(formatPrompt, "<sql>", "AI format action should keep SQL inside a data boundary.");
+
+            string convertPrompt = QueryAiPromptService.BuildPrompt(
+                QueryAiAction.ConvertDialect,
+                "mysql",
+                "sales",
+                "SELECT IFNULL(total, 0) FROM orders LIMIT 10;",
+                null,
+                "PostgreSQL");
+            AssertContains(convertPrompt, "轉換成目標資料庫語法", "Dialect conversion should use a focused Traditional Chinese instruction.");
+            AssertContains(convertPrompt, "資料庫引擎：mysql", "Dialect conversion should identify the source engine.");
+            AssertContains(convertPrompt, "目標資料庫引擎：PostgreSQL", "Dialect conversion should identify the selected target engine.");
+            AssertContains(convertPrompt, "SELECT IFNULL", "Dialect conversion should preserve the source SQL inside the draft.");
+            AssertEquals(
+                string.Empty,
+                QueryAiPromptService.BuildPrompt(
+                    QueryAiAction.ConvertDialect,
+                    "mysql",
+                    "sales",
+                    "SELECT 1;",
+                    null,
+                    "  "),
+                "Dialect conversion should fail closed when no target engine is selected.");
+
+            using (QueryForm form = new QueryForm(new FakeExecDatabase("mysql", "0"), "sales"))
+            {
+                ToolStripDropDownButton askAi = GetPrivateField<ToolStripDropDownButton>(form, "tsBtnAskAi");
+                ToolStripMenuItem formatItem = GetPrivateField<ToolStripMenuItem>(form, "tsAiFormatItem");
+                ToolStripMenuItem convertItem = GetPrivateField<ToolStripMenuItem>(form, "tsAiConvertItem");
+                ToolStripMenuItem mysqlItem = GetPrivateField<ToolStripMenuItem>(form, "tsAiConvertMySqlItem");
+                ToolStripMenuItem postgreSqlItem = GetPrivateField<ToolStripMenuItem>(form, "tsAiConvertPostgreSqlItem");
+                Assert(askAi.DropDownItems.Cast<ToolStripItem>().Contains(formatItem),
+                    "Ask AI should expose SQL formatting beside the existing built-in actions.");
+                Assert(askAi.DropDownItems.Cast<ToolStripItem>().Contains(convertItem),
+                    "Ask AI should expose database dialect conversion.");
+                Assert(convertItem.DropDownItems.Count == 5,
+                    "Dialect conversion should list the five relational database targets supported by the query workflow.");
+                Assert(!mysqlItem.Enabled, "The current database engine should be disabled as a conversion target.");
+                Assert(postgreSqlItem.Enabled, "Other database engines should remain available as conversion targets.");
+
+                Localization.SetLanguage(Localization.English, false);
+                form.ApplyLanguage();
+                AssertEquals("Format selected / current SQL", formatItem.Text, "AI format action should support English.");
+                AssertEquals("Convert database dialect", convertItem.Text, "Dialect conversion menu should support English.");
+                AssertEquals("Convert to PostgreSQL", postgreSqlItem.Text, "Dialect target items should support English.");
+            }
+
+            string englishPrompt = QueryAiPromptService.BuildPrompt(
+                QueryAiAction.ConvertDialect,
+                "oracle",
+                "warehouse",
+                "SELECT * FROM orders FETCH FIRST 5 ROWS ONLY;",
+                null,
+                "SQL Server");
+            AssertContains(englishPrompt, "Target database engine: SQL Server", "Dialect conversion prompts should support English.");
         }
         finally
         {
