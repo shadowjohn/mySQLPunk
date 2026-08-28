@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **自訂與釘選 AI 動作**：查詢工具列的「詢問 AI」可建立自己的提示動作，決定是否直接釘選到選單；管理視窗支援新增、修改、刪除與立即使用。執行時只把選取範圍或目前 SQL 帶入 Punky 草稿，不會自動送出或執行；回覆若含 SQL，仍需經過差異預覽才能套回編輯器。自訂檔只保存名稱、提示與釘選狀態，不包含 SQL、連線資訊或 AI 認證。
 - **查詢編輯器詢問 AI 與錯誤交接**：查詢工具列新增「詢問 AI」，可把選取範圍或目前 SQL 帶入解釋、最佳化草稿；查詢執行失敗後會啟用「修正上次執行錯誤」，一併附上資料庫類型、資料庫名稱與錯誤原因。草稿會先顯示在 Punky 面板供確認，不會自動送出；錯誤裡常見的 password、token、API key、secret 與 Bearer credential 會先遮蔽，也不會帶入主機、帳號或連線字串。最佳化與修正回覆可逐行並排比較，並勾選要採用的連續變更區段，確認後才套回當次選取範圍或全文；若編輯器已變更就拒絕覆寫，套用後也不會自動執行。
 - **AI 訂閱 CLI 卡片與帳號偵測**：重做「選項 > AI」，用卡片列出 OpenAI Codex、Claude Code 與 Gemini CLI 的安裝狀態、實際執行路徑、帳號標籤和登入方式，可直接切換目前使用的 CLI；API、Ollama、LM Studio 與 OpenRouter 設定保留在同頁下方，並依目前服務隱藏不適用的欄位。帳號偵測只解析 CLI 自己保存的非敏感欄位，不會把 token 或金鑰帶進畫面，也不把找到登入資料誤當成已驗證訂閱權限。
 - **Linux / macOS 跨平台預覽第一階段**：保留既有 Windows WinForms 完整版，新增獨立 .NET 8 Core 與 Avalonia 桌面程式，可在 Linux / macOS 管理 MySQL / MariaDB、PostgreSQL 與 SQLite 連線，瀏覽 database、Table / View，執行 DDL / DML / SELECT 並顯示結果網格；連線設定使用跨平台 JSON，密碼只留在記憶體、不寫入磁碟。加入 SQLite 端到端 smoke tests、Linux UI 實際操作驗證、Linux x64 與 macOS x64 / Apple Silicon 發佈建置，以及 Ubuntu / macOS CI 矩陣。其餘 provider、進階資料編輯與正式安裝／簽署流程留待後續。

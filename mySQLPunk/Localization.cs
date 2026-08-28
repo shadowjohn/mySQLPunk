@@ -1560,6 +1560,7 @@ namespace mySQLPunk
             Add("Query.AiExplain", "解釋選取／目前 SQL", "Explain selected / current SQL");
             Add("Query.AiOptimize", "最佳化選取／目前 SQL", "Optimize selected / current SQL");
             Add("Query.AiFixError", "修正上次執行錯誤", "Fix last execution error");
+            Add("Query.AiManageActions", "管理自訂動作…", "Manage custom actions...");
             Add("Query.Snippets", "程式碼片段...", "Code Snippets...");
             Add("Query.CompletionSnippet", "片段", "Snippet");
             Add("Query.CompletionAlias", "別名", "Alias");
@@ -1812,6 +1813,23 @@ namespace mySQLPunk
             Add("Snippet.BuiltinTransactionDescription", "BEGIN／COMMIT 交易範本。", "BEGIN/COMMIT transaction template.");
             Add("Snippet.BuiltinCreateTable", "CREATE TABLE", "CREATE TABLE");
             Add("Snippet.BuiltinCreateTableDescription", "含主鍵的基本建表範本。", "Basic table template with a primary key.");
+
+            Add("AiAction.Title", "自訂 AI 動作", "Custom AI Actions");
+            Add("AiAction.List", "已儲存的動作", "Saved actions");
+            Add("AiAction.Name", "名稱", "Name");
+            Add("AiAction.Instruction", "提示內容", "Instructions");
+            Add("AiAction.Pin", "釘選到「詢問 AI」選單", "Pin to the Ask AI menu");
+            Add("AiAction.Hint", "執行時會帶入選取範圍或目前 SQL，先建立草稿供你確認；不會自動送出、套用或執行。", "The selected or current SQL is added to a draft for review. It is not sent, applied, or executed automatically.");
+            Add("AiAction.New", "新增", "New");
+            Add("AiAction.Save", "儲存", "Save");
+            Add("AiAction.Delete", "刪除", "Delete");
+            Add("AiAction.Use", "儲存並使用", "Save and use");
+            Add("AiAction.Close", "關閉", "Close");
+            Add("AiAction.Invalid", "名稱與提示內容不可空白；名稱最多 80 字，提示內容最多 4000 字。", "Name and instructions are required. Names can contain up to 80 characters and instructions up to 4,000 characters.");
+            Add("AiAction.DuplicateName", "AI 動作名稱「{0}」已存在。", "AI action name \"{0}\" already exists.");
+            Add("AiAction.TooMany", "最多可儲存 {0} 個自訂 AI 動作。", "You can save up to {0} custom AI actions.");
+            Add("AiAction.ErrorTitle", "自訂 AI 動作錯誤", "Custom AI Action Error");
+            Add("AiAction.DeleteConfirm", "確定要刪除這個自訂 AI 動作嗎？", "Delete this custom AI action?");
 
             Add("Designer.DesignTable", "設計資料表", "Design Table");
             Add("Designer.NewTable", "新增資料表", "New Table");

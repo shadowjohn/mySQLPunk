@@ -30,6 +30,7 @@ namespace mySQLPunk
         private SqlCompletionMetadataStore _completionMetadataStore;
         private SqlCompletionMetadataEntry _completionMetadataEntry;
         private SqlSnippetService _snippetService;
+        private QueryAiActionService _queryAiActionService;
         private TableDataProfileStore _tableProfileStore;
         private TableDataProfile _activeTableProfile;
         private string _defaultTableBaseSql = string.Empty;
@@ -168,6 +169,10 @@ namespace mySQLPunk
         private ToolStripMenuItem tsAiExplainItem;
         private ToolStripMenuItem tsAiOptimizeItem;
         private ToolStripMenuItem tsAiFixErrorItem;
+        private ToolStripSeparator tsAiFixSeparator;
+        private ToolStripSeparator tsAiCustomSeparator;
+        private ToolStripMenuItem tsAiManageActionsItem;
+        private readonly List<ToolStripMenuItem> _aiPinnedActionItems = new List<ToolStripMenuItem>();
         private ToolStripButton tsBtnSave;
         private ToolStripButton tsBtnAdd;
         private ToolStripButton tsBtnDelete;
@@ -284,7 +289,9 @@ namespace mySQLPunk
             this.connectionHost = host ?? string.Empty;
             this._completionMetadataStore = new SqlCompletionMetadataStore(Path.Combine(Application.UserAppDataPath, "autocomplete-cache.json"));
             this._snippetService = new SqlSnippetService(Path.Combine(Application.UserAppDataPath, "sql-snippets.json"));
+            this._queryAiActionService = new QueryAiActionService(Path.Combine(Application.UserAppDataPath, "query-ai-actions.json"));
             this._tableProfileStore = new TableDataProfileStore(Path.Combine(Application.UserAppDataPath, "table-data-profiles.json"));
+            RefreshAiActionMenu();
 
             if (IsMongoDbProvider())
             {
@@ -1032,7 +1039,11 @@ namespace mySQLPunk
             tsAiExplainItem = new ToolStripMenuItem(Localization.T("Query.AiExplain"), null, (s, e) => OpenAiDraft(QueryAiAction.Explain));
             tsAiOptimizeItem = new ToolStripMenuItem(Localization.T("Query.AiOptimize"), null, (s, e) => OpenAiDraft(QueryAiAction.Optimize));
             tsAiFixErrorItem = new ToolStripMenuItem(Localization.T("Query.AiFixError"), null, (s, e) => OpenAiDraft(QueryAiAction.FixError)) { Enabled = false };
-            tsBtnAskAi.DropDownItems.AddRange(new ToolStripItem[] { tsAiExplainItem, tsAiOptimizeItem, new ToolStripSeparator(), tsAiFixErrorItem });
+            tsAiFixSeparator = new ToolStripSeparator();
+            tsAiCustomSeparator = new ToolStripSeparator();
+            tsAiManageActionsItem = new ToolStripMenuItem(Localization.T("Query.AiManageActions"), null, (s, e) => OpenAiActionManager());
+            tsBtnAskAi.DropDownOpening += (s, e) => RefreshAiActionMenu();
+            RefreshAiActionMenu();
             
             tsBtnSave = new ToolStripButton(Localization.T("Query.Save"), null, (s, e) => SaveChanges()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
             tsBtnAdd = new ToolStripButton(Localization.T("Query.Add"), null, (s, e) => AddNewRow()) { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Visible = false };
@@ -3156,6 +3167,84 @@ namespace mySQLPunk
             };
         }
 
+        private void RefreshAiActionMenu()
+        {
+            if (tsBtnAskAi == null || tsAiExplainItem == null || tsAiOptimizeItem == null ||
+                tsAiFixErrorItem == null || tsAiFixSeparator == null ||
+                tsAiCustomSeparator == null || tsAiManageActionsItem == null) return;
+
+            foreach (ToolStripMenuItem item in _aiPinnedActionItems)
+            {
+                tsBtnAskAi.DropDownItems.Remove(item);
+                item.Dispose();
+            }
+            _aiPinnedActionItems.Clear();
+            tsBtnAskAi.DropDownItems.Clear();
+            tsBtnAskAi.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                tsAiExplainItem,
+                tsAiOptimizeItem,
+                tsAiFixSeparator,
+                tsAiFixErrorItem,
+                tsAiCustomSeparator
+            });
+
+            IEnumerable<QueryAiCustomAction> pinned = _queryAiActionService == null
+                ? Enumerable.Empty<QueryAiCustomAction>()
+                : _queryAiActionService.GetPinned();
+            foreach (QueryAiCustomAction action in pinned)
+            {
+                QueryAiCustomAction captured = action.Clone();
+                ToolStripMenuItem item = new ToolStripMenuItem(captured.Name);
+                item.Tag = captured;
+                item.Click += (sender, args) => OpenCustomAiDraft(captured);
+                _aiPinnedActionItems.Add(item);
+                tsBtnAskAi.DropDownItems.Add(item);
+            }
+            tsBtnAskAi.DropDownItems.Add(tsAiManageActionsItem);
+        }
+
+        private void OpenAiActionManager()
+        {
+            if (_queryAiActionService == null)
+                _queryAiActionService = new QueryAiActionService(Path.Combine(Application.UserAppDataPath, "query-ai-actions.json"));
+
+            QueryAiCustomAction selected = null;
+            using (QueryAiActionManagerForm dialog = new QueryAiActionManagerForm(_queryAiActionService))
+            {
+                if (dialog.ShowDialog(this) == DialogResult.OK && dialog.SelectedAction != null)
+                    selected = dialog.SelectedAction.Clone();
+            }
+            RefreshAiActionMenu();
+            if (selected != null) OpenCustomAiDraft(selected);
+        }
+
+        private void OpenCustomAiDraft(QueryAiCustomAction action)
+        {
+            if (action == null || string.IsNullOrWhiteSpace(action.Instruction)) return;
+            AiEditorTarget target = CaptureAiEditorTarget();
+            string sql = target.OriginalSql.Trim();
+            if (string.IsNullOrWhiteSpace(sql))
+            {
+                UpdateStatus(Localization.T("Query.AiNoSql"));
+                return;
+            }
+            if (_mainHost == null)
+            {
+                UpdateStatus(Localization.T("Query.AiNeedsMainWindow"));
+                return;
+            }
+
+            string prompt = QueryAiPromptService.BuildCustomPrompt(
+                action.Instruction,
+                _db == null ? string.Empty : _db.ProviderName,
+                _databaseName,
+                sql);
+            if (string.IsNullOrWhiteSpace(prompt)) return;
+            _mainHost.ShowAiAssistantDraft(prompt, suggestedSql => ReviewAndApplyAiSql(target, suggestedSql));
+            UpdateStatus(Localization.T("Query.AiDraftReady"));
+        }
+
         private void OpenAiDraft(QueryAiAction action)
         {
             AiEditorTarget target = action == QueryAiAction.FixError
@@ -3295,6 +3384,8 @@ namespace mySQLPunk
             if (tsAiExplainItem != null) tsAiExplainItem.Text = Localization.T("Query.AiExplain");
             if (tsAiOptimizeItem != null) tsAiOptimizeItem.Text = Localization.T("Query.AiOptimize");
             if (tsAiFixErrorItem != null) tsAiFixErrorItem.Text = Localization.T("Query.AiFixError");
+            if (tsAiManageActionsItem != null) tsAiManageActionsItem.Text = Localization.T("Query.AiManageActions");
+            RefreshAiActionMenu();
             if (tsBtnSave != null) tsBtnSave.Text = Localization.T("Query.Save");
             if (tsBtnAdd != null) tsBtnAdd.Text = Localization.T("Query.Add");
             if (tsBtnDelete != null) tsBtnDelete.Text = Localization.T("Query.Delete");

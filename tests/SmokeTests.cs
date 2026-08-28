@@ -52,6 +52,7 @@ public static class SmokeTests
         Run("SQL editor completion and snippets", TestSqlEditorCompletionAndSnippets, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
         Run("Query editor AI actions", TestQueryEditorAiActions, ref passed);
+        Run("Query AI custom actions", TestQueryAiCustomActions, ref passed);
         Run("AI SQL diff review", TestAiSqlDiffReview, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
@@ -5977,7 +5978,11 @@ public static class SmokeTests
             {
                 ToolStripDropDownButton askAi = GetPrivateField<ToolStripDropDownButton>(form, "tsBtnAskAi");
                 ToolStripMenuItem fixItem = GetPrivateField<ToolStripMenuItem>(form, "tsAiFixErrorItem");
-                Assert(askAi != null && askAi.DropDownItems.Count == 4, "Query toolbar should expose explain, optimize, and fix-error AI actions.");
+                ToolStripMenuItem manageItem = GetPrivateField<ToolStripMenuItem>(form, "tsAiManageActionsItem");
+                Assert(askAi != null && askAi.DropDownItems.Cast<ToolStripItem>().Contains(fixItem),
+                    "Query toolbar should expose explain, optimize, and fix-error AI actions.");
+                Assert(askAi.DropDownItems.Cast<ToolStripItem>().Contains(manageItem),
+                    "Query toolbar should expose custom AI action management.");
                 Assert(!fixItem.Enabled, "Fix-error action should stay disabled before a query failure.");
 
                 MethodInfo rememberFailure = typeof(QueryForm).GetMethod(
@@ -5996,11 +6001,121 @@ public static class SmokeTests
                 form.ApplyLanguage();
                 AssertEquals("Ask AI", askAi.Text, "Query AI toolbar should support English.");
                 AssertEquals("Fix last execution error", fixItem.Text, "Fix-error action should support English.");
+                AssertEquals("Manage custom actions...", manageItem.Text, "Custom AI action management should support English.");
             }
         }
         finally
         {
             Localization.SetLanguage(previousLanguage, false);
+        }
+    }
+
+    private static void TestQueryAiCustomActions()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        string tempRoot = Path.Combine(Path.GetTempPath(), "mysqlpunk-ai-action-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            string actionPath = Path.Combine(tempRoot, "query-ai-actions.json");
+            QueryAiActionService service = new QueryAiActionService(actionPath);
+            QueryAiCustomAction indexes = service.Save(new QueryAiCustomAction
+            {
+                Name = "檢查索引",
+                Instruction = "找出可能缺少的索引，並說明判斷依據。",
+                Pinned = true
+            });
+            QueryAiCustomAction naming = service.Save(new QueryAiCustomAction
+            {
+                Name = "檢查命名",
+                Instruction = "檢查資料表與欄位命名是否一致。",
+                Pinned = false
+            });
+            Assert(service.Load().Any(action => action.Id == indexes.Id && action.Pinned),
+                "Custom AI actions should persist their name, instructions, and pinned state.");
+            Assert(service.GetPinned().Count == 1 && service.GetPinned()[0].Id == indexes.Id,
+                "Only pinned custom AI actions should be returned for the query toolbar.");
+
+            indexes.Instruction = "檢查查詢條件與排序是否需要索引。";
+            QueryAiCustomAction updated = service.Save(indexes);
+            AssertEquals(indexes.Id, updated.Id, "Updating a custom AI action should preserve its identity.");
+            AssertContains(service.Load().First(action => action.Id == indexes.Id).Instruction, "排序", "Updated AI action instructions should persist.");
+
+            bool duplicateRejected = false;
+            try
+            {
+                service.Save(new QueryAiCustomAction
+                {
+                    Name = "檢查索引",
+                    Instruction = "另一個同名動作",
+                    Pinned = true
+                });
+            }
+            catch (InvalidOperationException)
+            {
+                duplicateRejected = true;
+            }
+            Assert(duplicateRejected, "Custom AI action names should stay unique so pinned menu items are unambiguous.");
+
+            string customPrompt = QueryAiPromptService.BuildCustomPrompt(
+                indexes.Instruction,
+                "postgresql",
+                "warehouse",
+                "SELECT * FROM orders ORDER BY created_at;");
+            AssertContains(customPrompt, "自訂要求：", "Custom AI prompts should identify the saved request.");
+            AssertContains(customPrompt, "<custom-request>", "Custom AI prompts should isolate the saved request.");
+            AssertContains(customPrompt, "資料庫引擎：postgresql", "Custom AI prompts should include only the database engine context.");
+            AssertContains(customPrompt, "SELECT * FROM orders", "Custom AI prompts should include the selected SQL as data.");
+            Assert(customPrompt.IndexOf("host", StringComparison.OrdinalIgnoreCase) < 0,
+                "Custom AI prompts should not introduce connection host details.");
+            AssertContains(
+                QueryAiPromptService.BuildCustomPrompt(
+                    new string('x', QueryAiPromptService.MaxCustomInstructionLength + 20),
+                    "sqlite",
+                    "main",
+                    "SELECT 1;"),
+                "[truncated]",
+                "Oversized custom instructions should be bounded before entering an AI draft.");
+
+            using (QueryAiActionManagerForm manager = new QueryAiActionManagerForm(service))
+            {
+                ListBox list = GetPrivateField<ListBox>(manager, "_actionList");
+                TextBox instruction = GetPrivateField<TextBox>(manager, "_instructionBox");
+                CheckBox pin = GetPrivateField<CheckBox>(manager, "_pinCheckBox");
+                Button use = GetPrivateField<Button>(manager, "_useButton");
+                AssertEquals("自訂 AI 動作", manager.Text, "Custom AI action manager should use Traditional Chinese.");
+                Assert(list.Items.Count == 2, "Custom AI action manager should list every saved action.");
+                Assert(instruction.Multiline, "Custom AI action instructions should use a multiline editor.");
+                Assert(pin.Checked, "The selected pinned action should show its pinned state.");
+                AssertEquals("儲存並使用", use.Text, "The manager should make using a saved action explicit.");
+            }
+
+            using (QueryForm form = new QueryForm(new FakeExecDatabase("mysql", "0"), "sales"))
+            {
+                SetPrivateField(form, "_queryAiActionService", service);
+                typeof(QueryForm).GetMethod("RefreshAiActionMenu", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(form, null);
+                ToolStripDropDownButton askAi = GetPrivateField<ToolStripDropDownButton>(form, "tsBtnAskAi");
+                ToolStripMenuItem pinnedItem = askAi.DropDownItems
+                    .OfType<ToolStripMenuItem>()
+                    .FirstOrDefault(item => item.Text == "檢查索引");
+                Assert(pinnedItem != null, "Pinned custom AI actions should appear directly in the Ask AI menu.");
+                Assert(!askAi.DropDownItems.OfType<ToolStripMenuItem>().Any(item => item.Text == "檢查命名"),
+                    "Unpinned custom AI actions should stay in the manager instead of crowding the toolbar menu.");
+            }
+
+            string corruptPath = Path.Combine(tempRoot, "corrupt.json");
+            File.WriteAllText(corruptPath, "{not-json", Encoding.UTF8);
+            Assert(new QueryAiActionService(corruptPath).Load().Count == 0,
+                "A corrupt custom AI action file should fail closed without breaking the query window.");
+            service.Delete(naming.Id);
+            Assert(!service.Load().Any(action => action.Id == naming.Id), "Deleting a custom AI action should persist.");
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+            if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, true);
         }
     }
 

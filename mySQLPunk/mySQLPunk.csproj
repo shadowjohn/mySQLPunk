@@ -191,6 +191,9 @@
     <Compile Include="AiSqlReviewForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="QueryAiActionManagerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="DataProfileForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -262,6 +265,7 @@
     <Compile Include="lib\AiChatService.cs" />
     <Compile Include="lib\AiOAuthService.cs" />
     <Compile Include="lib\QueryAiPromptService.cs" />
+    <Compile Include="lib\QueryAiActionService.cs" />
     <Compile Include="lib\AiSqlReviewService.cs" />
     <Compile Include="lib\DataDictionaryService.cs" />
     <Compile Include="lib\DataProfilingService.cs" />
