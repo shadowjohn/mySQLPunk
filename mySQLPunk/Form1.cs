@@ -3792,13 +3792,18 @@ namespace mySQLPunk
 
         public void ShowAiAssistantDraft(string prompt)
         {
+            ShowAiAssistantDraft(prompt, null);
+        }
+
+        public void ShowAiAssistantDraft(string prompt, Action<string> reviewSqlAction)
+        {
             if (string.IsNullOrWhiteSpace(prompt)) return;
             if (_focusMode) SetFocusMode(false);
 
             // 從查詢編輯器叫出 AI 是單次操作，不改寫使用者的啟動顯示偏好。
             SetAiPanelVisible(true, false);
             ConfigureMainMenu();
-            if (aiPanel != null) aiPanel.SetDraft(prompt);
+            if (aiPanel != null) aiPanel.SetDraft(prompt, reviewSqlAction);
         }
 
         /// <summary>AI 助理用：目前選取連線的資料庫上下文（引擎、資料庫、資料表清單、選取物件 DDL）。</summary>

@@ -61,6 +61,7 @@ namespace mySQLPunk
         private bool _lastResultCanStreamExport;
         private string _lastFailedSql = "";
         private string _lastFailureReason = "";
+        private AiEditorTarget _lastFailedAiTarget;
         private const int GridFullAutoResizeRowLimit = 200;
         private const int GridRowHeightApplyLimit = 500;
         private const int WM_SETREDRAW = 0x000B;
@@ -83,6 +84,14 @@ namespace mySQLPunk
             public int Inserted { get; set; }
             public int Updated { get; set; }
             public int Deleted { get; set; }
+        }
+
+        private sealed class AiEditorTarget
+        {
+            public string EditorSnapshot { get; set; }
+            public int SelectionStart { get; set; }
+            public int SelectionLength { get; set; }
+            public string OriginalSql { get; set; }
         }
 
         private sealed class TableSaveTransactionStatements
@@ -2550,6 +2559,7 @@ namespace mySQLPunk
 
             if (_isQueryBusy) return;
 
+            AiEditorTarget executionTarget = CaptureAiEditorTarget();
             Stopwatch sw = Stopwatch.StartNew();
             ClearQueryFailure();
             _isQueryBusy = true;
@@ -2604,7 +2614,7 @@ namespace mySQLPunk
                 string reason = BuildQueryExceptionMessage(ex);
                 UpdateStatus(Localization.Format("Query.LoadFailed", reason));
                 ShowResultFeedback(Localization.T("Query.QueryError"), Localization.Format("Query.LoadTableFailed", reason));
-                RememberQueryFailure(GetSqlForAi(), reason);
+                RememberQueryFailure(executionTarget.OriginalSql, reason, executionTarget);
             }
             finally
             {
@@ -2757,9 +2767,8 @@ namespace mySQLPunk
         private async void ExecuteQueryAsync()
         {
             // 優先執行選取文字，否則全文
-            string rawSql = txtSql.SelectionLength > 0
-                ? txtSql.SelectedText.Trim()
-                : txtSql.Text.Trim();
+            AiEditorTarget executionTarget = CaptureAiEditorTarget();
+            string rawSql = executionTarget.OriginalSql.Trim();
 
             if (string.IsNullOrEmpty(rawSql)) return;
 
@@ -2899,7 +2908,7 @@ namespace mySQLPunk
                         string status = Localization.Format("Query.ErrorStatus", reason);
                         UpdateStatus(status);
                         ShowResultFeedback(Localization.T("Query.ExecuteError"), reason);
-                        RememberQueryFailure(sql, reason);
+                        RememberQueryFailure(rawSql, reason, executionTarget);
                         _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
                     }
                 }
@@ -2918,7 +2927,7 @@ namespace mySQLPunk
                 string status = Localization.Format("Query.ErrorStatus", reason);
                 UpdateStatus(status);
                 ShowResultFeedback(Localization.T("Query.QueryError"), reason);
-                RememberQueryFailure(sql, reason);
+                RememberQueryFailure(rawSql, reason, executionTarget);
                 _mainHost?.RecordQueryHistory(_databaseName, sql, status, sw.ElapsedMilliseconds, -1, false);
             }
             finally
@@ -3128,15 +3137,33 @@ namespace mySQLPunk
             return string.IsNullOrWhiteSpace(reason) ? Localization.T("Query.UnknownError") : reason;
         }
 
-        private string GetSqlForAi()
+        private AiEditorTarget CaptureAiEditorTarget()
         {
-            if (txtSql == null) return string.Empty;
-            return (txtSql.SelectionLength > 0 ? txtSql.SelectedText : txtSql.Text).Trim();
+            string snapshot = txtSql == null ? string.Empty : txtSql.Text ?? string.Empty;
+            int selectionStart = txtSql == null ? 0 : txtSql.SelectionStart;
+            int selectionLength = txtSql == null ? 0 : txtSql.SelectionLength;
+            bool validSelection = selectionLength > 0
+                && selectionStart >= 0
+                && selectionStart + selectionLength <= snapshot.Length;
+            return new AiEditorTarget
+            {
+                EditorSnapshot = snapshot,
+                SelectionStart = selectionStart,
+                SelectionLength = validSelection ? selectionLength : 0,
+                OriginalSql = validSelection
+                    ? snapshot.Substring(selectionStart, selectionLength)
+                    : snapshot
+            };
         }
 
         private void OpenAiDraft(QueryAiAction action)
         {
-            string sql = action == QueryAiAction.FixError ? _lastFailedSql : GetSqlForAi();
+            AiEditorTarget target = action == QueryAiAction.FixError
+                ? _lastFailedAiTarget
+                : CaptureAiEditorTarget();
+            if (target == null) target = CaptureAiEditorTarget();
+
+            string sql = action == QueryAiAction.FixError ? _lastFailedSql : target.OriginalSql.Trim();
             string errorReason = action == QueryAiAction.FixError ? _lastFailureReason : string.Empty;
             if (string.IsNullOrWhiteSpace(sql))
             {
@@ -3157,14 +3184,27 @@ namespace mySQLPunk
                 errorReason);
             if (string.IsNullOrWhiteSpace(prompt)) return;
 
-            _mainHost.ShowAiAssistantDraft(prompt);
+            if (action == QueryAiAction.Explain)
+            {
+                _mainHost.ShowAiAssistantDraft(prompt);
+            }
+            else
+            {
+                _mainHost.ShowAiAssistantDraft(prompt, suggestedSql => ReviewAndApplyAiSql(target, suggestedSql));
+            }
             UpdateStatus(Localization.T("Query.AiDraftReady"));
         }
 
         private void RememberQueryFailure(string sql, string reason)
         {
+            RememberQueryFailure(sql, reason, CaptureAiEditorTarget());
+        }
+
+        private void RememberQueryFailure(string sql, string reason, AiEditorTarget target)
+        {
             _lastFailedSql = (sql ?? string.Empty).Trim();
             _lastFailureReason = BuildQueryFailureReason(reason);
+            _lastFailedAiTarget = target;
             if (tsAiFixErrorItem != null)
                 tsAiFixErrorItem.Enabled = _lastFailedSql.Length > 0;
         }
@@ -3173,7 +3213,72 @@ namespace mySQLPunk
         {
             _lastFailedSql = string.Empty;
             _lastFailureReason = string.Empty;
+            _lastFailedAiTarget = null;
             if (tsAiFixErrorItem != null) tsAiFixErrorItem.Enabled = false;
+        }
+
+        private void ReviewAndApplyAiSql(AiEditorTarget target, string suggestedSql)
+        {
+            if (!CanUpdateUi() || txtSql == null || target == null) return;
+
+            string updatedText;
+            AiSqlApplyFailure failure;
+            if (!AiSqlReviewService.TryApply(
+                txtSql.Text,
+                target.EditorSnapshot,
+                target.SelectionStart,
+                target.SelectionLength,
+                suggestedSql,
+                out updatedText,
+                out failure))
+            {
+                ShowAiApplyFailure(failure);
+                return;
+            }
+
+            IWin32Window owner = _mainHost != null ? (IWin32Window)_mainHost : this;
+            using (AiSqlReviewForm dialog = new AiSqlReviewForm(target.OriginalSql, suggestedSql))
+            {
+                if (dialog.ShowDialog(owner) != DialogResult.OK) return;
+            }
+
+            // 使用者看差異時仍可能回頭改 SQL，因此在真正寫入前再檢查一次快照。
+            if (!AiSqlReviewService.TryApply(
+                txtSql.Text,
+                target.EditorSnapshot,
+                target.SelectionStart,
+                target.SelectionLength,
+                suggestedSql,
+                out updatedText,
+                out failure))
+            {
+                ShowAiApplyFailure(failure);
+                return;
+            }
+
+            txtSql.Text = updatedText;
+            if (target.SelectionLength > 0)
+            {
+                txtSql.SelectionStart = target.SelectionStart;
+                txtSql.SelectionLength = suggestedSql.Length;
+            }
+            else
+            {
+                txtSql.SelectionStart = Math.Min(suggestedSql.Length, txtSql.Text.Length);
+                txtSql.SelectionLength = 0;
+            }
+            txtSql.Focus();
+            UpdateStatus(Localization.T("Query.AiSqlApplied"));
+        }
+
+        private void ShowAiApplyFailure(AiSqlApplyFailure failure)
+        {
+            string key = failure == AiSqlApplyFailure.EditorChanged
+                ? "Query.AiEditorChanged"
+                : "Query.AiSqlApplyInvalid";
+            string message = Localization.T(key);
+            UpdateStatus(message);
+            MessageBox.Show(this, message, Localization.T("Ai.SqlReviewTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         public void ApplyLanguage()

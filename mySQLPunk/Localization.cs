@@ -486,6 +486,14 @@ namespace mySQLPunk
             Add("Ai.IncludeContext", "附上目前資料庫結構", "Include current database schema");
             Add("Ai.Send", "送出", "Send");
             Add("Ai.InsertSql", "插入 SQL 到查詢分頁", "Insert SQL into a query tab");
+            Add("Ai.OpenSqlInNewQuery", "另開查詢分頁", "Open in a new query tab");
+            Add("Ai.ReviewSql", "比較並套用", "Compare and apply");
+            Add("Ai.SqlReviewTitle", "確認 AI SQL 變更", "Review AI SQL changes");
+            Add("Ai.SqlReviewSubtitle", "逐行比較原始內容與 AI 建議", "Compare the original and AI suggestion line by line");
+            Add("Ai.SqlReviewIntro", "AI 建議尚未執行；請確認完整差異後再套用到編輯器。", "The AI suggestion has not been executed. Review the full diff before applying it to the editor.");
+            Add("Ai.SqlReviewOriginal", "原始 SQL", "Original SQL");
+            Add("Ai.SqlReviewSuggested", "AI 建議 SQL", "AI suggestion");
+            Add("Ai.SqlReviewApply", "確認套用", "Apply changes");
             Add("Ai.SuggestGenerate", "幫我寫一段查詢：", "Write a query for me: ");
             Add("Ai.SuggestExplain", "解釋這段 SQL 在做什麼：", "Explain what this SQL does: ");
             Add("Ai.SuggestOptimize", "這個查詢可以怎麼最佳化？", "How can this query be optimized?");
@@ -1707,6 +1715,9 @@ namespace mySQLPunk
             Add("Query.AiNoError", "目前沒有可交給 AI 修正的執行錯誤。", "There is no execution error to send to AI.");
             Add("Query.AiNeedsMainWindow", "詢問 AI 需要由 mySQLPunk 主視窗開啟查詢。", "Ask AI requires a query opened from the mySQLPunk main window.");
             Add("Query.AiDraftReady", "SQL 與相關資訊已帶入 AI 草稿，確認內容後再送出。", "The SQL and related details are in the AI draft. Review them before sending.");
+            Add("Query.AiEditorChanged", "編輯器在 AI 回覆期間已有變更，因此沒有套用建議；請用目前 SQL 重新詢問。", "The editor changed while AI was responding, so the suggestion was not applied. Ask again with the current SQL.");
+            Add("Query.AiSqlApplyInvalid", "AI 建議或原始選取範圍已失效，因此沒有套用。", "The AI suggestion or original selection is no longer valid, so nothing was applied.");
+            Add("Query.AiSqlApplied", "已確認並套用 AI SQL；尚未執行。", "The AI SQL was reviewed and applied. It has not been executed.");
             Add("Query.SaveTableDataOnly", "只有開啟資料表資料時才能儲存變更。", "Changes can only be saved when table data is open.");
             Add("Query.NoDataToSave", "目前沒有可儲存的資料。", "There is no data to save.");
             Add("Query.NoChangesDetected", "沒有偵測到資料變更。", "No data changes were detected.");

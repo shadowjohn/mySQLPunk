@@ -27,6 +27,7 @@ namespace mySQLPunk
         private FlowLayoutPanel suggestionPanel;
         private Panel actionPanel;
         private Button insertSqlButton;
+        private Button reviewSqlButton;
         private Panel inputPanel;
         private TextBox inputBox;
         private UiInputShell inputShell;
@@ -36,6 +37,8 @@ namespace mySQLPunk
         private readonly List<AiChatMessage> _history = new List<AiChatMessage>();
         private bool _busy;
         private string _lastAssistantSql;
+        private Action<string> _pendingSqlReviewAction;
+        private Action<string> _lastAssistantSqlReviewAction;
 
         public AiAssistantPanel(Func<string> contextProvider, Action<string> insertSqlAction, Action closeAction, Action collapseAction, Action openSettingsAction)
         {
@@ -133,14 +136,28 @@ namespace mySQLPunk
             actionPanel = new Panel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(10, 4, 10, 6), Visible = false };
             insertSqlButton = new Button
             {
-                Text = Localization.T("Ai.InsertSql"),
+                Text = Localization.T("Ai.OpenSqlInNewQuery"),
                 Dock = DockStyle.Fill
             };
             insertSqlButton.Click += (s, e) =>
             {
                 if (!string.IsNullOrWhiteSpace(_lastAssistantSql)) _insertSqlAction?.Invoke(_lastAssistantSql);
             };
+            reviewSqlButton = new Button
+            {
+                Text = Localization.T("Ai.ReviewSql"),
+                Dock = DockStyle.Right,
+                Width = 128,
+                Visible = false
+            };
+            ThemeManager.MarkAsPrimary(reviewSqlButton);
+            reviewSqlButton.Click += (s, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(_lastAssistantSql))
+                    _lastAssistantSqlReviewAction?.Invoke(_lastAssistantSql);
+            };
             actionPanel.Controls.Add(insertSqlButton);
+            actionPanel.Controls.Add(reviewSqlButton);
 
             // ── 建議提問（第一次使用的引導）──
             suggestionPanel = new FlowLayoutPanel
@@ -183,6 +200,11 @@ namespace mySQLPunk
 
         public void SetDraft(string text)
         {
+            SetDraft(text, null);
+        }
+
+        public void SetDraft(string text, Action<string> reviewSqlAction)
+        {
             string draft = (text ?? string.Empty).Trim();
             if (draft.Length == 0 || inputBox == null) return;
 
@@ -190,8 +212,10 @@ namespace mySQLPunk
             inputBox.SelectionStart = inputBox.Text.Length;
             inputBox.SelectionLength = 0;
             includeContextBox.Checked = true;
+            _pendingSqlReviewAction = reviewSqlAction;
             _lastAssistantSql = null;
-            actionPanel.Visible = false;
+            _lastAssistantSqlReviewAction = null;
+            UpdateSqlActions();
             inputBox.Focus();
         }
 
@@ -204,7 +228,8 @@ namespace mySQLPunk
             refreshModelsButton.AccessibleName = Localization.T("Query.Refresh");
             includeContextBox.Text = Localization.T("Ai.IncludeContext");
             sendButton.Text = Localization.T("Ai.Send");
-            insertSqlButton.Text = Localization.T("Ai.InsertSql");
+            insertSqlButton.Text = Localization.T("Ai.OpenSqlInNewQuery");
+            reviewSqlButton.Text = Localization.T("Ai.ReviewSql");
         }
 
         /// <summary>面板頂端的供應商／模型快速切換：使用者訂閱哪家、本機跑什麼，這裡直接換。</summary>
@@ -411,10 +436,15 @@ namespace mySQLPunk
 
             inputBox.Text = "";
             suggestionPanel.Visible = false;
-            SendAsync(text);
+            Action<string> reviewSqlAction = _pendingSqlReviewAction;
+            _pendingSqlReviewAction = null;
+            _lastAssistantSql = null;
+            _lastAssistantSqlReviewAction = null;
+            UpdateSqlActions();
+            SendAsync(text, reviewSqlAction);
         }
 
-        private async void SendAsync(string userText)
+        private async void SendAsync(string userText, Action<string> reviewSqlAction)
         {
             _busy = true;
             sendButton.Enabled = false;
@@ -450,7 +480,8 @@ namespace mySQLPunk
                 while (_history.Count > 12) _history.RemoveAt(0);
 
                 _lastAssistantSql = AiChatService.ExtractLastSqlBlock(reply);
-                actionPanel.Visible = !string.IsNullOrWhiteSpace(_lastAssistantSql);
+                _lastAssistantSqlReviewAction = reviewSqlAction;
+                UpdateSqlActions();
             }
             catch (Exception ex)
             {
@@ -466,6 +497,14 @@ namespace mySQLPunk
                 _busy = false;
                 sendButton.Enabled = true;
             }
+        }
+
+        private void UpdateSqlActions()
+        {
+            bool hasSql = !string.IsNullOrWhiteSpace(_lastAssistantSql);
+            bool canReview = hasSql && _lastAssistantSqlReviewAction != null;
+            if (reviewSqlButton != null) reviewSqlButton.Visible = canReview;
+            if (actionPanel != null) actionPanel.Visible = hasSql;
         }
     }
 

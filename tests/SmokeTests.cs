@@ -52,6 +52,7 @@ public static class SmokeTests
         Run("SQL editor completion and snippets", TestSqlEditorCompletionAndSnippets, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
         Run("Query editor AI actions", TestQueryEditorAiActions, ref passed);
+        Run("AI SQL diff review", TestAiSqlDiffReview, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
@@ -5979,7 +5980,12 @@ public static class SmokeTests
                 Assert(askAi != null && askAi.DropDownItems.Count == 4, "Query toolbar should expose explain, optimize, and fix-error AI actions.");
                 Assert(!fixItem.Enabled, "Fix-error action should stay disabled before a query failure.");
 
-                MethodInfo rememberFailure = typeof(QueryForm).GetMethod("RememberQueryFailure", BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo rememberFailure = typeof(QueryForm).GetMethod(
+                    "RememberQueryFailure",
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(string), typeof(string) },
+                    null);
                 MethodInfo clearFailure = typeof(QueryForm).GetMethod("ClearQueryFailure", BindingFlags.Instance | BindingFlags.NonPublic);
                 rememberFailure.Invoke(form, new object[] { "SELECT broken", "syntax error" });
                 Assert(fixItem.Enabled, "Fix-error action should become available after a query failure.");
@@ -5990,6 +5996,101 @@ public static class SmokeTests
                 form.ApplyLanguage();
                 AssertEquals("Ask AI", askAi.Text, "Query AI toolbar should support English.");
                 AssertEquals("Fix last execution error", fixItem.Text, "Fix-error action should support English.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
+    }
+
+    private static void TestAiSqlDiffReview()
+    {
+        string original = "SELECT id,\n       name\nFROM users\nWHERE active = 1;";
+        string suggested = "SELECT id,\n       display_name\nFROM users\nWHERE active = 1\nORDER BY id;";
+        List<AiSqlDiffRow> diff = AiSqlReviewService.BuildDiff(original, suggested);
+        Assert(diff.Count == 5, "AI SQL diff should align changed and added lines without duplicating common lines.");
+        Assert(diff[0].Kind == AiSqlDiffKind.Same, "Unchanged SQL lines should stay aligned.");
+        Assert(diff[1].Kind == AiSqlDiffKind.Changed, "Rewritten SQL lines should appear as a side-by-side change.");
+        Assert(diff[4].Kind == AiSqlDiffKind.Added, "New SQL lines should be marked as added.");
+
+        List<AiSqlDiffRow> removed = AiSqlReviewService.BuildDiff("A\nB\nC", "A\nC");
+        Assert(removed.Any(row => row.Kind == AiSqlDiffKind.Removed && row.OriginalText == "B"),
+            "Deleted SQL lines should remain visible on the original side.");
+
+        string updated;
+        AiSqlApplyFailure failure;
+        Assert(AiSqlReviewService.TryApply("SELECT old;", "SELECT old;", 4, 0, "SELECT new;", out updated, out failure),
+            "A matching full-editor snapshot should allow a reviewed replacement.");
+        AssertEquals("SELECT new;", updated, "A zero-length selection should replace the full editor.");
+        Assert(failure == AiSqlApplyFailure.None, "A successful full-editor replacement should not report a failure.");
+
+        string selectionSnapshot = "SELECT old;\nSELECT keep;";
+        Assert(AiSqlReviewService.TryApply(selectionSnapshot, selectionSnapshot, 7, 3, "new", out updated, out failure),
+            "A matching selected range should allow a reviewed replacement.");
+        AssertEquals("SELECT new;\nSELECT keep;", updated, "Only the original selected range should be replaced.");
+
+        Assert(!AiSqlReviewService.TryApply("SELECT user_edit;", "SELECT old;", 0, 0, "SELECT ai_edit;", out updated, out failure),
+            "A changed editor snapshot must reject stale AI output.");
+        Assert(failure == AiSqlApplyFailure.EditorChanged, "A stale editor should report the editor-changed reason.");
+        Assert(!AiSqlReviewService.TryApply("SELECT old;", "SELECT old;", 999, 2, "new", out updated, out failure),
+            "An invalid remembered selection must fail closed.");
+        Assert(failure == AiSqlApplyFailure.InvalidTarget, "An invalid selection should report the invalid-target reason.");
+        Assert(!AiSqlReviewService.TryApply("SELECT old;", "SELECT old;", 0, 0, "  ", out updated, out failure),
+            "A blank AI SQL block must never erase the editor.");
+        Assert(failure == AiSqlApplyFailure.BlankSuggestion, "A blank suggestion should report the blank-suggestion reason.");
+
+        string largeOriginal = string.Join("\n", Enumerable.Range(1, 501).Select(index => "SELECT " + index + ";"));
+        string largeSuggested = largeOriginal.Replace("SELECT 501;", "SELECT 999;");
+        List<AiSqlDiffRow> largeDiff = AiSqlReviewService.BuildDiff(largeOriginal, largeSuggested);
+        Assert(largeDiff.Count == 501, "Large diffs should use the bounded line-by-line fallback.");
+        Assert(largeDiff[500].Kind == AiSqlDiffKind.Changed, "The bounded fallback should still mark changed lines.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            using (AiSqlReviewForm form = new AiSqlReviewForm(original, suggested))
+            {
+                DataGridView grid = GetPrivateField<DataGridView>(form, "_diffGrid");
+                Button applyButton = GetPrivateField<Button>(form, "_applyButton");
+                Assert(grid.Columns.Count == 4, "The review dialog should show original and suggested SQL side by side.");
+                Assert(grid.Rows.Count == diff.Count, "The review dialog should render every aligned diff row.");
+                AssertEquals("確認套用", applyButton.Text, "The review dialog should require an explicit apply action.");
+                Assert(form.AcceptButton == applyButton, "The reviewed apply action should be the dialog's explicit default action.");
+            }
+
+            string reviewedSql = null;
+            using (AiAssistantPanel panel = new AiAssistantPanel(
+                () => string.Empty,
+                sql => { },
+                () => { },
+                () => { },
+                () => { }))
+            {
+                Action<string> reviewAction = sql => reviewedSql = sql;
+                panel.SetDraft("請最佳化 SQL", reviewAction);
+                typeof(AiAssistantPanel).GetField("_lastAssistantSql", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(panel, "SELECT 2;");
+                typeof(AiAssistantPanel).GetField("_lastAssistantSqlReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(panel, reviewAction);
+                typeof(AiAssistantPanel).GetMethod("UpdateSqlActions", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(panel, null);
+
+                Button reviewButton = GetPrivateField<Button>(panel, "reviewSqlButton");
+                Button openButton = GetPrivateField<Button>(panel, "insertSqlButton");
+                Assert(reviewButton.Visible, "An editor-originated AI request should expose compare-and-apply for its SQL reply.");
+                AssertEquals("比較並套用", reviewButton.Text, "The editor review action should be localized.");
+                AssertEquals("另開查詢分頁", openButton.Text, "Opening AI SQL in a new tab should remain available as a separate action.");
+                reviewButton.PerformClick();
+                AssertEquals("SELECT 2;", reviewedSql, "Compare-and-apply should invoke only the callback associated with that request.");
+
+                panel.SetDraft("一般問題");
+                typeof(AiAssistantPanel).GetField("_lastAssistantSql", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(panel, "SELECT 3;");
+                typeof(AiAssistantPanel).GetMethod("UpdateSqlActions", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(panel, null);
+                Assert(!reviewButton.Visible, "A normal AI chat must not reuse an editor review callback from an earlier request.");
             }
         }
         finally
