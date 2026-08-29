@@ -64,6 +64,8 @@ public static class TableCellValueConverter
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
                 TableColumnValueKind.Interval => ParseInterval(input.Text),
                 TableColumnValueKind.LogSequenceNumber => ParseLogSequenceNumber(input.Text),
+                TableColumnValueKind.FullTextVector => ParseFullTextValue(input.Text),
+                TableColumnValueKind.FullTextQuery => ParseFullTextValue(input.Text),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -147,7 +149,11 @@ public static class TableCellValueConverter
         bytes.Length > MaximumEditableBinaryBytes;
 
     public static bool IsStructuredTextTooLargeToEdit(TableColumnInfo column, object? value) =>
-        column.ValueKind is TableColumnValueKind.Json or TableColumnValueKind.Xml or TableColumnValueKind.BitString &&
+        column.ValueKind is TableColumnValueKind.Json or
+            TableColumnValueKind.Xml or
+            TableColumnValueKind.BitString or
+            TableColumnValueKind.FullTextVector or
+            TableColumnValueKind.FullTextQuery &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
 
@@ -269,6 +275,23 @@ public static class TableCellValueConverter
         value = default;
         return text.Length is >= 1 and <= 8 &&
                uint.TryParse(text, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value);
+    }
+
+    private static string ParseFullTextValue(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length > MaximumEditableStructuredTextCharacters)
+        {
+            throw new FormatException(
+                $"PostgreSQL 全文檢索值不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
+        }
+
+        if (trimmed.Contains('\0'))
+        {
+            throw new FormatException("PostgreSQL 全文檢索值不可包含 NUL 字元。");
+        }
+
+        return trimmed;
     }
 
     private static bool ParseBoolean(string text)

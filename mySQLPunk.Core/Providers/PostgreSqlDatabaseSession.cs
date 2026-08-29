@@ -96,6 +96,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             lsnParameter.NpgsqlDbType = NpgsqlDbType.PgLsn;
         }
+        else if (column.ValueKind is TableColumnValueKind.FullTextVector or TableColumnValueKind.FullTextQuery &&
+                 parameter is NpgsqlParameter fullTextParameter)
+        {
+            fullTextParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
+        }
     }
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
@@ -190,7 +195,9 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         return column.ValueKind is TableColumnValueKind.NetworkAddress or
             TableColumnValueKind.BitString or
             TableColumnValueKind.TimeWithTimeZone or
-            TableColumnValueKind.LogSequenceNumber
+            TableColumnValueKind.LogSequenceNumber or
+            TableColumnValueKind.FullTextVector or
+            TableColumnValueKind.FullTextQuery
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
@@ -316,6 +323,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "time with time zone" => TableColumnValueKind.TimeWithTimeZone,
             "interval" => TableColumnValueKind.Interval,
             "pg_lsn" => TableColumnValueKind.LogSequenceNumber,
+            "tsvector" => TableColumnValueKind.FullTextVector,
+            "tsquery" => TableColumnValueKind.FullTextQuery,
             "oid" or "xid" or "cid" or "xid8" => TableColumnValueKind.UnsignedInteger,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,

@@ -6,6 +6,7 @@ using System.Text.Json;
 using MySqlPunk.Core.Models;
 using MySqlPunk.Core.Providers;
 using MySqlPunk.Core.Services;
+using Npgsql;
 
 var tests = new List<(string Name, Func<Task> Run)>
 {
@@ -977,6 +978,39 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             oidColumn,
             new TableCellInput("object_id", TableCellInputMode.Value, "4294967296")));
+        var fullTextVectorColumn = new TableColumnInfo(
+            0,
+            "search_vector",
+            "tsvector",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.FullTextVector);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                fullTextVectorColumn,
+                new TableCellInput("search_vector", TableCellInputMode.Value, " 'dog':2B 'cat':1A,3 "))) ==
+            "'dog':2B 'cat':1A,3",
+            "PostgreSQL tsvector 應去除外圍空白並交由 PostgreSQL 權威 parser 驗證");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            fullTextVectorColumn,
+            new TableCellInput("search_vector", TableCellInputMode.Value, "'cat'\0:1")));
+        var fullTextQueryColumn = new TableColumnInfo(
+            0,
+            "search_query",
+            "tsquery",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.FullTextQuery);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                fullTextQueryColumn,
+                new TableCellInput("search_query", TableCellInputMode.Value, " 'cat':A & !'dog':* "))) ==
+            "'cat':A & !'dog':*",
+            "PostgreSQL tsquery 應保留 weight、NOT 與 prefix operator");
     }
     finally
     {
@@ -1087,7 +1121,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL, duration INTERVAL NULL, wal_position PG_LSN NULL, object_id OID NULL, transaction_id XID NULL, command_id CID NULL, full_transaction_id XID8 NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL, duration INTERVAL NULL, wal_position PG_LSN NULL, object_id OID NULL, transaction_id XID NULL, command_id CID NULL, full_transaction_id XID8 NULL, search_vector TSVECTOR NULL, search_query TSQUERY NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -1277,6 +1311,37 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetSystemIdentifierTestValue(systemIdentifierColumn, updated: false)));
     }
+    var fullTextVectorColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.FullTextVector);
+    if (fullTextVectorColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            fullTextVectorColumn.Name,
+            TableCellInputMode.Value,
+            "'cat':1A,3 'dog':2B"));
+    }
+    var fullTextQueryColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.FullTextQuery);
+    if (fullTextQueryColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            fullTextQueryColumn.Name,
+            TableCellInputMode.Value,
+            "'cat':A & !'dog':*"));
+
+        await AssertThrowsAsync<PostgresException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected full text"),
+                new TableCellInput(fullTextQueryColumn.Name, TableCellInputMode.Value, "'cat' &")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected full text"),
+            "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 tsquery");
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1359,6 +1424,18 @@ static async Task VerifySafeTableEditingAsync(
                 GetSystemIdentifierTestValue(systemIdentifierColumn, updated: false),
                 CultureInfo.InvariantCulture),
             $"PostgreSQL {systemIdentifierColumn.DataTypeName} 安全新增不正確");
+    }
+    if (fullTextVectorColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[fullTextVectorColumn.Ordinal]) == "'cat':1A,3 'dog':2B",
+            $"PostgreSQL tsvector 安全新增不正確；actual={inserted.Values[fullTextVectorColumn.Ordinal]}");
+    }
+    if (fullTextQueryColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[fullTextQueryColumn.Ordinal]) == "'cat':A & !'dog':*",
+            $"PostgreSQL tsquery 安全新增不正確；actual={inserted.Values[fullTextQueryColumn.Ordinal]}");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1449,6 +1526,20 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetSystemIdentifierTestValue(systemIdentifierColumn, updated: true)));
     }
+    if (fullTextVectorColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            fullTextVectorColumn.Name,
+            TableCellInputMode.Value,
+            "'bird':4C 'fish':2A"));
+    }
+    if (fullTextQueryColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            fullTextQueryColumn.Name,
+            TableCellInputMode.Value,
+            "'bird' <2> 'fish':B"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1533,6 +1624,18 @@ static async Task VerifySafeTableEditingAsync(
                 GetSystemIdentifierTestValue(systemIdentifierColumn, updated: true),
                 CultureInfo.InvariantCulture),
             $"PostgreSQL {systemIdentifierColumn.DataTypeName} 安全修改不正確");
+    }
+    if (fullTextVectorColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[fullTextVectorColumn.Ordinal]) == "'bird':4C 'fish':2A",
+            $"PostgreSQL tsvector 安全修改不正確；actual={updated.Values[fullTextVectorColumn.Ordinal]}");
+    }
+    if (fullTextQueryColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[fullTextQueryColumn.Ordinal]) == "'bird' <2> 'fish':B",
+            $"PostgreSQL tsquery 安全修改不正確；actual={updated.Values[fullTextQueryColumn.Ordinal]}");
     }
 
     var id = Convert.ToInt64(updated.Values[0]);

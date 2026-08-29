@@ -15,6 +15,8 @@ public enum TableColumnValueKind
     TimeWithTimeZone,
     Interval,
     LogSequenceNumber,
+    FullTextVector,
+    FullTextQuery,
     Guid,
     Json,
     Xml,
