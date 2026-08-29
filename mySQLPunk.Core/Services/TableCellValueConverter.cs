@@ -74,6 +74,9 @@ public static class TableCellValueConverter
                 TableColumnValueKind.PostgreSqlRange => ParsePostgreSqlServerValidatedText(
                     input.Text,
                     "range／multirange"),
+                TableColumnValueKind.PostgreSqlArray => ParsePostgreSqlServerValidatedText(
+                    input.Text,
+                    "array"),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -162,7 +165,8 @@ public static class TableCellValueConverter
             TableColumnValueKind.BitString or
             TableColumnValueKind.FullTextVector or
             TableColumnValueKind.FullTextQuery or
-            TableColumnValueKind.PostgreSqlRange &&
+            TableColumnValueKind.PostgreSqlRange or
+            TableColumnValueKind.PostgreSqlArray &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
 

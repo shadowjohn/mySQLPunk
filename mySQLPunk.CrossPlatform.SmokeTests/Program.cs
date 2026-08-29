@@ -1092,6 +1092,31 @@ static async Task TableDataEditingAsync()
         Assert(
             TableCellValueConverter.IsStructuredTextTooLargeToEdit(rangeColumn, oversizedRange),
             "既有 PostgreSQL range 超過 1 MiB 時應維持唯讀");
+        var arrayColumn = new TableColumnInfo(
+            0,
+            "numbers",
+            "int4[]",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.PostgreSqlArray);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                arrayColumn,
+                new TableCellInput("numbers", TableCellInputMode.Value, "  {{1,2},{3,4}}  "))) ==
+            "{{1,2},{3,4}}",
+            "PostgreSQL array 應去除外圍空白並保留多維結構");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            arrayColumn,
+            new TableCellInput("numbers", TableCellInputMode.Value, "{1,\0}")));
+        var oversizedArray = new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            arrayColumn,
+            new TableCellInput("numbers", TableCellInputMode.Value, oversizedArray)));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(arrayColumn, oversizedArray),
+            "既有 PostgreSQL array 超過 1 MiB 時應維持唯讀");
     }
     finally
     {
@@ -1202,6 +1227,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
+        await session.ExecuteAsync(database, "CREATE TYPE mood AS ENUM ('happy', 'sad', 'comma,value');");
         await session.ExecuteAsync(
             database,
             """
@@ -1239,7 +1265,14 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 numeric_spans NUMMULTIRANGE NULL,
                 timestamp_spans TSMULTIRANGE NULL,
                 timestamp_with_zone_spans TSTZMULTIRANGE NULL,
-                date_spans DATEMULTIRANGE NULL
+                date_spans DATEMULTIRANGE NULL,
+                numbers INTEGER[] NULL,
+                labels TEXT[] NULL,
+                matrix INTEGER[][] NULL,
+                identifiers UUID[] NULL,
+                states mood[] NULL,
+                json_items JSONB[] NULL,
+                range_items INT4RANGE[] NULL
             );
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
@@ -1528,6 +1561,38 @@ static async Task VerifySafeTableEditingAsync(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected range"),
             "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 range");
     }
+    var arrayColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.PostgreSqlArray)
+        .ToList();
+    if (arrayColumns.Count > 0)
+    {
+        Assert(arrayColumns.Count == 7, $"PostgreSQL array metadata 未完整辨識；actual={arrayColumns.Count}");
+        Assert(
+            arrayColumns.Single(column => column.Name == "numbers").DataTypeName == "int4[]" &&
+            arrayColumns.Single(column => column.Name == "states").DataTypeName == "mood[]",
+            "PostgreSQL array metadata 應顯示 element type，而不是籠統 ARRAY");
+        foreach (var arrayColumn in arrayColumns)
+        {
+            Assert(arrayColumn.IsEditable, $"PostgreSQL {arrayColumn.DataTypeName} 應可安全編輯");
+            insertInputs.Add(new TableCellInput(
+                arrayColumn.Name,
+                TableCellInputMode.Value,
+                GetPostgreSqlArrayTestValue(arrayColumn, updated: false)));
+        }
+
+        await AssertThrowsAsync<PostgresException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected array"),
+                new TableCellInput(arrayColumns[0].Name, TableCellInputMode.Value, "{1,2")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected array"),
+            "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 array");
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1645,6 +1710,13 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[rangeColumn.Ordinal]) ==
             GetPostgreSqlRangeTestValue(rangeColumn, updated: false),
             $"PostgreSQL {rangeColumn.DataTypeName} 安全新增不正確；actual={inserted.Values[rangeColumn.Ordinal]}");
+    }
+    foreach (var arrayColumn in arrayColumns)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[arrayColumn.Ordinal]) ==
+            GetPostgreSqlArrayTestValue(arrayColumn, updated: false),
+            $"PostgreSQL {arrayColumn.DataTypeName} 安全新增不正確；actual={inserted.Values[arrayColumn.Ordinal]}");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1771,6 +1843,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetPostgreSqlRangeTestValue(rangeColumn, updated: true)));
     }
+    foreach (var arrayColumn in arrayColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            arrayColumn.Name,
+            TableCellInputMode.Value,
+            GetPostgreSqlArrayTestValue(arrayColumn, updated: true)));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1891,6 +1970,13 @@ static async Task VerifySafeTableEditingAsync(
             GetPostgreSqlRangeTestValue(rangeColumn, updated: true),
             $"PostgreSQL {rangeColumn.DataTypeName} 安全修改不正確；actual={updated.Values[rangeColumn.Ordinal]}");
     }
+    foreach (var arrayColumn in arrayColumns)
+    {
+        Assert(
+            Convert.ToString(updated.Values[arrayColumn.Ordinal]) ==
+            GetPostgreSqlArrayTestValue(arrayColumn, updated: true),
+            $"PostgreSQL {arrayColumn.DataTypeName} 安全修改不正確；actual={updated.Values[arrayColumn.Ordinal]}");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -1977,6 +2063,27 @@ static string GetPostgreSqlRangeTestValue(TableColumnInfo column, bool updated) 
         (var dataType, true) when dataType.EndsWith("multirange", StringComparison.Ordinal) => "{}",
         (_, true) => "empty",
         _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} range 測試值。")
+    };
+
+static string GetPostgreSqlArrayTestValue(TableColumnInfo column, bool updated) =>
+    (column.Name, updated) switch
+    {
+        ("numbers", false) => "{1,2,3}",
+        ("labels", false) => "{plain,\"comma,value\",\"quote\\\"value\",\"NULL\",NULL}",
+        ("matrix", false) => "{{1,2},{3,4}}",
+        ("identifiers", false) =>
+            "{11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222}",
+        ("states", false) => "{happy,sad,\"comma,value\"}",
+        ("json_items", false) => "{\"{\\\"a\\\": 1}\",\"[1, 2]\"}",
+        ("range_items", false) => "{\"[1,5)\",\"[10,15)\"}",
+        ("numbers", true) => "{8,9}",
+        ("labels", true) => "{updated,\"two,values\",NULL}",
+        ("matrix", true) => "{{5,6},{7,8}}",
+        ("identifiers", true) => "{33333333-3333-3333-3333-333333333333}",
+        ("states", true) => "{sad,\"comma,value\"}",
+        ("json_items", true) => "{\"{\\\"updated\\\": true}\"}",
+        ("range_items", true) => "{\"[20,30)\",empty}",
+        _ => throw new InvalidOperationException($"缺少 {column.Name} PostgreSQL array 測試值。")
     };
 
 static void AssertNetworkValue(object? actual, string expected, string message)

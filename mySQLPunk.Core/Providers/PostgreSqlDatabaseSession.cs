@@ -98,7 +98,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         }
         else if (column.ValueKind is TableColumnValueKind.FullTextVector or
                      TableColumnValueKind.FullTextQuery or
-                     TableColumnValueKind.PostgreSqlRange &&
+                     TableColumnValueKind.PostgreSqlRange or
+                     TableColumnValueKind.PostgreSqlArray &&
                  parameter is NpgsqlParameter serverValidatedTextParameter)
         {
             serverValidatedTextParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
@@ -200,7 +201,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             TableColumnValueKind.LogSequenceNumber or
             TableColumnValueKind.FullTextVector or
             TableColumnValueKind.FullTextQuery or
-            TableColumnValueKind.PostgreSqlRange
+            TableColumnValueKind.PostgreSqlRange or
+            TableColumnValueKind.PostgreSqlArray
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
@@ -292,7 +294,12 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             var dataType = reader.GetString(2);
             var userDefinedType = reader.GetString(3);
             var displayType = reader.GetString(1);
-            if (dataType is "bit" or "bit varying" && !reader.IsDBNull(9))
+            if (dataType.Equals("ARRAY", StringComparison.OrdinalIgnoreCase) &&
+                userDefinedType.StartsWith('_'))
+            {
+                displayType = $"{userDefinedType[1..]}[]";
+            }
+            else if (dataType is "bit" or "bit varying" && !reader.IsDBNull(9))
             {
                 displayType = $"{displayType}({reader.GetInt32(9)})";
             }
@@ -330,7 +337,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "tsquery" => TableColumnValueKind.FullTextQuery,
             "int4range" or "int8range" or "numrange" or "tsrange" or "tstzrange" or "daterange" or
                 "int4multirange" or "int8multirange" or "nummultirange" or "tsmultirange" or
-                "tstzmultirange" or "datemultirange" => TableColumnValueKind.PostgreSqlRange,
+            "tstzmultirange" or "datemultirange" => TableColumnValueKind.PostgreSqlRange,
+            "array" => TableColumnValueKind.PostgreSqlArray,
             "oid" or "xid" or "cid" or "xid8" => TableColumnValueKind.UnsignedInteger,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,
