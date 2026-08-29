@@ -1,5 +1,6 @@
 using MySqlConnector;
 using MySqlPunk.Core.Models;
+using MySqlPunk.Core.Services;
 
 namespace MySqlPunk.Core.Providers;
 
@@ -49,6 +50,10 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             bitParameter.MySqlDbType = MySqlDbType.Bit;
         }
+        else if (column.ValueKind == TableColumnValueKind.MySqlTime && parameter is MySqlParameter timeParameter)
+        {
+            timeParameter.MySqlDbType = MySqlDbType.Time;
+        }
         else if (column.ValueKind == TableColumnValueKind.String && parameter is MySqlParameter stringParameter)
         {
             if (column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase))
@@ -70,6 +75,26 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         }
 
         return base.BuildOriginalValuePredicate(column, parameterName);
+    }
+
+    protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
+    {
+        if (column.ValueKind == TableColumnValueKind.MySqlTime && value is string time)
+        {
+            return TableCellValueConverter.Parse(
+                column,
+                new TableCellInput(column.Name, TableCellInputMode.Value, time));
+        }
+
+        return base.PrepareParameterValue(column, value);
+    }
+
+    protected override string BuildTableDataSelectExpression(TableColumnInfo column)
+    {
+        var quotedName = QuoteIdentifier(column.Name);
+        return column.ValueKind == TableColumnValueKind.MySqlTime
+            ? $"CAST({quotedName} AS CHAR) AS {quotedName}"
+            : base.BuildTableDataSelectExpression(column);
     }
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
@@ -185,7 +210,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             "bit" => TableColumnValueKind.UnsignedInteger,
             "date" => TableColumnValueKind.Date,
             "datetime" or "timestamp" => TableColumnValueKind.DateTime,
-            "time" => TableColumnValueKind.Time,
+            "time" => TableColumnValueKind.MySqlTime,
             "json" => TableColumnValueKind.Json,
             "binary" or "varbinary" or "tinyblob" or "blob" or "mediumblob" or "longblob" =>
                 TableColumnValueKind.Binary,

@@ -236,6 +236,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.DateTime => "yyyy-MM-dd HH:mm:ss",
         TableColumnValueKind.DateTimeOffset => "ISO 8601 日期時間與時區",
         TableColumnValueKind.Time => "HH:mm:ss",
+        TableColumnValueKind.MySqlTime => "[-]HHH:mm:ss[.ffffff]（最大 ±838:59:59）",
         TableColumnValueKind.TimeWithTimeZone => "HH:mm:ss.ffffff±HH:mm",
         TableColumnValueKind.Interval => "months=0;days=0;microseconds=0",
         TableColumnValueKind.LogSequenceNumber => "0/0（WAL LSN 十六進位）",

@@ -909,6 +909,50 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             timeZoneColumn,
             new TableCellInput("alarm", TableCellInputMode.Value, "25:00:00+08:00")));
+        var mySqlTimeColumn = new TableColumnInfo(
+            0,
+            "duration",
+            "time(6)",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.MySqlTime);
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    mySqlTimeColumn,
+                    new TableCellInput("duration", TableCellInputMode.Value, "838:59:58.123456")),
+                TimeSpan.FromTicks(
+                    ((838L * 3600 + 59 * 60 + 58) * TimeSpan.TicksPerSecond) + 1_234_560)),
+            "MySQL TIME 應支援超過 24 小時與微秒精度");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    mySqlTimeColumn,
+                    new TableCellInput("duration", TableCellInputMode.Value, "838:59:59")),
+                TimeSpan.FromSeconds(838L * 3600 + 59 * 60 + 59)),
+            "MySQL TIME 應接受絕對上限 838:59:59");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    mySqlTimeColumn,
+                    new TableCellInput("duration", TableCellInputMode.Value, "-838:59:58.654321")),
+                TimeSpan.FromTicks(
+                    -(((838L * 3600 + 59 * 60 + 58) * TimeSpan.TicksPerSecond) + 6_543_210))),
+            "MySQL TIME 應支援負值下界與微秒精度");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlTimeColumn,
+            new TableCellInput("duration", TableCellInputMode.Value, "839:00:00")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlTimeColumn,
+            new TableCellInput("duration", TableCellInputMode.Value, "12:34:56.1234567")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlTimeColumn,
+            new TableCellInput("duration", TableCellInputMode.Value, "838:59:59.000001")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlTimeColumn with { DataTypeName = "time" },
+            new TableCellInput("duration", TableCellInputMode.Value, "12:34:56.1")));
         var intervalColumn = new TableColumnInfo(
             0,
             "duration",
@@ -1081,7 +1125,7 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -1292,6 +1336,15 @@ static async Task VerifySafeTableEditingAsync(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected enum"),
             "MySQL／MariaDB 不可在 strict mode 寫入未宣告的 ENUM 值");
     }
+    var mySqlTimeColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.MySqlTime);
+    if (mySqlTimeColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            mySqlTimeColumn.Name,
+            TableCellInputMode.Value,
+            "838:59:58.123456"));
+    }
     var bitStringColumns = before.Columns
         .Where(column => column.ValueKind == TableColumnValueKind.BitString)
         .ToList();
@@ -1428,6 +1481,12 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[setColumn.Ordinal]) == "alpha,beta",
             $"MySQL SET 應依宣告順序正規化；actual={inserted.Values[setColumn.Ordinal]}");
     }
+    if (mySqlTimeColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[mySqlTimeColumn.Ordinal]) == "838:59:58.123456",
+            $"MySQL TIME 正上界安全新增不正確；actual={inserted.Values[mySqlTimeColumn.Ordinal]}");
+    }
     foreach (var bitStringColumn in bitStringColumns)
     {
         Assert(
@@ -1539,6 +1598,13 @@ static async Task VerifySafeTableEditingAsync(
     {
         updateInputs.Add(new TableCellInput(setColumn.Name, TableCellInputMode.Value, "gamma,beta"));
     }
+    if (mySqlTimeColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            mySqlTimeColumn.Name,
+            TableCellInputMode.Value,
+            "-838:59:58.654321"));
+    }
     foreach (var bitStringColumn in bitStringColumns)
     {
         updateInputs.Add(new TableCellInput(
@@ -1645,6 +1711,12 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             Convert.ToString(updated.Values[setColumn.Ordinal]) == "beta,gamma",
             $"MySQL SET 安全修改應保留宣告順序；actual={updated.Values[setColumn.Ordinal]}");
+    }
+    if (mySqlTimeColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[mySqlTimeColumn.Ordinal]) == "-838:59:58.654321",
+            $"MySQL TIME 負下界安全修改不正確；actual={updated.Values[mySqlTimeColumn.Ordinal]}");
     }
     foreach (var bitStringColumn in bitStringColumns)
     {

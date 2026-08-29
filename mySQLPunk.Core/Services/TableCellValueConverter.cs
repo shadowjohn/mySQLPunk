@@ -61,6 +61,7 @@ public static class TableCellValueConverter
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind),
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
+                TableColumnValueKind.MySqlTime => ParseMySqlTime(column, input.Text),
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
                 TableColumnValueKind.Interval => ParseInterval(input.Text),
                 TableColumnValueKind.LogSequenceNumber => ParseLogSequenceNumber(input.Text),
@@ -214,6 +215,74 @@ public static class TableCellValueConverter
             out var value)
             ? value
             : throw new FormatException("帶時區時間必須使用 HH:mm:ss.ffffff±HH:mm 格式，時區不可省略。");
+    }
+
+    private static TimeSpan ParseMySqlTime(TableColumnInfo column, string text)
+    {
+        var trimmed = text.Trim();
+        var isNegative = trimmed.StartsWith("-", StringComparison.Ordinal);
+        var valueText = isNegative || trimmed.StartsWith("+", StringComparison.Ordinal)
+            ? trimmed[1..]
+            : trimmed;
+        var parts = valueText.Split(':');
+        var secondParts = parts.Length == 3 ? parts[2].Split('.') : Array.Empty<string>();
+        var fractionalPrecision = GetMySqlTimeFractionalPrecision(column.DataTypeName);
+        if (parts.Length != 3 ||
+            parts[0].Length is < 1 or > 3 ||
+            parts[1].Length != 2 ||
+            secondParts.Length is < 1 or > 2 ||
+            secondParts[0].Length != 2 ||
+            parts[0].Any(character => !char.IsAsciiDigit(character)) ||
+            parts[1].Any(character => !char.IsAsciiDigit(character)) ||
+            secondParts[0].Any(character => !char.IsAsciiDigit(character)) ||
+            !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var hours) ||
+            !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
+            !int.TryParse(secondParts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) ||
+            hours > 838 || minutes > 59 || seconds > 59)
+        {
+            throw new FormatException("MySQL TIME 必須使用 [-]HHH:mm:ss[.ffffff] 格式，範圍不可超過 ±838:59:59。");
+        }
+
+        var fraction = secondParts.Length == 2 ? secondParts[1] : string.Empty;
+        if (secondParts.Length == 2 && fraction.Length == 0 ||
+            fraction.Length > fractionalPrecision ||
+            fraction.Length > 6 ||
+            fraction.Any(character => !char.IsAsciiDigit(character)))
+        {
+            throw new FormatException(
+                $"MySQL {column.DataTypeName} 最多接受 {fractionalPrecision} 位小數秒。");
+        }
+
+        var microseconds = fraction.Length == 0
+            ? 0
+            : int.Parse(fraction.PadRight(6, '0'), NumberStyles.None, CultureInfo.InvariantCulture);
+        if (hours == 838 && minutes == 59 && seconds == 59 && microseconds != 0)
+        {
+            throw new FormatException("MySQL TIME 的絕對值不可超過 838:59:59；邊界值不可再包含小數秒。");
+        }
+
+        var ticks = ((long)hours * 3600 + minutes * 60L + seconds) * TimeSpan.TicksPerSecond +
+                    microseconds * 10L;
+        return TimeSpan.FromTicks(isNegative ? -ticks : ticks);
+    }
+
+    private static int GetMySqlTimeFractionalPrecision(string dataTypeName)
+    {
+        var normalized = dataTypeName.Trim();
+        if (normalized.Equals("time", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        if (normalized.StartsWith("time(", StringComparison.OrdinalIgnoreCase) &&
+            normalized.EndsWith(')') &&
+            int.TryParse(normalized[5..^1], NumberStyles.None, CultureInfo.InvariantCulture, out var precision) &&
+            precision is >= 0 and <= 6)
+        {
+            return precision;
+        }
+
+        throw new FormatException($"無法辨識 MySQL TIME 精度：{dataTypeName}");
     }
 
     private static IntervalComponents ParseInterval(string text)
