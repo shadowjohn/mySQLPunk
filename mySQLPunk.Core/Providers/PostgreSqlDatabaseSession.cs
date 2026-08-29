@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Net.NetworkInformation;
 using MySqlPunk.Core.Models;
 using Npgsql;
@@ -60,13 +61,23 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 _ => throw new InvalidOperationException($"不支援的 PostgreSQL 網路位址型別：{column.DataTypeName}")
             };
         }
+        else if (column.ValueKind == TableColumnValueKind.BitString && parameter is NpgsqlParameter bitParameter)
+        {
+            bitParameter.NpgsqlDbType = column.DataTypeName.StartsWith(
+                "bit varying",
+                StringComparison.OrdinalIgnoreCase)
+                ? NpgsqlDbType.Varbit
+                : NpgsqlDbType.Bit;
+        }
     }
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
     {
         if (column.ValueKind != TableColumnValueKind.NetworkAddress || value is not string text)
         {
-            return base.PrepareParameterValue(column, value);
+            return column.ValueKind == TableColumnValueKind.BitString && value is string bits
+                ? new BitArray(bits.Select(character => character == '1').ToArray())
+                : base.PrepareParameterValue(column, value);
         }
 
         return column.DataTypeName.ToLowerInvariant() switch
@@ -98,7 +109,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
-        return column.ValueKind == TableColumnValueKind.NetworkAddress
+        return column.ValueKind is TableColumnValueKind.NetworkAddress or TableColumnValueKind.BitString
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
@@ -168,7 +179,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                    ) AS is_primary_key,
                    c.is_identity,
                    c.is_generated,
-                   c.column_default
+                   c.column_default,
+                   c.character_maximum_length
             FROM information_schema.columns c
             WHERE c.table_schema = @schema
               AND c.table_name = @table
@@ -182,12 +194,17 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             var dataType = reader.GetString(2);
             var userDefinedType = reader.GetString(3);
+            var displayType = reader.GetString(1);
+            if (dataType is "bit" or "bit varying" && !reader.IsDBNull(9))
+            {
+                displayType = $"{displayType}({reader.GetInt32(9)})";
+            }
             var generated = string.Equals(reader.GetString(6), "YES", StringComparison.OrdinalIgnoreCase) ||
                             !string.Equals(reader.GetString(7), "NEVER", StringComparison.OrdinalIgnoreCase);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
-                reader.GetString(1),
+                displayType,
                 string.Equals(reader.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
                 reader.GetBoolean(5),
                 generated,
@@ -213,6 +230,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "json" or "jsonb" => TableColumnValueKind.Json,
             "xml" => TableColumnValueKind.Xml,
             "inet" or "cidr" or "macaddr" or "macaddr8" => TableColumnValueKind.NetworkAddress,
+            "bit" or "bit varying" => TableColumnValueKind.BitString,
             "bytea" => TableColumnValueKind.Binary,
             "character" or "character varying" or "text" => TableColumnValueKind.String,
             "user-defined" when string.Equals(userDefinedType, "citext", StringComparison.OrdinalIgnoreCase) =>

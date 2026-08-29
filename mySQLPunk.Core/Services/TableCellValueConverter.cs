@@ -65,6 +65,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
                 TableColumnValueKind.NetworkAddress => ParseNetworkAddress(column, input.Text),
+                TableColumnValueKind.BitString => ParseBitString(column, input.Text),
                 TableColumnValueKind.Binary => ParseBinary(input.Text),
                 _ => throw new InvalidOperationException($"「{column.Name}」的型別目前不支援直接編輯。")
             };
@@ -143,7 +144,7 @@ public static class TableCellValueConverter
         bytes.Length > MaximumEditableBinaryBytes;
 
     public static bool IsStructuredTextTooLargeToEdit(TableColumnInfo column, object? value) =>
-        column.ValueKind is TableColumnValueKind.Json or TableColumnValueKind.Xml &&
+        column.ValueKind is TableColumnValueKind.Json or TableColumnValueKind.Xml or TableColumnValueKind.BitString &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
 
@@ -276,6 +277,36 @@ public static class TableCellValueConverter
             "macaddr8" => ParseMacAddress(text, 8),
             _ => throw new FormatException("不支援的網路位址型別。")
         };
+    }
+
+    private static string ParseBitString(TableColumnInfo column, string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Length > MaximumEditableStructuredTextCharacters ||
+            trimmed.Any(character => character is not ('0' or '1')))
+        {
+            throw new FormatException(
+                $"Bit string 只能包含 0 或 1，且長度必須介於 1 與 {MaximumEditableStructuredTextCharacters:N0}。");
+        }
+
+        var dataType = column.DataTypeName.Trim();
+        var openingParenthesis = dataType.LastIndexOf('(');
+        if (openingParenthesis < 0 || !dataType.EndsWith(')') ||
+            !int.TryParse(dataType[(openingParenthesis + 1)..^1], NumberStyles.None, CultureInfo.InvariantCulture, out var width) ||
+            width < 1)
+        {
+            throw new FormatException("Bit string 欄位缺少有效的長度 metadata。");
+        }
+
+        var varying = dataType.StartsWith("bit varying", StringComparison.OrdinalIgnoreCase);
+        if (varying ? trimmed.Length > width : trimmed.Length != width)
+        {
+            throw new FormatException(varying
+                ? $"BIT VARYING({width}) 最多接受 {width} bits。"
+                : $"BIT({width}) 必須剛好是 {width} bits。");
+        }
+
+        return trimmed;
     }
 
     private static string ParseIpNetwork(string text, bool requireNetworkAddress)

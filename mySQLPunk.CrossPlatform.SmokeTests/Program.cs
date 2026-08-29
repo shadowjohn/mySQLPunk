@@ -856,6 +856,31 @@ static async Task TableDataEditingAsync()
                     new TableCellInput("flags64", TableCellInputMode.Value, ulong.MaxValue.ToString(CultureInfo.InvariantCulture))),
                 ulong.MaxValue),
             "BIT(64) 應接受 UInt64 最大值");
+        var fixedBitsColumn = new TableColumnInfo(0, "bits", "bit(8)", true, false, false, false, TableColumnValueKind.BitString);
+        var varyingBitsColumn = fixedBitsColumn with { Name = "varbits", DataTypeName = "bit varying(16)" };
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    fixedBitsColumn,
+                    new TableCellInput("bits", TableCellInputMode.Value, "10100101")),
+                "10100101"),
+            "PostgreSQL BIT(8) 應接受八位 bit string");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    varyingBitsColumn,
+                    new TableCellInput("varbits", TableCellInputMode.Value, "10101")),
+                "10101"),
+            "PostgreSQL BIT VARYING 應接受上限內的 bit string");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            fixedBitsColumn,
+            new TableCellInput("bits", TableCellInputMode.Value, "101")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            fixedBitsColumn,
+            new TableCellInput("bits", TableCellInputMode.Value, "10102010")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            varyingBitsColumn,
+            new TableCellInput("varbits", TableCellInputMode.Value, new string('1', 17))));
     }
     finally
     {
@@ -966,7 +991,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -1096,7 +1121,9 @@ static async Task VerifySafeTableEditingAsync(
         insertInputs.Add(new TableCellInput(legacyImageColumn.Name, TableCellInputMode.Value, "0xDEADBEEF"));
     }
     var bitColumns = before.Columns
-        .Where(column => column.DataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase))
+        .Where(column =>
+            column.ValueKind == TableColumnValueKind.UnsignedInteger &&
+            column.DataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase))
         .ToList();
     foreach (var bitColumn in bitColumns)
     {
@@ -1104,6 +1131,16 @@ static async Task VerifySafeTableEditingAsync(
             bitColumn.Name,
             TableCellInputMode.Value,
             GetBitTestValue(bitColumn, updated: false)));
+    }
+    var bitStringColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.BitString)
+        .ToList();
+    foreach (var bitStringColumn in bitStringColumns)
+    {
+        insertInputs.Add(new TableCellInput(
+            bitStringColumn.Name,
+            TableCellInputMode.Value,
+            GetBitStringTestValue(bitStringColumn, updated: false)));
     }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
@@ -1150,6 +1187,13 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToUInt64(inserted.Values[bitColumn.Ordinal]) ==
             ulong.Parse(GetBitTestValue(bitColumn, updated: false), CultureInfo.InvariantCulture),
             $"MySQL {bitColumn.DataTypeName} 安全新增不正確");
+    }
+    foreach (var bitStringColumn in bitStringColumns)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[bitStringColumn.Ordinal]) ==
+            GetBitStringTestValue(bitStringColumn, updated: false),
+            $"PostgreSQL {bitStringColumn.DataTypeName} 安全新增不正確");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1205,6 +1249,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetBitTestValue(bitColumn, updated: true)));
     }
+    foreach (var bitStringColumn in bitStringColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            bitStringColumn.Name,
+            TableCellInputMode.Value,
+            GetBitStringTestValue(bitStringColumn, updated: true)));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1253,6 +1304,13 @@ static async Task VerifySafeTableEditingAsync(
             ulong.Parse(GetBitTestValue(bitColumn, updated: true), CultureInfo.InvariantCulture),
             $"MySQL {bitColumn.DataTypeName} 安全修改不正確");
     }
+    foreach (var bitStringColumn in bitStringColumns)
+    {
+        Assert(
+            Convert.ToString(updated.Values[bitStringColumn.Ordinal]) ==
+            GetBitStringTestValue(bitStringColumn, updated: true),
+            $"PostgreSQL {bitStringColumn.DataTypeName} 安全修改不正確");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -1292,6 +1350,16 @@ static string GetBitTestValue(TableColumnInfo column, bool updated) =>
         ("bit(8)", true) => "90",
         ("bit(64)", false) => "18446744073709551615",
         ("bit(64)", true) => "9223372036854775808",
+        _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
+    };
+
+static string GetBitStringTestValue(TableColumnInfo column, bool updated) =>
+    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    {
+        ("bit(8)", false) => "10100101",
+        ("bit(8)", true) => "01011010",
+        ("bit varying(16)", false) => "101011",
+        ("bit varying(16)", true) => "1111000011110000",
         _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
     };
 

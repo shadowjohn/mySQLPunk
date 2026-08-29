@@ -39,7 +39,7 @@ public sealed partial class TableRowEditorWindow : Window
         Title = _isInsert ? "新增資料列" : "修改資料列";
         _hintText.Text = _isInsert
             ? "預設會交由資料庫套用欄位 DEFAULT；取消勾選「使用預設值」後即可輸入。"
-            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON／XML 維持唯讀；只會送出實際變更的欄位。";
+            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON／XML／bit string 維持唯讀；只會送出實際變更的欄位。";
         BuildFields();
     }
 
@@ -229,6 +229,9 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",
         TableColumnValueKind.Xml => "有效 XML（最多 1 MiB 字元，禁止 DTD）",
         TableColumnValueKind.NetworkAddress => BuildNetworkWatermark(column),
+        TableColumnValueKind.BitString => column.DataTypeName.StartsWith("bit varying", StringComparison.OrdinalIgnoreCase)
+            ? "0/1 bit string（不可超過欄位長度）"
+            : "0/1 bit string（必須符合欄位長度）",
         TableColumnValueKind.Binary => "0x00FF（二進位十六進位，最多 1 MiB）",
         _ => string.Empty
     };

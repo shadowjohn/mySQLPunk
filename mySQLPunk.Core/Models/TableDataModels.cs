@@ -16,6 +16,7 @@ public enum TableColumnValueKind
     Json,
     Xml,
     NetworkAddress,
+    BitString,
     Binary,
     Unsupported
 }
