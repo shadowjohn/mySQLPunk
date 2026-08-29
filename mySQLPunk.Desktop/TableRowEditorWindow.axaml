@@ -1,0 +1,29 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MySqlPunk.Desktop.TableRowEditorWindow"
+        Title="資料列"
+        Width="720"
+        Height="650"
+        MinWidth="580"
+        MinHeight="420"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="20">
+    <TextBlock Grid.Row="0"
+               x:Name="HintText"
+               Margin="0,0,0,14"
+               Foreground="#475467"
+               TextWrapping="Wrap" />
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel x:Name="FieldsPanel" Spacing="10" />
+    </ScrollViewer>
+    <TextBlock Grid.Row="2"
+               x:Name="ErrorText"
+               Margin="0,12,0,0"
+               Foreground="#B42318"
+               TextWrapping="Wrap" />
+    <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto" Margin="0,18,0,0">
+      <Button Grid.Column="1" Content="取消" Click="Cancel_Click" Padding="14,7" />
+      <Button Grid.Column="2" x:Name="SaveButton" Content="儲存" Click="Save_Click" Margin="8,0,0,0" Padding="14,7" />
+    </Grid>
+  </Grid>
+</Window>

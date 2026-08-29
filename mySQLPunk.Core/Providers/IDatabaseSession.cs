@@ -19,5 +19,30 @@ public interface IDatabaseSession
         string sql,
         CancellationToken cancellationToken = default);
 
+    Task<TableDataSnapshot> LoadTableDataAsync(
+        string database,
+        DatabaseObjectInfo table,
+        int rowLimit = 200,
+        CancellationToken cancellationToken = default);
+
+    Task InsertTableRowAsync(
+        string database,
+        DatabaseObjectInfo table,
+        IReadOnlyList<TableCellInput> values,
+        CancellationToken cancellationToken = default);
+
+    Task UpdateTableRowAsync(
+        string database,
+        DatabaseObjectInfo table,
+        TableDataRow originalRow,
+        IReadOnlyList<TableCellInput> changes,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteTableRowAsync(
+        string database,
+        DatabaseObjectInfo table,
+        TableDataRow originalRow,
+        CancellationToken cancellationToken = default);
+
     string BuildSelectPreview(DatabaseObjectInfo databaseObject, int rowLimit = 200);
 }

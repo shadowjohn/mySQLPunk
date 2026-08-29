@@ -5,6 +5,7 @@ using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using MySqlPunk.Core.Models;
 using MySqlPunk.Core.Providers;
 using MySqlPunk.Core.Services;
@@ -18,6 +19,7 @@ public sealed partial class MainWindow : Window
     private readonly ConnectionProfileStore _profileStore = new();
     private readonly ISecretStore _secretStore = SecretStoreFactory.CreateDefault();
     private IDatabaseSession? _session;
+    private QueryResult? _lastResult;
     private CancellationTokenSource? _operationCancellation;
     private bool _loadingDatabases;
 
@@ -26,11 +28,13 @@ public sealed partial class MainWindow : Window
     private readonly TreeView _objectsTree;
     private readonly TextBox _sqlEditor;
     private readonly DataGrid _resultsGrid;
+    private readonly ComboBox _exportFormatCombo;
     private readonly TextBlock _statusText;
     private readonly TextBlock _connectionBadge;
     private readonly Button _connectButton;
     private readonly Button _refreshButton;
     private readonly Button _executeButton;
+    private readonly Button _exportButton;
     private readonly Button _cancelButton;
 
     public MainWindow()
@@ -41,11 +45,13 @@ public sealed partial class MainWindow : Window
         _objectsTree = this.FindControl<TreeView>("ObjectsTree")!;
         _sqlEditor = this.FindControl<TextBox>("SqlEditor")!;
         _resultsGrid = this.FindControl<DataGrid>("ResultsGrid")!;
+        _exportFormatCombo = this.FindControl<ComboBox>("ExportFormatCombo")!;
         _statusText = this.FindControl<TextBlock>("StatusText")!;
         _connectionBadge = this.FindControl<TextBlock>("ConnectionBadge")!;
         _connectButton = this.FindControl<Button>("ConnectButton")!;
         _refreshButton = this.FindControl<Button>("RefreshButton")!;
         _executeButton = this.FindControl<Button>("ExecuteButton")!;
+        _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
 
         _profilesList.ItemsSource = _profiles;
@@ -266,10 +272,19 @@ public sealed partial class MainWindow : Window
             LoadObjectsAsync(database, cancellationToken));
     }
 
-    private void ObjectsTree_DoubleTapped(object? sender, TappedEventArgs e)
+    private async void ObjectsTree_DoubleTapped(object? sender, TappedEventArgs e)
     {
         if (_session is null || _objectsTree.SelectedItem is not ObjectTreeItem { DatabaseObject: { } databaseObject })
         {
+            return;
+        }
+
+        if (databaseObject.Kind == DatabaseObjectKind.Table &&
+            _databaseCombo.SelectedItem is string database)
+        {
+            var editor = new TableDataEditorWindow(_session, database, databaseObject);
+            await editor.ShowDialog(this);
+            SetStatus($"已關閉 {databaseObject.DisplayName} 資料編輯器。");
             return;
         }
 
@@ -348,21 +363,112 @@ public sealed partial class MainWindow : Window
 
     private void DisplayResult(QueryResult result)
     {
+        _lastResult = result.HasResultSet ? result : null;
         _resultsGrid.Columns.Clear();
         for (var index = 0; index < result.Columns.Count; index++)
         {
             _resultsGrid.Columns.Add(new DataGridTextColumn
             {
                 Header = result.Columns[index],
-                Binding = new Binding($"Values[{index}]")
-                {
-                    TargetNullValue = "(NULL)"
-                },
+                Binding = new Binding($"Values[{index}]"),
                 Width = new DataGridLength(1, DataGridLengthUnitType.Auto)
             });
         }
 
-        _resultsGrid.ItemsSource = result.Rows.Select(row => new ResultRow(row)).ToList();
+        _resultsGrid.ItemsSource = result.Rows
+            .Select(row => new ResultRow(row.Select(value => value ?? "(NULL)").ToArray()))
+            .ToList();
+    }
+
+    private async void ExportResult_Click(object? sender, RoutedEventArgs e)
+    {
+        var result = _lastResult;
+        if (result is null)
+        {
+            return;
+        }
+
+        if (result.WasTruncated)
+        {
+            var confirmed = await MessageDialog.ShowAsync(
+                this,
+                "匯出截斷結果",
+                $"這次查詢只載入前 {result.Rows.Count:N0} 列；匯出檔也只會包含目前載入的資料。是否繼續？",
+                showCancel: true);
+            if (!confirmed)
+            {
+                return;
+            }
+        }
+
+        var selectedFormat = _exportFormatCombo.SelectedIndex switch
+        {
+            1 => QueryResultExportFormat.Tsv,
+            2 => QueryResultExportFormat.Json,
+            _ => QueryResultExportFormat.Csv
+        };
+        var extension = QueryResultExportService.GetDefaultExtension(selectedFormat);
+        if (!StorageProvider.CanSave)
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "無法匯出查詢結果",
+                "目前桌面環境未提供儲存檔案對話框。",
+                showCancel: false);
+            return;
+        }
+
+        var fileType = new FilePickerFileType(
+            $"{QueryResultExportService.GetFormatDisplayName(selectedFormat)} 查詢結果")
+        {
+            Patterns = new[] { $"*.{extension}" },
+            MimeTypes = selectedFormat switch
+            {
+                QueryResultExportFormat.Csv => new[] { "text/csv" },
+                QueryResultExportFormat.Tsv => new[] { "text/tab-separated-values" },
+                QueryResultExportFormat.Json => new[] { "application/json" },
+                _ => Array.Empty<string>()
+            }
+        };
+        IStorageFile? file;
+        try
+        {
+            file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "匯出查詢結果",
+                SuggestedFileName = $"mysqlpunk-result-{DateTime.Now:yyyyMMdd-HHmmss}.{extension}",
+                DefaultExtension = extension,
+                FileTypeChoices = new[] { fileType }
+            });
+        }
+        catch (Exception exception)
+        {
+            await ShowErrorAsync("無法開啟儲存檔案對話框", exception);
+            return;
+        }
+
+        if (file is null)
+        {
+            return;
+        }
+
+        if (file.TryGetLocalPath() is not { } path)
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "無法匯出查詢結果",
+                "目前只能匯出到本機檔案。",
+                showCancel: false);
+            return;
+        }
+
+        var format = QueryResultExportService.ResolveFormat(path, selectedFormat);
+        await RunOperationAsync("正在匯出查詢結果…", async cancellationToken =>
+        {
+            var summary = await QueryResultExportService.WriteFileAsync(result, path, format, cancellationToken);
+            SetStatus(
+                $"已匯出 {summary.Rows:N0} 列 {summary.FormatDisplayName}（{summary.FormattedBytes}）：{summary.Path}");
+        });
     }
 
     private async Task RunOperationAsync(string status, Func<CancellationToken, Task> operation)
@@ -535,6 +641,7 @@ public sealed partial class MainWindow : Window
         _objectsTree.ItemsSource = null;
         _resultsGrid.ItemsSource = null;
         _resultsGrid.Columns.Clear();
+        _lastResult = null;
         _connectionBadge.Text = "尚未連線";
         SetStatus(status);
         UpdateActionState();
@@ -545,6 +652,7 @@ public sealed partial class MainWindow : Window
         _connectButton.IsEnabled = !busy && _profilesList.SelectedItem is not null;
         _refreshButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _executeButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _exportButton.IsEnabled = !busy && _lastResult is not null;
         _databaseCombo.IsEnabled = !busy && _session is not null;
         _cancelButton.IsEnabled = busy;
         if (!string.IsNullOrWhiteSpace(status))

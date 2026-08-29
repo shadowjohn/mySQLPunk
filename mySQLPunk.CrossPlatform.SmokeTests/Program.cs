@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using MySqlPunk.Core.Models;
 using MySqlPunk.Core.Providers;
 using MySqlPunk.Core.Services;
@@ -5,10 +7,12 @@ using MySqlPunk.Core.Services;
 var tests = new List<(string Name, Func<Task> Run)>
 {
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
+    ("查詢結果安全匯出", QueryResultExportFormatsAsync),
     ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
+    ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
 
@@ -127,6 +131,109 @@ static async Task LinuxSecretServiceRoundTripAsync()
     }
 }
 
+static async Task QueryResultExportFormatsAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var instant = new DateTime(2026, 8, 29, 14, 5, 6, DateTimeKind.Utc);
+        var result = new QueryResult
+        {
+            Columns = new[] { "name", "name", "amount", "created", "payload", "empty", "nullable", "formula" },
+            Rows = new IReadOnlyList<object?>[]
+            {
+                new object?[]
+                {
+                    "崩琦",
+                    "引號 \"、逗號, 與\r\n換行",
+                    -12.5m,
+                    instant,
+                    new byte[] { 0, 255 },
+                    string.Empty,
+                    null,
+                    "=2+3"
+                },
+                new object?[]
+                {
+                    "Punky",
+                    "tab\tvalue",
+                    42,
+                    new DateTimeOffset(instant),
+                    Array.Empty<byte>(),
+                    "text",
+                    DBNull.Value,
+                    "-not-a-number"
+                }
+            }
+        };
+
+        var csvPath = Path.Combine(directory, "result.csv");
+        var csvSummary = await QueryResultExportService.WriteFileAsync(
+            result,
+            csvPath,
+            QueryResultExportFormat.Csv);
+        var csvBytes = await File.ReadAllBytesAsync(csvPath);
+        var csv = await File.ReadAllTextAsync(csvPath);
+        Assert(csvBytes.AsSpan(0, 3).SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF }), "CSV 應使用 UTF-8 BOM");
+        Assert(csv.Contains("\r\n", StringComparison.Ordinal), "CSV 應使用 RFC 4180 CRLF");
+        Assert(csv.Contains("\"引號 \"\"、逗號, 與\r\n換行\"", StringComparison.Ordinal), "CSV 引號或換行 escaping 錯誤");
+        Assert(csv.Contains("'=2+3", StringComparison.Ordinal), "CSV 公式注入未中和");
+        Assert(csv.Contains("-12.5", StringComparison.Ordinal), "CSV 負數不可被公式保護改寫");
+        Assert(csvSummary.Rows == 2 && csvSummary.Bytes == csvBytes.Length, "CSV 匯出摘要不正確");
+
+        var tsvPath = Path.Combine(directory, "result.tsv");
+        await QueryResultExportService.WriteFileAsync(result, tsvPath, QueryResultExportFormat.Tsv);
+        var tsv = await File.ReadAllTextAsync(tsvPath);
+        Assert(tsv.Contains("\"tab\tvalue\"", StringComparison.Ordinal), "TSV tab escaping 錯誤");
+        Assert(tsv.Contains("'-not-a-number", StringComparison.Ordinal), "TSV 公式注入未中和");
+
+        var jsonPath = Path.Combine(directory, "result.json");
+        await QueryResultExportService.WriteFileAsync(result, jsonPath, QueryResultExportFormat.Json);
+        var jsonBytes = await File.ReadAllBytesAsync(jsonPath);
+        Assert(!jsonBytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }), "JSON 不應包含 BOM");
+        using var json = JsonDocument.Parse(jsonBytes);
+        var first = json.RootElement[0];
+        Assert(first.GetProperty("name").GetString() == "崩琦", "JSON Unicode 不正確");
+        Assert(first.GetProperty("name_2").GetString()!.Contains("換行", StringComparison.Ordinal), "JSON 重複欄名未穩定改名");
+        Assert(first.GetProperty("amount").GetDecimal() == -12.5m, "JSON 數字型別不正確");
+        Assert(first.GetProperty("created").GetString() == instant.ToString("O"), "JSON 日期格式不正確");
+        Assert(first.GetProperty("payload").GetString() == "0x00FF", "JSON binary 格式不正確");
+        Assert(first.GetProperty("empty").GetString() == string.Empty, "JSON 空字串不正確");
+        Assert(first.GetProperty("nullable").ValueKind == JsonValueKind.Null, "JSON NULL 不正確");
+        Assert(first.GetProperty("formula").GetString() == "=2+3", "JSON 不應改寫一般字串");
+
+        Assert(
+            QueryResultExportService.ResolveFormat("result.tab", QueryResultExportFormat.Csv) == QueryResultExportFormat.Tsv,
+            "副檔名格式判斷不正確");
+
+        var existingPath = Path.Combine(directory, "existing.csv");
+        await File.WriteAllTextAsync(existingPath, "keep-me");
+        var invalid = new QueryResult
+        {
+            Columns = new[] { "first", "second" },
+            Rows = new IReadOnlyList<object?>[] { new object?[] { 1 } }
+        };
+        await AssertThrowsAsync<InvalidDataException>(() =>
+            QueryResultExportService.WriteFileAsync(invalid, existingPath, QueryResultExportFormat.Csv));
+        Assert(await File.ReadAllTextAsync(existingPath) == "keep-me", "匯出失敗不可覆寫既有檔案");
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await AssertThrowsAsync<OperationCanceledException>(() =>
+            QueryResultExportService.WriteFileAsync(
+                result,
+                existingPath,
+                QueryResultExportFormat.Csv,
+                cancellation.Token));
+        Assert(await File.ReadAllTextAsync(existingPath) == "keep-me", "取消匯出不可覆寫既有檔案");
+        Assert(!Directory.EnumerateFiles(directory).Any(path => path.EndsWith(".tmp", StringComparison.Ordinal)), "匯出失敗留下暫存檔");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
+
 static async Task MacOsKeychainRoundTripAsync()
 {
     if (OperatingSystem.IsWindows())
@@ -238,6 +345,130 @@ static async Task SqliteLoadsMetadataAsync()
     }
 }
 
+static async Task TableDataEditingAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var profile = CreateSqliteProfile(Path.Combine(directory, "editing.db"));
+        var session = DatabaseProviderFactory.Create(profile);
+        await session.ExecuteAsync(
+            profile.Database,
+            """
+            CREATE TABLE editor_sample (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                quantity INTEGER NULL,
+                note TEXT NULL DEFAULT 'database-default'
+            );
+            CREATE TABLE no_primary_key (name TEXT NOT NULL);
+            CREATE TABLE without_rowid (id INTEGER PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
+            """);
+        var table = new DatabaseObjectInfo(string.Empty, "editor_sample", DatabaseObjectKind.Table);
+
+        var empty = await session.LoadTableDataAsync(profile.Database, table);
+        Assert(empty.Rows.Count == 0, "新建 Table 應為空");
+        Assert(empty.HasPrimaryKey, "SQLite Primary Key metadata 未辨識");
+        Assert(empty.Columns.Single(column => column.Name == "id").IsGenerated, "SQLite INTEGER PK 應視為 generated");
+        Assert(!empty.Columns.Single(column => column.Name == "name").HasDefault, "必填欄位不可誤判為有 DEFAULT");
+        Assert(empty.Columns.Single(column => column.Name == "note").HasDefault, "SQLite DEFAULT metadata 未辨識");
+
+        const string parameterizedName = "Punky '); DROP TABLE editor_sample;--";
+        await session.InsertTableRowAsync(
+            profile.Database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, parameterizedName),
+                new TableCellInput("quantity", TableCellInputMode.Value, "7"),
+                new TableCellInput("note", TableCellInputMode.Default, string.Empty)
+            });
+        var inserted = await session.LoadTableDataAsync(profile.Database, table);
+        Assert(inserted.Rows.Count == 1, "安全新增後應有一列");
+        Assert(Convert.ToString(inserted.Rows[0].Values[1]) == parameterizedName, "安全新增參數化字串不正確");
+        Assert(Convert.ToInt64(inserted.Rows[0].Values[2]) == 7, "安全新增整數不正確");
+        Assert(Convert.ToString(inserted.Rows[0].Values[3]) == "database-default", "資料庫 DEFAULT 未套用");
+
+        var original = inserted.Rows[0];
+        await session.UpdateTableRowAsync(
+            profile.Database,
+            table,
+            original,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "崩琦"),
+                new TableCellInput("quantity", TableCellInputMode.Null, string.Empty)
+            });
+        var updated = await session.LoadTableDataAsync(profile.Database, table);
+        Assert(Convert.ToString(updated.Rows[0].Values[1]) == "崩琦", "安全修改字串不正確");
+        Assert(updated.Rows[0].Values[2] is null, "安全修改 NULL 不正確");
+
+        var staleRow = updated.Rows[0];
+        var id = Convert.ToInt64(staleRow.Values[0]);
+        await session.ExecuteAsync(
+            profile.Database,
+            $"UPDATE editor_sample SET name = 'Concurrent' WHERE id = {id};");
+        await AssertThrowsAsync<TableDataConflictException>(() =>
+            session.UpdateTableRowAsync(
+                profile.Database,
+                table,
+                staleRow,
+                new[] { new TableCellInput("name", TableCellInputMode.Value, "不可覆蓋") }));
+        var concurrent = await session.LoadTableDataAsync(profile.Database, table);
+        Assert(Convert.ToString(concurrent.Rows[0].Values[1]) == "Concurrent", "衝突檢查不應覆蓋外部變更");
+
+        await session.DeleteTableRowAsync(profile.Database, table, concurrent.Rows[0]);
+        Assert((await session.LoadTableDataAsync(profile.Database, table)).Rows.Count == 0, "安全刪除後應為空");
+        await AssertThrowsAsync<TableDataConflictException>(() =>
+            session.DeleteTableRowAsync(profile.Database, table, concurrent.Rows[0]));
+
+        var noPrimaryKey = new DatabaseObjectInfo(string.Empty, "no_primary_key", DatabaseObjectKind.Table);
+        await session.InsertTableRowAsync(
+            profile.Database,
+            noPrimaryKey,
+            new[] { new TableCellInput("name", TableCellInputMode.Value, "允許新增") });
+        var noKeyRows = await session.LoadTableDataAsync(profile.Database, noPrimaryKey);
+        Assert(!noKeyRows.HasPrimaryKey && noKeyRows.Rows.Count == 1, "無 PK Table 應可新增與瀏覽");
+        await AssertThrowsAsync<InvalidOperationException>(() =>
+            session.DeleteTableRowAsync(profile.Database, noPrimaryKey, noKeyRows.Rows[0]));
+        await AssertThrowsAsync<InvalidOperationException>(() =>
+            session.UpdateTableRowAsync(
+                profile.Database,
+                noPrimaryKey,
+                noKeyRows.Rows[0],
+                new[] { new TableCellInput("name", TableCellInputMode.Value, "不可修改") }));
+        await AssertThrowsAsync<InvalidOperationException>(() =>
+            session.InsertTableRowAsync(
+                profile.Database,
+                noPrimaryKey,
+                new[] { new TableCellInput("unknown", TableCellInputMode.Default, string.Empty) }));
+
+        var withoutRowId = new DatabaseObjectInfo(string.Empty, "without_rowid", DatabaseObjectKind.Table);
+        var withoutRowIdSnapshot = await session.LoadTableDataAsync(profile.Database, withoutRowId);
+        Assert(
+            !withoutRowIdSnapshot.Columns.Single(column => column.Name == "id").IsGenerated,
+            "SQLite WITHOUT ROWID 的 INTEGER PK 不可誤判為 generated");
+        await session.InsertTableRowAsync(
+            profile.Database,
+            withoutRowId,
+            new[]
+            {
+                new TableCellInput("id", TableCellInputMode.Value, "9"),
+                new TableCellInput("name", TableCellInputMode.Value, "需要明確 PK")
+            });
+        Assert((await session.LoadTableDataAsync(profile.Database, withoutRowId)).Rows.Count == 1, "WITHOUT ROWID 新增失敗");
+
+        var integerColumn = inserted.Columns.Single(column => column.Name == "quantity");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            integerColumn,
+            new TableCellInput("quantity", TableCellInputMode.Value, "not-an-integer")));
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
+
 static Task ProviderFactoryValidatesProfilesAsync()
 {
     var mysql = new ConnectionProfile
@@ -300,14 +531,20 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
         var result = await session.ExecuteAsync(database, "SELECT id, name FROM sample ORDER BY id;");
         Assert(result.Rows.Count == 2 && Convert.ToString(result.Rows[1][1]) == "Linux", "MySQL 查詢結果不正確");
         var objects = await session.GetObjectsAsync(database);
-        Assert(objects.Any(item => item.Name == "sample" && item.Kind == DatabaseObjectKind.Table), "MySQL metadata 找不到 sample");
+        var table = objects.SingleOrDefault(item => item.Name == "sample" && item.Kind == DatabaseObjectKind.Table);
+        Assert(table is not null, "MySQL metadata 找不到 sample");
+        await VerifySafeTableEditingAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
     }
     finally
     {
@@ -335,14 +572,20 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
         var result = await session.ExecuteAsync(database, "SELECT id, name FROM sample ORDER BY id;");
         Assert(result.Rows.Count == 2 && Convert.ToString(result.Rows[1][1]) == "macOS", "PostgreSQL 查詢結果不正確");
         var objects = await session.GetObjectsAsync(database);
-        Assert(objects.Any(item => item.Name == "sample" && item.Schema == "public"), "PostgreSQL metadata 找不到 public.sample");
+        var table = objects.SingleOrDefault(item => item.Name == "sample" && item.Schema == "public");
+        Assert(table is not null, "PostgreSQL metadata 找不到 public.sample");
+        await VerifySafeTableEditingAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE public.sample SET name = 'Concurrent' WHERE id = {id};");
     }
     finally
     {
@@ -373,7 +616,7 @@ static async Task SqlServerLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
 
@@ -383,6 +626,11 @@ static async Task SqlServerLiveRoundTripAsync()
         var table = objects.SingleOrDefault(item => item.Name == "sample" && item.Schema == "dbo");
         Assert(table is not null && table.Kind == DatabaseObjectKind.Table, "SQL Server metadata 找不到 dbo.sample");
         Assert(session.BuildSelectPreview(table!) == "SELECT TOP (200) * FROM [dbo].[sample];", "SQL Server 實機預覽 SQL 不正確");
+        await VerifySafeTableEditingAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE dbo.sample SET name = N'Concurrent' WHERE id = {id};");
     }
     finally
     {
@@ -390,6 +638,55 @@ static async Task SqlServerLiveRoundTripAsync()
             "master",
             $"IF DB_ID(N'{database}') IS NOT NULL BEGIN ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}]; END");
     }
+}
+
+static async Task VerifySafeTableEditingAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table,
+    Func<long, string> buildConcurrentUpdateSql)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    Assert(before.HasPrimaryKey, $"{session.Profile.ProviderDisplayName} 未辨識 Primary Key");
+    Assert(before.Columns.Single(column => column.Name == "id").IsGenerated, $"{session.Profile.ProviderDisplayName} 未辨識 generated id");
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "Editor"),
+            new TableCellInput("quantity", TableCellInputMode.Value, "7"),
+            new TableCellInput("note", TableCellInputMode.Null, string.Empty)
+        });
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
+    Assert(Convert.ToInt64(inserted.Values[2]) == 7, $"{session.Profile.ProviderDisplayName} 安全新增整數不正確");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "8") });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
+    Assert(Convert.ToInt64(updated.Values[2]) == 8, $"{session.Profile.ProviderDisplayName} 安全修改不正確");
+
+    var id = Convert.ToInt64(updated.Values[0]);
+    await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
+    await AssertThrowsAsync<TableDataConflictException>(() =>
+        session.UpdateTableRowAsync(
+            database,
+            table,
+            updated,
+            new[] { new TableCellInput("quantity", TableCellInputMode.Value, "9") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row => Convert.ToInt64(row.Values[0]) == id);
+    Assert(Convert.ToString(concurrent.Values[1]) == "Concurrent", $"{session.Profile.ProviderDisplayName} 衝突時覆蓋了外部變更");
+
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0]) != id), $"{session.Profile.ProviderDisplayName} 安全刪除失敗");
 }
 
 static ConnectionProfile CreateSqliteProfile(string path) => new()
@@ -448,6 +745,21 @@ static void AssertThrows<TException>(Action action)
     try
     {
         action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException($"預期丟出 {typeof(TException).Name}");
+}
+
+static async Task AssertThrowsAsync<TException>(Func<Task> action)
+    where TException : Exception
+{
+    try
+    {
+        await action();
     }
     catch (TException)
     {

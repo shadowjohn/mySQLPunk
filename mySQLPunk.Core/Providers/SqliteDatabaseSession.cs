@@ -58,4 +58,104 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
 
         return objects;
     }
+
+    protected override async Task<IReadOnlyList<TableColumnInfo>> GetTableColumnsAsync(
+        string database,
+        DatabaseObjectInfo table,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection(database);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var schemaCommand = connection.CreateCommand();
+        schemaCommand.CommandText = "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = @table;";
+        schemaCommand.Parameters.AddWithValue("@table", table.Name);
+        var createSql = Convert.ToString(
+            await schemaCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) ?? string.Empty;
+        var withoutRowId = createSql.Contains("WITHOUT ROWID", StringComparison.OrdinalIgnoreCase);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_xinfo({QuoteIdentifier(table.Name)});";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var entries = new List<(
+            string Name,
+            string DataType,
+            bool IsNullable,
+            int PrimaryKeyPosition,
+            bool IsHidden,
+            bool HasDefault)>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var dataType = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+            var primaryKeyPosition = checked((int)reader.GetInt64(5));
+            entries.Add((
+                reader.GetString(1),
+                dataType,
+                reader.GetInt64(3) == 0 && primaryKeyPosition == 0,
+                primaryKeyPosition,
+                reader.FieldCount > 6 && reader.GetInt64(6) != 0,
+                !reader.IsDBNull(4)));
+        }
+
+        var primaryKeyCount = entries.Count(entry => entry.PrimaryKeyPosition > 0);
+        return entries.Select((entry, ordinal) =>
+        {
+            var isPrimaryKey = entry.PrimaryKeyPosition > 0;
+            var isRowIdAlias = !withoutRowId &&
+                               primaryKeyCount == 1 &&
+                               isPrimaryKey &&
+                               string.Equals(entry.DataType.Trim(), "INTEGER", StringComparison.OrdinalIgnoreCase);
+            return new TableColumnInfo(
+                ordinal,
+                entry.Name,
+                string.IsNullOrWhiteSpace(entry.DataType) ? "BLOB" : entry.DataType,
+                entry.IsNullable,
+                isPrimaryKey,
+                entry.IsHidden || isRowIdAlias,
+                entry.HasDefault,
+                MapValueKind(entry.DataType));
+        }).ToList();
+    }
+
+    private static TableColumnValueKind MapValueKind(string dataType)
+    {
+        var normalized = dataType.Trim().ToUpperInvariant();
+        if (normalized.Contains("INT", StringComparison.Ordinal))
+        {
+            return TableColumnValueKind.Integer;
+        }
+
+        if (normalized.Contains("CHAR", StringComparison.Ordinal) ||
+            normalized.Contains("CLOB", StringComparison.Ordinal) ||
+            normalized.Contains("TEXT", StringComparison.Ordinal))
+        {
+            return TableColumnValueKind.String;
+        }
+
+        if (normalized.Contains("BLOB", StringComparison.Ordinal) || normalized.Length == 0)
+        {
+            return TableColumnValueKind.Binary;
+        }
+
+        if (normalized.Contains("REAL", StringComparison.Ordinal) ||
+            normalized.Contains("FLOA", StringComparison.Ordinal) ||
+            normalized.Contains("DOUB", StringComparison.Ordinal))
+        {
+            return TableColumnValueKind.FloatingPoint;
+        }
+
+        if (normalized.Contains("BOOL", StringComparison.Ordinal))
+        {
+            return TableColumnValueKind.Boolean;
+        }
+
+        if (normalized.Contains("DATE", StringComparison.Ordinal) ||
+            normalized.Contains("TIME", StringComparison.Ordinal))
+        {
+            return normalized.Contains("TIME", StringComparison.Ordinal)
+                ? TableColumnValueKind.DateTime
+                : TableColumnValueKind.Date;
+        }
+
+        return TableColumnValueKind.Decimal;
+    }
 }

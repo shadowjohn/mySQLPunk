@@ -99,10 +99,45 @@ public sealed class ConnectionProfileStore
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         if (string.IsNullOrWhiteSpace(appData))
         {
-            appData = AppContext.BaseDirectory;
+            appData = GetFallbackApplicationDataPath();
         }
 
         return Path.Combine(appData, "mySQLPunk", "connections.json");
+    }
+
+    private static string GetFallbackApplicationDataPath()
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            var xdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+            if (!string.IsNullOrWhiteSpace(xdgConfigHome) && Path.IsPathFullyQualified(xdgConfigHome))
+            {
+                return xdgConfigHome;
+            }
+
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(userProfile))
+            {
+                return Path.Combine(userProfile, ".config");
+            }
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(userProfile))
+            {
+                return Path.Combine(userProfile, "Library", "Application Support");
+            }
+        }
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            return localAppData;
+        }
+
+        throw new InvalidOperationException("無法定位使用者設定目錄；不會把連線設定寫入程式安裝目錄。");
     }
 
     private static void RestrictFilePermissions(string path)

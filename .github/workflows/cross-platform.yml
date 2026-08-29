@@ -31,9 +31,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux x64
+          - name: Linux x64 + ARM64
             os: ubuntu-latest
-            runtimes: linux-x64
+            runtimes: linux-x64 linux-arm64
           - name: macOS Intel + Apple Silicon
             os: macos-latest
             runtimes: osx-x64 osx-arm64
