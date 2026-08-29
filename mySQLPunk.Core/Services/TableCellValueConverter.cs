@@ -1102,7 +1102,25 @@ public static class TableCellValueConverter
             "cidr" => ParseIpNetwork(text, requireNetworkAddress: true),
             "macaddr" => ParseMacAddress(text, 6),
             "macaddr8" => ParseMacAddress(text, 8),
+            "inet6" => ParseMariaDbInet6(text),
             _ => throw new FormatException("不支援的網路位址型別。")
+        };
+    }
+
+    private static string ParseMariaDbInet6(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Contains('/') || trimmed.Contains('%') ||
+            !IPAddress.TryParse(trimmed, out var address))
+        {
+            throw new FormatException("MariaDB INET6 必須是不含 prefix 或 zone identifier 的 IPv4／IPv6 位址。");
+        }
+
+        return address.AddressFamily switch
+        {
+            System.Net.Sockets.AddressFamily.InterNetwork => address.MapToIPv6().ToString(),
+            System.Net.Sockets.AddressFamily.InterNetworkV6 => address.ToString(),
+            _ => throw new FormatException("MariaDB INET6 只接受 IPv4／IPv6 位址。")
         };
     }
 

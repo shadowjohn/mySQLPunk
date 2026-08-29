@@ -66,6 +66,20 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             spatialParameter.MySqlDbType = MySqlDbType.VarChar;
         }
+        else if (column.ValueKind == TableColumnValueKind.Guid &&
+                 column.StorageDataTypeName.Equals("uuid", StringComparison.OrdinalIgnoreCase) &&
+                 parameter is MySqlParameter uuidParameter)
+        {
+            uuidParameter.MySqlDbType = MySqlDbType.VarChar;
+            uuidParameter.Size = 36;
+        }
+        else if (column.ValueKind == TableColumnValueKind.NetworkAddress &&
+                 column.StorageDataTypeName.Equals("inet6", StringComparison.OrdinalIgnoreCase) &&
+                 parameter is MySqlParameter inet6Parameter)
+        {
+            inet6Parameter.MySqlDbType = MySqlDbType.VarChar;
+            inet6Parameter.Size = 45;
+        }
         else if (column.ValueKind == TableColumnValueKind.String && parameter is MySqlParameter stringParameter)
         {
             if (column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase))
@@ -86,7 +100,9 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             return $"BINARY CAST({QuoteIdentifier(column.Name)} AS CHAR) = BINARY CAST({parameterName} AS CHAR)";
         }
 
-        if (column.ValueKind == TableColumnValueKind.ExactDecimal)
+        if (column.ValueKind is TableColumnValueKind.ExactDecimal or
+            TableColumnValueKind.Guid or
+            TableColumnValueKind.NetworkAddress)
         {
             return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
         }
@@ -110,6 +126,13 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                 new TableCellInput(column.Name, TableCellInputMode.Value, time));
         }
 
+        if (column.ValueKind == TableColumnValueKind.Guid &&
+            column.StorageDataTypeName.Equals("uuid", StringComparison.OrdinalIgnoreCase) &&
+            value is Guid uuid)
+        {
+            return uuid.ToString("D").ToLowerInvariant();
+        }
+
         return base.PrepareParameterValue(column, value);
     }
 
@@ -118,7 +141,10 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         var quotedName = QuoteIdentifier(column.Name);
         return column.ValueKind switch
         {
-            TableColumnValueKind.MySqlTime or TableColumnValueKind.ExactDecimal =>
+            TableColumnValueKind.MySqlTime or
+            TableColumnValueKind.ExactDecimal or
+            TableColumnValueKind.Guid or
+            TableColumnValueKind.NetworkAddress =>
                 $"CAST({quotedName} AS CHAR) AS {quotedName}",
             TableColumnValueKind.Spatial =>
                 $"CONCAT('SRID=', ST_SRID({quotedName}), ';', ST_AsText({quotedName})) AS {quotedName}",
@@ -131,6 +157,18 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         if (column.ValueKind == TableColumnValueKind.Spatial)
         {
             return BuildSpatialValueExpression(parameterName);
+        }
+
+        if (column.ValueKind == TableColumnValueKind.Guid &&
+            column.StorageDataTypeName.Equals("uuid", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"CAST({parameterName} AS UUID)";
+        }
+
+        if (column.ValueKind == TableColumnValueKind.NetworkAddress &&
+            column.StorageDataTypeName.Equals("inet6", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"CAST({parameterName} AS INET6)";
         }
 
         if (column.ValueKind != TableColumnValueKind.ExactDecimal)
@@ -280,6 +318,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             "datetime" or "timestamp" => TableColumnValueKind.DateTime,
             "time" => TableColumnValueKind.MySqlTime,
             "json" => TableColumnValueKind.Json,
+            "uuid" => TableColumnValueKind.Guid,
+            "inet6" => TableColumnValueKind.NetworkAddress,
             "binary" or "varbinary" or "tinyblob" or "blob" or "mediumblob" or "longblob" =>
                 TableColumnValueKind.Binary,
             "geometry" or "point" or "linestring" or "polygon" or "multipoint" or "multilinestring" or

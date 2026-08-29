@@ -69,7 +69,7 @@ jobs:
       - name: Run cross-platform smoke tests
         run: dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj -c Release --no-build
 
-      - name: Run MySQL, PostgreSQL and SQL Server live round-trip
+      - name: Run MySQL, MariaDB, PostgreSQL and SQL Server live round-trip
         if: runner.os == 'Linux'
         run: ./tests/Run-CrossPlatformLiveTests.sh
 

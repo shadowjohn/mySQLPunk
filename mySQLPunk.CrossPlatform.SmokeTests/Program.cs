@@ -25,6 +25,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1", StringComparison.Ordinal))
 {
     tests.Add(("MySQL 實機連線、metadata 與 SQL", MySqlLiveRoundTripAsync));
+    tests.Add(("MariaDB 實機連線、metadata 與 SQL", MariaDbLiveRoundTripAsync));
     tests.Add(("PostgreSQL 實機連線、metadata 與 SQL", PostgreSqlLiveRoundTripAsync));
     tests.Add(("SQL Server 實機連線、metadata 與 SQL", SqlServerLiveRoundTripAsync));
 }
@@ -805,6 +806,21 @@ static async Task TableDataEditingAsync()
             DataTypeName = "macaddr8",
             StorageDataTypeName = "macaddr8"
         };
+        var mariaDbInet6Column = inetColumn with
+        {
+            Name = "native_address",
+            DataTypeName = "inet6",
+            StorageDataTypeName = "inet6"
+        };
+        var mariaDbUuidColumn = new TableColumnInfo(
+            0,
+            "native_uuid",
+            "uuid",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.Guid);
         Assert(
             Equals(
                 TableCellValueConverter.Parse(
@@ -833,6 +849,21 @@ static async Task TableDataEditingAsync()
                     new TableCellInput("mac8", TableCellInputMode.Value, "08:00:2b:ff:fe:01:02:03")),
                 "08:00:2b:ff:fe:01:02:03"),
             "macaddr8 應接受八段 hex");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    mariaDbInet6Column,
+                    new TableCellInput("native_address", TableCellInputMode.Value, "192.0.2.10")),
+                "::ffff:192.0.2.10"),
+            "MariaDB INET6 應把 IPv4 正規化為 mapped IPv6");
+        Assert(
+            TableCellValueConverter.Format(TableCellValueConverter.Parse(
+                mariaDbUuidColumn,
+                new TableCellInput(
+                    "native_uuid",
+                    TableCellInputMode.Value,
+                    "550E8400E29B41D4A716446655440000"))) == "550e8400-e29b-41d4-a716-446655440000",
+            "MariaDB UUID 應正規化為小寫 D 格式");
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             inetColumn,
             new TableCellInput("address", TableCellInputMode.Value, "192.0.2.1/33")));
@@ -851,6 +882,15 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             macColumn,
             new TableCellInput("mac", TableCellInputMode.Value, "08:00-2b:01:02:03")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mariaDbInet6Column,
+            new TableCellInput("native_address", TableCellInputMode.Value, "2001:db8::1/64")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mariaDbInet6Column,
+            new TableCellInput("native_address", TableCellInputMode.Value, "fe80::1%0")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mariaDbUuidColumn,
+            new TableCellInput("native_uuid", TableCellInputMode.Value, "not-a-uuid")));
         var bit8Column = new TableColumnInfo(0, "flags", "bit(8)", true, false, false, false, TableColumnValueKind.UnsignedInteger);
         Assert(
             Equals(
@@ -1541,17 +1581,24 @@ static Task ProviderFactoryValidatesProfilesAsync()
     return Task.CompletedTask;
 }
 
-static async Task MySqlLiveRoundTripAsync()
+static Task MySqlLiveRoundTripAsync() =>
+    MySqlFamilyLiveRoundTripAsync("MYSQLPUNK_MYSQL", isMariaDb: false);
+
+static Task MariaDbLiveRoundTripAsync() =>
+    MySqlFamilyLiveRoundTripAsync("MYSQLPUNK_MARIADB", isMariaDb: true);
+
+static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool isMariaDb)
 {
-    var database = "mysqlpunk_cross_" + Guid.NewGuid().ToString("N")[..10];
+    var database = (isMariaDb ? "mysqlpunk_maria_" : "mysqlpunk_cross_") +
+                   Guid.NewGuid().ToString("N")[..10];
     var profile = new ConnectionProfile
     {
-        Name = "MySQL live",
+        Name = isMariaDb ? "MariaDB live" : "MySQL live",
         Provider = DatabaseProviderKind.MySql,
-        Host = ReadRequiredEnvironment("MYSQLPUNK_MYSQL_HOST"),
-        Port = ReadRequiredIntEnvironment("MYSQLPUNK_MYSQL_PORT"),
-        Username = Environment.GetEnvironmentVariable("MYSQLPUNK_MYSQL_USER") ?? "root",
-        Password = ReadRequiredEnvironment("MYSQLPUNK_MYSQL_PASSWORD"),
+        Host = ReadRequiredEnvironment($"{environmentPrefix}_HOST"),
+        Port = ReadRequiredIntEnvironment($"{environmentPrefix}_PORT"),
+        Username = Environment.GetEnvironmentVariable($"{environmentPrefix}_USER") ?? "root",
+        Password = ReadRequiredEnvironment($"{environmentPrefix}_PASSWORD"),
         TimeoutSeconds = 20
     };
     var session = DatabaseProviderFactory.Create(profile);
@@ -1560,7 +1607,10 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL);");
+        var nativeColumns = isMariaDb
+            ? ", native_uuid UUID NULL, native_address INET6 NULL"
+            : string.Empty;
+        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -1574,11 +1624,111 @@ static async Task MySqlLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
+        if (isMariaDb)
+        {
+            await VerifyMariaDbNativeTypesAsync(session, database, table!);
+        }
     }
     finally
     {
         await session.ExecuteAsync(string.Empty, $"DROP DATABASE IF EXISTS `{database}`;");
     }
+}
+
+static async Task VerifyMariaDbNativeTypesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var uuidColumn = before.Columns.Single(column => column.Name == "native_uuid");
+    var addressColumn = before.Columns.Single(column => column.Name == "native_address");
+    Assert(
+        uuidColumn.ValueKind == TableColumnValueKind.Guid && uuidColumn.IsEditable,
+        "MariaDB UUID metadata 應映射為可編輯 Guid");
+    Assert(
+        addressColumn.ValueKind == TableColumnValueKind.NetworkAddress && addressColumn.IsEditable,
+        "MariaDB INET6 metadata 應映射為可編輯 NetworkAddress");
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "MariaDB native"),
+            new TableCellInput("native_uuid", TableCellInputMode.Value, "550E8400-E29B-41D4-A716-446655440000"),
+            new TableCellInput("native_address", TableCellInputMode.Value, "192.0.2.10")
+        });
+
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "MariaDB native");
+    Assert(
+        Convert.ToString(inserted.Values[uuidColumn.Ordinal]) == "550e8400-e29b-41d4-a716-446655440000",
+        $"MariaDB UUID 新增後未正規化；actual={inserted.Values[uuidColumn.Ordinal]}");
+    Assert(
+        Convert.ToString(inserted.Values[addressColumn.Ordinal]) == "::ffff:192.0.2.10",
+        $"MariaDB INET6 應把 IPv4 保存為 mapped IPv6；actual={inserted.Values[addressColumn.Ordinal]}");
+
+    foreach (var invalidInput in new[]
+             {
+                 new TableCellInput("native_uuid", TableCellInputMode.Value, "not-a-uuid"),
+                 new TableCellInput("native_address", TableCellInputMode.Value, "2001:db8::1/64"),
+                 new TableCellInput("native_address", TableCellInputMode.Value, "fe80::1%3")
+             })
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected MariaDB native"),
+                invalidInput
+            }));
+    }
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    Assert(
+        rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected MariaDB native"),
+        "MariaDB UUID／INET6 錯誤輸入不可留下半筆資料");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[]
+        {
+            new TableCellInput("native_uuid", TableCellInputMode.Value, "6ba7b8109dad11d180b400c04fd430c8"),
+            new TableCellInput("native_address", TableCellInputMode.Value, "2001:0db8:0:0:0:0:0:1")
+        });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "MariaDB native");
+    Assert(
+        Convert.ToString(updated.Values[uuidColumn.Ordinal]) == "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        $"MariaDB UUID 修改後 canonical 值不正確；actual={updated.Values[uuidColumn.Ordinal]}");
+    Assert(
+        Convert.ToString(updated.Values[addressColumn.Ordinal]) == "2001:db8::1",
+        $"MariaDB INET6 修改後 canonical 值不正確；actual={updated.Values[addressColumn.Ordinal]}");
+
+    var id = Convert.ToInt64(updated.Values[0]);
+    await session.ExecuteAsync(
+        database,
+        $"UPDATE sample SET native_uuid = CAST('6ba7b811-9dad-11d1-80b4-00c04fd430c8' AS UUID) WHERE id = {id};");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        updated,
+        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "99") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row => Convert.ToInt64(row.Values[0]) == id);
+    Assert(
+        Convert.ToString(concurrent.Values[uuidColumn.Ordinal]) == "6ba7b811-9dad-11d1-80b4-00c04fd430c8" &&
+        Convert.ToInt32(concurrent.Values[2]) != 99,
+        "MariaDB UUID 原值變更時 optimistic concurrency 不可覆寫外部資料");
+
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0]) != id), "MariaDB UUID／INET6 安全刪除失敗");
 }
 
 static async Task PostgreSqlLiveRoundTripAsync()
@@ -3226,6 +3376,8 @@ static string GetNetworkTestValue(TableColumnInfo column, bool updated) =>
         ("macaddr", true) => "08:00:2b:01:02:04",
         ("macaddr8", false) => "08:00:2b:ff:fe:01:02:03",
         ("macaddr8", true) => "08:00:2b:ff:fe:01:02:04",
+        ("inet6", false) => "2001:db8::20",
+        ("inet6", true) => "::ffff:192.0.2.20",
         _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
     };
 

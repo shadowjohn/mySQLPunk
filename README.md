@@ -74,6 +74,8 @@ Linux 資產是 `.tar.gz`，解壓後執行 `./install.sh` 即會以交易方式
 
 MySQL／MariaDB 的 GEOMETRY、POINT、LINESTRING、POLYGON、MULTIPOINT、MULTILINESTRING、MULTIPOLYGON、GEOMETRYCOLLECTION，以及 SQL Server 的 geometry／geography，可用 `SRID=<非負整數>;<WKT>` 安全編輯；載入與寫回都保留 SRID，原值比對同時檢查 SRID 與 canonical WKT。畸形 WKT 會讓整筆交易回復；MariaDB 即使只回傳 warning／NULL，也會轉成明確錯誤，避免 nullable 欄位被靜默清空。超過 1 MiB 的 spatial 文字維持唯讀。
 
+MariaDB 原生 `UUID` 與 `INET6` 欄位也可直接編輯。UUID 會正規化為小寫標準格式；INET6 接受 IPv4／IPv6，IPv4 依 MariaDB 原生語意保存為 IPv4-mapped IPv6。兩者都先在本機拒絕無效格式，再以參數化原生 CAST 寫入，修改與刪除會用 canonical 值完成 optimistic concurrency 比對。
+
 SQL Server `hierarchyid` 可用 `/1/2.5/` 形式的 canonical path 編輯；寫入使用原生 `hierarchyid::Parse()`，畸形 path 會讓整筆交易回復，修改／刪除則以原生 hierarchyid 等號完成 optimistic concurrency 比對。NULL 會保持 NULL，超過 1 MiB 的既有文字維持唯讀。
 
 SQL Server `sysname` 與 `CREATE TYPE ... FROM ...` alias type 會同時顯示宣告名稱與 base definition，例如 `[dbo].[precise_amount] (decimal(18,6))`；編輯時依 base type 選擇安全參數與 precision／scale 驗證，仍由 SQL Server 拒絕字串長度、整數範圍等超出 alias 定義的值，交易不會留下半筆資料。
