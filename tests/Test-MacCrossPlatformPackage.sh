@@ -64,7 +64,7 @@ for input_path in "$@"; do
     [[ "$(plist_value CFBundleVersion)" == "$bundle_version" ]]
     [[ "$(plist_value MySQLPunkRuntimeIdentifier)" == "$runtime" ]]
 
-    lipo -verify_arch "$architecture" "$executable"
+    lipo "$executable" -verify_arch "$architecture"
     codesign --verify --deep --strict --verbose=2 "$app_bundle"
     printf 'macOS app bundle verification passed: %s\n' "$archive_name"
 done
