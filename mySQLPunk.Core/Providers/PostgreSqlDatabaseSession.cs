@@ -44,6 +44,10 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 ? NpgsqlDbType.Jsonb
                 : NpgsqlDbType.Json;
         }
+        else if (column.ValueKind == TableColumnValueKind.Xml && parameter is NpgsqlParameter xmlParameter)
+        {
+            xmlParameter.NpgsqlDbType = NpgsqlDbType.Xml;
+        }
     }
 
     protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
@@ -52,6 +56,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             string.Equals(column.DataTypeName, "json", StringComparison.OrdinalIgnoreCase))
         {
             return $"{QuoteIdentifier(column.Name)}::jsonb = CAST({parameterName} AS jsonb)";
+        }
+
+        if (column.ValueKind == TableColumnValueKind.Xml)
+        {
+            return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
 
         return base.BuildOriginalValuePredicate(column, parameterName);
@@ -165,6 +174,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "time without time zone" => TableColumnValueKind.Time,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,
+            "xml" => TableColumnValueKind.Xml,
             "bytea" => TableColumnValueKind.Binary,
             "character" or "character varying" or "text" => TableColumnValueKind.String,
             "user-defined" when string.Equals(userDefinedType, "citext", StringComparison.OrdinalIgnoreCase) =>

@@ -31,6 +31,28 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
 
     protected override string QuoteIdentifier(string value) => $"[{value.Replace("]", "]]", StringComparison.Ordinal)}]";
 
+    protected override void ConfigureParameter(
+        System.Data.Common.DbParameter parameter,
+        TableColumnInfo column)
+    {
+        base.ConfigureParameter(parameter, column);
+        if (column.ValueKind == TableColumnValueKind.Xml && parameter is SqlParameter sqlParameter)
+        {
+            sqlParameter.SqlDbType = System.Data.SqlDbType.Xml;
+        }
+    }
+
+    protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
+    {
+        if (column.ValueKind == TableColumnValueKind.Xml)
+        {
+            return $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {QuoteIdentifier(column.Name)})) = " +
+                   $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {parameterName}))";
+        }
+
+        return base.BuildOriginalValuePredicate(column, parameterName);
+    }
+
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
     {
@@ -169,6 +191,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         "datetimeoffset" => TableColumnValueKind.DateTimeOffset,
         "time" => TableColumnValueKind.Time,
         "uniqueidentifier" => TableColumnValueKind.Guid,
+        "xml" => TableColumnValueKind.Xml,
         "binary" or "varbinary" => TableColumnValueKind.Binary,
         "char" or "varchar" or "nchar" or "nvarchar" => TableColumnValueKind.String,
         _ => TableColumnValueKind.Unsupported

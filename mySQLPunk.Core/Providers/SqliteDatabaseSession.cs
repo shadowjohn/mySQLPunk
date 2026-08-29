@@ -141,6 +141,11 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
             return TableColumnValueKind.Json;
         }
 
+        if (normalized.Contains("XML", StringComparison.Ordinal))
+        {
+            return TableColumnValueKind.Xml;
+        }
+
         if (normalized.Contains("REAL", StringComparison.Ordinal) ||
             normalized.Contains("FLOA", StringComparison.Ordinal) ||
             normalized.Contains("DOUB", StringComparison.Ordinal))

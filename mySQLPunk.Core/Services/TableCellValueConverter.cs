@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Xml;
 using MySqlPunk.Core.Models;
 
 namespace MySqlPunk.Core.Services;
@@ -61,11 +62,12 @@ public static class TableCellValueConverter
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
+                TableColumnValueKind.Xml => ParseXml(input.Text),
                 TableColumnValueKind.Binary => ParseBinary(input.Text),
                 _ => throw new InvalidOperationException($"「{column.Name}」的型別目前不支援直接編輯。")
             };
         }
-        catch (Exception exception) when (exception is FormatException or OverflowException or JsonException)
+        catch (Exception exception) when (exception is FormatException or OverflowException or JsonException or XmlException)
         {
             throw new InvalidOperationException(
                 $"「{column.Name}」的值不符合 {column.DataTypeName} 格式：{exception.Message}",
@@ -139,7 +141,7 @@ public static class TableCellValueConverter
         bytes.Length > MaximumEditableBinaryBytes;
 
     public static bool IsStructuredTextTooLargeToEdit(TableColumnInfo column, object? value) =>
-        column.ValueKind == TableColumnValueKind.Json &&
+        column.ValueKind is TableColumnValueKind.Json or TableColumnValueKind.Xml &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
 
@@ -202,6 +204,40 @@ public static class TableCellValueConverter
             CommentHandling = JsonCommentHandling.Disallow,
             MaxDepth = 64
         });
+        return trimmed;
+    }
+
+    private static string ParseXml(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Length > MaximumEditableStructuredTextCharacters)
+        {
+            throw new FormatException(
+                $"XML 不可為空，且不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
+        }
+
+        var settings = new XmlReaderSettings
+        {
+            CheckCharacters = true,
+            ConformanceLevel = ConformanceLevel.Document,
+            DtdProcessing = DtdProcessing.Prohibit,
+            IgnoreComments = false,
+            IgnoreProcessingInstructions = false,
+            IgnoreWhitespace = false,
+            MaxCharactersFromEntities = 1024,
+            MaxCharactersInDocument = MaximumEditableStructuredTextCharacters,
+            XmlResolver = null
+        };
+        using var stringReader = new StringReader(trimmed);
+        using var xmlReader = XmlReader.Create(stringReader, settings);
+        while (xmlReader.Read())
+        {
+            if (xmlReader.Depth > 64)
+            {
+                throw new FormatException("XML 巢狀深度不可超過 64 層。");
+            }
+        }
+
         return trimmed;
     }
 }

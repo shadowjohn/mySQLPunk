@@ -39,7 +39,7 @@ public sealed partial class TableRowEditorWindow : Window
         Title = _isInsert ? "新增資料列" : "修改資料列";
         _hintText.Text = _isInsert
             ? "預設會交由資料庫套用欄位 DEFAULT；取消勾選「使用預設值」後即可輸入。"
-            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON 維持唯讀；只會送出實際變更的欄位。";
+            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON／XML 維持唯讀；只會送出實際變更的欄位。";
         BuildFields();
     }
 
@@ -66,11 +66,11 @@ public sealed partial class TableRowEditorWindow : Window
                 IsReadOnly = readOnly,
                 IsEnabled = !readOnly,
                 PlaceholderText = BuildWatermark(column),
-                AcceptsReturn = column.ValueKind == TableColumnValueKind.Json,
-                TextWrapping = column.ValueKind == TableColumnValueKind.Json
+                AcceptsReturn = IsStructuredText(column),
+                TextWrapping = IsStructuredText(column)
                     ? TextWrapping.Wrap
                     : TextWrapping.NoWrap,
-                MinHeight = column.ValueKind == TableColumnValueKind.Json ? 90 : 0
+                MinHeight = IsStructuredText(column) ? 90 : 0
             };
             var nullCheck = new CheckBox
             {
@@ -225,9 +225,13 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.Time => "HH:mm:ss",
         TableColumnValueKind.Guid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
         TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",
+        TableColumnValueKind.Xml => "有效 XML（最多 1 MiB 字元，禁止 DTD）",
         TableColumnValueKind.Binary => "0x00FF（二進位十六進位，最多 1 MiB）",
         _ => string.Empty
     };
+
+    private static bool IsStructuredText(TableColumnInfo column) =>
+        column.ValueKind is TableColumnValueKind.Json or TableColumnValueKind.Xml;
 
     private sealed record FieldEditor(
         TableColumnInfo Column,

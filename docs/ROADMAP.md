@@ -65,7 +65,7 @@
 | SSH tunnel、SSL/TLS | ✅ | 四種網路 provider 已有共用安全設定 UI、憑證驗證、SSH SHA256 主機金鑰固定與隧道生命週期；SQLite 為本機檔案，不適用網路層設定。 |
 | PAM／LDAP／Kerberos／MFA／SSO | 📋 | 依 provider 驗證能力分階段加入，不保存明文祕密。 |
 | 深色模式／平台原生設計 | ✅ | Windows 原生 WinForms、淺／深色主題與 DPI 向量圖示已完成。 |
-| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、1 MiB 內 binary 與 JSON 欄位的安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。Linux x64／ARM64 使用 self-contained tar 安裝包，macOS Intel／Apple Silicon 使用 `.app.zip`，並可依 RID 安全檢查、下載及驗證最新 Release；Linux 已完成交易式套用、啟動健康檢查與 rollback，待補 macOS Developer ID/notarization、自動套用、其餘 provider 與進階功能。 |
+| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、1 MiB 內 binary、JSON 與 XML 欄位的安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。Linux x64／ARM64 使用 self-contained tar 安裝包，macOS Intel／Apple Silicon 使用 `.app.zip`，並可依 RID 安全檢查、下載及驗證最新 Release；Linux 已完成交易式套用、啟動健康檢查與 rollback，待補 macOS Developer ID/notarization、自動套用、其餘 provider 與進階功能。 |
 
 ## Provider 與服務覆蓋
 
@@ -87,4 +87,4 @@
 4. ✅ RDBMS、MongoDB 與 Redis 的連線 URI 匯入及設定頁確認流程已完成。
 5. ✅ 連線星號、持久化色彩與批次屬性操作已完成。
 6. 🟡 MongoDB 第一～三期、Redis／Garnet 第三期（string＋集合型別安全編輯，含實機矩陣）、Snowflake 第二期（SQL REST API 查詢＋查詢編輯器 DML／DDL）已完成。下一步候選：Snowflake 實機驗收、key-pair JWT、參數綁定與網格寫回，MongoDB Atlas／SRV 驗證矩陣與 Aggregation Pipeline，Redis Cluster／Sentinel／Pub/Sub，或回頭補模型／BI 路線。
-7. 🟡 Linux / macOS 跨平台第二階段進行中：獨立 Core、Avalonia UI、四種 RDBMS workflow、系統密碼庫、結果安全匯出、Table optimistic concurrency 編輯、1 MiB 內 binary hex／JSON 編輯與 200 列穩定分頁、四架構 self-contained CI／Release 資產，以及依 RID 與 sidecar 完成串流 SHA-256 的安全更新下載已完成；Linux 安裝／啟動／解除安裝納入 Xvfb smoke，並已支援交易式套用、啟動健康檢查、失敗 rollback 與舊版重啟。下一步是 macOS Developer ID/notarization 與自動套用、ARM64 實機啟動，再逐步補 XML／網路位址等進階型別。
+7. 🟡 Linux / macOS 跨平台第二階段進行中：獨立 Core、Avalonia UI、四種 RDBMS workflow、系統密碼庫、結果安全匯出、Table optimistic concurrency 編輯、1 MiB 內 binary hex／JSON／XML 編輯與 200 列穩定分頁、四架構 self-contained CI／Release 資產，以及依 RID 與 sidecar 完成串流 SHA-256 的安全更新下載已完成；Linux 安裝／啟動／解除安裝納入 Xvfb smoke，並已支援交易式套用、啟動健康檢查、失敗 rollback 與舊版重啟。下一步是 macOS Developer ID/notarization 與自動套用、ARM64 實機啟動，再逐步補網路位址等進階型別。

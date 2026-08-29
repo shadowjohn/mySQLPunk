@@ -14,6 +14,7 @@ public enum TableColumnValueKind
     Time,
     Guid,
     Json,
+    Xml,
     Binary,
     Unsupported
 }

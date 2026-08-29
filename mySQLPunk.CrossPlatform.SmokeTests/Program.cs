@@ -554,7 +554,8 @@ static async Task TableDataEditingAsync()
                 quantity INTEGER NULL,
                 note TEXT NULL DEFAULT 'database-default',
                 payload BLOB NULL,
-                metadata JSON NULL
+                metadata JSON NULL,
+                document XML NULL
             );
             CREATE TABLE no_primary_key (name TEXT NOT NULL);
             CREATE TABLE without_rowid (id INTEGER PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
@@ -587,6 +588,8 @@ static async Task TableDataEditingAsync()
         Assert(binaryColumn is { ValueKind: TableColumnValueKind.Binary, IsEditable: true }, "SQLite BLOB 應可安全編輯");
         var jsonColumn = empty.Columns.Single(column => column.Name == "metadata");
         Assert(jsonColumn is { ValueKind: TableColumnValueKind.Json, IsEditable: true }, "SQLite JSON 應可驗證後編輯");
+        var xmlColumn = empty.Columns.Single(column => column.Name == "document");
+        Assert(xmlColumn is { ValueKind: TableColumnValueKind.Xml, IsEditable: true }, "SQLite XML 應可驗證後編輯");
 
         const string parameterizedName = "Punky '); DROP TABLE editor_sample;--";
         await session.InsertTableRowAsync(
@@ -598,7 +601,8 @@ static async Task TableDataEditingAsync()
                 new TableCellInput("quantity", TableCellInputMode.Value, "7"),
                 new TableCellInput("note", TableCellInputMode.Default, string.Empty),
                 new TableCellInput("payload", TableCellInputMode.Value, "0x00ff10"),
-                new TableCellInput("metadata", TableCellInputMode.Value, "  {\"stage\":\"insert\",\"n\":1}  ")
+                new TableCellInput("metadata", TableCellInputMode.Value, "  {\"stage\":\"insert\",\"n\":1}  "),
+                new TableCellInput("document", TableCellInputMode.Value, "  <item stage=\"insert\"><n>1</n></item>  ")
             });
         var inserted = await session.LoadTableDataAsync(profile.Database, table);
         Assert(inserted.Rows.Count == 1, "安全新增後應有一列");
@@ -613,6 +617,9 @@ static async Task TableDataEditingAsync()
             Assert(insertedJson.RootElement.GetProperty("stage").GetString() == "insert", "SQLite JSON 安全新增不正確");
             Assert(insertedJson.RootElement.GetProperty("n").GetInt32() == 1, "SQLite JSON 數字型別不正確");
         }
+        var insertedXml = System.Xml.Linq.XDocument.Parse(Convert.ToString(inserted.Rows[0].Values[6])!);
+        Assert((string?)insertedXml.Root?.Attribute("stage") == "insert", "SQLite XML 安全新增不正確");
+        Assert((string?)insertedXml.Root?.Element("n") == "1", "SQLite XML 子元素不正確");
         Assert(
             TableCellValueConverter.MatchesOriginal(
                 binaryColumn,
@@ -630,7 +637,8 @@ static async Task TableDataEditingAsync()
                 new TableCellInput("name", TableCellInputMode.Value, "崩琦"),
                 new TableCellInput("quantity", TableCellInputMode.Null, string.Empty),
                 new TableCellInput("payload", TableCellInputMode.Value, "0xCAFE"),
-                new TableCellInput("metadata", TableCellInputMode.Value, "{\"stage\":\"updated\",\"ok\":true}")
+                new TableCellInput("metadata", TableCellInputMode.Value, "{\"stage\":\"updated\",\"ok\":true}"),
+                new TableCellInput("document", TableCellInputMode.Value, "<item stage=\"updated\"><ok>true</ok></item>")
             });
         var updated = await session.LoadTableDataAsync(profile.Database, table);
         Assert(Convert.ToString(updated.Rows[0].Values[1]) == "崩琦", "安全修改字串不正確");
@@ -643,6 +651,9 @@ static async Task TableDataEditingAsync()
             Assert(updatedJson.RootElement.GetProperty("stage").GetString() == "updated", "SQLite JSON 安全修改不正確");
             Assert(updatedJson.RootElement.GetProperty("ok").GetBoolean(), "SQLite JSON 布林型別不正確");
         }
+        var updatedXml = System.Xml.Linq.XDocument.Parse(Convert.ToString(updated.Rows[0].Values[6])!);
+        Assert((string?)updatedXml.Root?.Attribute("stage") == "updated", "SQLite XML 安全修改不正確");
+        Assert((string?)updatedXml.Root?.Element("ok") == "true", "SQLite XML 子元素修改不正確");
 
         var staleRow = updated.Rows[0];
         var id = Convert.ToInt64(staleRow.Values[0]);
@@ -744,6 +755,34 @@ static async Task TableDataEditingAsync()
                 jsonColumn,
                 new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1)),
             "超過 1 MiB 字元的既有 JSON 應維持唯讀");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            xmlColumn,
+            new TableCellInput("document", TableCellInputMode.Value, "<item>")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            xmlColumn,
+            new TableCellInput("document", TableCellInputMode.Value, "<one/><two/>")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            xmlColumn,
+            new TableCellInput(
+                "document",
+                TableCellInputMode.Value,
+                "<!DOCTYPE item [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><item>&xxe;</item>")));
+        var overlyDeepXml = "<root>" + string.Concat(Enumerable.Repeat("<item>", 65)) +
+                           string.Concat(Enumerable.Repeat("</item>", 65)) + "</root>";
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            xmlColumn,
+            new TableCellInput("document", TableCellInputMode.Value, overlyDeepXml)));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            xmlColumn,
+            new TableCellInput(
+                "document",
+                TableCellInputMode.Value,
+                "<item>" + new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters) + "</item>")));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(
+                xmlColumn,
+                new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1)),
+            "超過 1 MiB 字元的既有 XML 應維持唯讀");
     }
     finally
     {
@@ -854,7 +893,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -898,7 +937,7 @@ static async Task SqlServerLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
 
@@ -947,6 +986,14 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "{\"stage\":\"insert\",\"n\":1}"));
     }
+    var xmlColumn = before.Columns.SingleOrDefault(column => column.ValueKind == TableColumnValueKind.Xml);
+    if (xmlColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            xmlColumn.Name,
+            TableCellInputMode.Value,
+            "<item stage=\"insert\"><n>1</n></item>"));
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -958,6 +1005,11 @@ static async Task VerifySafeTableEditingAsync(
     {
         using var insertedJson = JsonDocument.Parse(Convert.ToString(inserted.Values[jsonColumn.Ordinal])!);
         Assert(insertedJson.RootElement.GetProperty("stage").GetString() == "insert", $"{session.Profile.ProviderDisplayName} 安全新增 JSON 不正確");
+    }
+    if (xmlColumn is not null)
+    {
+        var insertedXml = System.Xml.Linq.XDocument.Parse(Convert.ToString(inserted.Values[xmlColumn.Ordinal])!);
+        Assert((string?)insertedXml.Root?.Attribute("stage") == "insert", $"{session.Profile.ProviderDisplayName} 安全新增 XML 不正確");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -980,6 +1032,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "{\"stage\":\"updated\",\"ok\":true}"));
     }
+    if (xmlColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            xmlColumn.Name,
+            TableCellInputMode.Value,
+            "<item stage=\"updated\"><ok>true</ok></item>"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -992,6 +1051,12 @@ static async Task VerifySafeTableEditingAsync(
         using var updatedJson = JsonDocument.Parse(Convert.ToString(updated.Values[jsonColumn.Ordinal])!);
         Assert(updatedJson.RootElement.GetProperty("stage").GetString() == "updated", $"{session.Profile.ProviderDisplayName} 安全修改 JSON 不正確");
         Assert(updatedJson.RootElement.GetProperty("ok").GetBoolean(), $"{session.Profile.ProviderDisplayName} JSON 布林型別不正確");
+    }
+    if (xmlColumn is not null)
+    {
+        var updatedXml = System.Xml.Linq.XDocument.Parse(Convert.ToString(updated.Values[xmlColumn.Ordinal])!);
+        Assert((string?)updatedXml.Root?.Attribute("stage") == "updated", $"{session.Profile.ProviderDisplayName} 安全修改 XML 不正確");
+        Assert((string?)updatedXml.Root?.Element("ok") == "true", $"{session.Profile.ProviderDisplayName} XML 子元素不正確");
     }
 
     var id = Convert.ToInt64(updated.Values[0]);
