@@ -881,6 +881,32 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             varyingBitsColumn,
             new TableCellInput("varbits", TableCellInputMode.Value, new string('1', 17))));
+        var timeZoneColumn = new TableColumnInfo(
+            0,
+            "alarm",
+            "time with time zone",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.TimeWithTimeZone);
+        Assert(
+            TableCellValueConverter.Parse(
+                timeZoneColumn,
+                new TableCellInput("alarm", TableCellInputMode.Value, "23:59:59.123456+08:00")) is DateTimeOffset
+            {
+                Hour: 23,
+                Minute: 59,
+                Second: 59,
+                Offset: { Hours: 8 }
+            },
+            "PostgreSQL timetz 應保留時間與 offset");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timeZoneColumn,
+            new TableCellInput("alarm", TableCellInputMode.Value, "12:34:56")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timeZoneColumn,
+            new TableCellInput("alarm", TableCellInputMode.Value, "25:00:00+08:00")));
     }
     finally
     {
@@ -991,7 +1017,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -1142,6 +1168,15 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetBitStringTestValue(bitStringColumn, updated: false)));
     }
+    var timeZoneColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.TimeWithTimeZone);
+    if (timeZoneColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            timeZoneColumn.Name,
+            TableCellInputMode.Value,
+            "12:34:56.123456+08:00"));
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1194,6 +1229,14 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[bitStringColumn.Ordinal]) ==
             GetBitStringTestValue(bitStringColumn, updated: false),
             $"PostgreSQL {bitStringColumn.DataTypeName} 安全新增不正確");
+    }
+    if (timeZoneColumn is not null)
+    {
+        AssertTimeWithTimeZone(
+            inserted.Values[timeZoneColumn.Ordinal],
+            new TimeSpan(12, 34, 56) + TimeSpan.FromTicks(1_234_560),
+            TimeSpan.FromHours(8),
+            "PostgreSQL timetz 安全新增不正確");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1256,6 +1299,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetBitStringTestValue(bitStringColumn, updated: true)));
     }
+    if (timeZoneColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            timeZoneColumn.Name,
+            TableCellInputMode.Value,
+            "23:59:58.654321-04:30"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1310,6 +1360,14 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(updated.Values[bitStringColumn.Ordinal]) ==
             GetBitStringTestValue(bitStringColumn, updated: true),
             $"PostgreSQL {bitStringColumn.DataTypeName} 安全修改不正確");
+    }
+    if (timeZoneColumn is not null)
+    {
+        AssertTimeWithTimeZone(
+            updated.Values[timeZoneColumn.Ordinal],
+            new TimeSpan(23, 59, 58) + TimeSpan.FromTicks(6_543_210),
+            TimeSpan.FromMinutes(-270),
+            "PostgreSQL timetz 安全修改不正確");
     }
 
     var id = Convert.ToInt64(updated.Values[0]);
@@ -1377,6 +1435,18 @@ static void AssertNetworkValue(object? actual, string expected, string message)
     Assert(
         string.Equals(actualText, expected, StringComparison.OrdinalIgnoreCase),
         $"{message}；actual={actual?.GetType().FullName}:{Convert.ToString(actual)}，expected={expected}");
+}
+
+static void AssertTimeWithTimeZone(object? actual, TimeSpan expectedTime, TimeSpan expectedOffset, string message)
+{
+    var text = Convert.ToString(actual) ?? string.Empty;
+    var parsed = DateTimeOffset.Parse(
+        $"2000-01-01T{text}",
+        CultureInfo.InvariantCulture,
+        DateTimeStyles.None);
+    Assert(
+        parsed.TimeOfDay == expectedTime && parsed.Offset == expectedOffset,
+        $"{message}；actual={text}");
 }
 
 static ConnectionProfile CreateSqliteProfile(string path) => new()

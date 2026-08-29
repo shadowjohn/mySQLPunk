@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Net.NetworkInformation;
 using MySqlPunk.Core.Models;
+using MySqlPunk.Core.Services;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -69,10 +70,21 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 ? NpgsqlDbType.Varbit
                 : NpgsqlDbType.Bit;
         }
+        else if (column.ValueKind == TableColumnValueKind.TimeWithTimeZone && parameter is NpgsqlParameter timeZoneParameter)
+        {
+            timeZoneParameter.NpgsqlDbType = NpgsqlDbType.TimeTz;
+        }
     }
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
     {
+        if (column.ValueKind == TableColumnValueKind.TimeWithTimeZone && value is string timeWithTimeZone)
+        {
+            return TableCellValueConverter.Parse(
+                column,
+                new TableCellInput(column.Name, TableCellInputMode.Value, timeWithTimeZone));
+        }
+
         if (column.ValueKind != TableColumnValueKind.NetworkAddress || value is not string text)
         {
             return column.ValueKind == TableColumnValueKind.BitString && value is string bits
@@ -109,7 +121,9 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
-        return column.ValueKind is TableColumnValueKind.NetworkAddress or TableColumnValueKind.BitString
+        return column.ValueKind is TableColumnValueKind.NetworkAddress or
+            TableColumnValueKind.BitString or
+            TableColumnValueKind.TimeWithTimeZone
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
@@ -226,6 +240,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "timestamp without time zone" => TableColumnValueKind.DateTime,
             "timestamp with time zone" => TableColumnValueKind.DateTimeOffset,
             "time without time zone" => TableColumnValueKind.Time,
+            "time with time zone" => TableColumnValueKind.TimeWithTimeZone,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,
             "xml" => TableColumnValueKind.Xml,

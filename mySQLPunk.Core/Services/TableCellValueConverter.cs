@@ -61,6 +61,7 @@ public static class TableCellValueConverter
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind),
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
+                TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -176,6 +177,26 @@ public static class TableCellValueConverter
         return value <= maximum
             ? value
             : throw new OverflowException($"BIT({width}) 的十進位值不可超過 {maximum}。");
+    }
+
+    private static DateTimeOffset ParseTimeWithTimeZone(string text)
+    {
+        var trimmed = text.Trim();
+        var formats = new[]
+        {
+            "HH:mm:sszz",
+            "HH:mm:sszzz",
+            "HH:mm:ss.FFFFFFFzz",
+            "HH:mm:ss.FFFFFFFzzz"
+        };
+        return DateTimeOffset.TryParseExact(
+            trimmed,
+            formats,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var value)
+            ? value
+            : throw new FormatException("帶時區時間必須使用 HH:mm:ss.ffffff±HH:mm 格式，時區不可省略。");
     }
 
     private static bool ParseBoolean(string text)
