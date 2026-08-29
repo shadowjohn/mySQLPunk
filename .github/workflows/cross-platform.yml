@@ -10,6 +10,7 @@ on:
       - "mySQLPunk.CrossPlatform.SmokeTests/**"
       - "tests/Run-CrossPlatformLiveTests.sh"
       - "tests/Test-LinuxCrossPlatformPackage.sh"
+      - "tests/Test-LinuxUpdateApply.sh"
       - "tests/Test-MacCrossPlatformPackage.sh"
       - "scripts/package-cross-platform.sh"
       - "packaging/**"
@@ -22,6 +23,7 @@ on:
       - "mySQLPunk.CrossPlatform.SmokeTests/**"
       - "tests/Run-CrossPlatformLiveTests.sh"
       - "tests/Test-LinuxCrossPlatformPackage.sh"
+      - "tests/Test-LinuxUpdateApply.sh"
       - "tests/Test-MacCrossPlatformPackage.sh"
       - "scripts/package-cross-platform.sh"
       - "packaging/**"
@@ -92,6 +94,10 @@ jobs:
         run: |
           ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-linux-x64.tar.gz
           MYSQLPUNK_PACKAGE_RUN_UI=0 ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-linux-arm64.tar.gz
+
+      - name: Smoke test Linux safe update apply and rollback
+        if: runner.os == 'Linux'
+        run: ./tests/Test-LinuxUpdateApply.sh dist/cross-platform/*-linux-x64.tar.gz
 
       - name: Verify macOS app archives
         if: runner.os == 'macOS'

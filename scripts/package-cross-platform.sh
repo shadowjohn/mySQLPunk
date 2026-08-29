@@ -103,12 +103,14 @@ if [[ "$package_kind" == "linux" ]]; then
     cp -a "$publish_root/." "$package_root/app/"
     cp "$repo_root/packaging/linux/install.sh" "$package_root/install.sh"
     cp "$repo_root/packaging/linux/uninstall.sh" "$package_root/uninstall.sh"
+    cp "$repo_root/packaging/linux/apply-update.sh" "$package_root/app/apply-update.sh"
     cp "$repo_root/packaging/linux/README.txt" "$package_root/README.txt"
     cp "$repo_root/LICENSE" "$package_root/LICENSE"
     cp "$repo_root/THIRD_PARTY_NOTICES.md" "$package_root/THIRD_PARTY_NOTICES.md"
     sed -i "s/@VERSION@/$version/g; s/@RUNTIME@/$runtime/g" \
         "$package_root/install.sh" "$package_root/uninstall.sh" "$package_root/README.txt"
-    chmod +x "$package_root/install.sh" "$package_root/uninstall.sh" "$package_root/app/mySQLPunk"
+    chmod +x "$package_root/install.sh" "$package_root/uninstall.sh" \
+        "$package_root/app/mySQLPunk" "$package_root/app/apply-update.sh"
 
     asset_path="$output_root/$asset_base.tar.gz"
     temporary_asset="$work_root/$asset_base.tar.gz"

@@ -342,6 +342,84 @@ static async Task CrossPlatformUpdateAssetsAsync()
         AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseChecksumSidecar(
             Encoding.UTF8.GetBytes($"{expectedHash}  **{update.PackageFileName}\n"),
             update.PackageFileName));
+
+        var applyScriptPath = Path.Combine(directory, "apply-update.sh");
+        await WriteExecutableScriptAsync(applyScriptPath, "#!/usr/bin/env bash\nexit 0\n");
+        var applyStartInfo = new CrossPlatformUpdateService().BuildLinuxApplyStartInfo(
+            update,
+            new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
+            applyScriptPath,
+            12345,
+            "0123456789abcdef0123456789abcdef");
+        Assert(applyStartInfo.FileName == applyScriptPath && !applyStartInfo.UseShellExecute, "Linux updater 啟動方式不正確");
+        Assert(
+            applyStartInfo.ArgumentList.SequenceEqual(new[]
+            {
+                "--archive", destinationPath,
+                "--sha256", expectedHash,
+                "--version", "1.0.0.20",
+                "--runtime", "linux-x64",
+                "--wait-pid", "12345",
+                "--lock-token", "0123456789abcdef0123456789abcdef"
+            }),
+            "Linux updater 參數未使用獨立 ArgumentList 或內容不正確");
+
+        var resultPath = Path.Combine(directory, "last-apply-result");
+        await File.WriteAllTextAsync(
+            resultPath,
+            $"status=rollback\nversion=1.0.0.20\nruntime=linux-x64\nmessage=Startup failed.\nlog={Path.Combine(directory, "apply.log")}\n");
+        var applyResult = new CrossPlatformUpdateService().ReadAndClearLinuxApplyResult(resultPath);
+        Assert(applyResult is { WasRolledBack: true, Version: "1.0.0.20" }, "Linux rollback 結果解析不正確");
+        Assert(!File.Exists(resultPath), "Linux rollback 結果顯示後未清除");
+        AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseLinuxApplyResult(
+            $"status=success\nversion=1.0.0.20\nruntime=linux-x64\nmessage=Unexpected.\nlog={Path.Combine(directory, "apply.log")}\n"));
+
+        if (OperatingSystem.IsLinux())
+        {
+            var previousStateHome = Environment.GetEnvironmentVariable("XDG_STATE_HOME");
+            Environment.SetEnvironmentVariable("XDG_STATE_HOME", Path.Combine(directory, "lock-state"));
+            try
+            {
+                var service = new CrossPlatformUpdateService();
+                using (var lockOwner = service.StartLinuxApply(
+                           update,
+                           new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
+                           applyScriptPath,
+                           Environment.ProcessId))
+                {
+                    await lockOwner.WaitForExitAsync();
+                    Assert(lockOwner.ExitCode == 0, "Linux updater lock 測試程序未正常結束");
+                }
+
+                AssertThrows<InvalidOperationException>(() =>
+                {
+                    using var unexpected = service.StartLinuxApply(
+                        update,
+                        new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
+                        applyScriptPath,
+                        Environment.ProcessId);
+                });
+
+                var lockPath = CrossPlatformUpdateService.ResolveLinuxApplyLockPath();
+                await File.WriteAllTextAsync(
+                    lockPath,
+                    "token=0123456789abcdef0123456789abcdef\npid=2147483647\n");
+                using (var recovered = service.StartLinuxApply(
+                           update,
+                           new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
+                           applyScriptPath,
+                           Environment.ProcessId))
+                {
+                    await recovered.WaitForExitAsync();
+                    Assert(recovered.ExitCode == 0, "Linux updater 未從 stale lock 恢復");
+                }
+                File.Delete(lockPath);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("XDG_STATE_HOME", previousStateHome);
+            }
+        }
     }
     finally
     {

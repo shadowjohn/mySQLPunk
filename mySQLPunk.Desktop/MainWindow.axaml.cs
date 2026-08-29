@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -89,6 +90,8 @@ public sealed partial class MainWindow : Window
         {
             await ShowErrorAsync("無法載入連線設定", exception);
         }
+
+        await ShowPreviousLinuxUpdateFailureAsync();
 
         UpdateActionState();
     }
@@ -410,15 +413,81 @@ public sealed partial class MainWindow : Window
                 destinationPath,
                 cancellationToken);
             var installHint = isLinuxPackage
-                ? "解壓後執行 ./install.sh；既有連線設定會保留。"
+                ? "可由程式安全套用並重新啟動；既有連線設定會保留。"
                 : "解壓後將 mySQLPunk.app 拖到 Applications。";
             SetStatus($"已下載並驗證 {download.FormattedBytes}：{download.Path}");
+            var canApplyLinuxUpdate = isLinuxPackage && OperatingSystem.IsLinux();
+            var applyScriptPath = Path.Combine(AppContext.BaseDirectory, "apply-update.sh");
+            if (canApplyLinuxUpdate && File.Exists(applyScriptPath))
+            {
+                var shouldApply = await MessageDialog.ShowAsync(
+                    this,
+                    "更新安裝包已驗證",
+                    $"檔案：{download.Path}\n大小：{download.FormattedBytes}\nSHA-256：{download.Sha256}\n\n套用後會關閉目前程式；新版若無法正常啟動，會自動回復並重新開啟舊版。是否現在套用？",
+                    showCancel: true,
+                    confirmText: "套用並重新啟動");
+                if (shouldApply)
+                {
+                    using var updaterProcess = _updateService.StartLinuxApply(
+                        update,
+                        download,
+                        applyScriptPath,
+                        Environment.ProcessId);
+
+                    SetStatus($"正在關閉程式並套用 {update.LatestVersionText}…");
+                    if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                    {
+                        desktop.Shutdown();
+                    }
+                    else
+                    {
+                        Close();
+                    }
+                    return;
+                }
+
+                SetStatus($"已下載並驗證 {update.LatestVersionText}，尚未套用：{download.Path}");
+                return;
+            }
+
             await MessageDialog.ShowAsync(
                 this,
                 "更新安裝包已驗證",
                 $"檔案：{download.Path}\n大小：{download.FormattedBytes}\nSHA-256：{download.Sha256}\n\n{installHint}",
                 showCancel: false);
         });
+    }
+
+    private async Task ShowPreviousLinuxUpdateFailureAsync()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        try
+        {
+            var result = _updateService.ReadAndClearLinuxApplyResult();
+            if (result is null)
+            {
+                return;
+            }
+
+            var title = result.WasRolledBack ? "Linux 更新已回復" : "Linux 更新未完成";
+            var recovery = result.WasRolledBack
+                ? "已重新啟動前一個可用版本。"
+                : "目前安裝內容沒有被替換。";
+            SetStatus($"{title}：{result.Message}");
+            await MessageDialog.ShowAsync(
+                this,
+                title,
+                $"版本：{result.Version} ({result.RuntimeIdentifier})\n{recovery}\n\n原因：{result.Message}\n記錄：{result.LogPath}",
+                showCancel: false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            SetStatus($"無法讀取前次 Linux 更新結果：{exception.Message}");
+        }
     }
 
     private void OpenReleasePage(CrossPlatformUpdateInfo update)

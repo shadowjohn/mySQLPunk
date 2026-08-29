@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -14,6 +15,7 @@ public sealed class CrossPlatformUpdateService
     public const string DefaultRepository = "mySQLPunk";
     private const int MaximumReleaseJsonCharacters = 2 * 1024 * 1024;
     private const int MaximumChecksumBytes = 4 * 1024;
+    private const int MaximumApplyResultBytes = 4 * 1024;
     private const long MaximumPackageBytes = 512L * 1024 * 1024;
     private static readonly Regex VersionPattern = new(
         @"^\d+\.\d+\.\d+(\.\d+)?$",
@@ -120,6 +122,383 @@ public sealed class CrossPlatformUpdateService
             {
                 File.Delete(temporaryPath);
             }
+        }
+    }
+
+    public ProcessStartInfo BuildLinuxApplyStartInfo(
+        CrossPlatformUpdateInfo update,
+        CrossPlatformUpdateDownload download,
+        string applyScriptPath,
+        int processId,
+        string? lockToken = null)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        ArgumentNullException.ThrowIfNull(download);
+        if (!update.UpdateAvailable)
+        {
+            throw new InvalidOperationException("指定的 Release 並不是較新的版本。");
+        }
+        if (!update.RuntimeIdentifier.StartsWith("linux-", StringComparison.Ordinal) ||
+            update.RuntimeIdentifier is not ("linux-x64" or "linux-arm64"))
+        {
+            throw new PlatformNotSupportedException("安全自動套用目前只支援 Linux x64 與 ARM64。");
+        }
+        if (!Path.IsPathFullyQualified(download.Path) || !File.Exists(download.Path))
+        {
+            throw new FileNotFoundException("找不到已驗證的 Linux 更新安裝包。", download.Path);
+        }
+        if (!Regex.IsMatch(download.Sha256, "^[0-9a-fA-F]{64}$", RegexOptions.CultureInvariant))
+        {
+            throw new InvalidDataException("Linux 更新安裝包的 SHA-256 格式不正確。");
+        }
+        if (!Path.IsPathFullyQualified(applyScriptPath) || !File.Exists(applyScriptPath))
+        {
+            throw new FileNotFoundException("目前安裝內容缺少 Linux 安全更新腳本。", applyScriptPath);
+        }
+        if (processId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(processId), "等待的程序識別碼必須大於零。");
+        }
+        if (lockToken is not null &&
+            !Regex.IsMatch(lockToken, "^[0-9a-f]{32}$", RegexOptions.CultureInvariant))
+        {
+            throw new ArgumentException("Linux 更新 lock token 格式不正確。", nameof(lockToken));
+        }
+
+        var expectedPackageName = BuildPackageFileName(
+            update.LatestVersionText,
+            update.RuntimeIdentifier);
+        if (!string.Equals(update.PackageFileName, expectedPackageName, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("更新資產名稱與 Linux 套用參數不一致。");
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = applyScriptPath,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var argument in new[]
+                 {
+                     "--archive", download.Path,
+                     "--sha256", download.Sha256.ToLowerInvariant(),
+                     "--version", update.LatestVersionText,
+                     "--runtime", update.RuntimeIdentifier,
+                     "--wait-pid", processId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                 })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+        if (lockToken is not null)
+        {
+            startInfo.ArgumentList.Add("--lock-token");
+            startInfo.ArgumentList.Add(lockToken);
+        }
+        return startInfo;
+    }
+
+    public Process StartLinuxApply(
+        CrossPlatformUpdateInfo update,
+        CrossPlatformUpdateDownload download,
+        string applyScriptPath,
+        int processId)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new PlatformNotSupportedException("Linux 安全更新程序只能在 Linux 上啟動。");
+        }
+        var currentRuntime = ResolveCurrentRuntimeIdentifier();
+        if (!string.Equals(update.RuntimeIdentifier, currentRuntime, StringComparison.Ordinal))
+        {
+            throw new PlatformNotSupportedException(
+                $"更新 RID {update.RuntimeIdentifier} 與目前平台 {currentRuntime} 不一致。");
+        }
+
+        var lockToken = Guid.NewGuid().ToString("N");
+        var lockPath = ResolveLinuxApplyLockPath();
+        AcquireLinuxApplyLock(lockPath, lockToken, processId);
+        try
+        {
+            var startInfo = BuildLinuxApplyStartInfo(
+                update,
+                download,
+                applyScriptPath,
+                processId,
+                lockToken);
+            return Process.Start(startInfo) ??
+                   throw new InvalidOperationException("無法啟動 Linux 安全更新程序。");
+        }
+        catch
+        {
+            ReleaseLinuxApplyLock(lockPath, lockToken);
+            throw;
+        }
+    }
+
+    public LinuxUpdateApplyResult? ReadAndClearLinuxApplyResult(string? resultPath = null)
+    {
+        resultPath ??= ResolveLinuxApplyResultPath();
+        if (!Path.IsPathFullyQualified(resultPath))
+        {
+            throw new ArgumentException("Linux 更新結果位置必須是完整路徑。", nameof(resultPath));
+        }
+        if (!File.Exists(resultPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var resultLength = new FileInfo(resultPath).Length;
+            if (resultLength is <= 0 or > MaximumApplyResultBytes)
+            {
+                throw new InvalidDataException("Linux 更新結果為空或超過安全大小限制。");
+            }
+            var bytes = File.ReadAllBytes(resultPath);
+            if (bytes.Length != resultLength || bytes.Length > MaximumApplyResultBytes)
+            {
+                throw new InvalidDataException("Linux 更新結果在讀取時發生變更。");
+            }
+            string text;
+            try
+            {
+                text = StrictUtf8.GetString(bytes);
+            }
+            catch (DecoderFallbackException exception)
+            {
+                throw new InvalidDataException("Linux 更新結果不是有效 UTF-8。", exception);
+            }
+            return ParseLinuxApplyResult(text);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(resultPath);
+            }
+            catch (IOException)
+            {
+                // A stale result is less harmful than hiding the original update failure.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // The caller can still show the parsed failure for this launch.
+            }
+        }
+    }
+
+    public static LinuxUpdateApplyResult ParseLinuxApplyResult(string text)
+    {
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            if (line.Length == 0)
+            {
+                continue;
+            }
+            var separator = line.IndexOf('=');
+            if (separator <= 0 || !fields.TryAdd(line[..separator], line[(separator + 1)..]))
+            {
+                throw new InvalidDataException("Linux 更新結果格式不正確。");
+            }
+        }
+
+        var allowedFields = new[] { "status", "version", "runtime", "message", "log" };
+        if (fields.Count != allowedFields.Length || fields.Keys.Any(key => !allowedFields.Contains(key, StringComparer.Ordinal)))
+        {
+            throw new InvalidDataException("Linux 更新結果欄位不完整或包含未知欄位。");
+        }
+
+        var status = fields["status"];
+        if (status is not ("failed" or "rollback"))
+        {
+            throw new InvalidDataException("Linux 更新結果狀態不正確。");
+        }
+        ParseVersion(fields["version"], "version", out var version);
+        if (fields["runtime"] is not ("linux-x64" or "linux-arm64"))
+        {
+            throw new InvalidDataException("Linux 更新結果 RID 不正確。");
+        }
+        var message = fields["message"].Trim();
+        if (message.Length is 0 or > 500 || message.Contains('\r') || message.Contains('\n'))
+        {
+            throw new InvalidDataException("Linux 更新結果訊息不正確。");
+        }
+        var logPath = fields["log"];
+        if (!Path.IsPathFullyQualified(logPath) || logPath.Contains('\r') || logPath.Contains('\n'))
+        {
+            throw new InvalidDataException("Linux 更新 log 位置不正確。");
+        }
+
+        return new LinuxUpdateApplyResult(status, version, fields["runtime"], message, logPath);
+    }
+
+    public static string ResolveLinuxApplyResultPath()
+    {
+        var stateHome = Environment.GetEnvironmentVariable("XDG_STATE_HOME");
+        if (string.IsNullOrWhiteSpace(stateHome))
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            stateHome = Path.Combine(userProfile, ".local", "state");
+        }
+        if (!Path.IsPathFullyQualified(stateHome))
+        {
+            throw new InvalidOperationException("XDG_STATE_HOME 必須是完整路徑。");
+        }
+        return Path.Combine(stateHome, "mySQLPunk", "updates", "last-apply-result");
+    }
+
+    public static string ResolveLinuxApplyLockPath()
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(ResolveLinuxApplyResultPath())!,
+            "apply.lock");
+    }
+
+    private static void AcquireLinuxApplyLock(string lockPath, string token, int processId)
+    {
+        var directory = Path.GetDirectoryName(lockPath)!;
+        Directory.CreateDirectory(directory);
+        if (!OperatingSystem.IsWindows())
+        {
+            try
+            {
+                File.SetUnixFileMode(
+                    directory,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+            catch (IOException)
+            {
+                // Continue with the filesystem's existing user-state directory permissions.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // CreateNew below still determines whether exclusive ownership is available.
+            }
+        }
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(
+                    lockPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None);
+                var contents = StrictUtf8.GetBytes($"token={token}\npid={processId}\n");
+                stream.Write(contents);
+                stream.Flush(true);
+                if (!OperatingSystem.IsWindows())
+                {
+                    try
+                    {
+                        File.SetUnixFileMode(lockPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    }
+                    catch (IOException)
+                    {
+                        // The lock is still exclusive even if a filesystem cannot change Unix mode bits.
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        // The containing state directory remains user-scoped.
+                    }
+                }
+                return;
+            }
+            catch (IOException) when (File.Exists(lockPath))
+            {
+                var ownerPid = TryReadLinuxApplyLockPid(lockPath);
+                if (ownerPid is null)
+                {
+                    throw new InvalidOperationException("Linux 更新 lock 已存在，但無法安全驗證擁有者。");
+                }
+                if (IsProcessRunning(ownerPid.Value))
+                {
+                    throw new InvalidOperationException("另一個 mySQLPunk 視窗正在準備或套用 Linux 更新。");
+                }
+
+                try
+                {
+                    File.Delete(lockPath);
+                }
+                catch (FileNotFoundException)
+                {
+                    // Another stale-lock recovery won the race; retry CreateNew once.
+                }
+            }
+        }
+
+        throw new InvalidOperationException("無法取得 Linux 更新的獨佔 lock。");
+    }
+
+    private static int? TryReadLinuxApplyLockPid(string lockPath)
+    {
+        try
+        {
+            var info = new FileInfo(lockPath);
+            if (info.Length is <= 0 or > 256)
+            {
+                return null;
+            }
+            foreach (var line in File.ReadAllLines(lockPath, StrictUtf8))
+            {
+                if (line.StartsWith("pid=", StringComparison.Ordinal) &&
+                    int.TryParse(line[4..], out var processId))
+                {
+                    return processId;
+                }
+            }
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (DecoderFallbackException)
+        {
+            return null;
+        }
+        return null;
+    }
+
+    private static bool IsProcessRunning(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static void ReleaseLinuxApplyLock(string lockPath, string token)
+    {
+        try
+        {
+            var contents = File.ReadAllText(lockPath, StrictUtf8);
+            if (contents.Split('\n').Contains($"token={token}", StringComparer.Ordinal))
+            {
+                File.Delete(lockPath);
+            }
+        }
+        catch (FileNotFoundException)
+        {
+            // The updater may already have claimed and released the reservation.
+        }
+        catch (IOException)
+        {
+            // A live updater must retain ownership if the reservation cannot be read safely.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Do not delete a lock whose ownership cannot be verified.
         }
     }
 

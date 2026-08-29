@@ -12,6 +12,10 @@ Then start it from the application menu or run:
 
     ~/.local/bin/mysqlpunk
 
+Installed builds can download, verify and apply later Linux releases from the
+Check Updates button. The updater waits for the current process to exit,
+rechecks the archive, and relaunches the previous version if startup fails.
+
 Remove this version while preserving connection profiles:
 
     ./uninstall.sh

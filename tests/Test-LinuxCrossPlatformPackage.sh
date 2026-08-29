@@ -22,8 +22,9 @@ done < <(tar -tzf "$asset")
 
 tar -xzf "$asset" -C "$work_root"
 package_root=$(find "$work_root" -mindepth 1 -maxdepth 1 -type d -name 'mySQLPunk-*' -print -quit)
-if [[ -z "$package_root" || ! -x "$package_root/install.sh" || ! -x "$package_root/uninstall.sh" ]]; then
-    printf 'Archive does not contain executable install and uninstall scripts.\n' >&2
+if [[ -z "$package_root" || ! -x "$package_root/install.sh" || ! -x "$package_root/uninstall.sh" ||
+      ! -x "$package_root/app/apply-update.sh" ]]; then
+    printf 'Archive does not contain executable install, uninstall and update scripts.\n' >&2
     exit 4
 fi
 
