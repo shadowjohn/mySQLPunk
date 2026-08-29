@@ -43,7 +43,7 @@ public static class TableCellValueConverter
             {
                 TableColumnValueKind.String => input.Text,
                 TableColumnValueKind.Integer => long.Parse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture),
-                TableColumnValueKind.UnsignedInteger => ulong.Parse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture),
+                TableColumnValueKind.UnsignedInteger => ParseUnsignedInteger(column, input.Text),
                 TableColumnValueKind.Decimal => decimal.Parse(input.Text, NumberStyles.Number, CultureInfo.InvariantCulture),
                 TableColumnValueKind.FloatingPoint => ParseFiniteDouble(input.Text),
                 TableColumnValueKind.Boolean => ParseBoolean(input.Text),
@@ -153,6 +153,28 @@ public static class TableCellValueConverter
         return double.IsFinite(value)
             ? value
             : throw new FormatException("浮點數必須是有限值。");
+    }
+
+    private static ulong ParseUnsignedInteger(TableColumnInfo column, string text)
+    {
+        var value = ulong.Parse(text, NumberStyles.Integer, CultureInfo.InvariantCulture);
+        var dataType = column.DataTypeName.Trim();
+        if (!dataType.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) || !dataType.EndsWith(')'))
+        {
+            return value;
+        }
+
+        var widthText = dataType[4..^1];
+        if (!int.TryParse(widthText, NumberStyles.None, CultureInfo.InvariantCulture, out var width) ||
+            width is < 1 or > 64)
+        {
+            throw new FormatException("BIT 寬度必須介於 1 與 64。");
+        }
+
+        var maximum = width == 64 ? ulong.MaxValue : (1UL << width) - 1;
+        return value <= maximum
+            ? value
+            : throw new OverflowException($"BIT({width}) 的十進位值不可超過 {maximum}。");
     }
 
     private static bool ParseBoolean(string text)

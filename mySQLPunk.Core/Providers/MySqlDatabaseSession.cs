@@ -43,6 +43,12 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             mySqlParameter.MySqlDbType = MySqlDbType.JSON;
         }
+        else if (column.ValueKind == TableColumnValueKind.UnsignedInteger &&
+                 column.DataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) &&
+                 parameter is MySqlParameter bitParameter)
+        {
+            bitParameter.MySqlDbType = MySqlDbType.Bit;
+        }
     }
 
     protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
@@ -165,6 +171,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             "decimal" or "numeric" => TableColumnValueKind.Decimal,
             "float" or "double" or "real" => TableColumnValueKind.FloatingPoint,
             "bool" or "boolean" => TableColumnValueKind.Boolean,
+            "bit" => TableColumnValueKind.UnsignedInteger,
             "date" => TableColumnValueKind.Date,
             "datetime" or "timestamp" => TableColumnValueKind.DateTime,
             "time" => TableColumnValueKind.Time,

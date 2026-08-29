@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -833,6 +834,28 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             macColumn,
             new TableCellInput("mac", TableCellInputMode.Value, "08:00-2b:01:02:03")));
+        var bit8Column = new TableColumnInfo(0, "flags", "bit(8)", true, false, false, false, TableColumnValueKind.UnsignedInteger);
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    bit8Column,
+                    new TableCellInput("flags", TableCellInputMode.Value, "255")),
+                255UL),
+            "BIT(8) 應接受 0 到 255 的十進位值");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            bit8Column,
+            new TableCellInput("flags", TableCellInputMode.Value, "256")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            bit8Column,
+            new TableCellInput("flags", TableCellInputMode.Value, "-1")));
+        var bit64Column = bit8Column with { Name = "flags64", DataTypeName = "bit(64)" };
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    bit64Column,
+                    new TableCellInput("flags64", TableCellInputMode.Value, ulong.MaxValue.ToString(CultureInfo.InvariantCulture))),
+                ulong.MaxValue),
+            "BIT(64) 應接受 UInt64 最大值");
     }
     finally
     {
@@ -902,7 +925,7 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -1072,6 +1095,16 @@ static async Task VerifySafeTableEditingAsync(
     {
         insertInputs.Add(new TableCellInput(legacyImageColumn.Name, TableCellInputMode.Value, "0xDEADBEEF"));
     }
+    var bitColumns = before.Columns
+        .Where(column => column.DataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase))
+        .ToList();
+    foreach (var bitColumn in bitColumns)
+    {
+        insertInputs.Add(new TableCellInput(
+            bitColumn.Name,
+            TableCellInputMode.Value,
+            GetBitTestValue(bitColumn, updated: false)));
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1110,6 +1143,13 @@ static async Task VerifySafeTableEditingAsync(
             inserted.Values[legacyImageColumn.Ordinal] is byte[] legacyImage &&
             legacyImage.SequenceEqual(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }),
             "SQL Server image 安全新增不正確");
+    }
+    foreach (var bitColumn in bitColumns)
+    {
+        Assert(
+            Convert.ToUInt64(inserted.Values[bitColumn.Ordinal]) ==
+            ulong.Parse(GetBitTestValue(bitColumn, updated: false), CultureInfo.InvariantCulture),
+            $"MySQL {bitColumn.DataTypeName} 安全新增不正確");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1158,6 +1198,13 @@ static async Task VerifySafeTableEditingAsync(
     {
         updateInputs.Add(new TableCellInput(legacyImageColumn.Name, TableCellInputMode.Value, "0xCAFE"));
     }
+    foreach (var bitColumn in bitColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            bitColumn.Name,
+            TableCellInputMode.Value,
+            GetBitTestValue(bitColumn, updated: true)));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1199,6 +1246,13 @@ static async Task VerifySafeTableEditingAsync(
             legacyImage.SequenceEqual(new byte[] { 0xCA, 0xFE }),
             "SQL Server image 安全修改不正確");
     }
+    foreach (var bitColumn in bitColumns)
+    {
+        Assert(
+            Convert.ToUInt64(updated.Values[bitColumn.Ordinal]) ==
+            ulong.Parse(GetBitTestValue(bitColumn, updated: true), CultureInfo.InvariantCulture),
+            $"MySQL {bitColumn.DataTypeName} 安全修改不正確");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -1228,6 +1282,16 @@ static string GetNetworkTestValue(TableColumnInfo column, bool updated) =>
         ("macaddr", true) => "08:00:2b:01:02:04",
         ("macaddr8", false) => "08:00:2b:ff:fe:01:02:03",
         ("macaddr8", true) => "08:00:2b:ff:fe:01:02:04",
+        _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
+    };
+
+static string GetBitTestValue(TableColumnInfo column, bool updated) =>
+    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    {
+        ("bit(8)", false) => "165",
+        ("bit(8)", true) => "90",
+        ("bit(64)", false) => "18446744073709551615",
+        ("bit(64)", true) => "9223372036854775808",
         _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
     };
 

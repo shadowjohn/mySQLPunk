@@ -219,6 +219,8 @@ public sealed partial class TableRowEditorWindow : Window
     private static string BuildWatermark(TableColumnInfo column) => column.ValueKind switch
     {
         TableColumnValueKind.Boolean => "true / false / 1 / 0",
+        TableColumnValueKind.UnsignedInteger when column.DataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) =>
+            "非負十進位整數（依 BIT 寬度限制）",
         TableColumnValueKind.Date => "yyyy-MM-dd",
         TableColumnValueKind.DateTime => "yyyy-MM-dd HH:mm:ss",
         TableColumnValueKind.DateTimeOffset => "ISO 8601 日期時間與時區",
