@@ -16,6 +16,7 @@ public enum TableColumnValueKind
     MySqlTemporal,
     MySqlTime,
     MySqlYear,
+    PostgreSqlTemporal,
     TimeWithTimeZone,
     Interval,
     LogSequenceNumber,

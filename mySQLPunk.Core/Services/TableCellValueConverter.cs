@@ -66,7 +66,8 @@ public static class TableCellValueConverter
                 TableColumnValueKind.MySqlTemporal => ParseMySqlTemporal(column, input.Text),
                 TableColumnValueKind.MySqlTime => ParseMySqlTime(column, input.Text),
                 TableColumnValueKind.MySqlYear => ParseMySqlYear(input.Text),
-                TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
+                TableColumnValueKind.PostgreSqlTemporal => ParsePostgreSqlTemporal(column, input.Text),
+                TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(column, input.Text),
                 TableColumnValueKind.Interval => ParseInterval(input.Text),
                 TableColumnValueKind.LogSequenceNumber => ParseLogSequenceNumber(input.Text),
                 TableColumnValueKind.FullTextVector => ParseServerValidatedText(
@@ -940,7 +941,7 @@ public static class TableCellValueConverter
             : throw new OverflowException($"BIT({width}) 的十進位值不可超過 {maximum}。");
     }
 
-    private static DateTimeOffset ParseTimeWithTimeZone(string text)
+    private static DateTimeOffset ParseTimeWithTimeZone(TableColumnInfo column, string text)
     {
         var trimmed = text.Trim();
         var formats = new[]
@@ -950,14 +951,192 @@ public static class TableCellValueConverter
             "HH:mm:ss.FFFFFFFzz",
             "HH:mm:ss.FFFFFFFzzz"
         };
-        return DateTimeOffset.TryParseExact(
+        if (!DateTimeOffset.TryParseExact(
             trimmed,
             formats,
             CultureInfo.InvariantCulture,
             DateTimeStyles.None,
-            out var value)
-            ? value
-            : throw new FormatException("帶時區時間必須使用 HH:mm:ss.ffffff±HH:mm 格式，時區不可省略。");
+            out var value))
+        {
+            throw new FormatException("帶時區時間必須使用 HH:mm:ss.ffffff±HH:mm 格式，時區不可省略。");
+        }
+
+        EnsurePostgreSqlFractionalScale(value.TimeOfDay.Ticks, GetPostgreSqlTemporalScale(column), column);
+        return value;
+    }
+
+    private static object ParsePostgreSqlTemporal(TableColumnInfo column, string text)
+    {
+        var baseType = GetPostgreSqlTemporalBaseType(column);
+        return baseType switch
+        {
+            "timestamp without time zone" => ParsePostgreSqlTimestamp(column, text),
+            "timestamp with time zone" => ParsePostgreSqlTimestampWithTimeZone(column, text),
+            "time without time zone" => ParsePostgreSqlTime(column, text),
+            _ => throw new FormatException($"不支援的 PostgreSQL temporal 型別：{column.StorageDataTypeName}。")
+        };
+    }
+
+    private static DateTime ParsePostgreSqlTimestamp(TableColumnInfo column, string text)
+    {
+        var (wholeSeconds, fraction) = SplitPostgreSqlFraction(text);
+        if (!DateTime.TryParseExact(
+                wholeSeconds,
+                new[] { "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss" },
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var timestamp))
+        {
+            throw new FormatException(
+                "PostgreSQL timestamp without time zone 必須使用 yyyy-MM-ddTHH:mm:ss[.ffffff]，不可包含 offset 或時區。");
+        }
+
+        var result = timestamp.AddTicks(ParsePostgreSqlFractionTicks(fraction));
+        EnsurePostgreSqlFractionalScale(result.Ticks, GetPostgreSqlTemporalScale(column), column);
+        return DateTime.SpecifyKind(result, DateTimeKind.Unspecified);
+    }
+
+    private static DateTimeOffset ParsePostgreSqlTimestampWithTimeZone(TableColumnInfo column, string text)
+    {
+        var trimmed = text.Trim();
+        var offsetFormats = new[]
+        {
+            "yyyy-MM-dd'T'HH:mm:sszzz",
+            "yyyy-MM-dd'T'HH:mm:ss.FFFFFFzzz",
+            "yyyy-MM-dd HH:mm:sszzz",
+            "yyyy-MM-dd HH:mm:ss.FFFFFFzzz"
+        };
+        if (!DateTimeOffset.TryParseExact(
+                trimmed,
+                offsetFormats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var timestamp))
+        {
+            var utcFormats = new[]
+            {
+                "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                "yyyy-MM-dd'T'HH:mm:ss.FFFFFF'Z'",
+                "yyyy-MM-dd HH:mm:ss'Z'",
+                "yyyy-MM-dd HH:mm:ss.FFFFFF'Z'"
+            };
+            if (!DateTimeOffset.TryParseExact(
+                    trimmed,
+                    utcFormats,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out timestamp))
+            {
+                throw new FormatException(
+                    "PostgreSQL timestamp with time zone 必須包含明確的 ±HH:mm offset 或 Z，不可使用本機時區推測。");
+            }
+        }
+
+        EnsurePostgreSqlFractionalScale(timestamp.Ticks, GetPostgreSqlTemporalScale(column), column);
+        return timestamp.ToUniversalTime();
+    }
+
+    private static TimeSpan ParsePostgreSqlTime(TableColumnInfo column, string text)
+    {
+        var (wholeSeconds, fraction) = SplitPostgreSqlFraction(text);
+        var parts = wholeSeconds.Split(':');
+        if (parts.Length != 3 ||
+            parts[0].Length != 2 ||
+            parts[1].Length != 2 ||
+            parts[2].Length != 2 ||
+            !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var hours) ||
+            !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
+            !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) ||
+            hours > 24 || minutes > 59 || seconds > 59 ||
+            hours == 24 && (minutes != 0 || seconds != 0 || fraction.Length != 0))
+        {
+            throw new FormatException(
+                "PostgreSQL time without time zone 必須使用 HH:mm:ss[.ffffff]，範圍為 00:00:00–24:00:00。");
+        }
+
+        var time = TimeSpan.FromHours(hours) +
+                   TimeSpan.FromMinutes(minutes) +
+                   TimeSpan.FromSeconds(seconds) +
+                   TimeSpan.FromTicks(ParsePostgreSqlFractionTicks(fraction));
+        EnsurePostgreSqlFractionalScale(time.Ticks, GetPostgreSqlTemporalScale(column), column);
+        return time;
+    }
+
+    private static (string WholeSeconds, string Fraction) SplitPostgreSqlFraction(string text)
+    {
+        var trimmed = text.Trim();
+        var separator = trimmed.IndexOf('.');
+        if (separator < 0)
+        {
+            return (trimmed, string.Empty);
+        }
+
+        var fraction = trimmed[(separator + 1)..];
+        if (fraction.Length is < 1 or > 6 || fraction.Any(character => !char.IsAsciiDigit(character)))
+        {
+            throw new FormatException("PostgreSQL temporal 小數秒必須包含 1–6 位十進位數字。");
+        }
+
+        return (trimmed[..separator], fraction);
+    }
+
+    private static long ParsePostgreSqlFractionTicks(string fraction) => fraction.Length == 0
+        ? 0
+        : int.Parse(fraction.PadRight(6, '0'), NumberStyles.None, CultureInfo.InvariantCulture) * 10L;
+
+    private static void EnsurePostgreSqlFractionalScale(
+        long ticks,
+        byte scale,
+        TableColumnInfo column)
+    {
+        var tickQuantum = (long)Math.Pow(10, 7 - scale);
+        if (ticks % tickQuantum != 0)
+        {
+            throw new FormatException(
+                $"PostgreSQL {column.StorageDataTypeName} 最多接受 {scale} 位小數秒，輸入值會被取整。");
+        }
+    }
+
+    public static byte GetPostgreSqlTemporalScale(TableColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        var storageType = column.StorageDataTypeName.Trim();
+        var openingParenthesis = storageType.IndexOf('(');
+        if (openingParenthesis < 0)
+        {
+            return 6;
+        }
+
+        var closingParenthesis = storageType.IndexOf(')', openingParenthesis + 1);
+        if (closingParenthesis < 0 ||
+            !byte.TryParse(
+                storageType[(openingParenthesis + 1)..closingParenthesis],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var scale) ||
+            scale > 6)
+        {
+            throw new InvalidOperationException(
+                $"PostgreSQL temporal 欄位缺少有效的 0–6 小數秒精度 metadata：{column.StorageDataTypeName}");
+        }
+
+        return scale;
+    }
+
+    public static string GetPostgreSqlTemporalBaseType(TableColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        var storageType = column.StorageDataTypeName.Trim();
+        var openingParenthesis = storageType.IndexOf('(');
+        if (openingParenthesis < 0)
+        {
+            return storageType.ToLowerInvariant();
+        }
+
+        var closingParenthesis = storageType.IndexOf(')', openingParenthesis + 1);
+        return closingParenthesis < 0
+            ? storageType.ToLowerInvariant()
+            : (storageType[..openingParenthesis] + storageType[(closingParenthesis + 1)..]).ToLowerInvariant();
     }
 
     private static TimeSpan ParseMySqlTime(TableColumnInfo column, string text)

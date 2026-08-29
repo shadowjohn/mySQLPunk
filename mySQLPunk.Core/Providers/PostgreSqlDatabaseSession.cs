@@ -87,6 +87,21 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         else if (column.ValueKind == TableColumnValueKind.TimeWithTimeZone && parameter is NpgsqlParameter timeZoneParameter)
         {
             timeZoneParameter.NpgsqlDbType = NpgsqlDbType.TimeTz;
+            timeZoneParameter.Scale = TableCellValueConverter.GetPostgreSqlTemporalScale(column);
+        }
+        else if (column.ValueKind == TableColumnValueKind.PostgreSqlTemporal &&
+                 parameter is NpgsqlParameter temporalParameter)
+        {
+            var baseType = TableCellValueConverter.GetPostgreSqlTemporalBaseType(column);
+            temporalParameter.NpgsqlDbType = baseType switch
+            {
+                "timestamp without time zone" => NpgsqlDbType.Timestamp,
+                "timestamp with time zone" => NpgsqlDbType.TimestampTz,
+                "time without time zone" => NpgsqlDbType.Time,
+                _ => throw new InvalidOperationException(
+                    $"無法建立 PostgreSQL temporal 型別「{column.StorageDataTypeName}」的參數。")
+            };
+            temporalParameter.Scale = TableCellValueConverter.GetPostgreSqlTemporalScale(column);
         }
         else if (column.ValueKind == TableColumnValueKind.Interval && parameter is NpgsqlParameter intervalParameter)
         {
@@ -111,6 +126,13 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
     {
+        if (column.ValueKind == TableColumnValueKind.PostgreSqlTemporal && value is string temporal)
+        {
+            return TableCellValueConverter.Parse(
+                column,
+                new TableCellInput(column.Name, TableCellInputMode.Value, temporal));
+        }
+
         if (column.ValueKind == TableColumnValueKind.TimeWithTimeZone && value is string timeWithTimeZone)
         {
             return TableCellValueConverter.Parse(
@@ -203,6 +225,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
+        if (column.ValueKind == TableColumnValueKind.PostgreSqlTemporal)
+        {
+            return BuildPostgreSqlTemporalSelectExpression(column, quotedName);
+        }
+
         if (column.ValueKind == TableColumnValueKind.Interval)
         {
             return $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE " +
@@ -229,6 +256,25 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         $"';days=', (EXTRACT(DAY FROM {expression})::bigint), " +
         $"';microseconds=', (ROUND((EXTRACT(HOUR FROM {expression}) * 3600 + " +
         $"EXTRACT(MINUTE FROM {expression}) * 60 + EXTRACT(SECOND FROM {expression})) * 1000000)::bigint))";
+
+    private static string BuildPostgreSqlTemporalSelectExpression(TableColumnInfo column, string quotedName)
+    {
+        var baseType = TableCellValueConverter.GetPostgreSqlTemporalBaseType(column);
+        if (baseType == "time without time zone")
+        {
+            return $"CAST({quotedName} AS text) AS {quotedName}";
+        }
+
+        var scale = TableCellValueConverter.GetPostgreSqlTemporalScale(column);
+        var length = scale == 0 ? 19 : 20 + scale;
+        var source = baseType == "timestamp with time zone"
+            ? $"{quotedName} AT TIME ZONE 'UTC'"
+            : quotedName;
+        var formatted = $"LEFT(to_char({source}, 'YYYY-MM-DD\"T\"HH24:MI:SS.US'), {length})";
+        return baseType == "timestamp with time zone"
+            ? $"({formatted} || 'Z') AS {quotedName}"
+            : $"{formatted} AS {quotedName}";
+    }
 
     protected override string BuildParameterValueExpression(TableColumnInfo column, string parameterName)
     {
@@ -389,9 +435,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "real" or "double precision" => TableColumnValueKind.FloatingPoint,
             "boolean" => TableColumnValueKind.Boolean,
             "date" => TableColumnValueKind.Date,
-            "timestamp without time zone" => TableColumnValueKind.DateTime,
-            "timestamp with time zone" => TableColumnValueKind.DateTimeOffset,
-            "time without time zone" => TableColumnValueKind.Time,
+            "timestamp without time zone" or "timestamp with time zone" or "time without time zone" =>
+                TableColumnValueKind.PostgreSqlTemporal,
             "time with time zone" => TableColumnValueKind.TimeWithTimeZone,
             "interval" => TableColumnValueKind.Interval,
             "pg_lsn" => TableColumnValueKind.LogSequenceNumber,

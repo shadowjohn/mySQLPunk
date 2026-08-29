@@ -86,6 +86,8 @@ SQL Server `sysname` 與 `CREATE TYPE ... FROM ...` alias type 會同時顯示�
 
 PostgreSQL domain 也會同時顯示 schema domain 名稱與 base definition，例如 `"public"."precise_amount" (numeric(18,6))`；integer、文字、exact numeric、enum／自訂型別、網路位址等 domain 會沿用 base type 的安全編輯器與參數，再由 PostgreSQL 套用 domain constraint。constraint 拒絕時會回復整筆交易。
 
+PostgreSQL `timestamp(p)`、`timestamptz(p)`、`time(p)` 與 `timetz(p)` 會依欄位宣告保留 0–6 位小數秒；無時區型別禁止混入 offset，timestamptz 必須明確指定 offset 或 `Z`，載入固定顯示為 UTC `Z`。超出 p 的小數秒會在送出前拒絕，`time` 則保留 PostgreSQL 支援的 `24:00:00` 上界。
+
 ### Windows 完整版
 
 - Windows
@@ -209,7 +211,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 ## 已知限制
 
-- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、無損高精度 DECIMAL／NUMERIC、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／YEAR／DATE／DATETIME／TIMESTAMP／UUID／INET6、PostgreSQL bit string／timetz／interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery／range／multirange／array／geometric／jsonpath／snapshot／hstore／ltree／reg*／enum／composite／extension UDT／domain、1 MiB 內 binary、JSON、XML、PostgreSQL 網路位址，以及 SQL Server scalar temporal／legacy LOB／hierarchyid／alias type／sql_variant 欄位的 Table 資料編輯；Oracle、MongoDB、Redis、Snowflake、其餘進階型別、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；Linux 已可安全下載、關閉、套用、健康檢查與 rollback，macOS 則在正式 Developer ID 簽署與 Apple notarization 憑證完成前維持驗證後手動安裝。
+- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、無損高精度 DECIMAL／NUMERIC、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／YEAR／DATE／DATETIME／TIMESTAMP／UUID／INET6、PostgreSQL scalar temporal／bit string／timetz／interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery／range／multirange／array／geometric／jsonpath／snapshot／hstore／ltree／reg*／enum／composite／extension UDT／domain、1 MiB 內 binary、JSON、XML、PostgreSQL 網路位址，以及 SQL Server scalar temporal／legacy LOB／hierarchyid／alias type／sql_variant 欄位的 Table 資料編輯；Oracle、MongoDB、Redis、Snowflake、其餘進階型別、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；Linux 已可安全下載、關閉、套用、健康檢查與 rollback，macOS 則在正式 Developer ID 簽署與 Apple notarization 憑證完成前維持驗證後手動安裝。
 - Oracle 的部分 DDL 還是會被權限、語法或物件型態擋下來；預覽會附上權限診斷 SQL 跟修復建議，但終究要看帳號實際有什麼權限。
 - Windows 完整版對沒有 Primary Key 的資料表仍可用原始值組 WHERE 條件；欄位有浮點數或大文字時可能比不準，可在選項中改成唯讀。Linux / macOS 預覽版會直接停用無 Primary Key Table 的修改與刪除，只保留新增與瀏覽。
 - XLSX 匯出要把整份結果放進記憶體；還原 SQL 備份也是整個檔一次讀進來，特別大的備份要留意。

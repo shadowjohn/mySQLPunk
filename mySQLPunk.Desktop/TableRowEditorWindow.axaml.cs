@@ -239,6 +239,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.MySqlTemporal => "yyyy-MM-dd 或 yyyy-MM-ddTHH:mm:ss[.ffffff]",
         TableColumnValueKind.MySqlTime => "[-]HHH:mm:ss[.ffffff]（最大 ±838:59:59）",
         TableColumnValueKind.MySqlYear => "0 或 1901–2155（四位數年份）",
+        TableColumnValueKind.PostgreSqlTemporal => "ISO 日期時間／純時間（依欄位精度，時區欄位須含 offset）",
         TableColumnValueKind.ExactDecimal => BuildExactDecimalWatermark(column),
         TableColumnValueKind.TimeWithTimeZone => "HH:mm:ss.ffffff±HH:mm",
         TableColumnValueKind.Interval => "months=0;days=0;microseconds=0",

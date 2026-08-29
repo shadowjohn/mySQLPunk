@@ -974,6 +974,76 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             timeZoneColumn,
             new TableCellInput("alarm", TableCellInputMode.Value, "25:00:00+08:00")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timeZoneColumn,
+            new TableCellInput("alarm", TableCellInputMode.Value, "12:34:56.1234567+08:00")));
+        var timestampColumn = new TableColumnInfo(
+            0,
+            "local_timestamp",
+            "timestamp(3) without time zone",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.PostgreSqlTemporal);
+        var timestampWithTimeZoneColumn = timestampColumn with
+        {
+            Name = "utc_timestamp",
+            DataTypeName = "timestamp(4) with time zone",
+            StorageDataTypeName = "timestamp(4) with time zone"
+        };
+        var timeColumn = timestampColumn with
+        {
+            Name = "local_clock",
+            DataTypeName = "time(2) without time zone",
+            StorageDataTypeName = "time(2) without time zone"
+        };
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    timestampColumn,
+                    new TableCellInput("local_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.123")),
+                new DateTime(2026, 8, 30, 12, 34, 56).AddMilliseconds(123)),
+            "PostgreSQL timestamp(3) 應無損保存毫秒");
+        Assert(
+            TableCellValueConverter.Parse(
+                timestampWithTimeZoneColumn,
+                new TableCellInput("utc_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.1234+08:00")) is
+            DateTimeOffset timestampWithTimeZone &&
+            timestampWithTimeZone.Offset == TimeSpan.Zero &&
+            timestampWithTimeZone.Hour == 4 &&
+            timestampWithTimeZone.Ticks % TimeSpan.TicksPerSecond == 1_234_000,
+            "PostgreSQL timestamptz(4) 應轉成 UTC 並保留四位小數秒");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    timeColumn,
+                    new TableCellInput("local_clock", TableCellInputMode.Value, "24:00:00")),
+                TimeSpan.FromDays(1)),
+            "PostgreSQL time 應支援 24:00:00 上界");
+        Assert(TableCellValueConverter.GetPostgreSqlTemporalScale(timestampColumn) == 3, "timestamp scale 應為 3");
+        Assert(
+            TableCellValueConverter.GetPostgreSqlTemporalScale(timestampWithTimeZoneColumn) == 4,
+            "timestamptz scale 應為 4");
+        Assert(TableCellValueConverter.GetPostgreSqlTemporalScale(timeZoneColumn) == 6, "timetz 預設 scale 應為 6");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timestampColumn,
+            new TableCellInput("local_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.1234")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timestampColumn,
+            new TableCellInput("local_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.123+08:00")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timestampWithTimeZoneColumn,
+            new TableCellInput("utc_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.1234")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timestampWithTimeZoneColumn,
+            new TableCellInput("utc_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.12345Z")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timeColumn,
+            new TableCellInput("local_clock", TableCellInputMode.Value, "23:59:59.123")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            timeColumn,
+            new TableCellInput("local_clock", TableCellInputMode.Value, "24:00:00.01")));
         var mySqlDateColumn = new TableColumnInfo(
             0,
             "event_date",
@@ -2052,6 +2122,10 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 bits BIT(8) NULL,
                 varbits BIT VARYING(16) NULL,
                 alarm TIME WITH TIME ZONE NULL,
+                local_timestamp TIMESTAMP(3) WITHOUT TIME ZONE NULL,
+                precise_timestamp TIMESTAMP(6) WITHOUT TIME ZONE NULL,
+                utc_timestamp TIMESTAMP(4) WITH TIME ZONE NULL,
+                local_clock TIME(2) WITHOUT TIME ZONE NULL,
                 duration INTERVAL NULL,
                 wal_position PG_LSN NULL,
                 object_id OID NULL,
@@ -2130,6 +2204,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE public.sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyPostgreSqlTemporalTypesAsync(session, database, table!);
     }
     finally
     {
@@ -2138,6 +2213,136 @@ static async Task PostgreSqlLiveRoundTripAsync()
             $"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{database}' AND pid <> pg_backend_pid();");
         await session.ExecuteAsync("postgres", $"DROP DATABASE IF EXISTS \"{database}\";");
     }
+}
+
+static async Task VerifyPostgreSqlTemporalTypesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var temporalColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.PostgreSqlTemporal)
+        .ToDictionary(column => column.Name, StringComparer.Ordinal);
+    var expectedTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["local_timestamp"] = "timestamp(3) without time zone",
+        ["precise_timestamp"] = "timestamp(6) without time zone",
+        ["utc_timestamp"] = "timestamp(4) with time zone",
+        ["local_clock"] = "time(2) without time zone"
+    };
+    Assert(
+        temporalColumns.Count == expectedTypes.Count,
+        $"PostgreSQL temporal metadata 未完整辨識；actual={temporalColumns.Count}");
+    foreach (var expected in expectedTypes)
+    {
+        Assert(
+            temporalColumns.TryGetValue(expected.Key, out var column) &&
+            column.IsEditable &&
+            column.StorageDataTypeName == expected.Value,
+            $"PostgreSQL {expected.Key} metadata 不正確；actual={column?.StorageDataTypeName}");
+    }
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "PostgreSQL temporal"),
+            new TableCellInput("local_timestamp", TableCellInputMode.Value, "0001-01-01T00:00:00.123"),
+            new TableCellInput("precise_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.123456"),
+            new TableCellInput("utc_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.1234+08:00"),
+            new TableCellInput("local_clock", TableCellInputMode.Value, "24:00:00")
+        });
+
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "PostgreSQL temporal");
+    Assert(
+        Convert.ToString(inserted.Values[temporalColumns["local_timestamp"].Ordinal]) ==
+            "0001-01-01T00:00:00.123" &&
+        Convert.ToString(inserted.Values[temporalColumns["precise_timestamp"].Ordinal]) ==
+            "2026-08-30T12:34:56.123456" &&
+        Convert.ToString(inserted.Values[temporalColumns["utc_timestamp"].Ordinal]) ==
+            "2026-08-30T04:34:56.1234Z" &&
+        Convert.ToString(inserted.Values[temporalColumns["local_clock"].Ordinal]) == "24:00:00",
+        "PostgreSQL temporal 新增後未保留宣告精度、24:00 或 UTC canonical 格式");
+
+    var invalidValues = new[]
+    {
+        (Column: "local_timestamp", Value: "2026-08-30T12:34:56.1234"),
+        (Column: "local_timestamp", Value: "2026-08-30T12:34:56.123+08:00"),
+        (Column: "precise_timestamp", Value: "2026-08-30T12:34:56.1234567"),
+        (Column: "utc_timestamp", Value: "2026-08-30T12:34:56.1234"),
+        (Column: "utc_timestamp", Value: "2026-08-30T12:34:56.12345Z"),
+        (Column: "local_clock", Value: "23:59:59.123"),
+        (Column: "local_clock", Value: "24:00:00.01"),
+        (Column: "local_clock", Value: "25:00:00"),
+        (Column: "alarm", Value: "12:34:56.1234567+08:00")
+    };
+    foreach (var invalid in invalidValues)
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected PostgreSQL temporal"),
+                new TableCellInput(invalid.Column, TableCellInputMode.Value, invalid.Value)
+            }));
+    }
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    Assert(
+        rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected PostgreSQL temporal"),
+        "PostgreSQL temporal 錯誤／會取整的輸入不可留下半筆資料");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[]
+        {
+            new TableCellInput("local_timestamp", TableCellInputMode.Value, "9999-12-31T23:59:59.999"),
+            new TableCellInput("precise_timestamp", TableCellInputMode.Value, "9999-12-31T23:59:59.999999"),
+            new TableCellInput("utc_timestamp", TableCellInputMode.Value, "2026-08-30T01:02:03.4567Z"),
+            new TableCellInput("local_clock", TableCellInputMode.Value, "00:00:00.01")
+        });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "PostgreSQL temporal");
+    Assert(
+        Convert.ToString(updated.Values[temporalColumns["local_timestamp"].Ordinal]) ==
+            "9999-12-31T23:59:59.999" &&
+        Convert.ToString(updated.Values[temporalColumns["precise_timestamp"].Ordinal]) ==
+            "9999-12-31T23:59:59.999999" &&
+        Convert.ToString(updated.Values[temporalColumns["utc_timestamp"].Ordinal]) ==
+            "2026-08-30T01:02:03.4567Z" &&
+        Convert.ToString(updated.Values[temporalColumns["local_clock"].Ordinal]) == "00:00:00.01",
+        "PostgreSQL temporal 修改後未保留宣告精度與 UTC canonical 格式");
+
+    var id = Convert.ToInt64(updated.Values[0], CultureInfo.InvariantCulture);
+    await session.ExecuteAsync(
+        database,
+        $"UPDATE public.sample SET local_timestamp = TIMESTAMP '2026-08-30 12:34:56.789' WHERE id = {id};");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        updated,
+        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "99") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row =>
+        Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) == id);
+    Assert(
+        Convert.ToString(concurrent.Values[temporalColumns["local_timestamp"].Ordinal]) ==
+            "2026-08-30T12:34:56.789" &&
+        Convert.ToInt32(concurrent.Values[2], CultureInfo.InvariantCulture) != 99,
+        "PostgreSQL temporal 原值變更時 optimistic concurrency 不可覆寫外部資料");
+
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(
+        afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) != id),
+        "PostgreSQL temporal 安全刪除失敗");
 }
 
 static async Task SqlServerLiveRoundTripAsync()
