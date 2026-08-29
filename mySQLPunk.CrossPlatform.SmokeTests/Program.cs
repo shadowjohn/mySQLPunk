@@ -953,6 +953,34 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             mySqlTimeColumn with { DataTypeName = "time" },
             new TableCellInput("duration", TableCellInputMode.Value, "12:34:56.1")));
+        var mySqlYearColumn = new TableColumnInfo(
+            0,
+            "release_year",
+            "year",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.MySqlYear);
+        Assert(
+            Convert.ToUInt16(TableCellValueConverter.Parse(
+                mySqlYearColumn,
+                new TableCellInput("release_year", TableCellInputMode.Value, "0"))) == 0,
+            "MySQL YEAR 應接受 zero year");
+        Assert(
+            Convert.ToUInt16(TableCellValueConverter.Parse(
+                mySqlYearColumn,
+                new TableCellInput("release_year", TableCellInputMode.Value, "2155"))) == 2155,
+            "MySQL YEAR 應接受 2155 上界");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlYearColumn,
+            new TableCellInput("release_year", TableCellInputMode.Value, "1900")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlYearColumn,
+            new TableCellInput("release_year", TableCellInputMode.Value, "2156")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlYearColumn,
+            new TableCellInput("release_year", TableCellInputMode.Value, "70")));
         var intervalColumn = new TableColumnInfo(
             0,
             "duration",
@@ -1186,7 +1214,7 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL, release_year YEAR NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -1453,6 +1481,43 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "838:59:58.123456"));
     }
+    var mySqlYearColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.MySqlYear);
+    if (mySqlYearColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            mySqlYearColumn.Name,
+            TableCellInputMode.Value,
+            "1901"));
+
+        await session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Year zero"),
+                new TableCellInput(mySqlYearColumn.Name, TableCellInputMode.Value, "0")
+            });
+        var zeroYearSnapshot = await session.LoadTableDataAsync(database, table);
+        var zeroYearRow = zeroYearSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Year zero");
+        Assert(
+            Convert.ToUInt16(zeroYearRow.Values[mySqlYearColumn.Ordinal]) == 0,
+            "MySQL／MariaDB YEAR 應無損保存 zero year");
+        await session.DeleteTableRowAsync(database, table, zeroYearRow);
+
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected year"),
+                new TableCellInput(mySqlYearColumn.Name, TableCellInputMode.Value, "1900")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected year"),
+            "MySQL／MariaDB 不可寫入 1900 或模糊兩位數 YEAR");
+    }
     var bitStringColumns = before.Columns
         .Where(column => column.ValueKind == TableColumnValueKind.BitString)
         .ToList();
@@ -1655,6 +1720,12 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[mySqlTimeColumn.Ordinal]) == "838:59:58.123456",
             $"MySQL TIME 正上界安全新增不正確；actual={inserted.Values[mySqlTimeColumn.Ordinal]}");
     }
+    if (mySqlYearColumn is not null)
+    {
+        Assert(
+            Convert.ToUInt16(inserted.Values[mySqlYearColumn.Ordinal]) == 1901,
+            $"MySQL YEAR 下界安全新增不正確；actual={inserted.Values[mySqlYearColumn.Ordinal]}");
+    }
     foreach (var bitStringColumn in bitStringColumns)
     {
         Assert(
@@ -1787,6 +1858,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "-838:59:58.654321"));
     }
+    if (mySqlYearColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            mySqlYearColumn.Name,
+            TableCellInputMode.Value,
+            "2155"));
+    }
     foreach (var bitStringColumn in bitStringColumns)
     {
         updateInputs.Add(new TableCellInput(
@@ -1913,6 +1991,12 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             Convert.ToString(updated.Values[mySqlTimeColumn.Ordinal]) == "-838:59:58.654321",
             $"MySQL TIME 負下界安全修改不正確；actual={updated.Values[mySqlTimeColumn.Ordinal]}");
+    }
+    if (mySqlYearColumn is not null)
+    {
+        Assert(
+            Convert.ToUInt16(updated.Values[mySqlYearColumn.Ordinal]) == 2155,
+            $"MySQL YEAR 上界安全修改不正確；actual={updated.Values[mySqlYearColumn.Ordinal]}");
     }
     foreach (var bitStringColumn in bitStringColumns)
     {

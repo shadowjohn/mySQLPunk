@@ -54,6 +54,10 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             timeParameter.MySqlDbType = MySqlDbType.Time;
         }
+        else if (column.ValueKind == TableColumnValueKind.MySqlYear && parameter is MySqlParameter yearParameter)
+        {
+            yearParameter.MySqlDbType = MySqlDbType.Year;
+        }
         else if (column.ValueKind == TableColumnValueKind.String && parameter is MySqlParameter stringParameter)
         {
             if (column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase))
@@ -203,7 +207,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
 
         return normalizedDataType switch
         {
-            "year" => TableColumnValueKind.UnsignedInteger,
+            "year" => TableColumnValueKind.MySqlYear,
             "decimal" or "numeric" => TableColumnValueKind.Decimal,
             "float" or "double" or "real" => TableColumnValueKind.FloatingPoint,
             "bool" or "boolean" => TableColumnValueKind.Boolean,

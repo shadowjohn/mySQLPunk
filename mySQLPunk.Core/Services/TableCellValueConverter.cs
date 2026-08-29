@@ -62,6 +62,7 @@ public static class TableCellValueConverter
                     DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind),
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
                 TableColumnValueKind.MySqlTime => ParseMySqlTime(column, input.Text),
+                TableColumnValueKind.MySqlYear => ParseMySqlYear(input.Text),
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
                 TableColumnValueKind.Interval => ParseInterval(input.Text),
                 TableColumnValueKind.LogSequenceNumber => ParseLogSequenceNumber(input.Text),
@@ -295,6 +296,22 @@ public static class TableCellValueConverter
         }
 
         throw new FormatException($"無法辨識 MySQL TIME 精度：{dataTypeName}");
+    }
+
+    private static ushort ParseMySqlYear(string text)
+    {
+        var trimmed = text.Trim();
+        if (!ushort.TryParse(
+                trimmed,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var value) ||
+            value != 0 && value is < 1901 or > 2155)
+        {
+            throw new FormatException("MySQL YEAR 必須是 0，或介於 1901 與 2155 的四位數年份。");
+        }
+
+        return value;
     }
 
     private static IntervalComponents ParseInterval(string text)
