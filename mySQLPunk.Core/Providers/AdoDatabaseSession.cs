@@ -288,7 +288,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         int fetchLimit,
         int rowOffset)
     {
-        var selectColumns = string.Join(", ", columns.Select(column => QuoteIdentifier(column.Name)));
+        var selectColumns = string.Join(", ", columns.Select(BuildTableDataSelectExpression));
         var primaryKey = columns.Where(column => column.IsPrimaryKey).OrderBy(column => column.Ordinal).ToList();
         var orderBy = primaryKey.Count == 0
             ? string.Empty
@@ -296,6 +296,9 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         var offset = rowOffset == 0 ? string.Empty : $" OFFSET {rowOffset}";
         return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{orderBy} LIMIT {fetchLimit}{offset};";
     }
+
+    protected virtual string BuildTableDataSelectExpression(TableColumnInfo column) =>
+        QuoteIdentifier(column.Name);
 
     protected virtual string BuildDefaultInsertSql(DatabaseObjectInfo table) =>
         $"INSERT INTO {BuildQualifiedName(table)} DEFAULT VALUES;";
@@ -413,9 +416,11 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         var parameter = command.CreateParameter();
         parameter.ParameterName = name;
         ConfigureParameter(parameter, column);
-        parameter.Value = value ?? DBNull.Value;
+        parameter.Value = PrepareParameterValue(column, value) ?? DBNull.Value;
         command.Parameters.Add(parameter);
     }
+
+    protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) => value;
 
     protected virtual void ConfigureParameter(DbParameter parameter, TableColumnInfo column)
     {

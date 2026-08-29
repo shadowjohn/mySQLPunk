@@ -166,7 +166,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         int fetchLimit,
         int rowOffset)
     {
-        var selectColumns = string.Join(", ", columns.Select(column => QuoteIdentifier(column.Name)));
+        var selectColumns = string.Join(", ", columns.Select(BuildTableDataSelectExpression));
         var primaryKey = columns.Where(column => column.IsPrimaryKey).OrderBy(column => column.Ordinal).ToList();
         var orderBy = primaryKey.Count == 0
             ? string.Empty

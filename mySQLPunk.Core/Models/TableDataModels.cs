@@ -15,6 +15,7 @@ public enum TableColumnValueKind
     Guid,
     Json,
     Xml,
+    NetworkAddress,
     Binary,
     Unsupported
 }

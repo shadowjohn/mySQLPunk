@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Xml;
 using MySqlPunk.Core.Models;
@@ -63,6 +64,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
+                TableColumnValueKind.NetworkAddress => ParseNetworkAddress(column, input.Text),
                 TableColumnValueKind.Binary => ParseBinary(input.Text),
                 _ => throw new InvalidOperationException($"「{column.Name}」的型別目前不支援直接編輯。")
             };
@@ -239,5 +241,117 @@ public static class TableCellValueConverter
         }
 
         return trimmed;
+    }
+
+    private static string ParseNetworkAddress(TableColumnInfo column, string text)
+    {
+        var dataType = column.DataTypeName.Trim().ToLowerInvariant();
+        return dataType switch
+        {
+            "inet" => ParseIpNetwork(text, requireNetworkAddress: false),
+            "cidr" => ParseIpNetwork(text, requireNetworkAddress: true),
+            "macaddr" => ParseMacAddress(text, 6),
+            "macaddr8" => ParseMacAddress(text, 8),
+            _ => throw new FormatException("不支援的網路位址型別。")
+        };
+    }
+
+    private static string ParseIpNetwork(string text, bool requireNetworkAddress)
+    {
+        var trimmed = text.Trim();
+        var slashIndex = trimmed.IndexOf('/');
+        if (slashIndex != trimmed.LastIndexOf('/'))
+        {
+            throw new FormatException("IP 位址最多只能包含一個 CIDR prefix。");
+        }
+
+        var addressText = slashIndex < 0 ? trimmed : trimmed[..slashIndex];
+        if (!IPAddress.TryParse(addressText, out var address))
+        {
+            throw new FormatException("IP 位址格式無效。");
+        }
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && address.ScopeId != 0)
+        {
+            throw new FormatException("PostgreSQL inet／cidr 不接受 IPv6 zone identifier。");
+        }
+
+        var addressBytes = address.GetAddressBytes();
+        var maximumPrefix = addressBytes.Length * 8;
+        var prefix = maximumPrefix;
+        if (slashIndex >= 0 &&
+            (!int.TryParse(trimmed[(slashIndex + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out prefix) ||
+             prefix < 0 ||
+             prefix > maximumPrefix))
+        {
+            throw new FormatException($"CIDR prefix 必須介於 0 與 {maximumPrefix}。");
+        }
+
+        if (requireNetworkAddress && HasHostBits(addressBytes, prefix))
+        {
+            throw new FormatException("CIDR 必須使用網段起始位址，host bits 必須為 0。");
+        }
+
+        return slashIndex >= 0 || requireNetworkAddress
+            ? $"{address}/{prefix}"
+            : address.ToString();
+    }
+
+    private static bool HasHostBits(byte[] addressBytes, int prefix)
+    {
+        var fullBytes = prefix / 8;
+        var remainingBits = prefix % 8;
+        if (remainingBits != 0)
+        {
+            var hostMask = (byte)(0xFF >> remainingBits);
+            if ((addressBytes[fullBytes] & hostMask) != 0)
+            {
+                return true;
+            }
+            fullBytes++;
+        }
+
+        return addressBytes.AsSpan(fullBytes).IndexOfAnyExcept((byte)0) >= 0;
+    }
+
+    private static string ParseMacAddress(string text, int expectedBytes)
+    {
+        var trimmed = text.Trim();
+        string hex;
+        if (trimmed.Contains(':', StringComparison.Ordinal) || trimmed.Contains('-', StringComparison.Ordinal))
+        {
+            var separator = trimmed.Contains(':', StringComparison.Ordinal) ? ':' : '-';
+            if (trimmed.Contains(separator == ':' ? '-' : ':', StringComparison.Ordinal))
+            {
+                throw new FormatException("MAC 位址不可混用冒號與連字號。");
+            }
+
+            var parts = trimmed.Split(separator);
+            if (parts.Length != expectedBytes || parts.Any(part => part.Length != 2))
+            {
+                throw new FormatException($"MAC 位址必須是 {expectedBytes} 組兩位數 hex。");
+            }
+            hex = string.Concat(parts);
+        }
+        else if (trimmed.Contains('.', StringComparison.Ordinal))
+        {
+            var parts = trimmed.Split('.');
+            if (parts.Length != expectedBytes / 2 || parts.Any(part => part.Length != 4))
+            {
+                throw new FormatException($"MAC 位址必須是 {expectedBytes / 2} 組四位數 hex。");
+            }
+            hex = string.Concat(parts);
+        }
+        else
+        {
+            hex = trimmed;
+        }
+
+        if (hex.Length != expectedBytes * 2 || hex.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new FormatException($"MAC 位址必須是 {expectedBytes} bytes 的十六進位值。");
+        }
+
+        var bytes = Convert.FromHexString(hex);
+        return string.Join(":", bytes.Select(value => value.ToString("x2", CultureInfo.InvariantCulture)));
     }
 }

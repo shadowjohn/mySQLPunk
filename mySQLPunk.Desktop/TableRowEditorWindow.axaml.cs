@@ -226,7 +226,17 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.Guid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
         TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",
         TableColumnValueKind.Xml => "有效 XML（最多 1 MiB 字元，禁止 DTD）",
+        TableColumnValueKind.NetworkAddress => BuildNetworkWatermark(column),
         TableColumnValueKind.Binary => "0x00FF（二進位十六進位，最多 1 MiB）",
+        _ => string.Empty
+    };
+
+    private static string BuildNetworkWatermark(TableColumnInfo column) => column.DataTypeName.ToLowerInvariant() switch
+    {
+        "inet" => "192.0.2.10/24 或 2001:db8::10/64",
+        "cidr" => "192.0.2.0/24 或 2001:db8::/32",
+        "macaddr" => "08:00:2b:01:02:03",
+        "macaddr8" => "08:00:2b:ff:fe:01:02:03",
         _ => string.Empty
     };
 

@@ -1,3 +1,4 @@
+using System.Net.NetworkInformation;
 using MySqlPunk.Core.Models;
 using Npgsql;
 using NpgsqlTypes;
@@ -48,6 +49,34 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             xmlParameter.NpgsqlDbType = NpgsqlDbType.Xml;
         }
+        else if (column.ValueKind == TableColumnValueKind.NetworkAddress && parameter is NpgsqlParameter networkParameter)
+        {
+            networkParameter.NpgsqlDbType = column.DataTypeName.ToLowerInvariant() switch
+            {
+                "inet" => NpgsqlDbType.Inet,
+                "cidr" => NpgsqlDbType.Cidr,
+                "macaddr" => NpgsqlDbType.MacAddr,
+                "macaddr8" => NpgsqlDbType.MacAddr8,
+                _ => throw new InvalidOperationException($"不支援的 PostgreSQL 網路位址型別：{column.DataTypeName}")
+            };
+        }
+    }
+
+    protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
+    {
+        if (column.ValueKind != TableColumnValueKind.NetworkAddress || value is not string text)
+        {
+            return base.PrepareParameterValue(column, value);
+        }
+
+        return column.DataTypeName.ToLowerInvariant() switch
+        {
+            "inet" => new NpgsqlInet(text),
+            "cidr" => new NpgsqlCidr(text),
+            "macaddr" or "macaddr8" => new PhysicalAddress(
+                Convert.FromHexString(text.Replace(":", string.Empty, StringComparison.Ordinal))),
+            _ => throw new InvalidOperationException($"不支援的 PostgreSQL 網路位址型別：{column.DataTypeName}")
+        };
     }
 
     protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
@@ -64,6 +93,14 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         }
 
         return base.BuildOriginalValuePredicate(column, parameterName);
+    }
+
+    protected override string BuildTableDataSelectExpression(TableColumnInfo column)
+    {
+        var quotedName = QuoteIdentifier(column.Name);
+        return column.ValueKind == TableColumnValueKind.NetworkAddress
+            ? $"CAST({quotedName} AS text) AS {quotedName}"
+            : base.BuildTableDataSelectExpression(column);
     }
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
@@ -175,6 +212,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,
             "xml" => TableColumnValueKind.Xml,
+            "inet" or "cidr" or "macaddr" or "macaddr8" => TableColumnValueKind.NetworkAddress,
             "bytea" => TableColumnValueKind.Binary,
             "character" or "character varying" or "text" => TableColumnValueKind.String,
             "user-defined" when string.Equals(userDefinedType, "citext", StringComparison.OrdinalIgnoreCase) =>

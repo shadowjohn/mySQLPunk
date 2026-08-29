@@ -783,6 +783,56 @@ static async Task TableDataEditingAsync()
                 xmlColumn,
                 new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1)),
             "超過 1 MiB 字元的既有 XML 應維持唯讀");
+        var inetColumn = new TableColumnInfo(0, "address", "inet", true, false, false, false, TableColumnValueKind.NetworkAddress);
+        var cidrColumn = inetColumn with { Name = "subnet", DataTypeName = "cidr" };
+        var macColumn = inetColumn with { Name = "mac", DataTypeName = "macaddr" };
+        var mac8Column = inetColumn with { Name = "mac8", DataTypeName = "macaddr8" };
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    inetColumn,
+                    new TableCellInput("address", TableCellInputMode.Value, "2001:0db8::10/64")),
+                "2001:db8::10/64"),
+            "IPv6 inet 應正規化但保留 prefix");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    cidrColumn,
+                    new TableCellInput("subnet", TableCellInputMode.Value, "192.0.2.0/24")),
+                "192.0.2.0/24"),
+            "IPv4 cidr 應保留網段");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    macColumn,
+                    new TableCellInput("mac", TableCellInputMode.Value, "08-00-2B-01-02-03")),
+                "08:00:2b:01:02:03"),
+            "macaddr 應正規化為六段小寫 hex");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    mac8Column,
+                    new TableCellInput("mac8", TableCellInputMode.Value, "08:00:2b:ff:fe:01:02:03")),
+                "08:00:2b:ff:fe:01:02:03"),
+            "macaddr8 應接受八段 hex");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            inetColumn,
+            new TableCellInput("address", TableCellInputMode.Value, "192.0.2.1/33")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            inetColumn,
+            new TableCellInput("address", TableCellInputMode.Value, "fe80::1%1/64")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            cidrColumn,
+            new TableCellInput("subnet", TableCellInputMode.Value, "192.0.2.1/24")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            macColumn,
+            new TableCellInput("mac", TableCellInputMode.Value, "08:00:2b:01:02:03:04:05")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mac8Column,
+            new TableCellInput("mac8", TableCellInputMode.Value, "not-a-mac")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            macColumn,
+            new TableCellInput("mac", TableCellInputMode.Value, "08:00-2b:01:02:03")));
     }
     finally
     {
@@ -893,7 +943,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -994,6 +1044,16 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "<item stage=\"insert\"><n>1</n></item>"));
     }
+    var networkColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.NetworkAddress)
+        .ToList();
+    foreach (var networkColumn in networkColumns)
+    {
+        insertInputs.Add(new TableCellInput(
+            networkColumn.Name,
+            TableCellInputMode.Value,
+            GetNetworkTestValue(networkColumn, updated: false)));
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1010,6 +1070,13 @@ static async Task VerifySafeTableEditingAsync(
     {
         var insertedXml = System.Xml.Linq.XDocument.Parse(Convert.ToString(inserted.Values[xmlColumn.Ordinal])!);
         Assert((string?)insertedXml.Root?.Attribute("stage") == "insert", $"{session.Profile.ProviderDisplayName} 安全新增 XML 不正確");
+    }
+    foreach (var networkColumn in networkColumns)
+    {
+        AssertNetworkValue(
+            inserted.Values[networkColumn.Ordinal],
+            GetNetworkTestValue(networkColumn, updated: false),
+            $"{session.Profile.ProviderDisplayName} 安全新增 {networkColumn.DataTypeName} 不正確");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1039,6 +1106,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "<item stage=\"updated\"><ok>true</ok></item>"));
     }
+    foreach (var networkColumn in networkColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            networkColumn.Name,
+            TableCellInputMode.Value,
+            GetNetworkTestValue(networkColumn, updated: true)));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1058,6 +1132,13 @@ static async Task VerifySafeTableEditingAsync(
         Assert((string?)updatedXml.Root?.Attribute("stage") == "updated", $"{session.Profile.ProviderDisplayName} 安全修改 XML 不正確");
         Assert((string?)updatedXml.Root?.Element("ok") == "true", $"{session.Profile.ProviderDisplayName} XML 子元素不正確");
     }
+    foreach (var networkColumn in networkColumns)
+    {
+        AssertNetworkValue(
+            updated.Values[networkColumn.Ordinal],
+            GetNetworkTestValue(networkColumn, updated: true),
+            $"{session.Profile.ProviderDisplayName} 安全修改 {networkColumn.DataTypeName} 不正確");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -1074,6 +1155,36 @@ static async Task VerifySafeTableEditingAsync(
     await session.DeleteTableRowAsync(database, table, concurrent);
     var afterDelete = await session.LoadTableDataAsync(database, table);
     Assert(afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0]) != id), $"{session.Profile.ProviderDisplayName} 安全刪除失敗");
+}
+
+static string GetNetworkTestValue(TableColumnInfo column, bool updated) =>
+    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    {
+        ("inet", false) => "192.0.2.10/24",
+        ("inet", true) => "2001:db8::10/64",
+        ("cidr", false) => "192.0.2.0/24",
+        ("cidr", true) => "2001:db8::/48",
+        ("macaddr", false) => "08:00:2b:01:02:03",
+        ("macaddr", true) => "08:00:2b:01:02:04",
+        ("macaddr8", false) => "08:00:2b:ff:fe:01:02:03",
+        ("macaddr8", true) => "08:00:2b:ff:fe:01:02:04",
+        _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
+    };
+
+static void AssertNetworkValue(object? actual, string expected, string message)
+{
+    var actualText = Convert.ToString(actual) ?? string.Empty;
+    if (expected.Contains(':', StringComparison.Ordinal) &&
+        !expected.Contains("::", StringComparison.Ordinal))
+    {
+        actualText = actualText.Replace(":", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal);
+        expected = expected.Replace(":", string.Empty, StringComparison.Ordinal);
+    }
+
+    Assert(
+        string.Equals(actualText, expected, StringComparison.OrdinalIgnoreCase),
+        $"{message}；actual={actual?.GetType().FullName}:{Convert.ToString(actual)}，expected={expected}");
 }
 
 static ConnectionProfile CreateSqliteProfile(string path) => new()
