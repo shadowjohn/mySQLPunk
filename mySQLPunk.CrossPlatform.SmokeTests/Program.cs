@@ -552,7 +552,8 @@ static async Task TableDataEditingAsync()
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 quantity INTEGER NULL,
-                note TEXT NULL DEFAULT 'database-default'
+                note TEXT NULL DEFAULT 'database-default',
+                payload BLOB NULL
             );
             CREATE TABLE no_primary_key (name TEXT NOT NULL);
             CREATE TABLE without_rowid (id INTEGER PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
@@ -581,6 +582,8 @@ static async Task TableDataEditingAsync()
         Assert(empty.Columns.Single(column => column.Name == "id").IsGenerated, "SQLite INTEGER PK 應視為 generated");
         Assert(!empty.Columns.Single(column => column.Name == "name").HasDefault, "必填欄位不可誤判為有 DEFAULT");
         Assert(empty.Columns.Single(column => column.Name == "note").HasDefault, "SQLite DEFAULT metadata 未辨識");
+        var binaryColumn = empty.Columns.Single(column => column.Name == "payload");
+        Assert(binaryColumn is { ValueKind: TableColumnValueKind.Binary, IsEditable: true }, "SQLite BLOB 應可安全編輯");
 
         const string parameterizedName = "Punky '); DROP TABLE editor_sample;--";
         await session.InsertTableRowAsync(
@@ -590,13 +593,23 @@ static async Task TableDataEditingAsync()
             {
                 new TableCellInput("name", TableCellInputMode.Value, parameterizedName),
                 new TableCellInput("quantity", TableCellInputMode.Value, "7"),
-                new TableCellInput("note", TableCellInputMode.Default, string.Empty)
+                new TableCellInput("note", TableCellInputMode.Default, string.Empty),
+                new TableCellInput("payload", TableCellInputMode.Value, "0x00ff10")
             });
         var inserted = await session.LoadTableDataAsync(profile.Database, table);
         Assert(inserted.Rows.Count == 1, "安全新增後應有一列");
         Assert(Convert.ToString(inserted.Rows[0].Values[1]) == parameterizedName, "安全新增參數化字串不正確");
         Assert(Convert.ToInt64(inserted.Rows[0].Values[2]) == 7, "安全新增整數不正確");
         Assert(Convert.ToString(inserted.Rows[0].Values[3]) == "database-default", "資料庫 DEFAULT 未套用");
+        Assert(
+            inserted.Rows[0].Values[4] is byte[] insertedPayload && insertedPayload.SequenceEqual(new byte[] { 0x00, 0xFF, 0x10 }),
+            "SQLite BLOB 安全新增不正確");
+        Assert(
+            TableCellValueConverter.MatchesOriginal(
+                binaryColumn,
+                new TableCellInput("payload", TableCellInputMode.Value, "0X00fF10"),
+                inserted.Rows[0].Values[4]),
+            "Binary 原值比較應忽略十六進位大小寫");
 
         var original = inserted.Rows[0];
         await session.UpdateTableRowAsync(
@@ -606,11 +619,15 @@ static async Task TableDataEditingAsync()
             new[]
             {
                 new TableCellInput("name", TableCellInputMode.Value, "崩琦"),
-                new TableCellInput("quantity", TableCellInputMode.Null, string.Empty)
+                new TableCellInput("quantity", TableCellInputMode.Null, string.Empty),
+                new TableCellInput("payload", TableCellInputMode.Value, "0xCAFE")
             });
         var updated = await session.LoadTableDataAsync(profile.Database, table);
         Assert(Convert.ToString(updated.Rows[0].Values[1]) == "崩琦", "安全修改字串不正確");
         Assert(updated.Rows[0].Values[2] is null, "安全修改 NULL 不正確");
+        Assert(
+            updated.Rows[0].Values[4] is byte[] updatedPayload && updatedPayload.SequenceEqual(new byte[] { 0xCA, 0xFE }),
+            "SQLite BLOB 安全修改不正確");
 
         var staleRow = updated.Rows[0];
         var id = Convert.ToInt64(staleRow.Values[0]);
@@ -673,6 +690,28 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             integerColumn,
             new TableCellInput("quantity", TableCellInputMode.Value, "not-an-integer")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            binaryColumn,
+            new TableCellInput("payload", TableCellInputMode.Value, "0xABC")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            binaryColumn,
+            new TableCellInput("payload", TableCellInputMode.Value, "0xGG")));
+        Assert(
+            TableCellValueConverter.Parse(
+                binaryColumn,
+                new TableCellInput("payload", TableCellInputMode.Value, "0x")) is byte[] { Length: 0 },
+            "0x 應代表空 binary，而不是 NULL");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            binaryColumn,
+            new TableCellInput(
+                "payload",
+                TableCellInputMode.Value,
+                "0x" + new string('A', TableCellValueConverter.MaximumEditableBinaryBytes * 2 + 2))));
+        Assert(
+            TableCellValueConverter.IsBinaryValueTooLargeToEdit(
+                binaryColumn,
+                new byte[TableCellValueConverter.MaximumEditableBinaryBytes + 1]),
+            "超過 1 MiB 的既有 binary 應維持唯讀");
     }
     finally
     {
@@ -742,7 +781,7 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -783,7 +822,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -827,7 +866,7 @@ static async Task SqlServerLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
 
@@ -868,11 +907,15 @@ static async Task VerifySafeTableEditingAsync(
         {
             new TableCellInput("name", TableCellInputMode.Value, "Editor"),
             new TableCellInput("quantity", TableCellInputMode.Value, "7"),
-            new TableCellInput("note", TableCellInputMode.Null, string.Empty)
+            new TableCellInput("note", TableCellInputMode.Null, string.Empty),
+            new TableCellInput("payload", TableCellInputMode.Value, "0x00FF10")
         });
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
     Assert(Convert.ToInt64(inserted.Values[2]) == 7, $"{session.Profile.ProviderDisplayName} 安全新增整數不正確");
+    Assert(
+        inserted.Values[4] is byte[] insertedPayload && insertedPayload.SequenceEqual(new byte[] { 0x00, 0xFF, 0x10 }),
+        $"{session.Profile.ProviderDisplayName} 安全新增 binary 不正確");
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
     var secondPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 1);
@@ -886,10 +929,17 @@ static async Task VerifySafeTableEditingAsync(
         database,
         table,
         inserted,
-        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "8") });
+        new[]
+        {
+            new TableCellInput("quantity", TableCellInputMode.Value, "8"),
+            new TableCellInput("payload", TableCellInputMode.Value, "0xCAFE")
+        });
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
     Assert(Convert.ToInt64(updated.Values[2]) == 8, $"{session.Profile.ProviderDisplayName} 安全修改不正確");
+    Assert(
+        updated.Values[4] is byte[] updatedPayload && updatedPayload.SequenceEqual(new byte[] { 0xCA, 0xFE }),
+        $"{session.Profile.ProviderDisplayName} 安全修改 binary 不正確");
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));

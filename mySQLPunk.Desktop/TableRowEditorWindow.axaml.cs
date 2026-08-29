@@ -39,7 +39,7 @@ public sealed partial class TableRowEditorWindow : Window
         Title = _isInsert ? "新增資料列" : "修改資料列";
         _hintText.Text = _isInsert
             ? "預設會交由資料庫套用欄位 DEFAULT；取消勾選「使用預設值」後即可輸入。"
-            : "Primary Key、generated 與尚未支援的型別維持唯讀；只會送出實際變更的欄位。";
+            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary 維持唯讀；只會送出實際變更的欄位。";
         BuildFields();
     }
 
@@ -48,17 +48,20 @@ public sealed partial class TableRowEditorWindow : Window
         foreach (var column in _columns.OrderBy(column => column.Ordinal))
         {
             var original = _originalRow?.Values[column.Ordinal];
-            var readOnly = !_isInsert && column.IsPrimaryKey || !column.IsEditable;
+            var oversizedBinary = TableCellValueConverter.IsBinaryValueTooLargeToEdit(column, original);
+            var readOnly = !_isInsert && column.IsPrimaryKey || !column.IsEditable || oversizedBinary;
             var label = new TextBlock
             {
-                Text = BuildColumnLabel(column),
+                Text = BuildColumnLabel(column, oversizedBinary),
                 FontWeight = FontWeight.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap
             };
             var valueBox = new TextBox
             {
-                Text = TableCellValueConverter.Format(original),
+                Text = oversizedBinary
+                    ? TableCellValueConverter.FormatForDisplay(original)
+                    : TableCellValueConverter.Format(original),
                 IsReadOnly = readOnly,
                 IsEnabled = !readOnly,
                 PlaceholderText = BuildWatermark(column)
@@ -178,7 +181,7 @@ public sealed partial class TableRowEditorWindow : Window
         return inputs;
     }
 
-    private static string BuildColumnLabel(TableColumnInfo column)
+    private static string BuildColumnLabel(TableColumnInfo column, bool oversizedBinary)
     {
         var attributes = new List<string> { column.DataTypeName };
         if (column.IsPrimaryKey)
@@ -193,6 +196,10 @@ public sealed partial class TableRowEditorWindow : Window
         else if (!column.IsEditable)
         {
             attributes.Add("唯讀");
+        }
+        else if (oversizedBinary)
+        {
+            attributes.Add("超過 1 MiB · 唯讀");
         }
 
         if (column.IsNullable)
@@ -211,6 +218,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.DateTimeOffset => "ISO 8601 日期時間與時區",
         TableColumnValueKind.Time => "HH:mm:ss",
         TableColumnValueKind.Guid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        TableColumnValueKind.Binary => "0x00FF（二進位十六進位，最多 1 MiB）",
         _ => string.Empty
     };
 

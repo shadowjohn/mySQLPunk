@@ -5,6 +5,8 @@ namespace MySqlPunk.Core.Services;
 
 public static class TableCellValueConverter
 {
+    public const int MaximumEditableBinaryBytes = 1024 * 1024;
+
     public static object? Parse(TableColumnInfo column, TableCellInput input)
     {
         ArgumentNullException.ThrowIfNull(column);
@@ -56,13 +58,14 @@ public static class TableCellValueConverter
                     DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind),
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
+                TableColumnValueKind.Binary => ParseBinary(input.Text),
                 _ => throw new InvalidOperationException($"「{column.Name}」的型別目前不支援直接編輯。")
             };
         }
         catch (Exception exception) when (exception is FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"「{column.Name}」的值不符合 {column.DataTypeName} 格式。",
+                $"「{column.Name}」的值不符合 {column.DataTypeName} 格式：{exception.Message}",
                 exception);
         }
     }
@@ -107,10 +110,24 @@ public static class TableCellValueConverter
             return original is null or DBNull;
         }
 
-        return input.Mode == TableCellInputMode.Value &&
-               original is not null and not DBNull &&
-               string.Equals(input.Text, Format(original), StringComparison.Ordinal);
+        if (input.Mode != TableCellInputMode.Value || original is null or DBNull)
+        {
+            return false;
+        }
+
+        if (column.ValueKind == TableColumnValueKind.Binary && original is byte[] originalBytes)
+        {
+            return Parse(column, input) is byte[] parsedBytes &&
+                   parsedBytes.AsSpan().SequenceEqual(originalBytes);
+        }
+
+        return string.Equals(input.Text, Format(original), StringComparison.Ordinal);
     }
+
+    public static bool IsBinaryValueTooLargeToEdit(TableColumnInfo column, object? value) =>
+        column.ValueKind == TableColumnValueKind.Binary &&
+        value is byte[] bytes &&
+        bytes.Length > MaximumEditableBinaryBytes;
 
     private static double ParseFiniteDouble(string text)
     {
@@ -133,5 +150,26 @@ public static class TableCellValueConverter
             "0" => false,
             _ => throw new FormatException("布林值必須是 true、false、1 或 0。")
         };
+    }
+
+    private static byte[] ParseBinary(string text)
+    {
+        var trimmed = text.Trim();
+        if (!trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new FormatException("二進位值必須以 0x 開頭，後接偶數個十六進位字元。");
+        }
+
+        var hex = trimmed[2..];
+        if (hex.Length % 2 != 0 || hex.Length / 2 > MaximumEditableBinaryBytes)
+        {
+            throw new FormatException($"二進位值必須是偶數個十六進位字元，且不可超過 {MaximumEditableBinaryBytes / 1024:N0} KiB。");
+        }
+        if (hex.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new FormatException("0x 後只能包含 0-9、A-F 或 a-f。");
+        }
+
+        return Convert.FromHexString(hex);
     }
 }

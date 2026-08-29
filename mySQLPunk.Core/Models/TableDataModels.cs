@@ -27,7 +27,7 @@ public sealed record TableColumnInfo(
     bool HasDefault,
     TableColumnValueKind ValueKind)
 {
-    public bool IsEditable => !IsGenerated && ValueKind is not (TableColumnValueKind.Binary or TableColumnValueKind.Unsupported);
+    public bool IsEditable => !IsGenerated && ValueKind is not TableColumnValueKind.Unsupported;
 
     public string DisplayName => IsPrimaryKey ? $"{Name} · PK" : Name;
 }

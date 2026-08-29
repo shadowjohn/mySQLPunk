@@ -367,7 +367,11 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         TableDataRow originalRow)
     {
         var predicateColumns = columns
-            .Where(column => column.IsPrimaryKey || column.IsEditable)
+            .Where(column =>
+                column.IsPrimaryKey ||
+                column.IsEditable && !TableCellValueConverter.IsBinaryValueTooLargeToEdit(
+                    column,
+                    originalRow.Values[column.Ordinal]))
             .OrderBy(column => column.Ordinal)
             .ToList();
         var predicates = new List<string>(predicateColumns.Count);
