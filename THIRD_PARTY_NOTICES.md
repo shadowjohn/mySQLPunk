@@ -34,6 +34,7 @@ cross-platform SDK projects, including:
 - Inter font distributed by Avalonia.Fonts.Inter 12.1.1 - SIL Open Font License 1.1
 - MySqlConnector 2.6.2 (cross-platform project) - MIT
 - Npgsql 8.0.9 (cross-platform project) - PostgreSQL License
+- Microsoft.Data.SqlClient 7.0.2 and dependencies (cross-platform project) - MIT / package-specific Microsoft/.NET notices
 - Microsoft.Data.Sqlite 8.0.30 and SQLitePCLRaw dependencies - MIT / Apache-2.0 / SQLite terms
 - SkiaSharp and HarfBuzzSharp runtime dependencies distributed by Avalonia - MIT
 - Microsoft .NET support libraries from the `System.*` and `Microsoft.*`

@@ -6,7 +6,8 @@ public enum DatabaseProviderKind
 {
     MySql,
     PostgreSql,
-    Sqlite
+    Sqlite,
+    SqlServer
 }
 
 public sealed class ConnectionProfile
@@ -26,6 +27,11 @@ public sealed class ConnectionProfile
     [JsonIgnore]
     public string Password { get; set; } = string.Empty;
 
+    public bool UseSecretStore { get; set; }
+
+    [JsonIgnore]
+    public bool PasswordChanged { get; set; }
+
     public string Database { get; set; } = string.Empty;
 
     public bool UseSsl { get; set; }
@@ -38,6 +44,7 @@ public sealed class ConnectionProfile
         DatabaseProviderKind.MySql => "MySQL / MariaDB",
         DatabaseProviderKind.PostgreSql => "PostgreSQL",
         DatabaseProviderKind.Sqlite => "SQLite",
+        DatabaseProviderKind.SqlServer => "SQL Server",
         _ => Provider.ToString()
     };
 
@@ -50,6 +57,8 @@ public sealed class ConnectionProfile
         Port = Port,
         Username = Username,
         Password = Password,
+        UseSecretStore = UseSecretStore,
+        PasswordChanged = PasswordChanged,
         Database = Database,
         UseSsl = UseSsl,
         TimeoutSeconds = TimeoutSeconds
@@ -63,6 +72,7 @@ public sealed class ConnectionProfile
             Port = 0;
             Username = string.Empty;
             Password = string.Empty;
+            UseSecretStore = false;
             UseSsl = false;
             return;
         }
@@ -70,7 +80,12 @@ public sealed class ConnectionProfile
         Host = string.IsNullOrWhiteSpace(Host) ? "localhost" : Host.Trim();
         if (resetPort || Port <= 0)
         {
-            Port = Provider == DatabaseProviderKind.PostgreSql ? 5432 : 3306;
+            Port = Provider switch
+            {
+                DatabaseProviderKind.PostgreSql => 5432,
+                DatabaseProviderKind.SqlServer => 1433,
+                _ => 3306
+            };
         }
     }
 

@@ -5,6 +5,8 @@ using MySqlPunk.Core.Services;
 var tests = new List<(string Name, Func<Task> Run)>
 {
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
+    ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
+    ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
@@ -14,6 +16,7 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
 {
     tests.Add(("MySQL 實機連線、metadata 與 SQL", MySqlLiveRoundTripAsync));
     tests.Add(("PostgreSQL 實機連線、metadata 與 SQL", PostgreSqlLiveRoundTripAsync));
+    tests.Add(("SQL Server 實機連線、metadata 與 SQL", SqlServerLiveRoundTripAsync));
 }
 
 var failures = new List<string>();
@@ -41,8 +44,16 @@ static async Task ProfileStoreDoesNotPersistPasswordsAsync()
     {
         var path = Path.Combine(directory, "connections.json");
         var store = new ConnectionProfileStore(path);
-        var profile = CreateSqliteProfile(Path.Combine(directory, "profile.db"));
-        profile.Password = "this-must-never-be-saved";
+        var profile = new ConnectionProfile
+        {
+            Name = "Secret store profile",
+            Provider = DatabaseProviderKind.MySql,
+            Host = "localhost",
+            Port = 3306,
+            Username = "root",
+            Password = "this-must-never-be-saved",
+            UseSecretStore = true
+        };
 
         await store.SaveAsync(new[] { profile });
         var json = await File.ReadAllTextAsync(path);
@@ -52,6 +63,119 @@ static async Task ProfileStoreDoesNotPersistPasswordsAsync()
         var loaded = await store.LoadAsync();
         Assert(loaded.Count == 1, "設定檔數量不正確");
         Assert(loaded[0].Password.Length == 0, "載入後不應存在密碼");
+        Assert(loaded[0].UseSecretStore, "系統密碼庫 opt-in 旗標應保存");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
+
+static async Task LinuxSecretServiceRoundTripAsync()
+{
+    if (OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var statePath = Path.Combine(directory, "linux-secret-state");
+        var argumentsPath = Path.Combine(directory, "linux-secret-arguments");
+        var executablePath = Path.Combine(directory, "secret-tool");
+        var script = $$"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            case "$1" in
+              store)
+                shift
+                printf '%s' "$*" > '{{argumentsPath}}'
+                /bin/cat > '{{statePath}}'
+                ;;
+              lookup)
+                [[ -f '{{statePath}}' ]] || exit 1
+                /bin/cat '{{statePath}}'
+                ;;
+              clear)
+                /bin/rm -f '{{statePath}}'
+                ;;
+              *)
+                exit 2
+                ;;
+            esac
+            """;
+        await WriteExecutableScriptAsync(executablePath, script);
+
+        var profileId = Guid.NewGuid();
+        const string secret = "Linux secret with spaces + symbols";
+        var store = new LinuxSecretServiceStore(executablePath);
+        Assert(store.IsAvailable, "假的 secret-tool 應可使用");
+        await store.StoreAsync(profileId, "測試連線", secret);
+        Assert(await store.GetAsync(profileId) == secret, "Linux Secret Service round-trip 不正確");
+
+        var arguments = await File.ReadAllTextAsync(argumentsPath);
+        Assert(!arguments.Contains(secret, StringComparison.Ordinal), "Linux 密碼不可出現在 process arguments");
+        Assert(arguments.Contains(profileId.ToString("N"), StringComparison.Ordinal), "Linux 密碼庫缺少 profile id");
+
+        await store.DeleteAsync(profileId);
+        Assert(await store.GetAsync(profileId) is null, "Linux 密碼庫刪除後仍讀到內容");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
+
+static async Task MacOsKeychainRoundTripAsync()
+{
+    if (OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var statePath = Path.Combine(directory, "macos-keychain-state");
+        var commandPath = Path.Combine(directory, "macos-keychain-command");
+        var executablePath = Path.Combine(directory, "security");
+        var script = $$"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            case "$1" in
+              -i)
+                IFS= read -r command
+                printf '%s' "$command" > '{{commandPath}}'
+                printf '%s' "${command##* }" > '{{statePath}}'
+                ;;
+              find-generic-password)
+                [[ -f '{{statePath}}' ]] || exit 44
+                /bin/cat '{{statePath}}'
+                ;;
+              delete-generic-password)
+                /bin/rm -f '{{statePath}}'
+                ;;
+              *)
+                exit 2
+                ;;
+            esac
+            """;
+        await WriteExecutableScriptAsync(executablePath, script);
+
+        var profileId = Guid.NewGuid();
+        const string secret = "macOS 崩琦 secret with spaces";
+        var store = new MacOsKeychainSecretStore(executablePath);
+        Assert(store.IsAvailable, "假的 security 工具應可使用");
+        await store.StoreAsync(profileId, "測試連線", secret);
+        Assert(await store.GetAsync(profileId) == secret, "macOS Keychain round-trip 不正確");
+
+        var command = await File.ReadAllTextAsync(commandPath);
+        Assert(!command.Contains(secret, StringComparison.Ordinal), "macOS 密碼不可明文出現在互動命令");
+        Assert(command.Contains(profileId.ToString("N"), StringComparison.Ordinal), "macOS Keychain 缺少 profile id");
+
+        await store.DeleteAsync(profileId);
+        Assert(await store.GetAsync(profileId) is null, "macOS Keychain 刪除後仍讀到內容");
     }
     finally
     {
@@ -133,9 +257,23 @@ static Task ProviderFactoryValidatesProfilesAsync()
         Username = "postgres",
         Database = "postgres"
     };
+    var sqlServer = new ConnectionProfile
+    {
+        Name = "SQL Server",
+        Provider = DatabaseProviderKind.SqlServer,
+        Host = "localhost",
+        Port = 1433,
+        Username = "sa",
+        Database = "master"
+    };
 
     Assert(DatabaseProviderFactory.Create(mysql).Profile.Provider == DatabaseProviderKind.MySql, "MySQL factory 建立錯誤");
     Assert(DatabaseProviderFactory.Create(postgres).Profile.Provider == DatabaseProviderKind.PostgreSql, "PostgreSQL factory 建立錯誤");
+    var sqlServerSession = DatabaseProviderFactory.Create(sqlServer);
+    Assert(sqlServerSession.Profile.Provider == DatabaseProviderKind.SqlServer, "SQL Server factory 建立錯誤");
+    var sqlServerPreview = sqlServerSession.BuildSelectPreview(
+        new DatabaseObjectInfo("dbo", "people]archive", DatabaseObjectKind.Table));
+    Assert(sqlServerPreview == "SELECT TOP (200) * FROM [dbo].[people]]archive];", "SQL Server 預覽 SQL 不正確");
 
     var invalid = mysql.Clone();
     invalid.Username = string.Empty;
@@ -215,6 +353,45 @@ static async Task PostgreSqlLiveRoundTripAsync()
     }
 }
 
+static async Task SqlServerLiveRoundTripAsync()
+{
+    var database = "mysqlpunk_cross_" + Guid.NewGuid().ToString("N")[..10];
+    var profile = new ConnectionProfile
+    {
+        Name = "SQL Server live",
+        Provider = DatabaseProviderKind.SqlServer,
+        Host = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_HOST"),
+        Port = ReadRequiredIntEnvironment("MYSQLPUNK_SQLSERVER_PORT"),
+        Username = Environment.GetEnvironmentVariable("MYSQLPUNK_SQLSERVER_USER") ?? "sa",
+        Password = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_PASSWORD"),
+        Database = "master",
+        TimeoutSeconds = 30
+    };
+    var session = DatabaseProviderFactory.Create(profile);
+    await session.TestConnectionAsync();
+
+    try
+    {
+        await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL);");
+        var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
+        Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
+
+        var result = await session.ExecuteAsync(database, "SELECT id, name FROM dbo.sample ORDER BY id;");
+        Assert(result.Rows.Count == 2 && Convert.ToString(result.Rows[1][1]) == "Linux/macOS", "SQL Server 查詢結果不正確");
+        var objects = await session.GetObjectsAsync(database);
+        var table = objects.SingleOrDefault(item => item.Name == "sample" && item.Schema == "dbo");
+        Assert(table is not null && table.Kind == DatabaseObjectKind.Table, "SQL Server metadata 找不到 dbo.sample");
+        Assert(session.BuildSelectPreview(table!) == "SELECT TOP (200) * FROM [dbo].[sample];", "SQL Server 實機預覽 SQL 不正確");
+    }
+    finally
+    {
+        await session.ExecuteAsync(
+            "master",
+            $"IF DB_ID(N'{database}') IS NOT NULL BEGIN ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}]; END");
+    }
+}
+
 static ConnectionProfile CreateSqliteProfile(string path) => new()
 {
     Name = "SQLite smoke",
@@ -227,6 +404,19 @@ static string CreateTemporaryDirectory()
     var path = Path.Combine(Path.GetTempPath(), "mysqlpunk-cross-platform-tests", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(path);
     return path;
+}
+
+static async Task WriteExecutableScriptAsync(string path, string contents)
+{
+    if (OperatingSystem.IsWindows())
+    {
+        throw new PlatformNotSupportedException("此測試腳本只用於 Unix-like 平台。");
+    }
+
+    await File.WriteAllTextAsync(path, contents);
+    File.SetUnixFileMode(
+        path,
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 }
 
 static string ReadRequiredEnvironment(string name)

@@ -16,6 +16,7 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<ConnectionProfile> _profiles = new();
     private readonly Dictionary<Guid, string> _runtimePasswords = new();
     private readonly ConnectionProfileStore _profileStore = new();
+    private readonly ISecretStore _secretStore = SecretStoreFactory.CreateDefault();
     private IDatabaseSession? _session;
     private CancellationTokenSource? _operationCancellation;
     private bool _loadingDatabases;
@@ -66,7 +67,12 @@ public sealed partial class MainWindow : Window
             if (_profiles.Count > 0)
             {
                 _profilesList.SelectedIndex = 0;
-                SetStatus($"已載入 {_profiles.Count} 組連線設定；連線時才會要求密碼。");
+                var secretStatus = _profiles.Any(profile => profile.UseSecretStore)
+                    ? (_secretStore.IsAvailable
+                        ? $"已設定的密碼會在連線時由 {_secretStore.DisplayName} 讀取。"
+                        : _secretStore.UnavailableReason)
+                    : "未保存的密碼會在連線時要求輸入。";
+                SetStatus($"已載入 {_profiles.Count} 組連線設定；{secretStatus}");
             }
         }
         catch (Exception exception)
@@ -79,19 +85,19 @@ public sealed partial class MainWindow : Window
 
     private async void AddProfile_Click(object? sender, RoutedEventArgs e)
     {
-        var editor = new ConnectionEditorWindow(new ConnectionProfile());
+        var editor = new ConnectionEditorWindow(new ConnectionProfile(), secretStore: _secretStore);
         var result = await editor.ShowDialog<ConnectionProfile?>(this);
         if (result is null)
         {
             return;
         }
 
-        _runtimePasswords[result.Id] = result.Password;
+        var passwordStatus = await ApplyPasswordPreferenceAsync(original: null, result);
         result.Password = string.Empty;
         _profiles.Add(result);
         _profilesList.SelectedItem = result;
         await SaveProfilesAsync();
-        SetStatus($"已新增「{result.Name}」，密碼只保留到本次程式關閉。可以按連線開始使用。");
+        SetStatus($"已新增「{result.Name}」；{passwordStatus} 可以按連線開始使用。");
     }
 
     private async void EditProfile_Click(object? sender, RoutedEventArgs e)
@@ -102,8 +108,13 @@ public sealed partial class MainWindow : Window
         }
 
         var editable = selected.Clone();
-        editable.Password = _runtimePasswords.GetValueOrDefault(selected.Id, string.Empty);
-        var editor = new ConnectionEditorWindow(editable);
+        var passwordResolution = await ResolvePasswordAsync(selected);
+        if (passwordResolution.Found)
+        {
+            editable.Password = passwordResolution.Password;
+        }
+
+        var editor = new ConnectionEditorWindow(editable, passwordResolution.Warning, _secretStore);
         var result = await editor.ShowDialog<ConnectionProfile?>(this);
         if (result is null)
         {
@@ -111,12 +122,12 @@ public sealed partial class MainWindow : Window
         }
 
         var index = _profiles.IndexOf(selected);
-        _runtimePasswords[result.Id] = result.Password;
+        var passwordStatus = await ApplyPasswordPreferenceAsync(selected, result);
         result.Password = string.Empty;
         _profiles[index] = result;
         _profilesList.SelectedIndex = index;
         await SaveProfilesAsync();
-        Disconnect($"已更新「{result.Name}」，請重新連線。");
+        Disconnect($"已更新「{result.Name}」；{passwordStatus} 請重新連線。");
     }
 
     private async void DeleteProfile_Click(object? sender, RoutedEventArgs e)
@@ -138,11 +149,18 @@ public sealed partial class MainWindow : Window
 
         var wasConnected = _session?.Profile.Id == selected.Id;
         _runtimePasswords.Remove(selected.Id);
+        var secretWarning = selected.UseSecretStore
+            ? await DeleteStoredPasswordAsync(selected.Id)
+            : string.Empty;
         _profiles.Remove(selected);
         await SaveProfilesAsync();
         if (wasConnected)
         {
-            Disconnect("連線設定已刪除。");
+            Disconnect($"連線設定已刪除。{secretWarning}");
+        }
+        else
+        {
+            SetStatus($"連線設定已刪除。{secretWarning}");
         }
 
         UpdateActionState();
@@ -156,11 +174,14 @@ public sealed partial class MainWindow : Window
         }
 
         var connectionProfile = selected.Clone();
-        _runtimePasswords.TryGetValue(selected.Id, out var runtimePassword);
+        var passwordResolution = await ResolvePasswordAsync(selected);
         if (selected.Provider != DatabaseProviderKind.Sqlite &&
-            runtimePassword is null)
+            !passwordResolution.Found)
         {
-            var editor = new ConnectionEditorWindow(connectionProfile, "密碼不會儲存；請輸入後連線。");
+            var hint = string.IsNullOrWhiteSpace(passwordResolution.Warning)
+                ? "請輸入密碼後連線；可選擇交由系統密碼庫安全保存。"
+                : $"{passwordResolution.Warning} 請重新輸入密碼後連線。";
+            var editor = new ConnectionEditorWindow(connectionProfile, hint, _secretStore);
             var edited = await editor.ShowDialog<ConnectionProfile?>(this);
             if (edited is null)
             {
@@ -168,12 +189,12 @@ public sealed partial class MainWindow : Window
             }
 
             connectionProfile = edited.Clone();
-            _runtimePasswords[edited.Id] = edited.Password;
+            await ApplyPasswordPreferenceAsync(selected, edited);
             await UpdateStoredProfileAsync(selected, edited);
         }
         else
         {
-            connectionProfile.Password = runtimePassword ?? string.Empty;
+            connectionProfile.Password = passwordResolution.Password;
         }
 
         Disconnect($"準備連線至 {connectionProfile.Name}…");
@@ -384,6 +405,117 @@ public sealed partial class MainWindow : Window
         await SaveProfilesAsync();
     }
 
+    private async Task<PasswordResolution> ResolvePasswordAsync(ConnectionProfile profile)
+    {
+        if (_runtimePasswords.TryGetValue(profile.Id, out var runtimePassword))
+        {
+            return new PasswordResolution(true, runtimePassword, null);
+        }
+
+        if (!profile.UseSecretStore)
+        {
+            return new PasswordResolution(false, string.Empty, null);
+        }
+
+        if (!_secretStore.IsAvailable)
+        {
+            return new PasswordResolution(false, string.Empty, _secretStore.UnavailableReason);
+        }
+
+        try
+        {
+            var storedPassword = await _secretStore.GetAsync(profile.Id);
+            if (storedPassword is null)
+            {
+                return new PasswordResolution(
+                    false,
+                    string.Empty,
+                    $"{_secretStore.DisplayName} 找不到這組連線的密碼。");
+            }
+
+            _runtimePasswords[profile.Id] = storedPassword;
+            return new PasswordResolution(true, storedPassword, null);
+        }
+        catch (Exception exception) when (exception is SecretStoreException or IOException)
+        {
+            return new PasswordResolution(false, string.Empty, exception.Message);
+        }
+    }
+
+    private async Task<string> ApplyPasswordPreferenceAsync(
+        ConnectionProfile? original,
+        ConnectionProfile edited)
+    {
+        if (edited.Provider == DatabaseProviderKind.Sqlite)
+        {
+            _runtimePasswords.Remove(edited.Id);
+            edited.UseSecretStore = false;
+            var warning = original?.UseSecretStore == true
+                ? await DeleteStoredPasswordAsync(edited.Id)
+                : string.Empty;
+            return $"SQLite 不需要保存連線密碼。{warning}";
+        }
+
+        if (edited.PasswordChanged || original is null || !string.IsNullOrEmpty(edited.Password))
+        {
+            _runtimePasswords[edited.Id] = edited.Password;
+        }
+
+        if (!edited.UseSecretStore)
+        {
+            var warning = original?.UseSecretStore == true
+                ? await DeleteStoredPasswordAsync(edited.Id)
+                : string.Empty;
+            return $"密碼只保留到本次程式關閉。{warning}";
+        }
+
+        if (!_secretStore.IsAvailable)
+        {
+            return $"{_secretStore.UnavailableReason} 密碼只保留到本次程式關閉。";
+        }
+
+        if (edited.PasswordChanged && string.IsNullOrEmpty(edited.Password))
+        {
+            var warning = await DeleteStoredPasswordAsync(edited.Id);
+            return string.IsNullOrEmpty(warning)
+                ? $"已清除 {_secretStore.DisplayName} 中的密碼。"
+                : warning;
+        }
+
+        if (string.IsNullOrEmpty(edited.Password))
+        {
+            return $"未輸入密碼；{_secretStore.DisplayName} 設定維持不變。";
+        }
+
+        try
+        {
+            await _secretStore.StoreAsync(edited.Id, edited.Name, edited.Password);
+            return $"密碼已安全儲存於 {_secretStore.DisplayName}。";
+        }
+        catch (Exception exception) when (exception is SecretStoreException or IOException)
+        {
+            return $"{exception.Message} 密碼只保留到本次程式關閉。";
+        }
+    }
+
+    private async Task<string> DeleteStoredPasswordAsync(Guid profileId)
+    {
+        if (!_secretStore.IsAvailable)
+        {
+            return $"但 {_secretStore.UnavailableReason} 無法確認或清除既有密碼庫項目。";
+        }
+
+        try
+        {
+            await _secretStore.DeleteAsync(profileId);
+            return string.Empty;
+        }
+        catch (Exception exception) when (exception is SecretStoreException or IOException)
+        {
+            return $"但無法清除 {_secretStore.DisplayName} 項目：{exception.Message}";
+        }
+    }
+
     private async Task SaveProfilesAsync()
     {
         try
@@ -454,4 +586,6 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record ResultRow(IReadOnlyList<object?> Values);
+
+    private sealed record PasswordResolution(bool Found, string Password, string? Warning);
 }

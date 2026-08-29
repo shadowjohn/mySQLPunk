@@ -6,7 +6,7 @@
 
 > 免費開源的多資料庫 GUI、SQL 編輯器與 DBA 工作台；提供 Windows 完整版，以及 Linux / macOS 跨平台預覽版
 
-mySQLPunk 的 Windows 完整版（WinForms）可用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Microsoft Garnet，以及 Snowflake。新的 Avalonia 跨平台預覽版可原生執行於 Linux 與 macOS，第一階段已提供 MySQL / MariaDB、PostgreSQL、SQLite 的連線管理、物件瀏覽、SQL DDL / DML / 查詢與結果網格；其餘 Windows 完整版功能正分階段遷移。
+mySQLPunk 的 Windows 完整版（WinForms）可用同一個介面連接 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Microsoft Garnet，以及 Snowflake。新的 Avalonia 跨平台預覽版可原生執行於 Linux 與 macOS，目前已提供 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線管理、物件瀏覽、SQL DDL / DML / 查詢與結果網格；其餘 Windows 完整版功能正分階段遷移。
 
 Open-source Windows database client, SQL editor, database GUI and DBA workbench for MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, SpatiaLite, Oracle, MongoDB, Redis, Microsoft Garnet and Snowflake workflows.
 
@@ -14,14 +14,14 @@ Open-source Windows database client, SQL editor, database GUI and DBA workbench 
 
 ## 常見用途
 
-- 在 Windows 完整版管理 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Garnet 與 Snowflake 連線；或在 Linux / macOS 預覽版管理 MySQL / MariaDB、PostgreSQL 與 SQLite。
+- 在 Windows 完整版管理 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite / SpatiaLite、Oracle、MongoDB、Redis / Garnet 與 Snowflake 連線；或在 Linux / macOS 預覽版管理 MySQL / MariaDB、PostgreSQL、SQL Server 與 SQLite。
 - 依連線設定 SSL/TLS 憑證驗證，或透過有 SHA256 主機金鑰固定的 SSH Tunnel 連到內網資料庫。
 - 使用具自動完成、程式碼片段、查詢歷史、唯讀執行計畫與多格式匯出的 SQL 編輯器。
 - 編輯資料列、設計資料表、產生 DDL / DML、搬移 Table / View、建立 ER 圖並比較兩個資料庫結構。
 - 建立每日查詢、CSV / Excel / JSON 等格式匯出與 SQL 備份作業，交由 Windows Task Scheduler 執行並保留紀錄。
 - 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Gemini CLI 作為 SQL 助理；選項頁會列出三種 CLI 的安裝路徑與非敏感登入帳號資訊，沒有 AI 服務也能使用其他資料庫功能。
 
-Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密碼、私鑰密語與用戶端憑證密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。跨平台預覽版目前使用繁體中文介面，連線設定採 JSON 保存，但密碼只存在程式記憶體，關閉後需重新輸入。
+Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密碼、私鑰密語與用戶端憑證密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。跨平台預覽版目前使用繁體中文介面，連線設定採 JSON 保存；資料庫密碼可由使用者選擇交給 Linux Secret Service 或 macOS Keychain，系統密碼庫不可用或未勾選時才只保留在程式記憶體。
 
 <p align="center">
   <img src="snapshot/mySQLPunk_avatar.png" alt="看板娘：Punky 崩琦" width="260">
@@ -43,7 +43,7 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 ### Linux / macOS 跨平台預覽版
 
-需求：.NET 8 SDK。桌面 UI 使用 Avalonia，資料庫驅動使用純 managed 的 MySqlConnector、Npgsql 與 Microsoft.Data.Sqlite，因此不依賴 WinForms 或 Windows SQLite interop。
+需求：.NET 8 SDK。桌面 UI 使用 Avalonia，資料庫驅動使用純 managed 的 MySqlConnector、Npgsql、Microsoft.Data.SqlClient 與 Microsoft.Data.Sqlite，因此不依賴 WinForms 或 Windows SQLite interop。Linux 若要保存密碼，另需安裝提供 `secret-tool` 的 `libsecret-tools`，並使用 GNOME Keyring 或相容的 Secret Service；macOS 直接使用系統內建 Keychain。
 
 ```bash
 dotnet restore mySQLPunk.CrossPlatform.sln
@@ -52,7 +52,7 @@ dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.
 dotnet run --project mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release
 ```
 
-若已安裝 Docker，可再跑 MySQL 8 / PostgreSQL 16 實機 round-trip；腳本只會建立並清理 `mysqlpunk-cross-*-test` 測試容器與測試自行建立的暫存 database：
+若已安裝 Docker，可再跑 MySQL 8 / PostgreSQL 16 / SQL Server 2022 實機 round-trip；腳本只會建立並清理 `mysqlpunk-cross-*-test` 測試容器與測試自行建立的暫存 database：
 
 ```bash
 ./tests/Run-CrossPlatformLiveTests.sh
@@ -66,7 +66,7 @@ dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r osx-x64 
 dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r osx-arm64 --self-contained false
 ```
 
-目前預覽版包含：連線設定與測試、資料庫選擇、Table / View metadata、物件預覽 SQL、DDL / DML / SELECT、取消執行與動態結果網格。單次結果最多載入 10,000 列，避免誤查大表拖垮桌面程式；密碼刻意不落地，正式發佈前會再接 Linux Secret Service / KWallet 與 macOS Keychain。
+目前預覽版包含：連線設定與測試、資料庫選擇、Table / View metadata、物件預覽 SQL、DDL / DML / SELECT、取消執行與動態結果網格。單次結果最多載入 10,000 列，避免誤查大表拖垮桌面程式。`connections.json` 永遠不保存密碼；使用者可在連線設定勾選 Linux Secret Service 或 macOS Keychain，寫入後會立即讀回驗證，不可用或失敗時安全退回本次執行期間的記憶體保存。
 
 ### Windows 完整版
 
@@ -152,7 +152,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 | 功能 | 狀態 | 說明 |
 | --- | --- | --- |
-| Linux / macOS 跨平台預覽 | 第一階段可用 | 新增 .NET 8 Core 與 Avalonia 桌面程式，支援 MySQL / MariaDB、PostgreSQL、SQLite 的連線設定／測試、database 與 Table / View 瀏覽、SQL DDL / DML / 查詢、結果網格與取消操作；Linux x64、macOS x64／Apple Silicon 可建置。密碼不落地，其餘 provider 與 Windows 完整版進階工作台功能待遷移。 |
+| Linux / macOS 跨平台預覽 | 第二階段進行中 | .NET 8 Core 與 Avalonia 桌面程式支援 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線設定／測試、database 與 Table / View 瀏覽、SQL DDL / DML / 查詢、結果網格與取消操作；SQL Server 另有 Linux Docker 實機 round-trip，Linux x64、macOS x64／Apple Silicon 可建置。密碼可選擇存入 Linux Secret Service 或 macOS Keychain，絕不寫入連線 JSON；其餘 provider 與 Windows 完整版進階工作台功能待遷移。 |
 | 連線管理 | 可用 | 預設連線資訊儲存在 `setting.ini`，支援多設定檔、多層群組、拖曳、持久化星號／色彩，以及批次修改星號、群組與色彩；新增精靈可匯入 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、MongoDB、Redis 與 Snowflake URI，解析後先開設定頁確認；資料庫／SSH／憑證密碼改存 Windows Credential Manager，設定檔只保留 credential target；四種既有網路 RDBMS provider 可設定 SSL/TLS 與 SSH Tunnel，詳見[連線安全說明](docs/CONNECTION_SECURITY.md)。 |
 | MySQL | 可用 | 主要 provider，支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer。 |
 | MySQL / MariaDB 使用者管理 | 可用 | 自動偵測 MySQL 5 / MySQL 8 / MariaDB；支援使用者 CRUD、密碼/Plugin/Lock/Expire/SSL/資源限制、Database/Table/View/Routine 權限編輯、SQL 預覽、`SHOW GRANTS` 與安全 DDL，並保留同名不同 Host 的獨立節點。 |
@@ -191,7 +191,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 ## 已知限制
 
-- Linux / macOS 目前是第一階段預覽版，只涵蓋 MySQL / MariaDB、PostgreSQL、SQLite 的連線、metadata 與 SQL 工作流程；SQL Server、Oracle、MongoDB、Redis、Snowflake、資料編輯器、匯出、模型與 AI 等功能仍需從 Windows 完整版遷移。跨平台連線密碼不寫入磁碟，程式重開後需重新輸入；安裝套件、簽署與自動更新也尚未發布。
+- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata 與 SQL 工作流程；Oracle、MongoDB、Redis、Snowflake、資料編輯器、匯出、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；安裝套件、簽署與自動更新也尚未發布。
 - Oracle 的部分 DDL 還是會被權限、語法或物件型態擋下來；預覽會附上權限診斷 SQL 跟修復建議，但終究要看帳號實際有什麼權限。
 - 沒有 Primary Key 的資料表，編輯時是拿原始值組 WHERE 條件去比對；欄位有浮點數或大文字時可能比不準。不放心的話選項裡可以改成唯讀開啟。
 - XLSX 匯出要把整份結果放進記憶體；還原 SQL 備份也是整個檔一次讀進來，特別大的備份要留意。

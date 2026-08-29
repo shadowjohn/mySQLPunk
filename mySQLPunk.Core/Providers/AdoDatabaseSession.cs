@@ -84,15 +84,20 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         };
     }
 
-    public string BuildSelectPreview(DatabaseObjectInfo databaseObject, int rowLimit = 200)
+    public virtual string BuildSelectPreview(DatabaseObjectInfo databaseObject, int rowLimit = 200)
     {
         ArgumentNullException.ThrowIfNull(databaseObject);
         rowLimit = Math.Clamp(rowLimit, 1, 10_000);
 
-        var qualifiedName = string.IsNullOrWhiteSpace(databaseObject.Schema)
+        return $"SELECT * FROM {BuildQualifiedName(databaseObject)} LIMIT {rowLimit};";
+    }
+
+    protected string BuildQualifiedName(DatabaseObjectInfo databaseObject)
+    {
+        ArgumentNullException.ThrowIfNull(databaseObject);
+        return string.IsNullOrWhiteSpace(databaseObject.Schema)
             ? QuoteIdentifier(databaseObject.Name)
             : $"{QuoteIdentifier(databaseObject.Schema)}.{QuoteIdentifier(databaseObject.Name)}";
-        return $"SELECT * FROM {qualifiedName} LIMIT {rowLimit};";
     }
 
     protected async Task<List<string>> ReadStringsAsync(

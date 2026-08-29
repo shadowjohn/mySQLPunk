@@ -4,12 +4,12 @@
 
 ## 未完成功能與已知限制
 
-- **Linux / macOS 跨平台預覽 🟡 第一階段完成**
+- **Linux / macOS 跨平台預覽 🟡 第二階段進行中（SQL Server＋系統密碼庫）**
   - 架構：保留 `mySQLPunk.sln` 的 .NET Framework 4.7.2 WinForms 完整版，另以 `mySQLPunk.CrossPlatform.sln` 建立 .NET 8 Core、Avalonia Desktop 與獨立 smoke tests。跨平台 UI 不引用 `System.Windows.Forms`、Windows Credential Manager、Task Scheduler 或 `SQLite.Interop.dll`。
-  - Provider：MySqlConnector、Npgsql 與 Microsoft.Data.Sqlite 共用 provider-neutral session contract，涵蓋連線測試、database 清單、Table / View metadata、識別字引用、前 200 列預覽，以及 DDL / DML / SELECT 執行。結果以欄位與列模型回傳，UI 不依賴 provider-specific `DataTable`。
+  - Provider：MySqlConnector、Npgsql、Microsoft.Data.SqlClient 與 Microsoft.Data.Sqlite 共用 provider-neutral session contract，涵蓋連線測試、database 清單、Table / View metadata、識別字引用、前 200 列預覽，以及 DDL / DML / SELECT 執行。SQL Server 使用 `TOP` 與方括號識別字，其餘 provider 使用各自的 `LIMIT` 與引用規則；結果以欄位與列模型回傳，UI 不依賴 provider-specific `DataTable`。
   - UI：連線設定新增／編輯／刪除、SQLite 檔案選擇、資料庫切換、Table / View 物件樹、雙擊產生預覽 SQL、Ctrl+Enter／按鈕執行、取消操作、動態結果網格與狀態／錯誤顯示。Linux X11 已實際建立 SQLite、插入兩列並查回結果網格。
-  - 安全：跨平台連線設定寫入使用者 application-data 下的 `mySQLPunk/connections.json`；`Password` 明確排除序列化，非 Windows 檔案權限會嘗試限制為 `0600`。程式關閉後需重新輸入密碼，待接 Linux Secret Service / KWallet 與 macOS Keychain 才開放持久化祕密。
-  - 驗證與發佈：Core smoke tests 覆蓋密碼不落地、SQLite DDL / DML / UTF-8 SELECT、metadata、預覽 SQL與 provider 驗證；本機驗證 `linux-x64`、`osx-x64`、`osx-arm64` publish，GitHub Actions 另在 Ubuntu 與 macOS 原生建置／測試。正式安裝套件、簽署、自動更新、Linux ARM64 實機與 Windows 完整版其餘 provider／工作台能力留待後續。
+  - 安全：跨平台連線設定寫入使用者 application-data 下的 `mySQLPunk/connections.json`；`Password` 明確排除序列化，只有非祕密的 `UseSecretStore` opt-in 旗標會保存，非 Windows 檔案權限會嘗試限制為 `0600`。Linux 透過 `secret-tool` 的 stdin 接 Secret Service，macOS 透過 `security -i` 的 stdin 接 Keychain，祕密不出現在 process arguments；寫入後會讀回比對，工具缺失、服務鎖定或驗證失敗時不建立檔案 fallback，只保留於本次程式記憶體。刪除連線或取消保存會同步清除 Keyring 項目。
+  - 驗證與發佈：Core smoke tests 覆蓋密碼不落地、兩種系統工具的 store/get/delete 與 arguments 安全契約、SQLite DDL / DML / UTF-8 SELECT、metadata、各 provider 預覽 SQL與 factory 驗證；Linux 已用真實 GNOME Keyring 完成 store/get/delete，並從 UI 保存 SQL Server 密碼、關閉重啟、不重新輸入即連線與查詢。Docker 實機矩陣會在 Linux 啟動 MySQL 8、PostgreSQL 16 與 SQL Server 2022，驗證建庫、DDL、DML、Unicode 查詢與 metadata 後自行清理。本機可產生 `linux-x64`、`osx-x64`、`osx-arm64` publish，GitHub Actions 另在 Ubuntu 與 macOS 原生建置／測試。正式安裝套件、簽署、自動更新、Linux ARM64 實機與 Windows 完整版其餘 provider／工作台能力留待後續。
 
 - **Snowflake provider 🟡 第二期完成（查詢編輯器 DML／DDL）**
   - 架構選擇：不引入官方 `Snowflake.Data` 驅動——5.x 已退出 .NET Framework 4.7.2，4.x 只剩 netstandard2.0 且會把 Apache.Arrow、AWSSDK.S3、Azure.Storage、Google Cloud Storage 等整串相依拖進 packages.config 專案。改以內建 `SnowflakeRestClient` 直連 [SQL REST API v2](https://docs.snowflake.com/en/developer-guide/sql-api/intro)：POST statements、202 輪詢與多 partition 讀取，零新增套件。

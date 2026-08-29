@@ -14,6 +14,7 @@ public static class DatabaseProviderFactory
             DatabaseProviderKind.MySql => new MySqlDatabaseSession(profile.Clone()),
             DatabaseProviderKind.PostgreSql => new PostgreSqlDatabaseSession(profile.Clone()),
             DatabaseProviderKind.Sqlite => new SqliteDatabaseSession(profile.Clone()),
+            DatabaseProviderKind.SqlServer => new SqlServerDatabaseSession(profile.Clone()),
             _ => throw new NotSupportedException($"尚未支援資料庫類型：{profile.Provider}")
         };
     }
