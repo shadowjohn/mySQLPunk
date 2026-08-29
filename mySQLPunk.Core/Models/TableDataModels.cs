@@ -21,6 +21,7 @@ public enum TableColumnValueKind
     FullTextQuery,
     PostgreSqlRange,
     PostgreSqlArray,
+    PostgreSqlGeometric,
     Guid,
     Json,
     Xml,

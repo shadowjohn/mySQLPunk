@@ -1145,6 +1145,33 @@ static async Task TableDataEditingAsync()
         Assert(
             TableCellValueConverter.IsStructuredTextTooLargeToEdit(arrayColumn, oversizedArray),
             "既有 PostgreSQL array 超過 1 MiB 時應維持唯讀");
+        var geometricColumn = new TableColumnInfo(
+            0,
+            "location",
+            "point",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.PostgreSqlGeometric);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                geometricColumn,
+                new TableCellInput("location", TableCellInputMode.Value, "  (1.5,2.5)  "))) ==
+            "(1.5,2.5)",
+            "PostgreSQL geometric 應去除外圍空白並交由 PostgreSQL 權威 parser 驗證");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            geometricColumn,
+            new TableCellInput("location", TableCellInputMode.Value, "(1,\0)")));
+        var oversizedGeometric = new string(
+            'x',
+            TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            geometricColumn,
+            new TableCellInput("location", TableCellInputMode.Value, oversizedGeometric)));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(geometricColumn, oversizedGeometric),
+            "既有 PostgreSQL geometric 超過 1 MiB 時應維持唯讀");
     }
     finally
     {
@@ -1300,7 +1327,14 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 identifiers UUID[] NULL,
                 states mood[] NULL,
                 json_items JSONB[] NULL,
-                range_items INT4RANGE[] NULL
+                range_items INT4RANGE[] NULL,
+                location POINT NULL,
+                infinite_line LINE NULL,
+                segment LSEG NULL,
+                bounds BOX NULL,
+                route PATH NULL,
+                area POLYGON NULL,
+                radius CIRCLE NULL
             );
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
@@ -1658,6 +1692,34 @@ static async Task VerifySafeTableEditingAsync(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected array"),
             "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 array");
     }
+    var geometricColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.PostgreSqlGeometric)
+        .ToList();
+    if (geometricColumns.Count > 0)
+    {
+        Assert(geometricColumns.Count == 7, $"PostgreSQL 7 種 geometric metadata 未完整辨識；actual={geometricColumns.Count}");
+        foreach (var geometricColumn in geometricColumns)
+        {
+            Assert(geometricColumn.IsEditable, $"PostgreSQL {geometricColumn.DataTypeName} 應可安全編輯");
+            insertInputs.Add(new TableCellInput(
+                geometricColumn.Name,
+                TableCellInputMode.Value,
+                GetPostgreSqlGeometricTestValue(geometricColumn, updated: false)));
+        }
+
+        await AssertThrowsAsync<PostgresException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected geometric"),
+                new TableCellInput(geometricColumns[0].Name, TableCellInputMode.Value, "not-a-shape")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected geometric"),
+            "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 geometric 值");
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1788,6 +1850,13 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[arrayColumn.Ordinal]) ==
             GetPostgreSqlArrayTestValue(arrayColumn, updated: false),
             $"PostgreSQL {arrayColumn.DataTypeName} 安全新增不正確；actual={inserted.Values[arrayColumn.Ordinal]}");
+    }
+    foreach (var geometricColumn in geometricColumns)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[geometricColumn.Ordinal]) ==
+            GetPostgreSqlGeometricTestValue(geometricColumn, updated: false),
+            $"PostgreSQL {geometricColumn.DataTypeName} 安全新增不正確；actual={inserted.Values[geometricColumn.Ordinal]}");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1928,6 +1997,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetPostgreSqlArrayTestValue(arrayColumn, updated: true)));
     }
+    foreach (var geometricColumn in geometricColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            geometricColumn.Name,
+            TableCellInputMode.Value,
+            GetPostgreSqlGeometricTestValue(geometricColumn, updated: true)));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -2061,6 +2137,13 @@ static async Task VerifySafeTableEditingAsync(
             GetPostgreSqlArrayTestValue(arrayColumn, updated: true),
             $"PostgreSQL {arrayColumn.DataTypeName} 安全修改不正確；actual={updated.Values[arrayColumn.Ordinal]}");
     }
+    foreach (var geometricColumn in geometricColumns)
+    {
+        Assert(
+            Convert.ToString(updated.Values[geometricColumn.Ordinal]) ==
+            GetPostgreSqlGeometricTestValue(geometricColumn, updated: true),
+            $"PostgreSQL {geometricColumn.DataTypeName} 安全修改不正確；actual={updated.Values[geometricColumn.Ordinal]}");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -2168,6 +2251,26 @@ static string GetPostgreSqlArrayTestValue(TableColumnInfo column, bool updated) 
         ("json_items", true) => "{\"{\\\"updated\\\": true}\"}",
         ("range_items", true) => "{\"[20,30)\",empty}",
         _ => throw new InvalidOperationException($"缺少 {column.Name} PostgreSQL array 測試值。")
+    };
+
+static string GetPostgreSqlGeometricTestValue(TableColumnInfo column, bool updated) =>
+    (column.Name, updated) switch
+    {
+        ("location", false) => "(1.5,2.5)",
+        ("infinite_line", false) => "{1,2,-3}",
+        ("segment", false) => "[(1,2),(3,4)]",
+        ("bounds", false) => "(3,4),(1,2)",
+        ("route", false) => "[(1,2),(3,4),(5,6)]",
+        ("area", false) => "((1,2),(3,4),(5,6))",
+        ("radius", false) => "<(1,2),3.5>",
+        ("location", true) => "(-10.25,20.75)",
+        ("infinite_line", true) => "{4,-5,6}",
+        ("segment", true) => "[(-1,-2),(7,8)]",
+        ("bounds", true) => "(7,8),(-1,-2)",
+        ("route", true) => "((0,0),(2,0),(2,2),(0,2))",
+        ("area", true) => "((0,0),(4,0),(4,3))",
+        ("radius", true) => "<(-5,6),7.25>",
+        _ => throw new InvalidOperationException($"缺少 {column.Name} PostgreSQL geometric 測試值。")
     };
 
 static void AssertNetworkValue(object? actual, string expected, string message)

@@ -39,7 +39,7 @@ public sealed partial class TableRowEditorWindow : Window
         Title = _isInsert ? "新增資料列" : "修改資料列";
         _hintText.Text = _isInsert
             ? "預設會交由資料庫套用欄位 DEFAULT；取消勾選「使用預設值」後即可輸入。"
-            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON／XML／bit string／全文檢索／range／array 值維持唯讀；只會送出實際變更的欄位。";
+            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON／XML／bit string／全文檢索／range／array／geometric 值維持唯讀；只會送出實際變更的欄位。";
         BuildFields();
     }
 
@@ -248,6 +248,7 @@ public sealed partial class TableRowEditorWindow : Window
             StringComparison.OrdinalIgnoreCase) => "{[1,10),[20,30)}（最多 1 MiB 字元）",
         TableColumnValueKind.PostgreSqlRange => "[1,10) 或 empty（最多 1 MiB 字元）",
         TableColumnValueKind.PostgreSqlArray => "{1,2,3} 或 {{1,2},{3,4}}（最多 1 MiB 字元）",
+        TableColumnValueKind.PostgreSqlGeometric => BuildGeometricWatermark(column),
         TableColumnValueKind.Guid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
         TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",
         TableColumnValueKind.Xml => "有效 XML（最多 1 MiB 字元，禁止 DTD）",
@@ -267,6 +268,19 @@ public sealed partial class TableRowEditorWindow : Window
         "macaddr8" => "08:00:2b:ff:fe:01:02:03",
         _ => string.Empty
     };
+
+    private static string BuildGeometricWatermark(TableColumnInfo column) =>
+        column.DataTypeName.ToLowerInvariant() switch
+        {
+            "point" => "(1.5,2.5)",
+            "line" => "{1,2,-3}",
+            "lseg" => "[(1,2),(3,4)]",
+            "box" => "(3,4),(1,2)",
+            "path" => "[(1,2),(3,4)] 或 ((1,2),(3,4))",
+            "polygon" => "((1,2),(3,4),(5,6))",
+            "circle" => "<(1,2),3.5>",
+            _ => string.Empty
+        };
 
     private static bool IsStructuredText(TableColumnInfo column) =>
         column.ValueKind is TableColumnValueKind.Json or TableColumnValueKind.Xml;

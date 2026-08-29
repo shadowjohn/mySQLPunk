@@ -99,7 +99,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         else if (column.ValueKind is TableColumnValueKind.FullTextVector or
                      TableColumnValueKind.FullTextQuery or
                      TableColumnValueKind.PostgreSqlRange or
-                     TableColumnValueKind.PostgreSqlArray &&
+                     TableColumnValueKind.PostgreSqlArray or
+                     TableColumnValueKind.PostgreSqlGeometric &&
                  parameter is NpgsqlParameter serverValidatedTextParameter)
         {
             serverValidatedTextParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
@@ -177,6 +178,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
 
+        if (column.ValueKind == TableColumnValueKind.PostgreSqlGeometric)
+        {
+            return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
+        }
+
         if (column.ValueKind == TableColumnValueKind.Interval)
         {
             return $"{BuildIntervalComponentsExpression(QuoteIdentifier(column.Name))} = " +
@@ -202,7 +208,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             TableColumnValueKind.FullTextVector or
             TableColumnValueKind.FullTextQuery or
             TableColumnValueKind.PostgreSqlRange or
-            TableColumnValueKind.PostgreSqlArray
+            TableColumnValueKind.PostgreSqlArray or
+            TableColumnValueKind.PostgreSqlGeometric
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
@@ -339,6 +346,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 "int4multirange" or "int8multirange" or "nummultirange" or "tsmultirange" or
             "tstzmultirange" or "datemultirange" => TableColumnValueKind.PostgreSqlRange,
             "array" => TableColumnValueKind.PostgreSqlArray,
+            "point" or "line" or "lseg" or "box" or "path" or "polygon" or "circle" =>
+                TableColumnValueKind.PostgreSqlGeometric,
             "oid" or "xid" or "cid" or "xid8" => TableColumnValueKind.UnsignedInteger,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,

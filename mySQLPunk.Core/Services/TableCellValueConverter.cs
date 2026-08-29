@@ -78,6 +78,9 @@ public static class TableCellValueConverter
                 TableColumnValueKind.PostgreSqlArray => ParsePostgreSqlServerValidatedText(
                     input.Text,
                     "array"),
+                TableColumnValueKind.PostgreSqlGeometric => ParsePostgreSqlServerValidatedText(
+                    input.Text,
+                    "geometric"),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -167,7 +170,8 @@ public static class TableCellValueConverter
             TableColumnValueKind.FullTextVector or
             TableColumnValueKind.FullTextQuery or
             TableColumnValueKind.PostgreSqlRange or
-            TableColumnValueKind.PostgreSqlArray &&
+            TableColumnValueKind.PostgreSqlArray or
+            TableColumnValueKind.PostgreSqlGeometric &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
 
