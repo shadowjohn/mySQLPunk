@@ -227,6 +227,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.Time => "HH:mm:ss",
         TableColumnValueKind.TimeWithTimeZone => "HH:mm:ss.ffffff±HH:mm",
         TableColumnValueKind.Interval => "months=0;days=0;microseconds=0",
+        TableColumnValueKind.LogSequenceNumber => "0/0（WAL LSN 十六進位）",
         TableColumnValueKind.Guid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
         TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",
         TableColumnValueKind.Xml => "有效 XML（最多 1 MiB 字元，禁止 DTD）",

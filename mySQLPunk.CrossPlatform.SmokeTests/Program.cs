@@ -935,6 +935,27 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             intervalColumn,
             new TableCellInput("duration", TableCellInputMode.Value, "months=1;days=2;microseconds=3;extra=4")));
+        var lsnColumn = new TableColumnInfo(
+            0,
+            "wal_position",
+            "pg_lsn",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.LogSequenceNumber);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                lsnColumn,
+                new TableCellInput("wal_position", TableCellInputMode.Value, " 16/b374d848 "))) ==
+            "16/B374D848",
+            "PostgreSQL pg_lsn 應驗證 32-bit hex 分量並正規化為大寫");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            lsnColumn,
+            new TableCellInput("wal_position", TableCellInputMode.Value, "100000000/0")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            lsnColumn,
+            new TableCellInput("wal_position", TableCellInputMode.Value, "16//B374D848")));
     }
     finally
     {
@@ -1045,7 +1066,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL, duration INTERVAL NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL, duration INTERVAL NULL, wal_position PG_LSN NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -1214,6 +1235,15 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "months=14;days=3;microseconds=14706123456"));
     }
+    var lsnColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.LogSequenceNumber);
+    if (lsnColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            lsnColumn.Name,
+            TableCellInputMode.Value,
+            "16/B374D848"));
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1281,6 +1311,12 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[intervalColumn.Ordinal]) ==
             "months=14;days=3;microseconds=14706123456",
             $"PostgreSQL interval 安全新增不正確；actual={inserted.Values[intervalColumn.Ordinal]}");
+    }
+    if (lsnColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[lsnColumn.Ordinal]) == "16/B374D848",
+            $"PostgreSQL pg_lsn 安全新增不正確；actual={inserted.Values[lsnColumn.Ordinal]}");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1357,6 +1393,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "months=-1;days=2;microseconds=-11045123456"));
     }
+    if (lsnColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            lsnColumn.Name,
+            TableCellInputMode.Value,
+            "FFFFFFFF/FFFFFFFF"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1426,6 +1469,12 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(updated.Values[intervalColumn.Ordinal]) ==
             "months=-1;days=2;microseconds=-11045123456",
             $"PostgreSQL interval 安全修改不正確；actual={updated.Values[intervalColumn.Ordinal]}");
+    }
+    if (lsnColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[lsnColumn.Ordinal]) == "FFFFFFFF/FFFFFFFF",
+            $"PostgreSQL pg_lsn 安全修改不正確；actual={updated.Values[lsnColumn.Ordinal]}");
     }
 
     var id = Convert.ToInt64(updated.Values[0]);

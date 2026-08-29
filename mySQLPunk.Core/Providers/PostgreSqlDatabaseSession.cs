@@ -78,6 +78,10 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             intervalParameter.NpgsqlDbType = NpgsqlDbType.Interval;
         }
+        else if (column.ValueKind == TableColumnValueKind.LogSequenceNumber && parameter is NpgsqlParameter lsnParameter)
+        {
+            lsnParameter.NpgsqlDbType = NpgsqlDbType.PgLsn;
+        }
     }
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
@@ -103,6 +107,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             {
                 return new NpgsqlInterval(components.Months, components.Days, components.Microseconds);
             }
+        }
+
+        if (column.ValueKind == TableColumnValueKind.LogSequenceNumber && value is string lsn)
+        {
+            return NpgsqlLogSequenceNumber.Parse(lsn);
         }
 
         if (column.ValueKind != TableColumnValueKind.NetworkAddress || value is not string text)
@@ -155,7 +164,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
 
         return column.ValueKind is TableColumnValueKind.NetworkAddress or
             TableColumnValueKind.BitString or
-            TableColumnValueKind.TimeWithTimeZone
+            TableColumnValueKind.TimeWithTimeZone or
+            TableColumnValueKind.LogSequenceNumber
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
@@ -280,6 +290,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "time without time zone" => TableColumnValueKind.Time,
             "time with time zone" => TableColumnValueKind.TimeWithTimeZone,
             "interval" => TableColumnValueKind.Interval,
+            "pg_lsn" => TableColumnValueKind.LogSequenceNumber,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,
             "xml" => TableColumnValueKind.Xml,
@@ -289,6 +300,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "character" or "character varying" or "text" => TableColumnValueKind.String,
             "user-defined" when string.Equals(userDefinedType, "citext", StringComparison.OrdinalIgnoreCase) =>
                 TableColumnValueKind.String,
+            "user-defined" when string.Equals(userDefinedType, "pg_lsn", StringComparison.OrdinalIgnoreCase) =>
+                TableColumnValueKind.LogSequenceNumber,
             _ => TableColumnValueKind.Unsupported
         };
 }

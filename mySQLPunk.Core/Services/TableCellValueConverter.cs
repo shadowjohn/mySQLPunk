@@ -63,6 +63,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
                 TableColumnValueKind.Interval => ParseInterval(input.Text),
+                TableColumnValueKind.LogSequenceNumber => ParseLogSequenceNumber(input.Text),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -237,6 +238,28 @@ public static class TableCellValueConverter
                    NumberStyles.AllowLeadingSign,
                    CultureInfo.InvariantCulture,
                    out value);
+    }
+
+    private static string ParseLogSequenceNumber(string text)
+    {
+        var trimmed = text.Trim();
+        var slash = trimmed.IndexOf('/');
+        if (slash <= 0 || slash != trimmed.LastIndexOf('/') ||
+            !TryParseLogSequenceNumberPart(trimmed.AsSpan(0, slash), out var high) ||
+            !TryParseLogSequenceNumberPart(trimmed.AsSpan(slash + 1), out var low))
+        {
+            throw new FormatException(
+                "PostgreSQL WAL LSN 必須使用 XXXXXXXX/XXXXXXXX 格式；斜線兩側各為 1–8 個十六進位字元。");
+        }
+
+        return $"{high:X}/{low:X}";
+    }
+
+    private static bool TryParseLogSequenceNumberPart(ReadOnlySpan<char> text, out uint value)
+    {
+        value = default;
+        return text.Length is >= 1 and <= 8 &&
+               uint.TryParse(text, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value);
     }
 
     private static bool ParseBoolean(string text)
