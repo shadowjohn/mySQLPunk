@@ -9,16 +9,19 @@
         WindowStartupLocation="CenterOwner">
   <Grid RowDefinitions="Auto,*,Auto">
     <Border Grid.Row="0" Background="#172033" Padding="16,12">
-      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
         <StackPanel Grid.Column="0" Spacing="2">
           <TextBlock x:Name="TitleText" Foreground="White" FontSize="18" FontWeight="SemiBold" />
           <TextBlock x:Name="SchemaText" Foreground="#B9C7E8" FontSize="12" />
         </StackPanel>
-        <Button Grid.Column="1" x:Name="AddButton" Content="新增列" Click="Add_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
-        <Button Grid.Column="2" x:Name="EditButton" Content="修改列" Click="Edit_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
-        <Button Grid.Column="3" x:Name="DeleteButton" Content="刪除列" Click="Delete_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
-        <Button Grid.Column="4" x:Name="RefreshButton" Content="重新整理" Click="Refresh_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
-        <Button Grid.Column="5" x:Name="CloseButton" Content="關閉" Click="Close_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
+        <Button Grid.Column="1" x:Name="PreviousButton" Content="上一頁" Click="Previous_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
+        <TextBlock Grid.Column="2" x:Name="PageText" Text="第 1 頁" MinWidth="58" Margin="8,0,0,0" Foreground="White" VerticalAlignment="Center" TextAlignment="Center" />
+        <Button Grid.Column="3" x:Name="NextButton" Content="下一頁" Click="Next_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
+        <Button Grid.Column="4" x:Name="AddButton" Content="新增列" Click="Add_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
+        <Button Grid.Column="5" x:Name="EditButton" Content="修改列" Click="Edit_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
+        <Button Grid.Column="6" x:Name="DeleteButton" Content="刪除列" Click="Delete_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
+        <Button Grid.Column="7" x:Name="RefreshButton" Content="重新整理" Click="Refresh_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
+        <Button Grid.Column="8" x:Name="CloseButton" Content="關閉" Click="Close_Click" Margin="8,0,0,0" Foreground="White" Background="#263451" />
       </Grid>
     </Border>
 

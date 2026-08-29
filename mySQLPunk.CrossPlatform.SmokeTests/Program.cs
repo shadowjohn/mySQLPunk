@@ -424,8 +424,24 @@ static async Task TableDataEditingAsync()
             );
             CREATE TABLE no_primary_key (name TEXT NOT NULL);
             CREATE TABLE without_rowid (id INTEGER PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
+            CREATE TABLE paged_sample (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            INSERT INTO paged_sample (id, name) VALUES
+                (1, 'page-1'), (2, 'page-2'), (3, 'page-3'), (4, 'page-4'), (5, 'page-5');
             """);
         var table = new DatabaseObjectInfo(string.Empty, "editor_sample", DatabaseObjectKind.Table);
+
+        var pagedTable = new DatabaseObjectInfo(string.Empty, "paged_sample", DatabaseObjectKind.Table);
+        var firstPage = await session.LoadTableDataAsync(profile.Database, pagedTable, rowLimit: 2, rowOffset: 0);
+        var secondPage = await session.LoadTableDataAsync(profile.Database, pagedTable, rowLimit: 2, rowOffset: 2);
+        var lastPage = await session.LoadTableDataAsync(profile.Database, pagedTable, rowLimit: 2, rowOffset: 4);
+        Assert(firstPage.Rows.Select(row => Convert.ToInt64(row.Values[0])).SequenceEqual(new long[] { 1, 2 }), "第一頁排序不正確");
+        Assert(firstPage.HasNextPage && !firstPage.HasPreviousPage, "第一頁導覽狀態不正確");
+        Assert(secondPage.Rows.Select(row => Convert.ToInt64(row.Values[0])).SequenceEqual(new long[] { 3, 4 }), "第二頁 offset 不正確");
+        Assert(secondPage.HasNextPage && secondPage.HasPreviousPage && secondPage.RowOffset == 2, "第二頁導覽狀態不正確");
+        Assert(lastPage.Rows.Count == 1 && Convert.ToInt64(lastPage.Rows[0].Values[0]) == 5, "最後一頁資料不正確");
+        Assert(!lastPage.HasNextPage && lastPage.HasPreviousPage, "最後一頁導覽狀態不正確");
+        await AssertThrowsAsync<ArgumentOutOfRangeException>(() =>
+            session.LoadTableDataAsync(profile.Database, pagedTable, rowLimit: 2, rowOffset: -1));
 
         var empty = await session.LoadTableDataAsync(profile.Database, table);
         Assert(empty.Rows.Count == 0, "新建 Table 應為空");
@@ -490,6 +506,8 @@ static async Task TableDataEditingAsync()
             new[] { new TableCellInput("name", TableCellInputMode.Value, "允許新增") });
         var noKeyRows = await session.LoadTableDataAsync(profile.Database, noPrimaryKey);
         Assert(!noKeyRows.HasPrimaryKey && noKeyRows.Rows.Count == 1, "無 PK Table 應可新增與瀏覽");
+        await AssertThrowsAsync<InvalidOperationException>(() =>
+            session.LoadTableDataAsync(profile.Database, noPrimaryKey, rowLimit: 1, rowOffset: 1));
         await AssertThrowsAsync<InvalidOperationException>(() =>
             session.DeleteTableRowAsync(profile.Database, noPrimaryKey, noKeyRows.Rows[0]));
         await AssertThrowsAsync<InvalidOperationException>(() =>
@@ -723,6 +741,14 @@ static async Task VerifySafeTableEditingAsync(
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
     Assert(Convert.ToInt64(inserted.Values[2]) == 7, $"{session.Profile.ProviderDisplayName} 安全新增整數不正確");
+
+    var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
+    var secondPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 1);
+    Assert(firstPage.HasNextPage && !firstPage.HasPreviousPage, $"{session.Profile.ProviderDisplayName} 第一頁導覽狀態不正確");
+    Assert(secondPage.HasPreviousPage, $"{session.Profile.ProviderDisplayName} 第二頁導覽狀態不正確");
+    Assert(
+        !Equals(firstPage.Rows[0].Values[0], secondPage.Rows[0].Values[0]),
+        $"{session.Profile.ProviderDisplayName} 分頁未依 Primary Key 前進");
 
     await session.UpdateTableRowAsync(
         database,

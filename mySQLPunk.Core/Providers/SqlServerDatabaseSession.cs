@@ -141,14 +141,21 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
     protected override string BuildTableDataSql(
         DatabaseObjectInfo table,
         IReadOnlyList<TableColumnInfo> columns,
-        int fetchLimit)
+        int fetchLimit,
+        int rowOffset)
     {
         var selectColumns = string.Join(", ", columns.Select(column => QuoteIdentifier(column.Name)));
         var primaryKey = columns.Where(column => column.IsPrimaryKey).OrderBy(column => column.Ordinal).ToList();
         var orderBy = primaryKey.Count == 0
             ? string.Empty
             : $" ORDER BY {string.Join(", ", primaryKey.Select(column => QuoteIdentifier(column.Name)))}";
-        return $"SELECT TOP ({fetchLimit}) {selectColumns} FROM {BuildQualifiedName(table)}{orderBy};";
+        if (rowOffset == 0)
+        {
+            return $"SELECT TOP ({fetchLimit}) {selectColumns} FROM {BuildQualifiedName(table)}{orderBy};";
+        }
+
+        return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{orderBy} " +
+               $"OFFSET {rowOffset} ROWS FETCH NEXT {fetchLimit} ROWS ONLY;";
     }
 
     private static TableColumnValueKind MapValueKind(string dataType) => dataType.ToLowerInvariant() switch

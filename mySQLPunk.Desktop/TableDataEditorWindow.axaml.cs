@@ -20,6 +20,9 @@ public sealed partial class TableDataEditorWindow : Window
     private readonly TextBlock _titleText;
     private readonly TextBlock _schemaText;
     private readonly TextBlock _statusText;
+    private readonly TextBlock _pageText;
+    private readonly Button _previousButton;
+    private readonly Button _nextButton;
     private readonly Button _addButton;
     private readonly Button _editButton;
     private readonly Button _deleteButton;
@@ -28,6 +31,7 @@ public sealed partial class TableDataEditorWindow : Window
     private TableDataSnapshot? _snapshot;
     private CancellationTokenSource? _cancellation;
     private bool _busy;
+    private int _rowOffset;
 
     public TableDataEditorWindow()
     {
@@ -36,6 +40,9 @@ public sealed partial class TableDataEditorWindow : Window
         _titleText = this.FindControl<TextBlock>("TitleText")!;
         _schemaText = this.FindControl<TextBlock>("SchemaText")!;
         _statusText = this.FindControl<TextBlock>("StatusText")!;
+        _pageText = this.FindControl<TextBlock>("PageText")!;
+        _previousButton = this.FindControl<Button>("PreviousButton")!;
+        _nextButton = this.FindControl<Button>("NextButton")!;
         _addButton = this.FindControl<Button>("AddButton")!;
         _editButton = this.FindControl<Button>("EditButton")!;
         _deleteButton = this.FindControl<Button>("DeleteButton")!;
@@ -55,7 +62,7 @@ public sealed partial class TableDataEditorWindow : Window
 
         Title = $"{table.DisplayName} — 資料編輯";
         _titleText.Text = table.DisplayName;
-        _schemaText.Text = $"{session.Profile.ProviderDisplayName} · {database} · 最多載入 {RowLimit:N0} 列";
+        _schemaText.Text = $"{session.Profile.ProviderDisplayName} · {database} · 每頁 {RowLimit:N0} 列";
         Opened += TableDataEditorWindow_Opened;
         Closing += (_, _) => _cancellation?.Cancel();
         UpdateActionState();
@@ -157,6 +164,38 @@ public sealed partial class TableDataEditorWindow : Window
         await LoadDataAsync();
     }
 
+    private async void Previous_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _rowOffset <= 0)
+        {
+            return;
+        }
+
+        var previousOffset = _rowOffset;
+        _rowOffset = Math.Max(0, _rowOffset - RowLimit);
+        if (!await LoadDataAsync())
+        {
+            _rowOffset = previousOffset;
+            UpdateActionState();
+        }
+    }
+
+    private async void Next_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _snapshot?.HasNextPage != true)
+        {
+            return;
+        }
+
+        var previousOffset = _rowOffset;
+        _rowOffset = checked(_rowOffset + RowLimit);
+        if (!await LoadDataAsync())
+        {
+            _rowOffset = previousOffset;
+            UpdateActionState();
+        }
+    }
+
     private void Close_Click(object? sender, RoutedEventArgs e)
     {
         Close();
@@ -179,7 +218,7 @@ public sealed partial class TableDataEditorWindow : Window
         }
     }
 
-    private async Task LoadDataAsync(string? successPrefix = null)
+    private async Task<bool> LoadDataAsync(string? successPrefix = null)
     {
         var loadedSnapshot = default(TableDataSnapshot);
         var succeeded = await RunAsync("正在載入資料與欄位資訊…", async cancellationToken =>
@@ -188,11 +227,12 @@ public sealed partial class TableDataEditorWindow : Window
                 _database,
                 _table,
                 RowLimit,
+                _rowOffset,
                 cancellationToken);
         });
         if (!succeeded || loadedSnapshot is null)
         {
-            return;
+            return false;
         }
 
         _snapshot = loadedSnapshot;
@@ -200,14 +240,22 @@ public sealed partial class TableDataEditorWindow : Window
         var keyStatus = loadedSnapshot.HasPrimaryKey
             ? "Primary Key 已辨識，可安全修改與刪除。"
             : "沒有 Primary Key：可新增，但修改與刪除已停用。";
-        var truncation = loadedSnapshot.WasTruncated
-            ? $" 目前只顯示前 {loadedSnapshot.Rows.Count:N0} 列。"
-            : string.Empty;
+        _rowOffset = loadedSnapshot.RowOffset;
+        _pageText.Text = $"第 {(_rowOffset / RowLimit) + 1:N0} 頁";
+        var range = loadedSnapshot.Rows.Count == 0
+            ? "本頁沒有資料。"
+            : $"已載入第 {_rowOffset + 1:N0}–{_rowOffset + loadedSnapshot.Rows.Count:N0} 列。";
+        var pagingStatus = !loadedSnapshot.HasPrimaryKey && loadedSnapshot.WasTruncated
+            ? "沒有 Primary Key，為維持穩定定位不提供後續分頁。"
+            : loadedSnapshot.HasNextPage
+                ? "還有下一頁。"
+                : "已到最後一頁。";
         _statusText.Text = string.Join(
             " ",
-            new[] { successPrefix, $"已載入 {loadedSnapshot.Rows.Count:N0} 列。", keyStatus, truncation }
+            new[] { successPrefix, range, keyStatus, pagingStatus }
                 .Where(value => !string.IsNullOrWhiteSpace(value)));
         UpdateActionState();
+        return true;
     }
 
     private void RebuildGrid(TableDataSnapshot snapshot)
@@ -295,6 +343,8 @@ public sealed partial class TableDataEditorWindow : Window
         _addButton.IsEnabled = !_busy && hasSnapshot;
         _editButton.IsEnabled = !_busy && canMutateExisting;
         _deleteButton.IsEnabled = !_busy && canMutateExisting;
+        _previousButton.IsEnabled = !_busy && _snapshot?.HasPreviousPage == true;
+        _nextButton.IsEnabled = !_busy && _snapshot?.HasNextPage == true;
         _refreshButton.IsEnabled = !_busy;
         _closeButton.IsEnabled = !_busy;
         _dataGrid.IsEnabled = !_busy;

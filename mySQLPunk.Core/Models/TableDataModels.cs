@@ -38,9 +38,14 @@ public sealed record TableDataSnapshot(
     DatabaseObjectInfo Table,
     IReadOnlyList<TableColumnInfo> Columns,
     IReadOnlyList<TableDataRow> Rows,
-    bool WasTruncated)
+    bool WasTruncated,
+    int RowOffset = 0)
 {
     public bool HasPrimaryKey => Columns.Any(column => column.IsPrimaryKey);
+
+    public bool HasPreviousPage => HasPrimaryKey && RowOffset > 0;
+
+    public bool HasNextPage => HasPrimaryKey && WasTruncated;
 }
 
 public enum TableCellInputMode

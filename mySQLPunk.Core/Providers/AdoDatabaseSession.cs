@@ -103,16 +103,25 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         string database,
         DatabaseObjectInfo table,
         int rowLimit = 200,
+        int rowOffset = 0,
         CancellationToken cancellationToken = default)
     {
         ValidateTable(table);
         rowLimit = Math.Clamp(rowLimit, 1, 1_000);
+        if (rowOffset is < 0 or > 10_000_000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rowOffset), "資料列起點必須介於 0 與 10,000,000。");
+        }
         var columns = await GetRequiredTableColumnsAsync(database, table, cancellationToken).ConfigureAwait(false);
+        if (rowOffset > 0 && columns.All(column => !column.IsPrimaryKey))
+        {
+            throw new InvalidOperationException("沒有 Primary Key 的資料表無法安全提供穩定分頁。");
+        }
 
         await using var connection = CreateConnection(database);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = BuildTableDataSql(table, columns, rowLimit + 1);
+        command.CommandText = BuildTableDataSql(table, columns, rowLimit + 1, rowOffset);
         command.CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 2);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var rows = new List<TableDataRow>();
@@ -129,7 +138,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         }
 
         var wasTruncated = rows.Count == rowLimit && await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-        return new TableDataSnapshot(table, columns, rows, wasTruncated);
+        return new TableDataSnapshot(table, columns, rows, wasTruncated, rowOffset);
     }
 
     public async Task InsertTableRowAsync(
@@ -276,14 +285,16 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     protected virtual string BuildTableDataSql(
         DatabaseObjectInfo table,
         IReadOnlyList<TableColumnInfo> columns,
-        int fetchLimit)
+        int fetchLimit,
+        int rowOffset)
     {
         var selectColumns = string.Join(", ", columns.Select(column => QuoteIdentifier(column.Name)));
         var primaryKey = columns.Where(column => column.IsPrimaryKey).OrderBy(column => column.Ordinal).ToList();
         var orderBy = primaryKey.Count == 0
             ? string.Empty
             : $" ORDER BY {string.Join(", ", primaryKey.Select(column => QuoteIdentifier(column.Name)))}";
-        return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{orderBy} LIMIT {fetchLimit};";
+        var offset = rowOffset == 0 ? string.Empty : $" OFFSET {rowOffset}";
+        return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{orderBy} LIMIT {fetchLimit}{offset};";
     }
 
     protected virtual string BuildDefaultInsertSql(DatabaseObjectInfo table) =>

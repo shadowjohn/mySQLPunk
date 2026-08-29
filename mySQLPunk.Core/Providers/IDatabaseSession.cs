@@ -23,6 +23,7 @@ public interface IDatabaseSession
         string database,
         DatabaseObjectInfo table,
         int rowLimit = 200,
+        int rowOffset = 0,
         CancellationToken cancellationToken = default);
 
     Task InsertTableRowAsync(
