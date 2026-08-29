@@ -219,6 +219,10 @@ public sealed partial class TableRowEditorWindow : Window
     private static string BuildWatermark(TableColumnInfo column) => column.ValueKind switch
     {
         TableColumnValueKind.Boolean => "true / false / 1 / 0",
+        TableColumnValueKind.String when column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase) =>
+            "請輸入欄位宣告的 ENUM 值之一",
+        TableColumnValueKind.String when column.DataTypeName.StartsWith("set(", StringComparison.OrdinalIgnoreCase) =>
+            "以逗號分隔欄位宣告的 SET 值",
         TableColumnValueKind.UnsignedInteger when column.DataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) =>
             "非負十進位整數（依 BIT 寬度限制）",
         TableColumnValueKind.UnsignedInteger when column.DataTypeName.Equals("xid8", StringComparison.OrdinalIgnoreCase) =>

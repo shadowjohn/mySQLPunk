@@ -6,6 +6,7 @@ using System.Text.Json;
 using MySqlPunk.Core.Models;
 using MySqlPunk.Core.Providers;
 using MySqlPunk.Core.Services;
+using MySqlConnector;
 using Npgsql;
 
 var tests = new List<(string Name, Func<Task> Run)>
@@ -1080,7 +1081,7 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -1262,6 +1263,35 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetBitTestValue(bitColumn, updated: false)));
     }
+    var enumColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.String &&
+        column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase));
+    if (enumColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(enumColumn.Name, TableCellInputMode.Value, "draft"));
+    }
+    var setColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.String &&
+        column.DataTypeName.StartsWith("set(", StringComparison.OrdinalIgnoreCase));
+    if (setColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(setColumn.Name, TableCellInputMode.Value, "beta,alpha"));
+    }
+    if (enumColumn is not null)
+    {
+        await AssertThrowsAsync<MySqlException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected enum"),
+                new TableCellInput(enumColumn.Name, TableCellInputMode.Value, "not-declared")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected enum"),
+            "MySQL／MariaDB 不可在 strict mode 寫入未宣告的 ENUM 值");
+    }
     var bitStringColumns = before.Columns
         .Where(column => column.ValueKind == TableColumnValueKind.BitString)
         .ToList();
@@ -1388,6 +1418,16 @@ static async Task VerifySafeTableEditingAsync(
             ulong.Parse(GetBitTestValue(bitColumn, updated: false), CultureInfo.InvariantCulture),
             $"MySQL {bitColumn.DataTypeName} 安全新增不正確");
     }
+    if (enumColumn is not null)
+    {
+        Assert(Convert.ToString(inserted.Values[enumColumn.Ordinal]) == "draft", "MySQL ENUM 安全新增不正確");
+    }
+    if (setColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[setColumn.Ordinal]) == "alpha,beta",
+            $"MySQL SET 應依宣告順序正規化；actual={inserted.Values[setColumn.Ordinal]}");
+    }
     foreach (var bitStringColumn in bitStringColumns)
     {
         Assert(
@@ -1491,6 +1531,14 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetBitTestValue(bitColumn, updated: true)));
     }
+    if (enumColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(enumColumn.Name, TableCellInputMode.Value, "archived"));
+    }
+    if (setColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(setColumn.Name, TableCellInputMode.Value, "gamma,beta"));
+    }
     foreach (var bitStringColumn in bitStringColumns)
     {
         updateInputs.Add(new TableCellInput(
@@ -1587,6 +1635,16 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToUInt64(updated.Values[bitColumn.Ordinal]) ==
             ulong.Parse(GetBitTestValue(bitColumn, updated: true), CultureInfo.InvariantCulture),
             $"MySQL {bitColumn.DataTypeName} 安全修改不正確");
+    }
+    if (enumColumn is not null)
+    {
+        Assert(Convert.ToString(updated.Values[enumColumn.Ordinal]) == "archived", "MySQL ENUM 安全修改不正確");
+    }
+    if (setColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[setColumn.Ordinal]) == "beta,gamma",
+            $"MySQL SET 安全修改應保留宣告順序；actual={updated.Values[setColumn.Ordinal]}");
     }
     foreach (var bitStringColumn in bitStringColumns)
     {

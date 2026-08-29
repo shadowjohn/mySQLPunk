@@ -49,6 +49,17 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             bitParameter.MySqlDbType = MySqlDbType.Bit;
         }
+        else if (column.ValueKind == TableColumnValueKind.String && parameter is MySqlParameter stringParameter)
+        {
+            if (column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase))
+            {
+                stringParameter.MySqlDbType = MySqlDbType.Enum;
+            }
+            else if (column.DataTypeName.StartsWith("set(", StringComparison.OrdinalIgnoreCase))
+            {
+                stringParameter.MySqlDbType = MySqlDbType.Set;
+            }
+        }
     }
 
     protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
