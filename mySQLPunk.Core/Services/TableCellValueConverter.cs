@@ -68,7 +68,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.MySqlYear => ParseMySqlYear(input.Text),
                 TableColumnValueKind.PostgreSqlTemporal => ParsePostgreSqlTemporal(column, input.Text),
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(column, input.Text),
-                TableColumnValueKind.Interval => ParseInterval(input.Text),
+                TableColumnValueKind.Interval => ParseInterval(column, input.Text),
                 TableColumnValueKind.LogSequenceNumber => ParseLogSequenceNumber(input.Text),
                 TableColumnValueKind.FullTextVector => ParseServerValidatedText(
                     input.Text,
@@ -1325,7 +1325,7 @@ public static class TableCellValueConverter
         return value;
     }
 
-    private static IntervalComponents ParseInterval(string text)
+    private static IntervalComponents ParseInterval(TableColumnInfo column, string text)
     {
         var parts = text.Trim().Split(';', StringSplitOptions.TrimEntries);
         if (parts.Length != 3 ||
@@ -1337,8 +1337,119 @@ public static class TableCellValueConverter
                 "Interval 必須使用 months=<整數>;days=<整數>;microseconds=<整數> 格式。");
         }
 
-        return new IntervalComponents(months, days, microseconds);
+        var components = new IntervalComponents(months, days, microseconds);
+        EnsurePostgreSqlIntervalDefinition(column, components);
+        return components;
     }
+
+    private static void EnsurePostgreSqlIntervalDefinition(
+        TableColumnInfo column,
+        IntervalComponents components)
+    {
+        var definition = GetPostgreSqlIntervalDefinition(column);
+        var isLossless = definition.SmallestField switch
+        {
+            PostgreSqlIntervalField.Year =>
+                components.Months % 12 == 0 && components.Days == 0 && components.Microseconds == 0,
+            PostgreSqlIntervalField.Month => components.Days == 0 && components.Microseconds == 0,
+            PostgreSqlIntervalField.Day => components.Microseconds == 0,
+            PostgreSqlIntervalField.Hour => components.Microseconds % MicrosecondsPerHour == 0,
+            PostgreSqlIntervalField.Minute => components.Microseconds % MicrosecondsPerMinute == 0,
+            PostgreSqlIntervalField.Second =>
+                components.Microseconds % Pow10(6 - definition.FractionalSecondScale) == 0,
+            _ => false
+        };
+        if (!isLossless)
+        {
+            throw new FormatException(
+                $"PostgreSQL {column.StorageDataTypeName} 無法無損保存輸入的 interval 分量；" +
+                "較小欄位會被丟棄或小數秒會被取整。");
+        }
+    }
+
+    private static PostgreSqlIntervalDefinition GetPostgreSqlIntervalDefinition(TableColumnInfo column)
+    {
+        var normalized = string.Join(
+            ' ',
+            column.StorageDataTypeName.Trim().ToLowerInvariant().Split(
+                (char[]?)null,
+                StringSplitOptions.RemoveEmptyEntries));
+        if (!normalized.StartsWith("interval", StringComparison.Ordinal) ||
+            normalized.Length > "interval".Length && normalized["interval".Length] is not (' ' or '('))
+        {
+            throw new InvalidOperationException(
+                $"無法辨識 PostgreSQL interval 型別：{column.StorageDataTypeName}");
+        }
+
+        var qualifier = normalized["interval".Length..].Trim();
+        byte scale = 6;
+        var openingParenthesis = qualifier.LastIndexOf('(');
+        if (openingParenthesis >= 0)
+        {
+            if (!qualifier.EndsWith(')') ||
+                !byte.TryParse(
+                    qualifier[(openingParenthesis + 1)..^1],
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out scale) ||
+                scale > 6)
+            {
+                throw new InvalidOperationException(
+                    $"PostgreSQL interval 欄位缺少有效的 0–6 小數秒精度 metadata：{column.StorageDataTypeName}");
+            }
+
+            qualifier = qualifier[..openingParenthesis].TrimEnd();
+        }
+
+        var smallestField = qualifier switch
+        {
+            "" => PostgreSqlIntervalField.Second,
+            "year" => PostgreSqlIntervalField.Year,
+            "month" or "year to month" => PostgreSqlIntervalField.Month,
+            "day" => PostgreSqlIntervalField.Day,
+            "hour" or "day to hour" => PostgreSqlIntervalField.Hour,
+            "minute" or "day to minute" or "hour to minute" => PostgreSqlIntervalField.Minute,
+            "second" or "day to second" or "hour to second" or "minute to second" =>
+                PostgreSqlIntervalField.Second,
+            _ => throw new InvalidOperationException(
+                $"無法辨識 PostgreSQL interval 欄位限制：{column.StorageDataTypeName}")
+        };
+        if (openingParenthesis >= 0 && smallestField != PostgreSqlIntervalField.Second)
+        {
+            throw new InvalidOperationException(
+                $"PostgreSQL interval 精度只可套用於 SECOND：{column.StorageDataTypeName}");
+        }
+
+        return new PostgreSqlIntervalDefinition(smallestField, scale);
+    }
+
+    private static long Pow10(int exponent)
+    {
+        long value = 1;
+        for (var index = 0; index < exponent; index++)
+        {
+            value *= 10;
+        }
+
+        return value;
+    }
+
+    private const long MicrosecondsPerMinute = 60L * 1_000_000;
+    private const long MicrosecondsPerHour = 60L * MicrosecondsPerMinute;
+
+    private enum PostgreSqlIntervalField
+    {
+        Year,
+        Month,
+        Day,
+        Hour,
+        Minute,
+        Second
+    }
+
+    private readonly record struct PostgreSqlIntervalDefinition(
+        PostgreSqlIntervalField SmallestField,
+        byte FractionalSecondScale);
 
     private static bool TryParseNamedInteger(string part, string name, out int value)
     {

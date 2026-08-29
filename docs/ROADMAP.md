@@ -65,7 +65,7 @@
 | SSH tunnel、SSL/TLS | ✅ | 四種網路 provider 已有共用安全設定 UI、憑證驗證、SSH SHA256 主機金鑰固定與隧道生命週期；SQLite 為本機檔案，不適用網路層設定。 |
 | PAM／LDAP／Kerberos／MFA／SSO | 📋 | 依 provider 驗證能力分階段加入，不保存明文祕密。 |
 | 深色模式／平台原生設計 | ✅ | Windows 原生 WinForms、淺／深色主題與 DPI 向量圖示已完成。 |
-| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／DATE／DATETIME／TIMESTAMP／UUID／INET6、PostgreSQL scalar temporal／bit string／timetz／interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery、1 MiB 內 binary／JSON／XML、PostgreSQL 網路位址與 SQL Server scalar temporal／legacy LOB 欄位的安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。Linux x64／ARM64 使用 self-contained tar 安裝包，macOS Intel／Apple Silicon 使用 `.app.zip`，並可依 RID 安全檢查、下載及驗證最新 Release；Linux 已完成交易式套用、啟動健康檢查與 rollback，待補 macOS Developer ID/notarization、自動套用、其餘 provider 與進階功能。 |
+| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／DATE／DATETIME／TIMESTAMP／UUID／INET6、PostgreSQL scalar temporal／bit string／timetz／含 typemod 無損驗證的 interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery、1 MiB 內 binary／JSON／XML、PostgreSQL 網路位址與 SQL Server scalar temporal／legacy LOB 欄位的安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。Linux x64／ARM64 使用 self-contained tar 安裝包，macOS Intel／Apple Silicon 使用 `.app.zip`，並可依 RID 安全檢查、下載及驗證最新 Release；Linux 已完成交易式套用、啟動健康檢查與 rollback，待補 macOS Developer ID/notarization、自動套用、其餘 provider 與進階功能。 |
 
 ## Provider 與服務覆蓋
 

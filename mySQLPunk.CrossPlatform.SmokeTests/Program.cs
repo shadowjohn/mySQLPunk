@@ -1306,6 +1306,35 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             intervalColumn,
             new TableCellInput("duration", TableCellInputMode.Value, "months=1;days=2;microseconds=3;extra=4")));
+        var constrainedIntervals = new[]
+        {
+            (Type: "interval year", Valid: "months=24;days=0;microseconds=0", Invalid: "months=25;days=0;microseconds=0"),
+            (Type: "interval year to month", Valid: "months=25;days=0;microseconds=0", Invalid: "months=25;days=1;microseconds=0"),
+            (Type: "interval day", Valid: "months=25;days=1;microseconds=0", Invalid: "months=25;days=1;microseconds=3600000000"),
+            (Type: "interval day to hour", Valid: "months=25;days=1;microseconds=90000000000", Invalid: "months=25;days=1;microseconds=90060000000"),
+            (Type: "interval hour to minute", Valid: "months=25;days=1;microseconds=90060000000", Invalid: "months=25;days=1;microseconds=90060000001"),
+            (Type: "interval day to second(3)", Valid: "months=25;days=1;microseconds=90060123000", Invalid: "months=25;days=1;microseconds=90060123456"),
+            (Type: "interval(0)", Valid: "months=25;days=1;microseconds=-90061000000", Invalid: "months=25;days=1;microseconds=-90061100000")
+        };
+        foreach (var constrained in constrainedIntervals)
+        {
+            var constrainedColumn = intervalColumn with
+            {
+                DataTypeName = constrained.Type,
+                StorageDataTypeName = constrained.Type
+            };
+            Assert(
+                TableCellValueConverter.Parse(
+                    constrainedColumn,
+                    new TableCellInput("duration", TableCellInputMode.Value, constrained.Valid)) is IntervalComponents,
+                $"PostgreSQL {constrained.Type} 應接受可無損保存的 interval 分量");
+            AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+                constrainedColumn,
+                new TableCellInput("duration", TableCellInputMode.Value, constrained.Invalid)));
+        }
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            intervalColumn with { StorageDataTypeName = "interval day to fortnight" },
+            new TableCellInput("duration", TableCellInputMode.Value, "months=0;days=1;microseconds=0")));
         var lsnColumn = new TableColumnInfo(
             0,
             "wal_position",
@@ -2127,6 +2156,13 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 utc_timestamp TIMESTAMP(4) WITH TIME ZONE NULL,
                 local_clock TIME(2) WITHOUT TIME ZONE NULL,
                 duration INTERVAL NULL,
+                duration_ms INTERVAL(3) NULL,
+                duration_year INTERVAL YEAR NULL,
+                duration_month INTERVAL YEAR TO MONTH NULL,
+                duration_day INTERVAL DAY NULL,
+                duration_hour INTERVAL DAY TO HOUR NULL,
+                duration_minute INTERVAL DAY TO MINUTE NULL,
+                duration_second INTERVAL DAY TO SECOND(4) NULL,
                 wal_position PG_LSN NULL,
                 object_id OID NULL,
                 transaction_id XID NULL,
@@ -2205,6 +2241,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
             table!,
             id => $"UPDATE public.sample SET name = 'Concurrent' WHERE id = {id};");
         await VerifyPostgreSqlTemporalTypesAsync(session, database, table!);
+        await VerifyPostgreSqlIntervalRestrictionsAsync(session, database, table!);
     }
     finally
     {
@@ -2343,6 +2380,101 @@ static async Task VerifyPostgreSqlTemporalTypesAsync(
     Assert(
         afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) != id),
         "PostgreSQL temporal 安全刪除失敗");
+}
+
+static async Task VerifyPostgreSqlIntervalRestrictionsAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var expectedTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["duration"] = "interval",
+        ["duration_ms"] = "interval(3)",
+        ["duration_year"] = "interval year",
+        ["duration_month"] = "interval year to month",
+        ["duration_day"] = "interval day",
+        ["duration_hour"] = "interval day to hour",
+        ["duration_minute"] = "interval day to minute",
+        ["duration_second"] = "interval day to second(4)"
+    };
+    var intervalColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.Interval)
+        .ToDictionary(column => column.Name, StringComparer.Ordinal);
+    Assert(
+        intervalColumns.Count == expectedTypes.Count,
+        $"PostgreSQL interval metadata 未完整辨識；actual={intervalColumns.Count}");
+    foreach (var expected in expectedTypes)
+    {
+        Assert(
+            intervalColumns.TryGetValue(expected.Key, out var column) &&
+            column.IsEditable &&
+            column.StorageDataTypeName == expected.Value,
+            $"PostgreSQL {expected.Key} metadata 不正確；actual={column?.StorageDataTypeName}");
+    }
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "PostgreSQL constrained interval"),
+            new TableCellInput("duration_ms", TableCellInputMode.Value, "months=14;days=3;microseconds=14706123000"),
+            new TableCellInput("duration_year", TableCellInputMode.Value, "months=24;days=0;microseconds=0"),
+            new TableCellInput("duration_month", TableCellInputMode.Value, "months=25;days=0;microseconds=0"),
+            new TableCellInput("duration_day", TableCellInputMode.Value, "months=25;days=3;microseconds=0"),
+            new TableCellInput("duration_hour", TableCellInputMode.Value, "months=25;days=3;microseconds=90000000000"),
+            new TableCellInput("duration_minute", TableCellInputMode.Value, "months=25;days=3;microseconds=90060000000"),
+            new TableCellInput("duration_second", TableCellInputMode.Value, "months=25;days=3;microseconds=90060123400")
+        });
+
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "PostgreSQL constrained interval");
+    foreach (var expected in new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["duration_ms"] = "months=14;days=3;microseconds=14706123000",
+        ["duration_year"] = "months=24;days=0;microseconds=0",
+        ["duration_month"] = "months=25;days=0;microseconds=0",
+        ["duration_day"] = "months=25;days=3;microseconds=0",
+        ["duration_hour"] = "months=25;days=3;microseconds=90000000000",
+        ["duration_minute"] = "months=25;days=3;microseconds=90060000000",
+        ["duration_second"] = "months=25;days=3;microseconds=90060123400"
+    })
+    {
+        Assert(
+            Convert.ToString(inserted.Values[intervalColumns[expected.Key].Ordinal]) == expected.Value,
+            $"PostgreSQL {expected.Key} 新增後未保留 interval 分量");
+    }
+
+    var invalidValues = new[]
+    {
+        (Column: "duration_ms", Value: "months=14;days=3;microseconds=14706123456"),
+        (Column: "duration_year", Value: "months=25;days=0;microseconds=0"),
+        (Column: "duration_month", Value: "months=25;days=1;microseconds=0"),
+        (Column: "duration_day", Value: "months=25;days=3;microseconds=86400000000"),
+        (Column: "duration_hour", Value: "months=25;days=3;microseconds=90060000000"),
+        (Column: "duration_minute", Value: "months=25;days=3;microseconds=90060100000"),
+        (Column: "duration_second", Value: "months=25;days=3;microseconds=90060123456")
+    };
+    foreach (var invalid in invalidValues)
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.UpdateTableRowAsync(
+            database,
+            table,
+            inserted,
+            new[] { new TableCellInput(invalid.Column, TableCellInputMode.Value, invalid.Value) }));
+    }
+
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    var unchanged = rejectedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "PostgreSQL constrained interval");
+    Assert(
+        Convert.ToString(unchanged.Values[intervalColumns["duration_ms"].Ordinal]) ==
+            "months=14;days=3;microseconds=14706123000",
+        "PostgreSQL 不可把受限 interval 的無效輸入取整後寫入");
+    await session.DeleteTableRowAsync(database, table, unchanged);
 }
 
 static async Task SqlServerLiveRoundTripAsync()
@@ -3138,7 +3270,7 @@ static async Task VerifySafeTableEditingAsync(
             "12:34:56.123456+08:00"));
     }
     var intervalColumn = before.Columns.SingleOrDefault(column =>
-        column.ValueKind == TableColumnValueKind.Interval);
+        column.Name == "duration" && column.ValueKind == TableColumnValueKind.Interval);
     if (intervalColumn is not null)
     {
         insertInputs.Add(new TableCellInput(
