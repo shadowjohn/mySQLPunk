@@ -46,6 +46,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             decimalParameter.SqlDbType = System.Data.SqlDbType.VarChar;
             decimalParameter.Size = -1;
         }
+        else if (column.ValueKind == TableColumnValueKind.Spatial && parameter is SqlParameter spatialParameter)
+        {
+            spatialParameter.SqlDbType = System.Data.SqlDbType.VarChar;
+            spatialParameter.Size = -1;
+        }
         else if (parameter is SqlParameter legacyParameter)
         {
             legacyParameter.SqlDbType = column.DataTypeName.ToLowerInvariant() switch
@@ -71,6 +76,13 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
         }
 
+        if (column.ValueKind == TableColumnValueKind.Spatial)
+        {
+            var quotedName = QuoteIdentifier(column.Name);
+            return $"{quotedName}.STSrid = {BuildSpatialSridExpression(parameterName)} AND " +
+                   $"{quotedName}.STAsText() = CONVERT(nvarchar(max), {BuildSpatialWktExpression(parameterName)})";
+        }
+
         var dataType = column.DataTypeName.ToLowerInvariant();
         if (dataType == "text")
         {
@@ -94,13 +106,28 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
-        return column.ValueKind == TableColumnValueKind.ExactDecimal
-            ? $"CONVERT(varchar(max), {quotedName}) AS {quotedName}"
-            : base.BuildTableDataSelectExpression(column);
+        return column.ValueKind switch
+        {
+            TableColumnValueKind.ExactDecimal => $"CONVERT(varchar(max), {quotedName}) AS {quotedName}",
+            TableColumnValueKind.Spatial =>
+                $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE " +
+                $"CONCAT('SRID=', {quotedName}.STSrid, ';', {quotedName}.STAsText()) END AS {quotedName}",
+            _ => base.BuildTableDataSelectExpression(column)
+        };
     }
 
     protected override string BuildParameterValueExpression(TableColumnInfo column, string parameterName)
     {
+        if (column.ValueKind == TableColumnValueKind.Spatial)
+        {
+            var spatialTypeName = column.DataTypeName.Equals("geography", StringComparison.OrdinalIgnoreCase)
+                ? "geography"
+                : "geometry";
+            return $"{spatialTypeName}::STGeomFromText(" +
+                   $"CONVERT(nvarchar(max), {BuildSpatialWktExpression(parameterName)}), " +
+                   $"{BuildSpatialSridExpression(parameterName)})";
+        }
+
         if (column.ValueKind != TableColumnValueKind.ExactDecimal)
         {
             return base.BuildParameterValueExpression(column, parameterName);
@@ -112,6 +139,12 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             : "decimal";
         return $"CAST({parameterName} AS {typeName})";
     }
+
+    private static string BuildSpatialSridExpression(string parameterName) =>
+        $"CONVERT(int, SUBSTRING({parameterName}, 6, CHARINDEX(';', {parameterName}) - 6))";
+
+    private static string BuildSpatialWktExpression(string parameterName) =>
+        $"SUBSTRING({parameterName}, CHARINDEX(';', {parameterName}) + 1, LEN({parameterName}))";
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
@@ -258,6 +291,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         "time" => TableColumnValueKind.Time,
         "uniqueidentifier" => TableColumnValueKind.Guid,
         "xml" => TableColumnValueKind.Xml,
+        "geometry" or "geography" => TableColumnValueKind.Spatial,
         "binary" or "varbinary" or "image" => TableColumnValueKind.Binary,
         "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" => TableColumnValueKind.String,
         _ => TableColumnValueKind.Unsupported

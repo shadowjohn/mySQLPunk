@@ -62,6 +62,10 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             decimalParameter.MySqlDbType = MySqlDbType.VarChar;
         }
+        else if (column.ValueKind == TableColumnValueKind.Spatial && parameter is MySqlParameter spatialParameter)
+        {
+            spatialParameter.MySqlDbType = MySqlDbType.VarChar;
+        }
         else if (column.ValueKind == TableColumnValueKind.String && parameter is MySqlParameter stringParameter)
         {
             if (column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase))
@@ -87,6 +91,13 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
         }
 
+        if (column.ValueKind == TableColumnValueKind.Spatial)
+        {
+            var quotedName = QuoteIdentifier(column.Name);
+            return $"ST_SRID({quotedName}) = {BuildSpatialSridExpression(parameterName)} AND " +
+                   $"BINARY ST_AsText({quotedName}) = BINARY {BuildSpatialWktExpression(parameterName)}";
+        }
+
         return base.BuildOriginalValuePredicate(column, parameterName);
     }
 
@@ -105,13 +116,23 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
-        return column.ValueKind is TableColumnValueKind.MySqlTime or TableColumnValueKind.ExactDecimal
-            ? $"CAST({quotedName} AS CHAR) AS {quotedName}"
-            : base.BuildTableDataSelectExpression(column);
+        return column.ValueKind switch
+        {
+            TableColumnValueKind.MySqlTime or TableColumnValueKind.ExactDecimal =>
+                $"CAST({quotedName} AS CHAR) AS {quotedName}",
+            TableColumnValueKind.Spatial =>
+                $"CONCAT('SRID=', ST_SRID({quotedName}), ';', ST_AsText({quotedName})) AS {quotedName}",
+            _ => base.BuildTableDataSelectExpression(column)
+        };
     }
 
     protected override string BuildParameterValueExpression(TableColumnInfo column, string parameterName)
     {
+        if (column.ValueKind == TableColumnValueKind.Spatial)
+        {
+            return BuildSpatialValueExpression(parameterName);
+        }
+
         if (column.ValueKind != TableColumnValueKind.ExactDecimal)
         {
             return base.BuildParameterValueExpression(column, parameterName);
@@ -122,6 +143,26 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             ? $"DECIMAL({precision},{scale})"
             : "DECIMAL";
         return $"CAST({parameterName} AS {typeName})";
+    }
+
+    private static string BuildSpatialSridExpression(string parameterName) =>
+        $"CAST(SUBSTRING({parameterName}, 6, LOCATE(';', {parameterName}) - 6) AS UNSIGNED)";
+
+    private static string BuildSpatialWktExpression(string parameterName) =>
+        $"SUBSTRING({parameterName}, LOCATE(';', {parameterName}) + 1)";
+
+    private static string BuildSpatialValueExpression(string parameterName)
+    {
+        var sridExpression = BuildSpatialSridExpression(parameterName);
+        var wktExpression = BuildSpatialWktExpression(parameterName);
+        var parsedExpression = $"ST_GeomFromText({wktExpression}, {sridExpression})";
+
+        // MariaDB reports malformed WKT as NULL plus a warning, even in strict mode. Force the
+        // NULL branch to raise a numeric overflow so nullable spatial columns cannot silently lose data.
+        var failClosedWktExpression =
+            $"CASE WHEN {parsedExpression} IS NULL " +
+            $"THEN CONCAT('POINT(', EXP(10000), ' 0)') ELSE {wktExpression} END";
+        return $"ST_GeomFromText({failClosedWktExpression}, {sridExpression})";
     }
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
@@ -241,6 +282,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             "json" => TableColumnValueKind.Json,
             "binary" or "varbinary" or "tinyblob" or "blob" or "mediumblob" or "longblob" =>
                 TableColumnValueKind.Binary,
+            "geometry" or "point" or "linestring" or "polygon" or "multipoint" or "multilinestring" or
+                "multipolygon" or "geomcollection" or "geometrycollection" => TableColumnValueKind.Spatial,
             "char" or "varchar" or "tinytext" or "text" or "mediumtext" or "longtext" or "enum" or "set" =>
                 TableColumnValueKind.String,
             _ => TableColumnValueKind.Unsupported

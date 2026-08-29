@@ -1274,6 +1274,38 @@ static async Task TableDataEditingAsync()
         Assert(
             TableCellValueConverter.IsStructuredTextTooLargeToEdit(serverTextColumn, oversizedServerText),
             "既有 PostgreSQL server-validated text 超過 1 MiB 時應維持唯讀");
+        var spatialColumn = new TableColumnInfo(
+            0,
+            "shape",
+            "geometry",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.Spatial);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                spatialColumn,
+                new TableCellInput("shape", TableCellInputMode.Value, "  srid=4326; POINT (121.5 25)  "))) ==
+            "SRID=4326;POINT (121.5 25)",
+            "Spatial 應正規化 SRID prefix 並保留 WKT");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            spatialColumn,
+            new TableCellInput("shape", TableCellInputMode.Value, "SRID=-1;POINT (1 2)")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            spatialColumn,
+            new TableCellInput("shape", TableCellInputMode.Value, "SRID=0;")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            spatialColumn,
+            new TableCellInput("shape", TableCellInputMode.Value, "SRID=0;POINT (1\0 2)")));
+        var oversizedSpatial =
+            "SRID=0;" + new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            spatialColumn,
+            new TableCellInput("shape", TableCellInputMode.Value, oversizedSpatial)));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(spatialColumn, oversizedSpatial),
+            "既有 spatial 超過 1 MiB 時應維持唯讀");
     }
     finally
     {
@@ -1343,7 +1375,7 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -1505,7 +1537,7 @@ static async Task SqlServerLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
 
@@ -1580,6 +1612,52 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected exact decimal"),
             $"{session.Profile.ProviderDisplayName} 不可寫入超過 precision 的 exact decimal");
+    }
+    var spatialColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.Spatial)
+        .ToList();
+    if (spatialColumns.Count > 0)
+    {
+        var expectedSpatialColumns = session.Profile.Provider == DatabaseProviderKind.MySql ? 8 : 2;
+        Assert(
+            spatialColumns.Count == expectedSpatialColumns,
+            $"{session.Profile.ProviderDisplayName} spatial metadata 未完整辨識；actual={spatialColumns.Count}");
+        foreach (var spatialColumn in spatialColumns)
+        {
+            Assert(spatialColumn.IsEditable, $"{spatialColumn.DataTypeName} 應可安全編輯");
+            Assert(
+                before.Rows.All(row => row.Values[spatialColumn.Ordinal] is null or DBNull),
+                $"{session.Profile.ProviderDisplayName} NULL {spatialColumn.DataTypeName} 載入後必須維持 NULL");
+            insertInputs.Add(new TableCellInput(
+                spatialColumn.Name,
+                TableCellInputMode.Value,
+                GetSpatialTestValue(session.Profile.Provider, spatialColumn, updated: false)));
+        }
+
+        var invalidInputs = new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "Rejected spatial"),
+            new TableCellInput(spatialColumns[0].Name, TableCellInputMode.Value, "SRID=0;NOT_A_SHAPE")
+        };
+        if (session.Profile.Provider == DatabaseProviderKind.MySql)
+        {
+            await AssertThrowsAsync<MySqlException>(() => session.InsertTableRowAsync(
+                database,
+                table,
+                invalidInputs));
+        }
+        else
+        {
+            await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => session.InsertTableRowAsync(
+                database,
+                table,
+                invalidInputs));
+        }
+
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected spatial"),
+            $"{session.Profile.ProviderDisplayName} 不可寫入 server-side parser 拒絕的畸形 spatial 值");
     }
     var jsonColumn = before.Columns.SingleOrDefault(column => column.ValueKind == TableColumnValueKind.Json);
     if (jsonColumn is not null)
@@ -1926,6 +2004,14 @@ static async Task VerifySafeTableEditingAsync(
             GetExactDecimalTestValue(exactDecimalColumn, updated: false),
             $"{session.Profile.ProviderDisplayName} 高精度 decimal 安全新增不正確；actual={inserted.Values[exactDecimalColumn.Ordinal]}");
     }
+    foreach (var spatialColumn in spatialColumns)
+    {
+        AssertSpatialValue(
+            inserted.Values[spatialColumn.Ordinal],
+            GetSpatialTestValue(session.Profile.Provider, spatialColumn, updated: false),
+            spatialColumn,
+            $"{session.Profile.ProviderDisplayName} {spatialColumn.DataTypeName} 安全新增不正確");
+    }
     if (jsonColumn is not null)
     {
         using var insertedJson = JsonDocument.Parse(Convert.ToString(inserted.Values[jsonColumn.Ordinal])!);
@@ -2085,6 +2171,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetExactDecimalTestValue(exactDecimalColumn, updated: true)));
     }
+    foreach (var spatialColumn in spatialColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            spatialColumn.Name,
+            TableCellInputMode.Value,
+            GetSpatialTestValue(session.Profile.Provider, spatialColumn, updated: true)));
+    }
     if (jsonColumn is not null)
     {
         updateInputs.Add(new TableCellInput(
@@ -2237,6 +2330,14 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(updated.Values[exactDecimalColumn.Ordinal]) ==
             GetExactDecimalTestValue(exactDecimalColumn, updated: true),
             $"{session.Profile.ProviderDisplayName} 高精度 decimal 安全修改不正確；actual={updated.Values[exactDecimalColumn.Ordinal]}");
+    }
+    foreach (var spatialColumn in spatialColumns)
+    {
+        AssertSpatialValue(
+            updated.Values[spatialColumn.Ordinal],
+            GetSpatialTestValue(session.Profile.Provider, spatialColumn, updated: true),
+            spatialColumn,
+            $"{session.Profile.ProviderDisplayName} {spatialColumn.DataTypeName} 安全修改不正確");
     }
     if (jsonColumn is not null)
     {
@@ -2409,6 +2510,64 @@ static string GetNetworkTestValue(TableColumnInfo column, bool updated) =>
         ("macaddr8", true) => "08:00:2b:ff:fe:01:02:04",
         _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
     };
+
+static string GetSpatialTestValue(
+    DatabaseProviderKind provider,
+    TableColumnInfo column,
+    bool updated) =>
+    (provider, column.DataTypeName.ToLowerInvariant(), updated) switch
+    {
+        (DatabaseProviderKind.MySql, "geometry", false) => "SRID=0;POINT(1 2)",
+        (DatabaseProviderKind.MySql, "geometry", true) =>
+            "SRID=4326;GEOMETRYCOLLECTION(POINT(3 4),LINESTRING(0 0,1 1))",
+        (DatabaseProviderKind.MySql, "point", false) => "SRID=4326;POINT(3 4)",
+        (DatabaseProviderKind.MySql, "point", true) => "SRID=0;POINT(5 6)",
+        (DatabaseProviderKind.MySql, "linestring", false) => "SRID=0;LINESTRING(0 0,1 1)",
+        (DatabaseProviderKind.MySql, "linestring", true) => "SRID=4326;LINESTRING(2 2,3 3)",
+        (DatabaseProviderKind.MySql, "polygon", false) => "SRID=0;POLYGON((0 0,0 1,1 1,0 0))",
+        (DatabaseProviderKind.MySql, "polygon", true) => "SRID=4326;POLYGON((0 0,0 2,2 2,0 0))",
+        (DatabaseProviderKind.MySql, "multipoint", false) => "SRID=0;MULTIPOINT(0 0,1 1)",
+        (DatabaseProviderKind.MySql, "multipoint", true) => "SRID=4326;MULTIPOINT(2 2,3 3)",
+        (DatabaseProviderKind.MySql, "multilinestring", false) =>
+            "SRID=0;MULTILINESTRING((0 0,1 1),(2 2,3 3))",
+        (DatabaseProviderKind.MySql, "multilinestring", true) =>
+            "SRID=4326;MULTILINESTRING((1 0,2 1),(3 2,4 3))",
+        (DatabaseProviderKind.MySql, "multipolygon", false) =>
+            "SRID=0;MULTIPOLYGON(((0 0,0 1,1 1,0 0)))",
+        (DatabaseProviderKind.MySql, "multipolygon", true) =>
+            "SRID=4326;MULTIPOLYGON(((0 0,0 2,2 2,0 0)))",
+        (DatabaseProviderKind.MySql, "geomcollection" or "geometrycollection", false) =>
+            "SRID=0;GEOMETRYCOLLECTION(POINT(1 2),LINESTRING(0 0,1 1))",
+        (DatabaseProviderKind.MySql, "geomcollection" or "geometrycollection", true) =>
+            "SRID=4326;GEOMETRYCOLLECTION(POINT(3 4),LINESTRING(2 2,3 3))",
+        (DatabaseProviderKind.SqlServer, "geometry", false) => "SRID=4326;POINT (1 2)",
+        (DatabaseProviderKind.SqlServer, "geometry", true) => "SRID=3857;LINESTRING (0 0, 1 1)",
+        (DatabaseProviderKind.SqlServer, "geography", false) => "SRID=4326;POINT (-122.3 47.6)",
+        (DatabaseProviderKind.SqlServer, "geography", true) =>
+            "SRID=4326;LINESTRING (-122.3 47.6, -122.4 47.7)",
+        _ => throw new InvalidOperationException(
+            $"缺少 {provider} {column.Name} spatial 測試值。")
+    };
+
+static void AssertSpatialValue(
+    object? actual,
+    string expected,
+    TableColumnInfo column,
+    string message)
+{
+    var actualText = Convert.ToString(actual) ?? string.Empty;
+    if (column.DataTypeName.Equals("multipoint", StringComparison.OrdinalIgnoreCase))
+    {
+        var separator = expected.IndexOf(';');
+        var prefix = expected[..(separator + 1)];
+        var points = expected[(expected.IndexOf('(', separator) + 1)..^1].Split(',');
+        var alternate = $"{prefix}MULTIPOINT({string.Join(",", points.Select(point => $"({point})"))})";
+        Assert(actualText == expected || actualText == alternate, $"{message}；actual={actualText}");
+        return;
+    }
+
+    Assert(actualText == expected, $"{message}；actual={actualText}");
+}
 
 static string GetSystemIdentifierTestValue(TableColumnInfo column, bool updated) =>
     (column.DataTypeName.ToLowerInvariant(), updated) switch

@@ -85,6 +85,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.PostgreSqlServerValidatedText => ParsePostgreSqlServerValidatedText(
                     input.Text,
                     column.DataTypeName),
+                TableColumnValueKind.Spatial => ParseSpatial(input.Text),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -178,6 +179,7 @@ public static class TableCellValueConverter
             TableColumnValueKind.PostgreSqlArray or
             TableColumnValueKind.PostgreSqlGeometric or
             TableColumnValueKind.PostgreSqlServerValidatedText or
+            TableColumnValueKind.Spatial or
             TableColumnValueKind.ExactDecimal &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
@@ -556,6 +558,41 @@ public static class TableCellValueConverter
         }
 
         return trimmed;
+    }
+
+    private static string ParseSpatial(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length > MaximumEditableStructuredTextCharacters)
+        {
+            throw new FormatException(
+                $"Spatial 值不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
+        }
+
+        if (trimmed.Contains('\0'))
+        {
+            throw new FormatException("Spatial 值不可包含 NUL 字元。");
+        }
+
+        var separator = trimmed.IndexOf(';');
+        if (separator <= 5 ||
+            !trimmed.StartsWith("SRID=", StringComparison.OrdinalIgnoreCase) ||
+            !uint.TryParse(
+                trimmed.AsSpan(5, separator - 5),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var srid))
+        {
+            throw new FormatException("Spatial 必須使用 SRID=<非負整數>;<WKT> 格式。");
+        }
+
+        var wellKnownText = trimmed[(separator + 1)..].Trim();
+        if (wellKnownText.Length == 0)
+        {
+            throw new FormatException("Spatial 的 WKT 不可空白。");
+        }
+
+        return $"SRID={srid};{wellKnownText}";
     }
 
     private static bool ParseBoolean(string text)
