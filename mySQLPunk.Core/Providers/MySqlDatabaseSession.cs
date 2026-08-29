@@ -58,6 +58,10 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             yearParameter.MySqlDbType = MySqlDbType.Year;
         }
+        else if (column.ValueKind == TableColumnValueKind.ExactDecimal && parameter is MySqlParameter decimalParameter)
+        {
+            decimalParameter.MySqlDbType = MySqlDbType.VarChar;
+        }
         else if (column.ValueKind == TableColumnValueKind.String && parameter is MySqlParameter stringParameter)
         {
             if (column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase))
@@ -78,6 +82,11 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             return $"BINARY CAST({QuoteIdentifier(column.Name)} AS CHAR) = BINARY CAST({parameterName} AS CHAR)";
         }
 
+        if (column.ValueKind == TableColumnValueKind.ExactDecimal)
+        {
+            return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
+        }
+
         return base.BuildOriginalValuePredicate(column, parameterName);
     }
 
@@ -96,9 +105,23 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
-        return column.ValueKind == TableColumnValueKind.MySqlTime
+        return column.ValueKind is TableColumnValueKind.MySqlTime or TableColumnValueKind.ExactDecimal
             ? $"CAST({quotedName} AS CHAR) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
+    }
+
+    protected override string BuildParameterValueExpression(TableColumnInfo column, string parameterName)
+    {
+        if (column.ValueKind != TableColumnValueKind.ExactDecimal)
+        {
+            return base.BuildParameterValueExpression(column, parameterName);
+        }
+
+        var definition = TableCellValueConverter.GetExactDecimalDefinition(column);
+        var typeName = definition is { Precision: { } precision, Scale: { } scale }
+            ? $"DECIMAL({precision},{scale})"
+            : "DECIMAL";
+        return $"CAST({parameterName} AS {typeName})";
     }
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
@@ -208,7 +231,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         return normalizedDataType switch
         {
             "year" => TableColumnValueKind.MySqlYear,
-            "decimal" or "numeric" => TableColumnValueKind.Decimal,
+            "decimal" or "numeric" => TableColumnValueKind.ExactDecimal,
             "float" or "double" or "real" => TableColumnValueKind.FloatingPoint,
             "bool" or "boolean" => TableColumnValueKind.Boolean,
             "bit" => TableColumnValueKind.UnsignedInteger,

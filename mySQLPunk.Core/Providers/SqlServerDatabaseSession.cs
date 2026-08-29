@@ -1,5 +1,6 @@
 using Microsoft.Data.SqlClient;
 using MySqlPunk.Core.Models;
+using MySqlPunk.Core.Services;
 
 namespace MySqlPunk.Core.Providers;
 
@@ -40,6 +41,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         {
             sqlParameter.SqlDbType = System.Data.SqlDbType.Xml;
         }
+        else if (column.ValueKind == TableColumnValueKind.ExactDecimal && parameter is SqlParameter decimalParameter)
+        {
+            decimalParameter.SqlDbType = System.Data.SqlDbType.VarChar;
+            decimalParameter.Size = -1;
+        }
         else if (parameter is SqlParameter legacyParameter)
         {
             legacyParameter.SqlDbType = column.DataTypeName.ToLowerInvariant() switch
@@ -60,6 +66,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                    $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {parameterName}))";
         }
 
+        if (column.ValueKind == TableColumnValueKind.ExactDecimal)
+        {
+            return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
+        }
+
         var dataType = column.DataTypeName.ToLowerInvariant();
         if (dataType == "text")
         {
@@ -78,6 +89,28 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         }
 
         return base.BuildOriginalValuePredicate(column, parameterName);
+    }
+
+    protected override string BuildTableDataSelectExpression(TableColumnInfo column)
+    {
+        var quotedName = QuoteIdentifier(column.Name);
+        return column.ValueKind == TableColumnValueKind.ExactDecimal
+            ? $"CONVERT(varchar(max), {quotedName}) AS {quotedName}"
+            : base.BuildTableDataSelectExpression(column);
+    }
+
+    protected override string BuildParameterValueExpression(TableColumnInfo column, string parameterName)
+    {
+        if (column.ValueKind != TableColumnValueKind.ExactDecimal)
+        {
+            return base.BuildParameterValueExpression(column, parameterName);
+        }
+
+        var definition = TableCellValueConverter.GetExactDecimalDefinition(column);
+        var typeName = definition is { Precision: { } precision, Scale: { } scale }
+            ? $"decimal({precision},{scale})"
+            : "decimal";
+        return $"CAST({parameterName} AS {typeName})";
     }
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
@@ -154,7 +187,9 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                    ) THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS is_primary_key,
                    c.is_identity,
                    c.is_computed,
-                   c.default_object_id
+                   c.default_object_id,
+                   c.precision,
+                   c.scale
             FROM sys.columns c
             JOIN sys.tables t ON t.object_id = c.object_id
             JOIN sys.schemas s ON s.schema_id = t.schema_id
@@ -170,13 +205,16 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             var dataType = reader.GetString(1);
+            var displayType = dataType is "decimal" or "numeric"
+                ? $"{dataType}({reader.GetByte(7)},{reader.GetByte(8)})"
+                : dataType;
             var generated = reader.GetBoolean(4) || reader.GetBoolean(5) ||
                             dataType.Equals("timestamp", StringComparison.OrdinalIgnoreCase) ||
                             dataType.Equals("rowversion", StringComparison.OrdinalIgnoreCase);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
-                dataType,
+                displayType,
                 reader.GetBoolean(2),
                 reader.GetBoolean(3),
                 generated,
@@ -210,7 +248,8 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
     private static TableColumnValueKind MapValueKind(string dataType) => dataType.ToLowerInvariant() switch
     {
         "tinyint" or "smallint" or "int" or "bigint" => TableColumnValueKind.Integer,
-        "decimal" or "numeric" or "money" or "smallmoney" => TableColumnValueKind.Decimal,
+        "decimal" or "numeric" => TableColumnValueKind.ExactDecimal,
+        "money" or "smallmoney" => TableColumnValueKind.Decimal,
         "float" or "real" => TableColumnValueKind.FloatingPoint,
         "bit" => TableColumnValueKind.Boolean,
         "date" => TableColumnValueKind.Date,

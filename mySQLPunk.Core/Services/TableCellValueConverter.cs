@@ -45,6 +45,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.Integer => long.Parse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture),
                 TableColumnValueKind.UnsignedInteger => ParseUnsignedInteger(column, input.Text),
                 TableColumnValueKind.Decimal => decimal.Parse(input.Text, NumberStyles.Number, CultureInfo.InvariantCulture),
+                TableColumnValueKind.ExactDecimal => ParseExactDecimal(column, input.Text),
                 TableColumnValueKind.FloatingPoint => ParseFiniteDouble(input.Text),
                 TableColumnValueKind.Boolean => ParseBoolean(input.Text),
                 TableColumnValueKind.Date => DateTime.ParseExact(
@@ -107,6 +108,7 @@ public static class TableCellValueConverter
         DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         TimeOnly time => time.ToString("O", CultureInfo.InvariantCulture),
         TimeSpan duration => duration.ToString("c", CultureInfo.InvariantCulture),
+        ExactDecimalValue exactDecimal => exactDecimal.Text,
         bool boolean => boolean ? "true" : "false",
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString() ?? string.Empty
@@ -171,7 +173,8 @@ public static class TableCellValueConverter
             TableColumnValueKind.FullTextQuery or
             TableColumnValueKind.PostgreSqlRange or
             TableColumnValueKind.PostgreSqlArray or
-            TableColumnValueKind.PostgreSqlGeometric &&
+            TableColumnValueKind.PostgreSqlGeometric or
+            TableColumnValueKind.ExactDecimal &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
 
@@ -181,6 +184,161 @@ public static class TableCellValueConverter
         return double.IsFinite(value)
             ? value
             : throw new FormatException("浮點數必須是有限值。");
+    }
+
+    public static ExactDecimalDefinition GetExactDecimalDefinition(TableColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        var normalized = column.DataTypeName.Trim();
+        var openParenthesis = normalized.IndexOf('(');
+        var typeEnd = openParenthesis >= 0
+            ? openParenthesis
+            : normalized.IndexOfAny([' ', '\t']);
+        if (typeEnd < 0)
+        {
+            typeEnd = normalized.Length;
+        }
+
+        var typeName = normalized[..typeEnd];
+        if (!typeName.Equals("decimal", StringComparison.OrdinalIgnoreCase) &&
+            !typeName.Equals("numeric", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"無法辨識 exact decimal 型別：{column.DataTypeName}");
+        }
+
+        var isUnsigned = normalized.Contains("unsigned", StringComparison.OrdinalIgnoreCase);
+        if (openParenthesis < 0)
+        {
+            return new ExactDecimalDefinition(null, null, isUnsigned);
+        }
+
+        var closeParenthesis = normalized.IndexOf(')', openParenthesis + 1);
+        if (closeParenthesis < 0)
+        {
+            throw new InvalidOperationException($"無法辨識 exact decimal precision／scale：{column.DataTypeName}");
+        }
+
+        var parts = normalized[(openParenthesis + 1)..closeParenthesis]
+            .Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 ||
+            !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var precision) ||
+            !int.TryParse(
+                parts[1],
+                NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture,
+                out var scale) ||
+            precision <= 0)
+        {
+            throw new InvalidOperationException($"無法辨識 exact decimal precision／scale：{column.DataTypeName}");
+        }
+
+        return new ExactDecimalDefinition(precision, scale, isUnsigned);
+    }
+
+    private static ExactDecimalValue ParseExactDecimal(TableColumnInfo column, string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Length > MaximumEditableStructuredTextCharacters ||
+            trimmed.Contains('\0'))
+        {
+            throw new FormatException(
+                $"Exact decimal 不可為空、包含 NUL，且不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
+        }
+
+        var definition = GetExactDecimalDefinition(column);
+        var position = trimmed[0] is '+' or '-' ? 1 : 0;
+        var isNegative = trimmed[0] == '-';
+        var integerStart = position;
+        while (position < trimmed.Length && char.IsAsciiDigit(trimmed[position]))
+        {
+            position++;
+        }
+
+        if (position == integerStart)
+        {
+            throw new FormatException("Exact decimal 必須包含小數點前的十進位數字，且不可使用指數或千分位格式。");
+        }
+
+        var integerEnd = position;
+        var fractionStart = -1;
+        if (position < trimmed.Length && trimmed[position] == '.')
+        {
+            fractionStart = ++position;
+            while (position < trimmed.Length && char.IsAsciiDigit(trimmed[position]))
+            {
+                position++;
+            }
+
+            if (position == fractionStart)
+            {
+                throw new FormatException("Exact decimal 的小數點後必須包含至少一位十進位數字。");
+            }
+        }
+
+        if (position != trimmed.Length)
+        {
+            throw new FormatException("Exact decimal 只能使用正負號、十進位數字與一個小數點，不可使用指數或千分位格式。");
+        }
+
+        if (definition.IsUnsigned && isNegative)
+        {
+            throw new FormatException("Unsigned DECIMAL 不可輸入負值。");
+        }
+
+        if (definition is { Precision: { } precision, Scale: { } scale })
+        {
+            var integerPart = trimmed.AsSpan(integerStart, integerEnd - integerStart);
+            var significantIntegerPart = integerPart.TrimStart('0');
+            var integerDigits = significantIntegerPart.Length;
+            var fractionDigits = fractionStart < 0 ? 0 : trimmed.Length - fractionStart;
+            var fitsWithoutRounding = scale >= 0
+                ? FitsNonNegativeExactDecimalScale(
+                    trimmed,
+                    fractionStart,
+                    integerDigits,
+                    fractionDigits,
+                    precision,
+                    scale)
+                : fractionDigits == 0 &&
+                  integerDigits <= precision - scale &&
+                  HasRequiredTrailingZeros(integerPart, -scale);
+            if (!fitsWithoutRounding)
+            {
+                throw new OverflowException(
+                    $"{column.DataTypeName} 無法無損保存這個值；請確認 precision、scale、前導零與取整位數。");
+            }
+        }
+
+        return new ExactDecimalValue(trimmed);
+    }
+
+    private static bool FitsNonNegativeExactDecimalScale(
+        string text,
+        int fractionStart,
+        int integerDigits,
+        int fractionDigits,
+        int precision,
+        int scale)
+    {
+        if (integerDigits > Math.Max(0, precision - scale) || fractionDigits > scale)
+        {
+            return false;
+        }
+
+        var requiredLeadingFractionZeros = Math.Max(0, scale - precision);
+        if (requiredLeadingFractionZeros == 0 || fractionStart < 0)
+        {
+            return true;
+        }
+
+        var checkedDigits = Math.Min(requiredLeadingFractionZeros, fractionDigits);
+        return text.AsSpan(fractionStart, checkedDigits).IndexOfAnyExcept('0') < 0;
+    }
+
+    private static bool HasRequiredTrailingZeros(ReadOnlySpan<char> integerPart, int count)
+    {
+        var checkedDigits = Math.Min(count, integerPart.Length);
+        return integerPart[^checkedDigits..].IndexOfAnyExcept('0') < 0;
     }
 
     private static ulong ParseUnsignedInteger(TableColumnInfo column, string text)

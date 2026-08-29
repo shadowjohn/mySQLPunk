@@ -39,7 +39,7 @@ public sealed partial class TableRowEditorWindow : Window
         Title = _isInsert ? "新增資料列" : "修改資料列";
         _hintText.Text = _isInsert
             ? "預設會交由資料庫套用欄位 DEFAULT；取消勾選「使用預設值」後即可輸入。"
-            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON／XML／bit string／全文檢索／range／array／geometric 值維持唯讀；只會送出實際變更的欄位。";
+            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON／XML／bit string／全文檢索／range／array／geometric／exact decimal 值維持唯讀；只會送出實際變更的欄位。";
         BuildFields();
     }
 
@@ -238,6 +238,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.Time => "HH:mm:ss",
         TableColumnValueKind.MySqlTime => "[-]HHH:mm:ss[.ffffff]（最大 ±838:59:59）",
         TableColumnValueKind.MySqlYear => "0 或 1901–2155（四位數年份）",
+        TableColumnValueKind.ExactDecimal => BuildExactDecimalWatermark(column),
         TableColumnValueKind.TimeWithTimeZone => "HH:mm:ss.ffffff±HH:mm",
         TableColumnValueKind.Interval => "months=0;days=0;microseconds=0",
         TableColumnValueKind.LogSequenceNumber => "0/0（WAL LSN 十六進位）",
@@ -281,6 +282,26 @@ public sealed partial class TableRowEditorWindow : Window
             "circle" => "<(1,2),3.5>",
             _ => string.Empty
         };
+
+    private static string BuildExactDecimalWatermark(TableColumnInfo column)
+    {
+        var definition = TableCellValueConverter.GetExactDecimalDefinition(column);
+        var signHint = definition.IsUnsigned ? "非負；" : string.Empty;
+        if (definition is not { Precision: { } precision, Scale: { } scale })
+        {
+            return $"{signHint}十進位數字（不使用指數或千分位）";
+        }
+
+        if (scale < 0)
+        {
+            return $"{signHint}最多 {precision - scale} 位整數，尾端至少 {-scale} 個 0（不可含小數）";
+        }
+
+        var leadingZeroHint = scale > precision
+            ? $"，小數前 {scale - precision} 位須為 0"
+            : string.Empty;
+        return $"{signHint}最多 {Math.Max(0, precision - scale)} 位整數、{scale} 位小數{leadingZeroHint}（不使用指數）";
+    }
 
     private static bool IsStructuredText(TableColumnInfo column) =>
         column.ValueKind is TableColumnValueKind.Json or TableColumnValueKind.Xml;

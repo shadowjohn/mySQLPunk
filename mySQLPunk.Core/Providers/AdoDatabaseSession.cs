@@ -189,7 +189,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
                 var input = inputMap[column.Name];
                 var parameterName = $"@value{index}";
                 AddParameter(command, parameterName, TableCellValueConverter.Parse(column, input), column);
-                parameterNames.Add(parameterName);
+                parameterNames.Add(BuildParameterValueExpression(column, parameterName));
             }
 
             command.CommandText =
@@ -240,7 +240,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 
             var parameterName = $"@value{parameterIndex++}";
             AddParameter(command, parameterName, TableCellValueConverter.Parse(column, input), column);
-            assignments.Add($"{QuoteIdentifier(column.Name)} = {parameterName}");
+            assignments.Add(
+                $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}");
         }
 
         var predicate = BuildOptimisticPredicate(command, columns, originalRow);
@@ -407,6 +408,9 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     protected virtual string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName) =>
         $"{QuoteIdentifier(column.Name)} = {parameterName}";
 
+    protected virtual string BuildParameterValueExpression(TableColumnInfo column, string parameterName) =>
+        parameterName;
+
     private void AddParameter(
         DbCommand command,
         string name,
@@ -420,7 +424,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         command.Parameters.Add(parameter);
     }
 
-    protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) => value;
+    protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) =>
+        value is ExactDecimalValue exactDecimal ? exactDecimal.Text : value;
 
     protected virtual void ConfigureParameter(DbParameter parameter, TableColumnInfo column)
     {

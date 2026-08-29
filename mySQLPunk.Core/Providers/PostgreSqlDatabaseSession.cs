@@ -100,7 +100,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                      TableColumnValueKind.FullTextQuery or
                      TableColumnValueKind.PostgreSqlRange or
                      TableColumnValueKind.PostgreSqlArray or
-                     TableColumnValueKind.PostgreSqlGeometric &&
+                     TableColumnValueKind.PostgreSqlGeometric or
+                     TableColumnValueKind.ExactDecimal &&
                  parameter is NpgsqlParameter serverValidatedTextParameter)
         {
             serverValidatedTextParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
@@ -178,6 +179,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
 
+        if (column.ValueKind == TableColumnValueKind.ExactDecimal)
+        {
+            return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
+        }
+
         if (column.ValueKind == TableColumnValueKind.PostgreSqlGeometric)
         {
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
@@ -209,7 +215,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             TableColumnValueKind.FullTextQuery or
             TableColumnValueKind.PostgreSqlRange or
             TableColumnValueKind.PostgreSqlArray or
-            TableColumnValueKind.PostgreSqlGeometric
+            TableColumnValueKind.PostgreSqlGeometric or
+            TableColumnValueKind.ExactDecimal
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
@@ -219,6 +226,20 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         $"';days=', (EXTRACT(DAY FROM {expression})::bigint), " +
         $"';microseconds=', (ROUND((EXTRACT(HOUR FROM {expression}) * 3600 + " +
         $"EXTRACT(MINUTE FROM {expression}) * 60 + EXTRACT(SECOND FROM {expression})) * 1000000)::bigint))";
+
+    protected override string BuildParameterValueExpression(TableColumnInfo column, string parameterName)
+    {
+        if (column.ValueKind != TableColumnValueKind.ExactDecimal)
+        {
+            return base.BuildParameterValueExpression(column, parameterName);
+        }
+
+        var definition = TableCellValueConverter.GetExactDecimalDefinition(column);
+        var typeName = definition is { Precision: { } precision, Scale: { } scale }
+            ? $"numeric({precision},{scale})"
+            : "numeric";
+        return $"CAST({parameterName} AS {typeName})";
+    }
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
@@ -286,8 +307,18 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                    c.is_identity,
                    c.is_generated,
                    c.column_default,
-                   c.character_maximum_length
+                   c.character_maximum_length,
+                   pg_catalog.format_type(a.atttypid, a.atttypmod)
             FROM information_schema.columns c
+            JOIN pg_catalog.pg_namespace n ON n.nspname = c.table_schema
+            JOIN pg_catalog.pg_class rel
+              ON rel.relnamespace = n.oid
+             AND rel.relname = c.table_name
+            JOIN pg_catalog.pg_attribute a
+              ON a.attrelid = rel.oid
+             AND a.attname = c.column_name
+             AND a.attnum > 0
+             AND NOT a.attisdropped
             WHERE c.table_schema = @schema
               AND c.table_name = @table
             ORDER BY c.ordinal_position
@@ -301,10 +332,13 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             var dataType = reader.GetString(2);
             var userDefinedType = reader.GetString(3);
             var displayType = reader.GetString(1);
-            if (dataType.Equals("ARRAY", StringComparison.OrdinalIgnoreCase) &&
-                userDefinedType.StartsWith('_'))
+            if (dataType.Equals("ARRAY", StringComparison.OrdinalIgnoreCase))
             {
-                displayType = $"{userDefinedType[1..]}[]";
+                displayType = reader.GetString(10);
+            }
+            else if (dataType is "numeric" or "decimal")
+            {
+                displayType = reader.GetString(10);
             }
             else if (dataType is "bit" or "bit varying" && !reader.IsDBNull(9))
             {
@@ -330,7 +364,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         dataType.ToLowerInvariant() switch
         {
             "smallint" or "integer" or "bigint" => TableColumnValueKind.Integer,
-            "numeric" or "decimal" or "money" => TableColumnValueKind.Decimal,
+            "numeric" or "decimal" => TableColumnValueKind.ExactDecimal,
+            "money" => TableColumnValueKind.Decimal,
             "real" or "double precision" => TableColumnValueKind.FloatingPoint,
             "boolean" => TableColumnValueKind.Boolean,
             "date" => TableColumnValueKind.Date,

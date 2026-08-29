@@ -981,6 +981,78 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             mySqlYearColumn,
             new TableCellInput("release_year", TableCellInputMode.Value, "70")));
+        var exactDecimalColumn = new TableColumnInfo(
+            0,
+            "amount",
+            "decimal(65,30)",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.ExactDecimal);
+        var exactDecimalText =
+            "12345678901234567890123456789012345.123456789012345678901234567890";
+        Assert(
+            TableCellValueConverter.Parse(
+                exactDecimalColumn,
+                new TableCellInput("amount", TableCellInputMode.Value, exactDecimalText)) is ExactDecimalValue
+            {
+                Text: var parsedExactDecimal
+            } && parsedExactDecimal == exactDecimalText,
+            "DECIMAL(65,30) 應保留超過 .NET decimal 上限的完整文字精度");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            exactDecimalColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, new string('9', 36) + ".0")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            exactDecimalColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, "1." + new string('9', 31))));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            exactDecimalColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, "1e10")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            exactDecimalColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, "1,000.00")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            exactDecimalColumn with { DataTypeName = "decimal(65,30) unsigned" },
+            new TableCellInput("amount", TableCellInputMode.Value, "-1.0")));
+        var unrestrictedNumeric = exactDecimalColumn with { DataTypeName = "numeric" };
+        Assert(
+            TableCellValueConverter.Parse(
+                unrestrictedNumeric,
+                new TableCellInput("amount", TableCellInputMode.Value, new string('7', 200))) is ExactDecimalValue,
+            "PostgreSQL unrestricted numeric 應接受超過 29 位的精確數字");
+        var fractionalOnlyNumeric = exactDecimalColumn with { DataTypeName = "numeric(3,5)" };
+        Assert(
+            TableCellValueConverter.Parse(
+                fractionalOnlyNumeric,
+                new TableCellInput("amount", TableCellInputMode.Value, "0.00123")) is ExactDecimalValue,
+            "PostgreSQL numeric scale 大於 precision 時應接受足夠的前導小數零");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            fractionalOnlyNumeric,
+            new TableCellInput("amount", TableCellInputMode.Value, "0.01234")));
+        var negativeScaleNumeric = exactDecimalColumn with { DataTypeName = "numeric(2,-3)" };
+        Assert(
+            TableCellValueConverter.Parse(
+                negativeScaleNumeric,
+                new TableCellInput("amount", TableCellInputMode.Value, "12000")) is ExactDecimalValue,
+            "PostgreSQL negative numeric scale 應接受不需取整的千位數值");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            negativeScaleNumeric,
+            new TableCellInput("amount", TableCellInputMode.Value, "12345")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            negativeScaleNumeric,
+            new TableCellInput("amount", TableCellInputMode.Value, "12000.0")));
+        var oversizedExactDecimal = new string(
+            '9',
+            TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            unrestrictedNumeric,
+            new TableCellInput("amount", TableCellInputMode.Value, oversizedExactDecimal)));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(
+                unrestrictedNumeric,
+                oversizedExactDecimal),
+            "既有 exact decimal 超過 1 MiB 時應維持唯讀");
         var intervalColumn = new TableColumnInfo(
             0,
             "duration",
@@ -1241,7 +1313,7 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL, release_year YEAR NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -1334,7 +1406,10 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 bounds BOX NULL,
                 route PATH NULL,
                 area POLYGON NULL,
-                radius CIRCLE NULL
+                radius CIRCLE NULL,
+                high_precision NUMERIC(100,50) NULL,
+                fractional_only NUMERIC(3,5) NULL,
+                rounded_thousands NUMERIC(2,-3) NULL
             );
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
@@ -1380,7 +1455,7 @@ static async Task SqlServerLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
 
@@ -1421,6 +1496,41 @@ static async Task VerifySafeTableEditingAsync(
         new("note", TableCellInputMode.Null, string.Empty),
         new("payload", TableCellInputMode.Value, "0x00FF10")
     };
+    var exactDecimalColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.ExactDecimal)
+        .ToList();
+    foreach (var exactDecimalColumn in exactDecimalColumns)
+    {
+        var definition = TableCellValueConverter.GetExactDecimalDefinition(exactDecimalColumn);
+        Assert(
+            definition is { Precision: not null, Scale: not null },
+            $"{session.Profile.ProviderDisplayName} exact decimal metadata 缺少 precision／scale");
+        insertInputs.Add(new TableCellInput(
+            exactDecimalColumn.Name,
+            TableCellInputMode.Value,
+            GetExactDecimalTestValue(exactDecimalColumn, updated: false)));
+    }
+
+    if (exactDecimalColumns.Count > 0)
+    {
+        var exactDecimalColumn = exactDecimalColumns[0];
+        var definition = TableCellValueConverter.GetExactDecimalDefinition(exactDecimalColumn);
+        var invalidValue = new string(
+            '9',
+            Math.Max(0, definition.Precision!.Value - definition.Scale!.Value) + 1);
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected exact decimal"),
+                new TableCellInput(exactDecimalColumn.Name, TableCellInputMode.Value, invalidValue)
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected exact decimal"),
+            $"{session.Profile.ProviderDisplayName} 不可寫入超過 precision 的 exact decimal");
+    }
     var jsonColumn = before.Columns.SingleOrDefault(column => column.ValueKind == TableColumnValueKind.Json);
     if (jsonColumn is not null)
     {
@@ -1667,7 +1777,7 @@ static async Task VerifySafeTableEditingAsync(
     {
         Assert(arrayColumns.Count == 7, $"PostgreSQL array metadata 未完整辨識；actual={arrayColumns.Count}");
         Assert(
-            arrayColumns.Single(column => column.Name == "numbers").DataTypeName == "int4[]" &&
+            arrayColumns.Single(column => column.Name == "numbers").DataTypeName == "integer[]" &&
             arrayColumns.Single(column => column.Name == "states").DataTypeName == "mood[]",
             "PostgreSQL array metadata 應顯示 element type，而不是籠統 ARRAY");
         foreach (var arrayColumn in arrayColumns)
@@ -1727,6 +1837,13 @@ static async Task VerifySafeTableEditingAsync(
     Assert(
         inserted.Values[4] is byte[] insertedPayload && insertedPayload.SequenceEqual(new byte[] { 0x00, 0xFF, 0x10 }),
         $"{session.Profile.ProviderDisplayName} 安全新增 binary 不正確");
+    foreach (var exactDecimalColumn in exactDecimalColumns)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[exactDecimalColumn.Ordinal]) ==
+            GetExactDecimalTestValue(exactDecimalColumn, updated: false),
+            $"{session.Profile.ProviderDisplayName} 高精度 decimal 安全新增不正確；actual={inserted.Values[exactDecimalColumn.Ordinal]}");
+    }
     if (jsonColumn is not null)
     {
         using var insertedJson = JsonDocument.Parse(Convert.ToString(inserted.Values[jsonColumn.Ordinal])!);
@@ -1872,6 +1989,13 @@ static async Task VerifySafeTableEditingAsync(
         new("quantity", TableCellInputMode.Value, "8"),
         new("payload", TableCellInputMode.Value, "0xCAFE")
     };
+    foreach (var exactDecimalColumn in exactDecimalColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            exactDecimalColumn.Name,
+            TableCellInputMode.Value,
+            GetExactDecimalTestValue(exactDecimalColumn, updated: true)));
+    }
     if (jsonColumn is not null)
     {
         updateInputs.Add(new TableCellInput(
@@ -2011,6 +2135,13 @@ static async Task VerifySafeTableEditingAsync(
     Assert(
         updated.Values[4] is byte[] updatedPayload && updatedPayload.SequenceEqual(new byte[] { 0xCA, 0xFE }),
         $"{session.Profile.ProviderDisplayName} 安全修改 binary 不正確");
+    foreach (var exactDecimalColumn in exactDecimalColumns)
+    {
+        Assert(
+            Convert.ToString(updated.Values[exactDecimalColumn.Ordinal]) ==
+            GetExactDecimalTestValue(exactDecimalColumn, updated: true),
+            $"{session.Profile.ProviderDisplayName} 高精度 decimal 安全修改不正確；actual={updated.Values[exactDecimalColumn.Ordinal]}");
+    }
     if (jsonColumn is not null)
     {
         using var updatedJson = JsonDocument.Parse(Convert.ToString(updated.Values[jsonColumn.Ordinal])!);
@@ -2272,6 +2403,35 @@ static string GetPostgreSqlGeometricTestValue(TableColumnInfo column, bool updat
         ("radius", true) => "<(-5,6),7.25>",
         _ => throw new InvalidOperationException($"缺少 {column.Name} PostgreSQL geometric 測試值。")
     };
+
+static string GetExactDecimalTestValue(TableColumnInfo column, bool updated)
+{
+    var definition = TableCellValueConverter.GetExactDecimalDefinition(column);
+    if (definition is not { Precision: { } precision, Scale: { } scale })
+    {
+        throw new InvalidOperationException($"{column.DataTypeName} 缺少 precision／scale 測試 metadata。");
+    }
+
+    var digit = updated ? '8' : '9';
+    var fractionDigit = updated ? '2' : '1';
+    string magnitude;
+    if (scale < 0)
+    {
+        magnitude = new string(digit, precision) + new string('0', -scale);
+    }
+    else if (scale > precision)
+    {
+        magnitude = "0." + new string('0', scale - precision) + new string(fractionDigit, precision);
+    }
+    else
+    {
+        var integerDigits = new string(digit, precision - scale);
+        var fractionDigits = scale == 0 ? string.Empty : "." + new string(fractionDigit, scale);
+        magnitude = integerDigits + fractionDigits;
+    }
+
+    return (updated && !definition.IsUnsigned ? "-" : string.Empty) + magnitude;
+}
 
 static void AssertNetworkValue(object? actual, string expected, string message)
 {
