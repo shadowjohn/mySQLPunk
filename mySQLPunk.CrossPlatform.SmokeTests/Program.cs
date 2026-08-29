@@ -987,7 +987,7 @@ static async Task SqlServerLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
 
@@ -1054,6 +1054,24 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetNetworkTestValue(networkColumn, updated: false)));
     }
+    var legacyTextColumn = before.Columns.SingleOrDefault(column =>
+        string.Equals(column.DataTypeName, "text", StringComparison.OrdinalIgnoreCase));
+    var legacyNtextColumn = before.Columns.SingleOrDefault(column =>
+        string.Equals(column.DataTypeName, "ntext", StringComparison.OrdinalIgnoreCase));
+    var legacyImageColumn = before.Columns.SingleOrDefault(column =>
+        string.Equals(column.DataTypeName, "image", StringComparison.OrdinalIgnoreCase));
+    if (legacyTextColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(legacyTextColumn.Name, TableCellInputMode.Value, "legacy ' text"));
+    }
+    if (legacyNtextColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(legacyNtextColumn.Name, TableCellInputMode.Value, "舊式 Unicode 文字 🐧"));
+    }
+    if (legacyImageColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(legacyImageColumn.Name, TableCellInputMode.Value, "0xDEADBEEF"));
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1077,6 +1095,21 @@ static async Task VerifySafeTableEditingAsync(
             inserted.Values[networkColumn.Ordinal],
             GetNetworkTestValue(networkColumn, updated: false),
             $"{session.Profile.ProviderDisplayName} 安全新增 {networkColumn.DataTypeName} 不正確");
+    }
+    if (legacyTextColumn is not null)
+    {
+        Assert(Convert.ToString(inserted.Values[legacyTextColumn.Ordinal]) == "legacy ' text", "SQL Server text 安全新增不正確");
+    }
+    if (legacyNtextColumn is not null)
+    {
+        Assert(Convert.ToString(inserted.Values[legacyNtextColumn.Ordinal]) == "舊式 Unicode 文字 🐧", "SQL Server ntext 安全新增不正確");
+    }
+    if (legacyImageColumn is not null)
+    {
+        Assert(
+            inserted.Values[legacyImageColumn.Ordinal] is byte[] legacyImage &&
+            legacyImage.SequenceEqual(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }),
+            "SQL Server image 安全新增不正確");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1113,6 +1146,18 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetNetworkTestValue(networkColumn, updated: true)));
     }
+    if (legacyTextColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(legacyTextColumn.Name, TableCellInputMode.Value, "updated legacy text"));
+    }
+    if (legacyNtextColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(legacyNtextColumn.Name, TableCellInputMode.Value, "更新 Unicode 文字 🍎"));
+    }
+    if (legacyImageColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(legacyImageColumn.Name, TableCellInputMode.Value, "0xCAFE"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1138,6 +1183,21 @@ static async Task VerifySafeTableEditingAsync(
             updated.Values[networkColumn.Ordinal],
             GetNetworkTestValue(networkColumn, updated: true),
             $"{session.Profile.ProviderDisplayName} 安全修改 {networkColumn.DataTypeName} 不正確");
+    }
+    if (legacyTextColumn is not null)
+    {
+        Assert(Convert.ToString(updated.Values[legacyTextColumn.Ordinal]) == "updated legacy text", "SQL Server text 安全修改不正確");
+    }
+    if (legacyNtextColumn is not null)
+    {
+        Assert(Convert.ToString(updated.Values[legacyNtextColumn.Ordinal]) == "更新 Unicode 文字 🍎", "SQL Server ntext 安全修改不正確");
+    }
+    if (legacyImageColumn is not null)
+    {
+        Assert(
+            updated.Values[legacyImageColumn.Ordinal] is byte[] legacyImage &&
+            legacyImage.SequenceEqual(new byte[] { 0xCA, 0xFE }),
+            "SQL Server image 安全修改不正確");
     }
 
     var id = Convert.ToInt64(updated.Values[0]);

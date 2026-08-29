@@ -40,6 +40,16 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         {
             sqlParameter.SqlDbType = System.Data.SqlDbType.Xml;
         }
+        else if (parameter is SqlParameter legacyParameter)
+        {
+            legacyParameter.SqlDbType = column.DataTypeName.ToLowerInvariant() switch
+            {
+                "text" => System.Data.SqlDbType.Text,
+                "ntext" => System.Data.SqlDbType.NText,
+                "image" => System.Data.SqlDbType.Image,
+                _ => legacyParameter.SqlDbType
+            };
+        }
     }
 
     protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
@@ -48,6 +58,23 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         {
             return $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {QuoteIdentifier(column.Name)})) = " +
                    $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {parameterName}))";
+        }
+
+        var dataType = column.DataTypeName.ToLowerInvariant();
+        if (dataType == "text")
+        {
+            return $"CONVERT(varbinary(max), CONVERT(varchar(max), {QuoteIdentifier(column.Name)})) = " +
+                   $"CONVERT(varbinary(max), CONVERT(varchar(max), {parameterName}))";
+        }
+        if (dataType == "ntext")
+        {
+            return $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {QuoteIdentifier(column.Name)})) = " +
+                   $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {parameterName}))";
+        }
+        if (dataType == "image")
+        {
+            return $"CONVERT(varbinary(max), {QuoteIdentifier(column.Name)}) = " +
+                   $"CONVERT(varbinary(max), {parameterName})";
         }
 
         return base.BuildOriginalValuePredicate(column, parameterName);
@@ -192,8 +219,8 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         "time" => TableColumnValueKind.Time,
         "uniqueidentifier" => TableColumnValueKind.Guid,
         "xml" => TableColumnValueKind.Xml,
-        "binary" or "varbinary" => TableColumnValueKind.Binary,
-        "char" or "varchar" or "nchar" or "nvarchar" => TableColumnValueKind.String,
+        "binary" or "varbinary" or "image" => TableColumnValueKind.Binary,
+        "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" => TableColumnValueKind.String,
         _ => TableColumnValueKind.Unsupported
     };
 }
