@@ -236,6 +236,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.DateTime => "yyyy-MM-dd HH:mm:ss",
         TableColumnValueKind.DateTimeOffset => "ISO 8601 日期時間與時區",
         TableColumnValueKind.Time => "HH:mm:ss",
+        TableColumnValueKind.MySqlTemporal => "yyyy-MM-dd 或 yyyy-MM-ddTHH:mm:ss[.ffffff]",
         TableColumnValueKind.MySqlTime => "[-]HHH:mm:ss[.ffffff]（最大 ±838:59:59）",
         TableColumnValueKind.MySqlYear => "0 或 1901–2155（四位數年份）",
         TableColumnValueKind.ExactDecimal => BuildExactDecimalWatermark(column),

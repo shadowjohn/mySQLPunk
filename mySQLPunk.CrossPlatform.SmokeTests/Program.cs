@@ -974,6 +974,66 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             timeZoneColumn,
             new TableCellInput("alarm", TableCellInputMode.Value, "25:00:00+08:00")));
+        var mySqlDateColumn = new TableColumnInfo(
+            0,
+            "event_date",
+            "date",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.MySqlTemporal);
+        var mySqlDateTimeColumn = mySqlDateColumn with
+        {
+            Name = "recorded_at",
+            DataTypeName = "datetime(3)",
+            StorageDataTypeName = "datetime(3)"
+        };
+        var mySqlTimestampColumn = mySqlDateColumn with
+        {
+            Name = "changed_at",
+            DataTypeName = "timestamp(6)",
+            StorageDataTypeName = "timestamp(6)"
+        };
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    mySqlDateColumn,
+                    new TableCellInput("event_date", TableCellInputMode.Value, "1000-01-01")),
+                new DateTime(1000, 1, 1)),
+            "MySQL／MariaDB DATE 應接受 1000 年下界");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    mySqlDateTimeColumn,
+                    new TableCellInput("recorded_at", TableCellInputMode.Value, "9999-12-31T23:59:59.123")),
+                new DateTime(9999, 12, 31, 23, 59, 59).AddMilliseconds(123)),
+            "MySQL／MariaDB DATETIME(3) 應無損保存毫秒");
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    mySqlTimestampColumn,
+                    new TableCellInput("changed_at", TableCellInputMode.Value, "2030-01-02 03:04:05.123456")),
+                new DateTime(2030, 1, 2, 3, 4, 5).AddTicks(1_234_560)),
+            "MySQL／MariaDB TIMESTAMP(6) 應無損保存微秒");
+        Assert(TableCellValueConverter.GetMySqlTemporalScale(mySqlDateColumn) == 0, "DATE scale 應為 0");
+        Assert(TableCellValueConverter.GetMySqlTemporalScale(mySqlDateTimeColumn) == 3, "DATETIME scale 應為 3");
+        Assert(TableCellValueConverter.GetMySqlTemporalScale(mySqlTimestampColumn) == 6, "TIMESTAMP scale 應為 6");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlDateColumn,
+            new TableCellInput("event_date", TableCellInputMode.Value, "0999-12-31")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlDateColumn,
+            new TableCellInput("event_date", TableCellInputMode.Value, "2026-08-30T12:00:00")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlDateTimeColumn,
+            new TableCellInput("recorded_at", TableCellInputMode.Value, "2026-08-30T12:34:56.1234")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlDateTimeColumn,
+            new TableCellInput("recorded_at", TableCellInputMode.Value, "2026-08-30T12:34:56+08:00")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            mySqlTimestampColumn,
+            new TableCellInput("changed_at", TableCellInputMode.Value, "2026-08-30T12:34:56.1234567")));
         var mySqlTimeColumn = new TableColumnInfo(
             0,
             "duration",
@@ -1701,7 +1761,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
         var nativeColumns = isMariaDb
             ? ", native_uuid UUID NULL, native_address INET6 NULL"
             : string.Empty;
-        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
+        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -1715,6 +1775,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             database,
             table!,
             id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyMySqlTemporalTypesAsync(session, database, table!);
         if (isMariaDb)
         {
             await VerifyMariaDbNativeTypesAsync(session, database, table!);
@@ -1724,6 +1785,127 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
     {
         await session.ExecuteAsync(string.Empty, $"DROP DATABASE IF EXISTS `{database}`;");
     }
+}
+
+static async Task VerifyMySqlTemporalTypesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var temporalColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.MySqlTemporal)
+        .ToDictionary(column => column.Name, StringComparer.Ordinal);
+    var expectedTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["event_date"] = "date",
+        ["recorded_at"] = "datetime(3)",
+        ["precise_at"] = "datetime(6)",
+        ["changed_at"] = "timestamp(2)"
+    };
+    Assert(
+        temporalColumns.Count == expectedTypes.Count,
+        $"MySQL／MariaDB temporal metadata 未完整辨識；actual={temporalColumns.Count}");
+    foreach (var expected in expectedTypes)
+    {
+        Assert(
+            temporalColumns.TryGetValue(expected.Key, out var column) &&
+            column.IsEditable &&
+            column.StorageDataTypeName == expected.Value,
+            $"MySQL／MariaDB {expected.Key} metadata 不正確；actual={column?.StorageDataTypeName}");
+    }
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "MySQL temporal"),
+            new TableCellInput("event_date", TableCellInputMode.Value, "1000-01-01"),
+            new TableCellInput("recorded_at", TableCellInputMode.Value, "1000-01-01T00:00:00.123"),
+            new TableCellInput("precise_at", TableCellInputMode.Value, "2026-08-30T12:34:56.123456"),
+            new TableCellInput("changed_at", TableCellInputMode.Value, "2030-01-02T03:04:05.12")
+        });
+
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "MySQL temporal");
+    Assert(
+        Convert.ToString(inserted.Values[temporalColumns["event_date"].Ordinal]) == "1000-01-01" &&
+        Convert.ToString(inserted.Values[temporalColumns["recorded_at"].Ordinal]) == "1000-01-01T00:00:00.123" &&
+        Convert.ToString(inserted.Values[temporalColumns["precise_at"].Ordinal]) == "2026-08-30T12:34:56.123456" &&
+        Convert.ToString(inserted.Values[temporalColumns["changed_at"].Ordinal]) == "2030-01-02T03:04:05.12",
+        "MySQL／MariaDB temporal 新增後未保留宣告精度或 canonical 格式");
+
+    var invalidValues = new[]
+    {
+        (Column: "event_date", Value: "0999-12-31"),
+        (Column: "event_date", Value: "2026-08-30T12:00:00"),
+        (Column: "recorded_at", Value: "0999-12-31T23:59:59.999"),
+        (Column: "recorded_at", Value: "2026-08-30T12:34:56.1234"),
+        (Column: "precise_at", Value: "2026-08-30T12:34:56.1234567"),
+        (Column: "changed_at", Value: "2030-01-02T03:04:05.123"),
+        (Column: "changed_at", Value: "2030-01-02T03:04:05.12+08:00")
+    };
+    foreach (var invalid in invalidValues)
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected MySQL temporal"),
+                new TableCellInput(invalid.Column, TableCellInputMode.Value, invalid.Value)
+            }));
+    }
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    Assert(
+        rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected MySQL temporal"),
+        "MySQL／MariaDB temporal 錯誤／會取整的輸入不可留下半筆資料");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[]
+        {
+            new TableCellInput("event_date", TableCellInputMode.Value, "9999-12-31"),
+            new TableCellInput("recorded_at", TableCellInputMode.Value, "9999-12-31T23:59:59.999"),
+            new TableCellInput("precise_at", TableCellInputMode.Value, "9999-12-31T23:59:59.999999"),
+            new TableCellInput("changed_at", TableCellInputMode.Value, "2030-12-31T23:59:59.99")
+        });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "MySQL temporal");
+    Assert(
+        Convert.ToString(updated.Values[temporalColumns["event_date"].Ordinal]) == "9999-12-31" &&
+        Convert.ToString(updated.Values[temporalColumns["recorded_at"].Ordinal]) == "9999-12-31T23:59:59.999" &&
+        Convert.ToString(updated.Values[temporalColumns["precise_at"].Ordinal]) == "9999-12-31T23:59:59.999999" &&
+        Convert.ToString(updated.Values[temporalColumns["changed_at"].Ordinal]) == "2030-12-31T23:59:59.99",
+        "MySQL／MariaDB temporal 修改後未保留範圍邊界與宣告精度");
+
+    var id = Convert.ToUInt64(updated.Values[0], CultureInfo.InvariantCulture);
+    await session.ExecuteAsync(
+        database,
+        $"UPDATE sample SET recorded_at = '2026-08-30 12:34:56.789' WHERE id = {id};");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        updated,
+        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "99") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row =>
+        Convert.ToUInt64(row.Values[0], CultureInfo.InvariantCulture) == id);
+    Assert(
+        Convert.ToString(concurrent.Values[temporalColumns["recorded_at"].Ordinal]) == "2026-08-30T12:34:56.789" &&
+        Convert.ToInt32(concurrent.Values[2], CultureInfo.InvariantCulture) != 99,
+        "MySQL／MariaDB temporal 原值變更時 optimistic concurrency 不可覆寫外部資料");
+
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(
+        afterDelete.Rows.All(row => Convert.ToUInt64(row.Values[0], CultureInfo.InvariantCulture) != id),
+        "MySQL／MariaDB temporal 安全刪除失敗");
 }
 
 static async Task VerifyMariaDbNativeTypesAsync(

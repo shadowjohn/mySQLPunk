@@ -54,6 +54,20 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             timeParameter.MySqlDbType = MySqlDbType.Time;
         }
+        else if (column.ValueKind == TableColumnValueKind.MySqlTemporal &&
+                 parameter is MySqlParameter temporalParameter)
+        {
+            var baseType = TableCellValueConverter.GetMySqlTemporalBaseType(column);
+            temporalParameter.MySqlDbType = baseType switch
+            {
+                "date" => MySqlDbType.Date,
+                "datetime" => MySqlDbType.DateTime,
+                "timestamp" => MySqlDbType.Timestamp,
+                _ => throw new InvalidOperationException(
+                    $"無法建立 MySQL／MariaDB temporal 型別「{column.StorageDataTypeName}」的參數。")
+            };
+            temporalParameter.Scale = TableCellValueConverter.GetMySqlTemporalScale(column);
+        }
         else if (column.ValueKind == TableColumnValueKind.MySqlYear && parameter is MySqlParameter yearParameter)
         {
             yearParameter.MySqlDbType = MySqlDbType.Year;
@@ -126,6 +140,13 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                 new TableCellInput(column.Name, TableCellInputMode.Value, time));
         }
 
+        if (column.ValueKind == TableColumnValueKind.MySqlTemporal && value is string temporal)
+        {
+            return TableCellValueConverter.Parse(
+                column,
+                new TableCellInput(column.Name, TableCellInputMode.Value, temporal));
+        }
+
         if (column.ValueKind == TableColumnValueKind.Guid &&
             column.StorageDataTypeName.Equals("uuid", StringComparison.OrdinalIgnoreCase) &&
             value is Guid uuid)
@@ -141,6 +162,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         var quotedName = QuoteIdentifier(column.Name);
         return column.ValueKind switch
         {
+            TableColumnValueKind.MySqlTemporal => BuildMySqlTemporalSelectExpression(column, quotedName),
             TableColumnValueKind.MySqlTime or
             TableColumnValueKind.ExactDecimal or
             TableColumnValueKind.Guid or
@@ -185,6 +207,20 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
 
     private static string BuildSpatialSridExpression(string parameterName) =>
         $"CAST(SUBSTRING({parameterName}, 6, LOCATE(';', {parameterName}) - 6) AS UNSIGNED)";
+
+    private static string BuildMySqlTemporalSelectExpression(TableColumnInfo column, string quotedName)
+    {
+        var baseType = TableCellValueConverter.GetMySqlTemporalBaseType(column);
+        if (baseType == "date")
+        {
+            return $"DATE_FORMAT({quotedName}, '%Y-%m-%d') AS {quotedName}";
+        }
+
+        var scale = TableCellValueConverter.GetMySqlTemporalScale(column);
+        var formatted = $"DATE_FORMAT({quotedName}, '%Y-%m-%dT%H:%i:%s.%f')";
+        var length = scale == 0 ? 19 : 20 + scale;
+        return $"LEFT({formatted}, {length}) AS {quotedName}";
+    }
 
     private static string BuildSpatialWktExpression(string parameterName) =>
         $"SUBSTRING({parameterName}, LOCATE(';', {parameterName}) + 1)";
@@ -314,8 +350,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             "float" or "double" or "real" => TableColumnValueKind.FloatingPoint,
             "bool" or "boolean" => TableColumnValueKind.Boolean,
             "bit" => TableColumnValueKind.UnsignedInteger,
-            "date" => TableColumnValueKind.Date,
-            "datetime" or "timestamp" => TableColumnValueKind.DateTime,
+            "date" or "datetime" or "timestamp" => TableColumnValueKind.MySqlTemporal,
             "time" => TableColumnValueKind.MySqlTime,
             "json" => TableColumnValueKind.Json,
             "uuid" => TableColumnValueKind.Guid,

@@ -13,6 +13,7 @@ public enum TableColumnValueKind
     DateTime,
     DateTimeOffset,
     Time,
+    MySqlTemporal,
     MySqlTime,
     MySqlYear,
     TimeWithTimeZone,

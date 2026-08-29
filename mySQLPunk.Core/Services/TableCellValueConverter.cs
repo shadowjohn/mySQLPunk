@@ -63,6 +63,7 @@ public static class TableCellValueConverter
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind),
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
+                TableColumnValueKind.MySqlTemporal => ParseMySqlTemporal(column, input.Text),
                 TableColumnValueKind.MySqlTime => ParseMySqlTime(column, input.Text),
                 TableColumnValueKind.MySqlYear => ParseMySqlYear(input.Text),
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
@@ -1006,6 +1007,108 @@ public static class TableCellValueConverter
         var ticks = ((long)hours * 3600 + minutes * 60L + seconds) * TimeSpan.TicksPerSecond +
                     microseconds * 10L;
         return TimeSpan.FromTicks(isNegative ? -ticks : ticks);
+    }
+
+    private static DateTime ParseMySqlTemporal(TableColumnInfo column, string text)
+    {
+        var baseType = GetMySqlTemporalBaseType(column);
+        var trimmed = text.Trim();
+        if (baseType == "date")
+        {
+            if (!DateTime.TryParseExact(
+                    trimmed,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var date) ||
+                date < new DateTime(1000, 1, 1))
+            {
+                throw new FormatException("MySQL／MariaDB DATE 必須使用 yyyy-MM-dd，且介於 1000-01-01 與 9999-12-31。");
+            }
+
+            return DateTime.SpecifyKind(date, DateTimeKind.Unspecified);
+        }
+
+        var fractionSeparator = trimmed.IndexOf('.');
+        var dateTimeText = fractionSeparator < 0 ? trimmed : trimmed[..fractionSeparator];
+        var fraction = fractionSeparator < 0 ? string.Empty : trimmed[(fractionSeparator + 1)..];
+        if (fractionSeparator >= 0 &&
+            (fraction.Length == 0 || fraction.Length > 6 || fraction.Any(character => !char.IsAsciiDigit(character))))
+        {
+            throw new FormatException("MySQL／MariaDB DATETIME／TIMESTAMP 小數秒必須包含 1–6 位十進位數字。");
+        }
+
+        if (!DateTime.TryParseExact(
+                dateTimeText,
+                new[] { "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss" },
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var dateTime))
+        {
+            throw new FormatException(
+                "MySQL／MariaDB DATETIME／TIMESTAMP 必須使用 yyyy-MM-ddTHH:mm:ss[.ffffff]，不可包含 offset 或時區。");
+        }
+
+        var scale = GetMySqlTemporalScale(column);
+        if (fraction.Length > scale)
+        {
+            throw new FormatException($"MySQL／MariaDB {column.StorageDataTypeName} 最多接受 {scale} 位小數秒，輸入值會被取整。");
+        }
+
+        if (baseType == "datetime" && dateTime < new DateTime(1000, 1, 1))
+        {
+            throw new FormatException("MySQL／MariaDB DATETIME 必須介於 1000-01-01 與 9999-12-31。");
+        }
+
+        var microseconds = fraction.Length == 0
+            ? 0
+            : int.Parse(fraction.PadRight(6, '0'), NumberStyles.None, CultureInfo.InvariantCulture);
+        return DateTime.SpecifyKind(dateTime.AddTicks(microseconds * 10L), DateTimeKind.Unspecified);
+    }
+
+    public static byte GetMySqlTemporalScale(TableColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        var baseType = GetMySqlTemporalBaseType(column);
+        if (baseType == "date")
+        {
+            return 0;
+        }
+
+        if (baseType is not ("datetime" or "timestamp"))
+        {
+            throw new InvalidOperationException($"無法辨識 MySQL／MariaDB temporal 型別：{column.StorageDataTypeName}");
+        }
+
+        var storageType = column.StorageDataTypeName.Trim();
+        var openingParenthesis = storageType.IndexOf('(');
+        if (openingParenthesis < 0)
+        {
+            return 0;
+        }
+
+        var closingParenthesis = storageType.IndexOf(')', openingParenthesis + 1);
+        if (closingParenthesis != storageType.Length - 1 ||
+            !byte.TryParse(
+                storageType[(openingParenthesis + 1)..closingParenthesis],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var scale) ||
+            scale > 6)
+        {
+            throw new InvalidOperationException(
+                $"MySQL／MariaDB {baseType} 欄位缺少有效的 0–6 小數秒精度 metadata。");
+        }
+
+        return scale;
+    }
+
+    public static string GetMySqlTemporalBaseType(TableColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        var storageType = column.StorageDataTypeName.Trim();
+        var openingParenthesis = storageType.IndexOf('(');
+        return (openingParenthesis < 0 ? storageType : storageType[..openingParenthesis]).ToLowerInvariant();
     }
 
     private static int GetMySqlTimeFractionalPrecision(string dataTypeName)
