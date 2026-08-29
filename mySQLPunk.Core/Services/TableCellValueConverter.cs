@@ -92,6 +92,7 @@ public static class TableCellValueConverter
                     input.Text,
                     "PostgreSQL",
                     column.DataTypeName),
+                TableColumnValueKind.SqlServerTemporal => ParseSqlServerTemporal(column, input.Text),
                 TableColumnValueKind.SqlServerHierarchyId => ParseServerValidatedText(
                     input.Text,
                     "SQL Server",
@@ -362,7 +363,7 @@ public static class TableCellValueConverter
                 RequireNoVariantCollation(baseType, collationMetadata);
                 scale = ParseVariantScale(baseType, arguments);
                 var dateTime2 = ParseSqlServerVariantDateTime(valueText);
-                EnsureVariantFractionalScale(dateTime2.Ticks, scale.Value, baseType);
+                EnsureSqlServerFractionalScale(dateTime2.Ticks, scale.Value, baseType);
                 value = dateTime2;
                 canonicalValue = dateTime2.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture);
                 break;
@@ -379,7 +380,7 @@ public static class TableCellValueConverter
                     offsetText,
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind);
-                EnsureVariantFractionalScale(dateTimeOffset.Ticks, scale.Value, baseType);
+                EnsureSqlServerFractionalScale(dateTimeOffset.Ticks, scale.Value, baseType);
                 value = dateTimeOffset;
                 canonicalValue = dateTimeOffset.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture);
                 break;
@@ -391,7 +392,7 @@ public static class TableCellValueConverter
                 {
                     throw new OverflowException("SQL Server time 必須介於 00:00:00 與 23:59:59.9999999。");
                 }
-                EnsureVariantFractionalScale(((TimeSpan)value).Ticks, scale.Value, baseType);
+                EnsureSqlServerFractionalScale(((TimeSpan)value).Ticks, scale.Value, baseType);
                 canonicalValue = ((TimeSpan)value).ToString("c", CultureInfo.InvariantCulture);
                 break;
             case "uniqueidentifier":
@@ -535,7 +536,7 @@ public static class TableCellValueConverter
             : throw new FormatException($"sql_variant 的 {baseType} scale 必須介於 0–7。");
     }
 
-    private static void EnsureVariantFractionalScale(long ticks, byte scale, string baseType)
+    private static void EnsureSqlServerFractionalScale(long ticks, byte scale, string baseType)
     {
         var tickQuantum = (long)Math.Pow(10, 7 - scale);
         if (ticks % tickQuantum != 0)
@@ -590,6 +591,159 @@ public static class TableCellValueConverter
             out var value)
             ? value
             : throw new FormatException("SQL Server 日期時間必須包含日期與時間，且不可包含 offset 或時區。");
+
+    private static object ParseSqlServerTemporal(TableColumnInfo column, string text)
+    {
+        var baseType = GetSqlServerTemporalBaseType(column);
+        switch (baseType)
+        {
+            case "date":
+                return DateTime.TryParseExact(
+                    text.Trim(),
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var date)
+                    ? date
+                    : throw new FormatException("SQL Server date 必須使用 yyyy-MM-dd 格式，不可包含時間。");
+            case "datetime":
+                {
+                    var dateTime = ParseSqlServerVariantDateTime(text);
+                    try
+                    {
+                        var canonical = new SqlDateTime(dateTime).Value;
+                        if (canonical.Ticks != dateTime.Ticks)
+                        {
+                            throw new FormatException(
+                                "SQL Server datetime 只能無損保存 .000、.003、.007 秒循環精度；輸入值會被取整。");
+                        }
+                    }
+                    catch (SqlTypeException exception)
+                    {
+                        throw new FormatException("SQL Server datetime 必須介於 1753-01-01 與 9999-12-31。", exception);
+                    }
+
+                    return dateTime;
+                }
+            case "smalldatetime":
+                {
+                    var dateTime = ParseSqlServerVariantDateTime(text);
+                    var minimum = new DateTime(1900, 1, 1);
+                    var maximum = new DateTime(2079, 6, 6, 23, 59, 0);
+                    if (dateTime < minimum || dateTime > maximum)
+                    {
+                        throw new FormatException(
+                            "SQL Server smalldatetime 必須介於 1900-01-01 00:00 與 2079-06-06 23:59。");
+                    }
+                    if (dateTime.Ticks % TimeSpan.TicksPerMinute != 0)
+                    {
+                        throw new FormatException("SQL Server smalldatetime 只能無損保存整分鐘，秒與小數秒必須為 0。");
+                    }
+
+                    return dateTime;
+                }
+            case "datetime2":
+                {
+                    var dateTime = ParseSqlServerVariantDateTime(text);
+                    var scale = GetSqlServerTemporalScale(column);
+                    EnsureSqlServerFractionalScale(dateTime.Ticks, scale, baseType);
+                    return dateTime;
+                }
+            case "datetimeoffset":
+                {
+                    var dateTimeOffset = ParseSqlServerDateTimeOffset(text);
+                    var scale = GetSqlServerTemporalScale(column);
+                    EnsureSqlServerFractionalScale(dateTimeOffset.Ticks, scale, baseType);
+                    return dateTimeOffset;
+                }
+            case "time":
+                {
+                    if (!TimeSpan.TryParse(text.Trim(), CultureInfo.InvariantCulture, out var time) ||
+                        time < TimeSpan.Zero ||
+                        time >= TimeSpan.FromDays(1))
+                    {
+                        throw new FormatException("SQL Server time 必須是 00:00:00 到 23:59:59.9999999 的純時間。");
+                    }
+
+                    var scale = GetSqlServerTemporalScale(column);
+                    EnsureSqlServerFractionalScale(time.Ticks, scale, baseType);
+                    return time;
+                }
+            default:
+                throw new FormatException($"不支援的 SQL Server temporal 型別：{column.StorageDataTypeName}。");
+        }
+    }
+
+    private static DateTimeOffset ParseSqlServerDateTimeOffset(string text)
+    {
+        var trimmed = text.Trim();
+        var offsetFormats = new[]
+        {
+            "yyyy-MM-dd'T'HH:mm:sszzz",
+            "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz",
+            "yyyy-MM-dd HH:mm:sszzz",
+            "yyyy-MM-dd HH:mm:ss.FFFFFFFzzz"
+        };
+        if (DateTimeOffset.TryParseExact(
+                trimmed,
+                offsetFormats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var value))
+        {
+            return value;
+        }
+
+        var utcFormats = new[]
+        {
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'",
+            "yyyy-MM-dd HH:mm:ss'Z'",
+            "yyyy-MM-dd HH:mm:ss.FFFFFFF'Z'"
+        };
+        return DateTimeOffset.TryParseExact(
+            trimmed,
+            utcFormats,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out value)
+            ? value
+            : throw new FormatException(
+                "SQL Server datetimeoffset 必須包含明確的 ±HH:mm offset 或 Z，不可使用本機時區推測。");
+    }
+
+    public static byte GetSqlServerTemporalScale(TableColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        var baseType = GetSqlServerTemporalBaseType(column);
+        if (baseType is not ("datetime2" or "datetimeoffset" or "time"))
+        {
+            throw new InvalidOperationException($"SQL Server {baseType} 沒有可設定的小數秒 scale。");
+        }
+
+        var storageType = column.StorageDataTypeName.Trim();
+        var openingParenthesis = storageType.LastIndexOf('(');
+        if (openingParenthesis < 0 || !storageType.EndsWith(')') ||
+            !byte.TryParse(
+                storageType[(openingParenthesis + 1)..^1],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var scale) ||
+            scale > 7)
+        {
+            throw new InvalidOperationException(
+                $"SQL Server {baseType} 欄位缺少有效的 0–7 小數秒 scale metadata。");
+        }
+
+        return scale;
+    }
+
+    private static string GetSqlServerTemporalBaseType(TableColumnInfo column)
+    {
+        var storageType = column.StorageDataTypeName.Trim();
+        var openingParenthesis = storageType.IndexOf('(');
+        return (openingParenthesis < 0 ? storageType : storageType[..openingParenthesis]).ToLowerInvariant();
+    }
 
     private static double ParseFiniteDouble(string text)
     {

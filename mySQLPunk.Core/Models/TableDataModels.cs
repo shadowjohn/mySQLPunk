@@ -24,6 +24,7 @@ public enum TableColumnValueKind
     PostgreSqlArray,
     PostgreSqlGeometric,
     PostgreSqlServerValidatedText,
+    SqlServerTemporal,
     SqlServerHierarchyId,
     SqlServerVariant,
     Spatial,

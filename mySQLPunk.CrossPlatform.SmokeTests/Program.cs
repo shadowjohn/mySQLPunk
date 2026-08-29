@@ -1369,6 +1369,97 @@ static async Task TableDataEditingAsync()
         Assert(
             TableCellValueConverter.IsStructuredTextTooLargeToEdit(serverTextColumn, oversizedServerText),
             "既有 PostgreSQL server-validated text 超過 1 MiB 時應維持唯讀");
+        var sqlDateColumn = new TableColumnInfo(
+            0, "event_date", "date", true, false, false, false, TableColumnValueKind.SqlServerTemporal);
+        var sqlDateTimeColumn = sqlDateColumn with
+        {
+            Name = "legacy_time",
+            DataTypeName = "datetime",
+            StorageDataTypeName = "datetime"
+        };
+        var sqlSmallDateTimeColumn = sqlDateColumn with
+        {
+            Name = "minute_time",
+            DataTypeName = "smalldatetime",
+            StorageDataTypeName = "smalldatetime"
+        };
+        var sqlDateTime2Column = sqlDateColumn with
+        {
+            Name = "precise_time",
+            DataTypeName = "datetime2(3)",
+            StorageDataTypeName = "datetime2(3)"
+        };
+        var sqlDateTimeOffsetColumn = sqlDateColumn with
+        {
+            Name = "offset_time",
+            DataTypeName = "datetimeoffset(3)",
+            StorageDataTypeName = "datetimeoffset(3)"
+        };
+        var sqlTimeColumn = sqlDateColumn with
+        {
+            Name = "clock_time",
+            DataTypeName = "time(4)",
+            StorageDataTypeName = "time(4)"
+        };
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlDateColumn,
+                new TableCellInput("event_date", TableCellInputMode.Value, "0001-01-01")) is DateTime,
+            "SQL Server date 應支援完整 0001–9999 範圍");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlDateTimeColumn,
+                new TableCellInput("legacy_time", TableCellInputMode.Value, "1753-01-01T00:00:00.000")) is DateTime,
+            "SQL Server datetime 應接受可無損保存的下界");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlSmallDateTimeColumn,
+                new TableCellInput("minute_time", TableCellInputMode.Value, "2079-06-06T23:59:00")) is DateTime,
+            "SQL Server smalldatetime 應接受整分鐘上界");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlDateTime2Column,
+                new TableCellInput("precise_time", TableCellInputMode.Value, "0001-01-01T00:00:00.123")) is DateTime,
+            "SQL Server datetime2(3) 應保留毫秒");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlDateTimeOffsetColumn,
+                new TableCellInput("offset_time", TableCellInputMode.Value, "2026-08-30T12:34:56.789+14:00")) is DateTimeOffset,
+            "SQL Server datetimeoffset(3) 應保留明確 offset");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlTimeColumn,
+                new TableCellInput("clock_time", TableCellInputMode.Value, "23:59:59.1234")) is TimeSpan,
+            "SQL Server time(4) 應保留四位小數秒");
+        Assert(TableCellValueConverter.GetSqlServerTemporalScale(sqlDateTime2Column) == 3, "datetime2 scale metadata 應為 3");
+        Assert(TableCellValueConverter.GetSqlServerTemporalScale(sqlTimeColumn) == 4, "time scale metadata 應為 4");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlDateColumn,
+            new TableCellInput("event_date", TableCellInputMode.Value, "2026-08-30T12:00:00")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlDateTimeColumn,
+            new TableCellInput("legacy_time", TableCellInputMode.Value, "1752-12-31T23:59:59")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlDateTimeColumn,
+            new TableCellInput("legacy_time", TableCellInputMode.Value, "2026-08-30T12:34:56.002")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlSmallDateTimeColumn,
+            new TableCellInput("minute_time", TableCellInputMode.Value, "2026-08-30T12:34:30")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlDateTime2Column,
+            new TableCellInput("precise_time", TableCellInputMode.Value, "2026-08-30T12:34:56.1234")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlDateTimeOffsetColumn,
+            new TableCellInput("offset_time", TableCellInputMode.Value, "2026-08-30T12:34:56.789")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlDateTimeOffsetColumn,
+            new TableCellInput("offset_time", TableCellInputMode.Value, "2026-08-30T12:34:56.7891+08:00")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlTimeColumn,
+            new TableCellInput("clock_time", TableCellInputMode.Value, "23:59:59.12345")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlTimeColumn,
+            new TableCellInput("clock_time", TableCellInputMode.Value, "1.00:00:00")));
         var hierarchyIdColumn = new TableColumnInfo(
             0,
             "path",
@@ -1890,7 +1981,7 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE dbo.short_label FROM nvarchar(30) NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.positive_count FROM int NOT NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.precise_amount FROM decimal(18,6) NULL;");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
         await session.ExecuteAsync(
@@ -1919,6 +2010,7 @@ static async Task SqlServerLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE dbo.sample SET name = N'Concurrent' WHERE id = {id};");
+        await VerifySqlServerTemporalTypesAsync(session, database, table!);
     }
     finally
     {
@@ -1926,6 +2018,154 @@ static async Task SqlServerLiveRoundTripAsync()
             "master",
             $"IF DB_ID(N'{database}') IS NOT NULL BEGIN ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}]; END");
     }
+}
+
+static async Task VerifySqlServerTemporalTypesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var temporalColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.SqlServerTemporal)
+        .ToDictionary(column => column.Name, StringComparer.Ordinal);
+    var expectedTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["event_date"] = "date",
+        ["legacy_time"] = "datetime",
+        ["minute_time"] = "smalldatetime",
+        ["millisecond_time"] = "datetime2(3)",
+        ["precise_time"] = "datetime2(7)",
+        ["offset_time"] = "datetimeoffset(3)",
+        ["clock_time"] = "time(4)"
+    };
+    Assert(
+        temporalColumns.Count == expectedTypes.Count,
+        $"SQL Server temporal metadata 未完整辨識；actual={temporalColumns.Count}");
+    foreach (var expected in expectedTypes)
+    {
+        Assert(
+            temporalColumns.TryGetValue(expected.Key, out var column) &&
+            column.IsEditable &&
+            column.StorageDataTypeName == expected.Value,
+            $"SQL Server {expected.Key} metadata 不正確；actual={column?.StorageDataTypeName}");
+    }
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "SQL temporal"),
+            new TableCellInput("event_date", TableCellInputMode.Value, "0001-01-01"),
+            new TableCellInput("legacy_time", TableCellInputMode.Value, "1753-01-01T00:00:00.000"),
+            new TableCellInput("minute_time", TableCellInputMode.Value, "2079-06-06T23:59:00"),
+            new TableCellInput("millisecond_time", TableCellInputMode.Value, "0001-01-01T00:00:00.123"),
+            new TableCellInput("precise_time", TableCellInputMode.Value, "2026-08-30T12:34:56.1234567"),
+            new TableCellInput("offset_time", TableCellInputMode.Value, "2026-08-30T12:34:56.789+14:00"),
+            new TableCellInput("clock_time", TableCellInputMode.Value, "23:59:59.1234")
+        });
+
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "SQL temporal");
+    Assert(
+        Convert.ToDateTime(inserted.Values[temporalColumns["event_date"].Ordinal], CultureInfo.InvariantCulture) ==
+        new DateTime(1, 1, 1),
+        "SQL Server date 應保留 0001 年下界");
+    Assert(
+        Convert.ToDateTime(inserted.Values[temporalColumns["millisecond_time"].Ordinal], CultureInfo.InvariantCulture) ==
+        new DateTime(1, 1, 1).AddMilliseconds(123),
+        "SQL Server datetime2(3) 不可被 legacy datetime 的 1753 下界或 3.33ms 精度截斷");
+    Assert(
+        Convert.ToDateTime(inserted.Values[temporalColumns["precise_time"].Ordinal], CultureInfo.InvariantCulture).Ticks %
+        TimeSpan.TicksPerSecond == 1_234_567,
+        "SQL Server datetime2(7) 應保留 100ns 精度");
+    Assert(
+        inserted.Values[temporalColumns["offset_time"].Ordinal] is DateTimeOffset insertedOffset &&
+        insertedOffset.Offset == TimeSpan.FromHours(14) &&
+        insertedOffset.Ticks % TimeSpan.TicksPerSecond == 7_890_000,
+        "SQL Server datetimeoffset(3) 應保留毫秒與 +14:00 offset");
+    Assert(
+        inserted.Values[temporalColumns["clock_time"].Ordinal] is TimeSpan insertedTime &&
+        insertedTime == new TimeSpan(0, 23, 59, 59, 123).Add(TimeSpan.FromTicks(4_000)),
+        "SQL Server time(4) 應保留四位小數秒");
+
+    var invalidValues = new[]
+    {
+        (Column: "event_date", Value: "2026-08-30T12:00:00"),
+        (Column: "legacy_time", Value: "1752-12-31T23:59:59"),
+        (Column: "legacy_time", Value: "2026-08-30T12:34:56.002"),
+        (Column: "minute_time", Value: "2026-08-30T12:34:30"),
+        (Column: "minute_time", Value: "2080-01-01T00:00:00"),
+        (Column: "millisecond_time", Value: "2026-08-30T12:34:56.1234"),
+        (Column: "offset_time", Value: "2026-08-30T12:34:56.789"),
+        (Column: "offset_time", Value: "2026-08-30T12:34:56.7891+08:00"),
+        (Column: "clock_time", Value: "23:59:59.12345"),
+        (Column: "clock_time", Value: "1.00:00:00")
+    };
+    foreach (var invalid in invalidValues)
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected SQL temporal"),
+                new TableCellInput(invalid.Column, TableCellInputMode.Value, invalid.Value)
+            }));
+    }
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    Assert(
+        rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected SQL temporal"),
+        "SQL Server temporal 錯誤／會取整的輸入不可留下半筆資料");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[]
+        {
+            new TableCellInput("event_date", TableCellInputMode.Value, "9999-12-31"),
+            new TableCellInput("legacy_time", TableCellInputMode.Value, "9999-12-31T23:59:59.997"),
+            new TableCellInput("minute_time", TableCellInputMode.Value, "1900-01-01T00:00:00"),
+            new TableCellInput("millisecond_time", TableCellInputMode.Value, "9999-12-31T23:59:59.999"),
+            new TableCellInput("precise_time", TableCellInputMode.Value, "9999-12-31T23:59:59.9999999"),
+            new TableCellInput("offset_time", TableCellInputMode.Value, "2026-08-30T01:02:03.456Z"),
+            new TableCellInput("clock_time", TableCellInputMode.Value, "00:00:00.0001")
+        });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "SQL temporal");
+    Assert(
+        Convert.ToDateTime(updated.Values[temporalColumns["event_date"].Ordinal], CultureInfo.InvariantCulture) ==
+        new DateTime(9999, 12, 31),
+        "SQL Server date 修改後未保留 9999 年上界");
+    Assert(
+        updated.Values[temporalColumns["offset_time"].Ordinal] is DateTimeOffset updatedOffset &&
+        updatedOffset.Offset == TimeSpan.Zero &&
+        updatedOffset.Ticks % TimeSpan.TicksPerSecond == 4_560_000,
+        "SQL Server datetimeoffset 修改後未保留 Z 與 millisecond");
+
+    var id = Convert.ToInt64(updated.Values[0]);
+    await session.ExecuteAsync(
+        database,
+        $"UPDATE dbo.sample SET millisecond_time = CAST('2026-08-30T12:34:56.789' AS datetime2(3)) WHERE id = {id};");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        updated,
+        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "99") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row => Convert.ToInt64(row.Values[0]) == id);
+    Assert(
+        Convert.ToDateTime(
+            concurrent.Values[temporalColumns["millisecond_time"].Ordinal],
+            CultureInfo.InvariantCulture).Ticks % TimeSpan.TicksPerSecond == 7_890_000 &&
+        Convert.ToInt32(concurrent.Values[2]) != 99,
+        "SQL Server temporal 原值變更時 optimistic concurrency 不可覆寫外部資料");
+
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0]) != id), "SQL Server temporal 安全刪除失敗");
 }
 
 static async Task VerifySafeTableEditingAsync(

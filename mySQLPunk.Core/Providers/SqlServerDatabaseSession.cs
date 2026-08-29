@@ -63,6 +63,26 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         {
             variantParameter.SqlDbType = SqlDbType.Variant;
         }
+        else if (column.ValueKind == TableColumnValueKind.SqlServerTemporal &&
+                 parameter is SqlParameter temporalParameter)
+        {
+            var baseType = GetBaseTypeName(column.StorageDataTypeName);
+            temporalParameter.SqlDbType = baseType switch
+            {
+                "date" => SqlDbType.Date,
+                "datetime" => SqlDbType.DateTime,
+                "smalldatetime" => SqlDbType.SmallDateTime,
+                "datetime2" => SqlDbType.DateTime2,
+                "datetimeoffset" => SqlDbType.DateTimeOffset,
+                "time" => SqlDbType.Time,
+                _ => throw new InvalidOperationException(
+                    $"無法建立 SQL Server temporal 型別「{column.StorageDataTypeName}」的參數。")
+            };
+            if (baseType is "datetime2" or "datetimeoffset" or "time")
+            {
+                temporalParameter.Scale = TableCellValueConverter.GetSqlServerTemporalScale(column);
+            }
+        }
         else if (parameter is SqlParameter legacyParameter)
         {
             legacyParameter.SqlDbType = GetBaseTypeName(column.StorageDataTypeName) switch
@@ -591,10 +611,8 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         "money" or "smallmoney" => TableColumnValueKind.Decimal,
         "float" or "real" => TableColumnValueKind.FloatingPoint,
         "bit" => TableColumnValueKind.Boolean,
-        "date" => TableColumnValueKind.Date,
-        "datetime" or "datetime2" or "smalldatetime" => TableColumnValueKind.DateTime,
-        "datetimeoffset" => TableColumnValueKind.DateTimeOffset,
-        "time" => TableColumnValueKind.Time,
+        "date" or "datetime" or "datetime2" or "smalldatetime" or "datetimeoffset" or "time" =>
+            TableColumnValueKind.SqlServerTemporal,
         "uniqueidentifier" => TableColumnValueKind.Guid,
         "xml" => TableColumnValueKind.Xml,
         "hierarchyid" => TableColumnValueKind.SqlServerHierarchyId,
