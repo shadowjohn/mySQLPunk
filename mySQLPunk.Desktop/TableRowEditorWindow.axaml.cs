@@ -219,18 +219,18 @@ public sealed partial class TableRowEditorWindow : Window
     private static string BuildWatermark(TableColumnInfo column) => column.ValueKind switch
     {
         TableColumnValueKind.Boolean => "true / false / 1 / 0",
-        TableColumnValueKind.String when column.DataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase) =>
+        TableColumnValueKind.String when column.StorageDataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase) =>
             "請輸入欄位宣告的 ENUM 值之一",
-        TableColumnValueKind.String when column.DataTypeName.StartsWith("set(", StringComparison.OrdinalIgnoreCase) =>
+        TableColumnValueKind.String when column.StorageDataTypeName.StartsWith("set(", StringComparison.OrdinalIgnoreCase) =>
             "以逗號分隔欄位宣告的 SET 值",
-        TableColumnValueKind.UnsignedInteger when column.DataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) =>
+        TableColumnValueKind.UnsignedInteger when column.StorageDataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) =>
             "非負十進位整數（依 BIT 寬度限制）",
-        TableColumnValueKind.UnsignedInteger when column.DataTypeName.Equals("xid8", StringComparison.OrdinalIgnoreCase) =>
+        TableColumnValueKind.UnsignedInteger when column.StorageDataTypeName.Equals("xid8", StringComparison.OrdinalIgnoreCase) =>
             $"0–{ulong.MaxValue}（十進位）",
         TableColumnValueKind.UnsignedInteger when
-            column.DataTypeName.Equals("oid", StringComparison.OrdinalIgnoreCase) ||
-            column.DataTypeName.Equals("xid", StringComparison.OrdinalIgnoreCase) ||
-            column.DataTypeName.Equals("cid", StringComparison.OrdinalIgnoreCase) =>
+            column.StorageDataTypeName.Equals("oid", StringComparison.OrdinalIgnoreCase) ||
+            column.StorageDataTypeName.Equals("xid", StringComparison.OrdinalIgnoreCase) ||
+            column.StorageDataTypeName.Equals("cid", StringComparison.OrdinalIgnoreCase) =>
             $"0–{uint.MaxValue}（十進位）",
         TableColumnValueKind.Date => "yyyy-MM-dd",
         TableColumnValueKind.DateTime => "yyyy-MM-dd HH:mm:ss",
@@ -244,7 +244,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.LogSequenceNumber => "0/0（WAL LSN 十六進位）",
         TableColumnValueKind.FullTextVector => "'lexeme':1A,2B（tsvector）",
         TableColumnValueKind.FullTextQuery => "'lexeme':A & !'other':*（tsquery）",
-        TableColumnValueKind.PostgreSqlRange when column.DataTypeName.EndsWith(
+        TableColumnValueKind.PostgreSqlRange when column.StorageDataTypeName.EndsWith(
             "multirange",
             StringComparison.OrdinalIgnoreCase) => "{[1,10),[20,30)}（最多 1 MiB 字元）",
         TableColumnValueKind.PostgreSqlRange => "[1,10) 或 empty（最多 1 MiB 字元）",
@@ -257,14 +257,14 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",
         TableColumnValueKind.Xml => "有效 XML（最多 1 MiB 字元，禁止 DTD）",
         TableColumnValueKind.NetworkAddress => BuildNetworkWatermark(column),
-        TableColumnValueKind.BitString => column.DataTypeName.StartsWith("bit varying", StringComparison.OrdinalIgnoreCase)
+        TableColumnValueKind.BitString => column.StorageDataTypeName.StartsWith("bit varying", StringComparison.OrdinalIgnoreCase)
             ? "0/1 bit string（不可超過欄位長度）"
             : "0/1 bit string（必須符合欄位長度）",
         TableColumnValueKind.Binary => "0x00FF（二進位十六進位，最多 1 MiB）",
         _ => string.Empty
     };
 
-    private static string BuildNetworkWatermark(TableColumnInfo column) => column.DataTypeName.ToLowerInvariant() switch
+    private static string BuildNetworkWatermark(TableColumnInfo column) => column.StorageDataTypeName.ToLowerInvariant() switch
     {
         "inet" => "192.0.2.10/24 或 2001:db8::10/64",
         "cidr" => "192.0.2.0/24 或 2001:db8::/32",
@@ -274,7 +274,7 @@ public sealed partial class TableRowEditorWindow : Window
     };
 
     private static string BuildGeometricWatermark(TableColumnInfo column) =>
-        column.DataTypeName.ToLowerInvariant() switch
+        column.StorageDataTypeName.ToLowerInvariant() switch
         {
             "point" => "(1.5,2.5)",
             "line" => "{1,2,-3}",
@@ -287,7 +287,7 @@ public sealed partial class TableRowEditorWindow : Window
         };
 
     private static string BuildPostgreSqlServerTextWatermark(TableColumnInfo column) =>
-        column.DataTypeName.ToLowerInvariant() switch
+        column.StorageDataTypeName.ToLowerInvariant() switch
         {
             "jsonpath" => "$.store.book[*] ? (@.price < 10)",
             "pg_snapshot" or "txid_snapshot" => "xmin:xmax:xip_list",
@@ -295,7 +295,7 @@ public sealed partial class TableRowEditorWindow : Window
             "ltree" => "Top.Science.Astronomy",
             "lquery" => "Top.*{1,2}.Astronomy",
             "ltxtquery" => "Science & Astronomy",
-            _ when column.DataTypeName.StartsWith("reg", StringComparison.OrdinalIgnoreCase) =>
+            _ when column.StorageDataTypeName.StartsWith("reg", StringComparison.OrdinalIgnoreCase) =>
                 "物件名稱或 OID（由 PostgreSQL 驗證）",
             _ => "由 PostgreSQL 驗證格式（最多 1 MiB 字元）"
         };

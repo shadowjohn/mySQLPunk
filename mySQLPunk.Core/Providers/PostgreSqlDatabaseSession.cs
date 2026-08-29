@@ -39,7 +39,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     {
         if (column.ValueKind == TableColumnValueKind.UnsignedInteger && parameter is NpgsqlParameter unsignedParameter)
         {
-            unsignedParameter.NpgsqlDbType = column.DataTypeName.ToLowerInvariant() switch
+            unsignedParameter.NpgsqlDbType = column.StorageDataTypeName.ToLowerInvariant() switch
             {
                 "oid" => NpgsqlDbType.Oid,
                 "xid" => NpgsqlDbType.Xid,
@@ -55,7 +55,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         if (column.ValueKind == TableColumnValueKind.Json && parameter is NpgsqlParameter npgsqlParameter)
         {
             npgsqlParameter.NpgsqlDbType = string.Equals(
-                column.DataTypeName,
+                column.StorageDataTypeName,
                 "jsonb",
                 StringComparison.OrdinalIgnoreCase)
                 ? NpgsqlDbType.Jsonb
@@ -67,7 +67,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         }
         else if (column.ValueKind == TableColumnValueKind.NetworkAddress && parameter is NpgsqlParameter networkParameter)
         {
-            networkParameter.NpgsqlDbType = column.DataTypeName.ToLowerInvariant() switch
+            networkParameter.NpgsqlDbType = column.StorageDataTypeName.ToLowerInvariant() switch
             {
                 "inet" => NpgsqlDbType.Inet,
                 "cidr" => NpgsqlDbType.Cidr,
@@ -78,7 +78,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         }
         else if (column.ValueKind == TableColumnValueKind.BitString && parameter is NpgsqlParameter bitParameter)
         {
-            bitParameter.NpgsqlDbType = column.DataTypeName.StartsWith(
+            bitParameter.NpgsqlDbType = column.StorageDataTypeName.StartsWith(
                 "bit varying",
                 StringComparison.OrdinalIgnoreCase)
                 ? NpgsqlDbType.Varbit
@@ -142,7 +142,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         if (column.ValueKind == TableColumnValueKind.UnsignedInteger && value is not null)
         {
             var unsigned = Convert.ToUInt64(value, System.Globalization.CultureInfo.InvariantCulture);
-            if (column.DataTypeName.Equals("xid8", StringComparison.OrdinalIgnoreCase))
+            if (column.StorageDataTypeName.Equals("xid8", StringComparison.OrdinalIgnoreCase))
             {
                 return unsigned;
             }
@@ -157,7 +157,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 : base.PrepareParameterValue(column, value);
         }
 
-        return column.DataTypeName.ToLowerInvariant() switch
+        return column.StorageDataTypeName.ToLowerInvariant() switch
         {
             "inet" => new NpgsqlInet(text),
             "cidr" => new NpgsqlCidr(text),
@@ -170,7 +170,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
     {
         if (column.ValueKind == TableColumnValueKind.Json &&
-            string.Equals(column.DataTypeName, "json", StringComparison.OrdinalIgnoreCase))
+            string.Equals(column.StorageDataTypeName, "json", StringComparison.OrdinalIgnoreCase))
         {
             return $"{QuoteIdentifier(column.Name)}::jsonb = CAST({parameterName} AS jsonb)";
         }
@@ -311,7 +311,13 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                    c.is_generated,
                    c.column_default,
                    c.character_maximum_length,
-                   pg_catalog.format_type(a.atttypid, a.atttypmod)
+                   pg_catalog.format_type(a.atttypid, a.atttypmod),
+                   c.domain_schema,
+                   c.domain_name,
+                   CASE WHEN declared_ty.typtype = 'd'
+                       THEN pg_catalog.format_type(declared_ty.typbasetype, declared_ty.typtypmod)
+                       ELSE pg_catalog.format_type(a.atttypid, a.atttypmod)
+                   END AS storage_type
             FROM information_schema.columns c
             JOIN pg_catalog.pg_namespace n ON n.nspname = c.table_schema
             JOIN pg_catalog.pg_class rel
@@ -322,6 +328,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
              AND a.attname = c.column_name
              AND a.attnum > 0
              AND NOT a.attisdropped
+            JOIN pg_catalog.pg_type declared_ty ON declared_ty.oid = a.atttypid
             WHERE c.table_schema = @schema
               AND c.table_name = @table
             ORDER BY c.ordinal_position
@@ -335,7 +342,14 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             var dataType = reader.GetString(2);
             var userDefinedType = reader.GetString(3);
             var displayType = reader.GetString(1);
-            if (dataType.Equals("ARRAY", StringComparison.OrdinalIgnoreCase))
+            var storageType = reader.GetString(13);
+            var isDomain = !reader.IsDBNull(11) && !reader.IsDBNull(12);
+            if (isDomain)
+            {
+                displayType = $"{QuoteIdentifier(reader.GetString(11))}." +
+                              $"{QuoteIdentifier(reader.GetString(12))} ({storageType})";
+            }
+            else if (dataType.Equals("ARRAY", StringComparison.OrdinalIgnoreCase))
             {
                 displayType = reader.GetString(10);
             }
@@ -357,7 +371,10 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 reader.GetBoolean(5),
                 generated,
                 !reader.IsDBNull(8),
-                MapValueKind(dataType, userDefinedType)));
+                MapValueKind(dataType, userDefinedType))
+            {
+                StorageDataTypeName = storageType
+            });
         }
 
         return columns;

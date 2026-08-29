@@ -787,9 +787,24 @@ static async Task TableDataEditingAsync()
                 new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1)),
             "超過 1 MiB 字元的既有 XML 應維持唯讀");
         var inetColumn = new TableColumnInfo(0, "address", "inet", true, false, false, false, TableColumnValueKind.NetworkAddress);
-        var cidrColumn = inetColumn with { Name = "subnet", DataTypeName = "cidr" };
-        var macColumn = inetColumn with { Name = "mac", DataTypeName = "macaddr" };
-        var mac8Column = inetColumn with { Name = "mac8", DataTypeName = "macaddr8" };
+        var cidrColumn = inetColumn with
+        {
+            Name = "subnet",
+            DataTypeName = "cidr",
+            StorageDataTypeName = "cidr"
+        };
+        var macColumn = inetColumn with
+        {
+            Name = "mac",
+            DataTypeName = "macaddr",
+            StorageDataTypeName = "macaddr"
+        };
+        var mac8Column = inetColumn with
+        {
+            Name = "mac8",
+            DataTypeName = "macaddr8",
+            StorageDataTypeName = "macaddr8"
+        };
         Assert(
             Equals(
                 TableCellValueConverter.Parse(
@@ -850,7 +865,12 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             bit8Column,
             new TableCellInput("flags", TableCellInputMode.Value, "-1")));
-        var bit64Column = bit8Column with { Name = "flags64", DataTypeName = "bit(64)" };
+        var bit64Column = bit8Column with
+        {
+            Name = "flags64",
+            DataTypeName = "bit(64)",
+            StorageDataTypeName = "bit(64)"
+        };
         Assert(
             Equals(
                 TableCellValueConverter.Parse(
@@ -859,7 +879,12 @@ static async Task TableDataEditingAsync()
                 ulong.MaxValue),
             "BIT(64) 應接受 UInt64 最大值");
         var fixedBitsColumn = new TableColumnInfo(0, "bits", "bit(8)", true, false, false, false, TableColumnValueKind.BitString);
-        var varyingBitsColumn = fixedBitsColumn with { Name = "varbits", DataTypeName = "bit varying(16)" };
+        var varyingBitsColumn = fixedBitsColumn with
+        {
+            Name = "varbits",
+            DataTypeName = "bit varying(16)",
+            StorageDataTypeName = "bit varying(16)"
+        };
         Assert(
             Equals(
                 TableCellValueConverter.Parse(
@@ -1477,6 +1502,11 @@ static async Task PostgreSqlLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE EXTENSION ltree;");
         await session.ExecuteAsync(database, "CREATE TYPE mood AS ENUM ('happy', 'sad', 'comma,value');");
         await session.ExecuteAsync(database, "CREATE TYPE address_type AS (city TEXT, postal_code INTEGER);");
+        await session.ExecuteAsync(database, "CREATE DOMAIN positive_count AS INTEGER CHECK (VALUE BETWEEN 1 AND 100);");
+        await session.ExecuteAsync(database, "CREATE DOMAIN short_label AS VARCHAR(30) CHECK (length(VALUE) >= 3);");
+        await session.ExecuteAsync(database, "CREATE DOMAIN precise_amount AS NUMERIC(18,6) CHECK (VALUE <> 0);");
+        await session.ExecuteAsync(database, "CREATE DOMAIN work_state AS mood;");
+        await session.ExecuteAsync(database, "CREATE DOMAIN subnet_domain AS CIDR CHECK (masklen(VALUE) >= 24);");
         await session.ExecuteAsync(
             database,
             """
@@ -1522,6 +1552,11 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 states mood[] NULL,
                 json_items JSONB[] NULL,
                 range_items INT4RANGE[] NULL,
+                domain_count positive_count NULL,
+                domain_label short_label NULL,
+                domain_amount precise_amount NULL,
+                domain_state work_state NULL,
+                domain_subnet subnet_domain NULL,
                 state mood NULL,
                 mailing_address address_type NULL,
                 measurement cube NULL,
@@ -1804,6 +1839,66 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected alias overflow"),
             "SQL Server int alias 不可寫入超過 base type 範圍的值");
+    }
+    var postgreSqlDomainCountColumn = before.Columns.SingleOrDefault(column => column.Name == "domain_count");
+    var postgreSqlDomainLabelColumn = before.Columns.SingleOrDefault(column => column.Name == "domain_label");
+    var postgreSqlDomainAmountColumn = before.Columns.SingleOrDefault(column => column.Name == "domain_amount");
+    var postgreSqlDomainStateColumn = before.Columns.SingleOrDefault(column => column.Name == "domain_state");
+    var postgreSqlDomainSubnetColumn = before.Columns.SingleOrDefault(column => column.Name == "domain_subnet");
+    if (postgreSqlDomainCountColumn is not null)
+    {
+        Assert(
+            postgreSqlDomainLabelColumn is not null &&
+            postgreSqlDomainAmountColumn is not null &&
+            postgreSqlDomainStateColumn is not null &&
+            postgreSqlDomainSubnetColumn is not null,
+            "PostgreSQL domain metadata 不完整");
+        Assert(
+            postgreSqlDomainCountColumn.ValueKind == TableColumnValueKind.Integer &&
+            postgreSqlDomainCountColumn.DataTypeName == "\"public\".\"positive_count\" (integer)" &&
+            postgreSqlDomainCountColumn.StorageDataTypeName == "integer",
+            $"PostgreSQL integer domain metadata 不正確；actual={postgreSqlDomainCountColumn.DataTypeName}");
+        Assert(
+            postgreSqlDomainLabelColumn!.ValueKind == TableColumnValueKind.String &&
+            postgreSqlDomainLabelColumn.DataTypeName == "\"public\".\"short_label\" (character varying(30))" &&
+            postgreSqlDomainLabelColumn.StorageDataTypeName == "character varying(30)",
+            $"PostgreSQL varchar domain metadata 不正確；actual={postgreSqlDomainLabelColumn.DataTypeName}");
+        Assert(
+            postgreSqlDomainAmountColumn!.ValueKind == TableColumnValueKind.ExactDecimal &&
+            postgreSqlDomainAmountColumn.DataTypeName == "\"public\".\"precise_amount\" (numeric(18,6))" &&
+            postgreSqlDomainAmountColumn.StorageDataTypeName == "numeric(18,6)",
+            $"PostgreSQL numeric domain metadata 不正確；actual={postgreSqlDomainAmountColumn.DataTypeName}");
+        Assert(
+            postgreSqlDomainStateColumn!.ValueKind == TableColumnValueKind.PostgreSqlServerValidatedText &&
+            postgreSqlDomainStateColumn.DataTypeName == "\"public\".\"work_state\" (mood)" &&
+            postgreSqlDomainStateColumn.StorageDataTypeName == "mood",
+            $"PostgreSQL enum domain metadata 不正確；actual={postgreSqlDomainStateColumn.DataTypeName}");
+        Assert(
+            postgreSqlDomainSubnetColumn!.ValueKind == TableColumnValueKind.NetworkAddress &&
+            postgreSqlDomainSubnetColumn.DataTypeName == "\"public\".\"subnet_domain\" (cidr)" &&
+            postgreSqlDomainSubnetColumn.StorageDataTypeName == "cidr",
+            $"PostgreSQL CIDR domain metadata 不正確；actual={postgreSqlDomainSubnetColumn.DataTypeName}");
+        insertInputs.Add(new TableCellInput(
+            postgreSqlDomainCountColumn.Name,
+            TableCellInputMode.Value,
+            "42"));
+        insertInputs.Add(new TableCellInput(
+            postgreSqlDomainLabelColumn.Name,
+            TableCellInputMode.Value,
+            "Domain insert"));
+
+        await AssertThrowsAsync<PostgresException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected domain constraint"),
+                new TableCellInput(postgreSqlDomainCountColumn.Name, TableCellInputMode.Value, "0")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected domain constraint"),
+            "PostgreSQL domain constraint 拒絕時不可留下半筆資料");
     }
     var jsonColumn = before.Columns.SingleOrDefault(column => column.ValueKind == TableColumnValueKind.Json);
     if (jsonColumn is not null)
@@ -2110,7 +2205,7 @@ static async Task VerifySafeTableEditingAsync(
     if (serverValidatedTextColumns.Count > 0)
     {
         Assert(
-            serverValidatedTextColumns.Count == 21,
+            serverValidatedTextColumns.Count == 22,
             $"PostgreSQL server-validated text metadata 未完整辨識；actual={serverValidatedTextColumns.Count}");
         foreach (var serverTextColumn in serverValidatedTextColumns)
         {
@@ -2329,6 +2424,15 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[sqlServerSysnameColumn!.Ordinal]) == "alias_object",
             "SQL Server sysname 安全新增不正確");
     }
+    if (postgreSqlDomainCountColumn is not null)
+    {
+        Assert(
+            Convert.ToInt64(inserted.Values[postgreSqlDomainCountColumn.Ordinal]) == 42,
+            "PostgreSQL integer domain 安全新增不正確");
+        Assert(
+            Convert.ToString(inserted.Values[postgreSqlDomainLabelColumn!.Ordinal]) == "Domain insert",
+            "PostgreSQL varchar domain 安全新增不正確");
+    }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
     var secondPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 1);
@@ -2518,6 +2622,17 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "updated_object"));
     }
+    if (postgreSqlDomainCountColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            postgreSqlDomainCountColumn.Name,
+            TableCellInputMode.Value,
+            "84"));
+        updateInputs.Add(new TableCellInput(
+            postgreSqlDomainLabelColumn!.Name,
+            TableCellInputMode.Value,
+            "Domain updated"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -2698,6 +2813,15 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(updated.Values[sqlServerSysnameColumn!.Ordinal]) == "updated_object",
             "SQL Server sysname 安全修改不正確");
     }
+    if (postgreSqlDomainCountColumn is not null)
+    {
+        Assert(
+            Convert.ToInt64(updated.Values[postgreSqlDomainCountColumn.Ordinal]) == 84,
+            "PostgreSQL integer domain 安全修改不正確");
+        Assert(
+            Convert.ToString(updated.Values[postgreSqlDomainLabelColumn!.Ordinal]) == "Domain updated",
+            "PostgreSQL varchar domain 安全修改不正確");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -2717,7 +2841,7 @@ static async Task VerifySafeTableEditingAsync(
 }
 
 static string GetNetworkTestValue(TableColumnInfo column, bool updated) =>
-    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    (column.StorageDataTypeName.ToLowerInvariant(), updated) switch
     {
         ("inet", false) => "192.0.2.10/24",
         ("inet", true) => "2001:db8::10/64",
@@ -2734,7 +2858,7 @@ static string GetSpatialTestValue(
     DatabaseProviderKind provider,
     TableColumnInfo column,
     bool updated) =>
-    (provider, column.DataTypeName.ToLowerInvariant(), updated) switch
+    (provider, column.StorageDataTypeName.ToLowerInvariant(), updated) switch
     {
         (DatabaseProviderKind.MySql, "geometry", false) => "SRID=0;POINT(1 2)",
         (DatabaseProviderKind.MySql, "geometry", true) =>
@@ -2775,7 +2899,7 @@ static void AssertSpatialValue(
     string message)
 {
     var actualText = Convert.ToString(actual) ?? string.Empty;
-    if (column.DataTypeName.Equals("multipoint", StringComparison.OrdinalIgnoreCase))
+    if (column.StorageDataTypeName.Equals("multipoint", StringComparison.OrdinalIgnoreCase))
     {
         var separator = expected.IndexOf(';');
         var prefix = expected[..(separator + 1)];
@@ -2789,7 +2913,7 @@ static void AssertSpatialValue(
 }
 
 static string GetSystemIdentifierTestValue(TableColumnInfo column, bool updated) =>
-    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    (column.StorageDataTypeName.ToLowerInvariant(), updated) switch
     {
         ("oid", false) => uint.MaxValue.ToString(CultureInfo.InvariantCulture),
         ("xid", false) => "4000000000",
@@ -2803,7 +2927,7 @@ static string GetSystemIdentifierTestValue(TableColumnInfo column, bool updated)
     };
 
 static string GetBitTestValue(TableColumnInfo column, bool updated) =>
-    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    (column.StorageDataTypeName.ToLowerInvariant(), updated) switch
     {
         ("bit(8)", false) => "165",
         ("bit(8)", true) => "90",
@@ -2813,7 +2937,7 @@ static string GetBitTestValue(TableColumnInfo column, bool updated) =>
     };
 
 static string GetBitStringTestValue(TableColumnInfo column, bool updated) =>
-    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    (column.StorageDataTypeName.ToLowerInvariant(), updated) switch
     {
         ("bit(8)", false) => "10100101",
         ("bit(8)", true) => "01011010",
@@ -2823,7 +2947,7 @@ static string GetBitStringTestValue(TableColumnInfo column, bool updated) =>
     };
 
 static string GetPostgreSqlRangeTestValue(TableColumnInfo column, bool updated) =>
-    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    (column.StorageDataTypeName.ToLowerInvariant(), updated) switch
     {
         ("int4range", false) => "[1,10)",
         ("int8range", false) => "[10000000000,10000000100)",
@@ -2886,7 +3010,7 @@ static string GetPostgreSqlGeometricTestValue(TableColumnInfo column, bool updat
     };
 
 static string GetPostgreSqlServerTextTestValue(TableColumnInfo column, bool updated) =>
-    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    (column.StorageDataTypeName.ToLowerInvariant(), updated) switch
     {
         ("jsonpath", false) => "$.\"store\".\"book\"[*]?(@.\"price\" < 10)",
         ("jsonpath", true) => "strict $.\"track\".\"segments\"[*]?(@.\"HR\" >= 140)",

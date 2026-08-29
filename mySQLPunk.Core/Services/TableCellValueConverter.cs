@@ -361,7 +361,7 @@ public static class TableCellValueConverter
     private static ulong ParseUnsignedInteger(TableColumnInfo column, string text)
     {
         var value = ulong.Parse(text, NumberStyles.Integer, CultureInfo.InvariantCulture);
-        var dataType = column.DataTypeName.Trim();
+        var dataType = column.StorageDataTypeName.Trim();
         if (dataType.Equals("oid", StringComparison.OrdinalIgnoreCase) ||
             dataType.Equals("xid", StringComparison.OrdinalIgnoreCase) ||
             dataType.Equals("cid", StringComparison.OrdinalIgnoreCase))
@@ -699,7 +699,7 @@ public static class TableCellValueConverter
 
     private static string ParseNetworkAddress(TableColumnInfo column, string text)
     {
-        var dataType = column.DataTypeName.Trim().ToLowerInvariant();
+        var dataType = column.StorageDataTypeName.Trim().ToLowerInvariant();
         return dataType switch
         {
             "inet" => ParseIpNetwork(text, requireNetworkAddress: false),
@@ -720,7 +720,7 @@ public static class TableCellValueConverter
                 $"Bit string 只能包含 0 或 1，且長度必須介於 1 與 {MaximumEditableStructuredTextCharacters:N0}。");
         }
 
-        var dataType = column.DataTypeName.Trim();
+        var dataType = column.StorageDataTypeName.Trim();
         var openingParenthesis = dataType.LastIndexOf('(');
         if (openingParenthesis < 0 || !dataType.EndsWith(')') ||
             !int.TryParse(dataType[(openingParenthesis + 1)..^1], NumberStyles.None, CultureInfo.InvariantCulture, out var width) ||
