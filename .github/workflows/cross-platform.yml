@@ -9,6 +9,10 @@ on:
       - "mySQLPunk.Desktop/**"
       - "mySQLPunk.CrossPlatform.SmokeTests/**"
       - "tests/Run-CrossPlatformLiveTests.sh"
+      - "tests/Test-LinuxCrossPlatformPackage.sh"
+      - "tests/Test-MacCrossPlatformPackage.sh"
+      - "scripts/package-cross-platform.sh"
+      - "packaging/**"
       - "mySQLPunk.CrossPlatform.sln"
       - ".github/workflows/cross-platform.yml"
   pull_request:
@@ -17,6 +21,10 @@ on:
       - "mySQLPunk.Desktop/**"
       - "mySQLPunk.CrossPlatform.SmokeTests/**"
       - "tests/Run-CrossPlatformLiveTests.sh"
+      - "tests/Test-LinuxCrossPlatformPackage.sh"
+      - "tests/Test-MacCrossPlatformPackage.sh"
+      - "scripts/package-cross-platform.sh"
+      - "packaging/**"
       - "mySQLPunk.CrossPlatform.sln"
       - ".github/workflows/cross-platform.yml"
   workflow_dispatch:
@@ -34,9 +42,11 @@ jobs:
           - name: Linux x64 + ARM64
             os: ubuntu-latest
             runtimes: linux-x64 linux-arm64
+            artifact_name: linux
           - name: macOS Intel + Apple Silicon
             os: macos-latest
             runtimes: osx-x64 osx-arm64
+            artifact_name: macos
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -61,8 +71,36 @@ jobs:
         if: runner.os == 'Linux'
         run: ./tests/Run-CrossPlatformLiveTests.sh
 
-      - name: Publish desktop runtimes
+      - name: Build self-contained installable archives
         run: |
+          package_version=$(sed -n 's/.*AssemblyFileVersion("\([0-9.]*\)").*/\1/p' mySQLPunk/Properties/AssemblyInfo.cs | tail -n 1)
+          if [[ ! "$package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Cannot resolve package version from AssemblyInfo.cs: $package_version" >&2
+            exit 1
+          fi
           for runtime in ${{ matrix.runtimes }}; do
-            dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r "$runtime" --self-contained false
+            ./scripts/package-cross-platform.sh \
+              --version "$package_version" \
+              --runtime "$runtime" \
+              --output dist/cross-platform
           done
+
+      - name: Smoke test Linux install, startup and uninstall
+        if: runner.os == 'Linux'
+        env:
+          MYSQLPUNK_PACKAGE_RUN_UI: "1"
+        run: |
+          ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-linux-x64.tar.gz
+          MYSQLPUNK_PACKAGE_RUN_UI=0 ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-linux-arm64.tar.gz
+
+      - name: Verify macOS app archives
+        if: runner.os == 'macOS'
+        run: ./tests/Test-MacCrossPlatformPackage.sh dist/cross-platform/*.app.zip
+
+      - name: Upload installable preview packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: mySQLPunk-cross-platform-${{ matrix.artifact_name }}-${{ github.sha }}
+          path: dist/cross-platform/*
+          compression-level: 0
+          retention-days: 14

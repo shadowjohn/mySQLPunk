@@ -37,13 +37,13 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 目前發版版本：`v1.0.0.19`，最新版請看 [GitHub Releases](https://github.com/shadowjohn/mySQLPunk/releases)。
 
-目前 GitHub Release 仍只提供 Windows 完整版的 `mySQLPunk-<version>-win-x64-setup.exe`。安裝程式內含程式運作所需的 managed DLL、SQLite／SpatiaLite 原生 runtime、素材與第三方授權檔；使用者不需要另外下載 ZIP 或 manifest。Linux / macOS 預覽版目前由原始碼建置，正式安裝套件與簽署流程尚未發布。完整變更請見 `CHANGELOG.md`。
+目前的 `v1.0.0.19` GitHub Release 仍只提供 Windows 完整版；下一版起，Release workflow 會同時發布 Windows x64 setup、self-contained Linux x64／ARM64 安裝壓縮檔，以及 macOS Intel／Apple Silicon `.app.zip`。Linux 壓縮檔內附目前使用者層級的 `install.sh`／`uninstall.sh`；macOS 預覽目前採 ad-hoc 簽署、尚未 Apple notarize。每個跨平台資產都有獨立 `.sha256` 可驗證完整性。完整變更請見 `CHANGELOG.md`。
 
 ## 開發環境
 
 ### Linux / macOS 跨平台預覽版
 
-需求：.NET 8 SDK。桌面 UI 使用 Avalonia，資料庫驅動使用純 managed 的 MySqlConnector、Npgsql、Microsoft.Data.SqlClient 與 Microsoft.Data.Sqlite，因此不依賴 WinForms 或 Windows SQLite interop。Linux 若要保存密碼，另需安裝提供 `secret-tool` 的 `libsecret-tools`，並使用 GNOME Keyring 或相容的 Secret Service；macOS 直接使用系統內建 Keychain。
+從原始碼建置需要 .NET 8 SDK；GitHub Release 的 Linux / macOS 壓縮檔為 self-contained，不需要另外安裝 .NET。桌面 UI 使用 Avalonia，資料庫驅動使用純 managed 的 MySqlConnector、Npgsql、Microsoft.Data.SqlClient 與 Microsoft.Data.Sqlite，因此不依賴 WinForms 或 Windows SQLite interop。Linux 若要保存密碼，另需安裝提供 `secret-tool` 的 `libsecret-tools`，並使用 GNOME Keyring 或相容的 Secret Service；macOS 直接使用系統內建 Keychain。
 
 ```bash
 dotnet restore mySQLPunk.CrossPlatform.sln
@@ -58,14 +58,17 @@ dotnet run --project mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release
 ./tests/Run-CrossPlatformLiveTests.sh
 ```
 
-產生 framework-dependent 發佈目錄：
+產生可安裝／攜帶的 self-contained 發佈資產：
 
 ```bash
-dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r linux-x64 --self-contained false
-dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r linux-arm64 --self-contained false
-dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r osx-x64 --self-contained false
-dotnet publish mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release -r osx-arm64 --self-contained false
+./scripts/package-cross-platform.sh --version 1.0.0.19 --runtime linux-x64
+./scripts/package-cross-platform.sh --version 1.0.0.19 --runtime linux-arm64
+# 以下兩個命令需在 macOS 執行，才能驗證 codesign 與 .app archive metadata：
+./scripts/package-cross-platform.sh --version 1.0.0.19 --runtime osx-x64
+./scripts/package-cross-platform.sh --version 1.0.0.19 --runtime osx-arm64
 ```
+
+Linux 資產是 `.tar.gz`，解壓後執行 `./install.sh` 即會安裝到目前使用者的 XDG data 目錄並建立 `~/.local/bin/mysqlpunk` 與應用程式選單項目；`./uninstall.sh` 只移除該版本程式，保留連線設定。macOS 資產是標準 `.app.zip`，解壓後可拖到 Applications。設定 `MYSQLPUNK_MACOS_SIGN_IDENTITY` 可用 Developer ID 簽署；另外設定已存在於 Keychain 的 `MYSQLPUNK_MACOS_NOTARY_PROFILE` 時，打包腳本才會送 Apple notarization 並 staple，沒有憑證時只做可驗證的 ad-hoc 簽署。
 
 目前預覽版包含：連線設定與測試、資料庫選擇、Table / View metadata、物件預覽 SQL、DDL / DML / SELECT、取消執行、動態結果網格、CSV / TSV / JSON 結果匯出，以及 Table 資料編輯。雙擊 Table 會開啟最多 200 列的獨立編輯器；新增、修改與刪除均使用參數化 SQL 與單列交易，修改／刪除要求 Primary Key，並比對載入時的原始值，資料已被其他連線改動時會回復交易、要求重新整理。沒有 Primary Key 的 Table 仍可新增與瀏覽，但修改及刪除會停用；generated、binary 與尚未支援的進階型別維持唯讀。CSV / TSV 使用帶 BOM 的 UTF-8、固定 CRLF、完整引號 escaping 與試算表公式注入防護；JSON 使用無 BOM UTF-8，保留 NULL、數字、日期與 binary hex。匯出會先寫同目錄暫存檔，完整成功後才替換目標檔。一般查詢結果最多載入 10,000 列，避免誤查大表拖垮桌面程式；截斷結果匯出前會再次提醒只包含已載入資料。`connections.json` 永遠不保存密碼；使用者可在連線設定勾選 Linux Secret Service 或 macOS Keychain，寫入後會立即讀回驗證，不可用或失敗時安全退回本次執行期間的記憶體保存。
 
@@ -107,7 +110,7 @@ git tag v1.0.0.19
 git push origin v1.0.0.19
 ```
 
-推送 `v*` tag 後，`.github/workflows/release.yml` 會在 GitHub 的 Windows runner 上還原 NuGet、用 MSBuild 編譯 Release、安裝固定版本且先驗證 SHA-256 的 Inno Setup、執行 `scripts/package-release.ps1`，並建立或更新 GitHub Release。Release 會先清除同版本舊的 ZIP／manifest 等資產，再只上傳一個 setup EXE。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。Workflow 會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；`scripts/New-ReleaseNotes.ps1` 會從 `CHANGELOG.md` 的對應版本產生繁體中文 `🚀 新增功能`、`🛠️ 問題修正與優化`、`📦 下載與更新`、`🛡️ 完整性與驗證` 四段說明，並寫入安裝檔的實際 SHA-256 與 Authenticode 狀態。若缺少對應版本或必要段落，發佈會直接停止，不會建立內容不完整的 Release。
+推送 `v*` tag 後，`.github/workflows/release.yml` 會先由 Ubuntu 與 macOS runner 產生 Linux x64／ARM64、macOS Intel／Apple Silicon 的 self-contained 壓縮檔與 `.sha256`，並暫存為 immutable workflow artifacts；Windows runner 接著還原 NuGet、用 MSBuild 編譯 Release、安裝固定版本且先驗證 SHA-256 的 Inno Setup、執行 `scripts/package-release.ps1`，下載並核對所有跨平台資產，九個預期檔案齊全後才會一次建立或更新 GitHub Release。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。所有平台都會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；`scripts/New-ReleaseNotes.ps1` 會從 `CHANGELOG.md` 的對應版本產生繁體中文 `🚀 新增功能`、`🛠️ 問題修正與優化`、`📦 下載與更新`、`🛡️ 完整性與驗證` 四段說明。若缺少對應版本、必要段落或任一平台資產，發佈會直接停止，不會建立內容不完整的 Release。
 
 日常開發由 `.github/workflows/auto-release.yml` 控制，不會每個小修改都建立 Release：`feat` 算 2 分，`fix`／`perf`／`refactor` 算 1 分，累積 5 分才發布；已有程式變更但七天未達門檻時會合併成一批發布。單一大更新可在 commit footer 加上 `Release-Now: true` 立即發布。完整規則與範例請見 [`docs/RELEASE_AUTOMATION.md`](docs/RELEASE_AUTOMATION.md)。
 
@@ -192,7 +195,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 ## 已知限制
 
-- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出與常用 scalar 欄位的 Table 資料編輯；Oracle、MongoDB、Redis、Snowflake、進階型別／大型資料分頁編輯、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；安裝套件、簽署與自動更新也尚未發布。
+- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出與常用 scalar 欄位的 Table 資料編輯；Oracle、MongoDB、Redis、Snowflake、進階型別／大型資料分頁編輯、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；Linux / macOS 自動更新尚未接入，macOS 正式 Developer ID 簽署與 Apple notarization 也仍需發版憑證。
 - Oracle 的部分 DDL 還是會被權限、語法或物件型態擋下來；預覽會附上權限診斷 SQL 跟修復建議，但終究要看帳號實際有什麼權限。
 - Windows 完整版對沒有 Primary Key 的資料表仍可用原始值組 WHERE 條件；欄位有浮點數或大文字時可能比不準，可在選項中改成唯讀。Linux / macOS 預覽版會直接停用無 Primary Key Table 的修改與刪除，只保留新增與瀏覽。
 - XLSX 匯出要把整份結果放進記憶體；還原 SQL 備份也是整個檔一次讀進來，特別大的備份要留意。
@@ -258,7 +261,8 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `snapshot/mySQLPunk_avatar_wink.mp4`: 看板娘眨眼動畫原始素材，runtime 使用去背後的 GIF。
 - `mySQLPunk/lib/`: 其餘 service 層（匯出、備份、複製、更新檢查、憑證等）。
 - `tests/`: smoke test（`Run-SmokeTests.ps1`）與 Docker 實機整合測試。
-- `scripts/`: 打包（`package-release.ps1`）與發版說明（`New-ReleaseNotes.ps1`）腳本。
+- `scripts/`: Windows 打包（`package-release.ps1`）、Linux／macOS self-contained 打包（`package-cross-platform.sh`）與發版說明（`New-ReleaseNotes.ps1`）腳本。
+- `packaging/`: Linux 使用者層級安裝／解除安裝腳本與 macOS app bundle metadata 範本。
 - `docs/FEATURE_NOTES.md`: 功能完成紀錄。
 - `docs/AUTOMATION.md`: 自動執行作業的操作、安全設計、檔案位置與命令列說明。
 - `docs/CONNECTION_SECURITY.md`: 各 provider 的 SSL/TLS、SSH Tunnel、憑證與祕密保存方式。

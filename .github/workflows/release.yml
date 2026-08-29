@@ -18,6 +18,7 @@ permissions:
 jobs:
   build-release:
     name: Build and publish release
+    needs: build-cross-platform-release
     runs-on: windows-latest
 
     steps:
@@ -33,11 +34,15 @@ jobs:
       - name: Resolve release version
         id: release_version
         shell: pwsh
+        env:
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
+          RELEASE_INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
         run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $rawVersion = "${{ inputs.version }}"
+          if ($env:RELEASE_EVENT_NAME -eq "workflow_dispatch") {
+            $rawVersion = $env:RELEASE_INPUT_VERSION
           } else {
-            $rawVersion = "${{ github.ref_name }}"
+            $rawVersion = $env:RELEASE_REF_NAME
           }
 
           $version = $rawVersion.Trim()
@@ -188,6 +193,38 @@ jobs:
             throw "Installer smoke uninstall left mySQLPunk.exe behind."
           }
 
+      - name: Download verified cross-platform packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: mySQLPunk-${{ steps.release_version.outputs.version }}-*
+          path: dist/cross-platform
+          merge-multiple: true
+
+      - name: Verify cross-platform package set and SHA-256
+        shell: pwsh
+        run: |
+          $version = "${{ steps.release_version.outputs.version }}"
+          $packageRoot = ".\dist\cross-platform"
+          $expectedPackages = @(
+            "mySQLPunk-$version-linux-x64.tar.gz",
+            "mySQLPunk-$version-linux-arm64.tar.gz",
+            "mySQLPunk-$version-osx-x64.app.zip",
+            "mySQLPunk-$version-osx-arm64.app.zip"
+          )
+          foreach ($packageName in $expectedPackages) {
+            $packagePath = Join-Path $packageRoot $packageName
+            $hashPath = "$packagePath.sha256"
+            if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf) -or
+                -not (Test-Path -LiteralPath $hashPath -PathType Leaf)) {
+              throw "Missing cross-platform package or SHA-256: $packageName"
+            }
+            $expectedHash = ((Get-Content -LiteralPath $hashPath -Raw -Encoding UTF8).Trim() -split '\s+')[0].ToLowerInvariant()
+            $actualHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($expectedHash -ne $actualHash) {
+              throw "Cross-platform SHA-256 mismatch for $packageName. Expected $expectedHash, got $actualHash."
+            }
+          }
+
       - name: Write release notes
         shell: pwsh
         run: .\scripts\New-ReleaseNotes.ps1 -Version "${{ steps.release_version.outputs.version }}" -OutputDirectory .\dist
@@ -198,6 +235,7 @@ jobs:
           name: mySQLPunk-${{ steps.release_version.outputs.version }}-release-assets
           path: |
             dist/*-setup.exe
+            dist/cross-platform/*
             dist/release-notes.md
             dist/release-title.txt
 
@@ -252,19 +290,126 @@ jobs:
           }
 
           $uploadBaseUrl = $release.upload_url -replace '\{.*\}$', ''
-          $assets = @(Get-ChildItem -LiteralPath ".\dist" -Filter "*-setup.exe")
-          if ($assets.Count -ne 1) {
-            throw "Exactly one setup EXE is required, but found $($assets.Count)."
+          $assets = @(
+            @(Get-ChildItem -LiteralPath ".\dist" -Filter "*-setup.exe" -File)
+            @(Get-ChildItem -LiteralPath ".\dist\cross-platform" -File)
+          )
+          if ($assets.Count -ne 9) {
+            throw "Exactly one Windows setup and eight cross-platform asset/hash files are required, but found $($assets.Count)."
           }
 
-          # A release intentionally has one downloadable file. Remove assets left by older runs.
+          # Every required platform asset is ready before the public Release is changed.
           foreach ($existingAsset in @($release.assets)) {
             Invoke-RestMethod -Method Delete -Uri $existingAsset.url -Headers $headers | Out-Null
           }
 
           foreach ($asset in $assets) {
             $assetName = [uri]::EscapeDataString($asset.Name)
-            $assetLabel = [uri]::EscapeDataString("Windows x64 單一安裝程式")
+            $label = if ($asset.Name.EndsWith(".sha256", [System.StringComparison]::OrdinalIgnoreCase)) {
+              "SHA-256 完整性檢查"
+            } elseif ($asset.Name -like "*-linux-x64.tar.gz") {
+              "Linux x64 self-contained 預覽版"
+            } elseif ($asset.Name -like "*-linux-arm64.tar.gz") {
+              "Linux ARM64 self-contained 預覽版"
+            } elseif ($asset.Name -like "*-osx-x64.app.zip") {
+              "macOS Intel self-contained 預覽版"
+            } elseif ($asset.Name -like "*-osx-arm64.app.zip") {
+              "macOS Apple Silicon self-contained 預覽版"
+            } else {
+              "Windows x64 單一安裝程式"
+            }
+            $assetLabel = [uri]::EscapeDataString($label)
             $uploadUrl = "${uploadBaseUrl}?name=$assetName&label=$assetLabel"
             Invoke-RestMethod -Method Post -Uri $uploadUrl -Headers $headers -InFile $asset.FullName -ContentType "application/octet-stream" | Out-Null
           }
+
+  build-cross-platform-release:
+    name: Publish ${{ matrix.name }} release packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64 + ARM64
+            os: ubuntu-latest
+            runtimes: linux-x64 linux-arm64
+            artifact_name: linux
+          - name: macOS Intel + Apple Silicon
+            os: macos-latest
+            runtimes: osx-x64 osx-arm64
+            artifact_name: macos
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Resolve and verify release version
+        id: release_version
+        shell: bash
+        env:
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
+          RELEASE_INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$RELEASE_EVENT_NAME" == "workflow_dispatch" ]]; then
+            raw_version="$RELEASE_INPUT_VERSION"
+          else
+            raw_version="$RELEASE_REF_NAME"
+          fi
+          version="${raw_version#v}"
+          version="${version#V}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Release version must be n.n.n or n.n.n.n. Received: $raw_version" >&2
+            exit 1
+          fi
+
+          assembly_version=$(sed -n 's/.*AssemblyFileVersion("\([0-9.]*\)").*/\1/p' mySQLPunk/Properties/AssemblyInfo.cs | tail -n 1)
+          normalized_version="$version"
+          normalized_assembly="$assembly_version"
+          if [[ "$normalized_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            normalized_version="$normalized_version.0"
+          fi
+          if [[ "$normalized_assembly" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            normalized_assembly="$normalized_assembly.0"
+          fi
+          if [[ "$normalized_version" != "$normalized_assembly" ]]; then
+            echo "AssemblyFileVersion $assembly_version does not match release version $version." >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build self-contained packages
+        shell: bash
+        run: |
+          for runtime in ${{ matrix.runtimes }}; do
+            ./scripts/package-cross-platform.sh \
+              --version "${{ steps.release_version.outputs.version }}" \
+              --runtime "$runtime" \
+              --output dist/cross-platform
+          done
+
+      - name: Smoke test Linux install, startup and uninstall
+        if: runner.os == 'Linux'
+        env:
+          MYSQLPUNK_PACKAGE_RUN_UI: "1"
+        run: |
+          ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-linux-x64.tar.gz
+          MYSQLPUNK_PACKAGE_RUN_UI=0 ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-linux-arm64.tar.gz
+
+      - name: Verify macOS app archives
+        if: runner.os == 'macOS'
+        run: ./tests/Test-MacCrossPlatformPackage.sh dist/cross-platform/*.app.zip
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: mySQLPunk-${{ steps.release_version.outputs.version }}-${{ matrix.artifact_name }}
+          path: dist/cross-platform/*
+          compression-level: 0

@@ -41,7 +41,7 @@ Release-Now: true
 1. 更新 `AssemblyInfo.cs` 與 README 版號。
 2. 建立 `chore(release): 發佈 v...` 繁體中文 commit。
 3. 建立並 push tag。
-4. 明確 dispatch `release.yml`，建置、打包並發布單一 Windows x64 setup EXE。
+4. 明確 dispatch `release.yml`；Ubuntu／macOS runner 先建置並驗證 Linux x64／ARM64 與 macOS Intel／Apple Silicon self-contained 資產及 SHA-256，Windows job 再完成 setup EXE、核對九個檔案齊全並一次發布。
 
 若 changelog 尚未準備好，判斷會顯示原因並繼續累積，不會發布半成品。
 

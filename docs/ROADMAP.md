@@ -31,7 +31,7 @@
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 🟡 | 第二期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視、SELECT／SHOW，以及查詢編輯器單一 DML／DDL；待補實機驗收、key-pair JWT、參數綁定、資料網格寫回、模型與 BI 能力。 |
 | Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 第三期完成：瀏覽、受限查詢，加上 key 編輯器的 string 與 hash／list／set／zset 安全編輯（WATCH/MULTI/EXEC）、TTL 與刪除；Redis 6.2／7 與 Garnet 各 39 項實機矩陣通過。待補 Cluster、Sentinel、list 元素刪除、監控與 Pub/Sub。 |
-| Linux ARM | 🟡 | 已建立 .NET 8 Core 與 Avalonia 桌面預覽版；Linux x64 已完成 UI 實際操作，`linux-arm64` publish 也納入 CI，待 ARM64 實機執行、安裝套件與其餘 provider 遷移。跨平台 SQL Server 已使用 Linux 容器完成 provider 實機 round-trip。 |
+| Linux ARM | 🟡 | 已建立 .NET 8 Core 與 Avalonia 桌面預覽版；Linux x64 已完成 UI 實際操作，CI／Release 會建立 self-contained `linux-x64` 與 `linux-arm64` 安裝壓縮檔，待 ARM64 實機啟動驗收。跨平台 SQL Server 已使用 Linux 容器完成 provider 實機 round-trip。 |
 
 ## Navicat Premium 功能頁對照
 
@@ -65,7 +65,7 @@
 | SSH tunnel、SSL/TLS | ✅ | 四種網路 provider 已有共用安全設定 UI、憑證驗證、SSH SHA256 主機金鑰固定與隧道生命週期；SQLite 為本機檔案，不適用網路層設定。 |
 | PAM／LDAP／Kerberos／MFA／SSO | 📋 | 依 provider 驗證能力分階段加入，不保存明文祕密。 |
 | 深色模式／平台原生設計 | ✅ | Windows 原生 WinForms、淺／深色主題與 DPI 向量圖示已完成。 |
-| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出與安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。待補其餘 provider、進階功能與正式安裝／簽署。 |
+| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出與安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。Linux x64／ARM64 使用 self-contained tar 安裝包，macOS Intel／Apple Silicon 使用 `.app.zip`；待補 Developer ID/notarization、自動更新、其餘 provider 與進階功能。 |
 
 ## Provider 與服務覆蓋
 
@@ -87,4 +87,4 @@
 4. ✅ RDBMS、MongoDB 與 Redis 的連線 URI 匯入及設定頁確認流程已完成。
 5. ✅ 連線星號、持久化色彩與批次屬性操作已完成。
 6. 🟡 MongoDB 第一～三期、Redis／Garnet 第三期（string＋集合型別安全編輯，含實機矩陣）、Snowflake 第二期（SQL REST API 查詢＋查詢編輯器 DML／DDL）已完成。下一步候選：Snowflake 實機驗收、key-pair JWT、參數綁定與網格寫回，MongoDB Atlas／SRV 驗證矩陣與 Aggregation Pipeline，Redis Cluster／Sentinel／Pub/Sub，或回頭補模型／BI 路線。
-7. 🟡 Linux / macOS 跨平台第二階段進行中：獨立 Core、Avalonia UI、MySQL / PostgreSQL / SQL Server / SQLite metadata 與 SQL 工作流程、Linux Secret Service／macOS Keychain 密碼保存、CSV / TSV / JSON 結果安全匯出，以及具 Primary Key／optimistic concurrency 防護的 Table 資料編輯已完成；四種 provider 均納入 SQLite 或 Linux Docker CRUD／衝突矩陣。下一步是 Linux / macOS 安裝、簽署與自動更新，再逐步補進階型別與大型資料分頁編輯。
+7. 🟡 Linux / macOS 跨平台第二階段進行中：獨立 Core、Avalonia UI、四種 RDBMS workflow、系統密碼庫、結果安全匯出、Table optimistic concurrency 編輯，以及四架構 self-contained CI／Release 資產已完成；Linux 安裝／啟動／解除安裝也納入 Xvfb smoke。下一步是 macOS Developer ID/notarization、Linux / macOS 自動更新、ARM64 實機啟動，再逐步補進階型別與大型資料分頁編輯。

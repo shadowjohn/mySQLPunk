@@ -82,17 +82,25 @@ $footer = @'
 | 平台 | 架構 | 建議下載 | 安裝方式 |
 |---|---|---|---|
 | **Windows** | x64（Intel／AMD） | `{{INSTALLER_NAME}}` | 執行單一安裝程式即可全新安裝或覆蓋更新 |
+| **Linux** | x64 | `mySQLPunk-{{VERSION}}-linux-x64.tar.gz` | 解壓後執行 `./install.sh`，不需另裝 .NET |
+| **Linux** | ARM64 | `mySQLPunk-{{VERSION}}-linux-arm64.tar.gz` | 解壓後執行 `./install.sh`，不需另裝 .NET |
+| **macOS** | Intel | `mySQLPunk-{{VERSION}}-osx-x64.app.zip` | 解壓後將 `mySQLPunk.app` 拖到 Applications |
+| **macOS** | Apple Silicon | `mySQLPunk-{{VERSION}}-osx-arm64.app.zip` | 解壓後將 `mySQLPunk.app` 拖到 Applications |
 
-> Release 只提供一個安裝 EXE，已包含程式需要的 managed DLL、SQLite／SpatiaLite 原生 runtime、素材與第三方授權檔，不需要另外下載 ZIP 或 manifest。
+> Windows 是功能完整版本；Linux / macOS 是 Avalonia 跨平台預覽版。各跨平台壓縮檔旁都有同名 `.sha256`，macOS 預覽目前為 ad-hoc 簽署、尚未 Apple notarize，第一次開啟仍可能顯示 Gatekeeper 提示。
 
 ## 🛡️ 完整性與驗證
 
 - **SHA-256**：`{{SHA256}}`
 - Windows PowerShell 驗證指令：`Get-FileHash .\{{INSTALLER_NAME}} -Algorithm SHA256`
+- Linux / macOS：下載對應的同名 `.sha256` 後執行 `sha256sum -c <檔名>.sha256` 或 `shasum -a 256 -c <檔名>.sha256`
 - {{SIGNATURE_NOTE}}
 - 本版本已通過 Windows Release 建置、SmokeTests、安裝、啟動、關閉與解除安裝驗證。
+- Linux x64 資產已通過隔離安裝、Xvfb 啟動與解除安裝驗證；Linux ARM64 已通過封裝與安裝檔案檢查。
+- macOS Intel／Apple Silicon 資產已在對應 runner 通過 app bundle、codesign 與 zip metadata 驗證。
 '@
 $footer = $footer.Replace('{{INSTALLER_NAME}}', $installer.Name)
+$footer = $footer.Replace('{{VERSION}}', $Version)
 $footer = $footer.Replace('{{SHA256}}', $sha256)
 $footer = $footer.Replace('{{SIGNATURE_NOTE}}', $signatureNote)
 

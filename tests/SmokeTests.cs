@@ -9664,9 +9664,16 @@ public static class SmokeTests
         AssertContains(workflow, "actions/upload-artifact@v7", "Release workflow should use the Node.js 24 artifact action.");
         AssertContains(workflow, "dist/*-setup.exe", "Release workflow should upload the single setup EXE.");
         AssertContains(workflow, "Exactly one setup EXE is required", "Release workflow should reject multiple downloadable setup files.");
-        AssertContains(workflow, "foreach ($existingAsset in @($release.assets))", "Release workflow should remove legacy assets before publishing the single EXE.");
+        AssertContains(workflow, "foreach ($existingAsset in @($release.assets))", "Release workflow should remove legacy assets before publishing the complete platform asset set.");
         Assert(!workflow.Contains("dist/*.zip"), "Release workflow should not upload a portable zip.");
         Assert(!workflow.Contains("release-manifest.json"), "Release workflow should not upload a separate manifest.");
+        AssertContains(workflow, "build-cross-platform-release", "Release workflow should build cross-platform packages before publishing the public release.");
+        AssertContains(workflow, "actions/download-artifact@v8", "Release workflow should download the immutable Linux/macOS package artifacts.");
+        AssertContains(workflow, "linux-x64 linux-arm64", "Release workflow should package Linux x64 and ARM64.");
+        AssertContains(workflow, "osx-x64 osx-arm64", "Release workflow should package macOS Intel and Apple Silicon.");
+        AssertContains(workflow, "scripts/package-cross-platform.sh", "Release workflow should use the shared cross-platform packaging script.");
+        AssertContains(workflow, "Cross-platform SHA-256 mismatch", "Release workflow should verify every cross-platform asset before changing the public release.");
+        AssertContains(workflow, "Exactly one Windows setup and eight cross-platform asset/hash files", "Release workflow should require the complete platform asset set.");
         // d9c716d 之後 release notes 由 New-ReleaseNotes.ps1 產生（內部仍優先讀 CHANGELOG）
         AssertContains(workflow, "New-ReleaseNotes.ps1", "Release workflow should generate release notes with the shared script.");
         AssertContains(workflow, "dist/release-notes.md", "Release workflow should upload the generated release notes.");
