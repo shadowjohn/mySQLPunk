@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
@@ -18,6 +19,7 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<Guid, string> _runtimePasswords = new();
     private readonly ConnectionProfileStore _profileStore = new();
     private readonly ISecretStore _secretStore = SecretStoreFactory.CreateDefault();
+    private readonly CrossPlatformUpdateService _updateService = new();
     private IDatabaseSession? _session;
     private QueryResult? _lastResult;
     private CancellationTokenSource? _operationCancellation;
@@ -36,6 +38,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _executeButton;
     private readonly Button _exportButton;
     private readonly Button _cancelButton;
+    private readonly Button _updateButton;
 
     public MainWindow()
     {
@@ -53,6 +56,7 @@ public sealed partial class MainWindow : Window
         _executeButton = this.FindControl<Button>("ExecuteButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
+        _updateButton = this.FindControl<Button>("UpdateButton")!;
 
         _profilesList.ItemsSource = _profiles;
         _sqlEditor.AddHandler(KeyDownEvent, SqlEditor_KeyDown, RoutingStrategies.Tunnel);
@@ -313,6 +317,48 @@ public sealed partial class MainWindow : Window
     private void CancelOperation_Click(object? sender, RoutedEventArgs e)
     {
         _operationCancellation?.Cancel();
+    }
+
+    private async void CheckUpdates_Click(object? sender, RoutedEventArgs e)
+    {
+        await RunOperationAsync("正在檢查 GitHub Release…", async cancellationToken =>
+        {
+            var currentVersion = typeof(MainWindow).Assembly.GetName().Version ?? new Version(0, 0, 0, 0);
+            var update = await _updateService.CheckLatestAsync(
+                currentVersion.ToString(),
+                cancellationToken: cancellationToken);
+            if (!update.UpdateAvailable)
+            {
+                SetStatus($"目前已是最新版 {currentVersion}。");
+                await MessageDialog.ShowAsync(
+                    this,
+                    "沒有可用更新",
+                    $"目前版本 {currentVersion} 已是最新公開版本。",
+                    showCancel: false);
+                return;
+            }
+
+            var packageMessage = update.HasPackageAndChecksum
+                ? $"已找到 {update.RuntimeIdentifier} 的 {update.PackageFileName} 與同名 SHA-256。"
+                : $"這個 Release 尚未同時提供 {update.RuntimeIdentifier} 安裝包與 SHA-256，請在下載頁確認。";
+            var openReleasePage = await MessageDialog.ShowAsync(
+                this,
+                $"有新版本 {update.LatestVersionText}",
+                $"{update.ReleaseName}\n\n目前版本：{currentVersion}\n最新版本：{update.LatestVersionText}\n{packageMessage}\n\n是否開啟 GitHub Release 下載頁？",
+                showCancel: true,
+                confirmText: "開啟下載頁");
+            if (!openReleasePage)
+            {
+                SetStatus($"已找到 {update.LatestVersionText}，稍後可再檢查更新。");
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo(update.ReleasePageUri.AbsoluteUri)
+            {
+                UseShellExecute = true
+            });
+            SetStatus($"已開啟 {update.LatestVersionText} 下載頁；安裝前請核對同名 .sha256。");
+        });
     }
 
     private async Task ExecuteCurrentSqlAsync()
@@ -655,6 +701,7 @@ public sealed partial class MainWindow : Window
         _exportButton.IsEnabled = !busy && _lastResult is not null;
         _databaseCombo.IsEnabled = !busy && _session is not null;
         _cancelButton.IsEnabled = busy;
+        _updateButton.IsEnabled = !busy;
         if (!string.IsNullOrWhiteSpace(status))
         {
             SetStatus(status);

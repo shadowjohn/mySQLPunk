@@ -13,6 +13,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
+    ("跨平台更新資產安全選擇", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
 
@@ -232,6 +233,66 @@ static async Task QueryResultExportFormatsAsync()
     {
         Directory.Delete(directory, true);
     }
+}
+
+static Task CrossPlatformUpdateAssetsAsync()
+{
+    const string releaseJson = """
+        {
+          "tag_name": "v1.0.0.20",
+          "name": "mySQLPunk v1.0.0.20",
+          "html_url": "https://github.com/shadowjohn/mySQLPunk/releases/tag/v1.0.0.20",
+          "prerelease": false,
+          "assets": [
+            {
+              "name": "mySQLPunk-1.0.0.20-osx-arm64.app.zip",
+              "browser_download_url": "https://github.com/shadowjohn/mySQLPunk/releases/download/v1.0.0.20/mySQLPunk-1.0.0.20-osx-arm64.app.zip"
+            },
+            {
+              "name": "mySQLPunk-1.0.0.20-linux-x64.tar.gz.sha256",
+              "browser_download_url": "https://github.com/shadowjohn/mySQLPunk/releases/download/v1.0.0.20/mySQLPunk-1.0.0.20-linux-x64.tar.gz.sha256"
+            },
+            {
+              "name": "mySQLPunk-1.0.0.20-linux-x64.tar.gz",
+              "browser_download_url": "https://github.com/shadowjohn/mySQLPunk/releases/download/v1.0.0.20/mySQLPunk-1.0.0.20-linux-x64.tar.gz"
+            }
+          ]
+        }
+        """;
+
+    var update = CrossPlatformUpdateService.ParseLatestRelease(
+        releaseJson,
+        "1.0.0.19",
+        "linux-x64");
+    Assert(update.UpdateAvailable, "新版版本比較不正確");
+    Assert(update.LatestVersionText == "1.0.0.20", "最新版文字不正確");
+    Assert(update.RuntimeIdentifier == "linux-x64", "更新 RID 不正確");
+    Assert(update.PackageFileName == "mySQLPunk-1.0.0.20-linux-x64.tar.gz", "Linux 資產名稱不正確");
+    Assert(update.HasPackageAndChecksum, "應同時找到 Linux 安裝包與 SHA-256");
+    Assert(update.PackageDownloadUri?.Scheme == "https", "安裝包 URL 必須是 HTTPS");
+    Assert(
+        CrossPlatformUpdateService.BuildPackageFileName("v1.2.3", "osx-arm64") ==
+        "mySQLPunk-1.2.3-osx-arm64.app.zip",
+        "macOS 資產名稱不正確");
+
+    var alreadyLatest = CrossPlatformUpdateService.ParseLatestRelease(
+        releaseJson,
+        "1.0.0.20",
+        "linux-x64");
+    Assert(!alreadyLatest.UpdateAvailable, "相同版本不應回報更新");
+
+    var untrustedJson = releaseJson.Replace(
+        "https://github.com/shadowjohn/mySQLPunk/releases/download/v1.0.0.20/mySQLPunk-1.0.0.20-linux-x64.tar.gz\"",
+        "http://example.com/mySQLPunk-1.0.0.20-linux-x64.tar.gz\"",
+        StringComparison.Ordinal);
+    AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseLatestRelease(
+        untrustedJson,
+        "1.0.0.19",
+        "linux-x64"));
+    AssertThrows<PlatformNotSupportedException>(() =>
+        CrossPlatformUpdateService.BuildPackageFileName("1.0.0.20", "linux-riscv64"));
+
+    return Task.CompletedTask;
 }
 
 static async Task MacOsKeychainRoundTripAsync()

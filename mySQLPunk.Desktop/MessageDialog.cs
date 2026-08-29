@@ -6,7 +6,7 @@ namespace MySqlPunk.Desktop;
 
 internal sealed class MessageDialog : Window
 {
-    private MessageDialog(string title, string message, bool showCancel)
+    private MessageDialog(string title, string message, bool showCancel, string? confirmText)
     {
         Title = title;
         Width = 470;
@@ -16,7 +16,7 @@ internal sealed class MessageDialog : Window
 
         var confirm = new Button
         {
-            Content = showCancel ? "確定" : "關閉",
+            Content = confirmText ?? (showCancel ? "確定" : "關閉"),
             Padding = new Thickness(14, 7),
             MinWidth = 80,
             HorizontalContentAlignment = HorizontalAlignment.Center
@@ -62,8 +62,13 @@ internal sealed class MessageDialog : Window
         };
     }
 
-    public static Task<bool> ShowAsync(Window owner, string title, string message, bool showCancel)
+    public static Task<bool> ShowAsync(
+        Window owner,
+        string title,
+        string message,
+        bool showCancel,
+        string? confirmText = null)
     {
-        return new MessageDialog(title, message, showCancel).ShowDialog<bool>(owner);
+        return new MessageDialog(title, message, showCancel, confirmText).ShowDialog<bool>(owner);
     }
 }

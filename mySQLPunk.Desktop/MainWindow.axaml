@@ -10,12 +10,22 @@
         WindowStartupLocation="CenterScreen">
   <Grid RowDefinitions="Auto,*">
     <Border Grid.Row="0" Background="#172033" Padding="18,12">
-      <Grid ColumnDefinitions="*,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto">
         <StackPanel Spacing="2">
           <TextBlock Text="mySQLPunk" Foreground="White" FontSize="22" FontWeight="SemiBold" />
           <TextBlock Text="跨平台資料庫工作台 · Linux / macOS Preview" Foreground="#B9C7E8" />
         </StackPanel>
-        <Border Grid.Column="1" Background="#263451" CornerRadius="14" Padding="12,6" VerticalAlignment="Center">
+        <Button x:Name="UpdateButton"
+                Grid.Column="1"
+                Content="檢查更新"
+                Click="CheckUpdates_Click"
+                Margin="0,0,10,0"
+                Padding="12,6"
+                Background="#263451"
+                Foreground="White"
+                BorderBrush="#4A5D82"
+                VerticalAlignment="Center" />
+        <Border Grid.Column="2" Background="#263451" CornerRadius="14" Padding="12,6" VerticalAlignment="Center">
           <TextBlock x:Name="ConnectionBadge" Text="尚未連線" Foreground="#DCE5FA" />
         </Border>
       </Grid>
