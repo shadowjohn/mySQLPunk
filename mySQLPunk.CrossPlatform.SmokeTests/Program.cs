@@ -1056,6 +1056,42 @@ static async Task TableDataEditingAsync()
                 new TableCellInput("search_query", TableCellInputMode.Value, " 'cat':A & !'dog':* "))) ==
             "'cat':A & !'dog':*",
             "PostgreSQL tsquery 應保留 weight、NOT 與 prefix operator");
+        var rangeColumn = new TableColumnInfo(
+            0,
+            "integer_span",
+            "int4range",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.PostgreSqlRange);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                rangeColumn,
+                new TableCellInput("integer_span", TableCellInputMode.Value, "  [1,10)  "))) ==
+            "[1,10)",
+            "PostgreSQL range 應去除外圍空白並交由 PostgreSQL 權威 parser 驗證");
+        var multirangeColumn = rangeColumn with
+        {
+            Name = "integer_spans",
+            DataTypeName = "int4multirange"
+        };
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                multirangeColumn,
+                new TableCellInput("integer_spans", TableCellInputMode.Value, " {[1,5),[10,15)} "))) ==
+            "{[1,5),[10,15)}",
+            "PostgreSQL multirange 應保留多段 range 文字");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            rangeColumn,
+            new TableCellInput("integer_span", TableCellInputMode.Value, "[1,\0)")));
+        var oversizedRange = new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            rangeColumn,
+            new TableCellInput("integer_span", TableCellInputMode.Value, oversizedRange)));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(rangeColumn, oversizedRange),
+            "既有 PostgreSQL range 超過 1 MiB 時應維持唯讀");
     }
     finally
     {
@@ -1166,7 +1202,46 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL, duration INTERVAL NULL, wal_position PG_LSN NULL, object_id OID NULL, transaction_id XID NULL, command_id CID NULL, full_transaction_id XID8 NULL, search_vector TSVECTOR NULL, search_query TSQUERY NULL);");
+        await session.ExecuteAsync(
+            database,
+            """
+            CREATE TABLE sample (
+                id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                name VARCHAR(40) NOT NULL,
+                quantity INTEGER NULL,
+                note VARCHAR(80) NULL,
+                payload BYTEA NULL,
+                metadata JSONB NULL,
+                document XML NULL,
+                address INET NULL,
+                subnet CIDR NULL,
+                mac MACADDR NULL,
+                mac8 MACADDR8 NULL,
+                bits BIT(8) NULL,
+                varbits BIT VARYING(16) NULL,
+                alarm TIME WITH TIME ZONE NULL,
+                duration INTERVAL NULL,
+                wal_position PG_LSN NULL,
+                object_id OID NULL,
+                transaction_id XID NULL,
+                command_id CID NULL,
+                full_transaction_id XID8 NULL,
+                search_vector TSVECTOR NULL,
+                search_query TSQUERY NULL,
+                integer_span INT4RANGE NULL,
+                big_integer_span INT8RANGE NULL,
+                numeric_span NUMRANGE NULL,
+                timestamp_span TSRANGE NULL,
+                timestamp_with_zone_span TSTZRANGE NULL,
+                date_span DATERANGE NULL,
+                integer_spans INT4MULTIRANGE NULL,
+                big_integer_spans INT8MULTIRANGE NULL,
+                numeric_spans NUMMULTIRANGE NULL,
+                timestamp_spans TSMULTIRANGE NULL,
+                timestamp_with_zone_spans TSTZMULTIRANGE NULL,
+                date_spans DATEMULTIRANGE NULL
+            );
+            """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -1425,6 +1500,34 @@ static async Task VerifySafeTableEditingAsync(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected full text"),
             "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 tsquery");
     }
+    var rangeColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.PostgreSqlRange)
+        .ToList();
+    if (rangeColumns.Count > 0)
+    {
+        Assert(rangeColumns.Count == 12, $"PostgreSQL 12 種內建 range／multirange metadata 未完整辨識；actual={rangeColumns.Count}");
+        foreach (var rangeColumn in rangeColumns)
+        {
+            Assert(rangeColumn.IsEditable, $"PostgreSQL {rangeColumn.DataTypeName} 應可安全編輯");
+            insertInputs.Add(new TableCellInput(
+                rangeColumn.Name,
+                TableCellInputMode.Value,
+                GetPostgreSqlRangeTestValue(rangeColumn, updated: false)));
+        }
+
+        await AssertThrowsAsync<PostgresException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected range"),
+                new TableCellInput(rangeColumns[0].Name, TableCellInputMode.Value, "not-a-range")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected range"),
+            "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 range");
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1535,6 +1638,13 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             Convert.ToString(inserted.Values[fullTextQueryColumn.Ordinal]) == "'cat':A & !'dog':*",
             $"PostgreSQL tsquery 安全新增不正確；actual={inserted.Values[fullTextQueryColumn.Ordinal]}");
+    }
+    foreach (var rangeColumn in rangeColumns)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[rangeColumn.Ordinal]) ==
+            GetPostgreSqlRangeTestValue(rangeColumn, updated: false),
+            $"PostgreSQL {rangeColumn.DataTypeName} 安全新增不正確；actual={inserted.Values[rangeColumn.Ordinal]}");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1654,6 +1764,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "'bird' <2> 'fish':B"));
     }
+    foreach (var rangeColumn in rangeColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            rangeColumn.Name,
+            TableCellInputMode.Value,
+            GetPostgreSqlRangeTestValue(rangeColumn, updated: true)));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1767,6 +1884,13 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(updated.Values[fullTextQueryColumn.Ordinal]) == "'bird' <2> 'fish':B",
             $"PostgreSQL tsquery 安全修改不正確；actual={updated.Values[fullTextQueryColumn.Ordinal]}");
     }
+    foreach (var rangeColumn in rangeColumns)
+    {
+        Assert(
+            Convert.ToString(updated.Values[rangeColumn.Ordinal]) ==
+            GetPostgreSqlRangeTestValue(rangeColumn, updated: true),
+            $"PostgreSQL {rangeColumn.DataTypeName} 安全修改不正確；actual={updated.Values[rangeColumn.Ordinal]}");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -1831,6 +1955,28 @@ static string GetBitStringTestValue(TableColumnInfo column, bool updated) =>
         ("bit varying(16)", false) => "101011",
         ("bit varying(16)", true) => "1111000011110000",
         _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
+    };
+
+static string GetPostgreSqlRangeTestValue(TableColumnInfo column, bool updated) =>
+    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    {
+        ("int4range", false) => "[1,10)",
+        ("int8range", false) => "[10000000000,10000000100)",
+        ("numrange", false) => "[1.25,9.75]",
+        ("tsrange", false) => "[\"2026-01-01 00:00:00\",\"2026-01-02 00:00:00\")",
+        ("tstzrange", false) => "[\"2026-01-01 00:00:00+00\",\"2026-01-02 00:00:00+00\")",
+        ("daterange", false) => "[2026-01-01,2026-02-01)",
+        ("int4multirange", false) => "{[1,5),[10,15)}",
+        ("int8multirange", false) => "{[10000000000,10000000005),[10000000010,10000000015)}",
+        ("nummultirange", false) => "{[1.25,2.5),[5.75,9.5]}",
+        ("tsmultirange", false) =>
+            "{[\"2026-01-01 00:00:00\",\"2026-01-02 00:00:00\"),[\"2026-02-01 00:00:00\",\"2026-02-02 00:00:00\")}",
+        ("tstzmultirange", false) =>
+            "{[\"2026-01-01 00:00:00+00\",\"2026-01-02 00:00:00+00\"),[\"2026-02-01 00:00:00+00\",\"2026-02-02 00:00:00+00\")}",
+        ("datemultirange", false) => "{[2026-01-01,2026-02-01),[2026-03-01,2026-04-01)}",
+        (var dataType, true) when dataType.EndsWith("multirange", StringComparison.Ordinal) => "{}",
+        (_, true) => "empty",
+        _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} range 測試值。")
     };
 
 static void AssertNetworkValue(object? actual, string expected, string message)

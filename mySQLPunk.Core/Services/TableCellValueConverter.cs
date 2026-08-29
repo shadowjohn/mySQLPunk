@@ -65,8 +65,15 @@ public static class TableCellValueConverter
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
                 TableColumnValueKind.Interval => ParseInterval(input.Text),
                 TableColumnValueKind.LogSequenceNumber => ParseLogSequenceNumber(input.Text),
-                TableColumnValueKind.FullTextVector => ParseFullTextValue(input.Text),
-                TableColumnValueKind.FullTextQuery => ParseFullTextValue(input.Text),
+                TableColumnValueKind.FullTextVector => ParsePostgreSqlServerValidatedText(
+                    input.Text,
+                    "全文檢索"),
+                TableColumnValueKind.FullTextQuery => ParsePostgreSqlServerValidatedText(
+                    input.Text,
+                    "全文檢索"),
+                TableColumnValueKind.PostgreSqlRange => ParsePostgreSqlServerValidatedText(
+                    input.Text,
+                    "range／multirange"),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -154,7 +161,8 @@ public static class TableCellValueConverter
             TableColumnValueKind.Xml or
             TableColumnValueKind.BitString or
             TableColumnValueKind.FullTextVector or
-            TableColumnValueKind.FullTextQuery &&
+            TableColumnValueKind.FullTextQuery or
+            TableColumnValueKind.PostgreSqlRange &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
 
@@ -346,18 +354,18 @@ public static class TableCellValueConverter
                uint.TryParse(text, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value);
     }
 
-    private static string ParseFullTextValue(string text)
+    private static string ParsePostgreSqlServerValidatedText(string text, string valueDescription)
     {
         var trimmed = text.Trim();
         if (trimmed.Length > MaximumEditableStructuredTextCharacters)
         {
             throw new FormatException(
-                $"PostgreSQL 全文檢索值不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
+                $"PostgreSQL {valueDescription} 值不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
         }
 
         if (trimmed.Contains('\0'))
         {
-            throw new FormatException("PostgreSQL 全文檢索值不可包含 NUL 字元。");
+            throw new FormatException($"PostgreSQL {valueDescription} 值不可包含 NUL 字元。");
         }
 
         return trimmed;

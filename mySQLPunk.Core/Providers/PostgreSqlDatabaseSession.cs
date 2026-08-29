@@ -96,10 +96,12 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             lsnParameter.NpgsqlDbType = NpgsqlDbType.PgLsn;
         }
-        else if (column.ValueKind is TableColumnValueKind.FullTextVector or TableColumnValueKind.FullTextQuery &&
-                 parameter is NpgsqlParameter fullTextParameter)
+        else if (column.ValueKind is TableColumnValueKind.FullTextVector or
+                     TableColumnValueKind.FullTextQuery or
+                     TableColumnValueKind.PostgreSqlRange &&
+                 parameter is NpgsqlParameter serverValidatedTextParameter)
         {
-            fullTextParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
+            serverValidatedTextParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
         }
     }
 
@@ -197,7 +199,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             TableColumnValueKind.TimeWithTimeZone or
             TableColumnValueKind.LogSequenceNumber or
             TableColumnValueKind.FullTextVector or
-            TableColumnValueKind.FullTextQuery
+            TableColumnValueKind.FullTextQuery or
+            TableColumnValueKind.PostgreSqlRange
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
@@ -325,6 +328,9 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "pg_lsn" => TableColumnValueKind.LogSequenceNumber,
             "tsvector" => TableColumnValueKind.FullTextVector,
             "tsquery" => TableColumnValueKind.FullTextQuery,
+            "int4range" or "int8range" or "numrange" or "tsrange" or "tstzrange" or "daterange" or
+                "int4multirange" or "int8multirange" or "nummultirange" or "tsmultirange" or
+                "tstzmultirange" or "datemultirange" => TableColumnValueKind.PostgreSqlRange,
             "oid" or "xid" or "cid" or "xid8" => TableColumnValueKind.UnsignedInteger,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,

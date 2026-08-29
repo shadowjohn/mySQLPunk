@@ -18,6 +18,7 @@ public enum TableColumnValueKind
     LogSequenceNumber,
     FullTextVector,
     FullTextQuery,
+    PostgreSqlRange,
     Guid,
     Json,
     Xml,
