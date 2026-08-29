@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Data.SqlTypes;
 using System.Net;
 using System.Text.Json;
 using System.Xml;
@@ -95,6 +96,7 @@ public static class TableCellValueConverter
                     input.Text,
                     "SQL Server",
                     "hierarchyid"),
+                TableColumnValueKind.SqlServerVariant => ParseSqlServerVariant(input.Text),
                 TableColumnValueKind.Spatial => ParseSpatial(input.Text),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
@@ -123,6 +125,7 @@ public static class TableCellValueConverter
         TimeOnly time => time.ToString("O", CultureInfo.InvariantCulture),
         TimeSpan duration => duration.ToString("c", CultureInfo.InvariantCulture),
         ExactDecimalValue exactDecimal => exactDecimal.Text,
+        SqlServerVariantValue variant => variant.CanonicalText,
         bool boolean => boolean ? "true" : "false",
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString() ?? string.Empty
@@ -190,10 +193,403 @@ public static class TableCellValueConverter
             TableColumnValueKind.PostgreSqlGeometric or
             TableColumnValueKind.PostgreSqlServerValidatedText or
             TableColumnValueKind.SqlServerHierarchyId or
+            TableColumnValueKind.SqlServerVariant or
             TableColumnValueKind.Spatial or
             TableColumnValueKind.ExactDecimal &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
+
+    private static SqlServerVariantValue ParseSqlServerVariant(string text)
+    {
+        if (text.Length > MaximumEditableStructuredTextCharacters || text.Contains('\0'))
+        {
+            throw new FormatException(
+                $"SQL Server sql_variant 值不可包含 NUL，且不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
+        }
+
+        var separator = text.IndexOf(':');
+        if (separator <= 0)
+        {
+            throw new FormatException(
+                "SQL Server sql_variant 必須使用 type:value 格式，例如 int:42 或 nvarchar(30):文字。");
+        }
+
+        var typeSpec = text[..separator].Trim();
+        var valueText = text[(separator + 1)..];
+        var metadataSeparator = typeSpec.IndexOf('@');
+        var typeDefinition = metadataSeparator < 0 ? typeSpec : typeSpec[..metadataSeparator];
+        var collationMetadata = metadataSeparator < 0 ? null : typeSpec[(metadataSeparator + 1)..];
+        ParseSqlServerVariantTypeDefinition(typeDefinition, out var baseType, out var arguments);
+
+        int? size = null;
+        byte? precision = null;
+        byte? scale = null;
+        int? localeId = null;
+        int? comparisonStyle = null;
+        string? collationName = null;
+        object value;
+        string canonicalValue;
+
+        switch (baseType)
+        {
+            case "tinyint":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                value = byte.Parse(valueText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+                canonicalValue = ((byte)value).ToString(CultureInfo.InvariantCulture);
+                break;
+            case "smallint":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                value = short.Parse(valueText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+                canonicalValue = ((short)value).ToString(CultureInfo.InvariantCulture);
+                break;
+            case "int":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                value = int.Parse(valueText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+                canonicalValue = ((int)value).ToString(CultureInfo.InvariantCulture);
+                break;
+            case "bigint":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                value = long.Parse(valueText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+                canonicalValue = ((long)value).ToString(CultureInfo.InvariantCulture);
+                break;
+            case "bit":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                value = ParseBoolean(valueText);
+                canonicalValue = (bool)value ? "true" : "false";
+                break;
+            case "decimal":
+            case "numeric":
+                {
+                    RequireNoVariantCollation(baseType, collationMetadata);
+                    var numericArguments = ParseVariantIntegerArguments(baseType, arguments, 2);
+                    if (numericArguments[0] is < 1 or > 38 ||
+                        numericArguments[1] < 0 ||
+                        numericArguments[1] > numericArguments[0])
+                    {
+                        throw new FormatException($"{baseType} precision 必須介於 1–38，scale 必須介於 0–precision。");
+                    }
+
+                    precision = checked((byte)numericArguments[0]);
+                    scale = checked((byte)numericArguments[1]);
+                    var definition = $"{baseType}({precision},{scale})";
+                    var numericColumn = new TableColumnInfo(
+                        0,
+                        "sql_variant",
+                        definition,
+                        true,
+                        false,
+                        false,
+                        false,
+                        TableColumnValueKind.ExactDecimal)
+                    {
+                        StorageDataTypeName = definition
+                    };
+                    var exact = ParseExactDecimal(numericColumn, valueText);
+                    value = SqlDecimal.Parse(exact.Text);
+                    canonicalValue = exact.Text;
+                    break;
+                }
+            case "money":
+            case "smallmoney":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                var money = decimal.Parse(
+                    valueText.Trim(),
+                    NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture);
+                var minimumMoney = baseType == "smallmoney" ? -214_748.3648m : -922_337_203_685_477.5808m;
+                var maximumMoney = baseType == "smallmoney" ? 214_748.3647m : 922_337_203_685_477.5807m;
+                if (money < minimumMoney || money > maximumMoney || money * 10_000 != decimal.Truncate(money * 10_000))
+                {
+                    throw new OverflowException(
+                        $"{baseType} 必須介於 {minimumMoney} 與 {maximumMoney}，且最多 4 位小數。");
+                }
+                value = money;
+                canonicalValue = money.ToString(CultureInfo.InvariantCulture);
+                break;
+            case "float":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                value = ParseFiniteDouble(valueText);
+                canonicalValue = ((double)value).ToString("R", CultureInfo.InvariantCulture);
+                break;
+            case "real":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                var single = float.Parse(valueText.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture);
+                value = float.IsFinite(single) ? single : throw new FormatException("real 必須是有限值。");
+                canonicalValue = single.ToString("R", CultureInfo.InvariantCulture);
+                break;
+            case "date":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                value = DateTime.ParseExact(
+                    valueText.Trim(),
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None);
+                canonicalValue = ((DateTime)value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                break;
+            case "datetime":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                var dateTime = ParseSqlServerVariantDateTime(valueText);
+                SqlDateTime roundedDateTime;
+                try
+                {
+                    roundedDateTime = new SqlDateTime(dateTime);
+                }
+                catch (SqlTypeException exception)
+                {
+                    throw new OverflowException("datetime 必須介於 1753-01-01 與 9999-12-31。", exception);
+                }
+                if (roundedDateTime.Value != dateTime)
+                {
+                    throw new FormatException("datetime 的小數秒無法由 SQL Server 無損保存。");
+                }
+                value = dateTime;
+                canonicalValue = dateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture);
+                break;
+            case "smalldatetime":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                var smallDateTime = ParseSqlServerVariantDateTime(valueText);
+                if (smallDateTime < new DateTime(1900, 1, 1) ||
+                    smallDateTime > new DateTime(2079, 6, 6, 23, 59, 0) ||
+                    smallDateTime.Ticks % TimeSpan.TicksPerMinute != 0)
+                {
+                    throw new OverflowException(
+                        "smalldatetime 必須介於 1900-01-01T00:00 與 2079-06-06T23:59，且只能使用整分鐘。");
+                }
+                value = smallDateTime;
+                canonicalValue = smallDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture);
+                break;
+            case "datetime2":
+                RequireNoVariantCollation(baseType, collationMetadata);
+                scale = ParseVariantScale(baseType, arguments);
+                var dateTime2 = ParseSqlServerVariantDateTime(valueText);
+                EnsureVariantFractionalScale(dateTime2.Ticks, scale.Value, baseType);
+                value = dateTime2;
+                canonicalValue = dateTime2.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture);
+                break;
+            case "datetimeoffset":
+                RequireNoVariantCollation(baseType, collationMetadata);
+                scale = ParseVariantScale(baseType, arguments);
+                var offsetText = valueText.Trim();
+                if (!offsetText.EndsWith('Z') && !offsetText.EndsWith('z') &&
+                    offsetText.LastIndexOfAny(['+', '-']) <= 10)
+                {
+                    throw new FormatException("datetimeoffset 必須明確包含 Z 或 ±HH:mm offset。");
+                }
+                var dateTimeOffset = DateTimeOffset.Parse(
+                    offsetText,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind);
+                EnsureVariantFractionalScale(dateTimeOffset.Ticks, scale.Value, baseType);
+                value = dateTimeOffset;
+                canonicalValue = dateTimeOffset.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture);
+                break;
+            case "time":
+                RequireNoVariantCollation(baseType, collationMetadata);
+                scale = ParseVariantScale(baseType, arguments);
+                value = TimeSpan.Parse(valueText.Trim(), CultureInfo.InvariantCulture);
+                if ((TimeSpan)value < TimeSpan.Zero || (TimeSpan)value >= TimeSpan.FromDays(1))
+                {
+                    throw new OverflowException("SQL Server time 必須介於 00:00:00 與 23:59:59.9999999。");
+                }
+                EnsureVariantFractionalScale(((TimeSpan)value).Ticks, scale.Value, baseType);
+                canonicalValue = ((TimeSpan)value).ToString("c", CultureInfo.InvariantCulture);
+                break;
+            case "uniqueidentifier":
+                RequireNoVariantArguments(baseType, arguments, collationMetadata);
+                value = Guid.Parse(valueText.Trim());
+                canonicalValue = ((Guid)value).ToString("D", CultureInfo.InvariantCulture);
+                break;
+            case "char":
+            case "varchar":
+            case "nchar":
+            case "nvarchar":
+                {
+                    size = ParseVariantSize(baseType, arguments);
+                    ParseVariantCollationMetadata(
+                        collationMetadata,
+                        out localeId,
+                        out comparisonStyle,
+                        out collationName);
+                    if (valueText.Length > size)
+                    {
+                        throw new OverflowException($"{baseType}({size}) 不可保存超過 {size} 個字元的值。");
+                    }
+                    value = valueText;
+                    canonicalValue = valueText;
+                    break;
+                }
+            case "binary":
+            case "varbinary":
+                RequireNoVariantCollation(baseType, collationMetadata);
+                size = ParseVariantSize(baseType, arguments);
+                value = ParseBinary(valueText);
+                if (((byte[])value).Length > size)
+                {
+                    throw new OverflowException($"{baseType}({size}) 不可保存超過 {size} bytes 的值。");
+                }
+                canonicalValue = $"0x{Convert.ToHexString((byte[])value)}";
+                break;
+            default:
+                throw new FormatException($"sql_variant 不支援或無法辨識內層型別「{baseType}」。");
+        }
+
+        var canonicalType = arguments is null ? baseType : $"{baseType}({arguments})";
+        if (collationName is not null)
+        {
+            canonicalType += $"@{collationName}|{localeId}|{comparisonStyle}";
+        }
+
+        return new SqlServerVariantValue(
+            baseType,
+            value,
+            $"{canonicalType}:{canonicalValue}",
+            size,
+            precision,
+            scale,
+            localeId,
+            comparisonStyle,
+            collationName);
+    }
+
+    private static void ParseSqlServerVariantTypeDefinition(
+        string typeDefinition,
+        out string baseType,
+        out string? arguments)
+    {
+        var normalized = typeDefinition.Trim().ToLowerInvariant();
+        var open = normalized.IndexOf('(');
+        if (open < 0)
+        {
+            if (normalized.Length == 0 ||
+                !char.IsAsciiLetter(normalized[0]) ||
+                normalized.Any(character => !char.IsAsciiLetterOrDigit(character)))
+            {
+                throw new FormatException("sql_variant 內層型別名稱無效。");
+            }
+            baseType = normalized;
+            arguments = null;
+            return;
+        }
+
+        if (!normalized.EndsWith(')') || normalized.IndexOf('(', open + 1) >= 0)
+        {
+            throw new FormatException("sql_variant 內層型別宣告的括號無效。");
+        }
+        baseType = normalized[..open].Trim();
+        arguments = normalized[(open + 1)..^1].Trim();
+        if (baseType.Length == 0 ||
+            !char.IsAsciiLetter(baseType[0]) ||
+            baseType.Any(character => !char.IsAsciiLetterOrDigit(character)) ||
+            arguments.Length == 0)
+        {
+            throw new FormatException("sql_variant 內層型別宣告無效。");
+        }
+    }
+
+    private static void RequireNoVariantArguments(string baseType, string? arguments, string? collationMetadata)
+    {
+        RequireNoVariantCollation(baseType, collationMetadata);
+        if (arguments is not null)
+        {
+            throw new FormatException($"sql_variant 的 {baseType} 不可包含型別參數。");
+        }
+    }
+
+    private static void RequireNoVariantCollation(string baseType, string? collationMetadata)
+    {
+        if (collationMetadata is not null)
+        {
+            throw new FormatException($"只有 sql_variant 字串型別可包含 collation metadata；{baseType} 不可使用。");
+        }
+    }
+
+    private static int[] ParseVariantIntegerArguments(string baseType, string? arguments, int expectedCount)
+    {
+        var parts = arguments?.Split(',', StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
+        if (parts.Length != expectedCount ||
+            parts.Any(part => !int.TryParse(
+                part,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out _)))
+        {
+            throw new FormatException($"sql_variant 的 {baseType} 型別參數格式無效。");
+        }
+        return parts.Select(part => int.Parse(part, CultureInfo.InvariantCulture)).ToArray();
+    }
+
+    private static int ParseVariantSize(string baseType, string? arguments)
+    {
+        var values = ParseVariantIntegerArguments(baseType, arguments, 1);
+        var maximum = baseType is "nchar" or "nvarchar" ? 4000 : 8000;
+        return values[0] >= 1 && values[0] <= maximum
+            ? values[0]
+            : throw new FormatException($"sql_variant 的 {baseType} 長度必須介於 1–{maximum}。");
+    }
+
+    private static byte ParseVariantScale(string baseType, string? arguments)
+    {
+        var values = ParseVariantIntegerArguments(baseType, arguments, 1);
+        return values[0] is >= 0 and <= 7
+            ? checked((byte)values[0])
+            : throw new FormatException($"sql_variant 的 {baseType} scale 必須介於 0–7。");
+    }
+
+    private static void EnsureVariantFractionalScale(long ticks, byte scale, string baseType)
+    {
+        var tickQuantum = (long)Math.Pow(10, 7 - scale);
+        if (ticks % tickQuantum != 0)
+        {
+            throw new FormatException($"{baseType}({scale}) 無法無損保存輸入的小數秒。");
+        }
+    }
+
+    private static void ParseVariantCollationMetadata(
+        string? metadata,
+        out int? localeId,
+        out int? comparisonStyle,
+        out string? collationName)
+    {
+        localeId = null;
+        comparisonStyle = null;
+        collationName = null;
+        if (metadata is null)
+        {
+            return;
+        }
+
+        var parts = metadata.Split('|');
+        if (parts.Length != 3 || parts[0].Length is < 1 or > 128 ||
+            parts[0].Any(character => !char.IsAsciiLetterOrDigit(character) && character != '_') ||
+            !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var parsedLocaleId) ||
+            parsedLocaleId <= 0 ||
+            !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var parsedComparisonStyle) ||
+            parsedComparisonStyle < 0)
+        {
+            throw new FormatException(
+                "sql_variant collation metadata 必須使用 CollationName|LCID|ComparisonStyle 格式。");
+        }
+
+        collationName = parts[0];
+        localeId = parsedLocaleId;
+        comparisonStyle = parsedComparisonStyle;
+    }
+
+    private static DateTime ParseSqlServerVariantDateTime(string text) =>
+        DateTime.TryParseExact(
+            text.Trim(),
+            new[]
+            {
+                "yyyy-MM-dd'T'HH:mm:ss",
+                "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm:ss.FFFFFFF"
+            },
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var value)
+            ? value
+            : throw new FormatException("SQL Server 日期時間必須包含日期與時間，且不可包含 offset 或時區。");
 
     private static double ParseFiniteDouble(string text)
     {

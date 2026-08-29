@@ -188,8 +188,9 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
                 var column = insertColumns[index];
                 var input = inputMap[column.Name];
                 var parameterName = $"@value{index}";
-                AddParameter(command, parameterName, TableCellValueConverter.Parse(column, input), column);
-                parameterNames.Add(BuildParameterValueExpression(column, parameterName));
+                var parsedValue = TableCellValueConverter.Parse(column, input);
+                AddParameter(command, parameterName, parsedValue, column);
+                parameterNames.Add(BuildParameterValueExpression(column, parameterName, parsedValue));
             }
 
             command.CommandText =
@@ -239,9 +240,10 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             }
 
             var parameterName = $"@value{parameterIndex++}";
-            AddParameter(command, parameterName, TableCellValueConverter.Parse(column, input), column);
+            var parsedValue = TableCellValueConverter.Parse(column, input);
+            AddParameter(command, parameterName, parsedValue, column);
             assignments.Add(
-                $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}");
+                $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName, parsedValue)}");
         }
 
         var predicate = BuildOptimisticPredicate(command, columns, originalRow);
@@ -398,8 +400,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             }
 
             var parameterName = $"@original{parameterIndex++}";
-            AddParameter(command, parameterName, original, column);
-            predicates.Add(BuildOriginalValuePredicate(column, parameterName));
+            AddParameter(command, parameterName, original, column, isOriginalValue: true);
+            predicates.Add(BuildOriginalValuePredicate(column, parameterName, original));
         }
 
         return string.Join(" AND ", predicates);
@@ -408,24 +410,43 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     protected virtual string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName) =>
         $"{QuoteIdentifier(column.Name)} = {parameterName}";
 
+    protected virtual string BuildOriginalValuePredicate(
+        TableColumnInfo column,
+        string parameterName,
+        object originalValue) =>
+        BuildOriginalValuePredicate(column, parameterName);
+
     protected virtual string BuildParameterValueExpression(TableColumnInfo column, string parameterName) =>
         parameterName;
+
+    protected virtual string BuildParameterValueExpression(
+        TableColumnInfo column,
+        string parameterName,
+        object? value) =>
+        BuildParameterValueExpression(column, parameterName);
 
     private void AddParameter(
         DbCommand command,
         string name,
         object? value,
-        TableColumnInfo column)
+        TableColumnInfo column,
+        bool isOriginalValue = false)
     {
         var parameter = command.CreateParameter();
         parameter.ParameterName = name;
         ConfigureParameter(parameter, column);
-        parameter.Value = PrepareParameterValue(column, value) ?? DBNull.Value;
+        parameter.Value = (isOriginalValue
+            ? PrepareOriginalParameterValue(column, value)
+            : PrepareParameterValue(column, value)) ?? DBNull.Value;
+        ConfigurePreparedParameter(parameter, column);
         command.Parameters.Add(parameter);
     }
 
     protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) =>
         value is ExactDecimalValue exactDecimal ? exactDecimal.Text : value;
+
+    protected virtual object? PrepareOriginalParameterValue(TableColumnInfo column, object? value) =>
+        PrepareParameterValue(column, value);
 
     protected virtual void ConfigureParameter(DbParameter parameter, TableColumnInfo column)
     {
@@ -444,6 +465,10 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             TableColumnValueKind.Binary => DbType.Binary,
             _ => DbType.String
         };
+    }
+
+    protected virtual void ConfigurePreparedParameter(DbParameter parameter, TableColumnInfo column)
+    {
     }
 
     private static void ValidateTable(DatabaseObjectInfo table)

@@ -25,6 +25,7 @@ public enum TableColumnValueKind
     PostgreSqlGeometric,
     PostgreSqlServerValidatedText,
     SqlServerHierarchyId,
+    SqlServerVariant,
     Spatial,
     Guid,
     Json,
@@ -85,6 +86,17 @@ public sealed record IntervalComponents(int Months, int Days, long Microseconds)
 public sealed record ExactDecimalValue(string Text);
 
 public sealed record ExactDecimalDefinition(int? Precision, int? Scale, bool IsUnsigned);
+
+public sealed record SqlServerVariantValue(
+    string BaseTypeName,
+    object Value,
+    string CanonicalText,
+    int? Size = null,
+    byte? Precision = null,
+    byte? Scale = null,
+    int? LocaleId = null,
+    int? ComparisonStyle = null,
+    string? CollationName = null);
 
 public sealed class TableDataConflictException : Exception
 {

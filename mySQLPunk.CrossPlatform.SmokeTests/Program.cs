@@ -1355,6 +1355,110 @@ static async Task TableDataEditingAsync()
         Assert(
             TableCellValueConverter.IsStructuredTextTooLargeToEdit(hierarchyIdColumn, oversizedHierarchyId),
             "既有 SQL Server hierarchyid 超過 1 MiB 時應維持唯讀");
+        var sqlVariantColumn = new TableColumnInfo(
+            0,
+            "variant_value",
+            "sql_variant",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.SqlServerVariant);
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlVariantColumn,
+                new TableCellInput("variant_value", TableCellInputMode.Value, "int:42")) is
+                SqlServerVariantValue
+            {
+                BaseTypeName: "int",
+                Value: int intValue,
+                CanonicalText: "int:42"
+            } && intValue == 42,
+            "SQL Server sql_variant 應保留 int 內層型別");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlVariantColumn,
+                new TableCellInput("variant_value", TableCellInputMode.Value, "decimal(18,6):123.450000")) is
+                SqlServerVariantValue
+            {
+                BaseTypeName: "decimal",
+                Precision: 18,
+                Scale: 6,
+                Value: System.Data.SqlTypes.SqlDecimal,
+                CanonicalText: "decimal(18,6):123.450000"
+            },
+            "SQL Server sql_variant 應無損保留 decimal precision／scale");
+        const string collatedVariant =
+            "nvarchar(30)@Latin1_General_100_BIN2|1033|0:  文字:含冒號與尾端空白  ";
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlVariantColumn,
+                new TableCellInput("variant_value", TableCellInputMode.Value, collatedVariant)) is
+                SqlServerVariantValue
+            {
+                BaseTypeName: "nvarchar",
+                Size: 30,
+                LocaleId: 1033,
+                ComparisonStyle: 0,
+                CollationName: "Latin1_General_100_BIN2",
+                Value: "  文字:含冒號與尾端空白  ",
+                CanonicalText: collatedVariant
+            },
+            "SQL Server sql_variant 字串應保留長度、collation、冒號與外圍空白");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqlVariantColumn,
+                new TableCellInput("variant_value", TableCellInputMode.Value, "varbinary(4):0x00ff10")) is
+                SqlServerVariantValue
+            {
+                BaseTypeName: "varbinary",
+                Size: 4,
+                Value: byte[] { Length: 3 },
+                CanonicalText: "varbinary(4):0x00FF10"
+            },
+            "SQL Server sql_variant binary 應正規化十六進位並保留長度");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput("variant_value", TableCellInputMode.Value, "numeric(5,2):1234.56")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput("variant_value", TableCellInputMode.Value, "nvarchar(2):三個字")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput("variant_value", TableCellInputMode.Value, "xml:<item />")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput(
+                "variant_value",
+                TableCellInputMode.Value,
+                "datetime2(3):2026-08-30T12:34:56.7891")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput(
+                "variant_value",
+                TableCellInputMode.Value,
+                "datetimeoffset(3):2026-08-30T12:34:56.789")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput(
+                "variant_value",
+                TableCellInputMode.Value,
+                "smalldatetime:2026-08-30T12:34:01")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput("variant_value", TableCellInputMode.Value, "money:1.23456")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput("variant_value", TableCellInputMode.Value, "int:1\0")));
+        var oversizedVariant =
+            "nvarchar(4000):" +
+            new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqlVariantColumn,
+            new TableCellInput("variant_value", TableCellInputMode.Value, oversizedVariant)));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(sqlVariantColumn, oversizedVariant),
+            "既有 SQL Server sql_variant canonical 文字超過 1 MiB 時應維持唯讀");
         var spatialColumn = new TableColumnInfo(
             0,
             "shape",
@@ -1636,9 +1740,23 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE dbo.short_label FROM nvarchar(30) NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.positive_count FROM int NOT NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.precise_amount FROM decimal(18,6) NULL;");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, node_path hierarchyid NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
+        await session.ExecuteAsync(
+            database,
+            """
+            UPDATE dbo.sample
+            SET variant_value = CAST(123.450000 AS decimal(18,6)),
+                variant_text = CAST(N'Seed:文字  ' AS nvarchar(30)) COLLATE Latin1_General_100_BIN2,
+                variant_temporal = CAST('2026-08-30T12:34:56.789' AS datetime2(3))
+            WHERE name = N'Punky';
+            UPDATE dbo.sample
+            SET variant_value = CAST(987654321.12345678 AS numeric(20,8)),
+                variant_text = CAST('ASCII seed' AS varchar(20)),
+                variant_temporal = CAST(0x00FF10 AS varbinary(4))
+            WHERE name = N'Linux/macOS';
+            """);
 
         var result = await session.ExecuteAsync(database, "SELECT id, name FROM dbo.sample ORDER BY id;");
         Assert(result.Rows.Count == 2 && Convert.ToString(result.Rows[1][1]) == "Linux/macOS", "SQL Server 查詢結果不正確");
@@ -1782,6 +1900,198 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected hierarchyid"),
             "SQL Server 不可寫入 parser 拒絕的畸形 hierarchyid 值");
+    }
+    var sqlServerVariantColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.SqlServerVariant)
+        .ToList();
+    var sqlServerVariantValueColumn = sqlServerVariantColumns.SingleOrDefault(column =>
+        column.Name == "variant_value");
+    var sqlServerVariantTextColumn = sqlServerVariantColumns.SingleOrDefault(column =>
+        column.Name == "variant_text");
+    var sqlServerVariantTemporalColumn = sqlServerVariantColumns.SingleOrDefault(column =>
+        column.Name == "variant_temporal");
+    if (sqlServerVariantColumns.Count > 0)
+    {
+        Assert(
+            sqlServerVariantColumns.Count == 3 &&
+            sqlServerVariantValueColumn is not null &&
+            sqlServerVariantTextColumn is not null &&
+            sqlServerVariantTemporalColumn is not null &&
+            sqlServerVariantColumns.All(column =>
+                column.DataTypeName == "sql_variant" &&
+                column.StorageDataTypeName == "sql_variant" &&
+                column.IsEditable),
+            "SQL Server sql_variant metadata 不完整或未標示為可編輯");
+        var seededDecimal = before.Rows.Single(row => Convert.ToString(row.Values[1]) == "Punky");
+        Assert(
+            Convert.ToString(seededDecimal.Values[sqlServerVariantValueColumn!.Ordinal]) ==
+            "decimal(18,6):123.450000",
+            $"SQL Server sql_variant decimal 載入未保留 base type／precision／scale；actual={seededDecimal.Values[sqlServerVariantValueColumn.Ordinal]}");
+        var seededText = Convert.ToString(seededDecimal.Values[sqlServerVariantTextColumn!.Ordinal]);
+        Assert(
+            seededText?.StartsWith(
+                "nvarchar(30)@Latin1_General_100_BIN2|1033|",
+                StringComparison.Ordinal) == true &&
+            seededText.EndsWith(":Seed:文字  ", StringComparison.Ordinal),
+            $"SQL Server sql_variant nvarchar 載入未保留長度、collation 或文字；actual={seededText}");
+        Assert(
+            Convert.ToString(seededDecimal.Values[sqlServerVariantTemporalColumn!.Ordinal]) ==
+            "datetime2(3):2026-08-30T12:34:56.7890000",
+            $"SQL Server sql_variant datetime2 載入未保留 scale；actual={seededDecimal.Values[sqlServerVariantTemporalColumn.Ordinal]}");
+
+        var seededNumeric = before.Rows.Single(row => Convert.ToString(row.Values[1]) == "Linux/macOS");
+        Assert(
+            Convert.ToString(seededNumeric.Values[sqlServerVariantValueColumn.Ordinal]) ==
+            "numeric(20,8):987654321.12345678",
+            $"SQL Server sql_variant numeric 載入未保留 synonym 與精度；actual={seededNumeric.Values[sqlServerVariantValueColumn.Ordinal]}");
+        Assert(
+            Convert.ToString(seededNumeric.Values[sqlServerVariantTextColumn.Ordinal])?.StartsWith(
+                "varchar(20)@",
+                StringComparison.Ordinal) == true,
+            $"SQL Server sql_variant varchar 載入未保留長度與 collation；actual={seededNumeric.Values[sqlServerVariantTextColumn.Ordinal]}");
+        Assert(
+            Convert.ToString(seededNumeric.Values[sqlServerVariantTemporalColumn.Ordinal]) ==
+            "varbinary(4):0x00FF10",
+            $"SQL Server sql_variant varbinary 載入未保留長度與 bytes；actual={seededNumeric.Values[sqlServerVariantTemporalColumn.Ordinal]}");
+
+        await session.UpdateTableRowAsync(
+            database,
+            table,
+            seededDecimal,
+            new[]
+            {
+                new TableCellInput("note", TableCellInputMode.Value, "variant predicate"),
+                new TableCellInput(
+                    sqlServerVariantTextColumn.Name,
+                    TableCellInputMode.Value,
+                    seededText!.Replace(":Seed:文字  ", ":Updated:文字  ", StringComparison.Ordinal))
+            });
+        before = await session.LoadTableDataAsync(database, table);
+        var updatedSeededDecimal = before.Rows.Single(row => Convert.ToString(row.Values[1]) == "Punky");
+        Assert(
+            Convert.ToString(updatedSeededDecimal.Values[3]) ==
+            "variant predicate",
+            "SQL Server sql_variant custom collation 原值 predicate 無法安全 round-trip");
+        var updatedCollatedText = Convert.ToString(
+            updatedSeededDecimal.Values[sqlServerVariantTextColumn.Ordinal]);
+        Assert(
+            updatedCollatedText?.StartsWith(
+                "nvarchar(30)@Latin1_General_100_BIN2|1033|",
+                StringComparison.Ordinal) == true &&
+            updatedCollatedText.EndsWith(":Updated:文字  ", StringComparison.Ordinal),
+            $"SQL Server sql_variant custom collation 寫入未保留完整 metadata；actual={updatedCollatedText}");
+
+        var variantTypeMatrix = new (string Tag, string ExpectedBaseType)[]
+        {
+            ("tinyint:255", "tinyint"),
+            ("smallint:-32768", "smallint"),
+            ("int:-2147483648", "int"),
+            ("bigint:9223372036854775807", "bigint"),
+            ("bit:true", "bit"),
+            ("decimal(18,6):123.450000", "decimal"),
+            ("numeric(20,8):987654321.12345678", "numeric"),
+            ("money:123.4567", "money"),
+            ("smallmoney:-123.4567", "smallmoney"),
+            ("float:1.23456789012345", "float"),
+            ("real:1.2345", "real"),
+            ("date:2026-08-30", "date"),
+            ("datetime:2026-08-30T12:34:56", "datetime"),
+            ("smalldatetime:2026-08-30T12:34:00", "smalldatetime"),
+            ("datetime2(7):2026-08-30T12:34:56.1234567", "datetime2"),
+            ("datetimeoffset(3):2026-08-30T12:34:56.789+08:00", "datetimeoffset"),
+            ("time(4):12:34:56.7890", "time"),
+            ("uniqueidentifier:12345678-1234-5678-9abc-def012345678", "uniqueidentifier"),
+            ("char(12):ASCII", "char"),
+            ("varchar(12):ASCII", "varchar"),
+            ("nchar(12):繁體", "nchar"),
+            ("nvarchar(12):繁體", "nvarchar"),
+            ("binary(4):0xCAFE", "binary"),
+            ("varbinary(4):0xCAFE", "varbinary")
+        };
+        for (var matrixIndex = 0; matrixIndex < variantTypeMatrix.Length; matrixIndex++)
+        {
+            var matrixCase = variantTypeMatrix[matrixIndex];
+            var matrixName = $"Variant matrix {matrixIndex}";
+            await session.InsertTableRowAsync(
+                database,
+                table,
+                new[]
+                {
+                    new TableCellInput("name", TableCellInputMode.Value, matrixName),
+                    new TableCellInput(
+                        sqlServerVariantValueColumn.Name,
+                        TableCellInputMode.Value,
+                        matrixCase.Tag)
+                });
+            var matrixSnapshot = await session.LoadTableDataAsync(database, table);
+            var matrixRow = matrixSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == matrixName);
+            var matrixId = Convert.ToInt64(matrixRow.Values[0]);
+            var matrixProperty = await session.ExecuteAsync(
+                database,
+                $"SELECT CONVERT(varchar(30), SQL_VARIANT_PROPERTY(variant_value, 'BaseType')) " +
+                $"FROM dbo.sample WHERE id = {matrixId};");
+            Assert(
+                Convert.ToString(matrixProperty.Rows.Single()[0]) == matrixCase.ExpectedBaseType,
+                $"SQL Server sql_variant {matrixCase.Tag} 寫入後的 BaseType 不正確；" +
+                $"actual={matrixProperty.Rows.Single()[0]}");
+            await session.DeleteTableRowAsync(database, table, matrixRow);
+        }
+        before = await session.LoadTableDataAsync(database, table);
+
+        insertInputs.Add(new TableCellInput(
+            sqlServerVariantValueColumn.Name,
+            TableCellInputMode.Value,
+            "int:42"));
+        insertInputs.Add(new TableCellInput(
+            sqlServerVariantTextColumn.Name,
+            TableCellInputMode.Value,
+            "nvarchar(30):Variant insert:文字  "));
+        insertInputs.Add(new TableCellInput(
+            sqlServerVariantTemporalColumn.Name,
+            TableCellInputMode.Value,
+            "datetimeoffset(3):2026-08-30T12:34:56.789+08:00"));
+
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected sql_variant"),
+                new TableCellInput(sqlServerVariantValueColumn.Name, TableCellInputMode.Value, "decimal(5,2):1234.56")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected sql_variant"),
+            "SQL Server sql_variant 本機驗證拒絕時不可留下半筆資料");
+
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected variant range"),
+                new TableCellInput(sqlServerVariantTemporalColumn.Name, TableCellInputMode.Value, "smalldatetime:1000-01-01T00:00:00")
+            }));
+        rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected variant range"),
+            "SQL Server sql_variant server range 拒絕時不可留下半筆資料");
+
+        await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected variant encoding"),
+                new TableCellInput(
+                    sqlServerVariantTextColumn.Name,
+                    TableCellInputMode.Value,
+                    "varchar(2)@SQL_Latin1_General_CP1_CI_AS|1033|196609:漢字")
+            }));
+        rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected variant encoding"),
+            "SQL Server sql_variant varchar 不可靜默替換無法由 collation 表示的 Unicode 字元");
     }
     var sqlServerAliasLabelColumn = before.Columns.SingleOrDefault(column => column.Name == "alias_label");
     var sqlServerAliasCountColumn = before.Columns.SingleOrDefault(column => column.Name == "alias_count");
@@ -2412,6 +2722,21 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[hierarchyIdColumn.Ordinal]) == "/1/2.5/",
             $"SQL Server hierarchyid 安全新增不正確；actual={inserted.Values[hierarchyIdColumn.Ordinal]}");
     }
+    if (sqlServerVariantValueColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[sqlServerVariantValueColumn.Ordinal]) == "int:42",
+            $"SQL Server sql_variant int 安全新增不正確；actual={inserted.Values[sqlServerVariantValueColumn.Ordinal]}");
+        var insertedVariantText = Convert.ToString(inserted.Values[sqlServerVariantTextColumn!.Ordinal]);
+        Assert(
+            insertedVariantText?.StartsWith("nvarchar(30)@", StringComparison.Ordinal) == true &&
+            insertedVariantText.EndsWith(":Variant insert:文字  ", StringComparison.Ordinal),
+            $"SQL Server sql_variant nvarchar 安全新增不正確；actual={insertedVariantText}");
+        Assert(
+            Convert.ToString(inserted.Values[sqlServerVariantTemporalColumn!.Ordinal]) ==
+            "datetimeoffset(3):2026-08-30T12:34:56.7890000+08:00",
+            $"SQL Server sql_variant datetimeoffset 安全新增不正確；actual={inserted.Values[sqlServerVariantTemporalColumn.Ordinal]}");
+    }
     if (sqlServerAliasLabelColumn is not null)
     {
         Assert(
@@ -2607,6 +2932,21 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "/3/4.5/"));
     }
+    if (sqlServerVariantValueColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            sqlServerVariantValueColumn.Name,
+            TableCellInputMode.Value,
+            "numeric(20,8):123456789.87654321"));
+        updateInputs.Add(new TableCellInput(
+            sqlServerVariantTextColumn!.Name,
+            TableCellInputMode.Value,
+            "varbinary(4):0xCAFE"));
+        updateInputs.Add(new TableCellInput(
+            sqlServerVariantTemporalColumn!.Name,
+            TableCellInputMode.Value,
+            "time(4):12:34:56.7890"));
+    }
     if (sqlServerAliasLabelColumn is not null)
     {
         updateInputs.Add(new TableCellInput(
@@ -2800,6 +3140,41 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             Convert.ToString(updated.Values[hierarchyIdColumn.Ordinal]) == "/3/4.5/",
             $"SQL Server hierarchyid 安全修改不正確；actual={updated.Values[hierarchyIdColumn.Ordinal]}");
+    }
+    if (sqlServerVariantValueColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[sqlServerVariantValueColumn.Ordinal]) ==
+            "numeric(20,8):123456789.87654321",
+            $"SQL Server sql_variant numeric 安全修改不正確；actual={updated.Values[sqlServerVariantValueColumn.Ordinal]}");
+        Assert(
+            Convert.ToString(updated.Values[sqlServerVariantTextColumn!.Ordinal]) ==
+            "varbinary(4):0xCAFE",
+            $"SQL Server sql_variant varbinary 安全修改不正確；actual={updated.Values[sqlServerVariantTextColumn.Ordinal]}");
+        Assert(
+            Convert.ToString(updated.Values[sqlServerVariantTemporalColumn!.Ordinal]) ==
+            "time(4):12:34:56.7890000",
+            $"SQL Server sql_variant time 安全修改不正確；actual={updated.Values[sqlServerVariantTemporalColumn.Ordinal]}");
+        var properties = await session.ExecuteAsync(
+            database,
+            $"SELECT CONVERT(varchar(30), SQL_VARIANT_PROPERTY(variant_value, 'BaseType')), " +
+            $"CONVERT(int, SQL_VARIANT_PROPERTY(variant_value, 'Precision')), " +
+            $"CONVERT(int, SQL_VARIANT_PROPERTY(variant_value, 'Scale')), " +
+            $"CONVERT(varchar(30), SQL_VARIANT_PROPERTY(variant_text, 'BaseType')), " +
+            $"CONVERT(int, SQL_VARIANT_PROPERTY(variant_text, 'MaxLength')), " +
+            $"CONVERT(varchar(30), SQL_VARIANT_PROPERTY(variant_temporal, 'BaseType')), " +
+            $"CONVERT(int, SQL_VARIANT_PROPERTY(variant_temporal, 'Scale')) " +
+            $"FROM dbo.sample WHERE id = {Convert.ToInt64(updated.Values[0])};");
+        var propertyRow = properties.Rows.Single();
+        Assert(
+            Convert.ToString(propertyRow[0]) == "numeric" &&
+            Convert.ToInt32(propertyRow[1]) == 20 &&
+            Convert.ToInt32(propertyRow[2]) == 8 &&
+            Convert.ToString(propertyRow[3]) == "varbinary" &&
+            Convert.ToInt32(propertyRow[4]) == 4 &&
+            Convert.ToString(propertyRow[5]) == "time" &&
+            Convert.ToInt32(propertyRow[6]) == 4,
+            "SQL Server SQL_VARIANT_PROPERTY 直接查庫未保留修改後的 base type metadata");
     }
     if (sqlServerAliasLabelColumn is not null)
     {

@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.Data.SqlClient;
 using MySqlPunk.Core.Models;
 using MySqlPunk.Core.Services;
@@ -57,6 +58,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             hierarchyIdParameter.SqlDbType = System.Data.SqlDbType.NVarChar;
             hierarchyIdParameter.Size = -1;
         }
+        else if (column.ValueKind == TableColumnValueKind.SqlServerVariant &&
+                 parameter is SqlParameter variantParameter)
+        {
+            variantParameter.SqlDbType = SqlDbType.Variant;
+        }
         else if (parameter is SqlParameter legacyParameter)
         {
             legacyParameter.SqlDbType = GetBaseTypeName(column.StorageDataTypeName) switch
@@ -67,6 +73,116 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                 _ => legacyParameter.SqlDbType
             };
         }
+    }
+
+    protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
+    {
+        if (column.ValueKind == TableColumnValueKind.SqlServerVariant && value is string text)
+        {
+            return TableCellValueConverter.Parse(
+                column,
+                new TableCellInput(column.Name, TableCellInputMode.Value, text));
+        }
+
+        return base.PrepareParameterValue(column, value);
+    }
+
+    protected override object? PrepareOriginalParameterValue(TableColumnInfo column, object? value)
+    {
+        if (column.ValueKind == TableColumnValueKind.SqlServerVariant && value is string text)
+        {
+            return new SqlServerVariantOriginalText(text);
+        }
+
+        return base.PrepareOriginalParameterValue(column, value);
+    }
+
+    protected override void ConfigurePreparedParameter(
+        System.Data.Common.DbParameter parameter,
+        TableColumnInfo column)
+    {
+        base.ConfigurePreparedParameter(parameter, column);
+        if (column.ValueKind != TableColumnValueKind.SqlServerVariant ||
+            parameter is not SqlParameter sqlParameter)
+        {
+            return;
+        }
+
+        if (parameter.Value is SqlServerVariantOriginalText original)
+        {
+            sqlParameter.SqlDbType = SqlDbType.NVarChar;
+            sqlParameter.Size = -1;
+            sqlParameter.Value = original.Text;
+            return;
+        }
+        if (parameter.Value is not SqlServerVariantValue variant)
+        {
+            return;
+        }
+
+        if (variant is { BaseTypeName: "datetimeoffset", Value: DateTimeOffset dateTimeOffset })
+        {
+            sqlParameter.SqlDbType = SqlDbType.NVarChar;
+            sqlParameter.Size = 48;
+            sqlParameter.Value = dateTimeOffset.ToString(
+                "yyyy-MM-dd'T'HH:mm:ss.fffffffzzz",
+                System.Globalization.CultureInfo.InvariantCulture);
+            return;
+        }
+        if (variant is
+            {
+                BaseTypeName: "char" or "varchar" or "nchar" or "nvarchar",
+                Value: string stringValue
+            })
+        {
+            sqlParameter.SqlDbType = SqlDbType.NVarChar;
+            sqlParameter.Size = -1;
+            sqlParameter.Value = stringValue;
+            return;
+        }
+
+        sqlParameter.SqlDbType = variant.BaseTypeName switch
+        {
+            "tinyint" => SqlDbType.TinyInt,
+            "smallint" => SqlDbType.SmallInt,
+            "int" => SqlDbType.Int,
+            "bigint" => SqlDbType.BigInt,
+            "bit" => SqlDbType.Bit,
+            "decimal" => SqlDbType.Decimal,
+            "numeric" => SqlDbType.Decimal,
+            "money" => SqlDbType.Money,
+            "smallmoney" => SqlDbType.SmallMoney,
+            "float" => SqlDbType.Float,
+            "real" => SqlDbType.Real,
+            "date" => SqlDbType.Date,
+            "datetime" => SqlDbType.DateTime,
+            "smalldatetime" => SqlDbType.SmallDateTime,
+            "datetime2" => SqlDbType.DateTime2,
+            "datetimeoffset" => SqlDbType.DateTimeOffset,
+            "time" => SqlDbType.Time,
+            "uniqueidentifier" => SqlDbType.UniqueIdentifier,
+            "char" => SqlDbType.Char,
+            "varchar" => SqlDbType.VarChar,
+            "nchar" => SqlDbType.NChar,
+            "nvarchar" => SqlDbType.NVarChar,
+            "binary" => SqlDbType.Binary,
+            "varbinary" => SqlDbType.VarBinary,
+            _ => throw new InvalidOperationException(
+                $"無法建立 sql_variant 內層型別「{variant.BaseTypeName}」的 SQL Server 參數。")
+        };
+        if (variant.Size is { } size)
+        {
+            sqlParameter.Size = size;
+        }
+        if (variant.Precision is { } precision)
+        {
+            sqlParameter.Precision = precision;
+        }
+        if (variant.Scale is { } scale)
+        {
+            sqlParameter.Scale = scale;
+        }
+        sqlParameter.Value = variant.Value;
     }
 
     protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
@@ -114,6 +230,20 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         return base.BuildOriginalValuePredicate(column, parameterName);
     }
 
+    protected override string BuildOriginalValuePredicate(
+        TableColumnInfo column,
+        string parameterName,
+        object originalValue)
+    {
+        if (column.ValueKind == TableColumnValueKind.SqlServerVariant)
+        {
+            return $"CONVERT(varbinary(max), {BuildSqlVariantTextExpression(QuoteIdentifier(column.Name))}) = " +
+                   $"CONVERT(varbinary(max), {parameterName})";
+        }
+
+        return base.BuildOriginalValuePredicate(column, parameterName, originalValue);
+    }
+
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
@@ -126,8 +256,50 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             TableColumnValueKind.SqlServerHierarchyId =>
                 $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE " +
                 $"CONVERT(nvarchar(max), {quotedName}.ToString()) END AS {quotedName}",
+            TableColumnValueKind.SqlServerVariant =>
+                $"{BuildSqlVariantTextExpression(quotedName)} AS {quotedName}",
             _ => base.BuildTableDataSelectExpression(column)
         };
+    }
+
+    private static string BuildSqlVariantTextExpression(string quotedName)
+    {
+        var baseType = $"CONVERT(varchar(30), SQL_VARIANT_PROPERTY({quotedName}, 'BaseType'))";
+        var precision = $"CONVERT(varchar(3), SQL_VARIANT_PROPERTY({quotedName}, 'Precision'))";
+        var scale = $"CONVERT(varchar(3), SQL_VARIANT_PROPERTY({quotedName}, 'Scale'))";
+        var maximumLength = $"CONVERT(int, SQL_VARIANT_PROPERTY({quotedName}, 'MaxLength'))";
+        var collation = $"CONVERT(nvarchar(128), SQL_VARIANT_PROPERTY({quotedName}, 'Collation'))";
+        var localeId = $"CONVERT(varchar(10), COLLATIONPROPERTY({collation}, 'LCID'))";
+        var comparisonStyle =
+            $"CONVERT(varchar(10), COLLATIONPROPERTY({collation}, 'ComparisonStyle'))";
+        var typeDefinition =
+            $"CASE {baseType} " +
+            $"WHEN 'decimal' THEN CONCAT('decimal(', {precision}, ',', {scale}, ')') " +
+            $"WHEN 'numeric' THEN CONCAT('numeric(', {precision}, ',', {scale}, ')') " +
+            $"WHEN 'char' THEN CONCAT('char(', {maximumLength}, ')@', {collation}, '|', {localeId}, '|', {comparisonStyle}) " +
+            $"WHEN 'varchar' THEN CONCAT('varchar(', {maximumLength}, ')@', {collation}, '|', {localeId}, '|', {comparisonStyle}) " +
+            $"WHEN 'nchar' THEN CONCAT('nchar(', {maximumLength} / 2, ')@', {collation}, '|', {localeId}, '|', {comparisonStyle}) " +
+            $"WHEN 'nvarchar' THEN CONCAT('nvarchar(', {maximumLength} / 2, ')@', {collation}, '|', {localeId}, '|', {comparisonStyle}) " +
+            $"WHEN 'binary' THEN CONCAT('binary(', {maximumLength}, ')') " +
+            $"WHEN 'varbinary' THEN CONCAT('varbinary(', {maximumLength}, ')') " +
+            $"WHEN 'datetime2' THEN CONCAT('datetime2(', {scale}, ')') " +
+            $"WHEN 'datetimeoffset' THEN CONCAT('datetimeoffset(', {scale}, ')') " +
+            $"WHEN 'time' THEN CONCAT('time(', {scale}, ')') " +
+            $"ELSE {baseType} END";
+        var valueText =
+            $"CASE {baseType} " +
+            $"WHEN 'binary' THEN CONCAT('0x', CONVERT(varchar(max), CONVERT(varbinary(8000), {quotedName}), 2)) " +
+            $"WHEN 'varbinary' THEN CONCAT('0x', CONVERT(varchar(max), CONVERT(varbinary(8000), {quotedName}), 2)) " +
+            $"WHEN 'date' THEN CONVERT(varchar(10), CONVERT(date, {quotedName}), 23) " +
+            $"WHEN 'datetime' THEN CONVERT(varchar(33), CONVERT(datetime, {quotedName}), 126) " +
+            $"WHEN 'smalldatetime' THEN CONVERT(varchar(33), CONVERT(smalldatetime, {quotedName}), 126) " +
+            $"WHEN 'datetime2' THEN CONVERT(varchar(33), CONVERT(datetime2(7), {quotedName}), 126) " +
+            $"WHEN 'datetimeoffset' THEN CONVERT(varchar(40), CONVERT(datetimeoffset(7), {quotedName}), 126) " +
+            $"WHEN 'time' THEN CONVERT(varchar(30), CONVERT(time(7), {quotedName}), 126) " +
+            $"WHEN 'float' THEN CONVERT(varchar(99), CONVERT(float, {quotedName}), 3) " +
+            $"WHEN 'real' THEN CONVERT(varchar(99), CONVERT(real, {quotedName}), 3) " +
+            $"ELSE CONVERT(nvarchar(max), {quotedName}) END";
+        return $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE CONCAT({typeDefinition}, ':', {valueText}) END";
     }
 
     protected override string BuildParameterValueExpression(TableColumnInfo column, string parameterName)
@@ -157,6 +329,76 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             ? $"decimal({precision},{scale})"
             : "decimal";
         return $"CAST({parameterName} AS {typeName})";
+    }
+
+    protected override string BuildParameterValueExpression(
+        TableColumnInfo column,
+        string parameterName,
+        object? value)
+    {
+        if (column.ValueKind == TableColumnValueKind.SqlServerVariant &&
+            value is SqlServerVariantValue { BaseTypeName: "numeric", Precision: { } precision, Scale: { } scale })
+        {
+            return $"CAST({parameterName} AS numeric({precision},{scale}))";
+        }
+        if (column.ValueKind == TableColumnValueKind.SqlServerVariant &&
+            value is SqlServerVariantValue { BaseTypeName: "datetimeoffset", Scale: { } offsetScale })
+        {
+            return $"CAST({parameterName} AS datetimeoffset({offsetScale}))";
+        }
+        if (column.ValueKind == TableColumnValueKind.SqlServerVariant &&
+            value is SqlServerVariantValue { Size: not null } stringVariant &&
+            stringVariant.BaseTypeName is "char" or "varchar" or "nchar" or "nvarchar")
+        {
+            return BuildSqlVariantStringExpression(parameterName, stringVariant);
+        }
+
+        return base.BuildParameterValueExpression(column, parameterName, value);
+    }
+
+    private static string BuildSqlVariantStringExpression(
+        string parameterName,
+        SqlServerVariantValue variant)
+    {
+        var size = variant.Size!.Value;
+        var collationClause = variant.CollationName is { } collationName
+            ? $" COLLATE {ValidateCollationName(collationName)}"
+            : string.Empty;
+        var unicodeInput = $"CONVERT(nvarchar(max), {parameterName}){collationClause}";
+        string fitsWithoutLoss;
+        string typedValue;
+        if (variant.BaseTypeName is "char" or "varchar")
+        {
+            var ansiInput = $"CONVERT(varchar(max), {parameterName}){collationClause}";
+            fitsWithoutLoss =
+                $"DATALENGTH({ansiInput}) <= {size} AND " +
+                $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {ansiInput})) = " +
+                $"CONVERT(varbinary(max), {unicodeInput})";
+            typedValue =
+                $"CAST({ansiInput} AS {variant.BaseTypeName}({size})){collationClause}";
+        }
+        else
+        {
+            fitsWithoutLoss = $"DATALENGTH({unicodeInput}) <= {size * 2}";
+            typedValue =
+                $"CAST({unicodeInput} AS {variant.BaseTypeName}({size})){collationClause}";
+        }
+
+        var rejectedValue =
+            $"CONVERT(sql_variant, CONVERT(int, CONCAT('sql_variant-invalid-', DATALENGTH({parameterName}))))";
+        return $"CASE WHEN {fitsWithoutLoss} THEN CONVERT(sql_variant, {typedValue}) " +
+               $"ELSE {rejectedValue} END";
+    }
+
+    private static string ValidateCollationName(string value)
+    {
+        if (value.Length is < 1 or > 128 ||
+            value.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '_'))
+        {
+            throw new InvalidOperationException("sql_variant collation 名稱只允許英數字與底線。");
+        }
+
+        return value;
     }
 
     private static string BuildSpatialSridExpression(string parameterName) =>
@@ -356,9 +598,12 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         "uniqueidentifier" => TableColumnValueKind.Guid,
         "xml" => TableColumnValueKind.Xml,
         "hierarchyid" => TableColumnValueKind.SqlServerHierarchyId,
+        "sql_variant" => TableColumnValueKind.SqlServerVariant,
         "geometry" or "geography" => TableColumnValueKind.Spatial,
         "binary" or "varbinary" or "image" => TableColumnValueKind.Binary,
         "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" => TableColumnValueKind.String,
         _ => TableColumnValueKind.Unsupported
     };
+
+    private sealed record SqlServerVariantOriginalText(string Text);
 }
