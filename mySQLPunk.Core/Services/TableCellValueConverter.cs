@@ -67,24 +67,34 @@ public static class TableCellValueConverter
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
                 TableColumnValueKind.Interval => ParseInterval(input.Text),
                 TableColumnValueKind.LogSequenceNumber => ParseLogSequenceNumber(input.Text),
-                TableColumnValueKind.FullTextVector => ParsePostgreSqlServerValidatedText(
+                TableColumnValueKind.FullTextVector => ParseServerValidatedText(
                     input.Text,
+                    "PostgreSQL",
                     "全文檢索"),
-                TableColumnValueKind.FullTextQuery => ParsePostgreSqlServerValidatedText(
+                TableColumnValueKind.FullTextQuery => ParseServerValidatedText(
                     input.Text,
+                    "PostgreSQL",
                     "全文檢索"),
-                TableColumnValueKind.PostgreSqlRange => ParsePostgreSqlServerValidatedText(
+                TableColumnValueKind.PostgreSqlRange => ParseServerValidatedText(
                     input.Text,
+                    "PostgreSQL",
                     "range／multirange"),
-                TableColumnValueKind.PostgreSqlArray => ParsePostgreSqlServerValidatedText(
+                TableColumnValueKind.PostgreSqlArray => ParseServerValidatedText(
                     input.Text,
+                    "PostgreSQL",
                     "array"),
-                TableColumnValueKind.PostgreSqlGeometric => ParsePostgreSqlServerValidatedText(
+                TableColumnValueKind.PostgreSqlGeometric => ParseServerValidatedText(
                     input.Text,
+                    "PostgreSQL",
                     "geometric"),
-                TableColumnValueKind.PostgreSqlServerValidatedText => ParsePostgreSqlServerValidatedText(
+                TableColumnValueKind.PostgreSqlServerValidatedText => ParseServerValidatedText(
                     input.Text,
+                    "PostgreSQL",
                     column.DataTypeName),
+                TableColumnValueKind.SqlServerHierarchyId => ParseServerValidatedText(
+                    input.Text,
+                    "SQL Server",
+                    "hierarchyid"),
                 TableColumnValueKind.Spatial => ParseSpatial(input.Text),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
@@ -179,6 +189,7 @@ public static class TableCellValueConverter
             TableColumnValueKind.PostgreSqlArray or
             TableColumnValueKind.PostgreSqlGeometric or
             TableColumnValueKind.PostgreSqlServerValidatedText or
+            TableColumnValueKind.SqlServerHierarchyId or
             TableColumnValueKind.Spatial or
             TableColumnValueKind.ExactDecimal &&
         value is string text &&
@@ -543,18 +554,21 @@ public static class TableCellValueConverter
                uint.TryParse(text, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value);
     }
 
-    private static string ParsePostgreSqlServerValidatedText(string text, string valueDescription)
+    private static string ParseServerValidatedText(
+        string text,
+        string providerDisplayName,
+        string valueDescription)
     {
         var trimmed = text.Trim();
         if (trimmed.Length > MaximumEditableStructuredTextCharacters)
         {
             throw new FormatException(
-                $"PostgreSQL {valueDescription} 值不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
+                $"{providerDisplayName} {valueDescription} 值不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
         }
 
         if (trimmed.Contains('\0'))
         {
-            throw new FormatException($"PostgreSQL {valueDescription} 值不可包含 NUL 字元。");
+            throw new FormatException($"{providerDisplayName} {valueDescription} 值不可包含 NUL 字元。");
         }
 
         return trimmed;

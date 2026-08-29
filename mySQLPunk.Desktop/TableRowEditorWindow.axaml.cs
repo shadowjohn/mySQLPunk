@@ -251,6 +251,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.PostgreSqlArray => "{1,2,3} 或 {{1,2},{3,4}}（最多 1 MiB 字元）",
         TableColumnValueKind.PostgreSqlGeometric => BuildGeometricWatermark(column),
         TableColumnValueKind.PostgreSqlServerValidatedText => BuildPostgreSqlServerTextWatermark(column),
+        TableColumnValueKind.SqlServerHierarchyId => "/1/2.5/（由 SQL Server 驗證，最多 1 MiB）",
         TableColumnValueKind.Spatial => "SRID=4326;POINT (121.5 25.0)（WKT，最多 1 MiB）",
         TableColumnValueKind.Guid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
         TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",

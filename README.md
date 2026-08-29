@@ -74,6 +74,8 @@ Linux 資產是 `.tar.gz`，解壓後執行 `./install.sh` 即會以交易方式
 
 MySQL／MariaDB 的 GEOMETRY、POINT、LINESTRING、POLYGON、MULTIPOINT、MULTILINESTRING、MULTIPOLYGON、GEOMETRYCOLLECTION，以及 SQL Server 的 geometry／geography，可用 `SRID=<非負整數>;<WKT>` 安全編輯；載入與寫回都保留 SRID，原值比對同時檢查 SRID 與 canonical WKT。畸形 WKT 會讓整筆交易回復；MariaDB 即使只回傳 warning／NULL，也會轉成明確錯誤，避免 nullable 欄位被靜默清空。超過 1 MiB 的 spatial 文字維持唯讀。
 
+SQL Server `hierarchyid` 可用 `/1/2.5/` 形式的 canonical path 編輯；寫入使用原生 `hierarchyid::Parse()`，畸形 path 會讓整筆交易回復，修改／刪除則以原生 hierarchyid 等號完成 optimistic concurrency 比對。NULL 會保持 NULL，超過 1 MiB 的既有文字維持唯讀。
+
 ### Windows 完整版
 
 - Windows
@@ -197,7 +199,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 ## 已知限制
 
-- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、無損高精度 DECIMAL／NUMERIC、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／YEAR、PostgreSQL bit string／timetz／interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery／range／multirange／array／geometric／jsonpath／snapshot／hstore／ltree／reg*／enum／composite／extension UDT、1 MiB 內 binary、JSON、XML、PostgreSQL 網路位址與 SQL Server legacy LOB 欄位的 Table 資料編輯；Oracle、MongoDB、Redis、Snowflake、其餘進階型別、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；Linux 已可安全下載、關閉、套用、健康檢查與 rollback，macOS 則在正式 Developer ID 簽署與 Apple notarization 憑證完成前維持驗證後手動安裝。
+- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、無損高精度 DECIMAL／NUMERIC、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／YEAR、PostgreSQL bit string／timetz／interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery／range／multirange／array／geometric／jsonpath／snapshot／hstore／ltree／reg*／enum／composite／extension UDT、1 MiB 內 binary、JSON、XML、PostgreSQL 網路位址，以及 SQL Server legacy LOB／hierarchyid 欄位的 Table 資料編輯；Oracle、MongoDB、Redis、Snowflake、其餘進階型別、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；Linux 已可安全下載、關閉、套用、健康檢查與 rollback，macOS 則在正式 Developer ID 簽署與 Apple notarization 憑證完成前維持驗證後手動安裝。
 - Oracle 的部分 DDL 還是會被權限、語法或物件型態擋下來；預覽會附上權限診斷 SQL 跟修復建議，但終究要看帳號實際有什麼權限。
 - Windows 完整版對沒有 Primary Key 的資料表仍可用原始值組 WHERE 條件；欄位有浮點數或大文字時可能比不準，可在選項中改成唯讀。Linux / macOS 預覽版會直接停用無 Primary Key Table 的修改與刪除，只保留新增與瀏覽。
 - XLSX 匯出要把整份結果放進記憶體；還原 SQL 備份也是整個檔一次讀進來，特別大的備份要留意。

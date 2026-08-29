@@ -51,6 +51,12 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             spatialParameter.SqlDbType = System.Data.SqlDbType.VarChar;
             spatialParameter.Size = -1;
         }
+        else if (column.ValueKind == TableColumnValueKind.SqlServerHierarchyId &&
+                 parameter is SqlParameter hierarchyIdParameter)
+        {
+            hierarchyIdParameter.SqlDbType = System.Data.SqlDbType.NVarChar;
+            hierarchyIdParameter.Size = -1;
+        }
         else if (parameter is SqlParameter legacyParameter)
         {
             legacyParameter.SqlDbType = column.DataTypeName.ToLowerInvariant() switch
@@ -83,6 +89,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                    $"{quotedName}.STAsText() = CONVERT(nvarchar(max), {BuildSpatialWktExpression(parameterName)})";
         }
 
+        if (column.ValueKind == TableColumnValueKind.SqlServerHierarchyId)
+        {
+            return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
+        }
+
         var dataType = column.DataTypeName.ToLowerInvariant();
         if (dataType == "text")
         {
@@ -112,6 +123,9 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             TableColumnValueKind.Spatial =>
                 $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE " +
                 $"CONCAT('SRID=', {quotedName}.STSrid, ';', {quotedName}.STAsText()) END AS {quotedName}",
+            TableColumnValueKind.SqlServerHierarchyId =>
+                $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE " +
+                $"CONVERT(nvarchar(max), {quotedName}.ToString()) END AS {quotedName}",
             _ => base.BuildTableDataSelectExpression(column)
         };
     }
@@ -126,6 +140,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             return $"{spatialTypeName}::STGeomFromText(" +
                    $"CONVERT(nvarchar(max), {BuildSpatialWktExpression(parameterName)}), " +
                    $"{BuildSpatialSridExpression(parameterName)})";
+        }
+
+        if (column.ValueKind == TableColumnValueKind.SqlServerHierarchyId)
+        {
+            return $"hierarchyid::Parse(CONVERT(nvarchar(max), {parameterName}))";
         }
 
         if (column.ValueKind != TableColumnValueKind.ExactDecimal)
@@ -291,6 +310,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         "time" => TableColumnValueKind.Time,
         "uniqueidentifier" => TableColumnValueKind.Guid,
         "xml" => TableColumnValueKind.Xml,
+        "hierarchyid" => TableColumnValueKind.SqlServerHierarchyId,
         "geometry" or "geography" => TableColumnValueKind.Spatial,
         "binary" or "varbinary" or "image" => TableColumnValueKind.Binary,
         "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" => TableColumnValueKind.String,

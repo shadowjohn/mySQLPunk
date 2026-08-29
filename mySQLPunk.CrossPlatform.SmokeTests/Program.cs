@@ -1274,6 +1274,32 @@ static async Task TableDataEditingAsync()
         Assert(
             TableCellValueConverter.IsStructuredTextTooLargeToEdit(serverTextColumn, oversizedServerText),
             "既有 PostgreSQL server-validated text 超過 1 MiB 時應維持唯讀");
+        var hierarchyIdColumn = new TableColumnInfo(
+            0,
+            "path",
+            "hierarchyid",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.SqlServerHierarchyId);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                hierarchyIdColumn,
+                new TableCellInput("path", TableCellInputMode.Value, "  /1/2.5/  "))) == "/1/2.5/",
+            "SQL Server hierarchyid 應去除外圍空白並交由 server 驗證");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            hierarchyIdColumn,
+            new TableCellInput("path", TableCellInputMode.Value, "/1/\0/")));
+        var oversizedHierarchyId = new string(
+            '1',
+            TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            hierarchyIdColumn,
+            new TableCellInput("path", TableCellInputMode.Value, oversizedHierarchyId)));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(hierarchyIdColumn, oversizedHierarchyId),
+            "既有 SQL Server hierarchyid 超過 1 MiB 時應維持唯讀");
         var spatialColumn = new TableColumnInfo(
             0,
             "shape",
@@ -1542,7 +1568,7 @@ static async Task SqlServerLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, node_path hierarchyid NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
 
@@ -1663,6 +1689,31 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected spatial"),
             $"{session.Profile.ProviderDisplayName} 不可寫入 server-side parser 拒絕的畸形 spatial 值");
+    }
+    var hierarchyIdColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.SqlServerHierarchyId);
+    if (hierarchyIdColumn is not null)
+    {
+        Assert(hierarchyIdColumn.IsEditable, "SQL Server hierarchyid 應可安全編輯");
+        Assert(
+            before.Rows.All(row => row.Values[hierarchyIdColumn.Ordinal] is null or DBNull),
+            "SQL Server NULL hierarchyid 載入後必須維持 NULL");
+        insertInputs.Add(new TableCellInput(
+            hierarchyIdColumn.Name,
+            TableCellInputMode.Value,
+            "/1/2.5/"));
+        await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected hierarchyid"),
+                new TableCellInput(hierarchyIdColumn.Name, TableCellInputMode.Value, "/1//")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected hierarchyid"),
+            "SQL Server 不可寫入 parser 拒絕的畸形 hierarchyid 值");
     }
     var jsonColumn = before.Columns.SingleOrDefault(column => column.ValueKind == TableColumnValueKind.Json);
     if (jsonColumn is not null)
@@ -2170,6 +2221,12 @@ static async Task VerifySafeTableEditingAsync(
             GetPostgreSqlServerTextTestValue(serverTextColumn, updated: false),
             $"PostgreSQL {serverTextColumn.DataTypeName} 安全新增不正確；actual={inserted.Values[serverTextColumn.Ordinal]}");
     }
+    if (hierarchyIdColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[hierarchyIdColumn.Ordinal]) == "/1/2.5/",
+            $"SQL Server hierarchyid 安全新增不正確；actual={inserted.Values[hierarchyIdColumn.Ordinal]}");
+    }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
     var secondPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 1);
@@ -2337,6 +2394,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetPostgreSqlServerTextTestValue(serverTextColumn, updated: true)));
     }
+    if (hierarchyIdColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            hierarchyIdColumn.Name,
+            TableCellInputMode.Value,
+            "/3/4.5/"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -2498,6 +2562,12 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(updated.Values[serverTextColumn.Ordinal]) ==
             GetPostgreSqlServerTextTestValue(serverTextColumn, updated: true),
             $"PostgreSQL {serverTextColumn.DataTypeName} 安全修改不正確；actual={updated.Values[serverTextColumn.Ordinal]}");
+    }
+    if (hierarchyIdColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[hierarchyIdColumn.Ordinal]) == "/3/4.5/",
+            $"SQL Server hierarchyid 安全修改不正確；actual={updated.Values[hierarchyIdColumn.Ordinal]}");
     }
 
     var id = Convert.ToInt64(updated.Values[0]);
