@@ -62,6 +62,7 @@ public static class TableCellValueConverter
                     DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind),
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
                 TableColumnValueKind.TimeWithTimeZone => ParseTimeWithTimeZone(input.Text),
+                TableColumnValueKind.Interval => ParseInterval(input.Text),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -197,6 +198,45 @@ public static class TableCellValueConverter
             out var value)
             ? value
             : throw new FormatException("帶時區時間必須使用 HH:mm:ss.ffffff±HH:mm 格式，時區不可省略。");
+    }
+
+    private static IntervalComponents ParseInterval(string text)
+    {
+        var parts = text.Trim().Split(';', StringSplitOptions.TrimEntries);
+        if (parts.Length != 3 ||
+            !TryParseNamedInteger(parts[0], "months", out var months) ||
+            !TryParseNamedInteger(parts[1], "days", out var days) ||
+            !TryParseNamedLong(parts[2], "microseconds", out var microseconds))
+        {
+            throw new FormatException(
+                "Interval 必須使用 months=<整數>;days=<整數>;microseconds=<整數> 格式。");
+        }
+
+        return new IntervalComponents(months, days, microseconds);
+    }
+
+    private static bool TryParseNamedInteger(string part, string name, out int value)
+    {
+        value = default;
+        var prefix = name + "=";
+        return part.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+               int.TryParse(
+                   part[prefix.Length..].Trim(),
+                   NumberStyles.AllowLeadingSign,
+                   CultureInfo.InvariantCulture,
+                   out value);
+    }
+
+    private static bool TryParseNamedLong(string part, string name, out long value)
+    {
+        value = default;
+        var prefix = name + "=";
+        return part.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+               long.TryParse(
+                   part[prefix.Length..].Trim(),
+                   NumberStyles.AllowLeadingSign,
+                   CultureInfo.InvariantCulture,
+                   out value);
     }
 
     private static bool ParseBoolean(string text)

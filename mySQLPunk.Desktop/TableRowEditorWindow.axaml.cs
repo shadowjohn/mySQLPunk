@@ -226,6 +226,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.DateTimeOffset => "ISO 8601 日期時間與時區",
         TableColumnValueKind.Time => "HH:mm:ss",
         TableColumnValueKind.TimeWithTimeZone => "HH:mm:ss.ffffff±HH:mm",
+        TableColumnValueKind.Interval => "months=0;days=0;microseconds=0",
         TableColumnValueKind.Guid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
         TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",
         TableColumnValueKind.Xml => "有效 XML（最多 1 MiB 字元，禁止 DTD）",

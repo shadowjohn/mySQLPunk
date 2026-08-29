@@ -907,6 +907,34 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             timeZoneColumn,
             new TableCellInput("alarm", TableCellInputMode.Value, "25:00:00+08:00")));
+        var intervalColumn = new TableColumnInfo(
+            0,
+            "duration",
+            "interval",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.Interval);
+        Assert(
+            TableCellValueConverter.Parse(
+                intervalColumn,
+                new TableCellInput(
+                    "duration",
+                    TableCellInputMode.Value,
+                    "months=-14;days=3;microseconds=-14706123456")) is IntervalComponents
+            {
+                Months: -14,
+                Days: 3,
+                Microseconds: -14_706_123_456
+            },
+            "PostgreSQL interval 應保留 months、days 與 microseconds 三個 component");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            intervalColumn,
+            new TableCellInput("duration", TableCellInputMode.Value, "1 month 2 days")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            intervalColumn,
+            new TableCellInput("duration", TableCellInputMode.Value, "months=1;days=2;microseconds=3;extra=4")));
     }
     finally
     {
@@ -1017,7 +1045,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL, duration INTERVAL NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -1177,6 +1205,15 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "12:34:56.123456+08:00"));
     }
+    var intervalColumn = before.Columns.SingleOrDefault(column =>
+        column.ValueKind == TableColumnValueKind.Interval);
+    if (intervalColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            intervalColumn.Name,
+            TableCellInputMode.Value,
+            "months=14;days=3;microseconds=14706123456"));
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1237,6 +1274,13 @@ static async Task VerifySafeTableEditingAsync(
             new TimeSpan(12, 34, 56) + TimeSpan.FromTicks(1_234_560),
             TimeSpan.FromHours(8),
             "PostgreSQL timetz 安全新增不正確");
+    }
+    if (intervalColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[intervalColumn.Ordinal]) ==
+            "months=14;days=3;microseconds=14706123456",
+            $"PostgreSQL interval 安全新增不正確；actual={inserted.Values[intervalColumn.Ordinal]}");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1306,6 +1350,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "23:59:58.654321-04:30"));
     }
+    if (intervalColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            intervalColumn.Name,
+            TableCellInputMode.Value,
+            "months=-1;days=2;microseconds=-11045123456"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1368,6 +1419,13 @@ static async Task VerifySafeTableEditingAsync(
             new TimeSpan(23, 59, 58) + TimeSpan.FromTicks(6_543_210),
             TimeSpan.FromMinutes(-270),
             "PostgreSQL timetz 安全修改不正確");
+    }
+    if (intervalColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[intervalColumn.Ordinal]) ==
+            "months=-1;days=2;microseconds=-11045123456",
+            $"PostgreSQL interval 安全修改不正確；actual={updated.Values[intervalColumn.Ordinal]}");
     }
 
     var id = Convert.ToInt64(updated.Values[0]);

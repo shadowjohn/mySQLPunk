@@ -13,6 +13,7 @@ public enum TableColumnValueKind
     DateTimeOffset,
     Time,
     TimeWithTimeZone,
+    Interval,
     Guid,
     Json,
     Xml,
@@ -64,6 +65,8 @@ public sealed record TableCellInput(
     string ColumnName,
     TableCellInputMode Mode,
     string Text);
+
+public sealed record IntervalComponents(int Months, int Days, long Microseconds);
 
 public sealed class TableDataConflictException : Exception
 {

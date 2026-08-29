@@ -74,6 +74,10 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             timeZoneParameter.NpgsqlDbType = NpgsqlDbType.TimeTz;
         }
+        else if (column.ValueKind == TableColumnValueKind.Interval && parameter is NpgsqlParameter intervalParameter)
+        {
+            intervalParameter.NpgsqlDbType = NpgsqlDbType.Interval;
+        }
     }
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
@@ -83,6 +87,22 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return TableCellValueConverter.Parse(
                 column,
                 new TableCellInput(column.Name, TableCellInputMode.Value, timeWithTimeZone));
+        }
+
+        if (column.ValueKind == TableColumnValueKind.Interval)
+        {
+            var components = value switch
+            {
+                IntervalComponents parsed => parsed,
+                string intervalText => (IntervalComponents)TableCellValueConverter.Parse(
+                    column,
+                    new TableCellInput(column.Name, TableCellInputMode.Value, intervalText))!,
+                _ => null
+            };
+            if (components is not null)
+            {
+                return new NpgsqlInterval(components.Months, components.Days, components.Microseconds);
+            }
         }
 
         if (column.ValueKind != TableColumnValueKind.NetworkAddress || value is not string text)
@@ -115,18 +135,36 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
 
+        if (column.ValueKind == TableColumnValueKind.Interval)
+        {
+            return $"{BuildIntervalComponentsExpression(QuoteIdentifier(column.Name))} = " +
+                   BuildIntervalComponentsExpression(parameterName);
+        }
+
         return base.BuildOriginalValuePredicate(column, parameterName);
     }
 
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
+        if (column.ValueKind == TableColumnValueKind.Interval)
+        {
+            return $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE " +
+                   $"{BuildIntervalComponentsExpression(quotedName)} END AS {quotedName}";
+        }
+
         return column.ValueKind is TableColumnValueKind.NetworkAddress or
             TableColumnValueKind.BitString or
             TableColumnValueKind.TimeWithTimeZone
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
     }
+
+    private static string BuildIntervalComponentsExpression(string expression) =>
+        $"CONCAT('months=', ((EXTRACT(YEAR FROM {expression}) * 12 + EXTRACT(MONTH FROM {expression}))::bigint), " +
+        $"';days=', (EXTRACT(DAY FROM {expression})::bigint), " +
+        $"';microseconds=', (ROUND((EXTRACT(HOUR FROM {expression}) * 3600 + " +
+        $"EXTRACT(MINUTE FROM {expression}) * 60 + EXTRACT(SECOND FROM {expression})) * 1000000)::bigint))";
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
@@ -241,6 +279,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "timestamp with time zone" => TableColumnValueKind.DateTimeOffset,
             "time without time zone" => TableColumnValueKind.Time,
             "time with time zone" => TableColumnValueKind.TimeWithTimeZone,
+            "interval" => TableColumnValueKind.Interval,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,
             "xml" => TableColumnValueKind.Xml,
