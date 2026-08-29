@@ -407,6 +407,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                                 userDefinedType.Equals("lquery", StringComparison.OrdinalIgnoreCase) ||
                                 userDefinedType.Equals("ltxtquery", StringComparison.OrdinalIgnoreCase) =>
                 TableColumnValueKind.PostgreSqlServerValidatedText,
+            "user-defined" => TableColumnValueKind.PostgreSqlServerValidatedText,
             _ => TableColumnValueKind.Unsupported
         };
 }

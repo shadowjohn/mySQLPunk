@@ -1416,9 +1416,11 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
+        await session.ExecuteAsync(database, "CREATE EXTENSION cube;");
         await session.ExecuteAsync(database, "CREATE EXTENSION hstore;");
         await session.ExecuteAsync(database, "CREATE EXTENSION ltree;");
         await session.ExecuteAsync(database, "CREATE TYPE mood AS ENUM ('happy', 'sad', 'comma,value');");
+        await session.ExecuteAsync(database, "CREATE TYPE address_type AS (city TEXT, postal_code INTEGER);");
         await session.ExecuteAsync(
             database,
             """
@@ -1464,6 +1466,9 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 states mood[] NULL,
                 json_items JSONB[] NULL,
                 range_items INT4RANGE[] NULL,
+                state mood NULL,
+                mailing_address address_type NULL,
+                measurement cube NULL,
                 location POINT NULL,
                 infinite_line LINE NULL,
                 segment LSEG NULL,
@@ -1964,7 +1969,7 @@ static async Task VerifySafeTableEditingAsync(
     if (serverValidatedTextColumns.Count > 0)
     {
         Assert(
-            serverValidatedTextColumns.Count == 18,
+            serverValidatedTextColumns.Count == 21,
             $"PostgreSQL server-validated text metadata 未完整辨識；actual={serverValidatedTextColumns.Count}");
         foreach (var serverTextColumn in serverValidatedTextColumns)
         {
@@ -1989,6 +1994,21 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected jsonpath"),
             "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 jsonpath");
+
+        var compositeColumn = serverValidatedTextColumns.Single(column =>
+            column.DataTypeName.Equals("address_type", StringComparison.OrdinalIgnoreCase));
+        await AssertThrowsAsync<PostgresException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected composite"),
+                new TableCellInput(compositeColumn.Name, TableCellInputMode.Value, "(Taipei,not-an-integer)")
+            }));
+        rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected composite"),
+            "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 composite 值");
     }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
@@ -2681,6 +2701,12 @@ static string GetPostgreSqlServerTextTestValue(TableColumnInfo column, bool upda
         ("lquery", true) => "Top.!Science.*",
         ("ltxtquery", false) => "Science & Astronomy",
         ("ltxtquery", true) => "Technology | Databases",
+        ("mood", false) => "happy",
+        ("mood", true) => "comma,value",
+        ("address_type", false) => "(Taipei,100)",
+        ("address_type", true) => "(Taichung,400)",
+        ("cube", false) => "(1, 2, 3)",
+        ("cube", true) => "(4, 5, 6)",
         ("regclass", false) => "pg_class",
         ("regclass", true) => "pg_type",
         ("regrole", false) => "postgres",
