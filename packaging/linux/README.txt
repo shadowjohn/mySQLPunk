@@ -1,6 +1,8 @@
 mySQLPunk @VERSION@ Linux @RUNTIME@
 
 This package is self-contained and does not require a separate .NET runtime.
+Installation replaces the versioned app, launcher and desktop entry as one
+transaction. If any step fails, the previous installation is restored.
 
 Install for the current user:
 

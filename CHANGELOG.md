@@ -27,6 +27,7 @@
 
 ### 🛠️ 問題修正與優化
 
+- Linux 使用者層級 installer 會先建立 app、launcher 與 desktop entry 的完整 staging，三者都成功後才提交；任一切換失敗會原樣回復前一份 app 目錄與兩個入口，並清除中間檔，避免更新途中留下無法啟動的半安裝狀態。
 - PostgreSQL 連線字串改由 provider builder 組裝，排程連線遇到分號或等號等特殊密碼字元時不會被錯誤切割。
 
 ## [1.0.0.19] - 2026-08-26

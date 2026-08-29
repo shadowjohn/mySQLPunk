@@ -23,45 +23,65 @@ if [[ ! -x "$source_app/mySQLPunk" ]]; then
 fi
 
 mkdir -p "$install_base" "$bin_root" "$applications_root"
-staging_root=$(mktemp -d "$install_base/.install-$version.XXXXXX")
-backup_root=""
-cleanup() {
-    if [[ -d "$staging_root" ]]; then
-        rm -rf -- "$staging_root"
-    fi
-}
-trap cleanup EXIT
-
-cp -a "$source_app/." "$staging_root/"
-chmod +x "$staging_root/mySQLPunk"
+wrapper_path="$bin_root/mysqlpunk"
+desktop_path="$applications_root/mysqlpunk.desktop"
 target_root="$install_base/$version"
-if [[ -e "$target_root" ]]; then
-    backup_root="$install_base/.backup-$version-$$"
-    mv -- "$target_root" "$backup_root"
-fi
-
-if ! mv -- "$staging_root" "$target_root"; then
-    if [[ -n "$backup_root" && -e "$backup_root" ]]; then
-        mv -- "$backup_root" "$target_root"
-    fi
+if [[ -d "$wrapper_path" || -d "$desktop_path" ]]; then
+    printf 'Install destination collides with an existing directory.\n' >&2
     exit 4
 fi
 
-if [[ -n "$backup_root" && -e "$backup_root" ]]; then
-    rm -rf -- "$backup_root"
-fi
-
-wrapper_path="$bin_root/mysqlpunk"
+transaction_root=$(mktemp -d "$install_base/.transaction-$version.XXXXXX")
+staging_root="$transaction_root/staging"
 wrapper_temp="$bin_root/.mysqlpunk-wrapper.$$"
+desktop_temp="$applications_root/.mysqlpunk.desktop.$$"
+committed=0
+had_target=0
+had_wrapper=0
+had_desktop=0
+target_switched=0
+wrapper_switched=0
+desktop_switched=0
+cleanup() {
+    exit_code=$?
+    set +e
+    if [[ "$committed" -ne 1 ]]; then
+        if [[ "$target_switched" -eq 1 || "$had_target" -eq 1 ]]; then
+            rm -rf -- "$target_root"
+        fi
+        if [[ "$wrapper_switched" -eq 1 || "$had_wrapper" -eq 1 ]]; then
+            rm -f -- "$wrapper_path"
+        fi
+        if [[ "$desktop_switched" -eq 1 || "$had_desktop" -eq 1 ]]; then
+            rm -f -- "$desktop_path"
+        fi
+        if [[ "$had_target" -eq 1 && -e "$transaction_root/target" ]]; then
+            mv -- "$transaction_root/target" "$target_root"
+        fi
+        if [[ "$had_wrapper" -eq 1 && -e "$transaction_root/wrapper" ]]; then
+            mv -- "$transaction_root/wrapper" "$wrapper_path"
+        fi
+        if [[ "$had_desktop" -eq 1 && -e "$transaction_root/desktop" ]]; then
+            mv -- "$transaction_root/desktop" "$desktop_path"
+        fi
+    fi
+    rm -rf -- "$staging_root" "$transaction_root"
+    rm -f -- "$wrapper_temp" "$desktop_temp"
+    trap - EXIT
+    exit "$exit_code"
+}
+trap cleanup EXIT
+
+mkdir "$staging_root"
+cp -a "$source_app/." "$staging_root/"
+chmod +x "$staging_root/mySQLPunk"
+
 printf '%s\n' \
     '#!/usr/bin/env bash' \
     "# mySQLPunk $version $runtime" \
     "exec \"$target_root/mySQLPunk\" \"\$@\"" > "$wrapper_temp"
 chmod +x "$wrapper_temp"
-mv -f -- "$wrapper_temp" "$wrapper_path"
 
-desktop_path="$applications_root/mysqlpunk.desktop"
-desktop_temp="$applications_root/.mysqlpunk.desktop.$$"
 printf '%s\n' \
     '[Desktop Entry]' \
     'Type=Application' \
@@ -73,7 +93,28 @@ printf '%s\n' \
     'Categories=Development;Database;' \
     "X-mySQLPunk-Version=$version" > "$desktop_temp"
 chmod 0644 "$desktop_temp"
-mv -f -- "$desktop_temp" "$desktop_path"
+
+if [[ -e "$target_root" ]]; then
+    mv -- "$target_root" "$transaction_root/target"
+    had_target=1
+fi
+if [[ -e "$wrapper_path" ]]; then
+    mv -- "$wrapper_path" "$transaction_root/wrapper"
+    had_wrapper=1
+fi
+if [[ -e "$desktop_path" ]]; then
+    mv -- "$desktop_path" "$transaction_root/desktop"
+    had_desktop=1
+fi
+
+mv -- "$staging_root" "$target_root"
+target_switched=1
+mv -- "$wrapper_temp" "$wrapper_path"
+wrapper_switched=1
+mv -- "$desktop_temp" "$desktop_path"
+desktop_switched=1
+committed=1
+rm -rf -- "$transaction_root"
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$applications_root" >/dev/null 2>&1 || true
