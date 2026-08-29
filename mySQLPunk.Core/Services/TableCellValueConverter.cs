@@ -50,10 +50,11 @@ public static class TableCellValueConverter
                 TableColumnValueKind.FloatingPoint => ParseFiniteDouble(input.Text),
                 TableColumnValueKind.Boolean => ParseBoolean(input.Text),
                 TableColumnValueKind.Date => DateTime.ParseExact(
-                    input.Text,
-                    new[] { "yyyy-MM-dd", "O" },
+                    input.Text.Trim(),
+                    "yyyy-MM-dd",
                     CultureInfo.InvariantCulture,
-                    DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind),
+                    DateTimeStyles.None),
+                TableColumnValueKind.PostgreSqlDate => ParsePostgreSqlDate(input.Text),
                 TableColumnValueKind.DateTime => DateTime.Parse(
                     input.Text,
                     CultureInfo.InvariantCulture,
@@ -134,6 +135,22 @@ public static class TableCellValueConverter
         _ => value.ToString() ?? string.Empty
     };
 
+    public static string Format(TableColumnInfo column, object? value)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        if (column.ValueKind == TableColumnValueKind.Date)
+        {
+            return value switch
+            {
+                DateTime dateTime => dateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                _ => Format(value)
+            };
+        }
+
+        return Format(value);
+    }
+
     public static string FormatForDisplay(object? value)
     {
         if (value is null or DBNull)
@@ -159,6 +176,16 @@ public static class TableCellValueConverter
         return Format(value);
     }
 
+    public static string FormatForDisplay(TableColumnInfo column, object? value)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        return value is null or DBNull
+            ? FormatForDisplay(value)
+            : column.ValueKind == TableColumnValueKind.Date
+                ? Format(column, value)
+                : FormatForDisplay(value);
+    }
+
     public static bool MatchesOriginal(TableColumnInfo column, TableCellInput input, object? original)
     {
         if (input.Mode == TableCellInputMode.Null)
@@ -177,7 +204,9 @@ public static class TableCellValueConverter
                    parsedBytes.AsSpan().SequenceEqual(originalBytes);
         }
 
-        return string.Equals(input.Text, Format(original), StringComparison.Ordinal);
+        return column.ValueKind == TableColumnValueKind.Date
+            ? string.Equals(input.Text.Trim(), Format(column, original), StringComparison.Ordinal)
+            : string.Equals(input.Text, Format(original), StringComparison.Ordinal);
     }
 
     public static bool IsBinaryValueTooLargeToEdit(TableColumnInfo column, object? value) =>
@@ -975,6 +1004,56 @@ public static class TableCellValueConverter
             "time without time zone" => ParsePostgreSqlTime(column, text),
             _ => throw new FormatException($"不支援的 PostgreSQL temporal 型別：{column.StorageDataTypeName}。")
         };
+    }
+
+    private static string ParsePostgreSqlDate(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Equals("infinity", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("-infinity", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.ToLowerInvariant();
+        }
+
+        var isBeforeCommonEra = trimmed.EndsWith(" BC", StringComparison.OrdinalIgnoreCase);
+        var dateText = isBeforeCommonEra ? trimmed[..^3] : trimmed;
+        var parts = dateText.Split('-');
+        if (parts.Length != 3 ||
+            parts[0].Length is < 4 or > 7 ||
+            parts[1].Length != 2 ||
+            parts[2].Length != 2 ||
+            parts.Any(part => part.Any(character => !char.IsAsciiDigit(character))) ||
+            !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var year) ||
+            !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var month) ||
+            !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var day) ||
+            year == 0 ||
+            isBeforeCommonEra && year > 4713 ||
+            !isBeforeCommonEra && year > 5_874_897 ||
+            month is < 1 or > 12 ||
+            day < 1 || day > GetPostgreSqlDaysInMonth(year, month, isBeforeCommonEra))
+        {
+            throw new FormatException(
+                "PostgreSQL date 必須使用 YYYY-MM-DD、YYYY-MM-DD BC、infinity 或 -infinity 格式，" +
+                "且介於 4713-01-01 BC 與 5874897-12-31。");
+        }
+
+        var canonicalYear = year.ToString("D4", CultureInfo.InvariantCulture);
+        var canonicalMonth = month.ToString("D2", CultureInfo.InvariantCulture);
+        var canonicalDay = day.ToString("D2", CultureInfo.InvariantCulture);
+        return $"{canonicalYear}-{canonicalMonth}-{canonicalDay}{(isBeforeCommonEra ? " BC" : string.Empty)}";
+    }
+
+    private static int GetPostgreSqlDaysInMonth(int year, int month, bool isBeforeCommonEra)
+    {
+        if (month != 2)
+        {
+            return month is 4 or 6 or 9 or 11 ? 30 : 31;
+        }
+
+        var astronomicalYear = isBeforeCommonEra ? 1L - year : year;
+        var isLeapYear = astronomicalYear % 4 == 0 &&
+                         (astronomicalYear % 100 != 0 || astronomicalYear % 400 == 0);
+        return isLeapYear ? 29 : 28;
     }
 
     private static DateTime ParsePostgreSqlTimestamp(TableColumnInfo column, string text)

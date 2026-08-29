@@ -291,7 +291,8 @@ public sealed partial class TableDataEditorWindow : Window
         _dataGrid.ItemsSource = snapshot.Rows
             .Select(row => new TableDataRowView(
                 row,
-                row.Values.Select(TableCellValueConverter.FormatForDisplay).ToArray()))
+                row.Values.Select((value, index) =>
+                    TableCellValueConverter.FormatForDisplay(snapshot.Columns[index], value)).ToArray()))
             .ToList();
         _dataGrid.SelectedIndex = snapshot.Rows.Count > 0 ? 0 : -1;
     }

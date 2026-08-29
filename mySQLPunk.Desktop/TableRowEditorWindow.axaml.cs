@@ -61,8 +61,8 @@ public sealed partial class TableRowEditorWindow : Window
             var valueBox = new TextBox
             {
                 Text = oversizedValue
-                    ? TableCellValueConverter.FormatForDisplay(original)
-                    : TableCellValueConverter.Format(original),
+                    ? TableCellValueConverter.FormatForDisplay(column, original)
+                    : TableCellValueConverter.Format(column, original),
                 IsReadOnly = readOnly,
                 IsEnabled = !readOnly,
                 PlaceholderText = BuildWatermark(column),
@@ -233,6 +233,7 @@ public sealed partial class TableRowEditorWindow : Window
             column.StorageDataTypeName.Equals("cid", StringComparison.OrdinalIgnoreCase) =>
             $"0–{uint.MaxValue}（十進位）",
         TableColumnValueKind.Date => "yyyy-MM-dd",
+        TableColumnValueKind.PostgreSqlDate => "YYYY-MM-DD[ BC] 或 ±infinity",
         TableColumnValueKind.DateTime => "yyyy-MM-dd HH:mm:ss",
         TableColumnValueKind.DateTimeOffset => "ISO 8601 日期時間與時區",
         TableColumnValueKind.Time => "HH:mm:ss",

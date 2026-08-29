@@ -84,6 +84,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 ? NpgsqlDbType.Varbit
                 : NpgsqlDbType.Bit;
         }
+        else if (column.ValueKind == TableColumnValueKind.PostgreSqlDate &&
+                 parameter is NpgsqlParameter dateParameter)
+        {
+            dateParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
+        }
         else if (column.ValueKind == TableColumnValueKind.TimeWithTimeZone && parameter is NpgsqlParameter timeZoneParameter)
         {
             timeZoneParameter.NpgsqlDbType = NpgsqlDbType.TimeTz;
@@ -225,6 +230,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     protected override string BuildTableDataSelectExpression(TableColumnInfo column)
     {
         var quotedName = QuoteIdentifier(column.Name);
+        if (column.ValueKind == TableColumnValueKind.PostgreSqlDate)
+        {
+            return BuildPostgreSqlDateSelectExpression(quotedName);
+        }
+
         if (column.ValueKind == TableColumnValueKind.PostgreSqlTemporal)
         {
             return BuildPostgreSqlTemporalSelectExpression(column, quotedName);
@@ -256,6 +266,18 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         $"';days=', (EXTRACT(DAY FROM {expression})::bigint), " +
         $"';microseconds=', (ROUND((EXTRACT(HOUR FROM {expression}) * 3600 + " +
         $"EXTRACT(MINUTE FROM {expression}) * 60 + EXTRACT(SECOND FROM {expression})) * 1000000)::bigint))";
+
+    private static string BuildPostgreSqlDateSelectExpression(string quotedName)
+    {
+        var year = $"ABS(EXTRACT(YEAR FROM {quotedName})::bigint)::text";
+        var paddedYear = $"LPAD({year}, GREATEST(4, LENGTH({year})), '0')";
+        return $"CASE WHEN {quotedName} IS NULL THEN NULL " +
+               $"WHEN {quotedName} = 'infinity'::date THEN 'infinity' " +
+               $"WHEN {quotedName} = '-infinity'::date THEN '-infinity' " +
+               $"ELSE CONCAT({paddedYear}, '-', LPAD(EXTRACT(MONTH FROM {quotedName})::int::text, 2, '0'), " +
+               $"'-', LPAD(EXTRACT(DAY FROM {quotedName})::int::text, 2, '0'), " +
+               $"CASE WHEN EXTRACT(YEAR FROM {quotedName}) < 0 THEN ' BC' ELSE '' END) END AS {quotedName}";
+    }
 
     private static string BuildPostgreSqlTemporalSelectExpression(TableColumnInfo column, string quotedName)
     {
@@ -434,7 +456,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "money" => TableColumnValueKind.Decimal,
             "real" or "double precision" => TableColumnValueKind.FloatingPoint,
             "boolean" => TableColumnValueKind.Boolean,
-            "date" => TableColumnValueKind.Date,
+            "date" => TableColumnValueKind.PostgreSqlDate,
             "timestamp without time zone" or "timestamp with time zone" or "time without time zone" =>
                 TableColumnValueKind.PostgreSqlTemporal,
             "time with time zone" => TableColumnValueKind.TimeWithTimeZone,

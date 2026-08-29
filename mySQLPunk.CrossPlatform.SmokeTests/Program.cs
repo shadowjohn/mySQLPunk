@@ -594,6 +594,38 @@ static async Task TableDataEditingAsync()
         Assert(jsonColumn is { ValueKind: TableColumnValueKind.Json, IsEditable: true }, "SQLite JSON 應可驗證後編輯");
         var xmlColumn = empty.Columns.Single(column => column.Name == "document");
         Assert(xmlColumn is { ValueKind: TableColumnValueKind.Xml, IsEditable: true }, "SQLite XML 應可驗證後編輯");
+        var dateColumn = new TableColumnInfo(
+            0,
+            "event_date",
+            "date",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.Date);
+        Assert(
+            Equals(
+                TableCellValueConverter.Parse(
+                    dateColumn,
+                    new TableCellInput("event_date", TableCellInputMode.Value, " 2026-08-30 ")),
+                new DateTime(2026, 8, 30)),
+            "Date 欄位應接受純 yyyy-MM-dd 日期");
+        Assert(
+            TableCellValueConverter.Format(dateColumn, new DateTime(2026, 8, 30)) == "2026-08-30" &&
+            TableCellValueConverter.FormatForDisplay(dateColumn, new DateOnly(2026, 8, 30)) == "2026-08-30",
+            "Date 欄位在 grid 與編輯器都應顯示純日期");
+        Assert(
+            TableCellValueConverter.MatchesOriginal(
+                dateColumn,
+                new TableCellInput("event_date", TableCellInputMode.Value, "2026-08-30"),
+                new DateTime(2026, 8, 30)),
+            "Date 純日期輸入應與資料庫讀回的午夜 DateTime 視為相同");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            dateColumn,
+            new TableCellInput(
+                "event_date",
+                TableCellInputMode.Value,
+                "2026-08-30T12:34:56.0000000")));
 
         const string parameterizedName = "Punky '); DROP TABLE editor_sample;--";
         await session.InsertTableRowAsync(
@@ -1044,6 +1076,48 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             timeColumn,
             new TableCellInput("local_clock", TableCellInputMode.Value, "24:00:00.01")));
+        var postgreSqlDateColumn = new TableColumnInfo(
+            0,
+            "event_date",
+            "date",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.PostgreSqlDate);
+        foreach (var expected in new[]
+                 {
+                     "0001-01-01",
+                     "9999-12-31",
+                     "4713-01-01 BC",
+                     "0001-02-29 BC",
+                     "5874897-12-31",
+                     "infinity",
+                     "-infinity"
+                 })
+        {
+            Assert(
+                Equals(
+                    TableCellValueConverter.Parse(
+                        postgreSqlDateColumn,
+                        new TableCellInput("event_date", TableCellInputMode.Value, expected)),
+                    expected),
+                $"PostgreSQL date 應無損保留 {expected}");
+        }
+        foreach (var invalid in new[]
+                 {
+                     "2026-08-30T12:34:56.0000000",
+                     "0000-01-01",
+                     "4714-01-01 BC",
+                     "5874898-01-01",
+                     "0004-02-29 BC",
+                     "2026-02-29"
+                 })
+        {
+            AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+                postgreSqlDateColumn,
+                new TableCellInput("event_date", TableCellInputMode.Value, invalid)));
+        }
         var mySqlDateColumn = new TableColumnInfo(
             0,
             "event_date",
@@ -2151,6 +2225,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 bits BIT(8) NULL,
                 varbits BIT VARYING(16) NULL,
                 alarm TIME WITH TIME ZONE NULL,
+                event_date DATE NULL,
                 local_timestamp TIMESTAMP(3) WITHOUT TIME ZONE NULL,
                 precise_timestamp TIMESTAMP(6) WITHOUT TIME ZONE NULL,
                 utc_timestamp TIMESTAMP(4) WITH TIME ZONE NULL,
@@ -2258,6 +2333,68 @@ static async Task VerifyPostgreSqlTemporalTypesAsync(
     DatabaseObjectInfo table)
 {
     var before = await session.LoadTableDataAsync(database, table);
+    var dateColumn = before.Columns.Single(column =>
+        column.Name == "event_date" && column.ValueKind == TableColumnValueKind.PostgreSqlDate);
+    Assert(
+        dateColumn.IsEditable && dateColumn.StorageDataTypeName == "date",
+        $"PostgreSQL event_date metadata 不正確；actual={dateColumn.StorageDataTypeName}");
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "PostgreSQL date range"),
+            new TableCellInput("event_date", TableCellInputMode.Value, "4713-01-01 BC")
+        });
+    var dateRangeSnapshot = await session.LoadTableDataAsync(database, table);
+    var dateRange = dateRangeSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "PostgreSQL date range");
+    Assert(
+        Convert.ToString(dateRange.Values[dateColumn.Ordinal]) == "4713-01-01 BC",
+        "PostgreSQL date 應保留 BC 下界 canonical 文字");
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        dateRange,
+        new[]
+        {
+            new TableCellInput("event_date", TableCellInputMode.Value, "5874897-12-31")
+        });
+    var updatedDateRangeSnapshot = await session.LoadTableDataAsync(database, table);
+    var updatedDateRange = updatedDateRangeSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "PostgreSQL date range");
+    Assert(
+        Convert.ToString(updatedDateRange.Values[dateColumn.Ordinal]) == "5874897-12-31",
+        "PostgreSQL date 應保留 AD 上界 canonical 文字");
+    await session.DeleteTableRowAsync(database, table, updatedDateRange);
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "PostgreSQL date infinity"),
+            new TableCellInput("event_date", TableCellInputMode.Value, "infinity")
+        });
+    var infinitySnapshot = await session.LoadTableDataAsync(database, table);
+    var infinity = infinitySnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "PostgreSQL date infinity");
+    Assert(
+        Convert.ToString(infinity.Values[dateColumn.Ordinal]) == "infinity",
+        "PostgreSQL date 應保留 infinity");
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        infinity,
+        new[] { new TableCellInput("event_date", TableCellInputMode.Value, "-infinity") });
+    var negativeInfinitySnapshot = await session.LoadTableDataAsync(database, table);
+    var negativeInfinity = negativeInfinitySnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "PostgreSQL date infinity");
+    Assert(
+        Convert.ToString(negativeInfinity.Values[dateColumn.Ordinal]) == "-infinity",
+        "PostgreSQL date 應保留 -infinity");
+    await session.DeleteTableRowAsync(database, table, negativeInfinity);
     var temporalColumns = before.Columns
         .Where(column => column.ValueKind == TableColumnValueKind.PostgreSqlTemporal)
         .ToDictionary(column => column.Name, StringComparer.Ordinal);
@@ -2286,6 +2423,7 @@ static async Task VerifyPostgreSqlTemporalTypesAsync(
         new[]
         {
             new TableCellInput("name", TableCellInputMode.Value, "PostgreSQL temporal"),
+            new TableCellInput("event_date", TableCellInputMode.Value, "0001-01-01"),
             new TableCellInput("local_timestamp", TableCellInputMode.Value, "0001-01-01T00:00:00.123"),
             new TableCellInput("precise_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.123456"),
             new TableCellInput("utc_timestamp", TableCellInputMode.Value, "2026-08-30T12:34:56.1234+08:00"),
@@ -2296,6 +2434,7 @@ static async Task VerifyPostgreSqlTemporalTypesAsync(
     var inserted = insertedSnapshot.Rows.Single(row =>
         Convert.ToString(row.Values[1]) == "PostgreSQL temporal");
     Assert(
+        TableCellValueConverter.Format(dateColumn, inserted.Values[dateColumn.Ordinal]) == "0001-01-01" &&
         Convert.ToString(inserted.Values[temporalColumns["local_timestamp"].Ordinal]) ==
             "0001-01-01T00:00:00.123" &&
         Convert.ToString(inserted.Values[temporalColumns["precise_timestamp"].Ordinal]) ==
@@ -2307,6 +2446,7 @@ static async Task VerifyPostgreSqlTemporalTypesAsync(
 
     var invalidValues = new[]
     {
+        (Column: "event_date", Value: "2026-08-30T12:34:56.0000000"),
         (Column: "local_timestamp", Value: "2026-08-30T12:34:56.1234"),
         (Column: "local_timestamp", Value: "2026-08-30T12:34:56.123+08:00"),
         (Column: "precise_timestamp", Value: "2026-08-30T12:34:56.1234567"),
@@ -2339,6 +2479,7 @@ static async Task VerifyPostgreSqlTemporalTypesAsync(
         inserted,
         new[]
         {
+            new TableCellInput("event_date", TableCellInputMode.Value, "9999-12-31"),
             new TableCellInput("local_timestamp", TableCellInputMode.Value, "9999-12-31T23:59:59.999"),
             new TableCellInput("precise_timestamp", TableCellInputMode.Value, "9999-12-31T23:59:59.999999"),
             new TableCellInput("utc_timestamp", TableCellInputMode.Value, "2026-08-30T01:02:03.4567Z"),
@@ -2348,6 +2489,7 @@ static async Task VerifyPostgreSqlTemporalTypesAsync(
     var updated = updatedSnapshot.Rows.Single(row =>
         Convert.ToString(row.Values[1]) == "PostgreSQL temporal");
     Assert(
+        TableCellValueConverter.Format(dateColumn, updated.Values[dateColumn.Ordinal]) == "9999-12-31" &&
         Convert.ToString(updated.Values[temporalColumns["local_timestamp"].Ordinal]) ==
             "9999-12-31T23:59:59.999" &&
         Convert.ToString(updated.Values[temporalColumns["precise_timestamp"].Ordinal]) ==

@@ -10,6 +10,7 @@ public enum TableColumnValueKind
     FloatingPoint,
     Boolean,
     Date,
+    PostgreSqlDate,
     DateTime,
     DateTimeOffset,
     Time,
