@@ -1,3 +1,5 @@
+using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MySqlPunk.Core.Models;
@@ -13,7 +15,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
-    ("跨平台更新資產安全選擇", CrossPlatformUpdateAssetsAsync),
+    ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
 
@@ -235,7 +237,7 @@ static async Task QueryResultExportFormatsAsync()
     }
 }
 
-static Task CrossPlatformUpdateAssetsAsync()
+static async Task CrossPlatformUpdateAssetsAsync()
 {
     const string releaseJson = """
         {
@@ -292,7 +294,59 @@ static Task CrossPlatformUpdateAssetsAsync()
     AssertThrows<PlatformNotSupportedException>(() =>
         CrossPlatformUpdateService.BuildPackageFileName("1.0.0.20", "linux-riscv64"));
 
-    return Task.CompletedTask;
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var packageBytes = Encoding.UTF8.GetBytes("self-contained package 測試內容");
+        var expectedHash = Convert.ToHexString(SHA256.HashData(packageBytes)).ToLowerInvariant();
+        var sidecarBytes = Encoding.UTF8.GetBytes($"{expectedHash}  {update.PackageFileName}\n");
+        HttpClient CreateClient(byte[] servedPackage) => new(new StubHttpMessageHandler(request =>
+        {
+            var contents = request.RequestUri == update.Sha256DownloadUri ? sidecarBytes : servedPackage;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(contents)
+            };
+        }));
+
+        var destinationPath = Path.Combine(directory, update.PackageFileName);
+        await File.WriteAllTextAsync(destinationPath, "old-package-must-be-replaced-only-after-verification");
+        using (var client = CreateClient(packageBytes))
+        {
+            var download = await new CrossPlatformUpdateService(client).DownloadPackageAsync(
+                update,
+                destinationPath);
+            Assert(download.Bytes == packageBytes.Length, "安全下載大小不正確");
+            Assert(download.Sha256 == expectedHash, "安全下載 SHA-256 不正確");
+            Assert((await File.ReadAllBytesAsync(destinationPath)).SequenceEqual(packageBytes), "驗證成功後未原子替換目標檔");
+        }
+
+        await File.WriteAllTextAsync(destinationPath, "keep-existing-package");
+        using (var client = CreateClient(Encoding.UTF8.GetBytes("corrupted package")))
+        {
+            await AssertThrowsAsync<InvalidDataException>(() =>
+                new CrossPlatformUpdateService(client).DownloadPackageAsync(update, destinationPath));
+        }
+        Assert(await File.ReadAllTextAsync(destinationPath) == "keep-existing-package", "SHA-256 失敗時覆蓋了既有檔案");
+        Assert(!Directory.EnumerateFiles(directory).Any(path => path.EndsWith(".tmp", StringComparison.Ordinal)), "更新失敗留下暫存檔");
+
+        AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseChecksumSidecar(
+            Encoding.UTF8.GetBytes($"{expectedHash}  other-package.tar.gz\n"),
+            update.PackageFileName));
+        AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseChecksumSidecar(
+            Encoding.UTF8.GetBytes($"{expectedHash}  {update.PackageFileName}\n{expectedHash}  duplicate\n"),
+            update.PackageFileName));
+        AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseChecksumSidecar(
+            new byte[] { 0xFF, 0xFE, 0xFD },
+            update.PackageFileName));
+        AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseChecksumSidecar(
+            Encoding.UTF8.GetBytes($"{expectedHash}  **{update.PackageFileName}\n"),
+            update.PackageFileName));
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
 }
 
 static async Task MacOsKeychainRoundTripAsync()
@@ -854,4 +908,22 @@ static async Task AssertThrowsAsync<TException>(Func<Task> action)
     }
 
     throw new InvalidOperationException($"預期丟出 {typeof(TException).Name}");
+}
+
+file sealed class StubHttpMessageHandler : HttpMessageHandler
+{
+    private readonly Func<HttpRequestMessage, HttpResponseMessage> _responseFactory;
+
+    public StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+    {
+        _responseFactory = responseFactory;
+    }
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_responseFactory(request));
+    }
 }

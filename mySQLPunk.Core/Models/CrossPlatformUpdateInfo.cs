@@ -32,3 +32,17 @@ public sealed record CrossPlatformUpdateInfo
         Math.Max(0, version.Build),
         Math.Max(0, version.Revision));
 }
+
+public sealed record CrossPlatformUpdateDownload(
+    string Path,
+    long Bytes,
+    string Sha256)
+{
+    public string FormattedBytes => Bytes switch
+    {
+        < 1024 => $"{Bytes:N0} B",
+        < 1024 * 1024 => $"{Bytes / 1024d:N1} KB",
+        < 1024L * 1024 * 1024 => $"{Bytes / (1024d * 1024):N1} MB",
+        _ => $"{Bytes / (1024d * 1024 * 1024):N1} GB"
+    };
+}

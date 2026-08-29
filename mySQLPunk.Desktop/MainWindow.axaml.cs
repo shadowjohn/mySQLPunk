@@ -338,27 +338,96 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            var packageMessage = update.HasPackageAndChecksum
-                ? $"已找到 {update.RuntimeIdentifier} 的 {update.PackageFileName} 與同名 SHA-256。"
-                : $"這個 Release 尚未同時提供 {update.RuntimeIdentifier} 安裝包與 SHA-256，請在下載頁確認。";
-            var openReleasePage = await MessageDialog.ShowAsync(
+            if (!update.HasPackageAndChecksum)
+            {
+                var openReleasePage = await MessageDialog.ShowAsync(
+                    this,
+                    $"有新版本 {update.LatestVersionText}",
+                    $"{update.ReleaseName}\n\n目前版本：{currentVersion}\n最新版本：{update.LatestVersionText}\n這個 Release 尚未同時提供 {update.RuntimeIdentifier} 安裝包與 SHA-256。\n\n是否開啟 GitHub Release 頁確認？",
+                    showCancel: true,
+                    confirmText: "開啟 Release 頁");
+                if (openReleasePage)
+                {
+                    OpenReleasePage(update);
+                }
+                else
+                {
+                    SetStatus($"已找到 {update.LatestVersionText}，稍後可再檢查更新。");
+                }
+                return;
+            }
+
+            var shouldDownload = await MessageDialog.ShowAsync(
                 this,
                 $"有新版本 {update.LatestVersionText}",
-                $"{update.ReleaseName}\n\n目前版本：{currentVersion}\n最新版本：{update.LatestVersionText}\n{packageMessage}\n\n是否開啟 GitHub Release 下載頁？",
+                $"{update.ReleaseName}\n\n目前版本：{currentVersion}\n最新版本：{update.LatestVersionText}\n已找到 {update.RuntimeIdentifier} 的 {update.PackageFileName} 與同名 SHA-256。\n\n是否下載並驗證安裝包？",
                 showCancel: true,
-                confirmText: "開啟下載頁");
-            if (!openReleasePage)
+                confirmText: "下載並驗證");
+            if (!shouldDownload)
             {
                 SetStatus($"已找到 {update.LatestVersionText}，稍後可再檢查更新。");
                 return;
             }
 
-            Process.Start(new ProcessStartInfo(update.ReleasePageUri.AbsoluteUri)
+            if (!StorageProvider.CanSave)
             {
-                UseShellExecute = true
+                await MessageDialog.ShowAsync(
+                    this,
+                    "無法選擇下載位置",
+                    "目前桌面環境未提供儲存檔案對話框，將改為開啟 GitHub Release 頁。",
+                    showCancel: false);
+                OpenReleasePage(update);
+                return;
+            }
+
+            var isLinuxPackage = update.RuntimeIdentifier.StartsWith("linux-", StringComparison.Ordinal);
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = $"下載 mySQLPunk {update.LatestVersionText}",
+                SuggestedFileName = update.PackageFileName,
+                FileTypeChoices = new[]
+                {
+                    new FilePickerFileType(isLinuxPackage ? "Linux 安裝壓縮檔" : "macOS app 壓縮檔")
+                    {
+                        Patterns = isLinuxPackage ? new[] { "*.tar.gz" } : new[] { "*.app.zip", "*.zip" },
+                        MimeTypes = isLinuxPackage ? new[] { "application/gzip" } : new[] { "application/zip" }
+                    }
+                }
             });
-            SetStatus($"已開啟 {update.LatestVersionText} 下載頁；安裝前請核對同名 .sha256。");
+            if (file is null)
+            {
+                SetStatus($"已取消下載 {update.LatestVersionText}。");
+                return;
+            }
+            if (file.TryGetLocalPath() is not { } destinationPath)
+            {
+                throw new InvalidOperationException("目前只能把更新安裝包下載到本機檔案。");
+            }
+
+            SetStatus($"正在下載並驗證 {update.PackageFileName}…");
+            var download = await _updateService.DownloadPackageAsync(
+                update,
+                destinationPath,
+                cancellationToken);
+            var installHint = isLinuxPackage
+                ? "解壓後執行 ./install.sh；既有連線設定會保留。"
+                : "解壓後將 mySQLPunk.app 拖到 Applications。";
+            SetStatus($"已下載並驗證 {download.FormattedBytes}：{download.Path}");
+            await MessageDialog.ShowAsync(
+                this,
+                "更新安裝包已驗證",
+                $"檔案：{download.Path}\n大小：{download.FormattedBytes}\nSHA-256：{download.Sha256}\n\n{installHint}",
+                showCancel: false);
         });
+    }
+
+    private void OpenReleasePage(CrossPlatformUpdateInfo update)
+    {
+        Process.Start(new ProcessStartInfo(update.ReleasePageUri.AbsoluteUri)
+        {
+            UseShellExecute = true
+        });
+        SetStatus($"已開啟 {update.LatestVersionText} GitHub Release 頁。");
     }
 
     private async Task ExecuteCurrentSqlAsync()

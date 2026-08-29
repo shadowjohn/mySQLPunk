@@ -1,4 +1,7 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MySqlPunk.Core.Models;
@@ -10,9 +13,12 @@ public sealed class CrossPlatformUpdateService
     public const string DefaultOwner = "shadowjohn";
     public const string DefaultRepository = "mySQLPunk";
     private const int MaximumReleaseJsonCharacters = 2 * 1024 * 1024;
+    private const int MaximumChecksumBytes = 4 * 1024;
+    private const long MaximumPackageBytes = 512L * 1024 * 1024;
     private static readonly Regex VersionPattern = new(
         @"^\d+\.\d+\.\d+(\.\d+)?$",
         RegexOptions.CultureInvariant);
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly HttpClient SharedHttpClient = new();
 
     private readonly HttpClient _httpClient;
@@ -48,6 +54,73 @@ public sealed class CrossPlatformUpdateService
             json,
             currentVersion,
             runtimeIdentifier ?? ResolveCurrentRuntimeIdentifier());
+    }
+
+    public async Task<CrossPlatformUpdateDownload> DownloadPackageAsync(
+        CrossPlatformUpdateInfo update,
+        string destinationPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        if (!Path.IsPathFullyQualified(destinationPath))
+        {
+            throw new ArgumentException("更新下載位置必須是完整路徑。", nameof(destinationPath));
+        }
+
+        var expectedPackageName = BuildPackageFileName(update.LatestVersionText, update.RuntimeIdentifier);
+        if (!string.Equals(update.PackageFileName, expectedPackageName, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("更新資產名稱與版本／平台不一致。");
+        }
+
+        var packageUri = update.PackageDownloadUri is null
+            ? throw new InvalidOperationException("Release 沒有目前平台的安裝包。")
+            : ParseTrustedRepositoryUri(update.PackageDownloadUri.AbsoluteUri, "package URL");
+        var checksumUri = update.Sha256DownloadUri is null
+            ? throw new InvalidOperationException("Release 沒有目前平台安裝包的 SHA-256。")
+            : ParseTrustedRepositoryUri(update.Sha256DownloadUri.AbsoluteUri, "SHA-256 URL");
+        ValidateAssetUriFileName(packageUri, expectedPackageName);
+        ValidateAssetUriFileName(checksumUri, expectedPackageName + ".sha256");
+
+        var checksumBytes = await DownloadSmallFileAsync(
+            checksumUri,
+            MaximumChecksumBytes,
+            cancellationToken).ConfigureAwait(false);
+        var expectedHash = ParseChecksumSidecar(checksumBytes, expectedPackageName);
+
+        var destinationDirectory = Path.GetDirectoryName(destinationPath);
+        if (string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            throw new ArgumentException("無法定位更新下載目錄。", nameof(destinationPath));
+        }
+        Directory.CreateDirectory(destinationDirectory);
+        var temporaryPath = Path.Combine(
+            destinationDirectory,
+            $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            var (bytes, actualHash) = await DownloadPackageFileAsync(
+                packageUri,
+                temporaryPath,
+                cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(expectedHash, actualHash, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"下載檔案 SHA-256 不符；預期 {expectedHash}，實際 {actualHash}。既有檔案未被覆蓋。");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporaryPath, destinationPath, true);
+            return new CrossPlatformUpdateDownload(destinationPath, bytes, actualHash);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
     }
 
     public static CrossPlatformUpdateInfo ParseLatestRelease(
@@ -169,6 +242,42 @@ public sealed class CrossPlatformUpdateService
         return $"mySQLPunk-{normalizedVersion}-{runtimeIdentifier}{suffix}";
     }
 
+    public static string ParseChecksumSidecar(ReadOnlySpan<byte> contents, string expectedPackageName)
+    {
+        if (contents.IsEmpty || contents.Length > MaximumChecksumBytes)
+        {
+            throw new InvalidDataException("SHA-256 sidecar 為空或超過安全大小限制。");
+        }
+
+        string text;
+        try
+        {
+            text = StrictUtf8.GetString(contents).Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+        }
+        catch (DecoderFallbackException exception)
+        {
+            throw new InvalidDataException("SHA-256 sidecar 不是有效 UTF-8。", exception);
+        }
+        if (text.Contains('\n'))
+        {
+            throw new InvalidDataException("SHA-256 sidecar 必須只包含一筆檔案雜湊。");
+        }
+
+        var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || !Regex.IsMatch(parts[0], "^[0-9a-fA-F]{64}$", RegexOptions.CultureInvariant))
+        {
+            throw new InvalidDataException("SHA-256 sidecar 格式不正確。");
+        }
+
+        var sidecarFileName = parts[1].StartsWith('*') ? parts[1][1..] : parts[1];
+        if (!string.Equals(sidecarFileName, expectedPackageName, StringComparison.Ordinal) ||
+            !string.Equals(Path.GetFileName(sidecarFileName), sidecarFileName, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("SHA-256 sidecar 指向非預期的安裝包名稱。");
+        }
+        return parts[0].ToLowerInvariant();
+    }
+
     private static Version ParseVersion(string value, string fieldName, out string normalized)
     {
         normalized = (value ?? string.Empty).Trim();
@@ -203,6 +312,121 @@ public sealed class CrossPlatformUpdateService
             throw new InvalidDataException($"{fieldName} 不是受信任的 mySQLPunk GitHub HTTPS URL。");
         }
         return uri;
+    }
+
+    private async Task<byte[]> DownloadSmallFileAsync(
+        Uri uri,
+        int maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendDownloadRequestAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (response.Content.Headers.ContentLength is > 0 && response.Content.Headers.ContentLength > maximumBytes)
+        {
+            throw new InvalidDataException("下載內容超過安全大小限制。");
+        }
+
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var output = new MemoryStream();
+        var buffer = new byte[1024];
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+            if (output.Length + read > maximumBytes)
+            {
+                throw new InvalidDataException("下載內容超過安全大小限制。");
+            }
+            output.Write(buffer, 0, read);
+        }
+        return output.ToArray();
+    }
+
+    private async Task<(long Bytes, string Sha256)> DownloadPackageFileAsync(
+        Uri uri,
+        string temporaryPath,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendDownloadRequestAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (response.Content.Headers.ContentLength is > MaximumPackageBytes)
+        {
+            throw new InvalidDataException("更新安裝包超過 512 MiB 安全大小限制。");
+        }
+
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using var output = new FileStream(
+            temporaryPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            128 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(128 * 1024);
+        long totalBytes = 0;
+        try
+        {
+            while (true)
+            {
+                var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                totalBytes = checked(totalBytes + read);
+                if (totalBytes > MaximumPackageBytes)
+                {
+                    throw new InvalidDataException("更新安裝包超過 512 MiB 安全大小限制。");
+                }
+                hash.AppendData(buffer, 0, read);
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+            await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        if (totalBytes == 0)
+        {
+            throw new InvalidDataException("更新安裝包不可為空檔案。");
+        }
+        return (totalBytes, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
+    }
+
+    private async Task<HttpResponseMessage> SendDownloadRequestAsync(
+        Uri uri,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.UserAgent.ParseAdd("mySQLPunk-cross-platform-update-download");
+        var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            response.EnsureSuccessStatusCode();
+            return response;
+        }
+        catch
+        {
+            response.Dispose();
+            throw;
+        }
+    }
+
+    private static void ValidateAssetUriFileName(Uri uri, string expectedFileName)
+    {
+        var actualFileName = Path.GetFileName(Uri.UnescapeDataString(uri.AbsolutePath));
+        if (!string.Equals(actualFileName, expectedFileName, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("更新資產 URL 的檔名與 Release metadata 不一致。");
+        }
     }
 
     private static string GetRequiredString(JsonElement element, string propertyName)
