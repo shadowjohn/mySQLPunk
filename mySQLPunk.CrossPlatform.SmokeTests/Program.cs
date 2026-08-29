@@ -1244,6 +1244,36 @@ static async Task TableDataEditingAsync()
         Assert(
             TableCellValueConverter.IsStructuredTextTooLargeToEdit(geometricColumn, oversizedGeometric),
             "既有 PostgreSQL geometric 超過 1 MiB 時應維持唯讀");
+        var serverTextColumn = new TableColumnInfo(
+            0,
+            "search_path",
+            "jsonpath",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.PostgreSqlServerValidatedText);
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                serverTextColumn,
+                new TableCellInput(
+                    "search_path",
+                    TableCellInputMode.Value,
+                    "  $.store.book[*] ? (@.price < 10)  "))) ==
+            "$.store.book[*] ? (@.price < 10)",
+            "PostgreSQL server-validated text 應去除外圍空白並保留內容");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            serverTextColumn,
+            new TableCellInput("search_path", TableCellInputMode.Value, "$\0")));
+        var oversizedServerText = new string(
+            'x',
+            TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            serverTextColumn,
+            new TableCellInput("search_path", TableCellInputMode.Value, oversizedServerText)));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(serverTextColumn, oversizedServerText),
+            "既有 PostgreSQL server-validated text 超過 1 MiB 時應維持唯讀");
     }
     finally
     {
@@ -1354,6 +1384,8 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
+        await session.ExecuteAsync(database, "CREATE EXTENSION hstore;");
+        await session.ExecuteAsync(database, "CREATE EXTENSION ltree;");
         await session.ExecuteAsync(database, "CREATE TYPE mood AS ENUM ('happy', 'sad', 'comma,value');");
         await session.ExecuteAsync(
             database,
@@ -1409,7 +1441,25 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 radius CIRCLE NULL,
                 high_precision NUMERIC(100,50) NULL,
                 fractional_only NUMERIC(3,5) NULL,
-                rounded_thousands NUMERIC(2,-3) NULL
+                rounded_thousands NUMERIC(2,-3) NULL,
+                search_path JSONPATH NULL,
+                snapshot PG_SNAPSHOT NULL,
+                legacy_snapshot TXID_SNAPSHOT NULL,
+                attributes HSTORE NULL,
+                tree LTREE NULL,
+                tree_query LQUERY NULL,
+                text_query LTXTQUERY NULL,
+                relation REGCLASS NULL,
+                role_name REGROLE NULL,
+                config_name REGCONFIG NULL,
+                collation_name REGCOLLATION NULL,
+                dictionary_name REGDICTIONARY NULL,
+                namespace_name REGNAMESPACE NULL,
+                operator_name REGOPER NULL,
+                operator_signature REGOPERATOR NULL,
+                function_name REGPROC NULL,
+                function_signature REGPROCEDURE NULL,
+                type_name REGTYPE NULL
             );
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
@@ -1830,6 +1880,38 @@ static async Task VerifySafeTableEditingAsync(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected geometric"),
             "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 geometric 值");
     }
+    var serverValidatedTextColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.PostgreSqlServerValidatedText)
+        .ToList();
+    if (serverValidatedTextColumns.Count > 0)
+    {
+        Assert(
+            serverValidatedTextColumns.Count == 18,
+            $"PostgreSQL server-validated text metadata 未完整辨識；actual={serverValidatedTextColumns.Count}");
+        foreach (var serverTextColumn in serverValidatedTextColumns)
+        {
+            Assert(serverTextColumn.IsEditable, $"PostgreSQL {serverTextColumn.DataTypeName} 應可安全編輯");
+            insertInputs.Add(new TableCellInput(
+                serverTextColumn.Name,
+                TableCellInputMode.Value,
+                GetPostgreSqlServerTextTestValue(serverTextColumn, updated: false)));
+        }
+
+        var jsonPathColumn = serverValidatedTextColumns.Single(column =>
+            column.DataTypeName.Equals("jsonpath", StringComparison.OrdinalIgnoreCase));
+        await AssertThrowsAsync<PostgresException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected jsonpath"),
+                new TableCellInput(jsonPathColumn.Name, TableCellInputMode.Value, "$.items[*] ? (")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected jsonpath"),
+            "PostgreSQL 不可寫入 server-side parser 拒絕的畸形 jsonpath");
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1974,6 +2056,13 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[geometricColumn.Ordinal]) ==
             GetPostgreSqlGeometricTestValue(geometricColumn, updated: false),
             $"PostgreSQL {geometricColumn.DataTypeName} 安全新增不正確；actual={inserted.Values[geometricColumn.Ordinal]}");
+    }
+    foreach (var serverTextColumn in serverValidatedTextColumns)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[serverTextColumn.Ordinal]) ==
+            GetPostgreSqlServerTextTestValue(serverTextColumn, updated: false),
+            $"PostgreSQL {serverTextColumn.DataTypeName} 安全新增不正確；actual={inserted.Values[serverTextColumn.Ordinal]}");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -2128,6 +2217,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             GetPostgreSqlGeometricTestValue(geometricColumn, updated: true)));
     }
+    foreach (var serverTextColumn in serverValidatedTextColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            serverTextColumn.Name,
+            TableCellInputMode.Value,
+            GetPostgreSqlServerTextTestValue(serverTextColumn, updated: true)));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -2275,6 +2371,13 @@ static async Task VerifySafeTableEditingAsync(
             GetPostgreSqlGeometricTestValue(geometricColumn, updated: true),
             $"PostgreSQL {geometricColumn.DataTypeName} 安全修改不正確；actual={updated.Values[geometricColumn.Ordinal]}");
     }
+    foreach (var serverTextColumn in serverValidatedTextColumns)
+    {
+        Assert(
+            Convert.ToString(updated.Values[serverTextColumn.Ordinal]) ==
+            GetPostgreSqlServerTextTestValue(serverTextColumn, updated: true),
+            $"PostgreSQL {serverTextColumn.DataTypeName} 安全修改不正確；actual={updated.Values[serverTextColumn.Ordinal]}");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -2402,6 +2505,47 @@ static string GetPostgreSqlGeometricTestValue(TableColumnInfo column, bool updat
         ("area", true) => "((0,0),(4,0),(4,3))",
         ("radius", true) => "<(-5,6),7.25>",
         _ => throw new InvalidOperationException($"缺少 {column.Name} PostgreSQL geometric 測試值。")
+    };
+
+static string GetPostgreSqlServerTextTestValue(TableColumnInfo column, bool updated) =>
+    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    {
+        ("jsonpath", false) => "$.\"store\".\"book\"[*]?(@.\"price\" < 10)",
+        ("jsonpath", true) => "strict $.\"track\".\"segments\"[*]?(@.\"HR\" >= 140)",
+        ("pg_snapshot" or "txid_snapshot", false) => "10:20:12,15",
+        ("pg_snapshot" or "txid_snapshot", true) => "100:120:105,110",
+        ("hstore", false) => "\"theme\"=>\"dark\", \"locale\"=>\"zh-TW\"",
+        ("hstore", true) => "\"theme\"=>\"light\", \"locale\"=>\"en-US\"",
+        ("ltree", false) => "Top.Science.Astronomy",
+        ("ltree", true) => "Top.Technology.Databases",
+        ("lquery", false) => "Top.*{1,2}.Astronomy",
+        ("lquery", true) => "Top.!Science.*",
+        ("ltxtquery", false) => "Science & Astronomy",
+        ("ltxtquery", true) => "Technology | Databases",
+        ("regclass", false) => "pg_class",
+        ("regclass", true) => "pg_type",
+        ("regrole", false) => "postgres",
+        ("regrole", true) => "pg_database_owner",
+        ("regconfig", false) => "english",
+        ("regconfig", true) => "simple",
+        ("regcollation", false) => "\"C\"",
+        ("regcollation", true) => "\"POSIX\"",
+        ("regdictionary", false) => "simple",
+        ("regdictionary", true) => "english_stem",
+        ("regnamespace", false) => "public",
+        ("regnamespace", true) => "pg_catalog",
+        ("regoper", false) => "!!",
+        ("regoper", true) => "#-",
+        ("regoperator", false) => "!!(NONE,tsquery)",
+        ("regoperator", true) => "#-(jsonb,text[])",
+        ("regproc", false) => "current_database",
+        ("regproc", true) => "\"current_schema\"",
+        ("regprocedure", false) => "lower(text)",
+        ("regprocedure", true) => "upper(text)",
+        ("regtype", false) => "integer",
+        ("regtype", true) => "text",
+        _ => throw new InvalidOperationException(
+            $"缺少 {column.Name} PostgreSQL server-validated text 測試值。")
     };
 
 static string GetExactDecimalTestValue(TableColumnInfo column, bool updated)

@@ -101,6 +101,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                      TableColumnValueKind.PostgreSqlRange or
                      TableColumnValueKind.PostgreSqlArray or
                      TableColumnValueKind.PostgreSqlGeometric or
+                     TableColumnValueKind.PostgreSqlServerValidatedText or
                      TableColumnValueKind.ExactDecimal &&
                  parameter is NpgsqlParameter serverValidatedTextParameter)
         {
@@ -184,7 +185,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
         }
 
-        if (column.ValueKind == TableColumnValueKind.PostgreSqlGeometric)
+        if (column.ValueKind is TableColumnValueKind.PostgreSqlGeometric or
+            TableColumnValueKind.PostgreSqlServerValidatedText)
         {
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
@@ -216,6 +218,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             TableColumnValueKind.PostgreSqlRange or
             TableColumnValueKind.PostgreSqlArray or
             TableColumnValueKind.PostgreSqlGeometric or
+            TableColumnValueKind.PostgreSqlServerValidatedText or
             TableColumnValueKind.ExactDecimal
             ? $"CAST({quotedName} AS text) AS {quotedName}"
             : base.BuildTableDataSelectExpression(column);
@@ -383,6 +386,10 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "array" => TableColumnValueKind.PostgreSqlArray,
             "point" or "line" or "lseg" or "box" or "path" or "polygon" or "circle" =>
                 TableColumnValueKind.PostgreSqlGeometric,
+            "jsonpath" or "pg_snapshot" or "txid_snapshot" or
+                "regclass" or "regcollation" or "regconfig" or "regdictionary" or "regnamespace" or
+                "regoper" or "regoperator" or "regproc" or "regprocedure" or "regrole" or "regtype" =>
+                TableColumnValueKind.PostgreSqlServerValidatedText,
             "oid" or "xid" or "cid" or "xid8" => TableColumnValueKind.UnsignedInteger,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,
@@ -395,6 +402,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 TableColumnValueKind.String,
             "user-defined" when string.Equals(userDefinedType, "pg_lsn", StringComparison.OrdinalIgnoreCase) =>
                 TableColumnValueKind.LogSequenceNumber,
+            "user-defined" when userDefinedType.Equals("hstore", StringComparison.OrdinalIgnoreCase) ||
+                                userDefinedType.Equals("ltree", StringComparison.OrdinalIgnoreCase) ||
+                                userDefinedType.Equals("lquery", StringComparison.OrdinalIgnoreCase) ||
+                                userDefinedType.Equals("ltxtquery", StringComparison.OrdinalIgnoreCase) =>
+                TableColumnValueKind.PostgreSqlServerValidatedText,
             _ => TableColumnValueKind.Unsupported
         };
 }

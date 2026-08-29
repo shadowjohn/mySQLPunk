@@ -23,6 +23,7 @@ public enum TableColumnValueKind
     PostgreSqlRange,
     PostgreSqlArray,
     PostgreSqlGeometric,
+    PostgreSqlServerValidatedText,
     Guid,
     Json,
     Xml,

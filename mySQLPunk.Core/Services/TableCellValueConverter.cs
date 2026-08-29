@@ -82,6 +82,9 @@ public static class TableCellValueConverter
                 TableColumnValueKind.PostgreSqlGeometric => ParsePostgreSqlServerValidatedText(
                     input.Text,
                     "geometric"),
+                TableColumnValueKind.PostgreSqlServerValidatedText => ParsePostgreSqlServerValidatedText(
+                    input.Text,
+                    column.DataTypeName),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
                 TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Xml => ParseXml(input.Text),
@@ -174,6 +177,7 @@ public static class TableCellValueConverter
             TableColumnValueKind.PostgreSqlRange or
             TableColumnValueKind.PostgreSqlArray or
             TableColumnValueKind.PostgreSqlGeometric or
+            TableColumnValueKind.PostgreSqlServerValidatedText or
             TableColumnValueKind.ExactDecimal &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
