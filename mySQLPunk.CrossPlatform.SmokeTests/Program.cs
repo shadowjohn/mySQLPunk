@@ -956,6 +956,27 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             lsnColumn,
             new TableCellInput("wal_position", TableCellInputMode.Value, "16//B374D848")));
+        var oidColumn = new TableColumnInfo(
+            0,
+            "object_id",
+            "oid",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.UnsignedInteger);
+        Assert(
+            Convert.ToUInt64(TableCellValueConverter.Parse(
+                oidColumn,
+                new TableCellInput("object_id", TableCellInputMode.Value, uint.MaxValue.ToString(CultureInfo.InvariantCulture)))) ==
+            uint.MaxValue,
+            "PostgreSQL oid 應接受完整 UInt32 範圍");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            oidColumn,
+            new TableCellInput("object_id", TableCellInputMode.Value, "-1")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            oidColumn,
+            new TableCellInput("object_id", TableCellInputMode.Value, "4294967296")));
     }
     finally
     {
@@ -1066,7 +1087,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL, duration INTERVAL NULL, wal_position PG_LSN NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL, document XML NULL, address INET NULL, subnet CIDR NULL, mac MACADDR NULL, mac8 MACADDR8 NULL, bits BIT(8) NULL, varbits BIT VARYING(16) NULL, alarm TIME WITH TIME ZONE NULL, duration INTERVAL NULL, wal_position PG_LSN NULL, object_id OID NULL, transaction_id XID NULL, command_id CID NULL, full_transaction_id XID8 NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -1244,6 +1265,18 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "16/B374D848"));
     }
+    var systemIdentifierColumns = before.Columns
+        .Where(column =>
+            column.ValueKind == TableColumnValueKind.UnsignedInteger &&
+            column.DataTypeName is "oid" or "xid" or "cid" or "xid8")
+        .ToList();
+    foreach (var systemIdentifierColumn in systemIdentifierColumns)
+    {
+        insertInputs.Add(new TableCellInput(
+            systemIdentifierColumn.Name,
+            TableCellInputMode.Value,
+            GetSystemIdentifierTestValue(systemIdentifierColumn, updated: false)));
+    }
     await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1317,6 +1350,15 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             Convert.ToString(inserted.Values[lsnColumn.Ordinal]) == "16/B374D848",
             $"PostgreSQL pg_lsn 安全新增不正確；actual={inserted.Values[lsnColumn.Ordinal]}");
+    }
+    foreach (var systemIdentifierColumn in systemIdentifierColumns)
+    {
+        Assert(
+            Convert.ToUInt64(inserted.Values[systemIdentifierColumn.Ordinal]) ==
+            ulong.Parse(
+                GetSystemIdentifierTestValue(systemIdentifierColumn, updated: false),
+                CultureInfo.InvariantCulture),
+            $"PostgreSQL {systemIdentifierColumn.DataTypeName} 安全新增不正確");
     }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
@@ -1400,6 +1442,13 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "FFFFFFFF/FFFFFFFF"));
     }
+    foreach (var systemIdentifierColumn in systemIdentifierColumns)
+    {
+        updateInputs.Add(new TableCellInput(
+            systemIdentifierColumn.Name,
+            TableCellInputMode.Value,
+            GetSystemIdentifierTestValue(systemIdentifierColumn, updated: true)));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -1476,6 +1525,15 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(updated.Values[lsnColumn.Ordinal]) == "FFFFFFFF/FFFFFFFF",
             $"PostgreSQL pg_lsn 安全修改不正確；actual={updated.Values[lsnColumn.Ordinal]}");
     }
+    foreach (var systemIdentifierColumn in systemIdentifierColumns)
+    {
+        Assert(
+            Convert.ToUInt64(updated.Values[systemIdentifierColumn.Ordinal]) ==
+            ulong.Parse(
+                GetSystemIdentifierTestValue(systemIdentifierColumn, updated: true),
+                CultureInfo.InvariantCulture),
+            $"PostgreSQL {systemIdentifierColumn.DataTypeName} 安全修改不正確");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
@@ -1506,6 +1564,20 @@ static string GetNetworkTestValue(TableColumnInfo column, bool updated) =>
         ("macaddr8", false) => "08:00:2b:ff:fe:01:02:03",
         ("macaddr8", true) => "08:00:2b:ff:fe:01:02:04",
         _ => throw new InvalidOperationException($"缺少 {column.DataTypeName} 測試值。")
+    };
+
+static string GetSystemIdentifierTestValue(TableColumnInfo column, bool updated) =>
+    (column.DataTypeName.ToLowerInvariant(), updated) switch
+    {
+        ("oid", false) => uint.MaxValue.ToString(CultureInfo.InvariantCulture),
+        ("xid", false) => "4000000000",
+        ("cid", false) => "3000000000",
+        ("xid8", false) => ulong.MaxValue.ToString(CultureInfo.InvariantCulture),
+        ("oid", true) => "42",
+        ("xid", true) => "43",
+        ("cid", true) => "44",
+        ("xid8", true) => "18446744073709551614",
+        _ => throw new InvalidOperationException($"沒有 {column.DataTypeName} 的實機測試值。")
     };
 
 static string GetBitTestValue(TableColumnInfo column, bool updated) =>

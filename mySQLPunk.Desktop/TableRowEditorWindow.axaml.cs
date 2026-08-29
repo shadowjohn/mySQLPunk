@@ -221,6 +221,13 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.Boolean => "true / false / 1 / 0",
         TableColumnValueKind.UnsignedInteger when column.DataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) =>
             "非負十進位整數（依 BIT 寬度限制）",
+        TableColumnValueKind.UnsignedInteger when column.DataTypeName.Equals("xid8", StringComparison.OrdinalIgnoreCase) =>
+            $"0–{ulong.MaxValue}（十進位）",
+        TableColumnValueKind.UnsignedInteger when
+            column.DataTypeName.Equals("oid", StringComparison.OrdinalIgnoreCase) ||
+            column.DataTypeName.Equals("xid", StringComparison.OrdinalIgnoreCase) ||
+            column.DataTypeName.Equals("cid", StringComparison.OrdinalIgnoreCase) =>
+            $"0–{uint.MaxValue}（十進位）",
         TableColumnValueKind.Date => "yyyy-MM-dd",
         TableColumnValueKind.DateTime => "yyyy-MM-dd HH:mm:ss",
         TableColumnValueKind.DateTimeOffset => "ISO 8601 日期時間與時區",

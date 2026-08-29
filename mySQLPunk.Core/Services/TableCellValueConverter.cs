@@ -163,6 +163,15 @@ public static class TableCellValueConverter
     {
         var value = ulong.Parse(text, NumberStyles.Integer, CultureInfo.InvariantCulture);
         var dataType = column.DataTypeName.Trim();
+        if (dataType.Equals("oid", StringComparison.OrdinalIgnoreCase) ||
+            dataType.Equals("xid", StringComparison.OrdinalIgnoreCase) ||
+            dataType.Equals("cid", StringComparison.OrdinalIgnoreCase))
+        {
+            return value <= uint.MaxValue
+                ? value
+                : throw new OverflowException($"PostgreSQL {dataType} 的十進位值不可超過 {uint.MaxValue}。");
+        }
+
         if (!dataType.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) || !dataType.EndsWith(')'))
         {
             return value;

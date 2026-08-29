@@ -37,6 +37,20 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         System.Data.Common.DbParameter parameter,
         TableColumnInfo column)
     {
+        if (column.ValueKind == TableColumnValueKind.UnsignedInteger && parameter is NpgsqlParameter unsignedParameter)
+        {
+            unsignedParameter.NpgsqlDbType = column.DataTypeName.ToLowerInvariant() switch
+            {
+                "oid" => NpgsqlDbType.Oid,
+                "xid" => NpgsqlDbType.Xid,
+                "cid" => NpgsqlDbType.Cid,
+                "xid8" => NpgsqlDbType.Xid8,
+                _ => throw new InvalidOperationException(
+                    $"不支援的 PostgreSQL unsigned integer 型別：{column.DataTypeName}")
+            };
+            return;
+        }
+
         base.ConfigureParameter(parameter, column);
         if (column.ValueKind == TableColumnValueKind.Json && parameter is NpgsqlParameter npgsqlParameter)
         {
@@ -112,6 +126,17 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         if (column.ValueKind == TableColumnValueKind.LogSequenceNumber && value is string lsn)
         {
             return NpgsqlLogSequenceNumber.Parse(lsn);
+        }
+
+        if (column.ValueKind == TableColumnValueKind.UnsignedInteger && value is not null)
+        {
+            var unsigned = Convert.ToUInt64(value, System.Globalization.CultureInfo.InvariantCulture);
+            if (column.DataTypeName.Equals("xid8", StringComparison.OrdinalIgnoreCase))
+            {
+                return unsigned;
+            }
+
+            return checked((uint)unsigned);
         }
 
         if (column.ValueKind != TableColumnValueKind.NetworkAddress || value is not string text)
@@ -291,6 +316,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "time with time zone" => TableColumnValueKind.TimeWithTimeZone,
             "interval" => TableColumnValueKind.Interval,
             "pg_lsn" => TableColumnValueKind.LogSequenceNumber,
+            "oid" or "xid" or "cid" or "xid8" => TableColumnValueKind.UnsignedInteger,
             "uuid" => TableColumnValueKind.Guid,
             "json" or "jsonb" => TableColumnValueKind.Json,
             "xml" => TableColumnValueKind.Xml,
