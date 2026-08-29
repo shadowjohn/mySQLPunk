@@ -59,7 +59,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         }
         else if (parameter is SqlParameter legacyParameter)
         {
-            legacyParameter.SqlDbType = column.DataTypeName.ToLowerInvariant() switch
+            legacyParameter.SqlDbType = GetBaseTypeName(column.StorageDataTypeName) switch
             {
                 "text" => System.Data.SqlDbType.Text,
                 "ntext" => System.Data.SqlDbType.NText,
@@ -94,7 +94,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
         }
 
-        var dataType = column.DataTypeName.ToLowerInvariant();
+        var dataType = GetBaseTypeName(column.StorageDataTypeName);
         if (dataType == "text")
         {
             return $"CONVERT(varbinary(max), CONVERT(varchar(max), {QuoteIdentifier(column.Name)})) = " +
@@ -226,6 +226,9 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         command.CommandText = """
             SELECT c.name,
                    ty.name,
+                   schema_name(ty.schema_id),
+                   ty.is_user_defined,
+                   base_ty.name,
                    c.is_nullable,
                    CASE WHEN EXISTS (
                        SELECT 1
@@ -240,12 +243,14 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                    c.is_identity,
                    c.is_computed,
                    c.default_object_id,
+                   c.max_length,
                    c.precision,
                    c.scale
             FROM sys.columns c
             JOIN sys.tables t ON t.object_id = c.object_id
             JOIN sys.schemas s ON s.schema_id = t.schema_id
             JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+            JOIN sys.types base_ty ON base_ty.user_type_id = c.system_type_id
             WHERE s.name = @schema
               AND t.name = @table
             ORDER BY c.column_id
@@ -256,25 +261,65 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         var columns = new List<TableColumnInfo>();
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            var dataType = reader.GetString(1);
-            var displayType = dataType is "decimal" or "numeric"
-                ? $"{dataType}({reader.GetByte(7)},{reader.GetByte(8)})"
-                : dataType;
-            var generated = reader.GetBoolean(4) || reader.GetBoolean(5) ||
-                            dataType.Equals("timestamp", StringComparison.OrdinalIgnoreCase) ||
-                            dataType.Equals("rowversion", StringComparison.OrdinalIgnoreCase);
+            var declaredType = reader.GetString(1);
+            var declaredTypeSchema = reader.GetString(2);
+            var isUserDefined = reader.GetBoolean(3);
+            var baseType = reader.GetString(4);
+            var storageType = BuildStorageTypeName(
+                baseType,
+                reader.GetInt16(10),
+                reader.GetByte(11),
+                reader.GetByte(12));
+            var declaredTypeDisplayName = isUserDefined
+                ? $"{QuoteTypeNamePart(declaredTypeSchema)}.{QuoteTypeNamePart(declaredType)}"
+                : declaredType;
+            var displayType = declaredType.Equals(baseType, StringComparison.OrdinalIgnoreCase)
+                ? storageType
+                : $"{declaredTypeDisplayName} ({storageType})";
+            var generated = reader.GetBoolean(7) || reader.GetBoolean(8) ||
+                            baseType.Equals("timestamp", StringComparison.OrdinalIgnoreCase) ||
+                            baseType.Equals("rowversion", StringComparison.OrdinalIgnoreCase);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
                 displayType,
-                reader.GetBoolean(2),
-                reader.GetBoolean(3),
+                reader.GetBoolean(5),
+                reader.GetBoolean(6),
                 generated,
-                reader.GetInt32(6) != 0,
-                MapValueKind(dataType)));
+                reader.GetInt32(9) != 0,
+                MapValueKind(baseType))
+            {
+                StorageDataTypeName = storageType
+            });
         }
 
         return columns;
+    }
+
+    private static string BuildStorageTypeName(
+        string baseType,
+        short maxLength,
+        byte precision,
+        byte scale) =>
+        baseType.ToLowerInvariant() switch
+        {
+            "decimal" or "numeric" => $"{baseType}({precision},{scale})",
+            "char" or "varchar" or "binary" or "varbinary" =>
+                $"{baseType}({(maxLength < 0 ? "max" : maxLength.ToString(System.Globalization.CultureInfo.InvariantCulture))})",
+            "nchar" or "nvarchar" =>
+                $"{baseType}({(maxLength < 0 ? "max" : (maxLength / 2).ToString(System.Globalization.CultureInfo.InvariantCulture))})",
+            "time" or "datetime2" or "datetimeoffset" => $"{baseType}({scale})",
+            _ => baseType
+        };
+
+    private static string QuoteTypeNamePart(string value) =>
+        $"[{value.Replace("]", "]]", StringComparison.Ordinal)}]";
+
+    private static string GetBaseTypeName(string storageTypeName)
+    {
+        var normalized = storageTypeName.Trim();
+        var definitionStart = normalized.IndexOf('(');
+        return (definitionStart < 0 ? normalized : normalized[..definitionStart]).ToLowerInvariant();
     }
 
     protected override string BuildTableDataSql(

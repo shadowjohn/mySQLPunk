@@ -206,7 +206,7 @@ public static class TableCellValueConverter
     public static ExactDecimalDefinition GetExactDecimalDefinition(TableColumnInfo column)
     {
         ArgumentNullException.ThrowIfNull(column);
-        var normalized = column.DataTypeName.Trim();
+        var normalized = column.StorageDataTypeName.Trim();
         var openParenthesis = normalized.IndexOf('(');
         var typeEnd = openParenthesis >= 0
             ? openParenthesis
@@ -220,7 +220,7 @@ public static class TableCellValueConverter
         if (!typeName.Equals("decimal", StringComparison.OrdinalIgnoreCase) &&
             !typeName.Equals("numeric", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"無法辨識 exact decimal 型別：{column.DataTypeName}");
+            throw new InvalidOperationException($"無法辨識 exact decimal 型別：{column.StorageDataTypeName}");
         }
 
         var isUnsigned = normalized.Contains("unsigned", StringComparison.OrdinalIgnoreCase);
@@ -232,7 +232,7 @@ public static class TableCellValueConverter
         var closeParenthesis = normalized.IndexOf(')', openParenthesis + 1);
         if (closeParenthesis < 0)
         {
-            throw new InvalidOperationException($"無法辨識 exact decimal precision／scale：{column.DataTypeName}");
+            throw new InvalidOperationException($"無法辨識 exact decimal precision／scale：{column.StorageDataTypeName}");
         }
 
         var parts = normalized[(openParenthesis + 1)..closeParenthesis]

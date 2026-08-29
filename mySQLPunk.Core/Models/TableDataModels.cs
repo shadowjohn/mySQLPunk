@@ -45,6 +45,8 @@ public sealed record TableColumnInfo(
     bool HasDefault,
     TableColumnValueKind ValueKind)
 {
+    public string StorageDataTypeName { get; init; } = DataTypeName;
+
     public bool IsEditable => !IsGenerated && ValueKind is not TableColumnValueKind.Unsupported;
 
     public string DisplayName => IsPrimaryKey ? $"{Name} · PK" : Name;

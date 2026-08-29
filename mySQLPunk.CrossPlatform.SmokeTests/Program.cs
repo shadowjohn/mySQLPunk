@@ -1013,15 +1013,27 @@ static async Task TableDataEditingAsync()
             exactDecimalColumn,
             new TableCellInput("amount", TableCellInputMode.Value, "1,000.00")));
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
-            exactDecimalColumn with { DataTypeName = "decimal(65,30) unsigned" },
+            exactDecimalColumn with
+            {
+                DataTypeName = "decimal(65,30) unsigned",
+                StorageDataTypeName = "decimal(65,30) unsigned"
+            },
             new TableCellInput("amount", TableCellInputMode.Value, "-1.0")));
-        var unrestrictedNumeric = exactDecimalColumn with { DataTypeName = "numeric" };
+        var unrestrictedNumeric = exactDecimalColumn with
+        {
+            DataTypeName = "numeric",
+            StorageDataTypeName = "numeric"
+        };
         Assert(
             TableCellValueConverter.Parse(
                 unrestrictedNumeric,
                 new TableCellInput("amount", TableCellInputMode.Value, new string('7', 200))) is ExactDecimalValue,
             "PostgreSQL unrestricted numeric 應接受超過 29 位的精確數字");
-        var fractionalOnlyNumeric = exactDecimalColumn with { DataTypeName = "numeric(3,5)" };
+        var fractionalOnlyNumeric = exactDecimalColumn with
+        {
+            DataTypeName = "numeric(3,5)",
+            StorageDataTypeName = "numeric(3,5)"
+        };
         Assert(
             TableCellValueConverter.Parse(
                 fractionalOnlyNumeric,
@@ -1030,7 +1042,11 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             fractionalOnlyNumeric,
             new TableCellInput("amount", TableCellInputMode.Value, "0.01234")));
-        var negativeScaleNumeric = exactDecimalColumn with { DataTypeName = "numeric(2,-3)" };
+        var negativeScaleNumeric = exactDecimalColumn with
+        {
+            DataTypeName = "numeric(2,-3)",
+            StorageDataTypeName = "numeric(2,-3)"
+        };
         Assert(
             TableCellValueConverter.Parse(
                 negativeScaleNumeric,
@@ -1053,6 +1069,20 @@ static async Task TableDataEditingAsync()
                 unrestrictedNumeric,
                 oversizedExactDecimal),
             "既有 exact decimal 超過 1 MiB 時應維持唯讀");
+        var aliasExactDecimal = exactDecimalColumn with
+        {
+            DataTypeName = "[dbo].[precise_amount] (decimal(18,6))",
+            StorageDataTypeName = "decimal(18,6)"
+        };
+        Assert(
+            TableCellValueConverter.GetExactDecimalDefinition(aliasExactDecimal) ==
+            new ExactDecimalDefinition(18, 6, false),
+            "SQL Server alias decimal 應依 base type 保留 precision／scale");
+        Assert(
+            TableCellValueConverter.Parse(
+                aliasExactDecimal,
+                new TableCellInput("amount", TableCellInputMode.Value, "123456789012.123456")) is ExactDecimalValue,
+            "SQL Server alias decimal 應使用 base type 安全解析");
         var intervalColumn = new TableColumnInfo(
             0,
             "duration",
@@ -1568,7 +1598,10 @@ static async Task SqlServerLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("master", $"CREATE DATABASE [{database}];");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, node_path hierarchyid NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TYPE dbo.short_label FROM nvarchar(30) NULL;");
+        await session.ExecuteAsync(database, "CREATE TYPE dbo.positive_count FROM int NOT NULL;");
+        await session.ExecuteAsync(database, "CREATE TYPE dbo.precise_amount FROM decimal(18,6) NULL;");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, node_path hierarchyid NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
 
@@ -1714,6 +1747,63 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected hierarchyid"),
             "SQL Server 不可寫入 parser 拒絕的畸形 hierarchyid 值");
+    }
+    var sqlServerAliasLabelColumn = before.Columns.SingleOrDefault(column => column.Name == "alias_label");
+    var sqlServerAliasCountColumn = before.Columns.SingleOrDefault(column => column.Name == "alias_count");
+    var sqlServerAliasAmountColumn = before.Columns.SingleOrDefault(column => column.Name == "alias_amount");
+    var sqlServerSysnameColumn = before.Columns.SingleOrDefault(column => column.Name == "system_name");
+    if (sqlServerAliasLabelColumn is not null)
+    {
+        Assert(
+            sqlServerAliasCountColumn is not null &&
+            sqlServerAliasAmountColumn is not null &&
+            sqlServerSysnameColumn is not null,
+            "SQL Server alias type metadata 不完整");
+        Assert(
+            sqlServerAliasLabelColumn.ValueKind == TableColumnValueKind.String &&
+            sqlServerAliasLabelColumn.DataTypeName == "[dbo].[short_label] (nvarchar(30))" &&
+            sqlServerAliasLabelColumn.StorageDataTypeName == "nvarchar(30)",
+            $"SQL Server nvarchar alias metadata 不正確；actual={sqlServerAliasLabelColumn.DataTypeName}");
+        Assert(
+            sqlServerAliasCountColumn!.ValueKind == TableColumnValueKind.Integer &&
+            sqlServerAliasCountColumn.DataTypeName == "[dbo].[positive_count] (int)" &&
+            sqlServerAliasCountColumn.StorageDataTypeName == "int",
+            $"SQL Server int alias metadata 不正確；actual={sqlServerAliasCountColumn.DataTypeName}");
+        Assert(
+            sqlServerAliasAmountColumn!.ValueKind == TableColumnValueKind.ExactDecimal &&
+            sqlServerAliasAmountColumn.DataTypeName == "[dbo].[precise_amount] (decimal(18,6))" &&
+            sqlServerAliasAmountColumn.StorageDataTypeName == "decimal(18,6)",
+            $"SQL Server decimal alias metadata 不正確；actual={sqlServerAliasAmountColumn.DataTypeName}");
+        Assert(
+            sqlServerSysnameColumn!.ValueKind == TableColumnValueKind.String &&
+            sqlServerSysnameColumn.DataTypeName == "sysname (nvarchar(128))" &&
+            sqlServerSysnameColumn.StorageDataTypeName == "nvarchar(128)",
+            $"SQL Server sysname metadata 不正確；actual={sqlServerSysnameColumn.DataTypeName}");
+        insertInputs.Add(new TableCellInput(
+            sqlServerAliasLabelColumn.Name,
+            TableCellInputMode.Value,
+            "Alias insert"));
+        insertInputs.Add(new TableCellInput(
+            sqlServerAliasCountColumn.Name,
+            TableCellInputMode.Value,
+            "42"));
+        insertInputs.Add(new TableCellInput(
+            sqlServerSysnameColumn.Name,
+            TableCellInputMode.Value,
+            "alias_object"));
+
+        await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected alias overflow"),
+                new TableCellInput(sqlServerAliasCountColumn.Name, TableCellInputMode.Value, "2147483648")
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected alias overflow"),
+            "SQL Server int alias 不可寫入超過 base type 範圍的值");
     }
     var jsonColumn = before.Columns.SingleOrDefault(column => column.ValueKind == TableColumnValueKind.Json);
     if (jsonColumn is not null)
@@ -2227,6 +2317,18 @@ static async Task VerifySafeTableEditingAsync(
             Convert.ToString(inserted.Values[hierarchyIdColumn.Ordinal]) == "/1/2.5/",
             $"SQL Server hierarchyid 安全新增不正確；actual={inserted.Values[hierarchyIdColumn.Ordinal]}");
     }
+    if (sqlServerAliasLabelColumn is not null)
+    {
+        Assert(
+            Convert.ToString(inserted.Values[sqlServerAliasLabelColumn.Ordinal]) == "Alias insert",
+            "SQL Server nvarchar alias 安全新增不正確");
+        Assert(
+            Convert.ToInt64(inserted.Values[sqlServerAliasCountColumn!.Ordinal]) == 42,
+            "SQL Server int alias 安全新增不正確");
+        Assert(
+            Convert.ToString(inserted.Values[sqlServerSysnameColumn!.Ordinal]) == "alias_object",
+            "SQL Server sysname 安全新增不正確");
+    }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
     var secondPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 1);
@@ -2401,6 +2503,21 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "/3/4.5/"));
     }
+    if (sqlServerAliasLabelColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            sqlServerAliasLabelColumn.Name,
+            TableCellInputMode.Value,
+            "Alias updated"));
+        updateInputs.Add(new TableCellInput(
+            sqlServerAliasCountColumn!.Name,
+            TableCellInputMode.Value,
+            "84"));
+        updateInputs.Add(new TableCellInput(
+            sqlServerSysnameColumn!.Name,
+            TableCellInputMode.Value,
+            "updated_object"));
+    }
     await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
@@ -2568,6 +2685,18 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             Convert.ToString(updated.Values[hierarchyIdColumn.Ordinal]) == "/3/4.5/",
             $"SQL Server hierarchyid 安全修改不正確；actual={updated.Values[hierarchyIdColumn.Ordinal]}");
+    }
+    if (sqlServerAliasLabelColumn is not null)
+    {
+        Assert(
+            Convert.ToString(updated.Values[sqlServerAliasLabelColumn.Ordinal]) == "Alias updated",
+            "SQL Server nvarchar alias 安全修改不正確");
+        Assert(
+            Convert.ToInt64(updated.Values[sqlServerAliasCountColumn!.Ordinal]) == 84,
+            "SQL Server int alias 安全修改不正確");
+        Assert(
+            Convert.ToString(updated.Values[sqlServerSysnameColumn!.Ordinal]) == "updated_object",
+            "SQL Server sysname 安全修改不正確");
     }
 
     var id = Convert.ToInt64(updated.Values[0]);
