@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using MySqlPunk.Core.Models;
 
 namespace MySqlPunk.Core.Services;
@@ -6,6 +7,7 @@ namespace MySqlPunk.Core.Services;
 public static class TableCellValueConverter
 {
     public const int MaximumEditableBinaryBytes = 1024 * 1024;
+    public const int MaximumEditableStructuredTextCharacters = 1024 * 1024;
 
     public static object? Parse(TableColumnInfo column, TableCellInput input)
     {
@@ -58,11 +60,12 @@ public static class TableCellValueConverter
                     DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind),
                 TableColumnValueKind.Time => TimeSpan.Parse(input.Text, CultureInfo.InvariantCulture),
                 TableColumnValueKind.Guid => System.Guid.Parse(input.Text),
+                TableColumnValueKind.Json => ParseJson(input.Text),
                 TableColumnValueKind.Binary => ParseBinary(input.Text),
                 _ => throw new InvalidOperationException($"「{column.Name}」的型別目前不支援直接編輯。")
             };
         }
-        catch (Exception exception) when (exception is FormatException or OverflowException)
+        catch (Exception exception) when (exception is FormatException or OverflowException or JsonException)
         {
             throw new InvalidOperationException(
                 $"「{column.Name}」的值不符合 {column.DataTypeName} 格式：{exception.Message}",
@@ -100,6 +103,12 @@ public static class TableCellValueConverter
                 : $"0x{preview}";
         }
 
+        if (value is string text && text.Length > MaximumEditableStructuredTextCharacters)
+        {
+            const int previewCharacters = 512;
+            return $"{text[..previewCharacters]}…（{text.Length:N0} chars）";
+        }
+
         return Format(value);
     }
 
@@ -128,6 +137,11 @@ public static class TableCellValueConverter
         column.ValueKind == TableColumnValueKind.Binary &&
         value is byte[] bytes &&
         bytes.Length > MaximumEditableBinaryBytes;
+
+    public static bool IsStructuredTextTooLargeToEdit(TableColumnInfo column, object? value) =>
+        column.ValueKind == TableColumnValueKind.Json &&
+        value is string text &&
+        text.Length > MaximumEditableStructuredTextCharacters;
 
     private static double ParseFiniteDouble(string text)
     {
@@ -171,5 +185,23 @@ public static class TableCellValueConverter
         }
 
         return Convert.FromHexString(hex);
+    }
+
+    private static string ParseJson(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Length > MaximumEditableStructuredTextCharacters)
+        {
+            throw new FormatException(
+                $"JSON 不可為空，且不可超過 {MaximumEditableStructuredTextCharacters / 1024:N0} KiB 字元。");
+        }
+
+        using var _ = JsonDocument.Parse(trimmed, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = false,
+            CommentHandling = JsonCommentHandling.Disallow,
+            MaxDepth = 64
+        });
+        return trimmed;
     }
 }

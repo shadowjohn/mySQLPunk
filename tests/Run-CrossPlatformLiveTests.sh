@@ -47,7 +47,12 @@ postgres_ready=0
 sqlserver_ready=0
 for _ in $(seq 1 90); do
     if [[ "$mysql_ready" -eq 0 ]] &&
-       docker exec "$mysql_container" mysqladmin ping -h 127.0.0.1 -p"$test_password" --silent >/dev/null 2>&1; then
+       docker exec --env MYSQL_PWD="$test_password" "$mysql_container" sh -c '
+           if command -v mysqladmin >/dev/null 2>&1; then
+               exec mysqladmin ping -h 127.0.0.1 -uroot --silent
+           fi
+           exec mariadb-admin ping -h 127.0.0.1 -uroot --silent
+       ' >/dev/null 2>&1; then
         mysql_ready=1
     fi
     if [[ "$postgres_ready" -eq 0 ]] &&

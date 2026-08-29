@@ -34,6 +34,27 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
 
     protected override string QuoteIdentifier(string value) => $"`{value.Replace("`", "``")}`";
 
+    protected override void ConfigureParameter(
+        System.Data.Common.DbParameter parameter,
+        TableColumnInfo column)
+    {
+        base.ConfigureParameter(parameter, column);
+        if (column.ValueKind == TableColumnValueKind.Json && parameter is MySqlParameter mySqlParameter)
+        {
+            mySqlParameter.MySqlDbType = MySqlDbType.JSON;
+        }
+    }
+
+    protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
+    {
+        if (column.ValueKind == TableColumnValueKind.Json)
+        {
+            return $"BINARY CAST({QuoteIdentifier(column.Name)} AS CHAR) = BINARY CAST({parameterName} AS CHAR)";
+        }
+
+        return base.BuildOriginalValuePredicate(column, parameterName);
+    }
+
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
     {
@@ -147,6 +168,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             "date" => TableColumnValueKind.Date,
             "datetime" or "timestamp" => TableColumnValueKind.DateTime,
             "time" => TableColumnValueKind.Time,
+            "json" => TableColumnValueKind.Json,
             "binary" or "varbinary" or "tinyblob" or "blob" or "mediumblob" or "longblob" =>
                 TableColumnValueKind.Binary,
             "char" or "varchar" or "tinytext" or "text" or "mediumtext" or "longtext" or "enum" or "set" =>

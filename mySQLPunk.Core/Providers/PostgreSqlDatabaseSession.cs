@@ -1,5 +1,6 @@
 using MySqlPunk.Core.Models;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace MySqlPunk.Core.Providers;
 
@@ -28,6 +29,33 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     }
 
     protected override string QuoteIdentifier(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
+
+    protected override void ConfigureParameter(
+        System.Data.Common.DbParameter parameter,
+        TableColumnInfo column)
+    {
+        base.ConfigureParameter(parameter, column);
+        if (column.ValueKind == TableColumnValueKind.Json && parameter is NpgsqlParameter npgsqlParameter)
+        {
+            npgsqlParameter.NpgsqlDbType = string.Equals(
+                column.DataTypeName,
+                "jsonb",
+                StringComparison.OrdinalIgnoreCase)
+                ? NpgsqlDbType.Jsonb
+                : NpgsqlDbType.Json;
+        }
+    }
+
+    protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
+    {
+        if (column.ValueKind == TableColumnValueKind.Json &&
+            string.Equals(column.DataTypeName, "json", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{QuoteIdentifier(column.Name)}::jsonb = CAST({parameterName} AS jsonb)";
+        }
+
+        return base.BuildOriginalValuePredicate(column, parameterName);
+    }
 
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
@@ -136,6 +164,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "timestamp with time zone" => TableColumnValueKind.DateTimeOffset,
             "time without time zone" => TableColumnValueKind.Time,
             "uuid" => TableColumnValueKind.Guid,
+            "json" or "jsonb" => TableColumnValueKind.Json,
             "bytea" => TableColumnValueKind.Binary,
             "character" or "character varying" or "text" => TableColumnValueKind.String,
             "user-defined" when string.Equals(userDefinedType, "citext", StringComparison.OrdinalIgnoreCase) =>

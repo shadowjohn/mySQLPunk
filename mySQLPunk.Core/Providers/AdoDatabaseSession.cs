@@ -188,7 +188,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
                 var column = insertColumns[index];
                 var input = inputMap[column.Name];
                 var parameterName = $"@value{index}";
-                AddParameter(command, parameterName, TableCellValueConverter.Parse(column, input), column.ValueKind);
+                AddParameter(command, parameterName, TableCellValueConverter.Parse(column, input), column);
                 parameterNames.Add(parameterName);
             }
 
@@ -239,7 +239,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             }
 
             var parameterName = $"@value{parameterIndex++}";
-            AddParameter(command, parameterName, TableCellValueConverter.Parse(column, input), column.ValueKind);
+            AddParameter(command, parameterName, TableCellValueConverter.Parse(column, input), column);
             assignments.Add($"{QuoteIdentifier(column.Name)} = {parameterName}");
         }
 
@@ -371,6 +371,9 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
                 column.IsPrimaryKey ||
                 column.IsEditable && !TableCellValueConverter.IsBinaryValueTooLargeToEdit(
                     column,
+                    originalRow.Values[column.Ordinal]) &&
+                !TableCellValueConverter.IsStructuredTextTooLargeToEdit(
+                    column,
                     originalRow.Values[column.Ordinal]))
             .OrderBy(column => column.Ordinal)
             .ToList();
@@ -391,22 +394,32 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             }
 
             var parameterName = $"@original{parameterIndex++}";
-            AddParameter(command, parameterName, original, column.ValueKind);
-            predicates.Add($"{QuoteIdentifier(column.Name)} = {parameterName}");
+            AddParameter(command, parameterName, original, column);
+            predicates.Add(BuildOriginalValuePredicate(column, parameterName));
         }
 
         return string.Join(" AND ", predicates);
     }
 
-    private static void AddParameter(
+    protected virtual string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName) =>
+        $"{QuoteIdentifier(column.Name)} = {parameterName}";
+
+    private void AddParameter(
         DbCommand command,
         string name,
         object? value,
-        TableColumnValueKind valueKind)
+        TableColumnInfo column)
     {
         var parameter = command.CreateParameter();
         parameter.ParameterName = name;
-        parameter.DbType = valueKind switch
+        ConfigureParameter(parameter, column);
+        parameter.Value = value ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
+
+    protected virtual void ConfigureParameter(DbParameter parameter, TableColumnInfo column)
+    {
+        parameter.DbType = column.ValueKind switch
         {
             TableColumnValueKind.Integer => DbType.Int64,
             TableColumnValueKind.UnsignedInteger => DbType.UInt64,
@@ -421,8 +434,6 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             TableColumnValueKind.Binary => DbType.Binary,
             _ => DbType.String
         };
-        parameter.Value = value ?? DBNull.Value;
-        command.Parameters.Add(parameter);
     }
 
     private static void ValidateTable(DatabaseObjectInfo table)

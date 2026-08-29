@@ -553,7 +553,8 @@ static async Task TableDataEditingAsync()
                 name TEXT NOT NULL,
                 quantity INTEGER NULL,
                 note TEXT NULL DEFAULT 'database-default',
-                payload BLOB NULL
+                payload BLOB NULL,
+                metadata JSON NULL
             );
             CREATE TABLE no_primary_key (name TEXT NOT NULL);
             CREATE TABLE without_rowid (id INTEGER PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
@@ -584,6 +585,8 @@ static async Task TableDataEditingAsync()
         Assert(empty.Columns.Single(column => column.Name == "note").HasDefault, "SQLite DEFAULT metadata 未辨識");
         var binaryColumn = empty.Columns.Single(column => column.Name == "payload");
         Assert(binaryColumn is { ValueKind: TableColumnValueKind.Binary, IsEditable: true }, "SQLite BLOB 應可安全編輯");
+        var jsonColumn = empty.Columns.Single(column => column.Name == "metadata");
+        Assert(jsonColumn is { ValueKind: TableColumnValueKind.Json, IsEditable: true }, "SQLite JSON 應可驗證後編輯");
 
         const string parameterizedName = "Punky '); DROP TABLE editor_sample;--";
         await session.InsertTableRowAsync(
@@ -594,7 +597,8 @@ static async Task TableDataEditingAsync()
                 new TableCellInput("name", TableCellInputMode.Value, parameterizedName),
                 new TableCellInput("quantity", TableCellInputMode.Value, "7"),
                 new TableCellInput("note", TableCellInputMode.Default, string.Empty),
-                new TableCellInput("payload", TableCellInputMode.Value, "0x00ff10")
+                new TableCellInput("payload", TableCellInputMode.Value, "0x00ff10"),
+                new TableCellInput("metadata", TableCellInputMode.Value, "  {\"stage\":\"insert\",\"n\":1}  ")
             });
         var inserted = await session.LoadTableDataAsync(profile.Database, table);
         Assert(inserted.Rows.Count == 1, "安全新增後應有一列");
@@ -604,6 +608,11 @@ static async Task TableDataEditingAsync()
         Assert(
             inserted.Rows[0].Values[4] is byte[] insertedPayload && insertedPayload.SequenceEqual(new byte[] { 0x00, 0xFF, 0x10 }),
             "SQLite BLOB 安全新增不正確");
+        using (var insertedJson = JsonDocument.Parse(Convert.ToString(inserted.Rows[0].Values[5])!))
+        {
+            Assert(insertedJson.RootElement.GetProperty("stage").GetString() == "insert", "SQLite JSON 安全新增不正確");
+            Assert(insertedJson.RootElement.GetProperty("n").GetInt32() == 1, "SQLite JSON 數字型別不正確");
+        }
         Assert(
             TableCellValueConverter.MatchesOriginal(
                 binaryColumn,
@@ -620,7 +629,8 @@ static async Task TableDataEditingAsync()
             {
                 new TableCellInput("name", TableCellInputMode.Value, "崩琦"),
                 new TableCellInput("quantity", TableCellInputMode.Null, string.Empty),
-                new TableCellInput("payload", TableCellInputMode.Value, "0xCAFE")
+                new TableCellInput("payload", TableCellInputMode.Value, "0xCAFE"),
+                new TableCellInput("metadata", TableCellInputMode.Value, "{\"stage\":\"updated\",\"ok\":true}")
             });
         var updated = await session.LoadTableDataAsync(profile.Database, table);
         Assert(Convert.ToString(updated.Rows[0].Values[1]) == "崩琦", "安全修改字串不正確");
@@ -628,6 +638,11 @@ static async Task TableDataEditingAsync()
         Assert(
             updated.Rows[0].Values[4] is byte[] updatedPayload && updatedPayload.SequenceEqual(new byte[] { 0xCA, 0xFE }),
             "SQLite BLOB 安全修改不正確");
+        using (var updatedJson = JsonDocument.Parse(Convert.ToString(updated.Rows[0].Values[5])!))
+        {
+            Assert(updatedJson.RootElement.GetProperty("stage").GetString() == "updated", "SQLite JSON 安全修改不正確");
+            Assert(updatedJson.RootElement.GetProperty("ok").GetBoolean(), "SQLite JSON 布林型別不正確");
+        }
 
         var staleRow = updated.Rows[0];
         var id = Convert.ToInt64(staleRow.Values[0]);
@@ -712,6 +727,23 @@ static async Task TableDataEditingAsync()
                 binaryColumn,
                 new byte[TableCellValueConverter.MaximumEditableBinaryBytes + 1]),
             "超過 1 MiB 的既有 binary 應維持唯讀");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            jsonColumn,
+            new TableCellInput("metadata", TableCellInputMode.Value, "{\"missing\":}")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            jsonColumn,
+            new TableCellInput("metadata", TableCellInputMode.Value, "{\"trailing\":true,}")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            jsonColumn,
+            new TableCellInput(
+                "metadata",
+                TableCellInputMode.Value,
+                "\"" + new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters) + "\"")));
+        Assert(
+            TableCellValueConverter.IsStructuredTextTooLargeToEdit(
+                jsonColumn,
+                new string('x', TableCellValueConverter.MaximumEditableStructuredTextCharacters + 1)),
+            "超過 1 MiB 字元的既有 JSON 應維持唯讀");
     }
     finally
     {
@@ -781,7 +813,7 @@ static async Task MySqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -822,7 +854,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
     try
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
-        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, quantity INTEGER NULL, note VARCHAR(80) NULL, payload BYTEA NULL, metadata JSONB NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
@@ -900,22 +932,33 @@ static async Task VerifySafeTableEditingAsync(
     Assert(before.HasPrimaryKey, $"{session.Profile.ProviderDisplayName} 未辨識 Primary Key");
     Assert(before.Columns.Single(column => column.Name == "id").IsGenerated, $"{session.Profile.ProviderDisplayName} 未辨識 generated id");
 
-    await session.InsertTableRowAsync(
-        database,
-        table,
-        new[]
-        {
-            new TableCellInput("name", TableCellInputMode.Value, "Editor"),
-            new TableCellInput("quantity", TableCellInputMode.Value, "7"),
-            new TableCellInput("note", TableCellInputMode.Null, string.Empty),
-            new TableCellInput("payload", TableCellInputMode.Value, "0x00FF10")
-        });
+    var insertInputs = new List<TableCellInput>
+    {
+        new("name", TableCellInputMode.Value, "Editor"),
+        new("quantity", TableCellInputMode.Value, "7"),
+        new("note", TableCellInputMode.Null, string.Empty),
+        new("payload", TableCellInputMode.Value, "0x00FF10")
+    };
+    var jsonColumn = before.Columns.SingleOrDefault(column => column.ValueKind == TableColumnValueKind.Json);
+    if (jsonColumn is not null)
+    {
+        insertInputs.Add(new TableCellInput(
+            jsonColumn.Name,
+            TableCellInputMode.Value,
+            "{\"stage\":\"insert\",\"n\":1}"));
+    }
+    await session.InsertTableRowAsync(database, table, insertInputs);
     var insertedSnapshot = await session.LoadTableDataAsync(database, table);
     var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
     Assert(Convert.ToInt64(inserted.Values[2]) == 7, $"{session.Profile.ProviderDisplayName} 安全新增整數不正確");
     Assert(
         inserted.Values[4] is byte[] insertedPayload && insertedPayload.SequenceEqual(new byte[] { 0x00, 0xFF, 0x10 }),
         $"{session.Profile.ProviderDisplayName} 安全新增 binary 不正確");
+    if (jsonColumn is not null)
+    {
+        using var insertedJson = JsonDocument.Parse(Convert.ToString(inserted.Values[jsonColumn.Ordinal])!);
+        Assert(insertedJson.RootElement.GetProperty("stage").GetString() == "insert", $"{session.Profile.ProviderDisplayName} 安全新增 JSON 不正確");
+    }
 
     var firstPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 0);
     var secondPage = await session.LoadTableDataAsync(database, table, rowLimit: 1, rowOffset: 1);
@@ -925,21 +968,31 @@ static async Task VerifySafeTableEditingAsync(
         !Equals(firstPage.Rows[0].Values[0], secondPage.Rows[0].Values[0]),
         $"{session.Profile.ProviderDisplayName} 分頁未依 Primary Key 前進");
 
-    await session.UpdateTableRowAsync(
-        database,
-        table,
-        inserted,
-        new[]
-        {
-            new TableCellInput("quantity", TableCellInputMode.Value, "8"),
-            new TableCellInput("payload", TableCellInputMode.Value, "0xCAFE")
-        });
+    var updateInputs = new List<TableCellInput>
+    {
+        new("quantity", TableCellInputMode.Value, "8"),
+        new("payload", TableCellInputMode.Value, "0xCAFE")
+    };
+    if (jsonColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            jsonColumn.Name,
+            TableCellInputMode.Value,
+            "{\"stage\":\"updated\",\"ok\":true}"));
+    }
+    await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
     var updatedSnapshot = await session.LoadTableDataAsync(database, table);
     var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "Editor");
     Assert(Convert.ToInt64(updated.Values[2]) == 8, $"{session.Profile.ProviderDisplayName} 安全修改不正確");
     Assert(
         updated.Values[4] is byte[] updatedPayload && updatedPayload.SequenceEqual(new byte[] { 0xCA, 0xFE }),
         $"{session.Profile.ProviderDisplayName} 安全修改 binary 不正確");
+    if (jsonColumn is not null)
+    {
+        using var updatedJson = JsonDocument.Parse(Convert.ToString(updated.Values[jsonColumn.Ordinal])!);
+        Assert(updatedJson.RootElement.GetProperty("stage").GetString() == "updated", $"{session.Profile.ProviderDisplayName} 安全修改 JSON 不正確");
+        Assert(updatedJson.RootElement.GetProperty("ok").GetBoolean(), $"{session.Profile.ProviderDisplayName} JSON 布林型別不正確");
+    }
 
     var id = Convert.ToInt64(updated.Values[0]);
     await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));

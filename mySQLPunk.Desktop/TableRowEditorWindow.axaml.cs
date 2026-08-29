@@ -39,7 +39,7 @@ public sealed partial class TableRowEditorWindow : Window
         Title = _isInsert ? "新增資料列" : "修改資料列";
         _hintText.Text = _isInsert
             ? "預設會交由資料庫套用欄位 DEFAULT；取消勾選「使用預設值」後即可輸入。"
-            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary 維持唯讀；只會送出實際變更的欄位。";
+            : "Primary Key、generated、尚未支援的型別與超過 1 MiB 的 binary／JSON 維持唯讀；只會送出實際變更的欄位。";
         BuildFields();
     }
 
@@ -48,23 +48,29 @@ public sealed partial class TableRowEditorWindow : Window
         foreach (var column in _columns.OrderBy(column => column.Ordinal))
         {
             var original = _originalRow?.Values[column.Ordinal];
-            var oversizedBinary = TableCellValueConverter.IsBinaryValueTooLargeToEdit(column, original);
-            var readOnly = !_isInsert && column.IsPrimaryKey || !column.IsEditable || oversizedBinary;
+            var oversizedValue = TableCellValueConverter.IsBinaryValueTooLargeToEdit(column, original) ||
+                                 TableCellValueConverter.IsStructuredTextTooLargeToEdit(column, original);
+            var readOnly = !_isInsert && column.IsPrimaryKey || !column.IsEditable || oversizedValue;
             var label = new TextBlock
             {
-                Text = BuildColumnLabel(column, oversizedBinary),
+                Text = BuildColumnLabel(column, oversizedValue),
                 FontWeight = FontWeight.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap
             };
             var valueBox = new TextBox
             {
-                Text = oversizedBinary
+                Text = oversizedValue
                     ? TableCellValueConverter.FormatForDisplay(original)
                     : TableCellValueConverter.Format(original),
                 IsReadOnly = readOnly,
                 IsEnabled = !readOnly,
-                PlaceholderText = BuildWatermark(column)
+                PlaceholderText = BuildWatermark(column),
+                AcceptsReturn = column.ValueKind == TableColumnValueKind.Json,
+                TextWrapping = column.ValueKind == TableColumnValueKind.Json
+                    ? TextWrapping.Wrap
+                    : TextWrapping.NoWrap,
+                MinHeight = column.ValueKind == TableColumnValueKind.Json ? 90 : 0
             };
             var nullCheck = new CheckBox
             {
@@ -181,7 +187,7 @@ public sealed partial class TableRowEditorWindow : Window
         return inputs;
     }
 
-    private static string BuildColumnLabel(TableColumnInfo column, bool oversizedBinary)
+    private static string BuildColumnLabel(TableColumnInfo column, bool oversizedValue)
     {
         var attributes = new List<string> { column.DataTypeName };
         if (column.IsPrimaryKey)
@@ -197,7 +203,7 @@ public sealed partial class TableRowEditorWindow : Window
         {
             attributes.Add("唯讀");
         }
-        else if (oversizedBinary)
+        else if (oversizedValue)
         {
             attributes.Add("超過 1 MiB · 唯讀");
         }
@@ -218,6 +224,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.DateTimeOffset => "ISO 8601 日期時間與時區",
         TableColumnValueKind.Time => "HH:mm:ss",
         TableColumnValueKind.Guid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        TableColumnValueKind.Json => "有效 JSON（最多 1 MiB 字元）",
         TableColumnValueKind.Binary => "0x00FF（二進位十六進位，最多 1 MiB）",
         _ => string.Empty
     };

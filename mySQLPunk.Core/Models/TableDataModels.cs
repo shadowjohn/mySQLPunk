@@ -13,6 +13,7 @@ public enum TableColumnValueKind
     DateTimeOffset,
     Time,
     Guid,
+    Json,
     Binary,
     Unsupported
 }
