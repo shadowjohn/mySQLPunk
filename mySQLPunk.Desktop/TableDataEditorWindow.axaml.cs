@@ -21,6 +21,8 @@ public sealed partial class TableDataEditorWindow : Window
     private readonly TextBlock _schemaText;
     private readonly TextBlock _statusText;
     private readonly TextBlock _pageText;
+    private readonly ComboBox _sortColumnCombo;
+    private readonly ComboBox _sortDirectionCombo;
     private readonly Button _previousButton;
     private readonly Button _nextButton;
     private readonly Button _addButton;
@@ -31,7 +33,10 @@ public sealed partial class TableDataEditorWindow : Window
     private TableDataSnapshot? _snapshot;
     private CancellationTokenSource? _cancellation;
     private bool _busy;
+    private bool _updatingSortControls;
+    private bool _hasSortableColumns;
     private int _rowOffset;
+    private TableDataSort? _sort;
 
     public TableDataEditorWindow()
     {
@@ -41,6 +46,8 @@ public sealed partial class TableDataEditorWindow : Window
         _schemaText = this.FindControl<TextBlock>("SchemaText")!;
         _statusText = this.FindControl<TextBlock>("StatusText")!;
         _pageText = this.FindControl<TextBlock>("PageText")!;
+        _sortColumnCombo = this.FindControl<ComboBox>("SortColumnCombo")!;
+        _sortDirectionCombo = this.FindControl<ComboBox>("SortDirectionCombo")!;
         _previousButton = this.FindControl<Button>("PreviousButton")!;
         _nextButton = this.FindControl<Button>("NextButton")!;
         _addButton = this.FindControl<Button>("AddButton")!;
@@ -48,6 +55,10 @@ public sealed partial class TableDataEditorWindow : Window
         _deleteButton = this.FindControl<Button>("DeleteButton")!;
         _refreshButton = this.FindControl<Button>("RefreshButton")!;
         _closeButton = this.FindControl<Button>("CloseButton")!;
+        _updatingSortControls = true;
+        _sortDirectionCombo.ItemsSource = new[] { "遞增（A → Z）", "遞減（Z → A）" };
+        _sortDirectionCombo.SelectedIndex = 0;
+        _updatingSortControls = false;
     }
 
     public TableDataEditorWindow(
@@ -206,6 +217,35 @@ public sealed partial class TableDataEditorWindow : Window
         UpdateActionState();
     }
 
+    private async void Sort_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingSortControls || _busy || _snapshot is null ||
+            _sortColumnCombo.SelectedItem is not SortColumnOption selectedOption)
+        {
+            return;
+        }
+
+        var nextSort = selectedOption.ColumnName is null
+            ? null
+            : new TableDataSort(selectedOption.ColumnName, _sortDirectionCombo.SelectedIndex == 1);
+        if (nextSort == _sort)
+        {
+            return;
+        }
+
+        var previousSort = _sort;
+        var previousOffset = _rowOffset;
+        _sort = nextSort;
+        _rowOffset = 0;
+        if (!await LoadDataAsync())
+        {
+            _sort = previousSort;
+            _rowOffset = previousOffset;
+            UpdateSortControls(_snapshot);
+            UpdateActionState();
+        }
+    }
+
     private async Task RunMutationAsync(
         string busyStatus,
         Func<CancellationToken, Task> mutation,
@@ -228,7 +268,8 @@ public sealed partial class TableDataEditorWindow : Window
                 _table,
                 RowLimit,
                 _rowOffset,
-                cancellationToken);
+                cancellationToken,
+                _sort);
         });
         if (!succeeded || loadedSnapshot is null)
         {
@@ -236,6 +277,7 @@ public sealed partial class TableDataEditorWindow : Window
         }
 
         _snapshot = loadedSnapshot;
+        UpdateSortControls(loadedSnapshot);
         RebuildGrid(loadedSnapshot);
         var keyStatus = loadedSnapshot.HasPrimaryKey
             ? "Primary Key 已辨識，可安全修改與刪除。"
@@ -250,9 +292,14 @@ public sealed partial class TableDataEditorWindow : Window
             : loadedSnapshot.HasNextPage
                 ? "還有下一頁。"
                 : "已到最後一頁。";
+        var sortStatus = !loadedSnapshot.HasPrimaryKey
+            ? "沒有 Primary Key，不提供欄位排序。"
+            : _sort is null
+                ? "依 Primary Key 預設順序。"
+                : $"依 {_sort.ColumnName} {(_sort.Descending ? "遞減" : "遞增")}排序，相同值再依 Primary Key 遞增排序。";
         _statusText.Text = string.Join(
             " ",
-            new[] { successPrefix, range, keyStatus, pagingStatus }
+            new[] { successPrefix, range, keyStatus, pagingStatus, sortStatus }
                 .Where(value => !string.IsNullOrWhiteSpace(value)));
         UpdateActionState();
         return true;
@@ -295,6 +342,40 @@ public sealed partial class TableDataEditorWindow : Window
                     TableCellValueConverter.FormatForDisplay(snapshot.Columns[index], value)).ToArray()))
             .ToList();
         _dataGrid.SelectedIndex = snapshot.Rows.Count > 0 ? 0 : -1;
+    }
+
+    private void UpdateSortControls(TableDataSnapshot snapshot)
+    {
+        _updatingSortControls = true;
+        try
+        {
+            var options = new List<SortColumnOption>
+            {
+                new("Primary Key 預設順序", null)
+            };
+            if (snapshot.HasPrimaryKey)
+            {
+                options.AddRange(snapshot.Columns
+                    .Where(column => TableDataSortService.IsSortable(_session.Profile.Provider, column))
+                    .OrderBy(column => column.Ordinal)
+                    .Select(column => new SortColumnOption(
+                        $"{column.Name} · {column.DataTypeName}",
+                        column.Name)));
+            }
+
+            _hasSortableColumns = options.Count > 1;
+            _sortColumnCombo.ItemsSource = options;
+            var selectedIndex = _sort is null
+                ? 0
+                : options.FindIndex(option =>
+                    string.Equals(option.ColumnName, _sort.ColumnName, StringComparison.Ordinal));
+            _sortColumnCombo.SelectedIndex = selectedIndex < 0 ? 0 : selectedIndex;
+            _sortDirectionCombo.SelectedIndex = _sort?.Descending == true ? 1 : 0;
+        }
+        finally
+        {
+            _updatingSortControls = false;
+        }
     }
 
     private async Task<bool> RunAsync(string status, Func<CancellationToken, Task> operation)
@@ -355,7 +436,14 @@ public sealed partial class TableDataEditorWindow : Window
         _refreshButton.IsEnabled = !_busy;
         _closeButton.IsEnabled = !_busy;
         _dataGrid.IsEnabled = !_busy;
+        _sortColumnCombo.IsEnabled = !_busy && hasSnapshot && _snapshot!.HasPrimaryKey && _hasSortableColumns;
+        _sortDirectionCombo.IsEnabled = _sortColumnCombo.IsEnabled && _sort is not null;
     }
 
     private sealed record TableDataRowView(TableDataRow Source, IReadOnlyList<string> Values);
+
+    private sealed record SortColumnOption(string DisplayName, string? ColumnName)
+    {
+        public override string ToString() => DisplayName;
+    }
 }

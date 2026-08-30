@@ -84,6 +84,8 @@ public sealed record TableColumnInfo(
 
 public sealed record TableDataRow(IReadOnlyList<object?> Values);
 
+public sealed record TableDataSort(string ColumnName, bool Descending);
+
 public sealed record TableDataSnapshot(
     DatabaseObjectInfo Table,
     IReadOnlyList<TableColumnInfo> Columns,

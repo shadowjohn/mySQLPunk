@@ -786,7 +786,7 @@ static async Task TableDataEditingAsync()
             );
             INSERT INTO collation_sample VALUES (1, 'Alpha', 'tail ', 'before');
             INSERT INTO paged_sample (id, name) VALUES
-                (1, 'page-1'), (2, 'page-2'), (3, 'page-3'), (4, 'page-4'), (5, 'page-5');
+                (1, 'alpha'), (2, 'same'), (3, 'same'), (4, 'beta'), (5, 'zulu');
             """);
         var table = new DatabaseObjectInfo(string.Empty, "editor_sample", DatabaseObjectKind.Table);
 
@@ -802,6 +802,43 @@ static async Task TableDataEditingAsync()
         Assert(!lastPage.HasNextPage && lastPage.HasPreviousPage, "最後一頁導覽狀態不正確");
         await AssertThrowsAsync<ArgumentOutOfRangeException>(() =>
             session.LoadTableDataAsync(profile.Database, pagedTable, rowLimit: 2, rowOffset: -1));
+
+        var nameDescending = new TableDataSort("name", Descending: true);
+        var sortedFirstPage = await session.LoadTableDataAsync(
+            profile.Database,
+            pagedTable,
+            rowLimit: 2,
+            rowOffset: 0,
+            sort: nameDescending);
+        var sortedSecondPage = await session.LoadTableDataAsync(
+            profile.Database,
+            pagedTable,
+            rowLimit: 2,
+            rowOffset: 2,
+            sort: nameDescending);
+        var sortedLastPage = await session.LoadTableDataAsync(
+            profile.Database,
+            pagedTable,
+            rowLimit: 2,
+            rowOffset: 4,
+            sort: nameDescending);
+        Assert(
+            sortedFirstPage.Rows.Select(row => Convert.ToInt64(row.Values[0])).SequenceEqual(new long[] { 5, 2 }) &&
+            sortedSecondPage.Rows.Select(row => Convert.ToInt64(row.Values[0])).SequenceEqual(new long[] { 3, 4 }) &&
+            sortedLastPage.Rows.Select(row => Convert.ToInt64(row.Values[0])).SequenceEqual(new long[] { 1 }),
+            "欄位遞減排序應在相同值後以 Primary Key 遞增作為跨頁 tie-breaker");
+        await AssertThrowsAsync<ArgumentException>(() => session.LoadTableDataAsync(
+            profile.Database,
+            pagedTable,
+            sort: new TableDataSort("name; DROP TABLE paged_sample", Descending: false)));
+        await AssertThrowsAsync<InvalidOperationException>(() => session.LoadTableDataAsync(
+            profile.Database,
+            table,
+            sort: new TableDataSort("metadata", Descending: false)));
+        await AssertThrowsAsync<InvalidOperationException>(() => session.LoadTableDataAsync(
+            profile.Database,
+            new DatabaseObjectInfo(string.Empty, "no_primary_key", DatabaseObjectKind.Table),
+            sort: new TableDataSort("name", Descending: false)));
 
         var empty = await session.LoadTableDataAsync(profile.Database, table);
         Assert(empty.Rows.Count == 0, "新建 Table 應為空");
@@ -6769,6 +6806,36 @@ static async Task VerifySafeTableEditingAsync(
         !Equals(firstPage.Rows[0].Values[0], secondPage.Rows[0].Values[0]),
         $"{session.Profile.ProviderDisplayName} 分頁未依 Primary Key 前進");
 
+    var sortedFirstPage = await session.LoadTableDataAsync(
+        database,
+        table,
+        rowLimit: 1,
+        rowOffset: 0,
+        sort: new TableDataSort("name", Descending: true));
+    var sortedSecondPage = await session.LoadTableDataAsync(
+        database,
+        table,
+        rowLimit: 1,
+        rowOffset: 1,
+        sort: new TableDataSort("name", Descending: true));
+    var expectedSortedIds = await session.ExecuteAsync(
+        database,
+        BuildStableSortProbeSql(session.Profile.Provider, table));
+    Assert(
+        Convert.ToString(sortedFirstPage.Rows.Single().Values[0], CultureInfo.InvariantCulture) ==
+            Convert.ToString(expectedSortedIds.Rows[0][0], CultureInfo.InvariantCulture) &&
+        Convert.ToString(sortedSecondPage.Rows.Single().Values[0], CultureInfo.InvariantCulture) ==
+            Convert.ToString(expectedSortedIds.Rows[1][0], CultureInfo.InvariantCulture),
+        $"{session.Profile.ProviderDisplayName} 欄位排序未使用 provider 原生順序或 Primary Key tie-breaker");
+    await AssertThrowsAsync<ArgumentException>(() => session.LoadTableDataAsync(
+        database,
+        table,
+        sort: new TableDataSort("missing_sort_column", Descending: false)));
+    await AssertThrowsAsync<InvalidOperationException>(() => session.LoadTableDataAsync(
+        database,
+        table,
+        sort: new TableDataSort("payload", Descending: false)));
+
     var updateInputs = new List<TableCellInput>
     {
         new("quantity", TableCellInputMode.Value, "8"),
@@ -7215,6 +7282,21 @@ static async Task VerifySafeTableEditingAsync(
     await session.DeleteTableRowAsync(database, table, concurrent);
     var afterDelete = await session.LoadTableDataAsync(database, table);
     Assert(afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0]) != id), $"{session.Profile.ProviderDisplayName} 安全刪除失敗");
+}
+
+static string BuildStableSortProbeSql(DatabaseProviderKind provider, DatabaseObjectInfo table)
+{
+    string Quote(string identifier) => provider switch
+    {
+        DatabaseProviderKind.MySql => $"`{identifier.Replace("`", "``", StringComparison.Ordinal)}`",
+        DatabaseProviderKind.SqlServer => $"[{identifier.Replace("]", "]]", StringComparison.Ordinal)}]",
+        _ => $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\""
+    };
+
+    var qualifiedName = string.IsNullOrWhiteSpace(table.Schema)
+        ? Quote(table.Name)
+        : $"{Quote(table.Schema)}.{Quote(table.Name)}";
+    return $"SELECT {Quote("id")} FROM {qualifiedName} ORDER BY {Quote("name")} DESC, {Quote("id")} ASC;";
 }
 
 static string GetNetworkTestValue(TableColumnInfo column, bool updated) =>

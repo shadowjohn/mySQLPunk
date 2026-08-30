@@ -51,6 +51,8 @@ SQL 編輯器按下 `Ctrl+Enter`（macOS 為 `Cmd+Enter`）或「執行 SQL」�
 
 成功執行的 SQL 會加入「本次查詢記錄」，標示時間、provider、database 與是否來自選取範圍；選取記錄只會載回編輯器，不會自動執行。記錄最多 50 筆並限制為合計 2 MiB，同資料庫的相同 SQL 會更新到最上方；可隨時清除，程式結束也會消失，可能含敏感 literal 的 SQL 不會寫入設定檔或其他磁碟檔案。
 
+Table 資料視窗每頁載入 200 列；有 Primary Key 時可選擇安全 scalar 欄位做資料庫端遞增／遞減排序，相同值會再依 Primary Key 遞增排序以維持跨頁穩定。排序欄名與型別會由 Core 重新對照 metadata，JSON、XML、binary、spatial 等不適合跨 provider 排序的欄位不會直接拼入 SQL；沒有 Primary Key 的 Table 仍只提供安全的第一頁瀏覽。
+
 ```bash
 dotnet restore mySQLPunk.CrossPlatform.sln
 dotnet build mySQLPunk.CrossPlatform.sln -c Release --no-restore

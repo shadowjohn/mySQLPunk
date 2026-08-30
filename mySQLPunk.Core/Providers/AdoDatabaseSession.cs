@@ -104,7 +104,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         DatabaseObjectInfo table,
         int rowLimit = 200,
         int rowOffset = 0,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TableDataSort? sort = null)
     {
         ValidateTable(table);
         rowLimit = Math.Clamp(rowLimit, 1, 1_000);
@@ -117,11 +118,20 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         {
             throw new InvalidOperationException("沒有 Primary Key 的資料表無法安全提供穩定分頁。");
         }
+        if (sort is not null)
+        {
+            if (columns.All(column => !column.IsPrimaryKey))
+            {
+                throw new InvalidOperationException("沒有 Primary Key 的資料表無法提供具穩定 tie-breaker 的欄位排序。");
+            }
+
+            TableDataSortService.Resolve(Profile.Provider, columns, sort);
+        }
 
         await using var connection = CreateConnection(database);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = BuildTableDataSql(table, columns, rowLimit + 1, rowOffset);
+        command.CommandText = BuildTableDataSql(table, columns, rowLimit + 1, rowOffset, sort);
         command.CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 2);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var rows = new List<TableDataRow>();
@@ -292,15 +302,36 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         DatabaseObjectInfo table,
         IReadOnlyList<TableColumnInfo> columns,
         int fetchLimit,
-        int rowOffset)
+        int rowOffset,
+        TableDataSort? sort)
     {
         var selectColumns = string.Join(", ", columns.Select(BuildTableDataSelectExpression));
-        var primaryKey = columns.Where(column => column.IsPrimaryKey).OrderBy(column => column.Ordinal).ToList();
-        var orderBy = primaryKey.Count == 0
-            ? string.Empty
-            : $" ORDER BY {string.Join(", ", primaryKey.Select(column => QuoteIdentifier(column.Name)))}";
+        var orderBy = BuildTableDataOrderBy(columns, sort);
         var offset = rowOffset == 0 ? string.Empty : $" OFFSET {rowOffset}";
         return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{orderBy} LIMIT {fetchLimit}{offset};";
+    }
+
+    protected string BuildTableDataOrderBy(
+        IReadOnlyList<TableColumnInfo> columns,
+        TableDataSort? sort)
+    {
+        var expressions = new List<string>();
+        if (sort is not null)
+        {
+            var sortColumn = columns.Single(column =>
+                string.Equals(column.Name, sort.ColumnName, StringComparison.Ordinal));
+            expressions.Add($"{QuoteIdentifier(sortColumn.Name)} {(sort.Descending ? "DESC" : "ASC")}");
+        }
+
+        expressions.AddRange(columns
+            .Where(column =>
+                column.IsPrimaryKey &&
+                (sort is null || !string.Equals(column.Name, sort.ColumnName, StringComparison.Ordinal)))
+            .OrderBy(column => column.Ordinal)
+            .Select(column => $"{QuoteIdentifier(column.Name)} ASC"));
+        return expressions.Count == 0
+            ? string.Empty
+            : $" ORDER BY {string.Join(", ", expressions)}";
     }
 
     protected virtual string BuildTableDataSelectExpression(TableColumnInfo column) =>

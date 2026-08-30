@@ -760,13 +760,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         DatabaseObjectInfo table,
         IReadOnlyList<TableColumnInfo> columns,
         int fetchLimit,
-        int rowOffset)
+        int rowOffset,
+        TableDataSort? sort)
     {
         var selectColumns = string.Join(", ", columns.Select(BuildTableDataSelectExpression));
-        var primaryKey = columns.Where(column => column.IsPrimaryKey).OrderBy(column => column.Ordinal).ToList();
-        var orderBy = primaryKey.Count == 0
-            ? string.Empty
-            : $" ORDER BY {string.Join(", ", primaryKey.Select(column => QuoteIdentifier(column.Name)))}";
+        var orderBy = BuildTableDataOrderBy(columns, sort);
         if (rowOffset == 0)
         {
             return $"SELECT TOP ({fetchLimit}) {selectColumns} FROM {BuildQualifiedName(table)}{orderBy};";
