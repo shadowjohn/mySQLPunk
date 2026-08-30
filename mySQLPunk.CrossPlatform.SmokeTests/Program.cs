@@ -2363,6 +2363,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             database,
             table!,
             id => $"UPDATE sample SET integer_value = 1 WHERE id = {id};");
+        await VerifyMySqlMutationWarningsRollbackAsync(session, database, table!);
     }
     finally
     {
@@ -3471,6 +3472,157 @@ static async Task VerifyIntegerTypesAsync(
     {
         var escapedMode = originalMode.Replace("'", "''", StringComparison.Ordinal);
         await session.ExecuteAsync(database, $"SET GLOBAL sql_mode = '{escapedMode}';");
+    }
+}
+
+static async Task VerifyMySqlMutationWarningsRollbackAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    await session.ExecuteAsync(
+        database,
+        """
+        ALTER TABLE sample
+            ADD bounded_text VARCHAR(5) CHARACTER SET utf8mb4 NULL,
+            ADD latin_text VARCHAR(10) CHARACTER SET latin1 NULL,
+            ADD bounded_payload VARBINARY(3) NULL,
+            ADD tiny_text TINYTEXT CHARACTER SET utf8mb4 NULL,
+            ADD tiny_payload TINYBLOB NULL;
+        """);
+
+    var originalModeResult = await session.ExecuteAsync(database, "SELECT @@GLOBAL.sql_mode;");
+    var originalMode = Convert.ToString(originalModeResult.Rows.Single()[0]) ?? string.Empty;
+    var originalMaxErrorResult = await session.ExecuteAsync(database, "SELECT @@GLOBAL.max_error_count;");
+    var originalMaxErrorCount = Convert.ToUInt64(originalMaxErrorResult.Rows.Single()[0]);
+    await session.ExecuteAsync(database, "SET GLOBAL sql_mode = ''; ");
+    await session.ExecuteAsync(database, "SET GLOBAL max_error_count = 0;");
+    try
+    {
+        var activeMode = await session.ExecuteAsync(
+            database,
+            "SELECT @@SESSION.sql_mode, @@SESSION.max_error_count;");
+        Assert(
+            string.IsNullOrEmpty(Convert.ToString(activeMode.Rows.Single()[0])) &&
+            Convert.ToUInt64(activeMode.Rows.Single()[1]) == 0,
+            "MySQL／MariaDB mutation diagnostics 測試必須實際進入 non-strict 且不保存 warning 明細的 session");
+
+        var invalidMutations = new[]
+        {
+            (Name: "Rejected VARCHAR", Column: "bounded_text", Value: "六個中文字元"),
+            (Name: "Rejected charset", Column: "latin_text", Value: "不可表示的中文字"),
+            (Name: "Rejected VARBINARY", Column: "bounded_payload", Value: "0x00010203"),
+            (Name: "Rejected TINYTEXT", Column: "tiny_text", Value: string.Concat(Enumerable.Repeat("🐧", 64))),
+            (Name: "Rejected TINYBLOB", Column: "tiny_payload", Value: "0x" + Convert.ToHexString(new byte[256]))
+        };
+        foreach (var invalid in invalidMutations)
+        {
+            var exception = await CaptureExceptionAsync<InvalidOperationException>(() =>
+                session.InsertTableRowAsync(
+                    database,
+                    table,
+                    new[]
+                    {
+                        new TableCellInput("name", TableCellInputMode.Value, invalid.Name),
+                        new TableCellInput(invalid.Column, TableCellInputMode.Value, invalid.Value)
+                    }));
+            Assert(
+                exception.Message.Contains("寫入警告", StringComparison.Ordinal) &&
+                exception.Message.Contains("本次新增已回復", StringComparison.Ordinal),
+                $"MySQL／MariaDB 應回報並回復 {invalid.Column} 的 warning；actual={exception.Message}");
+        }
+
+        var rejected = await session.LoadTableDataAsync(database, table);
+        Assert(
+            invalidMutations.All(invalid =>
+                rejected.Rows.All(row => Convert.ToString(row.Values[1]) != invalid.Name)),
+            "MySQL／MariaDB non-strict warning 不可留下被截斷或替換的資料列");
+
+        var validTinyText = string.Concat(Enumerable.Repeat("🐧", 63));
+        var validTinyPayload = Enumerable.Range(0, byte.MaxValue)
+            .Select(value => (byte)value)
+            .ToArray();
+        await session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Warning guard"),
+                new TableCellInput("bounded_text", TableCellInputMode.Value, "繁體🐧"),
+                new TableCellInput("latin_text", TableCellInputMode.Value, "ASCII"),
+                new TableCellInput("bounded_payload", TableCellInputMode.Value, "0x00FF10"),
+                new TableCellInput("tiny_text", TableCellInputMode.Value, validTinyText),
+                new TableCellInput(
+                    "tiny_payload",
+                    TableCellInputMode.Value,
+                    "0x" + Convert.ToHexString(validTinyPayload))
+            });
+
+        var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+        var inserted = insertedSnapshot.Rows.Single(row =>
+            Convert.ToString(row.Values[1]) == "Warning guard");
+        var boundedTextColumn = insertedSnapshot.Columns.Single(column => column.Name == "bounded_text");
+        var boundedPayloadColumn = insertedSnapshot.Columns.Single(column => column.Name == "bounded_payload");
+        var tinyTextColumn = insertedSnapshot.Columns.Single(column => column.Name == "tiny_text");
+        var tinyPayloadColumn = insertedSnapshot.Columns.Single(column => column.Name == "tiny_payload");
+        Assert(
+            Convert.ToString(inserted.Values[boundedTextColumn.Ordinal]) == "繁體🐧" &&
+            inserted.Values[boundedPayloadColumn.Ordinal] is byte[] boundedBytes &&
+            boundedBytes.SequenceEqual(new byte[] { 0x00, 0xFF, 0x10 }) &&
+            Convert.ToString(inserted.Values[tinyTextColumn.Ordinal]) == validTinyText &&
+            inserted.Values[tinyPayloadColumn.Ordinal] is byte[] tinyBytes &&
+            tinyBytes.SequenceEqual(validTinyPayload),
+            "MySQL／MariaDB 無 warning 的邊界值應正常 commit");
+
+        var updateException = await CaptureExceptionAsync<InvalidOperationException>(() =>
+            session.UpdateTableRowAsync(
+                database,
+                table,
+                inserted,
+                new[]
+                {
+                    new TableCellInput("bounded_text", TableCellInputMode.Value, "abcdef")
+                }));
+        Assert(
+            updateException.Message.Contains("本次修改已回復", StringComparison.Ordinal),
+            $"MySQL／MariaDB UPDATE warning 應在 commit 前回復；actual={updateException.Message}");
+
+        var afterRejectedUpdate = await session.LoadTableDataAsync(database, table);
+        var unchanged = afterRejectedUpdate.Rows.Single(row =>
+            Convert.ToString(row.Values[1]) == "Warning guard");
+        Assert(
+            Convert.ToString(unchanged.Values[boundedTextColumn.Ordinal]) == "繁體🐧",
+            "MySQL／MariaDB UPDATE warning 不可留下被截斷的值");
+
+        await session.UpdateTableRowAsync(
+            database,
+            table,
+            unchanged,
+            new[]
+            {
+                new TableCellInput("bounded_text", TableCellInputMode.Value, "台灣abc"),
+                new TableCellInput("bounded_payload", TableCellInputMode.Value, "0xABCDEF")
+            });
+        var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+        var updated = updatedSnapshot.Rows.Single(row =>
+            Convert.ToString(row.Values[1]) == "Warning guard");
+        Assert(
+            Convert.ToString(updated.Values[boundedTextColumn.Ordinal]) == "台灣abc" &&
+            updated.Values[boundedPayloadColumn.Ordinal] is byte[] updatedBytes &&
+            updatedBytes.SequenceEqual(new byte[] { 0xAB, 0xCD, 0xEF }),
+            "MySQL／MariaDB 無 warning 的 UPDATE 應正常 commit");
+
+        await session.DeleteTableRowAsync(database, table, updated);
+        var afterDelete = await session.LoadTableDataAsync(database, table);
+        Assert(
+            afterDelete.Rows.All(row => Convert.ToString(row.Values[1]) != "Warning guard"),
+            "MySQL／MariaDB 無 warning 的 DELETE 應正常 commit");
+    }
+    finally
+    {
+        var escapedMode = originalMode.Replace("'", "''", StringComparison.Ordinal);
+        await session.ExecuteAsync(database, $"SET GLOBAL sql_mode = '{escapedMode}';");
+        await session.ExecuteAsync(database, $"SET GLOBAL max_error_count = {originalMaxErrorCount};");
     }
 }
 
@@ -5631,6 +5783,21 @@ static async Task AssertThrowsAsync<TException>(Func<Task> action)
     catch (TException)
     {
         return;
+    }
+
+    throw new InvalidOperationException($"預期丟出 {typeof(TException).Name}");
+}
+
+static async Task<TException> CaptureExceptionAsync<TException>(Func<Task> action)
+    where TException : Exception
+{
+    try
+    {
+        await action();
+    }
+    catch (TException exception)
+    {
+        return exception;
     }
 
     throw new InvalidOperationException($"預期丟出 {typeof(TException).Name}");

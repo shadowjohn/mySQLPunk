@@ -199,7 +199,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         }
 
         var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        await CompleteSingleRowMutationAsync(transaction, affected, "新增", cancellationToken).ConfigureAwait(false);
+        await CompleteSingleRowMutationAsync(connection, transaction, affected, "新增", cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task UpdateTableRowAsync(
@@ -250,7 +251,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         command.CommandText =
             $"UPDATE {BuildQualifiedName(table)} SET {string.Join(", ", assignments)} WHERE {predicate};";
         var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        await CompleteSingleRowMutationAsync(transaction, affected, "修改", cancellationToken).ConfigureAwait(false);
+        await CompleteSingleRowMutationAsync(connection, transaction, affected, "修改", cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task DeleteTableRowAsync(
@@ -274,7 +276,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         var predicate = BuildOptimisticPredicate(command, columns, originalRow);
         command.CommandText = $"DELETE FROM {BuildQualifiedName(table)} WHERE {predicate};";
         var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        await CompleteSingleRowMutationAsync(transaction, affected, "刪除", cancellationToken).ConfigureAwait(false);
+        await CompleteSingleRowMutationAsync(connection, transaction, affected, "刪除", cancellationToken)
+            .ConfigureAwait(false);
     }
 
     protected string BuildQualifiedName(DatabaseObjectInfo databaseObject)
@@ -523,7 +526,14 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         }
     }
 
-    private static async Task CompleteSingleRowMutationAsync(
+    protected virtual Task ValidateMutationDiagnosticsAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string operation,
+        CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private async Task CompleteSingleRowMutationAsync(
+        DbConnection connection,
         DbTransaction transaction,
         int affected,
         string operation,
@@ -531,6 +541,26 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     {
         if (affected == 1)
         {
+            try
+            {
+                await ValidateMutationDiagnosticsAsync(connection, transaction, operation, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                try
+                {
+                    await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Preserve the provider diagnostic that caused the rollback. Disposing the
+                    // uncommitted transaction remains the final rollback safeguard.
+                }
+
+                throw;
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return;
         }

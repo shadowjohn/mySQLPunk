@@ -1,4 +1,5 @@
 using MySqlConnector;
+using System.Data.Common;
 using MySqlPunk.Core.Models;
 using MySqlPunk.Core.Services;
 
@@ -34,6 +35,54 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
     }
 
     protected override string QuoteIdentifier(string value) => $"`{value.Replace("`", "``")}`";
+
+    protected override async Task ValidateMutationDiagnosticsAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        if (connection is not MySqlConnection)
+        {
+            throw new InvalidOperationException("無法讀取 MySQL／MariaDB 寫入診斷資訊。");
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 2);
+        command.CommandText = "SHOW COUNT(*) WARNINGS";
+        var warningCount = Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+            System.Globalization.CultureInfo.InvariantCulture);
+        if (warningCount == 0)
+        {
+            return;
+        }
+
+        command.CommandText = "SHOW WARNINGS";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var diagnostics = new List<string>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var level = reader.GetString(0);
+            var code = reader.GetInt32(1);
+            var message = reader.GetString(2);
+            diagnostics.Add($"{level} {code}: {message}");
+        }
+
+        const int maximumReportedDiagnostics = 5;
+        var summary = diagnostics.Count == 0
+            ? $"server 回報 {warningCount:N0} 項，但目前 session 未保存診斷明細"
+            : string.Join("；", diagnostics.Take(maximumReportedDiagnostics));
+        var unreportedCount = Math.Max(0, warningCount - Math.Min(diagnostics.Count, maximumReportedDiagnostics));
+        if (unreportedCount > 0 && diagnostics.Count > 0)
+        {
+            summary += $"；另有 {unreportedCount:N0} 項";
+        }
+
+        throw new InvalidOperationException(
+            $"MySQL／MariaDB 回報寫入警告；為避免截斷、替換或其他資料失真，本次{operation}已回復。{summary}");
+    }
 
     protected override void ConfigureParameter(
         System.Data.Common.DbParameter parameter,
@@ -120,7 +169,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
     {
         if (column.ValueKind == TableColumnValueKind.Json)
         {
-            return $"BINARY CAST({QuoteIdentifier(column.Name)} AS CHAR) = BINARY CAST({parameterName} AS CHAR)";
+            return $"CAST(CAST({QuoteIdentifier(column.Name)} AS CHAR) AS BINARY) = " +
+                   $"CAST(CAST({parameterName} AS CHAR) AS BINARY)";
         }
 
         if (column.ValueKind is TableColumnValueKind.ExactDecimal or
@@ -139,7 +189,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             var quotedName = QuoteIdentifier(column.Name);
             return $"ST_SRID({quotedName}) = {BuildSpatialSridExpression(parameterName)} AND " +
-                   $"BINARY ST_AsText({quotedName}) = BINARY {BuildSpatialWktExpression(parameterName)}";
+                   $"CAST(ST_AsText({quotedName}) AS BINARY) = " +
+                   $"CAST({BuildSpatialWktExpression(parameterName)} AS BINARY)";
         }
 
         return base.BuildOriginalValuePredicate(column, parameterName);
