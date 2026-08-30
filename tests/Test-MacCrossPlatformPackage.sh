@@ -64,6 +64,12 @@ for input_path in "$@"; do
     [[ "$(plist_value CFBundleShortVersionString)" == "$short_version" ]]
     [[ "$(plist_value CFBundleVersion)" == "$bundle_version" ]]
     [[ "$(plist_value MySQLPunkRuntimeIdentifier)" == "$runtime" ]]
+    [[ "$(plist_value CFBundleDocumentTypes:0:CFBundleTypeExtensions:0)" == "sql" ]]
+    [[ "$(plist_value CFBundleDocumentTypes:0:CFBundleTypeRole)" == "Editor" ]]
+    [[ "$(plist_value CFBundleDocumentTypes:0:LSHandlerRank)" == "Alternate" ]]
+    [[ "$(plist_value CFBundleDocumentTypes:0:LSItemContentTypes:0)" == "tw.fcu.gis.mysqlpunk.sql" ]]
+    [[ "$(plist_value UTExportedTypeDeclarations:0:UTTypeTagSpecification:public.filename-extension:0)" == "sql" ]]
+    [[ "$(plist_value UTExportedTypeDeclarations:0:UTTypeTagSpecification:public.mime-type)" == "application/sql" ]]
 
     lipo "$executable" -verify_arch "$architecture"
     codesign --verify --deep --strict --verbose=2 "$app_bundle"

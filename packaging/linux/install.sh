@@ -87,10 +87,12 @@ printf '%s\n' \
     'Type=Application' \
     'Name=mySQLPunk' \
     'Comment=Cross-platform database workbench' \
-    "Exec=\"$target_root/mySQLPunk\"" \
+    "Exec=\"$target_root/mySQLPunk\" %f" \
     'Icon=utilities-terminal' \
     'Terminal=false' \
     'Categories=Development;Database;' \
+    'MimeType=application/sql;text/x-sql;' \
+    'StartupNotify=true' \
     "X-mySQLPunk-Version=$version" > "$desktop_temp"
 chmod 0644 "$desktop_temp"
 

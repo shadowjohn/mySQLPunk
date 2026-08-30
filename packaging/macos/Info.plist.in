@@ -6,6 +6,25 @@
   <string>zh_TW</string>
   <key>CFBundleDisplayName</key>
   <string>mySQLPunk</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>sql</string>
+      </array>
+      <key>CFBundleTypeName</key>
+      <string>SQL document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>tw.fcu.gis.mysqlpunk.sql</string>
+      </array>
+    </dict>
+  </array>
   <key>CFBundleExecutable</key>
   <string>mySQLPunk</string>
   <key>CFBundleIdentifier</key>
@@ -26,5 +45,27 @@
   <true/>
   <key>MySQLPunkRuntimeIdentifier</key>
   <string>@RUNTIME@</string>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.plain-text</string>
+      </array>
+      <key>UTTypeDescription</key>
+      <string>SQL document</string>
+      <key>UTTypeIdentifier</key>
+      <string>tw.fcu.gis.mysqlpunk.sql</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>sql</string>
+        </array>
+        <key>public.mime-type</key>
+        <string>application/sql</string>
+      </dict>
+    </dict>
+  </array>
 </dict>
 </plist>

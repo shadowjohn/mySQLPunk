@@ -16,6 +16,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
     ("SQL 選取範圍安全執行", SqlExecutionSelectionAsync),
     ("本次執行期間查詢記錄", QueryExecutionHistoryAsync),
+    ("SQL 文件安全開啟與保存", SqlDocumentFilesAsync),
     ("Table 欄位偏好安全持久化", TableColumnPreferencesAsync),
     ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
@@ -25,6 +26,103 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static async Task SqlDocumentFilesAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        const string sql = "SELECT '跨平台';\n";
+        var utf8Path = Path.Combine(directory, "query.sql");
+        await File.WriteAllBytesAsync(utf8Path, new UTF8Encoding(false).GetBytes(sql));
+        var loaded = await SqlDocumentService.LoadAsync(utf8Path);
+        Assert(
+            loaded.Text == sql && loaded.Encoding == SqlDocumentEncoding.Utf8 && loaded.Sha256.Length == 64,
+            "UTF-8 SQL 文件應無損載入並記錄 SHA-256");
+
+        var utf8BomPath = Path.Combine(directory, "query-bom.sql");
+        await File.WriteAllBytesAsync(
+            utf8BomPath,
+            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sql)).ToArray());
+        Assert(
+            (await SqlDocumentService.LoadAsync(utf8BomPath)).Encoding == SqlDocumentEncoding.Utf8WithBom,
+            "UTF-8 BOM 應保留原始編碼");
+
+        var utf16Path = Path.Combine(directory, "query-utf16.sql");
+        await File.WriteAllBytesAsync(
+            utf16Path,
+            Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(sql)).ToArray());
+        var utf16 = await SqlDocumentService.LoadAsync(utf16Path);
+        Assert(
+            utf16.Text == sql && utf16.Encoding == SqlDocumentEncoding.Utf16LittleEndian,
+            "帶 BOM 的 UTF-16 SQL 文件應無損載入");
+        var utf16Saved = await SqlDocumentService.SaveAsync(
+            utf16Path,
+            "SELECT N'編碼保留';\n",
+            utf16.Encoding,
+            utf16.Sha256);
+        var utf16Bytes = await File.ReadAllBytesAsync(utf16Path);
+        Assert(
+            utf16Bytes.AsSpan().StartsWith(Encoding.Unicode.GetPreamble()) &&
+            (await SqlDocumentService.LoadAsync(utf16Path)).Text == utf16Saved.Text,
+            "儲存既有 SQL 文件應保留 UTF-16 BOM 與內容");
+
+        var savedPath = Path.Combine(directory, "saved.sql");
+        var saved = await SqlDocumentService.SaveAsync(savedPath, sql);
+        Assert((await SqlDocumentService.LoadAsync(savedPath)).Text == sql, "新 SQL 文件應能原子保存後重載");
+        Assert(
+            !Directory.EnumerateFiles(directory, ".*.tmp").Any(),
+            "SQL 文件保存後不可殘留 staging 檔");
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert(
+                File.GetUnixFileMode(savedPath) == (UnixFileMode.UserRead | UnixFileMode.UserWrite),
+                "新 SQL 文件在 Unix 應從 staging 建立時就限制為 0600");
+            var sharedMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead;
+            File.SetUnixFileMode(savedPath, sharedMode);
+            saved = await SqlDocumentService.SaveAsync(
+                savedPath,
+                "SELECT 2;\n",
+                saved.Encoding,
+                saved.Sha256);
+            Assert(File.GetUnixFileMode(savedPath) == sharedMode, "覆寫 SQL 文件應保留既有 Unix mode");
+        }
+
+        await File.WriteAllTextAsync(savedPath, "SELECT 'external';\n");
+        await AssertThrowsAsync<SqlDocumentConflictException>(() => SqlDocumentService.SaveAsync(
+            savedPath,
+            "SELECT 'editor';\n",
+            saved.Encoding,
+            saved.Sha256));
+        Assert(
+            await File.ReadAllTextAsync(savedPath) == "SELECT 'external';\n",
+            "外部修改衝突時不可覆寫磁碟內容");
+
+        var invalidPath = Path.Combine(directory, "invalid.sql");
+        await File.WriteAllBytesAsync(invalidPath, new byte[] { 0xC3, 0x28 });
+        await AssertThrowsAsync<InvalidDataException>(() => SqlDocumentService.LoadAsync(invalidPath));
+        await AssertThrowsAsync<InvalidDataException>(() =>
+            SqlDocumentService.SaveAsync(Path.Combine(directory, "nul.sql"), "SELECT '\0';"));
+
+        var oversizedPath = Path.Combine(directory, "oversized.sql");
+        await using (var oversized = new FileStream(oversizedPath, FileMode.CreateNew, FileAccess.Write))
+        {
+            oversized.SetLength(SqlDocumentService.MaximumDocumentBytes + 1L);
+        }
+
+        await AssertThrowsAsync<InvalidDataException>(() => SqlDocumentService.LoadAsync(oversizedPath));
+        Assert(
+            SqlDocumentService.ResolveLaunchPath(new[] { utf8Path }) == Path.GetFullPath(utf8Path) &&
+            SqlDocumentService.ResolveLaunchPath(new[] { new Uri(utf8Path).AbsoluteUri }) == Path.GetFullPath(utf8Path) &&
+            SqlDocumentService.ResolveLaunchPath(new[] { "notes.txt" }) is null &&
+            SqlDocumentService.ResolveLaunchPath(new[] { utf8Path, utf16Path }) is null,
+            "啟動參數只應接受單一 .sql 本機路徑或 file URI");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
 
 static async Task TableColumnPreferencesAsync()
 {

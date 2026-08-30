@@ -40,6 +40,12 @@ if [[ ! -x "$MYSQLPUNK_BIN_DIR/mysqlpunk" || ! -f "$MYSQLPUNK_APPLICATIONS_DIR/m
     printf 'Install smoke test did not create the launcher and desktop entry.\n' >&2
     exit 5
 fi
+if ! grep -Fq "Exec=\"$MYSQLPUNK_INSTALL_BASE/" "$MYSQLPUNK_APPLICATIONS_DIR/mysqlpunk.desktop" ||
+   ! grep -Fq 'mySQLPunk" %f' "$MYSQLPUNK_APPLICATIONS_DIR/mysqlpunk.desktop" ||
+   ! grep -Fq 'MimeType=application/sql;text/x-sql;' "$MYSQLPUNK_APPLICATIONS_DIR/mysqlpunk.desktop"; then
+    printf 'Desktop entry does not register single-file SQL activation.\n' >&2
+    exit 5
+fi
 
 target_root=$(find "$MYSQLPUNK_INSTALL_BASE" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print -quit)
 if [[ -z "$target_root" ]]; then

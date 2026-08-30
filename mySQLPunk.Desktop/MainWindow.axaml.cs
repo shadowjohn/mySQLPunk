@@ -28,6 +28,14 @@ public sealed partial class MainWindow : Window
     private QueryResult? _lastResult;
     private CancellationTokenSource? _operationCancellation;
     private bool _loadingDatabases;
+    private readonly string? _initialSqlDocumentPath;
+    private string? _pendingActivatedSqlPath;
+    private SqlDocument? _sqlDocument;
+    private string _sqlDocumentBaselineText = string.Empty;
+    private bool _sqlDocumentDirty;
+    private bool _windowOpened;
+    private bool _closingPromptActive;
+    private bool _allowClose;
 
     private readonly ListBox _profilesList;
     private readonly ComboBox _databaseCombo;
@@ -36,6 +44,7 @@ public sealed partial class MainWindow : Window
     private readonly ComboBox _objectTypeCombo;
     private readonly TextBlock _objectCountText;
     private readonly TextBox _sqlEditor;
+    private readonly TextBlock _sqlDocumentText;
     private readonly ComboBox _queryHistoryCombo;
     private readonly DataGrid _resultsGrid;
     private readonly ComboBox _exportFormatCombo;
@@ -48,9 +57,18 @@ public sealed partial class MainWindow : Window
     private readonly Button _cancelButton;
     private readonly Button _updateButton;
     private readonly Button _clearQueryHistoryButton;
+    private readonly Button _openSqlButton;
+    private readonly Button _saveSqlButton;
+    private readonly Button _saveSqlAsButton;
 
     public MainWindow()
+        : this(initialSqlDocumentPath: null)
     {
+    }
+
+    internal MainWindow(string? initialSqlDocumentPath)
+    {
+        _initialSqlDocumentPath = initialSqlDocumentPath;
         AvaloniaXamlLoader.Load(this);
         _profilesList = this.FindControl<ListBox>("ProfilesList")!;
         _databaseCombo = this.FindControl<ComboBox>("DatabaseCombo")!;
@@ -59,6 +77,7 @@ public sealed partial class MainWindow : Window
         _objectTypeCombo = this.FindControl<ComboBox>("ObjectTypeCombo")!;
         _objectCountText = this.FindControl<TextBlock>("ObjectCountText")!;
         _sqlEditor = this.FindControl<TextBox>("SqlEditor")!;
+        _sqlDocumentText = this.FindControl<TextBlock>("SqlDocumentText")!;
         _queryHistoryCombo = this.FindControl<ComboBox>("QueryHistoryCombo")!;
         _resultsGrid = this.FindControl<DataGrid>("ResultsGrid")!;
         _exportFormatCombo = this.FindControl<ComboBox>("ExportFormatCombo")!;
@@ -71,16 +90,24 @@ public sealed partial class MainWindow : Window
         _cancelButton = this.FindControl<Button>("CancelButton")!;
         _updateButton = this.FindControl<Button>("UpdateButton")!;
         _clearQueryHistoryButton = this.FindControl<Button>("ClearQueryHistoryButton")!;
+        _openSqlButton = this.FindControl<Button>("OpenSqlButton")!;
+        _saveSqlButton = this.FindControl<Button>("SaveSqlButton")!;
+        _saveSqlAsButton = this.FindControl<Button>("SaveSqlAsButton")!;
 
         _profilesList.ItemsSource = _profiles;
         _objectTypeCombo.SelectedIndex = 0;
+        _sqlDocumentBaselineText = _sqlEditor.Text ?? string.Empty;
+        _sqlEditor.TextChanged += SqlEditor_TextChanged;
         _sqlEditor.AddHandler(KeyDownEvent, SqlEditor_KeyDown, RoutingStrategies.Tunnel);
         Opened += MainWindow_Opened;
+        Closing += MainWindow_Closing;
+        UpdateSqlDocumentPresentation();
     }
 
     private async void MainWindow_Opened(object? sender, EventArgs e)
     {
         Opened -= MainWindow_Opened;
+        _windowOpened = true;
         try
         {
             var profiles = await _profileStore.LoadAsync();
@@ -107,8 +134,323 @@ public sealed partial class MainWindow : Window
 
         await ShowPreviousUpdateFailureAsync();
 
+        var startupSqlPath = _pendingActivatedSqlPath ?? _initialSqlDocumentPath;
+        _pendingActivatedSqlPath = null;
+        if (startupSqlPath is not null)
+        {
+            await OpenSqlDocumentAsync(startupSqlPath, confirmDiscard: false);
+        }
+
         UpdateActionState();
     }
+
+    internal async Task OpenActivatedSqlFilesAsync(IReadOnlyList<IStorageItem> files)
+    {
+        var paths = files
+            .OfType<IStorageFile>()
+            .Select(file => file.TryGetLocalPath())
+            .Where(path => SqlDocumentService.HasSqlExtension(path))
+            .Select(path => Path.GetFullPath(path!))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (paths.Count == 0)
+        {
+            if (_windowOpened)
+            {
+                await MessageDialog.ShowAsync(
+                    this,
+                    "無法開啟文件",
+                    "mySQLPunk 跨平台版只會從檔案啟用開啟本機 .sql 文件。",
+                    showCancel: false);
+            }
+
+            return;
+        }
+
+        if (!_windowOpened)
+        {
+            _pendingActivatedSqlPath = paths[0];
+            return;
+        }
+
+        if (paths.Count > 1)
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "一次開啟一個 SQL 文件",
+                $"目前編輯器一次只載入一個文件；將開啟 {Path.GetFileName(paths[0])}，其餘 {paths.Count - 1:N0} 個未載入。",
+                showCancel: false);
+        }
+
+        Activate();
+        await OpenSqlDocumentAsync(paths[0], confirmDiscard: true);
+    }
+
+    private void SqlEditor_TextChanged(object? sender, TextChangedEventArgs e)
+    {
+        var dirty = !string.Equals(_sqlEditor.Text, _sqlDocumentBaselineText, StringComparison.Ordinal);
+        if (dirty != _sqlDocumentDirty)
+        {
+            _sqlDocumentDirty = dirty;
+            UpdateSqlDocumentPresentation();
+        }
+    }
+
+    private async void OpenSql_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_operationCancellation is not null)
+        {
+            return;
+        }
+
+        if (!StorageProvider.CanOpen)
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "無法開啟 SQL 文件",
+                "目前桌面環境未提供開啟檔案對話框。",
+                showCancel: false);
+            return;
+        }
+
+        IReadOnlyList<IStorageFile> files;
+        try
+        {
+            files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "開啟 SQL 文件",
+                AllowMultiple = false,
+                FileTypeFilter = new[] { CreateSqlFileType() }
+            });
+        }
+        catch (Exception exception)
+        {
+            await ShowErrorAsync("無法開啟檔案對話框", exception);
+            return;
+        }
+
+        var path = files.FirstOrDefault()?.TryGetLocalPath();
+        if (path is null)
+        {
+            if (files.Count > 0)
+            {
+                await MessageDialog.ShowAsync(
+                    this,
+                    "無法開啟 SQL 文件",
+                    "目前只能開啟本機 .sql 文件。",
+                    showCancel: false);
+            }
+
+            return;
+        }
+
+        await OpenSqlDocumentAsync(path, confirmDiscard: true);
+    }
+
+    private async void SaveSql_Click(object? sender, RoutedEventArgs e)
+    {
+        await SaveSqlDocumentAsync(saveAs: false);
+    }
+
+    private async void SaveSqlAs_Click(object? sender, RoutedEventArgs e)
+    {
+        await SaveSqlDocumentAsync(saveAs: true);
+    }
+
+    private async Task OpenSqlDocumentAsync(string path, bool confirmDiscard)
+    {
+        if (_operationCancellation is not null ||
+            (confirmDiscard && !await ConfirmDiscardUnsavedSqlAsync("開啟另一個 SQL 文件")))
+        {
+            return;
+        }
+
+        SqlDocument? document = null;
+        _sqlEditor.IsReadOnly = true;
+        try
+        {
+            await RunOperationAsync("正在安全開啟 SQL 文件…", async cancellationToken =>
+            {
+                document = await SqlDocumentService.LoadAsync(path, cancellationToken);
+            });
+        }
+        finally
+        {
+            _sqlEditor.IsReadOnly = false;
+        }
+
+        if (document is null)
+        {
+            return;
+        }
+
+        _sqlDocumentBaselineText = document.Text;
+        _sqlEditor.Text = document.Text;
+        _sqlEditor.SelectionStart = 0;
+        _sqlEditor.SelectionEnd = 0;
+        _sqlDocument = document;
+        _sqlDocumentDirty = false;
+        UpdateSqlDocumentPresentation();
+        SetStatus(
+            $"已開啟 {Path.GetFileName(document.Path)}（{GetSqlEncodingDisplayName(document.Encoding)}，{FormatBytes(document.Bytes)}）。尚未執行。");
+        _sqlEditor.Focus();
+    }
+
+    private async Task SaveSqlDocumentAsync(bool saveAs)
+    {
+        if (_operationCancellation is not null)
+        {
+            return;
+        }
+
+        var currentDocument = _sqlDocument;
+        var targetPath = saveAs ? null : currentDocument?.Path;
+        if (targetPath is null)
+        {
+            if (!StorageProvider.CanSave)
+            {
+                await MessageDialog.ShowAsync(
+                    this,
+                    "無法儲存 SQL 文件",
+                    "目前桌面環境未提供儲存檔案對話框。",
+                    showCancel: false);
+                return;
+            }
+
+            IStorageFile? file;
+            try
+            {
+                file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = saveAs ? "另存 SQL 文件" : "儲存 SQL 文件",
+                    SuggestedFileName = currentDocument is null
+                        ? $"query-{DateTime.Now:yyyyMMdd-HHmmss}.sql"
+                        : Path.GetFileName(currentDocument.Path),
+                    DefaultExtension = "sql",
+                    FileTypeChoices = new[] { CreateSqlFileType() }
+                });
+            }
+            catch (Exception exception)
+            {
+                await ShowErrorAsync("無法開啟儲存檔案對話框", exception);
+                return;
+            }
+
+            if (file is null)
+            {
+                return;
+            }
+
+            targetPath = file.TryGetLocalPath();
+            if (targetPath is null)
+            {
+                await MessageDialog.ShowAsync(
+                    this,
+                    "無法儲存 SQL 文件",
+                    "目前只能儲存到本機 .sql 文件。",
+                    showCancel: false);
+                return;
+            }
+        }
+
+        var textToSave = _sqlEditor.Text ?? string.Empty;
+        var targetMatchesCurrent = currentDocument is not null &&
+                                   string.Equals(
+                                       Path.GetFullPath(targetPath),
+                                       currentDocument.Path,
+                                       StringComparison.Ordinal);
+        var encoding = currentDocument?.Encoding ?? SqlDocumentEncoding.Utf8;
+        SqlDocument? savedDocument = null;
+        await RunOperationAsync("正在安全儲存 SQL 文件…", async cancellationToken =>
+        {
+            savedDocument = await SqlDocumentService.SaveAsync(
+                targetPath,
+                textToSave,
+                encoding,
+                targetMatchesCurrent ? currentDocument!.Sha256 : null,
+                cancellationToken);
+        });
+        if (savedDocument is null)
+        {
+            return;
+        }
+
+        _sqlDocument = savedDocument;
+        _sqlDocumentBaselineText = textToSave;
+        _sqlDocumentDirty = !string.Equals(_sqlEditor.Text, _sqlDocumentBaselineText, StringComparison.Ordinal);
+        UpdateSqlDocumentPresentation();
+        SetStatus(
+            $"已安全儲存 {Path.GetFileName(savedDocument.Path)}（{GetSqlEncodingDisplayName(savedDocument.Encoding)}，{FormatBytes(savedDocument.Bytes)}）。");
+    }
+
+    private async Task<bool> ConfirmDiscardUnsavedSqlAsync(string action)
+    {
+        if (!_sqlDocumentDirty)
+        {
+            return true;
+        }
+
+        var name = _sqlDocument is null ? "未命名 SQL" : Path.GetFileName(_sqlDocument.Path);
+        return await MessageDialog.ShowAsync(
+            this,
+            "尚未儲存 SQL",
+            $"{name} 有尚未儲存的變更。若繼續{action}，這些變更會遺失。",
+            showCancel: true,
+            confirmText: "捨棄變更");
+    }
+
+    private async void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_allowClose || !_sqlDocumentDirty)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        if (_closingPromptActive)
+        {
+            return;
+        }
+
+        _closingPromptActive = true;
+        var discard = await ConfirmDiscardUnsavedSqlAsync("關閉程式");
+        _closingPromptActive = false;
+        if (discard)
+        {
+            _allowClose = true;
+            Close();
+        }
+    }
+
+    private static FilePickerFileType CreateSqlFileType() => new("SQL 文件")
+    {
+        Patterns = new[] { "*.sql" },
+        MimeTypes = new[] { "application/sql", "text/x-sql" }
+    };
+
+    private void UpdateSqlDocumentPresentation()
+    {
+        var name = _sqlDocument is null ? "未命名.sql" : Path.GetFileName(_sqlDocument.Path);
+        var dirtyMarker = _sqlDocumentDirty ? " *" : string.Empty;
+        _sqlDocumentText.Text = $"SQL 編輯器 · {name}{dirtyMarker}";
+        Title = $"{name}{dirtyMarker} — mySQLPunk Linux / macOS Preview";
+    }
+
+    private static string GetSqlEncodingDisplayName(SqlDocumentEncoding encoding) => encoding switch
+    {
+        SqlDocumentEncoding.Utf8 => "UTF-8",
+        SqlDocumentEncoding.Utf8WithBom => "UTF-8 BOM",
+        SqlDocumentEncoding.Utf16LittleEndian => "UTF-16 LE",
+        SqlDocumentEncoding.Utf16BigEndian => "UTF-16 BE",
+        _ => throw new ArgumentOutOfRangeException(nameof(encoding))
+    };
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes:N0} B",
+        < 1024 * 1024 => $"{bytes / 1024d:N1} KB",
+        _ => $"{bytes / (1024d * 1024):N1} MB"
+    };
 
     private async void AddProfile_Click(object? sender, RoutedEventArgs e)
     {
@@ -361,10 +703,25 @@ public sealed partial class MainWindow : Window
     {
         var executeModifier = e.KeyModifiers.HasFlag(KeyModifiers.Control) ||
                               e.KeyModifiers.HasFlag(KeyModifiers.Meta);
-        if (e.Key is Key.Enter or Key.Return && executeModifier)
+        if (!executeModifier)
+        {
+            return;
+        }
+
+        if (e.Key is Key.Enter or Key.Return)
         {
             e.Handled = true;
             await ExecuteCurrentSqlAsync();
+        }
+        else if (e.Key == Key.O)
+        {
+            e.Handled = true;
+            OpenSql_Click(sender, new RoutedEventArgs());
+        }
+        else if (e.Key == Key.S)
+        {
+            e.Handled = true;
+            await SaveSqlDocumentAsync(saveAs: e.KeyModifiers.HasFlag(KeyModifiers.Shift));
         }
     }
 
@@ -483,6 +840,12 @@ public sealed partial class MainWindow : Window
                     confirmText: "套用並重新啟動");
                 if (shouldApply)
                 {
+                    if (!await ConfirmDiscardUnsavedSqlAsync("套用更新"))
+                    {
+                        SetStatus($"已取消套用 {update.LatestVersionText}；已驗證的安裝包仍保留在 {download.Path}。");
+                        return;
+                    }
+
                     using var updaterProcess = canApplyLinuxUpdate
                         ? _updateService.StartLinuxApply(
                             update,
@@ -497,6 +860,7 @@ public sealed partial class MainWindow : Window
                             Environment.ProcessId);
 
                     SetStatus($"正在關閉程式並套用 {update.LatestVersionText}…");
+                    _allowClose = true;
                     if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
                     {
                         desktop.Shutdown();
@@ -998,6 +1362,9 @@ public sealed partial class MainWindow : Window
         _clearQueryHistoryButton.IsEnabled = !busy && _queryHistory.Entries.Count > 0;
         _cancelButton.IsEnabled = busy;
         _updateButton.IsEnabled = !busy;
+        _openSqlButton.IsEnabled = !busy;
+        _saveSqlButton.IsEnabled = !busy;
+        _saveSqlAsButton.IsEnabled = !busy;
         if (!string.IsNullOrWhiteSpace(status))
         {
             SetStatus(status);
