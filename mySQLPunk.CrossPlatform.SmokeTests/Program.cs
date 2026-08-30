@@ -3156,8 +3156,13 @@ static async Task PostgreSqlLiveRoundTripAsync()
     {
         await session.ExecuteAsync("postgres", $"CREATE DATABASE \"{database}\";");
         await session.ExecuteAsync(database, "CREATE EXTENSION cube;");
+        await session.ExecuteAsync(database, "CREATE EXTENSION citext;");
         await session.ExecuteAsync(database, "CREATE EXTENSION hstore;");
         await session.ExecuteAsync(database, "CREATE EXTENSION ltree;");
+        await session.ExecuteAsync(
+            database,
+            "CREATE COLLATION exact_conflict_ci (" +
+            "provider = icu, locale = 'und-u-ks-level1', deterministic = false);");
         await session.ExecuteAsync(database, "CREATE TYPE mood AS ENUM ('happy', 'sad', 'comma,value');");
         await session.ExecuteAsync(database, "CREATE TYPE address_type AS (city TEXT, postal_code INTEGER);");
         await session.ExecuteAsync(database, "CREATE DOMAIN positive_count AS INTEGER CHECK (VALUE BETWEEN 1 AND 100);");
@@ -3272,6 +3277,16 @@ static async Task PostgreSqlLiveRoundTripAsync()
             );
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
+        await session.ExecuteAsync(
+            database,
+            "CREATE TABLE collation_sample (" +
+            "id INTEGER PRIMARY KEY, " +
+            "case_value CITEXT NOT NULL, " +
+            "collated_value TEXT COLLATE exact_conflict_ci NOT NULL, " +
+            "marker TEXT NOT NULL);");
+        await session.ExecuteAsync(
+            database,
+            "INSERT INTO collation_sample VALUES (1, 'Alpha', 'Resume', 'before');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
         var result = await session.ExecuteAsync(database, "SELECT id, name FROM sample ORDER BY id;");
@@ -3284,6 +3299,13 @@ static async Task PostgreSqlLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE public.sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyPostgreSqlStringExactConflictAsync(
+            session,
+            database,
+            objects.Single(item =>
+                item.Name == "collation_sample" &&
+                item.Schema == "public" &&
+                item.Kind == DatabaseObjectKind.Table));
         await VerifyNonRoundTrippableTrailingSpacesAsync(session, database, table!);
         await VerifyPostgreSqlBoundedStringsAsync(session, database, table!);
         await VerifyFloatingPointTypesAsync(
@@ -3307,6 +3329,74 @@ static async Task PostgreSqlLiveRoundTripAsync()
             $"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{database}' AND pid <> pg_backend_pid();");
         await session.ExecuteAsync("postgres", $"DROP DATABASE IF EXISTS \"{database}\";");
     }
+}
+
+static async Task VerifyPostgreSqlStringExactConflictAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var caseColumn = before.Columns.Single(column => column.Name == "case_value");
+    var collatedColumn = before.Columns.Single(column => column.Name == "collated_value");
+    Assert(
+        caseColumn.ValueKind == TableColumnValueKind.String &&
+        caseColumn.StorageDataTypeName == "citext" &&
+        caseColumn.IsEditable &&
+        collatedColumn.ValueKind == TableColumnValueKind.String &&
+        collatedColumn.StorageDataTypeName == "text" &&
+        collatedColumn.IsEditable,
+        $"PostgreSQL citext／collated text metadata 應映射為可編輯字串；" +
+        $"actual={caseColumn}, {collatedColumn}");
+    var collationSemantics = await session.ExecuteAsync(
+        database,
+        "SELECT 'Resume'::text COLLATE exact_conflict_ci = " +
+        "'résumé'::text COLLATE exact_conflict_ci;");
+    Assert(
+        Convert.ToBoolean(collationSemantics.Rows.Single()[0], CultureInfo.InvariantCulture),
+        "PostgreSQL 測試 collation 應證實會把大小寫與重音不同的文字視為相等");
+    var stale = before.Rows.Single();
+
+    await session.ExecuteAsync(
+        database,
+        "UPDATE public.collation_sample SET collated_value = 'résumé' WHERE id = 1;");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        stale,
+        new[] { new TableCellInput("marker", TableCellInputMode.Value, "stale-overwrite") }));
+
+    var afterConflict = await session.ExecuteAsync(
+        database,
+        "SELECT encode(convert_to(case_value::text, 'UTF8'), 'hex'), " +
+        "encode(convert_to(collated_value, 'UTF8'), 'hex'), marker " +
+        "FROM public.collation_sample WHERE id = 1;");
+    Assert(
+        Convert.ToString(afterConflict.Rows.Single()[0]) == "416c706861" &&
+        Convert.ToString(afterConflict.Rows.Single()[1]) == "72c3a973756dc3a9" &&
+        Convert.ToString(afterConflict.Rows.Single()[2]) == "before",
+        "PostgreSQL nondeterministic collation 外部變更不可被過期編輯覆寫");
+
+    var refreshed = (await session.LoadTableDataAsync(database, table)).Rows.Single();
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        refreshed,
+        new[]
+        {
+            new TableCellInput("case_value", TableCellInputMode.Value, "Beta"),
+            new TableCellInput("collated_value", TableCellInputMode.Value, "Ångström"),
+            new TableCellInput("marker", TableCellInputMode.Value, "after-refresh")
+        });
+    var afterRefresh = await session.ExecuteAsync(
+        database,
+        "SELECT case_value::text, collated_value, marker " +
+        "FROM public.collation_sample WHERE id = 1;");
+    Assert(
+        Convert.ToString(afterRefresh.Rows.Single()[0]) == "Beta" &&
+        Convert.ToString(afterRefresh.Rows.Single()[1]) == "Ångström" &&
+        Convert.ToString(afterRefresh.Rows.Single()[2]) == "after-refresh",
+        "PostgreSQL 重新整理後應可正常修改 citext／collated text 資料列");
 }
 
 static async Task VerifyPostgreSqlBoundedStringsAsync(

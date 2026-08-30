@@ -217,10 +217,10 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
 
-        if (column.ValueKind == TableColumnValueKind.String &&
-            column.TrailingSpacesAreNotRoundTrippable)
+        if (column.ValueKind == TableColumnValueKind.String)
         {
-            return $"CAST({QuoteIdentifier(column.Name)} AS text) = {parameterName}";
+            return $"pg_catalog.convert_to(CAST({QuoteIdentifier(column.Name)} AS text), 'UTF8') = " +
+                   $"pg_catalog.convert_to(CAST({parameterName} AS text), 'UTF8')";
         }
 
         if (column.ValueKind is TableColumnValueKind.ExactDecimal or TableColumnValueKind.PostgreSqlMoney)
@@ -267,8 +267,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                    $"{BuildIntervalComponentsExpression(quotedName)} END AS {quotedName}";
         }
 
-        if (column.ValueKind == TableColumnValueKind.String &&
-            column.TrailingSpacesAreNotRoundTrippable)
+        if (column.ValueKind == TableColumnValueKind.String)
         {
             return $"CAST({quotedName} AS text) AS {quotedName}";
         }

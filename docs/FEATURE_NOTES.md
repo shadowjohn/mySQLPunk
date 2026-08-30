@@ -5,6 +5,7 @@
 ## 未完成功能與已知限制
 
 - **Linux / macOS 跨平台預覽 🟡 第二階段進行中**
+  - PostgreSQL byte-exact concurrency／citext：所有 String 載入會明確轉成 `text`，補上 Npgsql 無法以 `object` 讀取 `citext` extension type 的缺口；原值 predicate 再用 `convert_to(..., 'UTF8')` 轉為 `bytea` 比對，避開 nondeterministic collation 的寬鬆等號。`character(n)` 仍使用去 padding 後的 canonical 文字。PostgreSQL 16 實機矩陣先重現 `citext` 載入的 `InvalidCastException`，再由 ICU collation 自證 `Resume = résumé` 且舊版允許 stale update，最後驗證修正版攔截衝突、保留外部 bytes／marker，刷新後可同時修改 `citext`、collated text 與 marker。Linux X11 另實際打開該 Table、重現衝突對話框、直接查庫確認未覆寫，刷新後由 UI 修改 `citext` 並核對 UTF-8 hex。
   - MySQL／MariaDB byte-exact concurrency：String 原值 predicate 會將欄位與參數轉為 binary 後逐 byte 比對；`CHAR` 先移除 server 本身無法 round-trip 的 U+0020 padding，保留合法短值編輯。MySQL 8 與 MariaDB 11.4 實機矩陣先在 `utf8mb4_general_ci` 重現 `Alpha→alpha`、`resume→résumé` 仍讓過期修改提交，再確認修正版回復交易、保留外部 bytes 與 marker，重新整理後可正常修改。Linux X11 亦從真實 MySQL Table 編輯器重現同一衝突，UI 顯示「資料已變更」且直接查庫證明 marker 未被覆寫，刷新後才允許合法儲存。
   - 架構：保留 `mySQLPunk.sln` 的 .NET Framework 4.7.2 WinForms 完整版，另以 `mySQLPunk.CrossPlatform.sln` 建立 .NET 8 Core、Avalonia Desktop 與獨立 smoke tests。跨平台 UI 不引用 `System.Windows.Forms`、Windows Credential Manager、Task Scheduler 或 `SQLite.Interop.dll`。
   - Provider：MySqlConnector、Npgsql、Microsoft.Data.SqlClient 與 Microsoft.Data.Sqlite 共用 provider-neutral session contract，涵蓋連線測試、database 清單、Table / View metadata、欄位型別／nullable／Primary Key／generated／DEFAULT 辨識、識別字引用、前 200 列預覽，以及 DDL / DML / SELECT 執行。SQL Server 使用 `TOP` 與方括號識別字，其餘 provider 使用各自的 `LIMIT` 與引用規則；結果以欄位與列模型回傳，UI 不依賴 provider-specific `DataTable`。
