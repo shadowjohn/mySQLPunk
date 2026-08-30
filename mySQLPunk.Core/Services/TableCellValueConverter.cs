@@ -303,6 +303,11 @@ public static class TableCellValueConverter
                 "必須與欄位宣告的 ENUM 成員完全一致；大小寫、重音字元與空白皆不可由資料庫自動轉換。");
         }
 
+        if (column.StringSetMembers is { } setMembers)
+        {
+            return ParseStringSet(text, setMembers);
+        }
+
         var characterCount = CountUnicodeScalars(text);
         if (column.MaximumStringLengthInCharacters is { } maximumLength &&
             characterCount > maximumLength)
@@ -320,6 +325,29 @@ public static class TableCellValueConverter
         }
 
         return text;
+    }
+
+    private static string ParseStringSet(string text, IReadOnlyList<string> declaredMembers)
+    {
+        if (text.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var selectedMembers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var member in text.Split(','))
+        {
+            if (!declaredMembers.Contains(member, StringComparer.Ordinal))
+            {
+                throw new FormatException(
+                    "每個逗號分隔的 SET 成員都必須與欄位宣告完全一致；" +
+                    "大小寫、重音字元與空白皆不可由資料庫自動轉換。");
+            }
+
+            selectedMembers.Add(member);
+        }
+
+        return string.Join(',', declaredMembers.Where(selectedMembers.Contains));
     }
 
     private static int CountUnicodeScalars(string text)

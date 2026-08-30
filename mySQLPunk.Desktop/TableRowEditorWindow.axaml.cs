@@ -224,7 +224,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.String when column.StorageDataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase) =>
             "ENUM 值（大小寫、重音與空白須完全符合宣告）",
         TableColumnValueKind.String when column.StorageDataTypeName.StartsWith("set(", StringComparison.OrdinalIgnoreCase) =>
-            "以逗號分隔欄位宣告的 SET 值",
+            "SET 成員（精確符合宣告；可任意排序）",
         TableColumnValueKind.UnsignedInteger when column.StorageDataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) =>
             "非負十進位整數（依 BIT 寬度限制）",
         TableColumnValueKind.UnsignedInteger when column.StorageDataTypeName.Equals("xid8", StringComparison.OrdinalIgnoreCase) =>

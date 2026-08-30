@@ -69,6 +69,8 @@ public sealed record TableColumnInfo(
 
     public IReadOnlyList<string>? AllowedStringValues { get; init; }
 
+    public IReadOnlyList<string>? StringSetMembers { get; init; }
+
     public string? StorageCollationName { get; init; }
 
     public bool TrailingSpacesAreNotRoundTrippable { get; init; }

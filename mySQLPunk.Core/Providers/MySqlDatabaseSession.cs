@@ -411,10 +411,15 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                             extra.Contains("virtual generated", StringComparison.OrdinalIgnoreCase) ||
                             extra.Contains("stored generated", StringComparison.OrdinalIgnoreCase) ||
                             !string.IsNullOrWhiteSpace(generationExpression);
+            var declaredStringValues = GetDeclaredStringValues(dataType, columnType);
             var valueKind = MapValueKind(dataType, columnType);
+            if (dataType.Equals("set", StringComparison.OrdinalIgnoreCase) &&
+                declaredStringValues?.Any(value => value.Length == 0 || value.Contains(',')) == true)
+            {
+                valueKind = TableColumnValueKind.Unsupported;
+            }
             var integerBounds = GetIntegerBounds(dataType, columnType, valueKind);
             var requiredBinaryLength = GetRequiredBinaryLength(dataType, columnType);
-            var allowedStringValues = GetAllowedStringValues(dataType, columnType);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -428,7 +433,12 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                 IntegerMinimum = integerBounds?.Minimum,
                 IntegerMaximum = integerBounds?.Maximum,
                 RequiredBinaryLength = requiredBinaryLength,
-                AllowedStringValues = allowedStringValues,
+                AllowedStringValues = dataType.Equals("enum", StringComparison.OrdinalIgnoreCase)
+                    ? declaredStringValues
+                    : null,
+                StringSetMembers = dataType.Equals("set", StringComparison.OrdinalIgnoreCase)
+                    ? declaredStringValues
+                    : null,
                 TrailingSpacesAreNotRoundTrippable = dataType.Equals(
                     "char",
                     StringComparison.OrdinalIgnoreCase)
@@ -438,19 +448,20 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         return columns;
     }
 
-    private static IReadOnlyList<string>? GetAllowedStringValues(string dataType, string columnType) =>
-        dataType.Equals("enum", StringComparison.OrdinalIgnoreCase)
-            ? ParseEnumValues(columnType)
+    private static IReadOnlyList<string>? GetDeclaredStringValues(string dataType, string columnType) =>
+        dataType.Equals("enum", StringComparison.OrdinalIgnoreCase) ||
+        dataType.Equals("set", StringComparison.OrdinalIgnoreCase)
+            ? ParseDeclaredStringValues(dataType, columnType)
             : null;
 
-    private static IReadOnlyList<string> ParseEnumValues(string columnType)
+    private static IReadOnlyList<string> ParseDeclaredStringValues(string dataType, string columnType)
     {
-        const string prefix = "enum(";
+        var prefix = dataType + "(";
         var definition = columnType.Trim();
         if (!definition.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
             !definition.EndsWith(')'))
         {
-            throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+            throw BuildStringMetadataException(dataType, columnType);
         }
 
         var values = new List<string>();
@@ -460,7 +471,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             if (definition[index] != '\'')
             {
-                throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+                throw BuildStringMetadataException(dataType, columnType);
             }
 
             index++;
@@ -473,7 +484,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                 {
                     if (index >= end)
                     {
-                        throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+                        throw BuildStringMetadataException(dataType, columnType);
                     }
 
                     value.Append(DecodeMetadataEscape(definition[index++]));
@@ -499,7 +510,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
 
             if (!closed)
             {
-                throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+                throw BuildStringMetadataException(dataType, columnType);
             }
 
             values.Add(value.ToString());
@@ -510,17 +521,20 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
 
             if (definition[index++] != ',' || index == end)
             {
-                throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+                throw BuildStringMetadataException(dataType, columnType);
             }
         }
 
         if (values.Count == 0 || index != end)
         {
-            throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+            throw BuildStringMetadataException(dataType, columnType);
         }
 
         return values;
     }
+
+    private static InvalidOperationException BuildStringMetadataException(string dataType, string columnType) =>
+        new($"無法解析 {dataType.ToUpperInvariant()} metadata「{columnType}」。");
 
     private static char DecodeMetadataEscape(char escaped) => escaped switch
     {
