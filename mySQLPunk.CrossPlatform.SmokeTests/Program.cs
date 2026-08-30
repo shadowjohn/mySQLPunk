@@ -14,7 +14,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("查詢結果安全匯出", QueryResultExportFormatsAsync),
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
-    ("SQL 選取範圍安全執行", SqlExecutionSelectionAsync),
+    ("SQL 選取範圍與游標 statement 安全執行", SqlExecutionSelectionAsync),
     ("本次執行期間查詢記錄", QueryExecutionHistoryAsync),
     ("SQL 文件安全開啟與保存", SqlDocumentFilesAsync),
     ("Table 欄位偏好安全持久化", TableColumnPreferencesAsync),
@@ -184,23 +184,27 @@ static Task QueryExecutionHistoryAsync()
         string sql,
         string database,
         int seconds,
-        bool usedSelection = false) => new(
+        SqlExecutionScope scope = SqlExecutionScope.Document) => new(
             start.AddSeconds(seconds),
             DatabaseProviderKind.Sqlite,
             database,
             sql,
-            usedSelection,
+            scope,
             TimeSpan.FromMilliseconds(12),
             "完成，共 1 列");
 
     Assert(history.Add(Entry("SELECT 1;", "first.db", 1)), "有效 SQL 應加入本次記錄");
-    Assert(history.Add(Entry("SELECT 2;", "first.db", 2, usedSelection: true)), "第二筆 SQL 應加入記錄");
-    Assert(history.Add(Entry("SELECT 3;", "other.db", 3)), "不同資料庫 SQL 應加入記錄");
+    Assert(history.Entries[0].DisplayText.Contains("整份文件", StringComparison.Ordinal),
+        "查詢記錄應明確標示整份文件來源");
+    Assert(history.Add(Entry("SELECT 2;", "first.db", 2, SqlExecutionScope.Selection)), "第二筆 SQL 應加入記錄");
+    Assert(history.Add(Entry("SELECT 3;", "other.db", 3, SqlExecutionScope.CurrentStatement)), "不同資料庫 SQL 應加入記錄");
     Assert(history.Entries.Select(entry => entry.Sql).SequenceEqual(new[] { "SELECT 3;", "SELECT 2;", "SELECT 1;" }),
         "查詢記錄應依最新時間置頂");
     Assert(history.Entries[1].DisplayText.Contains("選取範圍", StringComparison.Ordinal) &&
            history.Entries[1].DisplayText.Contains("first.db", StringComparison.Ordinal),
         "記錄顯示應標示來源資料庫與選取範圍");
+    Assert(history.Entries[0].DisplayText.Contains("游標 statement", StringComparison.Ordinal),
+        "查詢記錄應區分游標 statement 與整份文件");
 
     Assert(history.Add(Entry("SELECT 1;", "first.db", 4)), "重複 SQL 應更新到最上方");
     Assert(history.Entries.Count == 3 && history.Entries[0].ExecutedAt == start.AddSeconds(4),
@@ -229,24 +233,115 @@ static Task SqlExecutionSelectionAsync()
 {
     const string editorSql = "CREATE TABLE should_not_run(id INTEGER);\nSELECT 42 AS chosen;";
     var selectStart = editorSql.IndexOf("SELECT", StringComparison.Ordinal);
-    var selected = SqlExecutionSelectionService.Resolve(editorSql, selectStart, editorSql.Length);
+    var selected = SqlExecutionSelectionService.Resolve(
+        editorSql,
+        selectStart,
+        editorSql.Length,
+        DatabaseProviderKind.Sqlite);
     Assert(selected.UsesSelection && selected.Sql == "SELECT 42 AS chosen;",
         "非空白選取範圍應是唯一送出的 SQL");
 
-    var reversed = SqlExecutionSelectionService.Resolve(editorSql, editorSql.Length, selectStart);
+    var reversed = SqlExecutionSelectionService.Resolve(
+        editorSql,
+        editorSql.Length,
+        selectStart,
+        DatabaseProviderKind.Sqlite);
     Assert(reversed == selected, "反向選取應解析成相同 SQL");
 
+    var secondCaret = editorSql.IndexOf("42", StringComparison.Ordinal);
+    var noSelection = SqlExecutionSelectionService.Resolve(
+        editorSql,
+        secondCaret,
+        secondCaret,
+        DatabaseProviderKind.Sqlite);
+    Assert(noSelection.UsesCurrentStatement && noSelection.Sql.Contains("SELECT 42 AS chosen;", StringComparison.Ordinal) &&
+           !noSelection.Sql.Contains("CREATE TABLE", StringComparison.Ordinal),
+        "沒有選取範圍時只應解析游標所在 statement");
+
     var whitespaceStart = editorSql.IndexOf('\n');
-    var whitespace = SqlExecutionSelectionService.Resolve(editorSql, whitespaceStart, whitespaceStart + 1);
-    Assert(!whitespace.UsesSelection && whitespace.Sql == editorSql,
-        "只選到空白時應安全退回完整 SQL");
+    var whitespace = SqlExecutionSelectionService.Resolve(
+        editorSql,
+        whitespaceStart,
+        whitespaceStart + 1,
+        DatabaseProviderKind.Sqlite);
+    Assert(whitespace.UsesCurrentStatement && whitespace.Sql.Contains("SELECT 42 AS chosen;", StringComparison.Ordinal),
+        "只選到 statement 前方空白時應解析下一個 statement");
 
-    var noSelection = SqlExecutionSelectionService.Resolve(editorSql, 0, 0);
-    Assert(!noSelection.UsesSelection && noSelection.Sql == editorSql,
-        "沒有選取範圍時應維持原本的全文執行");
+    var document = SqlExecutionSelectionService.Resolve(
+        editorSql,
+        secondCaret,
+        secondCaret,
+        DatabaseProviderKind.Sqlite,
+        executeDocument: true);
+    Assert(document.Scope == SqlExecutionScope.Document && document.Sql == editorSql,
+        "明確執行整份時不可受游標或選取範圍影響");
 
-    var clamped = SqlExecutionSelectionService.Resolve(editorSql, selectStart, int.MaxValue);
+    var clamped = SqlExecutionSelectionService.Resolve(
+        editorSql,
+        selectStart,
+        int.MaxValue,
+        DatabaseProviderKind.Sqlite);
     Assert(clamped == selected, "超出文字長度的 UI selection index 應安全限制範圍");
+
+    const string sqliteSql = "SELECT ';', \"semi;column\", `semi;table`, [semi;name];\n" +
+                             "-- ignored ;\n/* ignored ; */ SELECT 3;   ";
+    var quotedCaret = sqliteSql.IndexOf("semi;column", StringComparison.Ordinal);
+    var quotedStatement = SqlExecutionSelectionService.Resolve(
+        sqliteSql,
+        quotedCaret,
+        quotedCaret,
+        DatabaseProviderKind.Sqlite);
+    Assert(quotedStatement.Sql.Contains("[semi;name]", StringComparison.Ordinal) &&
+           !quotedStatement.Sql.Contains("SELECT 3", StringComparison.Ordinal),
+        "SQLite 字串、quoted identifier 與註解內的分號不可切斷 statement");
+
+    const string postgreSql = "SELECT $$BEGIN; PERFORM 1; END$$, $tag$more;sql$tag$, $標籤$unicode;body$標籤$;\n" +
+                              "/* outer ; /* nested ; */ still ; */ SELECT 3;   ";
+    var dollarCaret = postgreSql.IndexOf("PERFORM", StringComparison.Ordinal);
+    var dollarStatement = SqlExecutionSelectionService.Resolve(
+        postgreSql,
+        dollarCaret,
+        dollarCaret,
+        DatabaseProviderKind.PostgreSql);
+    Assert(dollarStatement.Sql.Contains("SELECT $$BEGIN; PERFORM 1; END$$", StringComparison.Ordinal) &&
+           !dollarStatement.Sql.Contains("SELECT 3", StringComparison.Ordinal),
+        "PostgreSQL 巢狀註解與 dollar quote 內的分號不可切斷 statement");
+    var finalStatement = SqlExecutionSelectionService.Resolve(
+        postgreSql,
+        postgreSql.Length,
+        postgreSql.Length,
+        DatabaseProviderKind.PostgreSql);
+    Assert(finalStatement.Sql.Contains("SELECT 3;", StringComparison.Ordinal),
+        "游標位於結尾空白時應選擇最後一個非空 statement");
+
+    const string mysqlSql = "SELECT 'safe;value', `semi;name`;\n" +
+                            "SELECT 4--2;\n# ignored ;\nSELECT 3;";
+    var arithmeticCaret = mysqlSql.IndexOf("4--2", StringComparison.Ordinal);
+    var arithmeticStatement = SqlExecutionSelectionService.Resolve(
+        mysqlSql,
+        arithmeticCaret,
+        arithmeticCaret,
+        DatabaseProviderKind.MySql);
+    Assert(arithmeticStatement.Sql.Contains("SELECT 4--2;", StringComparison.Ordinal) &&
+           !arithmeticStatement.Sql.Contains("SELECT 3", StringComparison.Ordinal),
+        "MySQL 未接空白的雙減號不可誤判為行註解");
+    const string ambiguousMySql = "SELECT 'it\\'s;mode-dependent';\nSELECT 2;";
+    var ambiguousCaret = ambiguousMySql.IndexOf("mode-dependent", StringComparison.Ordinal);
+    Assert(SqlExecutionSelectionService.Resolve(
+               ambiguousMySql,
+               ambiguousCaret,
+               ambiguousCaret,
+               DatabaseProviderKind.MySql).Sql.Length == 0,
+        "MySQL 反斜線跳脫受 NO_BACKSLASH_ESCAPES 影響時應拒絕猜測 statement 邊界");
+
+    const string commentOnly = "-- this file intentionally has no SQL;\n/* still no SQL; */";
+    var noExecutableStatement = SqlExecutionSelectionService.Resolve(
+        commentOnly,
+        5,
+        5,
+        DatabaseProviderKind.SqlServer);
+    Assert(noExecutableStatement.UsesCurrentStatement && noExecutableStatement.Sql.Length == 0,
+        "只有註解的文件不可被誤判為可執行 statement");
     return Task.CompletedTask;
 }
 

@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _connectButton;
     private readonly Button _refreshButton;
     private readonly Button _executeButton;
+    private readonly Button _executeDocumentButton;
     private readonly Button _exportButton;
     private readonly Button _cancelButton;
     private readonly Button _updateButton;
@@ -86,6 +87,7 @@ public sealed partial class MainWindow : Window
         _connectButton = this.FindControl<Button>("ConnectButton")!;
         _refreshButton = this.FindControl<Button>("RefreshButton")!;
         _executeButton = this.FindControl<Button>("ExecuteButton")!;
+        _executeDocumentButton = this.FindControl<Button>("ExecuteDocumentButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
         _updateButton = this.FindControl<Button>("UpdateButton")!;
@@ -677,6 +679,11 @@ public sealed partial class MainWindow : Window
         await ExecuteCurrentSqlAsync();
     }
 
+    private async void ExecuteDocument_Click(object? sender, RoutedEventArgs e)
+    {
+        await ExecuteCurrentSqlAsync(executeDocument: true);
+    }
+
     private void QueryHistory_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_queryHistoryCombo.SelectedItem is not QueryExecutionHistoryEntry entry)
@@ -711,7 +718,8 @@ public sealed partial class MainWindow : Window
         if (e.Key is Key.Enter or Key.Return)
         {
             e.Handled = true;
-            await ExecuteCurrentSqlAsync();
+            await ExecuteCurrentSqlAsync(
+                executeDocument: e.KeyModifiers.HasFlag(KeyModifiers.Shift));
         }
         else if (e.Key == Key.O)
         {
@@ -944,7 +952,7 @@ public sealed partial class MainWindow : Window
         SetStatus($"已開啟 {update.LatestVersionText} GitHub Release 頁。");
     }
 
-    private async Task ExecuteCurrentSqlAsync()
+    private async Task ExecuteCurrentSqlAsync(bool executeDocument = false)
     {
         if (_session is null || _databaseCombo.SelectedItem is not string database)
         {
@@ -955,10 +963,25 @@ public sealed partial class MainWindow : Window
         var execution = SqlExecutionSelectionService.Resolve(
             _sqlEditor.Text,
             _sqlEditor.SelectionStart,
-            _sqlEditor.SelectionEnd);
-        var operationStatus = execution.UsesSelection
-            ? "正在執行選取的 SQL…"
-            : "正在執行 SQL…";
+            _sqlEditor.SelectionEnd,
+            _session.Profile.Provider,
+            executeDocument);
+        if (string.IsNullOrWhiteSpace(execution.Sql))
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "沒有可執行的 SQL",
+                "請在 SQL 編輯器輸入指令，或把游標移到要執行的 statement。若 MySQL 字串跳脫會因 SQL mode 產生歧義，請明確反白要執行的範圍。",
+                showCancel: false);
+            return;
+        }
+
+        var operationStatus = execution.Scope switch
+        {
+            SqlExecutionScope.Selection => "正在執行選取的 SQL…",
+            SqlExecutionScope.CurrentStatement => "正在執行游標所在 statement…",
+            _ => "正在執行整份 SQL…"
+        };
         var executedAt = DateTimeOffset.Now;
         var stopwatch = Stopwatch.StartNew();
         await RunOperationAsync(operationStatus, async cancellationToken =>
@@ -971,7 +994,7 @@ public sealed partial class MainWindow : Window
                 _session.Profile.Provider,
                 database,
                 execution.Sql,
-                execution.UsesSelection,
+                execution.Scope,
                 stopwatch.Elapsed,
                 result.Summary));
             RefreshQueryHistory();
@@ -980,9 +1003,12 @@ public sealed partial class MainWindow : Window
                 await LoadObjectsAsync(database, cancellationToken);
             }
 
-            var executionSummary = execution.UsesSelection
-                ? $"{result.Summary}（已執行選取範圍）"
-                : result.Summary;
+            var executionSummary = execution.Scope switch
+            {
+                SqlExecutionScope.Selection => $"{result.Summary}（已執行選取範圍）",
+                SqlExecutionScope.CurrentStatement => $"{result.Summary}（已執行游標 statement）",
+                _ => $"{result.Summary}（已執行整份文件）"
+            };
             SetStatus(historyRecorded
                 ? executionSummary
                 : $"{executionSummary}（SQL 超過本次記錄的 2 MiB 安全上限，未保留）");
@@ -1354,6 +1380,7 @@ public sealed partial class MainWindow : Window
         _connectButton.IsEnabled = !busy && _profilesList.SelectedItem is not null;
         _refreshButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _executeButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _executeDocumentButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _exportButton.IsEnabled = !busy && _lastResult is not null;
         _databaseCombo.IsEnabled = !busy && _session is not null;
         _objectSearchBox.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;

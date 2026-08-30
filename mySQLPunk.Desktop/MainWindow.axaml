@@ -65,7 +65,7 @@
 
       <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
         <Border Grid.Row="0" BorderBrush="#CDD5E0" BorderThickness="0,0,0,1" Padding="12,9">
-          <Grid ColumnDefinitions="Auto,280,Auto,*,Auto,Auto">
+          <Grid ColumnDefinitions="Auto,280,Auto,*,Auto,Auto,Auto">
             <TextBlock Grid.Column="0" Text="資料庫" VerticalAlignment="Center" Margin="0,0,8,0" />
             <ComboBox x:Name="DatabaseCombo"
                       Grid.Column="1"
@@ -78,12 +78,17 @@
                     Margin="8,0,0,0" />
             <Button x:Name="ExecuteButton"
                     Grid.Column="4"
-                    Content="執行 SQL  (Ctrl/Cmd+Enter)"
+                    Content="執行目前  (Ctrl/Cmd+Enter)"
                     Click="ExecuteSql_Click"
                     Padding="14,6"
                     Margin="8,0,0,0" />
-            <Button x:Name="CancelButton"
+            <Button x:Name="ExecuteDocumentButton"
                     Grid.Column="5"
+                    Content="執行整份"
+                    Click="ExecuteDocument_Click"
+                    Margin="8,0,0,0" />
+            <Button x:Name="CancelButton"
+                    Grid.Column="6"
                     Content="取消"
                     Click="CancelOperation_Click"
                     Margin="8,0,0,0"
@@ -162,7 +167,7 @@
                              Margin="12,0,0,0" />
                 </Grid>
                 <Grid Grid.Row="1" ColumnDefinitions="*,190,Auto" Margin="0,7,0,0">
-                  <TextBlock Text="有選取範圍時只執行選取 SQL；雙擊 Table 開啟資料編輯器"
+                  <TextBlock Text="執行選取範圍或游標 statement；Ctrl/Cmd+Shift+Enter 執行整份"
                              Foreground="#667085"
                              FontSize="12"
                              TextTrimming="CharacterEllipsis"

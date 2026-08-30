@@ -8,7 +8,7 @@ public sealed record QueryExecutionHistoryEntry(
     DatabaseProviderKind Provider,
     string Database,
     string Sql,
-    bool UsedSelection,
+    SqlExecutionScope Scope,
     TimeSpan Duration,
     string Summary)
 {
@@ -23,8 +23,15 @@ public sealed record QueryExecutionHistoryEntry(
 
     public string SourceDisplay => $"{ProviderDisplayName} · {Database}";
 
+    public string ScopeDisplay => Scope switch
+    {
+        SqlExecutionScope.Selection => " · 選取範圍",
+        SqlExecutionScope.CurrentStatement => " · 游標 statement",
+        _ => " · 整份文件"
+    };
+
     public string DisplayText =>
-        $"{ExecutedAt:HH:mm:ss} · {SourceDisplay}{(UsedSelection ? " · 選取範圍" : string.Empty)} · " +
+        $"{ExecutedAt:HH:mm:ss} · {SourceDisplay}{ScopeDisplay} · " +
         QueryExecutionHistory.BuildPreview(Sql);
 }
 

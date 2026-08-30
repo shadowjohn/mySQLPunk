@@ -49,7 +49,7 @@
 
 ### 🛠️ 問題修正與優化
 
-- Linux / macOS SQL 編輯器現在會優先執行非空白的選取範圍；按下 `Ctrl+Enter`／`Cmd+Enter` 或工具列按鈕時，不再忽略反白內容而送出整份文件，避免未選取的 DDL／DML 被意外執行。沒有選取或只選到空白時仍維持全文執行。
+- Linux / macOS SQL 編輯器現在會優先執行非空白的選取範圍，否則只執行游標所在 statement；provider lexer 會依 MySQL、PostgreSQL、SQL Server 與 SQLite 規則略過字串、quoted identifier、註解、dollar quote 與 PostgreSQL `E''` 內分號。MySQL 反斜線字串若受 `NO_BACKSLASH_ESCAPES` 影響而有兩種可能邊界會 fail closed、要求明確反白；整份文件改由獨立按鈕或 `Ctrl/Cmd+Shift+Enter` 執行，避免開啟多段 SQL 後誤送出未選取的 DDL／DML，本次查詢記錄也會區分三種來源。
 - Linux／macOS Table 編輯器會從 MySQL／MariaDB 與 SQL Server metadata 保留 `BINARY(n)` 的固定 byte 數，並要求 hex 輸入剛好為 n bytes；較短值不再被 server 無 warning 補 `0x00`，較長值也不會被截斷。SQL Server alias type 沿用 base binary 長度，VARBINARY／BLOB／bytea／SQLite BLOB 仍維持可變長。
 - Linux／macOS 的 MySQL／MariaDB Table mutation 現在會在 commit 前讀取同連線 `SHOW WARNINGS`；non-strict 模式若把超長 VARCHAR／VARBINARY／TINYTEXT／TINYBLOB 或不可表示字元降成 warning，整筆單列交易會立即 rollback 並回報 server code，不再顯示成功卻留下截斷／替換值。MySQL optimistic predicate 也改用 `CAST(... AS BINARY)`，移除新版 server 對 deprecated `BINARY expr` 的警告。
 - Linux／macOS Table 編輯器的 PostgreSQL `date` 改用獨立 canonical 文字路徑，完整保留 4713 BC–5874897 AD 與 `±infinity`，也避免 Npgsql 把 `0001-01-01`／.NET 最小值誤送成 `-infinity`；一般 PostgreSQL／SQLite 日期只接受純日期，不再讓 timestamp 的時間部分被無聲丟掉。

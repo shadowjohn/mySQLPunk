@@ -47,11 +47,11 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 跨平台 metadata 樹可依 schema 或物件名稱即時搜尋，空白分隔的多個關鍵字會同時套用；也可只顯示 Table 或 View，畫面會同步標示篩選後與總物件數。搜尋只處理已載入的 metadata，不會額外掃描資料表內容。
 
-SQL 編輯器按下 `Ctrl+Enter`（macOS 為 `Cmd+Enter`）或「執行 SQL」時，若有反白且非空白的範圍，只會送出該段 SQL；未選取內容時才執行全文，避免同一文件裡未選取的 DDL／DML 被一併執行。
+SQL 編輯器按下 `Ctrl+Enter`（macOS 為 `Cmd+Enter`）或「執行目前」時，會優先執行非空白選取範圍，否則只送出游標所在的 statement；lexer 依目前 provider 區分字串、quoted identifier、註解、PostgreSQL dollar-quoted body 與 `E''`。MySQL 反斜線字串若會因 `NO_BACKSLASH_ESCAPES` 產生兩種可能邊界，會拒絕猜測並要求明確反白。需要執行整份文件時必須按「執行整份」或 `Ctrl/Cmd+Shift+Enter`，避免開啟多段 SQL 後意外送出未選取的 DDL／DML。
 
 可從工具列、`Ctrl/Cmd+O` 或 Linux／macOS 的 `.sql` 檔案關聯開啟 SQL 文件，`Ctrl/Cmd+S` 儲存、`Ctrl/Cmd+Shift+S` 另存。編輯器接受嚴格 UTF-8 與帶 BOM 的 UTF-16，保存時保留原始編碼並限制為 4 MiB；覆寫前會核對載入時 SHA-256，若磁碟檔已被其他程式修改或刪除就拒絕覆蓋。新檔在 Unix 預設為 `0600`，既有檔保留原權限，所有寫入都先建立同目錄私有 staging 再原子替換；開啟另一檔、關閉程式或套用更新也會先提醒未儲存變更。
 
-成功執行的 SQL 會加入「本次查詢記錄」，標示時間、provider、database 與是否來自選取範圍；選取記錄只會載回編輯器，不會自動執行。記錄最多 50 筆並限制為合計 2 MiB，同資料庫的相同 SQL 會更新到最上方；可隨時清除，程式結束也會消失，可能含敏感 literal 的 SQL 不會寫入設定檔或其他磁碟檔案。
+成功執行的 SQL 會加入「本次查詢記錄」，標示時間、provider、database，以及來自選取範圍、游標 statement 或整份文件；選取記錄只會載回編輯器，不會自動執行。記錄最多 50 筆並限制為合計 2 MiB，同資料庫的相同 SQL 會更新到最上方；可隨時清除，程式結束也會消失，可能含敏感 literal 的 SQL 不會寫入設定檔或其他磁碟檔案。
 
 Table 資料視窗每頁載入 200 列；有 Primary Key 時可選擇安全 scalar 欄位做資料庫端遞增／遞減排序，相同值會再依 Primary Key 遞增排序以維持跨頁穩定。scalar 欄位也可套用型別化「精確等於／是 NULL／不是 NULL」篩選；欄名與型別會由 Core 重新對照 metadata，值一律走 provider 原生參數，JSON、XML、binary、spatial 等跨 provider 語意不一致的欄位不會直接拼入 SQL。沒有 Primary Key 的 Table 仍只提供安全的第一頁瀏覽。「欄位」可隱藏不需要的欄位，重開後仍依連線與 Table 保留，偏好檔只記錄欄名、不保存篩選值或資料內容；完整資料列仍供修改與衝突比對。「匯出本頁」則把目前篩選、排序後載入的可見欄位與列輸出成 CSV、TSV 或 JSON，沿用公式注入防護與原子寫檔，且不會把單一頁面誤稱為完整 Table。
 
