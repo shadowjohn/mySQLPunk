@@ -45,7 +45,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.String => input.Text,
                 TableColumnValueKind.Integer => long.Parse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture),
                 TableColumnValueKind.UnsignedInteger => ParseUnsignedInteger(column, input.Text),
-                TableColumnValueKind.Decimal => decimal.Parse(input.Text, NumberStyles.Number, CultureInfo.InvariantCulture),
+                TableColumnValueKind.SqliteNumeric => ParseSqliteNumeric(column, input.Text),
                 TableColumnValueKind.ExactDecimal => ParseExactDecimal(column, input.Text),
                 TableColumnValueKind.PostgreSqlMoney => ParsePostgreSqlMoney(column, input.Text),
                 TableColumnValueKind.SqlServerMoney => ParseSqlServerMoney(column, input.Text),
@@ -130,6 +130,7 @@ public static class TableCellValueConverter
         DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         TimeOnly time => time.ToString("O", CultureInfo.InvariantCulture),
         TimeSpan duration => duration.ToString("c", CultureInfo.InvariantCulture),
+        SqliteNumericValue numeric => numeric.Text,
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,
         SqlServerMoneyValue money => money.Text,
@@ -221,6 +222,12 @@ public static class TableCellValueConverter
         if (column.ValueKind == TableColumnValueKind.SqlServerMoney)
         {
             return ParseSqlServerMoney(column, input.Text).Text == Format(original);
+        }
+
+        if (column.ValueKind == TableColumnValueKind.SqliteNumeric)
+        {
+            return ParseSqliteNumeric(column, input.Text).Text ==
+                   NormalizeSqliteNumericText(column, Format(original));
         }
 
         return string.Equals(input.Text, Format(original), StringComparison.Ordinal);
@@ -1032,6 +1039,180 @@ public static class TableCellValueConverter
 
         return new ExactDecimalValue(trimmed);
     }
+
+    private static SqliteNumericValue ParseSqliteNumeric(TableColumnInfo column, string text)
+    {
+        var normalized = NormalizeSqliteNumeric(column, text);
+        if (normalized.IsSignedInt64 || normalized.IsZero)
+        {
+            return new SqliteNumericValue(normalized.Text);
+        }
+
+        if (normalized.SignificantDigits > 15)
+        {
+            throw new OverflowException(
+                $"{column.DataTypeName} 的非 64 位整數值最多只能有 15 位有效數字，避免 SQLite 轉成 REAL 時失真。");
+        }
+
+        if (!double.TryParse(
+                normalized.Text,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var doubleValue) ||
+            !double.IsFinite(doubleValue) ||
+            doubleValue == 0)
+        {
+            throw new OverflowException($"{column.DataTypeName} 超出 SQLite REAL 可無損處理的有限範圍。");
+        }
+
+        var sqliteRoundTrip = NormalizeSqliteNumeric(
+            column,
+            doubleValue.ToString("G15", CultureInfo.InvariantCulture));
+        if (!string.Equals(normalized.Text, sqliteRoundTrip.Text, StringComparison.Ordinal))
+        {
+            throw new OverflowException(
+                $"{column.DataTypeName} 無法在 SQLite REAL 的 15 位有效數 round-trip 中無損保存。");
+        }
+
+        return new SqliteNumericValue(normalized.Text);
+    }
+
+    private static string NormalizeSqliteNumericText(TableColumnInfo column, string text)
+        => NormalizeSqliteNumeric(column, text).Text;
+
+    private static SqliteNumericParts NormalizeSqliteNumeric(TableColumnInfo column, string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Length > 64 || trimmed.Contains('\0'))
+        {
+            throw new FormatException($"{column.DataTypeName} 不可為空、包含 NUL，且不可超過 64 個字元。");
+        }
+
+        var position = trimmed[0] is '+' or '-' ? 1 : 0;
+        var isNegative = trimmed[0] == '-';
+        var integerStart = position;
+        while (position < trimmed.Length && char.IsAsciiDigit(trimmed[position]))
+        {
+            position++;
+        }
+
+        var integerEnd = position;
+        var fractionStart = -1;
+        if (position < trimmed.Length && trimmed[position] == '.')
+        {
+            fractionStart = ++position;
+            while (position < trimmed.Length && char.IsAsciiDigit(trimmed[position]))
+            {
+                position++;
+            }
+        }
+
+        if (integerEnd == integerStart && (fractionStart < 0 || position == fractionStart))
+        {
+            throw new FormatException($"{column.DataTypeName} 必須包含十進位數字。");
+        }
+
+        var fractionEnd = position;
+        var exponent = 0;
+        if (position < trimmed.Length && trimmed[position] is 'e' or 'E')
+        {
+            var exponentStart = ++position;
+            if (position < trimmed.Length && trimmed[position] is '+' or '-')
+            {
+                position++;
+            }
+
+            var exponentDigitsStart = position;
+            while (position < trimmed.Length && char.IsAsciiDigit(trimmed[position]))
+            {
+                position++;
+            }
+
+            if (position == exponentDigitsStart ||
+                !int.TryParse(
+                    trimmed.AsSpan(exponentStart, position - exponentStart),
+                    NumberStyles.AllowLeadingSign,
+                    CultureInfo.InvariantCulture,
+                    out exponent))
+            {
+                throw new FormatException($"{column.DataTypeName} 的指數格式或範圍無效。");
+            }
+        }
+
+        if (position != trimmed.Length)
+        {
+            throw new FormatException(
+                $"{column.DataTypeName} 只能使用正負號、十進位數字、小數點與科學記號，不可使用千分位。");
+        }
+
+        var integerDigits = trimmed[integerStart..integerEnd];
+        var fractionDigits = fractionStart < 0 ? string.Empty : trimmed[fractionStart..fractionEnd];
+        var digits = integerDigits + fractionDigits;
+        var firstSignificant = 0;
+        while (firstSignificant < digits.Length && digits[firstSignificant] == '0')
+        {
+            firstSignificant++;
+        }
+
+        if (firstSignificant == digits.Length)
+        {
+            return new SqliteNumericParts("0", 0, true, true);
+        }
+
+        var lastSignificant = digits.Length - 1;
+        while (lastSignificant > firstSignificant && digits[lastSignificant] == '0')
+        {
+            lastSignificant--;
+        }
+
+        var significant = digits[firstSignificant..(lastSignificant + 1)];
+        var trailingZeros = digits.Length - lastSignificant - 1;
+        var decimalPlaces = fractionDigits.Length;
+        var power = checked(exponent - decimalPlaces + trailingZeros);
+        var canonical = BuildSqliteNumericText(significant, power, isNegative);
+        var isSignedInt64 = power >= 0 &&
+                            long.TryParse(
+                                canonical,
+                                NumberStyles.Integer,
+                                CultureInfo.InvariantCulture,
+                                out _);
+        return new SqliteNumericParts(canonical, significant.Length, false, isSignedInt64);
+    }
+
+    private static string BuildSqliteNumericText(string significant, int power, bool isNegative)
+    {
+        var sign = isNegative ? "-" : string.Empty;
+        var decimalPosition = checked(significant.Length + power);
+        if (power >= 0 && decimalPosition <= 60)
+        {
+            return sign + significant + new string('0', power);
+        }
+
+        if (power < 0 && decimalPosition > 0)
+        {
+            return sign + significant[..decimalPosition] + "." + significant[decimalPosition..];
+        }
+
+        if (power < 0 && checked(significant.Length - decimalPosition) <= 60)
+        {
+            return sign + "0." + new string('0', -decimalPosition) + significant;
+        }
+
+        var scientificExponent = checked(power + significant.Length - 1);
+        var coefficient = significant.Length == 1
+            ? significant
+            : significant[0] + "." + significant[1..];
+        var exponentText = scientificExponent >= 0
+            ? "+" + scientificExponent.ToString(CultureInfo.InvariantCulture)
+            : scientificExponent.ToString(CultureInfo.InvariantCulture);
+        return $"{sign}{coefficient}e{exponentText}";
+    }
+
+    private sealed record SqliteNumericParts(
+        string Text,
+        int SignificantDigits,
+        bool IsZero,
+        bool IsSignedInt64);
 
     private static bool FitsNonNegativeExactDecimalScale(
         string text,

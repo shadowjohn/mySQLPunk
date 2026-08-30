@@ -444,6 +444,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 
     protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) => value switch
     {
+        SqliteNumericValue numeric => numeric.Text,
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,
         SqlServerMoneyValue money => money.Value,
@@ -459,7 +460,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         {
             TableColumnValueKind.Integer => DbType.Int64,
             TableColumnValueKind.UnsignedInteger => DbType.UInt64,
-            TableColumnValueKind.Decimal => DbType.Decimal,
+            TableColumnValueKind.SqliteNumeric => DbType.String,
             TableColumnValueKind.FloatingPoint => DbType.Double,
             TableColumnValueKind.Boolean => DbType.Boolean,
             TableColumnValueKind.Date => DbType.Date,

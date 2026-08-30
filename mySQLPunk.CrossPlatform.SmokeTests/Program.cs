@@ -564,6 +564,11 @@ static async Task TableDataEditingAsync()
             CREATE TABLE no_primary_key (name TEXT NOT NULL);
             CREATE TABLE without_rowid (id INTEGER PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
             CREATE TABLE paged_sample (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE numeric_sample (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                amount DECIMAL(30,10) NOT NULL,
+                note TEXT NOT NULL
+            );
             INSERT INTO paged_sample (id, name) VALUES
                 (1, 'page-1'), (2, 'page-2'), (3, 'page-3'), (4, 'page-4'), (5, 'page-5');
             """);
@@ -626,6 +631,115 @@ static async Task TableDataEditingAsync()
                 "event_date",
                 TableCellInputMode.Value,
                 "2026-08-30T12:34:56.0000000")));
+
+        var numericTable = new DatabaseObjectInfo(string.Empty, "numeric_sample", DatabaseObjectKind.Table);
+        var emptyNumeric = await session.LoadTableDataAsync(profile.Database, numericTable);
+        var sqliteNumericColumn = emptyNumeric.Columns.Single(column => column.Name == "amount");
+        Assert(
+            sqliteNumericColumn is { ValueKind: TableColumnValueKind.SqliteNumeric, IsEditable: true },
+            "SQLite NUMERIC affinity 欄位應使用避免 REAL 精度損失的編輯器");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqliteNumericColumn,
+                new TableCellInput("amount", TableCellInputMode.Value, "+001.2300e+2")) is SqliteNumericValue
+            {
+                Text: "123"
+            },
+            "SQLite NUMERIC 應把安全的指數輸入正規化為固定十進位文字");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqliteNumericColumn,
+                new TableCellInput("amount", TableCellInputMode.Value, "9223372036854775807")) is SqliteNumericValue,
+            "SQLite NUMERIC 應接受可由 INTEGER storage class 無損保存的 Int64 上界");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqliteNumericColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, "12345678901234.56")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqliteNumericColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, "9223372036854775808")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqliteNumericColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, "1e309")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqliteNumericColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, "1e-400")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqliteNumericColumn,
+            new TableCellInput("amount", TableCellInputMode.Value, "1,234.5")));
+
+        await session.InsertTableRowAsync(
+            profile.Database,
+            numericTable,
+            new[]
+            {
+                new TableCellInput("amount", TableCellInputMode.Value, "1234567890123.45"),
+                new TableCellInput("note", TableCellInputMode.Value, "safe-real")
+            });
+        await session.InsertTableRowAsync(
+            profile.Database,
+            numericTable,
+            new[]
+            {
+                new TableCellInput("amount", TableCellInputMode.Value, "9223372036854775807"),
+                new TableCellInput("note", TableCellInputMode.Value, "safe-integer")
+            });
+        var numericRows = await session.LoadTableDataAsync(profile.Database, numericTable);
+        Assert(
+            Convert.ToString(numericRows.Rows[0].Values[1]) == "1234567890123.45" &&
+            Convert.ToString(numericRows.Rows[1].Values[1]) == "9223372036854775807",
+            "SQLite NUMERIC grid 應顯示實際儲存且可 round-trip 的 canonical 數值");
+        var numericStorage = await session.ExecuteAsync(
+            profile.Database,
+            "SELECT CAST(amount AS TEXT), typeof(amount) FROM numeric_sample ORDER BY id;");
+        Assert(
+            Convert.ToString(numericStorage.Rows[0][0]) == "1234567890123.45" &&
+            Convert.ToString(numericStorage.Rows[0][1]) == "real" &&
+            Convert.ToString(numericStorage.Rows[1][0]) == "9223372036854775807" &&
+            Convert.ToString(numericStorage.Rows[1][1]) == "integer",
+            "SQLite NUMERIC 寫入應依 affinity 使用 REAL／INTEGER 且保留 canonical 值");
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            profile.Database,
+            numericTable,
+            new[]
+            {
+                new TableCellInput("amount", TableCellInputMode.Value, "12345678901234.56"),
+                new TableCellInput("note", TableCellInputMode.Value, "must-not-land")
+            }));
+        Assert(
+            (await session.LoadTableDataAsync(profile.Database, numericTable)).Rows.Count == 2,
+            "會被 SQLite REAL 無聲取整的 NUMERIC 新增不可落入資料庫");
+
+        await session.UpdateTableRowAsync(
+            profile.Database,
+            numericTable,
+            numericRows.Rows[0],
+            new[]
+            {
+                new TableCellInput("amount", TableCellInputMode.Value, "1.23456789012345e-15")
+            });
+        var updatedNumericRows = await session.LoadTableDataAsync(profile.Database, numericTable);
+        var storedScientificNumeric = Convert.ToString(updatedNumericRows.Rows[0].Values[1]);
+        Assert(
+            storedScientificNumeric == "1.23456789012345e-15",
+            $"SQLite NUMERIC 應顯示實際儲存的科學記號值，實際為 {storedScientificNumeric}");
+        Assert(
+            TableCellValueConverter.MatchesOriginal(
+                sqliteNumericColumn,
+                new TableCellInput("amount", TableCellInputMode.Value, "0.00000000000000123456789012345"),
+                updatedNumericRows.Rows[0].Values[1]),
+            "SQLite NUMERIC 應能以固定或科學記號無損比對同一原值");
+        var staleNumericRow = updatedNumericRows.Rows[0];
+        await session.ExecuteAsync(
+            profile.Database,
+            $"UPDATE numeric_sample SET amount = 2.5 WHERE id = {Convert.ToInt64(staleNumericRow.Values[0])};");
+        await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+            profile.Database,
+            numericTable,
+            staleNumericRow,
+            new[] { new TableCellInput("note", TableCellInputMode.Value, "must-not-overwrite") }));
+        Assert(
+            Convert.ToString((await session.LoadTableDataAsync(profile.Database, numericTable)).Rows[0].Values[1]) == "2.5",
+            "SQLite NUMERIC optimistic predicate 應攔截外部數值變更");
 
         const string parameterizedName = "Punky '); DROP TABLE editor_sample;--";
         await session.InsertTableRowAsync(

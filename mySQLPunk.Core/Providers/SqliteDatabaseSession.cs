@@ -25,6 +25,27 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
 
     protected override string QuoteIdentifier(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
 
+    protected override void ConfigureParameter(
+        System.Data.Common.DbParameter parameter,
+        TableColumnInfo column)
+    {
+        base.ConfigureParameter(parameter, column);
+        if (column.ValueKind == TableColumnValueKind.SqliteNumeric && parameter is SqliteParameter sqliteParameter)
+        {
+            sqliteParameter.SqliteType = SqliteType.Text;
+        }
+    }
+
+    protected override string BuildTableDataSelectExpression(TableColumnInfo column)
+    {
+        var quotedName = QuoteIdentifier(column.Name);
+        return column.ValueKind == TableColumnValueKind.SqliteNumeric
+            ? $"CASE typeof({quotedName}) " +
+              $"WHEN 'real' THEN printf('%.15g', {quotedName}) " +
+              $"ELSE CAST({quotedName} AS TEXT) END AS {quotedName}"
+            : base.BuildTableDataSelectExpression(column);
+    }
+
     public override Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
     {
@@ -166,6 +187,6 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
                 : TableColumnValueKind.Date;
         }
 
-        return TableColumnValueKind.Decimal;
+        return TableColumnValueKind.SqliteNumeric;
     }
 }

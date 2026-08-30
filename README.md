@@ -74,6 +74,8 @@ Linux 資產是 `.tar.gz`，解壓後執行 `./install.sh` 即會以交易方式
 
 PostgreSQL `money` 會依資料庫目前的 `lc_monetary` 推導固定小數位，以不含幣別符號或千分位的 canonical 十進位文字無損編輯，並拒絕多餘小數與 8-byte 範圍溢位，避免 server 無聲取整或 Linux／macOS locale 改變顯示內容。
 
+SQLite 的 `NUMERIC`／`DECIMAL` affinity 欄位會以 SQLite 實際儲存的 canonical 數值顯示；signed 64-bit 整數可完整編輯，其餘數值限制為 SQLite TEXT↔REAL 可穩定保留的 15 位有效數字。超出安全精度、千分位或無效格式會在送出前拒絕，避免 Microsoft.Data.Sqlite 的 decimal TEXT 參數再被 NUMERIC affinity 悄悄轉成失真的 REAL。
+
 SQL Server `money`／`smallmoney` 會固定顯示 4 位小數，並以各自的原生參數與正負範圍安全編輯；需要取整的第 5 位小數、幣別符號、千分位、科學記號與溢位會在送出前拒絕，不交給 server 無聲四捨五入。
 
 MySQL／MariaDB 的 GEOMETRY、POINT、LINESTRING、POLYGON、MULTIPOINT、MULTILINESTRING、MULTIPOLYGON、GEOMETRYCOLLECTION，以及 SQL Server 的 geometry／geography，可用 `SRID=<非負整數>;<WKT>` 安全編輯；載入與寫回都保留 SRID，原值比對同時檢查 SRID 與 canonical WKT。畸形 WKT 會讓整筆交易回復；MariaDB 即使只回傳 warning／NULL，也會轉成明確錯誤，避免 nullable 欄位被靜默清空。超過 1 MiB 的 spatial 文字維持唯讀。
