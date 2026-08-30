@@ -67,7 +67,7 @@
 | 深色模式／平台原生設計 | ✅ | Windows 原生 WinForms、淺／深色主題與 DPI 向量圖示已完成。 |
 | 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、provider-aware integer range、SQLite NUMERIC／temporal／UUID／GUID、single／double 浮點無聲失真防護、MySQL／MariaDB mutation warning rollback、MySQL／MariaDB／SQL Server 固定長度 binary 防護與 SQL Server collation-aware 字串無損寫入、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／DATE／DATETIME／TIMESTAMP／UUID／INET4／INET6、PostgreSQL scalar temporal／bit string／timetz／含 typemod 無損驗證的 interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery、1 MiB 內 binary／JSON／XML、PostgreSQL 網路位址與 SQL Server scalar temporal／legacy LOB 欄位的安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。Linux x64／ARM64 使用 self-contained tar 安裝包，macOS Intel／Apple Silicon 使用 `.app.zip`，並可依 RID 安全檢查、下載及驗證最新 Release；Linux 已完成交易式套用、啟動健康檢查與 rollback，待補 macOS Developer ID/notarization、自動套用、其餘 provider 與進階功能。 |
 
-> 最新安全進度：MySQL 8、MariaDB 11.4 與 PostgreSQL 16 的一般字串已使用 byte-exact 原值比對，可在大小寫／重音不敏感 collation 下支撐 optimistic concurrency 衝突；PostgreSQL `citext` 可安全載入與編輯，保留原始格式的 `json` 也會逐 byte 攔截外部改動。Linux X11 已實際操作驗證，macOS 由原生 Intel／Apple Silicon CI 持續建置與檢查 app archive。
+> 最新安全進度：MySQL 8、MariaDB 11.4 與 PostgreSQL 16 的一般字串已使用 byte-exact 原值比對，可在大小寫／重音不敏感 collation 下支撐 optimistic concurrency 衝突；PostgreSQL `citext` 可安全載入與編輯，保留原始格式的 `json` 也會逐 byte 攔截外部改動，`json[]`、`xml[]` 等無 element equality 的陣列則改用 canonical text UTF-8 bytes 保留安全編輯與衝突防護。Linux X11 已實際操作驗證，macOS 由原生 Intel／Apple Silicon CI 持續建置與檢查 app archive。
 
 ## Provider 與服務覆蓋
 

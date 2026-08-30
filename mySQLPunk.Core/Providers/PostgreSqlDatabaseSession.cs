@@ -218,7 +218,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
 
-        if (column.ValueKind == TableColumnValueKind.String)
+        if (column.ValueKind is TableColumnValueKind.String or TableColumnValueKind.PostgreSqlArray)
         {
             return $"pg_catalog.convert_to(CAST({QuoteIdentifier(column.Name)} AS text), 'UTF8') = " +
                    $"pg_catalog.convert_to(CAST({parameterName} AS text), 'UTF8')";
