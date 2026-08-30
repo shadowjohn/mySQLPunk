@@ -49,6 +49,9 @@ public sealed partial class TableDataEditorWindow : Window
     private TableDataSort? _sort;
     private TableDataFilter? _filter;
     private readonly HashSet<string> _hiddenColumnNames = new(StringComparer.Ordinal);
+    private TableColumnPreferenceStore _columnPreferenceStore = new();
+    private TableColumnPreferenceKey? _columnPreferenceKey;
+    private string? _columnPreferenceWarning;
 
     public TableDataEditorWindow()
     {
@@ -93,12 +96,19 @@ public sealed partial class TableDataEditorWindow : Window
     public TableDataEditorWindow(
         IDatabaseSession session,
         string database,
-        DatabaseObjectInfo table)
+        DatabaseObjectInfo table,
+        TableColumnPreferenceStore? columnPreferenceStore = null)
         : this()
     {
         _session = session;
         _database = database;
         _table = table;
+        _columnPreferenceStore = columnPreferenceStore ?? _columnPreferenceStore;
+        _columnPreferenceKey = new TableColumnPreferenceKey(
+            session.Profile.Id,
+            database,
+            table.Schema,
+            table.Name);
 
         Title = $"{table.DisplayName} — 資料編輯";
         _titleText.Text = table.DisplayName;
@@ -111,7 +121,28 @@ public sealed partial class TableDataEditorWindow : Window
     private async void TableDataEditorWindow_Opened(object? sender, EventArgs e)
     {
         Opened -= TableDataEditorWindow_Opened;
+        await LoadColumnPreferencesAsync();
         await LoadDataAsync();
+    }
+
+    private async Task LoadColumnPreferencesAsync()
+    {
+        if (_columnPreferenceKey is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var hidden = await _columnPreferenceStore.LoadHiddenColumnsAsync(_columnPreferenceKey);
+            _hiddenColumnNames.Clear();
+            _hiddenColumnNames.UnionWith(hidden);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            _columnPreferenceWarning = $"無法載入欄位偏好：{exception.Message} 已改為顯示全部欄位。";
+            _hiddenColumnNames.Clear();
+        }
     }
 
     private async void Add_Click(object? sender, RoutedEventArgs e)
@@ -332,8 +363,30 @@ public sealed partial class TableDataEditorWindow : Window
             .Where(columnName => !selected.Contains(columnName)));
         RebuildGrid(snapshot);
         UpdateColumnVisibilityButton(snapshot);
-        _statusText.Text = $"目前顯示 {selected.Count:N0}／{snapshot.Columns.Count:N0} 欄；本頁匯出只包含可見欄位。";
+        var preferenceStatus = await SaveColumnPreferencesAsync();
+        _statusText.Text =
+            $"目前顯示 {selected.Count:N0}／{snapshot.Columns.Count:N0} 欄；本頁匯出只包含可見欄位。{preferenceStatus}";
         UpdateActionState();
+    }
+
+    private async Task<string> SaveColumnPreferencesAsync()
+    {
+        if (_columnPreferenceKey is null)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            await _columnPreferenceStore.SaveHiddenColumnsAsync(_columnPreferenceKey, _hiddenColumnNames);
+            _columnPreferenceWarning = null;
+            return "欄位顯示偏好已安全保存。";
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            _columnPreferenceWarning = $"無法保存欄位偏好：{exception.Message}";
+            return _columnPreferenceWarning;
+        }
     }
 
     private void FilterControl_Changed(object? sender, SelectionChangedEventArgs e)
@@ -516,6 +569,7 @@ public sealed partial class TableDataEditorWindow : Window
         _snapshot = loadedSnapshot;
         UpdateSortControls(loadedSnapshot);
         UpdateFilterControls(loadedSnapshot);
+        NormalizeHiddenColumns(loadedSnapshot);
         RebuildGrid(loadedSnapshot);
         UpdateColumnVisibilityButton(loadedSnapshot);
         var keyStatus = loadedSnapshot.HasPrimaryKey
@@ -539,9 +593,10 @@ public sealed partial class TableDataEditorWindow : Window
         var filterStatus = _filter is null
             ? "未套用篩選。"
             : $"已套用 {_filter.ColumnName} {GetFilterOperatorDisplayName(_filter.Operator)}篩選。";
+        var columnStatus = $"顯示 {GetVisibleColumns(loadedSnapshot).Count:N0}／{loadedSnapshot.Columns.Count:N0} 欄。";
         _statusText.Text = string.Join(
             " ",
-            new[] { successPrefix, range, keyStatus, pagingStatus, sortStatus, filterStatus }
+            new[] { successPrefix, range, keyStatus, pagingStatus, sortStatus, filterStatus, columnStatus, _columnPreferenceWarning }
                 .Where(value => !string.IsNullOrWhiteSpace(value)));
         UpdateActionState();
         return true;
@@ -598,6 +653,19 @@ public sealed partial class TableDataEditorWindow : Window
         }
 
         return columns;
+    }
+
+    private void NormalizeHiddenColumns(TableDataSnapshot snapshot)
+    {
+        var currentColumnNames = snapshot.Columns
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        _hiddenColumnNames.IntersectWith(currentColumnNames);
+        if (_hiddenColumnNames.Count >= snapshot.Columns.Count)
+        {
+            _hiddenColumnNames.Clear();
+            _columnPreferenceWarning = "既有欄位偏好與目前 schema 不相容，已安全改為顯示全部欄位。";
+        }
     }
 
     private void UpdateColumnVisibilityButton(TableDataSnapshot snapshot)

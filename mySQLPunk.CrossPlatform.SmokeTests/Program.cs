@@ -16,6 +16,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
     ("SQL 選取範圍安全執行", SqlExecutionSelectionAsync),
     ("本次執行期間查詢記錄", QueryExecutionHistoryAsync),
+    ("Table 欄位偏好安全持久化", TableColumnPreferencesAsync),
     ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
@@ -24,6 +25,58 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static async Task TableColumnPreferencesAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var path = Path.Combine(directory, "table-column-preferences.json");
+        var store = new TableColumnPreferenceStore(path);
+        var firstProfileId = Guid.NewGuid();
+        var first = new TableColumnPreferenceKey(firstProfileId, "orders.db", "sales", "orders");
+        var second = new TableColumnPreferenceKey(firstProfileId, "orders.db", "sales", "customers");
+        var otherProfile = new TableColumnPreferenceKey(Guid.NewGuid(), "orders.db", "sales", "orders");
+
+        await store.SaveHiddenColumnsAsync(first, new[] { "secret", "internal_notes" });
+        await store.SaveHiddenColumnsAsync(second, new[] { "audit_marker" });
+        await store.SaveHiddenColumnsAsync(otherProfile, new[] { "other_profile_only" });
+        var loaded = await store.LoadHiddenColumnsAsync(first);
+        Assert(
+            loaded.SetEquals(new[] { "secret", "internal_notes" }),
+            "欄位偏好應依 profile/database/schema/table 精確保存隱藏欄名");
+        var json = await File.ReadAllTextAsync(path);
+        Assert(
+            !json.Contains("filterValue", StringComparison.OrdinalIgnoreCase) &&
+            !json.Contains("rowValue", StringComparison.OrdinalIgnoreCase),
+            "欄位偏好檔不可包含篩選值或資料列值欄位");
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert(
+                File.GetUnixFileMode(path) == (UnixFileMode.UserRead | UnixFileMode.UserWrite),
+                "非 Windows 欄位偏好檔權限應限制為 0600");
+        }
+
+        await store.SaveHiddenColumnsAsync(first, new[] { "internal_notes" });
+        loaded = await store.LoadHiddenColumnsAsync(first);
+        Assert(loaded.SetEquals(new[] { "internal_notes" }), "更新偏好不可保留舊隱藏欄名");
+        await store.SaveHiddenColumnsAsync(first, Array.Empty<string>());
+        Assert((await store.LoadHiddenColumnsAsync(first)).Count == 0, "全部顯示應移除該 Table 的隱藏欄偏好");
+
+        await store.DeleteProfileAsync(firstProfileId);
+        Assert(
+            (await store.LoadHiddenColumnsAsync(second)).Count == 0 &&
+            (await store.LoadHiddenColumnsAsync(otherProfile)).SetEquals(new[] { "other_profile_only" }),
+            "刪除連線應只清除相同 profile ID 的欄位偏好");
+
+        await File.WriteAllTextAsync(path, "{ not-json }");
+        await AssertThrowsAsync<InvalidDataException>(() => store.LoadHiddenColumnsAsync(otherProfile));
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
 
 static Task QueryExecutionHistoryAsync()
 {

@@ -18,6 +18,7 @@
 - **跨平台 Table 本頁安全匯出**：Linux / macOS Table 編輯器可把目前排序後載入的頁面直接匯出成 CSV、TSV 或 JSON；沿用查詢結果的 UTF-8、試算表公式注入防護、暫存檔與驗證後原子替換。檔案選擇與提示都明確標示只包含目前最多 200 列，位於後續頁或仍有下一頁時不會誤稱為完整 Table。
 - **跨平台 Table 參數化篩選**：Linux / macOS Table 編輯器可對 metadata 白名單 scalar 欄位套用「精確等於／是 NULL／不是 NULL」，並與欄位排序及 PK 穩定分頁共同運作。欄名必須精確命中 metadata，值會先依欄位型別驗證再使用 provider 原生參數，未知欄名、偽造 SQL 片段，以及 binary／JSON／XML／spatial 等跨 provider 等號語意不一致的型別都會 fail closed。
 - **跨平台 Table 欄位顯示控制**：Linux / macOS Table 編輯器可暫時隱藏不需要的欄位，網格與 CSV／TSV／JSON 本頁匯出會一致只保留可見欄位；完整原始資料列仍留在記憶體供修改與 optimistic concurrency 比對，至少保留一欄，未知匯出欄名也會 fail closed。
+- **跨平台 Table 欄位偏好安全保存**：Linux / macOS 會依連線 ID、database、schema 與 Table 保存隱藏欄名，重開編輯器或程式後仍保留；偏好檔不記錄篩選值或資料列內容，採 1 MiB／500 Table 上限、原子替換與 Unix `0600`。刪除連線會同步清除該連線偏好，schema 變更若使全部現存欄位被舊設定隱藏，會安全退回全部顯示。
 - **跨平台 binary 安全編輯**：Linux / macOS Table 編輯器可用明確 `0x` 十六進位格式新增或修改 MySQL／MariaDB BLOB、PostgreSQL bytea、SQL Server binary／varbinary 與 SQLite BLOB；輸入必須是偶數個 hex 字元且上限 1 MiB，仍使用 binary 參數與原始值樂觀衝突防護。超過 1 MiB 的既有值只顯示前 16 bytes 與總長度並維持唯讀，避免編輯器建立超大型 hex 字串或 optimistic WHERE 參數。
 - **跨平台 JSON 安全編輯**：Linux / macOS Table 編輯器可新增或修改 MySQL／MariaDB JSON、PostgreSQL json／jsonb 與 SQLite JSON 欄位；儲存前以嚴格 JSON parser 拒絕空值、註解、尾端逗號、超過 64 層或 1 MiB 的輸入，並依 provider 指定 JSON 參數與語意正確的原始值比對。超過 1 MiB 的既有 JSON 只顯示摘要並維持唯讀，避免大型文字進入編輯器或 optimistic WHERE 參數。
 - **跨平台 XML 安全編輯**：Linux / macOS Table 編輯器可新增或修改 PostgreSQL xml、SQL Server xml 與 SQLite XML 欄位；儲存前拒絕空值、畸形文件、多根節點、DTD／外部實體、超過 64 層或 1 MiB 的內容，並依 PostgreSQL／SQL Server 的原生 XML 型別指定參數及安全原值 predicate。超過 1 MiB 的既有 XML 只顯示摘要並維持唯讀。

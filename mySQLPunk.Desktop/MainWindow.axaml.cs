@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private readonly ISecretStore _secretStore = SecretStoreFactory.CreateDefault();
     private readonly CrossPlatformUpdateService _updateService = new();
     private readonly QueryExecutionHistory _queryHistory = new();
+    private readonly TableColumnPreferenceStore _tableColumnPreferenceStore = new();
     private IDatabaseSession? _session;
     private IReadOnlyList<DatabaseObjectInfo> _databaseObjects = Array.Empty<DatabaseObjectInfo>();
     private QueryResult? _lastResult;
@@ -178,15 +179,16 @@ public sealed partial class MainWindow : Window
         var secretWarning = selected.UseSecretStore
             ? await DeleteStoredPasswordAsync(selected.Id)
             : string.Empty;
+        var preferenceWarning = await DeleteTableColumnPreferencesAsync(selected.Id);
         _profiles.Remove(selected);
         await SaveProfilesAsync();
         if (wasConnected)
         {
-            Disconnect($"連線設定已刪除。{secretWarning}");
+            Disconnect($"連線設定已刪除。{secretWarning}{preferenceWarning}");
         }
         else
         {
-            SetStatus($"連線設定已刪除。{secretWarning}");
+            SetStatus($"連線設定已刪除。{secretWarning}{preferenceWarning}");
         }
 
         UpdateActionState();
@@ -302,7 +304,11 @@ public sealed partial class MainWindow : Window
         if (databaseObject.Kind == DatabaseObjectKind.Table &&
             _databaseCombo.SelectedItem is string database)
         {
-            var editor = new TableDataEditorWindow(_session, database, databaseObject);
+            var editor = new TableDataEditorWindow(
+                _session,
+                database,
+                databaseObject,
+                _tableColumnPreferenceStore);
             await editor.ShowDialog(this);
             SetStatus($"已關閉 {databaseObject.DisplayName} 資料編輯器。");
             return;
@@ -948,6 +954,19 @@ public sealed partial class MainWindow : Window
         catch (Exception exception)
         {
             await ShowErrorAsync("無法儲存連線設定", exception);
+        }
+    }
+
+    private async Task<string> DeleteTableColumnPreferencesAsync(Guid profileId)
+    {
+        try
+        {
+            await _tableColumnPreferenceStore.DeleteProfileAsync(profileId);
+            return string.Empty;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            return $"但無法清除 Table 欄位偏好：{exception.Message}";
         }
     }
 

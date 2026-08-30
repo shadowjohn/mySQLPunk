@@ -94,7 +94,7 @@ public sealed class ConnectionProfileStore
         }
     }
 
-    private static string GetDefaultFilePath()
+    internal static string GetDefaultApplicationDataDirectory()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         if (string.IsNullOrWhiteSpace(appData))
@@ -102,8 +102,11 @@ public sealed class ConnectionProfileStore
             appData = GetFallbackApplicationDataPath();
         }
 
-        return Path.Combine(appData, "mySQLPunk", "connections.json");
+        return Path.Combine(appData, "mySQLPunk");
     }
+
+    private static string GetDefaultFilePath() =>
+        Path.Combine(GetDefaultApplicationDataDirectory(), "connections.json");
 
     private static string GetFallbackApplicationDataPath()
     {
