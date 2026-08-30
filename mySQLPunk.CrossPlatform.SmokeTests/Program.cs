@@ -605,6 +605,13 @@ static async Task TableDataEditingAsync()
                 '6F9619FF-8B86-D011-B42D-00C04FC964FF',
                 '{00000000-0000-0000-0000-000000000001}',
                 X'00112233445566778899AABBCCDDEEFF');
+            CREATE TABLE collation_sample (
+                id INTEGER PRIMARY KEY,
+                name TEXT COLLATE NOCASE NOT NULL,
+                padded TEXT COLLATE RTRIM NOT NULL,
+                marker TEXT NOT NULL
+            );
+            INSERT INTO collation_sample VALUES (1, 'Alpha', 'tail ', 'before');
             INSERT INTO paged_sample (id, name) VALUES
                 (1, 'page-1'), (2, 'page-2'), (3, 'page-3'), (4, 'page-4'), (5, 'page-5');
             """);
@@ -923,6 +930,40 @@ static async Task TableDataEditingAsync()
                 profile.Database,
                 "SELECT name FROM identifier_sample WHERE id = 1;")).Rows.Single()[0]) == "Identifier after",
             "SQLite GUID optimistic predicate 應攔截外部修改");
+
+        var collationTable = new DatabaseObjectInfo(string.Empty, "collation_sample", DatabaseObjectKind.Table);
+        var staleCollationRow = (await session.LoadTableDataAsync(
+            profile.Database,
+            collationTable)).Rows.Single();
+        await session.ExecuteAsync(
+            profile.Database,
+            "UPDATE collation_sample SET name = 'alpha', padded = 'tail' WHERE id = 1;");
+        await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+            profile.Database,
+            collationTable,
+            staleCollationRow,
+            new[] { new TableCellInput("marker", TableCellInputMode.Value, "must-not-overwrite") }));
+        var afterCollationConflict = await session.ExecuteAsync(
+            profile.Database,
+            "SELECT name, quote(padded), marker FROM collation_sample WHERE id = 1;");
+        Assert(
+            Convert.ToString(afterCollationConflict.Rows.Single()[0]) == "alpha" &&
+            Convert.ToString(afterCollationConflict.Rows.Single()[1]) == "'tail'" &&
+            Convert.ToString(afterCollationConflict.Rows.Single()[2]) == "before",
+            "SQLite NOCASE／RTRIM 不可掩蓋外部文字 bytes 變更或提交 stale update");
+        var refreshedCollationRow = (await session.LoadTableDataAsync(
+            profile.Database,
+            collationTable)).Rows.Single();
+        await session.UpdateTableRowAsync(
+            profile.Database,
+            collationTable,
+            refreshedCollationRow,
+            new[] { new TableCellInput("marker", TableCellInputMode.Value, "after-refresh") });
+        Assert(
+            Convert.ToString((await session.ExecuteAsync(
+                profile.Database,
+                "SELECT marker FROM collation_sample WHERE id = 1;")).Rows.Single()[0]) == "after-refresh",
+            "SQLite byte-exact optimistic predicate 不可阻擋重新整理後的合法修改");
 
         var numericTable = new DatabaseObjectInfo(string.Empty, "numeric_sample", DatabaseObjectKind.Table);
         var emptyNumeric = await session.LoadTableDataAsync(profile.Database, numericTable);

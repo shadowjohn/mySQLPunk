@@ -62,6 +62,20 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
             : base.BuildTableDataSelectExpression(column);
     }
 
+    protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
+    {
+        if (column.ValueKind is TableColumnValueKind.String or
+            TableColumnValueKind.SqliteTemporal or
+            TableColumnValueKind.SqliteGuid or
+            TableColumnValueKind.Json or
+            TableColumnValueKind.Xml)
+        {
+            return $"CAST({QuoteIdentifier(column.Name)} AS BLOB) = CAST({parameterName} AS BLOB)";
+        }
+
+        return base.BuildOriginalValuePredicate(column, parameterName);
+    }
+
     public override Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
     {

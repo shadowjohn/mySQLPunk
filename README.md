@@ -84,6 +84,8 @@ SQLite `DATE`／`TIME`／`DATETIME`／`TIMESTAMP`／`DATETIMEOFFSET` 以嚴格 I
 
 SQLite `UUID`／`GUID` 宣告欄位使用 8-4-4-4-12 標準格式驗證，再以 TEXT 參數逐字保存大小寫；省略連字號、大括號或畸形值會在送出前拒絕。既有非標準 GUID 文字或 16-byte BLOB 未修改時仍以原 storage class 參與 optimistic concurrency，不會阻擋其它欄位的安全修改。
 
+SQLite 文字、JSON、XML、temporal 與 GUID 欄位的 optimistic concurrency 會把資料庫原值與參數轉成 BLOB 後逐 byte 比對，不受欄位 `NOCASE`、`RTRIM` 或自訂 collation 的寬鬆等號影響；其它連線只改大小寫或尾端空白也會觸發衝突，不會提交 stale 修改或刪除。
+
 MySQL／MariaDB `FLOAT`、PostgreSQL `real`、SQL Server `real`／`float(1–24)` 使用 4-byte IEEE 754 編輯器，其餘 `DOUBLE`／`double precision`／`float(25–53)` 與 SQLite `REAL` 使用 8-byte 編輯器。輸入必須能以目標 single／double 的 canonical 十進位文字 round-trip；會改變數字、溢位、下溢為 subnormal／zero、NaN 與 Infinity 都會在送出前拒絕。MySQL／MariaDB `FLOAT(M,D)` 另外檢查 scale、整數位與 `UNSIGNED`，而 `FLOAT` 載入會先提升為 `DOUBLE`，避開伺服器 text protocol 只輸出約 6 位有效數字造成的二次失真。
 
 MySQL／MariaDB `TINYINT`／`SMALLINT`／`MEDIUMINT`／`INT`／`BIGINT` 會依 signed／unsigned／`ZEROFILL` 宣告驗證完整 1–8 byte 範圍；PostgreSQL `smallint`／`integer`／`bigint`、SQL Server `tinyint`／`smallint`／`int`／`bigint` 也使用各自的 metadata 邊界，domain 與 alias type 沿用 base type。越界值會在送出前拒絕，避免 MySQL／MariaDB non-strict 模式只回 warning 並把數值靜默截到最近邊界；`BIGINT UNSIGNED` 的 `18446744073709551615` 上界仍可完整 round-trip。
