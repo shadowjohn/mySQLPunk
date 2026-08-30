@@ -13,6 +13,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 {
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("查詢結果安全匯出", QueryResultExportFormatsAsync),
+    ("查詢結果型別感知排序", QueryResultValueSortingAsync),
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
     ("SQL 選取範圍與游標 statement 安全執行", SqlExecutionSelectionAsync),
     ("本次執行期間查詢記錄", QueryExecutionHistoryAsync),
@@ -26,6 +27,31 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static Task QueryResultValueSortingAsync()
+{
+    var comparer = QueryResultValueComparer.Instance;
+    var values = new object?[] { 10L, null, 2, DBNull.Value, -1m };
+    Array.Sort(values, comparer);
+    Assert(values[0] is null or DBNull && values[1] is null or DBNull &&
+           Convert.ToDecimal(values[2], CultureInfo.InvariantCulture) == -1m &&
+           Convert.ToDecimal(values[3], CultureInfo.InvariantCulture) == 2m &&
+           Convert.ToDecimal(values[4], CultureInfo.InvariantCulture) == 10m,
+        "NULL 與跨 CLR 數字型別應穩定排序，且不可觸發異質型別比較例外");
+
+    Assert(comparer.Compare("(NULL)", null) > 0, "文字 (NULL) 不可與資料庫 NULL 混為同一值");
+    Assert(comparer.Compare(double.NaN, double.NegativeInfinity) < 0, "浮點特殊值應可穩定比較");
+    Assert(comparer.Compare(new byte[] { 0x01, 0x02 }, new byte[] { 0x01, 0x10 }) < 0,
+        "binary 應依 byte lexicographic 順序比較");
+    Assert(comparer.Compare(new DateTime(2026, 8, 29), new DateTime(2026, 8, 30)) < 0,
+        "相同 CLR 型別的日期值應保留原生比較語意");
+
+    var mixedForward = comparer.Compare(Guid.Empty, "text");
+    var mixedBackward = comparer.Compare("text", Guid.Empty);
+    Assert(Math.Sign(mixedForward) == -Math.Sign(mixedBackward),
+        "無法直接比較的 provider 異質值仍應提供對稱且不拋例外的順序");
+    return Task.CompletedTask;
+}
 
 static async Task SqlDocumentFilesAsync()
 {

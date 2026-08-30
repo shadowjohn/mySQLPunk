@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia;
@@ -1088,14 +1089,23 @@ public sealed partial class MainWindow : Window
             {
                 Header = result.Columns[index],
                 Binding = new Binding($"Values[{index}]"),
+                CanUserSort = true,
+                CustomSortComparer = new ResultRowColumnComparer(index),
                 Width = new DataGridLength(1, DataGridLengthUnitType.Auto)
             });
         }
 
         _resultsGrid.ItemsSource = result.Rows
-            .Select((row, rowIndex) => new ResultRow(
-                rowIndex,
-                row.Select(value => value ?? "(NULL)").ToArray()))
+            .Select((row, rowIndex) =>
+            {
+                var originalValues = row.ToArray();
+                return new ResultRow(
+                    rowIndex,
+                    originalValues
+                        .Select(value => value is null or DBNull ? "(NULL)" : value)
+                        .ToArray(),
+                    originalValues);
+            })
             .ToList();
     }
 
@@ -1507,7 +1517,30 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private sealed record ResultRow(int RowIndex, IReadOnlyList<object?> Values);
+    private sealed record ResultRow(
+        int RowIndex,
+        IReadOnlyList<object?> Values,
+        IReadOnlyList<object?> OriginalValues);
+
+    private sealed class ResultRowColumnComparer(int columnIndex) : IComparer
+    {
+        public int Compare(object? left, object? right)
+        {
+            if (left is not ResultRow leftRow)
+            {
+                return right is ResultRow ? -1 : 0;
+            }
+
+            if (right is not ResultRow rightRow)
+            {
+                return 1;
+            }
+
+            return QueryResultValueComparer.Instance.Compare(
+                leftRow.OriginalValues[columnIndex],
+                rightRow.OriginalValues[columnIndex]);
+        }
+    }
 
     private sealed record PasswordResolution(bool Found, string Password, string? Warning);
 }
