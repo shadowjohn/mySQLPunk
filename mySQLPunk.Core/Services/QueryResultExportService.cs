@@ -33,6 +33,28 @@ public static class QueryResultExportService
 {
     private static readonly UTF8Encoding Utf8WithBom = new(true);
 
+    public static QueryResult CreateTablePageResult(TableDataSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var columns = snapshot.Columns.OrderBy(column => column.Ordinal).ToList();
+        if (columns.Select(column => column.Ordinal).Where((ordinal, index) => ordinal != index).Any())
+        {
+            throw new InvalidOperationException("Table 欄位 ordinal 不連續，請重新載入 schema 後再匯出。");
+        }
+
+        if (snapshot.Rows.Any(row => row.Values.Count != columns.Count))
+        {
+            throw new InvalidOperationException("Table 資料列與目前 schema 不一致，請重新整理後再匯出。");
+        }
+
+        return new QueryResult
+        {
+            Columns = columns.Select(column => column.Name).ToList(),
+            Rows = snapshot.Rows.Select(row => row.Values).ToList(),
+            WasTruncated = snapshot.WasTruncated || snapshot.RowOffset > 0
+        };
+    }
+
     public static string GetDefaultExtension(QueryResultExportFormat format) => format switch
     {
         QueryResultExportFormat.Csv => "csv",

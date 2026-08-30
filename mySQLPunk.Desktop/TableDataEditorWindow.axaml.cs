@@ -3,6 +3,7 @@ using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using MySqlPunk.Core.Models;
 using MySqlPunk.Core.Providers;
 using MySqlPunk.Core.Services;
@@ -23,12 +24,14 @@ public sealed partial class TableDataEditorWindow : Window
     private readonly TextBlock _pageText;
     private readonly ComboBox _sortColumnCombo;
     private readonly ComboBox _sortDirectionCombo;
+    private readonly ComboBox _exportFormatCombo;
     private readonly Button _previousButton;
     private readonly Button _nextButton;
     private readonly Button _addButton;
     private readonly Button _editButton;
     private readonly Button _deleteButton;
     private readonly Button _refreshButton;
+    private readonly Button _exportPageButton;
     private readonly Button _closeButton;
     private TableDataSnapshot? _snapshot;
     private CancellationTokenSource? _cancellation;
@@ -48,12 +51,14 @@ public sealed partial class TableDataEditorWindow : Window
         _pageText = this.FindControl<TextBlock>("PageText")!;
         _sortColumnCombo = this.FindControl<ComboBox>("SortColumnCombo")!;
         _sortDirectionCombo = this.FindControl<ComboBox>("SortDirectionCombo")!;
+        _exportFormatCombo = this.FindControl<ComboBox>("ExportFormatCombo")!;
         _previousButton = this.FindControl<Button>("PreviousButton")!;
         _nextButton = this.FindControl<Button>("NextButton")!;
         _addButton = this.FindControl<Button>("AddButton")!;
         _editButton = this.FindControl<Button>("EditButton")!;
         _deleteButton = this.FindControl<Button>("DeleteButton")!;
         _refreshButton = this.FindControl<Button>("RefreshButton")!;
+        _exportPageButton = this.FindControl<Button>("ExportPageButton")!;
         _closeButton = this.FindControl<Button>("CloseButton")!;
         _updatingSortControls = true;
         _sortDirectionCombo.ItemsSource = new[] { "遞增（A → Z）", "遞減（Z → A）" };
@@ -175,6 +180,107 @@ public sealed partial class TableDataEditorWindow : Window
         await LoadDataAsync();
     }
 
+    private async void ExportPage_Click(object? sender, RoutedEventArgs e)
+    {
+        var snapshot = _snapshot;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        if (snapshot.WasTruncated || snapshot.RowOffset > 0)
+        {
+            var confirmed = await MessageDialog.ShowAsync(
+                this,
+                "只匯出目前頁面",
+                $"只會匯出第 {(_rowOffset / RowLimit) + 1:N0} 頁目前載入的 {snapshot.Rows.Count:N0} 列，" +
+                "並保留目前排序；其他頁不會包含。是否繼續？",
+                showCancel: true);
+            if (!confirmed)
+            {
+                return;
+            }
+        }
+
+        if (!StorageProvider.CanSave)
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "無法匯出目前頁面",
+                "目前桌面環境未提供儲存檔案對話框。",
+                showCancel: false);
+            return;
+        }
+
+        var selectedFormat = _exportFormatCombo.SelectedIndex switch
+        {
+            1 => QueryResultExportFormat.Tsv,
+            2 => QueryResultExportFormat.Json,
+            _ => QueryResultExportFormat.Csv
+        };
+        var extension = QueryResultExportService.GetDefaultExtension(selectedFormat);
+        var fileType = new FilePickerFileType(
+            $"{QueryResultExportService.GetFormatDisplayName(selectedFormat)} Table 頁面")
+        {
+            Patterns = new[] { $"*.{extension}" },
+            MimeTypes = selectedFormat switch
+            {
+                QueryResultExportFormat.Csv => new[] { "text/csv" },
+                QueryResultExportFormat.Tsv => new[] { "text/tab-separated-values" },
+                QueryResultExportFormat.Json => new[] { "application/json" },
+                _ => Array.Empty<string>()
+            }
+        };
+        IStorageFile? file;
+        try
+        {
+            file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "匯出目前 Table 頁面",
+                SuggestedFileName = BuildSuggestedExportFileName(extension),
+                DefaultExtension = extension,
+                FileTypeChoices = new[] { fileType }
+            });
+        }
+        catch (Exception exception)
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "無法開啟儲存檔案對話框",
+                exception.Message,
+                showCancel: false);
+            return;
+        }
+
+        if (file is null)
+        {
+            return;
+        }
+
+        if (file.TryGetLocalPath() is not { } path)
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "無法匯出目前頁面",
+                "目前只能匯出到本機檔案。",
+                showCancel: false);
+            return;
+        }
+
+        var result = QueryResultExportService.CreateTablePageResult(snapshot);
+        var format = QueryResultExportService.ResolveFormat(path, selectedFormat);
+        QueryResultExportSummary? summary = null;
+        var succeeded = await RunAsync("正在安全匯出目前頁面…", async cancellationToken =>
+        {
+            summary = await QueryResultExportService.WriteFileAsync(result, path, format, cancellationToken);
+        });
+        if (succeeded && summary is not null)
+        {
+            _statusText.Text =
+                $"已匯出本頁 {summary.Rows:N0} 列 {summary.FormatDisplayName}（{summary.FormattedBytes}）：{summary.Path}";
+        }
+    }
+
     private async void Previous_Click(object? sender, RoutedEventArgs e)
     {
         if (_busy || _rowOffset <= 0)
@@ -210,6 +316,22 @@ public sealed partial class TableDataEditorWindow : Window
     private void Close_Click(object? sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private string BuildSuggestedExportFileName(string extension)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        var safeTableName = new string(_table.DisplayName
+            .Select(character => invalidCharacters.Contains(character) || char.IsControl(character) ? '-' : character)
+            .Take(80)
+            .ToArray())
+            .Trim(' ', '.', '-');
+        if (safeTableName.Length == 0)
+        {
+            safeTableName = "table";
+        }
+
+        return $"mysqlpunk-{safeTableName}-page-{(_rowOffset / RowLimit) + 1}-{DateTime.Now:yyyyMMdd-HHmmss}.{extension}";
     }
 
     private void DataGrid_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -434,6 +556,8 @@ public sealed partial class TableDataEditorWindow : Window
         _previousButton.IsEnabled = !_busy && _snapshot?.HasPreviousPage == true;
         _nextButton.IsEnabled = !_busy && _snapshot?.HasNextPage == true;
         _refreshButton.IsEnabled = !_busy;
+        _exportFormatCombo.IsEnabled = !_busy && hasSnapshot;
+        _exportPageButton.IsEnabled = !_busy && hasSnapshot;
         _closeButton.IsEnabled = !_busy;
         _dataGrid.IsEnabled = !_busy;
         _sortColumnCombo.IsEnabled = !_busy && hasSnapshot && _snapshot!.HasPrimaryKey && _hasSortableColumns;

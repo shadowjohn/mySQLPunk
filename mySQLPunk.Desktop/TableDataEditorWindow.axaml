@@ -26,7 +26,7 @@
     </Border>
 
     <Border Grid.Row="1" Background="#F8FAFD" BorderBrush="#CDD5E0" BorderThickness="0,0,0,1" Padding="12,8">
-      <Grid ColumnDefinitions="Auto,260,Auto,150,*">
+      <Grid ColumnDefinitions="Auto,260,Auto,150,*,Auto,82,Auto">
         <TextBlock Grid.Column="0" Text="排序欄位" Margin="0,0,8,0" VerticalAlignment="Center" />
         <ComboBox Grid.Column="1"
                   x:Name="SortColumnCombo"
@@ -41,6 +41,17 @@
                    Foreground="#5F6B7A"
                    VerticalAlignment="Center"
                    TextWrapping="Wrap" />
+        <TextBlock Grid.Column="5" Text="格式" Margin="12,0,7,0" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="6" x:Name="ExportFormatCombo" SelectedIndex="0">
+          <ComboBoxItem Content="CSV" />
+          <ComboBoxItem Content="TSV" />
+          <ComboBoxItem Content="JSON" />
+        </ComboBox>
+        <Button Grid.Column="7"
+                x:Name="ExportPageButton"
+                Content="匯出本頁…"
+                Click="ExportPage_Click"
+                Margin="7,0,0,0" />
       </Grid>
     </Border>
 

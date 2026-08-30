@@ -827,6 +827,23 @@ static async Task TableDataEditingAsync()
             sortedSecondPage.Rows.Select(row => Convert.ToInt64(row.Values[0])).SequenceEqual(new long[] { 3, 4 }) &&
             sortedLastPage.Rows.Select(row => Convert.ToInt64(row.Values[0])).SequenceEqual(new long[] { 1 }),
             "欄位遞減排序應在相同值後以 Primary Key 遞增作為跨頁 tie-breaker");
+        var sortedExportPage = QueryResultExportService.CreateTablePageResult(sortedFirstPage);
+        Assert(
+            sortedExportPage.Columns.SequenceEqual(new[] { "id", "name" }) &&
+            sortedExportPage.Rows.Select(row => Convert.ToInt64(row[0])).SequenceEqual(new long[] { 5, 2 }) &&
+            sortedExportPage.WasTruncated,
+            "Table 本頁匯出應保留目前欄位與排序，並標示還有其他頁未包含");
+        await using var sortedExportStream = new MemoryStream();
+        await QueryResultExportService.WriteAsync(
+            sortedExportPage,
+            sortedExportStream,
+            QueryResultExportFormat.Csv);
+        var sortedExportCsv = Encoding.UTF8.GetString(sortedExportStream.ToArray()).TrimStart('\uFEFF');
+        Assert(
+            sortedExportCsv == "id,name\r\n5,zulu\r\n2,same\r\n",
+            $"Table 本頁 CSV 應保留目前排序與安全格式；actual={sortedExportCsv.Replace("\r", "\\r").Replace("\n", "\\n")}");
+        var lastExportPage = QueryResultExportService.CreateTablePageResult(sortedLastPage);
+        Assert(lastExportPage.WasTruncated, "非第一頁即使已到結尾，匯出仍應標示不是完整 Table");
         await AssertThrowsAsync<ArgumentException>(() => session.LoadTableDataAsync(
             profile.Database,
             pagedTable,
