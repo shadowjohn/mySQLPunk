@@ -319,8 +319,9 @@ public sealed partial class TableDataEditorWindow : Window
         catch (Exception exception)
         {
             var title = exception is TableDataConflictException ? "資料已變更" : "資料表操作失敗";
-            _statusText.Text = $"{title}：{exception.Message}";
-            await MessageDialog.ShowAsync(this, title, exception.Message, showCancel: false);
+            var message = FormatMutationError(exception);
+            _statusText.Text = $"{title}：{message}";
+            await MessageDialog.ShowAsync(this, title, message, showCancel: false);
             return false;
         }
         finally
@@ -335,6 +336,11 @@ public sealed partial class TableDataEditorWindow : Window
             UpdateActionState();
         }
     }
+
+    private static string FormatMutationError(Exception exception) =>
+        exception.Message.Contains("mysqlpunk-string-invalid-", StringComparison.Ordinal)
+            ? "SQL Server 無法將輸入文字依欄位 collation 無損保存，或輸入超過欄位的 byte 上限；本次修改已回復，資料未變更。"
+            : exception.Message;
 
     private void UpdateActionState()
     {

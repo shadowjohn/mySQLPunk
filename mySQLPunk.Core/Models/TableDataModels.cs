@@ -63,6 +63,10 @@ public sealed record TableColumnInfo(
 
     public int? RequiredBinaryLength { get; init; }
 
+    public int? MaximumStringLengthInBytes { get; init; }
+
+    public string? StorageCollationName { get; init; }
+
     public bool IsEditable => !IsGenerated && ValueKind is not TableColumnValueKind.Unsupported;
 
     public string DisplayName => IsPrimaryKey ? $"{Name} · PK" : Name;

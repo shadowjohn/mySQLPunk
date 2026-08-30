@@ -103,12 +103,18 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                 temporalParameter.Scale = TableCellValueConverter.GetSqlServerTemporalScale(column);
             }
         }
+        else if (column.ValueKind == TableColumnValueKind.String &&
+                 parameter is SqlParameter stringParameter)
+        {
+            // Keep the user's original Unicode text intact until the SQL expression can
+            // validate it against the destination column's collation and byte limit.
+            stringParameter.SqlDbType = SqlDbType.NVarChar;
+            stringParameter.Size = -1;
+        }
         else if (parameter is SqlParameter legacyParameter)
         {
             legacyParameter.SqlDbType = GetBaseTypeName(column.StorageDataTypeName) switch
             {
-                "text" => System.Data.SqlDbType.Text,
-                "ntext" => System.Data.SqlDbType.NText,
                 "image" => System.Data.SqlDbType.Image,
                 _ => legacyParameter.SqlDbType
             };
@@ -234,6 +240,21 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
 
     protected override string BuildOriginalValuePredicate(TableColumnInfo column, string parameterName)
     {
+        if (column.ValueKind == TableColumnValueKind.String)
+        {
+            var stringDataType = GetBaseTypeName(column.StorageDataTypeName);
+            var collationClause = BuildStringCollationClause(column);
+            var unicodeInput = $"CONVERT(nvarchar(max), {parameterName}){collationClause}";
+            var originalInput = stringDataType is "char" or "varchar" or "text"
+                ? $"CONVERT(varchar(max), {unicodeInput}){collationClause}"
+                : unicodeInput;
+            var storedValue = stringDataType is "char" or "varchar" or "text"
+                ? $"CONVERT(varchar(max), {QuoteIdentifier(column.Name)})"
+                : $"CONVERT(nvarchar(max), {QuoteIdentifier(column.Name)})";
+            return $"CONVERT(varbinary(max), {storedValue}) = " +
+                   $"CONVERT(varbinary(max), {originalInput})";
+        }
+
         if (column.ValueKind == TableColumnValueKind.Xml)
         {
             return $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {QuoteIdentifier(column.Name)})) = " +
@@ -258,16 +279,6 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         }
 
         var dataType = GetBaseTypeName(column.StorageDataTypeName);
-        if (dataType == "text")
-        {
-            return $"CONVERT(varbinary(max), CONVERT(varchar(max), {QuoteIdentifier(column.Name)})) = " +
-                   $"CONVERT(varbinary(max), CONVERT(varchar(max), {parameterName}))";
-        }
-        if (dataType == "ntext")
-        {
-            return $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {QuoteIdentifier(column.Name)})) = " +
-                   $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {parameterName}))";
-        }
         if (dataType == "image")
         {
             return $"CONVERT(varbinary(max), {QuoteIdentifier(column.Name)}) = " +
@@ -396,6 +407,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         string parameterName,
         object? value)
     {
+        if (column.ValueKind == TableColumnValueKind.String && value is string)
+        {
+            return BuildStringValueExpression(column, parameterName);
+        }
+
         if (column.ValueKind == TableColumnValueKind.SqlServerVariant &&
             value is SqlServerVariantValue { BaseTypeName: "numeric", Precision: { } precision, Scale: { } scale })
         {
@@ -429,7 +445,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         string typedValue;
         if (variant.BaseTypeName is "char" or "varchar")
         {
-            var ansiInput = $"CONVERT(varchar(max), {parameterName}){collationClause}";
+            var ansiInput = $"CONVERT(varchar(max), {unicodeInput}){collationClause}";
             fitsWithoutLoss =
                 $"DATALENGTH({ansiInput}) <= {size} AND " +
                 $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {ansiInput})) = " +
@@ -450,12 +466,111 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                $"ELSE {rejectedValue} END";
     }
 
+    private static string BuildStringValueExpression(TableColumnInfo column, string parameterName)
+    {
+        var baseType = GetBaseTypeName(column.StorageDataTypeName);
+        if (baseType is not ("char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext"))
+        {
+            throw new InvalidOperationException(
+                $"無法建立 SQL Server 字串型別「{column.StorageDataTypeName}」的無損參數。");
+        }
+
+        var collationClause = BuildStringCollationClause(column);
+        var unicodeInput = $"CONVERT(nvarchar(max), {parameterName}){collationClause}";
+
+        if (baseType is "text" or "char" or "varchar")
+        {
+            var ansiInput = $"CONVERT(varchar(max), {unicodeInput}){collationClause}";
+            var fitsWithoutLoss =
+                $"CONVERT(varbinary(max), CONVERT(nvarchar(max), {ansiInput})) = " +
+                $"CONVERT(varbinary(max), {unicodeInput})";
+            if (baseType is "char" or "varchar")
+            {
+                var maximumBytes = GetRequiredStringMaximumBytes(column);
+                if (maximumBytes >= 0)
+                {
+                    fitsWithoutLoss = $"DATALENGTH({ansiInput}) <= {maximumBytes} AND {fitsWithoutLoss}";
+                }
+            }
+
+            var typedValue = baseType == "text"
+                ? ansiInput
+                : $"CAST({ansiInput} AS {baseType}({FormatStringSize(column)})){collationClause}";
+            return BuildStringValidationCase(parameterName, fitsWithoutLoss, typedValue, unicode: false, collationClause);
+        }
+
+        if (baseType == "ntext")
+        {
+            return unicodeInput;
+        }
+
+        var maximumUnicodeBytes = GetRequiredStringMaximumBytes(column);
+        var unicodeFits = maximumUnicodeBytes < 0
+            ? "1 = 1"
+            : $"DATALENGTH({unicodeInput}) <= {maximumUnicodeBytes}";
+        var unicodeTypedValue =
+            $"CAST({unicodeInput} AS {baseType}({FormatStringSize(column)})){collationClause}";
+        return BuildStringValidationCase(
+            parameterName,
+            unicodeFits,
+            unicodeTypedValue,
+            unicode: true,
+            collationClause);
+    }
+
+    private static string BuildStringValidationCase(
+        string parameterName,
+        string fitsWithoutLoss,
+        string typedValue,
+        bool unicode,
+        string collationClause)
+    {
+        var resultType = unicode ? "nvarchar(max)" : "varchar(max)";
+        var rejectedValue =
+            $"CONVERT({resultType}, CONVERT(int, CONCAT('mysqlpunk-string-invalid-', DATALENGTH({parameterName}))))" +
+            collationClause;
+        return $"CASE WHEN {fitsWithoutLoss} THEN {typedValue} ELSE {rejectedValue} END";
+    }
+
+    private static int GetRequiredStringMaximumBytes(TableColumnInfo column)
+    {
+        if (column.MaximumStringLengthInBytes is not { } maximumBytes || maximumBytes is 0 or < -1)
+        {
+            throw new InvalidOperationException(
+                $"SQL Server 字串欄位「{column.Name}」缺少有效的長度 metadata，已停止寫入以避免資料失真。");
+        }
+
+        return maximumBytes;
+    }
+
+    private static string BuildStringCollationClause(TableColumnInfo column)
+    {
+        var collationName = column.StorageCollationName is { } value
+            ? ValidateCollationName(value)
+            : throw new InvalidOperationException(
+                $"SQL Server 字串欄位「{column.Name}」缺少 collation metadata，已停止寫入以避免資料失真。");
+        return $" COLLATE {collationName}";
+    }
+
+    private static string FormatStringSize(TableColumnInfo column)
+    {
+        var maximumBytes = GetRequiredStringMaximumBytes(column);
+        if (maximumBytes < 0)
+        {
+            return "max";
+        }
+
+        var baseType = GetBaseTypeName(column.StorageDataTypeName);
+        var size = baseType is "nchar" or "nvarchar" ? maximumBytes / 2 : maximumBytes;
+        return size.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private static string ValidateCollationName(string value)
     {
         if (value.Length is < 1 or > 128 ||
             value.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '_'))
         {
-            throw new InvalidOperationException("sql_variant collation 名稱只允許英數字與底線。");
+            throw new InvalidOperationException("SQL Server collation 名稱只允許英數字與底線。");
         }
 
         return value;
@@ -547,7 +662,8 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                    c.default_object_id,
                    c.max_length,
                    c.precision,
-                   c.scale
+                   c.scale,
+                   c.collation_name
             FROM sys.columns c
             JOIN sys.tables t ON t.object_id = c.object_id
             JOIN sys.schemas s ON s.schema_id = t.schema_id
@@ -586,6 +702,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             int? requiredBinaryLength = baseType.Equals("binary", StringComparison.OrdinalIgnoreCase)
                 ? reader.GetInt16(10)
                 : null;
+            int? maximumStringLengthInBytes = baseType.ToLowerInvariant() switch
+            {
+                "char" or "varchar" or "nchar" or "nvarchar" => reader.GetInt16(10),
+                _ => null
+            };
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -599,7 +720,9 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                 StorageDataTypeName = storageType,
                 IntegerMinimum = integerBounds?.Minimum,
                 IntegerMaximum = integerBounds?.Maximum,
-                RequiredBinaryLength = requiredBinaryLength
+                RequiredBinaryLength = requiredBinaryLength,
+                MaximumStringLengthInBytes = maximumStringLengthInBytes,
+                StorageCollationName = reader.IsDBNull(13) ? null : reader.GetString(13)
             });
         }
 

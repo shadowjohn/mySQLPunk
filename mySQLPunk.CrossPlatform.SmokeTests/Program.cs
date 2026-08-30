@@ -3175,7 +3175,8 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE dbo.positive_count FROM int NOT NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.precise_amount FROM decimal(18,6) NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.fixed_token FROM binary(4) NULL;");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, fixed_payload BINARY(3) NULL, alias_fixed_payload dbo.fixed_token NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, tiny_value TINYINT NULL, small_value SMALLINT NULL, integer_value INT NULL, big_value BIGINT NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TYPE dbo.ansi_code FROM varchar(6) NULL;");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, fixed_payload BINARY(3) NULL, alias_fixed_payload dbo.fixed_token NULL, document XML NULL, legacy_text TEXT COLLATE SQL_Latin1_General_CP1_CI_AS NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, tiny_value TINYINT NULL, small_value SMALLINT NULL, integer_value INT NULL, big_value BIGINT NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL, ansi_text VARCHAR(8) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, ansi_fixed CHAR(4) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, utf8_text VARCHAR(8) COLLATE Latin1_General_100_CI_AS_SC_UTF8 NULL, unicode_text NVARCHAR(4) COLLATE Latin1_General_100_CI_AS_SC NULL, alias_ansi dbo.ansi_code NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
         await session.ExecuteAsync(
@@ -3199,6 +3200,7 @@ static async Task SqlServerLiveRoundTripAsync()
         var table = objects.SingleOrDefault(item => item.Name == "sample" && item.Schema == "dbo");
         Assert(table is not null && table.Kind == DatabaseObjectKind.Table, "SQL Server metadata 找不到 dbo.sample");
         Assert(session.BuildSelectPreview(table!) == "SELECT TOP (200) * FROM [dbo].[sample];", "SQL Server 實機預覽 SQL 不正確");
+        await VerifySqlServerStringTypesAsync(session, database, table!);
         await VerifySafeTableEditingAsync(
             session,
             database,
@@ -3224,6 +3226,192 @@ static async Task SqlServerLiveRoundTripAsync()
             "master",
             $"IF DB_ID(N'{database}') IS NOT NULL BEGIN ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}]; END");
     }
+}
+
+static async Task VerifySqlServerStringTypesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var ansiTextColumn = before.Columns.Single(column => column.Name == "ansi_text");
+    var ansiFixedColumn = before.Columns.Single(column => column.Name == "ansi_fixed");
+    var utf8TextColumn = before.Columns.Single(column => column.Name == "utf8_text");
+    var unicodeTextColumn = before.Columns.Single(column => column.Name == "unicode_text");
+    var aliasAnsiColumn = before.Columns.Single(column => column.Name == "alias_ansi");
+    var legacyTextColumn = before.Columns.Single(column => column.Name == "legacy_text");
+
+    Assert(
+        ansiTextColumn.ValueKind == TableColumnValueKind.String &&
+        ansiTextColumn.StorageDataTypeName == "varchar(8)" &&
+        ansiTextColumn.MaximumStringLengthInBytes == 8 &&
+        ansiTextColumn.StorageCollationName == "SQL_Latin1_General_CP1_CI_AS",
+        $"SQL Server varchar length／collation metadata 不正確；actual={ansiTextColumn}");
+    Assert(
+        ansiFixedColumn.StorageDataTypeName == "char(4)" &&
+        ansiFixedColumn.MaximumStringLengthInBytes == 4 &&
+        ansiFixedColumn.StorageCollationName == "SQL_Latin1_General_CP1_CI_AS",
+        $"SQL Server char length／collation metadata 不正確；actual={ansiFixedColumn}");
+    Assert(
+        utf8TextColumn.StorageDataTypeName == "varchar(8)" &&
+        utf8TextColumn.MaximumStringLengthInBytes == 8 &&
+        utf8TextColumn.StorageCollationName == "Latin1_General_100_CI_AS_SC_UTF8",
+        $"SQL Server UTF-8 varchar metadata 不正確；actual={utf8TextColumn}");
+    Assert(
+        unicodeTextColumn.StorageDataTypeName == "nvarchar(4)" &&
+        unicodeTextColumn.MaximumStringLengthInBytes == 8 &&
+        unicodeTextColumn.StorageCollationName == "Latin1_General_100_CI_AS_SC",
+        $"SQL Server nvarchar byte length metadata 不正確；actual={unicodeTextColumn}");
+    Assert(
+        aliasAnsiColumn.DataTypeName == "[dbo].[ansi_code] (varchar(6))" &&
+        aliasAnsiColumn.StorageDataTypeName == "varchar(6)" &&
+        aliasAnsiColumn.MaximumStringLengthInBytes == 6 &&
+        !string.IsNullOrWhiteSpace(aliasAnsiColumn.StorageCollationName),
+        $"SQL Server varchar alias metadata 不正確；actual={aliasAnsiColumn}");
+    Assert(
+        legacyTextColumn.StorageCollationName == "SQL_Latin1_General_CP1_CI_AS",
+        $"SQL Server text collation metadata 不正確；actual={legacyTextColumn}");
+
+    await session.ExecuteAsync(
+        database,
+        "INSERT INTO dbo.sample (name, ansi_text) VALUES (N'Native ANSI loss', N'漢字');");
+    var nativeLoss = await session.ExecuteAsync(
+        database,
+        "SELECT ansi_text FROM dbo.sample WHERE name = N'Native ANSI loss';");
+    Assert(
+        Convert.ToString(nativeLoss.Rows.Single()[0]) == "??",
+        "SQL Server 實機前提改變：legacy code-page varchar 不再把不可表示 Unicode 靜默替換為問號");
+    await session.ExecuteAsync(database, "DELETE FROM dbo.sample WHERE name = N'Native ANSI loss';");
+
+    var rejectedCases = new (string Name, string ColumnName, string Value)[]
+    {
+        ("Rejected ANSI encoding", "ansi_text", "漢字"),
+        ("Rejected ANSI bytes", "ansi_text", "123456789"),
+        ("Rejected UTF8 bytes", "utf8_text", "台灣人"),
+        ("Rejected Unicode bytes", "unicode_text", "🐧台灣A"),
+        ("Rejected alias encoding", "alias_ansi", "漢字"),
+        ("Rejected legacy text encoding", "legacy_text", "漢字")
+    };
+    foreach (var rejectedCase in rejectedCases)
+    {
+        await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, rejectedCase.Name),
+                new TableCellInput(rejectedCase.ColumnName, TableCellInputMode.Value, rejectedCase.Value)
+            }));
+        var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+        Assert(
+            rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != rejectedCase.Name),
+            $"SQL Server {rejectedCase.ColumnName} 無損驗證拒絕時不可留下半筆資料");
+    }
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "String safety"),
+            new TableCellInput("ansi_text", TableCellInputMode.Value, "ABCDEFGH"),
+            new TableCellInput("ansi_fixed", TableCellInputMode.Value, "AB"),
+            new TableCellInput("utf8_text", TableCellInputMode.Value, "台灣"),
+            new TableCellInput("unicode_text", TableCellInputMode.Value, "🐧台灣"),
+            new TableCellInput("alias_ansi", TableCellInputMode.Value, "CODE6"),
+            new TableCellInput("legacy_text", TableCellInputMode.Value, "legacy ASCII")
+        });
+    var insertedNative = await session.ExecuteAsync(
+        database,
+        "SELECT ansi_text, DATALENGTH(ansi_text), ansi_fixed, DATALENGTH(ansi_fixed), " +
+        "utf8_text, DATALENGTH(utf8_text), unicode_text, DATALENGTH(unicode_text), " +
+        "alias_ansi, DATALENGTH(alias_ansi), CONVERT(varchar(max), legacy_text) " +
+        "FROM dbo.sample WHERE name = N'String safety';");
+    var insertedValues = insertedNative.Rows.Single();
+    Assert(
+        Convert.ToString(insertedValues[0]) == "ABCDEFGH" && Convert.ToInt32(insertedValues[1]) == 8 &&
+        Convert.ToString(insertedValues[2]) == "AB  " && Convert.ToInt32(insertedValues[3]) == 4 &&
+        Convert.ToString(insertedValues[4]) == "台灣" && Convert.ToInt32(insertedValues[5]) == 6 &&
+        Convert.ToString(insertedValues[6]) == "🐧台灣" && Convert.ToInt32(insertedValues[7]) == 8 &&
+        Convert.ToString(insertedValues[8]) == "CODE6" && Convert.ToInt32(insertedValues[9]) == 5 &&
+        Convert.ToString(insertedValues[10]) == "legacy ASCII",
+        "SQL Server 一般 ANSI／Unicode 字串合法邊界新增未完整保存");
+
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "String safety");
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[]
+        {
+            new TableCellInput("ansi_text", TableCellInputMode.Value, "87654321"),
+            new TableCellInput("ansi_fixed", TableCellInputMode.Value, "WXYZ"),
+            new TableCellInput("utf8_text", TableCellInputMode.Value, "海龜"),
+            new TableCellInput("unicode_text", TableCellInputMode.Value, "🍎臺北"),
+            new TableCellInput("alias_ansi", TableCellInputMode.Value, "A1B2C3"),
+            new TableCellInput("legacy_text", TableCellInputMode.Value, "updated ASCII")
+        });
+    var updatedNative = await session.ExecuteAsync(
+        database,
+        "SELECT ansi_text, ansi_fixed, utf8_text, DATALENGTH(utf8_text), unicode_text, " +
+        "DATALENGTH(unicode_text), alias_ansi, CONVERT(varchar(max), legacy_text) " +
+        "FROM dbo.sample WHERE name = N'String safety';");
+    var updatedValues = updatedNative.Rows.Single();
+    Assert(
+        Convert.ToString(updatedValues[0]) == "87654321" &&
+        Convert.ToString(updatedValues[1]) == "WXYZ" &&
+        Convert.ToString(updatedValues[2]) == "海龜" && Convert.ToInt32(updatedValues[3]) == 6 &&
+        Convert.ToString(updatedValues[4]) == "🍎臺北" && Convert.ToInt32(updatedValues[5]) == 8 &&
+        Convert.ToString(updatedValues[6]) == "A1B2C3" &&
+        Convert.ToString(updatedValues[7]) == "updated ASCII",
+        "SQL Server 一般 ANSI／Unicode 字串安全修改未完整保存");
+
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "String safety");
+    await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        updated,
+        new[] { new TableCellInput("ansi_text", TableCellInputMode.Value, "漢字") }));
+    var unchanged = await session.ExecuteAsync(
+        database,
+        "SELECT ansi_text FROM dbo.sample WHERE name = N'String safety';");
+    Assert(
+        Convert.ToString(unchanged.Rows.Single()[0]) == "87654321",
+        "SQL Server ANSI 字串修改被拒後必須回復原值");
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "String trailing conflict"),
+            new TableCellInput("ansi_text", TableCellInputMode.Value, "edge  ")
+        });
+    var conflictSnapshot = await session.LoadTableDataAsync(database, table);
+    var staleConflictRow = conflictSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "String trailing conflict");
+    await session.ExecuteAsync(
+        database,
+        "UPDATE dbo.sample SET ansi_text = 'edge   ' WHERE name = N'String trailing conflict';");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        staleConflictRow,
+        new[] { new TableCellInput("note", TableCellInputMode.Value, "must not land") }));
+    var conflictNative = await session.ExecuteAsync(
+        database,
+        "SELECT DATALENGTH(ansi_text), note FROM dbo.sample WHERE name = N'String trailing conflict';");
+    Assert(
+        Convert.ToInt32(conflictNative.Rows.Single()[0]) == 7 &&
+        conflictNative.Rows.Single()[1] is null or DBNull,
+        "SQL Server varchar 只改變尾端空白時仍必須被 optimistic concurrency 偵測");
+    var currentConflictSnapshot = await session.LoadTableDataAsync(database, table);
+    var currentConflictRow = currentConflictSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "String trailing conflict");
+    await session.DeleteTableRowAsync(database, table, currentConflictRow);
+    await session.DeleteTableRowAsync(database, table, updated);
 }
 
 static async Task VerifySqlServerMoneyAsync(
