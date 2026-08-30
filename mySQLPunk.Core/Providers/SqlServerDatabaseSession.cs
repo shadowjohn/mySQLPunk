@@ -761,16 +761,18 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         IReadOnlyList<TableColumnInfo> columns,
         int fetchLimit,
         int rowOffset,
-        TableDataSort? sort)
+        TableDataSort? sort,
+        string? filterPredicate)
     {
         var selectColumns = string.Join(", ", columns.Select(BuildTableDataSelectExpression));
+        var where = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
         var orderBy = BuildTableDataOrderBy(columns, sort);
         if (rowOffset == 0)
         {
-            return $"SELECT TOP ({fetchLimit}) {selectColumns} FROM {BuildQualifiedName(table)}{orderBy};";
+            return $"SELECT TOP ({fetchLimit}) {selectColumns} FROM {BuildQualifiedName(table)}{where}{orderBy};";
         }
 
-        return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{orderBy} " +
+        return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{where}{orderBy} " +
                $"OFFSET {rowOffset} ROWS FETCH NEXT {fetchLimit} ROWS ONLY;";
     }
 

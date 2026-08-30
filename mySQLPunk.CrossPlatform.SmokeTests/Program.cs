@@ -844,14 +844,49 @@ static async Task TableDataEditingAsync()
             $"Table 本頁 CSV 應保留目前排序與安全格式；actual={sortedExportCsv.Replace("\r", "\\r").Replace("\n", "\\n")}");
         var lastExportPage = QueryResultExportService.CreateTablePageResult(sortedLastPage);
         Assert(lastExportPage.WasTruncated, "非第一頁即使已到結尾，匯出仍應標示不是完整 Table");
+        var matchingNames = await session.LoadTableDataAsync(
+            profile.Database,
+            pagedTable,
+            rowLimit: 2,
+            sort: nameDescending,
+            filter: new TableDataFilter("name", TableDataFilterOperator.Equals, "same"));
+        Assert(
+            matchingNames.Rows.Select(row => Convert.ToInt64(row.Values[0])).SequenceEqual(new long[] { 2, 3 }) &&
+            !matchingNames.WasTruncated,
+            "Table 精確值篩選應保留目前排序與 PK tie-breaker");
+        var generatedIdMatch = await session.LoadTableDataAsync(
+            profile.Database,
+            pagedTable,
+            filter: new TableDataFilter("id", TableDataFilterOperator.Equals, "3"));
+        Assert(
+            generatedIdMatch.Rows.Count == 1 && Convert.ToInt64(generatedIdMatch.Rows[0].Values[0]) == 3,
+            "generated Primary Key 應可作為型別化篩選條件");
+        var injectedFilter = await session.LoadTableDataAsync(
+            profile.Database,
+            pagedTable,
+            filter: new TableDataFilter("name", TableDataFilterOperator.Equals, "same' OR 1=1 --"));
+        Assert(injectedFilter.Rows.Count == 0, "Table 篩選值必須使用參數，不可改變 WHERE 結構");
+        Assert(
+            Convert.ToInt64((await session.ExecuteAsync(
+                profile.Database,
+                "SELECT COUNT(*) FROM paged_sample;")).Rows.Single()[0]) == 5,
+            "惡意篩選值不可修改或刪除 Table");
         await AssertThrowsAsync<ArgumentException>(() => session.LoadTableDataAsync(
             profile.Database,
             pagedTable,
             sort: new TableDataSort("name; DROP TABLE paged_sample", Descending: false)));
+        await AssertThrowsAsync<ArgumentException>(() => session.LoadTableDataAsync(
+            profile.Database,
+            pagedTable,
+            filter: new TableDataFilter("missing_filter_column", TableDataFilterOperator.Equals, "x")));
         await AssertThrowsAsync<InvalidOperationException>(() => session.LoadTableDataAsync(
             profile.Database,
             table,
             sort: new TableDataSort("metadata", Descending: false)));
+        await AssertThrowsAsync<InvalidOperationException>(() => session.LoadTableDataAsync(
+            profile.Database,
+            table,
+            filter: new TableDataFilter("metadata", TableDataFilterOperator.Equals, "{}")));
         await AssertThrowsAsync<InvalidOperationException>(() => session.LoadTableDataAsync(
             profile.Database,
             new DatabaseObjectInfo(string.Empty, "no_primary_key", DatabaseObjectKind.Table),
@@ -6852,6 +6887,39 @@ static async Task VerifySafeTableEditingAsync(
         database,
         table,
         sort: new TableDataSort("payload", Descending: false)));
+
+    var filteredEditor = await session.LoadTableDataAsync(
+        database,
+        table,
+        filter: new TableDataFilter("name", TableDataFilterOperator.Equals, "Editor"));
+    Assert(
+        filteredEditor.Rows.Count == 1 && Convert.ToString(filteredEditor.Rows[0].Values[1]) == "Editor",
+        $"{session.Profile.ProviderDisplayName} 參數化字串篩選不正確");
+    var nullQuantities = await session.LoadTableDataAsync(
+        database,
+        table,
+        filter: new TableDataFilter("quantity", TableDataFilterOperator.IsNull));
+    var nonNullQuantities = await session.LoadTableDataAsync(
+        database,
+        table,
+        filter: new TableDataFilter("quantity", TableDataFilterOperator.IsNotNull));
+    Assert(
+        nullQuantities.Rows.Count == 2 && nonNullQuantities.Rows.Count == 1 &&
+        Convert.ToString(nonNullQuantities.Rows[0].Values[1]) == "Editor",
+        $"{session.Profile.ProviderDisplayName} NULL／NOT NULL 篩選不正確");
+    var injectedFilter = await session.LoadTableDataAsync(
+        database,
+        table,
+        filter: new TableDataFilter("name", TableDataFilterOperator.Equals, "Editor' OR 1=1 --"));
+    Assert(injectedFilter.Rows.Count == 0, $"{session.Profile.ProviderDisplayName} 篩選值未完整參數化");
+    await AssertThrowsAsync<ArgumentException>(() => session.LoadTableDataAsync(
+        database,
+        table,
+        filter: new TableDataFilter("missing_filter_column", TableDataFilterOperator.Equals, "x")));
+    await AssertThrowsAsync<InvalidOperationException>(() => session.LoadTableDataAsync(
+        database,
+        table,
+        filter: new TableDataFilter("payload", TableDataFilterOperator.Equals, "0x00FF10")));
 
     var updateInputs = new List<TableCellInput>
     {

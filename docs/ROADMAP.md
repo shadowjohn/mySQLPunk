@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | 主要視窗、樹狀導覽、物件清單、分頁 | ✅ | Windows 完整版已具備可停靠／浮動分頁、多連線樹與物件清單；Linux / macOS 預覽版的 metadata 樹也可依 schema／名稱即時搜尋並依 Table／View 篩選。 |
 | 物件設計器 | 🟡 | 五種 provider 已能建表與主要 ALTER；進階 constraint／索引仍需更多實機矩陣。 |
-| RDBMS 資料編輯器（網格） | ✅ | Windows 完整版具備分頁瀏覽、篩選、排序、欄顯示、寫回、無主鍵安全模式與多格式匯出；Linux / macOS 預覽版已補 Primary Key 穩定分頁、metadata 白名單欄位排序、安全寫回，以及保留目前排序的 CSV／TSV／JSON 本頁匯出。 |
+| RDBMS 資料編輯器（網格） | ✅ | Windows 完整版具備分頁瀏覽、篩選、排序、欄顯示、寫回、無主鍵安全模式與多格式匯出；Linux / macOS 預覽版已補 Primary Key 穩定分頁、metadata 白名單參數化篩選與欄位排序、安全寫回，以及保留目前篩選／排序的 CSV／TSV／JSON 本頁匯出。 |
 | MongoDB 資料編輯器（網格／樹／JSON） | 🆕 | 文件檢視器提供可展開文件樹與 Canonical Extended JSON 編輯；儲存會鎖定 `_id` 並以完整原始文件做並行比對，並支援文件新增（自動 `_id`）與安全刪除；view 與缺 `_id` 文件唯讀。待補網格內編輯。 |
 | Redis 資料編輯器 | ✅ | key 編輯器依型別切換：string 值編輯、hash 欄位、list 元素／尾端新增、set 成員、zset 分數都有並行衝突保護，另有 TTL 設定／移除與刪除 key；list 元素刪除因 Redis 無對應命令留待後續。 |
 | 資料分析與互動圖表 | 🆕 | 已完成欄位摘要、Top 值比例與值鑽取的第一版。 |

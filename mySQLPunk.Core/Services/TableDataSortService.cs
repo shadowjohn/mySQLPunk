@@ -7,10 +7,12 @@ public static class TableDataSortService
     public static bool IsSortable(DatabaseProviderKind provider, TableColumnInfo column)
     {
         ArgumentNullException.ThrowIfNull(column);
-        if (column.IsPrimaryKey)
-        {
-            return true;
-        }
+        return column.IsPrimaryKey || IsScalarComparable(provider, column);
+    }
+
+    public static bool IsScalarComparable(DatabaseProviderKind provider, TableColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
 
         if (provider == DatabaseProviderKind.SqlServer &&
             column.ValueKind == TableColumnValueKind.String &&

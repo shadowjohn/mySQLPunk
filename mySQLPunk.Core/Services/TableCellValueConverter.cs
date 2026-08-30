@@ -16,6 +16,23 @@ public static class TableCellValueConverter
 
     public static object? Parse(TableColumnInfo column, TableCellInput input)
     {
+        return ParseCore(column, input, requireEditable: true);
+    }
+
+    public static object? ParseFilterValue(TableColumnInfo column, string text)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        return ParseCore(
+            column,
+            new TableCellInput(column.Name, TableCellInputMode.Value, text),
+            requireEditable: false);
+    }
+
+    private static object? ParseCore(
+        TableColumnInfo column,
+        TableCellInput input,
+        bool requireEditable)
+    {
         ArgumentNullException.ThrowIfNull(column);
         ArgumentNullException.ThrowIfNull(input);
         if (!string.Equals(column.Name, input.ColumnName, StringComparison.Ordinal))
@@ -35,7 +52,7 @@ public static class TableCellValueConverter
                 : throw new InvalidOperationException($"「{column.Name}」不可設為 NULL。");
         }
 
-        if (!column.IsEditable)
+        if (requireEditable && !column.IsEditable)
         {
             throw new InvalidOperationException($"「{column.Name}」的型別目前不支援直接編輯。");
         }

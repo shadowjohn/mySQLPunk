@@ -105,7 +105,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         int rowLimit = 200,
         int rowOffset = 0,
         CancellationToken cancellationToken = default,
-        TableDataSort? sort = null)
+        TableDataSort? sort = null,
+        TableDataFilter? filter = null)
     {
         ValidateTable(table);
         rowLimit = Math.Clamp(rowLimit, 1, 1_000);
@@ -127,11 +128,22 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 
             TableDataSortService.Resolve(Profile.Provider, columns, sort);
         }
+        if (filter is not null)
+        {
+            TableDataFilterService.Resolve(Profile.Provider, columns, filter);
+        }
 
         await using var connection = CreateConnection(database);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = BuildTableDataSql(table, columns, rowLimit + 1, rowOffset, sort);
+        var filterPredicate = BuildTableDataFilterPredicate(command, columns, filter);
+        command.CommandText = BuildTableDataSql(
+            table,
+            columns,
+            rowLimit + 1,
+            rowOffset,
+            sort,
+            filterPredicate);
         command.CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 2);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var rows = new List<TableDataRow>();
@@ -303,12 +315,46 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         IReadOnlyList<TableColumnInfo> columns,
         int fetchLimit,
         int rowOffset,
-        TableDataSort? sort)
+        TableDataSort? sort,
+        string? filterPredicate)
     {
         var selectColumns = string.Join(", ", columns.Select(BuildTableDataSelectExpression));
+        var where = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
         var orderBy = BuildTableDataOrderBy(columns, sort);
         var offset = rowOffset == 0 ? string.Empty : $" OFFSET {rowOffset}";
-        return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{orderBy} LIMIT {fetchLimit}{offset};";
+        return $"SELECT {selectColumns} FROM {BuildQualifiedName(table)}{where}{orderBy} LIMIT {fetchLimit}{offset};";
+    }
+
+    private string? BuildTableDataFilterPredicate(
+        DbCommand command,
+        IReadOnlyList<TableColumnInfo> columns,
+        TableDataFilter? filter)
+    {
+        if (filter is null)
+        {
+            return null;
+        }
+
+        var column = TableDataFilterService.Resolve(Profile.Provider, columns, filter);
+        return filter.Operator switch
+        {
+            TableDataFilterOperator.IsNull => $"{QuoteIdentifier(column.Name)} IS NULL",
+            TableDataFilterOperator.IsNotNull => $"{QuoteIdentifier(column.Name)} IS NOT NULL",
+            TableDataFilterOperator.Equals => BuildTableDataEqualsPredicate(command, column, filter.Value),
+            _ => throw new ArgumentOutOfRangeException(nameof(filter), "不支援的 Table 篩選操作。")
+        };
+    }
+
+    private string BuildTableDataEqualsPredicate(
+        DbCommand command,
+        TableColumnInfo column,
+        string filterValue)
+    {
+        const string parameterName = "@tableFilter";
+        var parsedValue = TableCellValueConverter.ParseFilterValue(column, filterValue);
+        AddParameter(command, parameterName, parsedValue, column);
+        return $"{QuoteIdentifier(column.Name)} = " +
+               BuildParameterValueExpression(column, parameterName, parsedValue);
     }
 
     protected string BuildTableDataOrderBy(

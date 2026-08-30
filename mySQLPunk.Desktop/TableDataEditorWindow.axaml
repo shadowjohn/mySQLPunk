@@ -7,7 +7,7 @@
         MinWidth="760"
         MinHeight="480"
         WindowStartupLocation="CenterOwner">
-  <Grid RowDefinitions="Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <Border Grid.Row="0" Background="#172033" Padding="16,12">
       <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
         <StackPanel Grid.Column="0" Spacing="2">
@@ -55,7 +55,34 @@
       </Grid>
     </Border>
 
-    <DataGrid Grid.Row="2"
+    <Border Grid.Row="2" Background="#F8FAFD" BorderBrush="#CDD5E0" BorderThickness="0,0,0,1" Padding="12,8">
+      <Grid ColumnDefinitions="Auto,230,Auto,145,*,Auto,Auto">
+        <TextBlock Grid.Column="0" Text="篩選欄位" Margin="0,0,8,0" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="1"
+                  x:Name="FilterColumnCombo"
+                  SelectionChanged="FilterControl_Changed" />
+        <TextBlock Grid.Column="2" Text="條件" Margin="16,0,8,0" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="3"
+                  x:Name="FilterOperatorCombo"
+                  SelectionChanged="FilterControl_Changed" />
+        <TextBox Grid.Column="4"
+                 x:Name="FilterValueBox"
+                 PlaceholderText="依欄位型別輸入精確值"
+                 Margin="12,0,0,0" />
+        <Button Grid.Column="5"
+                x:Name="ApplyFilterButton"
+                Content="套用"
+                Click="ApplyFilter_Click"
+                Margin="8,0,0,0" />
+        <Button Grid.Column="6"
+                x:Name="ClearFilterButton"
+                Content="清除"
+                Click="ClearFilter_Click"
+                Margin="8,0,0,0" />
+      </Grid>
+    </Border>
+
+    <DataGrid Grid.Row="3"
               x:Name="DataGrid"
               Margin="12"
               AutoGenerateColumns="False"
@@ -68,7 +95,7 @@
               SelectionChanged="DataGrid_SelectionChanged"
               DoubleTapped="DataGrid_DoubleTapped" />
 
-    <Border Grid.Row="3" Background="#F2F4F7" BorderBrush="#CDD5E0" BorderThickness="0,1,0,0" Padding="12,8">
+    <Border Grid.Row="4" Background="#F2F4F7" BorderBrush="#CDD5E0" BorderThickness="0,1,0,0" Padding="12,8">
       <TextBlock x:Name="StatusText" Text="正在載入資料…" TextWrapping="Wrap" />
     </Border>
   </Grid>

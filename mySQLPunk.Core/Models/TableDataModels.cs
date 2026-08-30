@@ -86,6 +86,18 @@ public sealed record TableDataRow(IReadOnlyList<object?> Values);
 
 public sealed record TableDataSort(string ColumnName, bool Descending);
 
+public enum TableDataFilterOperator
+{
+    Equals,
+    IsNull,
+    IsNotNull
+}
+
+public sealed record TableDataFilter(
+    string ColumnName,
+    TableDataFilterOperator Operator,
+    string Value = "");
+
 public sealed record TableDataSnapshot(
     DatabaseObjectInfo Table,
     IReadOnlyList<TableColumnInfo> Columns,

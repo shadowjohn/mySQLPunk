@@ -25,6 +25,9 @@ public sealed partial class TableDataEditorWindow : Window
     private readonly ComboBox _sortColumnCombo;
     private readonly ComboBox _sortDirectionCombo;
     private readonly ComboBox _exportFormatCombo;
+    private readonly ComboBox _filterColumnCombo;
+    private readonly ComboBox _filterOperatorCombo;
+    private readonly TextBox _filterValueBox;
     private readonly Button _previousButton;
     private readonly Button _nextButton;
     private readonly Button _addButton;
@@ -32,14 +35,18 @@ public sealed partial class TableDataEditorWindow : Window
     private readonly Button _deleteButton;
     private readonly Button _refreshButton;
     private readonly Button _exportPageButton;
+    private readonly Button _applyFilterButton;
+    private readonly Button _clearFilterButton;
     private readonly Button _closeButton;
     private TableDataSnapshot? _snapshot;
     private CancellationTokenSource? _cancellation;
     private bool _busy;
     private bool _updatingSortControls;
+    private bool _updatingFilterControls;
     private bool _hasSortableColumns;
     private int _rowOffset;
     private TableDataSort? _sort;
+    private TableDataFilter? _filter;
 
     public TableDataEditorWindow()
     {
@@ -52,6 +59,9 @@ public sealed partial class TableDataEditorWindow : Window
         _sortColumnCombo = this.FindControl<ComboBox>("SortColumnCombo")!;
         _sortDirectionCombo = this.FindControl<ComboBox>("SortDirectionCombo")!;
         _exportFormatCombo = this.FindControl<ComboBox>("ExportFormatCombo")!;
+        _filterColumnCombo = this.FindControl<ComboBox>("FilterColumnCombo")!;
+        _filterOperatorCombo = this.FindControl<ComboBox>("FilterOperatorCombo")!;
+        _filterValueBox = this.FindControl<TextBox>("FilterValueBox")!;
         _previousButton = this.FindControl<Button>("PreviousButton")!;
         _nextButton = this.FindControl<Button>("NextButton")!;
         _addButton = this.FindControl<Button>("AddButton")!;
@@ -59,11 +69,22 @@ public sealed partial class TableDataEditorWindow : Window
         _deleteButton = this.FindControl<Button>("DeleteButton")!;
         _refreshButton = this.FindControl<Button>("RefreshButton")!;
         _exportPageButton = this.FindControl<Button>("ExportPageButton")!;
+        _applyFilterButton = this.FindControl<Button>("ApplyFilterButton")!;
+        _clearFilterButton = this.FindControl<Button>("ClearFilterButton")!;
         _closeButton = this.FindControl<Button>("CloseButton")!;
         _updatingSortControls = true;
         _sortDirectionCombo.ItemsSource = new[] { "遞增（A → Z）", "遞減（Z → A）" };
         _sortDirectionCombo.SelectedIndex = 0;
         _updatingSortControls = false;
+        _updatingFilterControls = true;
+        _filterOperatorCombo.ItemsSource = new[]
+        {
+            new FilterOperatorOption("精確等於", TableDataFilterOperator.Equals),
+            new FilterOperatorOption("是 NULL", TableDataFilterOperator.IsNull),
+            new FilterOperatorOption("不是 NULL", TableDataFilterOperator.IsNotNull)
+        };
+        _filterOperatorCombo.SelectedIndex = 0;
+        _updatingFilterControls = false;
     }
 
     public TableDataEditorWindow(
@@ -281,6 +302,65 @@ public sealed partial class TableDataEditorWindow : Window
         }
     }
 
+    private void FilterControl_Changed(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_updatingFilterControls)
+        {
+            UpdateActionState();
+        }
+    }
+
+    private async void ApplyFilter_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_busy ||
+            _filterColumnCombo.SelectedItem is not FilterColumnOption column ||
+            _filterOperatorCombo.SelectedItem is not FilterOperatorOption filterOperator)
+        {
+            return;
+        }
+
+        var nextFilter = new TableDataFilter(
+            column.ColumnName,
+            filterOperator.Operator,
+            filterOperator.Operator == TableDataFilterOperator.Equals ? _filterValueBox.Text ?? string.Empty : string.Empty);
+        if (nextFilter == _filter)
+        {
+            return;
+        }
+
+        var previousFilter = _filter;
+        var previousOffset = _rowOffset;
+        _filter = nextFilter;
+        _rowOffset = 0;
+        if (!await LoadDataAsync())
+        {
+            _filter = previousFilter;
+            _rowOffset = previousOffset;
+            UpdateFilterControls(_snapshot);
+            UpdateActionState();
+        }
+    }
+
+    private async void ClearFilter_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _filter is null)
+        {
+            return;
+        }
+
+        var previousFilter = _filter;
+        var previousOffset = _rowOffset;
+        _filter = null;
+        _rowOffset = 0;
+        if (!await LoadDataAsync())
+        {
+            _filter = previousFilter;
+            _rowOffset = previousOffset;
+            UpdateFilterControls(_snapshot);
+            UpdateActionState();
+        }
+    }
+
     private async void Previous_Click(object? sender, RoutedEventArgs e)
     {
         if (_busy || _rowOffset <= 0)
@@ -391,7 +471,8 @@ public sealed partial class TableDataEditorWindow : Window
                 RowLimit,
                 _rowOffset,
                 cancellationToken,
-                _sort);
+                _sort,
+                _filter);
         });
         if (!succeeded || loadedSnapshot is null)
         {
@@ -400,6 +481,7 @@ public sealed partial class TableDataEditorWindow : Window
 
         _snapshot = loadedSnapshot;
         UpdateSortControls(loadedSnapshot);
+        UpdateFilterControls(loadedSnapshot);
         RebuildGrid(loadedSnapshot);
         var keyStatus = loadedSnapshot.HasPrimaryKey
             ? "Primary Key 已辨識，可安全修改與刪除。"
@@ -419,9 +501,12 @@ public sealed partial class TableDataEditorWindow : Window
             : _sort is null
                 ? "依 Primary Key 預設順序。"
                 : $"依 {_sort.ColumnName} {(_sort.Descending ? "遞減" : "遞增")}排序，相同值再依 Primary Key 遞增排序。";
+        var filterStatus = _filter is null
+            ? "未套用篩選。"
+            : $"已套用 {_filter.ColumnName} {GetFilterOperatorDisplayName(_filter.Operator)}篩選。";
         _statusText.Text = string.Join(
             " ",
-            new[] { successPrefix, range, keyStatus, pagingStatus, sortStatus }
+            new[] { successPrefix, range, keyStatus, pagingStatus, sortStatus, filterStatus }
                 .Where(value => !string.IsNullOrWhiteSpace(value)));
         UpdateActionState();
         return true;
@@ -500,6 +585,48 @@ public sealed partial class TableDataEditorWindow : Window
         }
     }
 
+    private void UpdateFilterControls(TableDataSnapshot? snapshot)
+    {
+        _updatingFilterControls = true;
+        try
+        {
+            var options = snapshot?.Columns
+                .Where(column => TableDataFilterService.IsFilterable(_session.Profile.Provider, column))
+                .OrderBy(column => column.Ordinal)
+                .Select(column => new FilterColumnOption(
+                    $"{column.Name} · {column.DataTypeName}",
+                    column.Name))
+                .ToList() ?? new List<FilterColumnOption>();
+            _filterColumnCombo.ItemsSource = options;
+            var selectedColumnIndex = _filter is null
+                ? 0
+                : options.FindIndex(option =>
+                    string.Equals(option.ColumnName, _filter.ColumnName, StringComparison.Ordinal));
+            _filterColumnCombo.SelectedIndex = options.Count == 0 ? -1 : Math.Max(0, selectedColumnIndex);
+            _filterOperatorCombo.SelectedIndex = _filter?.Operator switch
+            {
+                TableDataFilterOperator.IsNull => 1,
+                TableDataFilterOperator.IsNotNull => 2,
+                _ => 0
+            };
+            _filterValueBox.Text = _filter?.Operator == TableDataFilterOperator.Equals
+                ? _filter.Value
+                : string.Empty;
+        }
+        finally
+        {
+            _updatingFilterControls = false;
+        }
+    }
+
+    private static string GetFilterOperatorDisplayName(TableDataFilterOperator filterOperator) => filterOperator switch
+    {
+        TableDataFilterOperator.Equals => "精確等於",
+        TableDataFilterOperator.IsNull => "是 NULL",
+        TableDataFilterOperator.IsNotNull => "不是 NULL",
+        _ => throw new ArgumentOutOfRangeException(nameof(filterOperator))
+    };
+
     private async Task<bool> RunAsync(string status, Func<CancellationToken, Task> operation)
     {
         _cancellation?.Cancel();
@@ -562,11 +689,31 @@ public sealed partial class TableDataEditorWindow : Window
         _dataGrid.IsEnabled = !_busy;
         _sortColumnCombo.IsEnabled = !_busy && hasSnapshot && _snapshot!.HasPrimaryKey && _hasSortableColumns;
         _sortDirectionCombo.IsEnabled = _sortColumnCombo.IsEnabled && _sort is not null;
+        var hasFilterColumn = _filterColumnCombo.SelectedItem is FilterColumnOption;
+        var filterNeedsValue = _filterOperatorCombo.SelectedItem is FilterOperatorOption
+        {
+            Operator: TableDataFilterOperator.Equals
+        };
+        _filterColumnCombo.IsEnabled = !_busy && hasSnapshot && _filterColumnCombo.ItemCount > 0;
+        _filterOperatorCombo.IsEnabled = !_busy && hasSnapshot && hasFilterColumn;
+        _filterValueBox.IsEnabled = !_busy && hasSnapshot && hasFilterColumn && filterNeedsValue;
+        _applyFilterButton.IsEnabled = !_busy && hasSnapshot && hasFilterColumn;
+        _clearFilterButton.IsEnabled = !_busy && _filter is not null;
     }
 
     private sealed record TableDataRowView(TableDataRow Source, IReadOnlyList<string> Values);
 
     private sealed record SortColumnOption(string DisplayName, string? ColumnName)
+    {
+        public override string ToString() => DisplayName;
+    }
+
+    private sealed record FilterColumnOption(string DisplayName, string ColumnName)
+    {
+        public override string ToString() => DisplayName;
+    }
+
+    private sealed record FilterOperatorOption(string DisplayName, TableDataFilterOperator Operator)
     {
         public override string ToString() => DisplayName;
     }
