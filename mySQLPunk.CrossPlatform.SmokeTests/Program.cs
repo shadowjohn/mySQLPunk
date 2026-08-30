@@ -15,6 +15,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("查詢結果安全匯出", QueryResultExportFormatsAsync),
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
     ("SQL 選取範圍安全執行", SqlExecutionSelectionAsync),
+    ("本次執行期間查詢記錄", QueryExecutionHistoryAsync),
     ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
@@ -23,6 +24,55 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static Task QueryExecutionHistoryAsync()
+{
+    var history = new QueryExecutionHistory(capacity: 3, byteBudget: 256);
+    var start = new DateTimeOffset(2026, 8, 30, 16, 0, 0, TimeSpan.FromHours(8));
+    QueryExecutionHistoryEntry Entry(
+        string sql,
+        string database,
+        int seconds,
+        bool usedSelection = false) => new(
+            start.AddSeconds(seconds),
+            DatabaseProviderKind.Sqlite,
+            database,
+            sql,
+            usedSelection,
+            TimeSpan.FromMilliseconds(12),
+            "完成，共 1 列");
+
+    Assert(history.Add(Entry("SELECT 1;", "first.db", 1)), "有效 SQL 應加入本次記錄");
+    Assert(history.Add(Entry("SELECT 2;", "first.db", 2, usedSelection: true)), "第二筆 SQL 應加入記錄");
+    Assert(history.Add(Entry("SELECT 3;", "other.db", 3)), "不同資料庫 SQL 應加入記錄");
+    Assert(history.Entries.Select(entry => entry.Sql).SequenceEqual(new[] { "SELECT 3;", "SELECT 2;", "SELECT 1;" }),
+        "查詢記錄應依最新時間置頂");
+    Assert(history.Entries[1].DisplayText.Contains("選取範圍", StringComparison.Ordinal) &&
+           history.Entries[1].DisplayText.Contains("first.db", StringComparison.Ordinal),
+        "記錄顯示應標示來源資料庫與選取範圍");
+
+    Assert(history.Add(Entry("SELECT 1;", "first.db", 4)), "重複 SQL 應更新到最上方");
+    Assert(history.Entries.Count == 3 && history.Entries[0].ExecutedAt == start.AddSeconds(4),
+        "同資料庫的相同 SQL 應去重並更新時間");
+    Assert(history.Add(Entry("SELECT 4;", "first.db", 5)), "容量邊界前應可新增");
+    Assert(history.Entries.Count == 3 && history.Entries.All(entry => entry.Sql != "SELECT 2;"),
+        "超過容量時應移除最舊記錄");
+
+    var oversized = string.Concat(Enumerable.Repeat("😀", 65));
+    Assert(!history.Add(Entry(oversized, "first.db", 6)) && history.Entries.Count == 3,
+        "單筆 SQL 的 UTF-8 bytes 超過總預算時不可加入或破壞既有記錄");
+    var budgetHistory = new QueryExecutionHistory(capacity: 10, byteBudget: 10);
+    Assert(budgetHistory.Add(Entry("123456", "first.db", 7)) &&
+           budgetHistory.Add(Entry("abcde", "first.db", 8)) &&
+           budgetHistory.Entries.Count == 1 && budgetHistory.Entries[0].Sql == "abcde",
+        "合計 UTF-8 byte 預算超限時應從最舊記錄開始移除");
+    Assert(QueryExecutionHistory.BuildPreview("  SELECT\n\t😀  FROM   sample;  ", 22) == "SELECT 😀 FROM sample;",
+        "預覽應摺疊空白並保留 Unicode 字元");
+
+    history.Clear();
+    Assert(history.Entries.Count == 0, "清除後不應保留本次執行期間的 SQL");
+    return Task.CompletedTask;
+}
 
 static Task SqlExecutionSelectionAsync()
 {

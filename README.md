@@ -49,6 +49,8 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 SQL 編輯器按下 `Ctrl+Enter`（macOS 為 `Cmd+Enter`）或「執行 SQL」時，若有反白且非空白的範圍，只會送出該段 SQL；未選取內容時才執行全文，避免同一文件裡未選取的 DDL／DML 被一併執行。
 
+成功執行的 SQL 會加入「本次查詢記錄」，標示時間、provider、database 與是否來自選取範圍；選取記錄只會載回編輯器，不會自動執行。記錄最多 50 筆並限制為合計 2 MiB，同資料庫的相同 SQL 會更新到最上方；可隨時清除，程式結束也會消失，可能含敏感 literal 的 SQL 不會寫入設定檔或其他磁碟檔案。
+
 ```bash
 dotnet restore mySQLPunk.CrossPlatform.sln
 dotnet build mySQLPunk.CrossPlatform.sln -c Release --no-restore

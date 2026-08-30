@@ -21,6 +21,7 @@ public sealed partial class MainWindow : Window
     private readonly ConnectionProfileStore _profileStore = new();
     private readonly ISecretStore _secretStore = SecretStoreFactory.CreateDefault();
     private readonly CrossPlatformUpdateService _updateService = new();
+    private readonly QueryExecutionHistory _queryHistory = new();
     private IDatabaseSession? _session;
     private IReadOnlyList<DatabaseObjectInfo> _databaseObjects = Array.Empty<DatabaseObjectInfo>();
     private QueryResult? _lastResult;
@@ -34,6 +35,7 @@ public sealed partial class MainWindow : Window
     private readonly ComboBox _objectTypeCombo;
     private readonly TextBlock _objectCountText;
     private readonly TextBox _sqlEditor;
+    private readonly ComboBox _queryHistoryCombo;
     private readonly DataGrid _resultsGrid;
     private readonly ComboBox _exportFormatCombo;
     private readonly TextBlock _statusText;
@@ -44,6 +46,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _exportButton;
     private readonly Button _cancelButton;
     private readonly Button _updateButton;
+    private readonly Button _clearQueryHistoryButton;
 
     public MainWindow()
     {
@@ -55,6 +58,7 @@ public sealed partial class MainWindow : Window
         _objectTypeCombo = this.FindControl<ComboBox>("ObjectTypeCombo")!;
         _objectCountText = this.FindControl<TextBlock>("ObjectCountText")!;
         _sqlEditor = this.FindControl<TextBox>("SqlEditor")!;
+        _queryHistoryCombo = this.FindControl<ComboBox>("QueryHistoryCombo")!;
         _resultsGrid = this.FindControl<DataGrid>("ResultsGrid")!;
         _exportFormatCombo = this.FindControl<ComboBox>("ExportFormatCombo")!;
         _statusText = this.FindControl<TextBlock>("StatusText")!;
@@ -65,6 +69,7 @@ public sealed partial class MainWindow : Window
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
         _updateButton = this.FindControl<Button>("UpdateButton")!;
+        _clearQueryHistoryButton = this.FindControl<Button>("ClearQueryHistoryButton")!;
 
         _profilesList.ItemsSource = _profiles;
         _objectTypeCombo.SelectedIndex = 0;
@@ -324,6 +329,28 @@ public sealed partial class MainWindow : Window
         await ExecuteCurrentSqlAsync();
     }
 
+    private void QueryHistory_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_queryHistoryCombo.SelectedItem is not QueryExecutionHistoryEntry entry)
+        {
+            return;
+        }
+
+        _sqlEditor.Text = entry.Sql;
+        _sqlEditor.SelectionStart = entry.Sql.Length;
+        _sqlEditor.SelectionEnd = entry.Sql.Length;
+        _queryHistoryCombo.SelectedIndex = -1;
+        _sqlEditor.Focus();
+        SetStatus($"已從本次記錄載入 {entry.SourceDisplay} 的 SQL；尚未執行。");
+    }
+
+    private void ClearQueryHistory_Click(object? sender, RoutedEventArgs e)
+    {
+        _queryHistory.Clear();
+        RefreshQueryHistory();
+        SetStatus("本次查詢記錄已清除；沒有修改資料庫或磁碟檔案。");
+    }
+
     private async void SqlEditor_KeyDown(object? sender, KeyEventArgs e)
     {
         var executeModifier = e.KeyModifiers.HasFlag(KeyModifiers.Control) ||
@@ -562,19 +589,44 @@ public sealed partial class MainWindow : Window
         var operationStatus = execution.UsesSelection
             ? "正在執行選取的 SQL…"
             : "正在執行 SQL…";
+        var executedAt = DateTimeOffset.Now;
+        var stopwatch = Stopwatch.StartNew();
         await RunOperationAsync(operationStatus, async cancellationToken =>
         {
             var result = await _session.ExecuteAsync(database, execution.Sql, cancellationToken);
+            stopwatch.Stop();
             DisplayResult(result);
+            var historyRecorded = _queryHistory.Add(new QueryExecutionHistoryEntry(
+                executedAt,
+                _session.Profile.Provider,
+                database,
+                execution.Sql,
+                execution.UsesSelection,
+                stopwatch.Elapsed,
+                result.Summary));
+            RefreshQueryHistory();
             if (!result.HasResultSet)
             {
                 await LoadObjectsAsync(database, cancellationToken);
             }
 
-            SetStatus(execution.UsesSelection
+            var executionSummary = execution.UsesSelection
                 ? $"{result.Summary}（已執行選取範圍）"
-                : result.Summary);
+                : result.Summary;
+            SetStatus(historyRecorded
+                ? executionSummary
+                : $"{executionSummary}（SQL 超過本次記錄的 2 MiB 安全上限，未保留）");
         });
+    }
+
+    private void RefreshQueryHistory()
+    {
+        _queryHistoryCombo.ItemsSource = _queryHistory.Entries.ToArray();
+        _queryHistoryCombo.PlaceholderText = $"本次查詢記錄（{_queryHistory.Entries.Count}）";
+        _queryHistoryCombo.SelectedIndex = -1;
+        var canUseHistory = _operationCancellation is null && _queryHistory.Entries.Count > 0;
+        _queryHistoryCombo.IsEnabled = canUseHistory;
+        _clearQueryHistoryButton.IsEnabled = canUseHistory;
     }
 
     private async Task LoadObjectsAsync(string database, CancellationToken cancellationToken)
@@ -923,6 +975,8 @@ public sealed partial class MainWindow : Window
         _databaseCombo.IsEnabled = !busy && _session is not null;
         _objectSearchBox.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _objectTypeCombo.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _queryHistoryCombo.IsEnabled = !busy && _queryHistory.Entries.Count > 0;
+        _clearQueryHistoryButton.IsEnabled = !busy && _queryHistory.Entries.Count > 0;
         _cancelButton.IsEnabled = busy;
         _updateButton.IsEnabled = !busy;
         if (!string.IsNullOrWhiteSpace(status))
