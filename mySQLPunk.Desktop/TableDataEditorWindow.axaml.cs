@@ -34,6 +34,7 @@ public sealed partial class TableDataEditorWindow : Window
     private readonly Button _editButton;
     private readonly Button _deleteButton;
     private readonly Button _refreshButton;
+    private readonly Button _columnVisibilityButton;
     private readonly Button _exportPageButton;
     private readonly Button _applyFilterButton;
     private readonly Button _clearFilterButton;
@@ -47,6 +48,7 @@ public sealed partial class TableDataEditorWindow : Window
     private int _rowOffset;
     private TableDataSort? _sort;
     private TableDataFilter? _filter;
+    private readonly HashSet<string> _hiddenColumnNames = new(StringComparer.Ordinal);
 
     public TableDataEditorWindow()
     {
@@ -68,6 +70,7 @@ public sealed partial class TableDataEditorWindow : Window
         _editButton = this.FindControl<Button>("EditButton")!;
         _deleteButton = this.FindControl<Button>("DeleteButton")!;
         _refreshButton = this.FindControl<Button>("RefreshButton")!;
+        _columnVisibilityButton = this.FindControl<Button>("ColumnVisibilityButton")!;
         _exportPageButton = this.FindControl<Button>("ExportPageButton")!;
         _applyFilterButton = this.FindControl<Button>("ApplyFilterButton")!;
         _clearFilterButton = this.FindControl<Button>("ClearFilterButton")!;
@@ -288,7 +291,10 @@ public sealed partial class TableDataEditorWindow : Window
             return;
         }
 
-        var result = QueryResultExportService.CreateTablePageResult(snapshot);
+        var visibleColumnNames = GetVisibleColumns(snapshot)
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var result = QueryResultExportService.CreateTablePageResult(snapshot, visibleColumnNames);
         var format = QueryResultExportService.ResolveFormat(path, selectedFormat);
         QueryResultExportSummary? summary = null;
         var succeeded = await RunAsync("正在安全匯出目前頁面…", async cancellationToken =>
@@ -300,6 +306,34 @@ public sealed partial class TableDataEditorWindow : Window
             _statusText.Text =
                 $"已匯出本頁 {summary.Rows:N0} 列 {summary.FormatDisplayName}（{summary.FormattedBytes}）：{summary.Path}";
         }
+    }
+
+    private async void ColumnVisibility_Click(object? sender, RoutedEventArgs e)
+    {
+        var snapshot = _snapshot;
+        if (_busy || snapshot is null)
+        {
+            return;
+        }
+
+        var currentVisible = GetVisibleColumns(snapshot)
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var dialog = new TableColumnVisibilityDialog(snapshot.Columns, currentVisible);
+        var selected = await dialog.ShowDialog<IReadOnlySet<string>?>(this);
+        if (selected is null)
+        {
+            return;
+        }
+
+        _hiddenColumnNames.Clear();
+        _hiddenColumnNames.UnionWith(snapshot.Columns
+            .Select(column => column.Name)
+            .Where(columnName => !selected.Contains(columnName)));
+        RebuildGrid(snapshot);
+        UpdateColumnVisibilityButton(snapshot);
+        _statusText.Text = $"目前顯示 {selected.Count:N0}／{snapshot.Columns.Count:N0} 欄；本頁匯出只包含可見欄位。";
+        UpdateActionState();
     }
 
     private void FilterControl_Changed(object? sender, SelectionChangedEventArgs e)
@@ -483,6 +517,7 @@ public sealed partial class TableDataEditorWindow : Window
         UpdateSortControls(loadedSnapshot);
         UpdateFilterControls(loadedSnapshot);
         RebuildGrid(loadedSnapshot);
+        UpdateColumnVisibilityButton(loadedSnapshot);
         var keyStatus = loadedSnapshot.HasPrimaryKey
             ? "Primary Key 已辨識，可安全修改與刪除。"
             : "沒有 Primary Key：可新增，但修改與刪除已停用。";
@@ -515,7 +550,7 @@ public sealed partial class TableDataEditorWindow : Window
     private void RebuildGrid(TableDataSnapshot snapshot)
     {
         _dataGrid.Columns.Clear();
-        foreach (var column in snapshot.Columns.OrderBy(column => column.Ordinal))
+        foreach (var column in GetVisibleColumns(snapshot))
         {
             var attributes = new List<string>();
             if (column.IsPrimaryKey)
@@ -549,6 +584,26 @@ public sealed partial class TableDataEditorWindow : Window
                     TableCellValueConverter.FormatForDisplay(snapshot.Columns[index], value)).ToArray()))
             .ToList();
         _dataGrid.SelectedIndex = snapshot.Rows.Count > 0 ? 0 : -1;
+    }
+
+    private IReadOnlyList<TableColumnInfo> GetVisibleColumns(TableDataSnapshot snapshot)
+    {
+        var columns = snapshot.Columns
+            .Where(column => !_hiddenColumnNames.Contains(column.Name))
+            .OrderBy(column => column.Ordinal)
+            .ToList();
+        if (columns.Count == 0)
+        {
+            throw new InvalidOperationException("Table 至少需要一個顯示欄位。");
+        }
+
+        return columns;
+    }
+
+    private void UpdateColumnVisibilityButton(TableDataSnapshot snapshot)
+    {
+        var visibleCount = snapshot.Columns.Count(column => !_hiddenColumnNames.Contains(column.Name));
+        _columnVisibilityButton.Content = $"欄位 {visibleCount:N0}/{snapshot.Columns.Count:N0}…";
     }
 
     private void UpdateSortControls(TableDataSnapshot snapshot)
@@ -683,6 +738,7 @@ public sealed partial class TableDataEditorWindow : Window
         _previousButton.IsEnabled = !_busy && _snapshot?.HasPreviousPage == true;
         _nextButton.IsEnabled = !_busy && _snapshot?.HasNextPage == true;
         _refreshButton.IsEnabled = !_busy;
+        _columnVisibilityButton.IsEnabled = !_busy && hasSnapshot;
         _exportFormatCombo.IsEnabled = !_busy && hasSnapshot;
         _exportPageButton.IsEnabled = !_busy && hasSnapshot;
         _closeButton.IsEnabled = !_busy;

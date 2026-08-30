@@ -33,24 +33,55 @@ public static class QueryResultExportService
 {
     private static readonly UTF8Encoding Utf8WithBom = new(true);
 
-    public static QueryResult CreateTablePageResult(TableDataSnapshot snapshot)
+    public static QueryResult CreateTablePageResult(
+        TableDataSnapshot snapshot,
+        IReadOnlyCollection<string>? includedColumnNames = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        var columns = snapshot.Columns.OrderBy(column => column.Ordinal).ToList();
-        if (columns.Select(column => column.Ordinal).Where((ordinal, index) => ordinal != index).Any())
+        var allColumns = snapshot.Columns.OrderBy(column => column.Ordinal).ToList();
+        if (allColumns.Select(column => column.Ordinal).Where((ordinal, index) => ordinal != index).Any())
         {
             throw new InvalidOperationException("Table 欄位 ordinal 不連續，請重新載入 schema 後再匯出。");
         }
 
-        if (snapshot.Rows.Any(row => row.Values.Count != columns.Count))
+        if (snapshot.Rows.Any(row => row.Values.Count != allColumns.Count))
         {
             throw new InvalidOperationException("Table 資料列與目前 schema 不一致，請重新整理後再匯出。");
+        }
+
+        var columns = allColumns;
+        if (includedColumnNames is not null)
+        {
+            var knownNames = allColumns.Select(column => column.Name).ToHashSet(StringComparer.Ordinal);
+            var included = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var columnName in includedColumnNames)
+            {
+                if (columnName is null || !knownNames.Contains(columnName))
+                {
+                    throw new ArgumentException(
+                        $"找不到要匯出的 Table 欄位：{columnName ?? "(null)"}",
+                        nameof(includedColumnNames));
+                }
+
+                included.Add(columnName);
+            }
+
+            if (included.Count == 0)
+            {
+                throw new ArgumentException("本頁匯出至少需要一個可見欄位。", nameof(includedColumnNames));
+            }
+
+            columns = allColumns.Where(column => included.Contains(column.Name)).ToList();
         }
 
         return new QueryResult
         {
             Columns = columns.Select(column => column.Name).ToList(),
-            Rows = snapshot.Rows.Select(row => row.Values).ToList(),
+            Rows = snapshot.Rows
+                .Select(row => (IReadOnlyList<object?>)columns
+                    .Select(column => row.Values[column.Ordinal])
+                    .ToList())
+                .ToList(),
             WasTruncated = snapshot.WasTruncated || snapshot.RowOffset > 0
         };
     }

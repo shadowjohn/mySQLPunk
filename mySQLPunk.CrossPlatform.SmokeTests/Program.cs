@@ -844,6 +844,21 @@ static async Task TableDataEditingAsync()
             $"Table 本頁 CSV 應保留目前排序與安全格式；actual={sortedExportCsv.Replace("\r", "\\r").Replace("\n", "\\n")}");
         var lastExportPage = QueryResultExportService.CreateTablePageResult(sortedLastPage);
         Assert(lastExportPage.WasTruncated, "非第一頁即使已到結尾，匯出仍應標示不是完整 Table");
+        var visibleColumnExport = QueryResultExportService.CreateTablePageResult(
+            sortedFirstPage,
+            new HashSet<string>(StringComparer.Ordinal) { "name" });
+        Assert(
+            visibleColumnExport.Columns.SequenceEqual(new[] { "name" }) &&
+            visibleColumnExport.Rows.Select(row => Convert.ToString(row[0])).SequenceEqual(new[] { "zulu", "same" }),
+            "Table 本頁匯出應只保留目前可見欄位，並維持 metadata 欄位順序");
+        await AssertThrowsAsync<ArgumentException>(() => Task.FromResult(
+            QueryResultExportService.CreateTablePageResult(
+                sortedFirstPage,
+                Array.Empty<string>())));
+        await AssertThrowsAsync<ArgumentException>(() => Task.FromResult(
+            QueryResultExportService.CreateTablePageResult(
+                sortedFirstPage,
+                new[] { "name; DROP TABLE paged_sample" })));
         var matchingNames = await session.LoadTableDataAsync(
             profile.Database,
             pagedTable,

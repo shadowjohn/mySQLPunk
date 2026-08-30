@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | 主要視窗、樹狀導覽、物件清單、分頁 | ✅ | Windows 完整版已具備可停靠／浮動分頁、多連線樹與物件清單；Linux / macOS 預覽版的 metadata 樹也可依 schema／名稱即時搜尋並依 Table／View 篩選。 |
 | 物件設計器 | 🟡 | 五種 provider 已能建表與主要 ALTER；進階 constraint／索引仍需更多實機矩陣。 |
-| RDBMS 資料編輯器（網格） | ✅ | Windows 完整版具備分頁瀏覽、篩選、排序、欄顯示、寫回、無主鍵安全模式與多格式匯出；Linux / macOS 預覽版已補 Primary Key 穩定分頁、metadata 白名單參數化篩選與欄位排序、安全寫回，以及保留目前篩選／排序的 CSV／TSV／JSON 本頁匯出。 |
+| RDBMS 資料編輯器（網格） | ✅ | Windows 完整版具備分頁瀏覽、篩選、排序、欄顯示、寫回、無主鍵安全模式與多格式匯出；Linux / macOS 預覽版已補 Primary Key 穩定分頁、metadata 白名單參數化篩選與欄位排序、暫時欄位顯示控制、安全寫回，以及保留目前篩選／排序與可見欄位的 CSV／TSV／JSON 本頁匯出。 |
 | MongoDB 資料編輯器（網格／樹／JSON） | 🆕 | 文件檢視器提供可展開文件樹與 Canonical Extended JSON 編輯；儲存會鎖定 `_id` 並以完整原始文件做並行比對，並支援文件新增（自動 `_id`）與安全刪除；view 與缺 `_id` 文件唯讀。待補網格內編輯。 |
 | Redis 資料編輯器 | ✅ | key 編輯器依型別切換：string 值編輯、hash 欄位、list 元素／尾端新增、set 成員、zset 分數都有並行衝突保護，另有 TTL 設定／移除與刪除 key；list 元素刪除因 Redis 無對應命令留待後續。 |
 | 資料分析與互動圖表 | 🆕 | 已完成欄位摘要、Top 值比例與值鑽取的第一版。 |
@@ -65,7 +65,7 @@
 | SSH tunnel、SSL/TLS | ✅ | 四種網路 provider 已有共用安全設定 UI、憑證驗證、SSH SHA256 主機金鑰固定與隧道生命週期；SQLite 為本機檔案，不適用網路層設定。 |
 | PAM／LDAP／Kerberos／MFA／SSO | 📋 | 依 provider 驗證能力分階段加入，不保存明文祕密。 |
 | 深色模式／平台原生設計 | ✅ | Windows 原生 WinForms、淺／深色主題與 DPI 向量圖示已完成。 |
-| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁、metadata 白名單欄位排序，以及常用 scalar、provider-aware integer range、SQLite NUMERIC／temporal／UUID／GUID、single／double 浮點無聲失真防護、MySQL／MariaDB mutation warning rollback、MySQL／MariaDB／SQL Server 固定長度 binary 防護與 SQL Server collation-aware 字串無損寫入、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／DATE／DATETIME／TIMESTAMP／UUID／INET4／INET6、PostgreSQL scalar temporal／bit string／timetz／含 typemod 無損驗證的 interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery、1 MiB 內 binary／JSON／XML、PostgreSQL 網路位址與 SQL Server scalar temporal／legacy LOB 欄位的安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。Linux x64／ARM64 使用 self-contained tar 安裝包，macOS Intel／Apple Silicon 使用 `.app.zip`，並可依 RID 安全檢查、下載及驗證最新 Release；Linux 與 macOS 都已完成交易式套用、啟動健康檢查與 rollback，待補 macOS Developer ID/notarization、其餘 provider 與進階功能。 |
+| 跨平台授權／Windows、macOS、Linux | 🟡 | 商業授權本身不適用開源專案；Avalonia 跨平台版已可使用 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁、metadata 白名單參數化篩選與欄位排序、Table 欄位顯示控制，以及常用 scalar、provider-aware integer range、SQLite NUMERIC／temporal／UUID／GUID、single／double 浮點無聲失真防護、MySQL／MariaDB mutation warning rollback、MySQL／MariaDB／SQL Server 固定長度 binary 防護與 SQL Server collation-aware 字串無損寫入、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／DATE／DATETIME／TIMESTAMP／UUID／INET4／INET6、PostgreSQL scalar temporal／bit string／timetz／含 typemod 無損驗證的 interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery、1 MiB 內 binary／JSON／XML、PostgreSQL 網路位址與 SQL Server scalar temporal／legacy LOB 欄位的安全 Table 資料編輯，並可選擇以 Linux Secret Service 或 macOS Keychain 保存密碼。Linux x64／ARM64 使用 self-contained tar 安裝包，macOS Intel／Apple Silicon 使用 `.app.zip`，並可依 RID 安全檢查、下載及驗證最新 Release；Linux 與 macOS 都已完成交易式套用、啟動健康檢查與 rollback，待補 macOS Developer ID/notarization、其餘 provider 與進階功能。 |
 
 > 最新安全進度：MySQL 8、MariaDB 11.4 與 PostgreSQL 16 的一般字串已使用 byte-exact 原值比對，可在大小寫／重音不敏感 collation 下支撐 optimistic concurrency 衝突；PostgreSQL `citext` 可安全載入與編輯，保留原始格式的 `json` 也會逐 byte 攔截外部改動，`json[]`、`xml[]` 等無 element equality 的陣列則改用 canonical text UTF-8 bytes 保留安全編輯與衝突防護。Linux X11 已實際操作驗證，macOS 由原生 Intel／Apple Silicon CI 持續建置與檢查 app archive。
 
