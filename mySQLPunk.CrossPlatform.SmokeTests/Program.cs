@@ -425,8 +425,34 @@ static async Task CrossPlatformUpdateAssetsAsync()
             try
             {
                 var service = new CrossPlatformUpdateService();
+                var currentLinuxRuntime = CrossPlatformUpdateService.ResolveCurrentRuntimeIdentifier();
+                var nativeLinuxUpdate = update with
+                {
+                    RuntimeIdentifier = currentLinuxRuntime,
+                    PackageFileName = CrossPlatformUpdateService.BuildPackageFileName(
+                        update.LatestVersionText,
+                        currentLinuxRuntime)
+                };
+                var wrongLinuxRuntime = currentLinuxRuntime == "linux-x64"
+                    ? "linux-arm64"
+                    : "linux-x64";
+                var wrongArchitectureUpdate = nativeLinuxUpdate with
+                {
+                    RuntimeIdentifier = wrongLinuxRuntime,
+                    PackageFileName = CrossPlatformUpdateService.BuildPackageFileName(
+                        update.LatestVersionText,
+                        wrongLinuxRuntime)
+                };
+                AssertThrows<PlatformNotSupportedException>(() =>
+                {
+                    using var unexpected = service.StartLinuxApply(
+                        wrongArchitectureUpdate,
+                        new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
+                        applyScriptPath,
+                        Environment.ProcessId);
+                });
                 using (var lockOwner = service.StartLinuxApply(
-                           update,
+                           nativeLinuxUpdate,
                            new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
                            applyScriptPath,
                            Environment.ProcessId))
@@ -438,7 +464,7 @@ static async Task CrossPlatformUpdateAssetsAsync()
                 AssertThrows<InvalidOperationException>(() =>
                 {
                     using var unexpected = service.StartLinuxApply(
-                        update,
+                        nativeLinuxUpdate,
                         new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
                         applyScriptPath,
                         Environment.ProcessId);
@@ -449,7 +475,7 @@ static async Task CrossPlatformUpdateAssetsAsync()
                     lockPath,
                     "token=0123456789abcdef0123456789abcdef\npid=2147483647\n");
                 using (var recovered = service.StartLinuxApply(
-                           update,
+                           nativeLinuxUpdate,
                            new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
                            applyScriptPath,
                            Environment.ProcessId))
