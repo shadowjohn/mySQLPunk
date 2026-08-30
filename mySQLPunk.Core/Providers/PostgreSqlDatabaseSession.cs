@@ -217,6 +217,12 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
 
+        if (column.ValueKind == TableColumnValueKind.String &&
+            column.TrailingSpacesAreNotRoundTrippable)
+        {
+            return $"CAST({QuoteIdentifier(column.Name)} AS text) = {parameterName}";
+        }
+
         if (column.ValueKind is TableColumnValueKind.ExactDecimal or TableColumnValueKind.PostgreSqlMoney)
         {
             return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
@@ -259,6 +265,12 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             return $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE " +
                    $"{BuildIntervalComponentsExpression(quotedName)} END AS {quotedName}";
+        }
+
+        if (column.ValueKind == TableColumnValueKind.String &&
+            column.TrailingSpacesAreNotRoundTrippable)
+        {
+            return $"CAST({quotedName} AS text) AS {quotedName}";
         }
 
         return column.ValueKind is TableColumnValueKind.NetworkAddress or
@@ -469,11 +481,20 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                     ? reader.GetInt32(14)
                     : null,
                 IntegerMinimum = integerBounds?.Minimum,
-                IntegerMaximum = integerBounds?.Maximum
+                IntegerMaximum = integerBounds?.Maximum,
+                TrailingSpacesAreNotRoundTrippable = IsFixedLengthCharacterType(storageType)
             });
         }
 
         return columns;
+    }
+
+    private static bool IsFixedLengthCharacterType(string storageType)
+    {
+        var normalized = storageType.Trim();
+        return normalized.Equals("character", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("bpchar", StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith("character(", StringComparison.OrdinalIgnoreCase);
     }
 
     private static TableColumnValueKind MapValueKind(string dataType, string userDefinedType) =>

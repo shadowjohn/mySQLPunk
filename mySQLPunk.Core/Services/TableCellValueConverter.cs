@@ -42,7 +42,7 @@ public static class TableCellValueConverter
         {
             return column.ValueKind switch
             {
-                TableColumnValueKind.String => input.Text,
+                TableColumnValueKind.String => ParseString(column, input.Text),
                 TableColumnValueKind.Integer => ParseSignedInteger(column, input.Text),
                 TableColumnValueKind.UnsignedInteger => ParseUnsignedInteger(column, input.Text),
                 TableColumnValueKind.SqliteNumeric => ParseSqliteNumeric(column, input.Text),
@@ -291,6 +291,18 @@ public static class TableCellValueConverter
             TableColumnValueKind.ExactDecimal &&
         value is string text &&
         text.Length > MaximumEditableStructuredTextCharacters;
+
+    private static string ParseString(TableColumnInfo column, string text)
+    {
+        if (column.TrailingSpacesAreNotRoundTrippable && text.EndsWith(' '))
+        {
+            throw new FormatException(
+                "這個固定長度字串欄位不會保留尾端 U+0020 空白的數量；" +
+                "請移除尾端空白，或改用 VARCHAR／TEXT 欄位保存。");
+        }
+
+        return text;
+    }
 
     private static SqlServerVariantValue ParseSqlServerVariant(string text)
     {

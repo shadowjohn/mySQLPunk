@@ -426,7 +426,10 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             {
                 IntegerMinimum = integerBounds?.Minimum,
                 IntegerMaximum = integerBounds?.Maximum,
-                RequiredBinaryLength = requiredBinaryLength
+                RequiredBinaryLength = requiredBinaryLength,
+                TrailingSpacesAreNotRoundTrippable = dataType.Equals(
+                    "char",
+                    StringComparison.OrdinalIgnoreCase)
             });
         }
 

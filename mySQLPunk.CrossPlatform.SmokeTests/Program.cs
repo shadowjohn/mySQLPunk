@@ -934,6 +934,26 @@ static async Task TableDataEditingAsync()
                 new TableCellInput("fixed_payload", TableCellInputMode.Value, "0xCAFE00")) is byte[] exactBytes &&
             exactBytes.SequenceEqual(new byte[] { 0xCA, 0xFE, 0x00 }),
             "固定長度 binary 應只接受精確 byte 數");
+        var nonRoundTrippableCharColumn = inserted.Columns.Single(column => column.Name == "name") with
+        {
+            DataTypeName = "char(6)",
+            StorageDataTypeName = "char(6)",
+            TrailingSpacesAreNotRoundTrippable = true
+        };
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            nonRoundTrippableCharColumn,
+            new TableCellInput("name", TableCellInputMode.Value, "AB ")));
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                nonRoundTrippableCharColumn,
+                new TableCellInput("name", TableCellInputMode.Value, "AB\t"))) == "AB\t" &&
+            Convert.ToString(TableCellValueConverter.Parse(
+                nonRoundTrippableCharColumn,
+                new TableCellInput("name", TableCellInputMode.Value, "AB\u00A0"))) == "AB\u00A0" &&
+            Convert.ToString(TableCellValueConverter.Parse(
+                nonRoundTrippableCharColumn with { TrailingSpacesAreNotRoundTrippable = false },
+                new TableCellInput("name", TableCellInputMode.Value, "AB "))) == "AB ",
+            "固定長度 CHAR 只應拒絕 provider 無法 round-trip 的尾端 U+0020 空白");
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             binaryColumn,
             new TableCellInput(
@@ -2372,7 +2392,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
         var nativeColumns = isMariaDb
             ? ", native_uuid UUID NULL, native_address INET6 NULL, native_ipv4 INET4 NULL"
             : string.Empty;
-        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, fixed_payload BINARY(3) NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, tiny_value TINYINT NULL, unsigned_tiny_value TINYINT UNSIGNED NULL, small_value SMALLINT NULL, unsigned_small_value SMALLINT UNSIGNED NULL, zerofill_small_value SMALLINT ZEROFILL NULL, medium_value MEDIUMINT NULL, unsigned_medium_value MEDIUMINT UNSIGNED NULL, integer_value INT NULL, unsigned_integer_value INT UNSIGNED NULL, big_value BIGINT NULL, unsigned_big_value BIGINT UNSIGNED NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
+        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, fixed_payload BINARY(3) NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, tiny_value TINYINT NULL, unsigned_tiny_value TINYINT UNSIGNED NULL, small_value SMALLINT NULL, unsigned_small_value SMALLINT UNSIGNED NULL, zerofill_small_value SMALLINT ZEROFILL NULL, medium_value MEDIUMINT NULL, unsigned_medium_value MEDIUMINT UNSIGNED NULL, integer_value INT NULL, unsigned_integer_value INT UNSIGNED NULL, big_value BIGINT NULL, unsigned_big_value BIGINT UNSIGNED NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL, fixed_text CHAR(6) NULL{nativeColumns});");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -2386,6 +2406,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             database,
             table!,
             id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyNonRoundTrippableTrailingSpacesAsync(session, database, table!);
         await VerifyFixedLengthBinaryAsync(session, database, table!);
         await VerifyFloatingPointTypesAsync(
             session,
@@ -2678,6 +2699,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE address_type AS (city TEXT, postal_code INTEGER);");
         await session.ExecuteAsync(database, "CREATE DOMAIN positive_count AS INTEGER CHECK (VALUE BETWEEN 1 AND 100);");
         await session.ExecuteAsync(database, "CREATE DOMAIN short_label AS VARCHAR(30) CHECK (length(VALUE) >= 3);");
+        await session.ExecuteAsync(database, "CREATE DOMAIN fixed_label AS CHARACTER(6);");
         await session.ExecuteAsync(database, "CREATE DOMAIN precise_amount AS NUMERIC(18,6) CHECK (VALUE <> 0);");
         await session.ExecuteAsync(database, "CREATE DOMAIN work_state AS mood;");
         await session.ExecuteAsync(database, "CREATE DOMAIN subnet_domain AS CIDR CHECK (masklen(VALUE) >= 24);");
@@ -2779,7 +2801,10 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 operator_signature REGOPERATOR NULL,
                 function_name REGPROC NULL,
                 function_signature REGPROCEDURE NULL,
-                type_name REGTYPE NULL
+                type_name REGTYPE NULL,
+                fixed_text CHARACTER(6) NULL,
+                domain_fixed fixed_label NULL,
+                unbounded_fixed bpchar NULL
             );
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
@@ -2795,6 +2820,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE public.sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyNonRoundTrippableTrailingSpacesAsync(session, database, table!);
         await VerifyFloatingPointTypesAsync(
             session,
             database,
@@ -3877,6 +3903,163 @@ static async Task VerifyMySqlMutationWarningsRollbackAsync(
         await session.ExecuteAsync(database, $"SET GLOBAL sql_mode = '{escapedMode}';");
         await session.ExecuteAsync(database, $"SET GLOBAL max_error_count = {originalMaxErrorCount};");
     }
+}
+
+static async Task VerifyNonRoundTrippableTrailingSpacesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var fixedTextColumn = before.Columns.Single(column => column.Name == "fixed_text");
+    Assert(
+        fixedTextColumn.ValueKind == TableColumnValueKind.String &&
+        fixedTextColumn.IsEditable &&
+        fixedTextColumn.TrailingSpacesAreNotRoundTrippable,
+        $"{session.Profile.ProviderDisplayName} fixed CHAR metadata 應標記尾端空白無法 round-trip");
+    Assert(
+        !before.Columns.Single(column => column.Name == "name").TrailingSpacesAreNotRoundTrippable,
+        $"{session.Profile.ProviderDisplayName} VARCHAR 不可誤標為固定長度 CHAR");
+    AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+        fixedTextColumn,
+        new TableCellInput("fixed_text", TableCellInputMode.Value, "AB ")));
+    Assert(
+        Convert.ToString(TableCellValueConverter.Parse(
+            fixedTextColumn,
+            new TableCellInput("fixed_text", TableCellInputMode.Value, "AB\t"))) == "AB\t" &&
+        Convert.ToString(TableCellValueConverter.Parse(
+            fixedTextColumn,
+            new TableCellInput("fixed_text", TableCellInputMode.Value, "AB\u00A0"))) == "AB\u00A0",
+        $"{session.Profile.ProviderDisplayName} fixed CHAR 只應拒絕尾端 U+0020 空白");
+
+    if (session.Profile.Provider == DatabaseProviderKind.PostgreSql)
+    {
+        var domainColumn = before.Columns.Single(column => column.Name == "domain_fixed");
+        var unboundedColumn = before.Columns.Single(column => column.Name == "unbounded_fixed");
+        Assert(
+            domainColumn.ValueKind == TableColumnValueKind.String &&
+            domainColumn.StorageDataTypeName == "character(6)" &&
+            domainColumn.TrailingSpacesAreNotRoundTrippable,
+            "PostgreSQL character domain 應依 base type 標記尾端空白無法 round-trip");
+        Assert(
+            unboundedColumn.ValueKind == TableColumnValueKind.String &&
+            unboundedColumn.StorageDataTypeName == "bpchar" &&
+            unboundedColumn.TrailingSpacesAreNotRoundTrippable,
+            "PostgreSQL unbounded bpchar 應標記尾端空白無法 round-trip");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            domainColumn,
+            new TableCellInput("domain_fixed", TableCellInputMode.Value, "CD ")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            unboundedColumn,
+            new TableCellInput("unbounded_fixed", TableCellInputMode.Value, "EF ")));
+    }
+
+    const string nativeName = "Native CHAR spaces";
+    if (session.Profile.Provider == DatabaseProviderKind.MySql)
+    {
+        var builder = new MySqlConnectionStringBuilder
+        {
+            Server = session.Profile.Host,
+            Port = (uint)session.Profile.Port,
+            UserID = session.Profile.Username,
+            Password = session.Profile.Password,
+            Database = database,
+            SslMode = session.Profile.UseSsl ? MySqlSslMode.Preferred : MySqlSslMode.None
+        };
+        await using var connection = new MySqlConnection(builder.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SET SESSION sql_mode = 'STRICT_ALL_TABLES';";
+        await command.ExecuteNonQueryAsync();
+        command.CommandText =
+            "INSERT INTO sample (name, fixed_text) VALUES ('Native CHAR spaces', 'AB  ');";
+        await command.ExecuteNonQueryAsync();
+        command.CommandText = "SHOW COUNT(*) WARNINGS;";
+        Assert(
+            Convert.ToInt32(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture) == 0,
+            "MySQL／MariaDB CHAR 尾端空白失真應證實不會產生 warning");
+    }
+    else
+    {
+        await session.ExecuteAsync(
+            database,
+            "INSERT INTO public.sample (name, fixed_text, unbounded_fixed) " +
+            "VALUES ('Native CHAR spaces', 'AB  ', 'EF  ');");
+    }
+
+    var nativeSnapshot = await session.LoadTableDataAsync(database, table);
+    var nativeRow = nativeSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == nativeName);
+    var nativeValue = Convert.ToString(nativeRow.Values[fixedTextColumn.Ordinal]) ?? string.Empty;
+    Assert(
+        nativeValue != "AB  " && nativeValue.TrimEnd(' ') == "AB",
+        $"{session.Profile.ProviderDisplayName} 原生 CHAR 應證實無法讀回輸入的尾端空白數量；actual=[{nativeValue}]");
+    if (session.Profile.Provider == DatabaseProviderKind.PostgreSql)
+    {
+        var unboundedColumn = nativeSnapshot.Columns.Single(column => column.Name == "unbounded_fixed");
+        var unboundedValue = Convert.ToString(nativeRow.Values[unboundedColumn.Ordinal]) ?? string.Empty;
+        Assert(
+            unboundedValue == "EF",
+            $"PostgreSQL 原生 unbounded bpchar 應證實會移除尾端空白；actual=[{unboundedValue}]");
+    }
+    await session.DeleteTableRowAsync(database, table, nativeRow);
+
+    var rejectedException = await CaptureExceptionAsync<InvalidOperationException>(() =>
+        session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected CHAR spaces"),
+                new TableCellInput("fixed_text", TableCellInputMode.Value, "AB ")
+            }));
+    Assert(
+        rejectedException.Message.Contains("U+0020", StringComparison.Ordinal) &&
+        rejectedException.Message.Contains("VARCHAR", StringComparison.Ordinal),
+        $"{session.Profile.ProviderDisplayName} fixed CHAR 應提供可行的無損修正說明；actual={rejectedException.Message}");
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    Assert(
+        rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected CHAR spaces"),
+        $"{session.Profile.ProviderDisplayName} fixed CHAR 尾端空白輸入不可落地");
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "Fixed CHAR editor"),
+            new TableCellInput("fixed_text", TableCellInputMode.Value, "ABC")
+        });
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Fixed CHAR editor");
+    Assert(
+        (Convert.ToString(inserted.Values[fixedTextColumn.Ordinal]) ?? string.Empty).TrimEnd(' ') == "ABC",
+        $"{session.Profile.ProviderDisplayName} fixed CHAR 合法短值新增不正確");
+
+    await AssertThrowsAsync<InvalidOperationException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[] { new TableCellInput("fixed_text", TableCellInputMode.Value, "XYZ ") }));
+    var unchangedSnapshot = await session.LoadTableDataAsync(database, table);
+    var unchanged = unchangedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Fixed CHAR editor");
+    Assert(
+        (Convert.ToString(unchanged.Values[fixedTextColumn.Ordinal]) ?? string.Empty).TrimEnd(' ') == "ABC",
+        $"{session.Profile.ProviderDisplayName} fixed CHAR 無效修改不可落地");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        unchanged,
+        new[] { new TableCellInput("fixed_text", TableCellInputMode.Value, "UVWXYZ") });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Fixed CHAR editor");
+    Assert(
+        Convert.ToString(updated.Values[fixedTextColumn.Ordinal]) == "UVWXYZ",
+        $"{session.Profile.ProviderDisplayName} fixed CHAR 無尾端空白的滿長值應正常保存");
+    await session.DeleteTableRowAsync(database, table, updated);
 }
 
 static async Task VerifyFixedLengthBinaryAsync(

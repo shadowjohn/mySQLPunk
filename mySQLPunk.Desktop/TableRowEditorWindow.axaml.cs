@@ -219,6 +219,8 @@ public sealed partial class TableRowEditorWindow : Window
     private static string BuildWatermark(TableColumnInfo column) => column.ValueKind switch
     {
         TableColumnValueKind.Boolean => "true / false / 1 / 0",
+        TableColumnValueKind.String when column.TrailingSpacesAreNotRoundTrippable =>
+            "固定長度字串（尾端空白無法保留）",
         TableColumnValueKind.String when column.StorageDataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase) =>
             "請輸入欄位宣告的 ENUM 值之一",
         TableColumnValueKind.String when column.StorageDataTypeName.StartsWith("set(", StringComparison.OrdinalIgnoreCase) =>
