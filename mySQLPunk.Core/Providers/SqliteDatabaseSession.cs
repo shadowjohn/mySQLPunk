@@ -171,7 +171,7 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
             normalized.Contains("FLOA", StringComparison.Ordinal) ||
             normalized.Contains("DOUB", StringComparison.Ordinal))
         {
-            return TableColumnValueKind.FloatingPoint;
+            return TableColumnValueKind.DoublePrecisionFloatingPoint;
         }
 
         if (normalized.Contains("BOOL", StringComparison.Ordinal))

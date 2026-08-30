@@ -567,7 +567,8 @@ static async Task TableDataEditingAsync()
             CREATE TABLE numeric_sample (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 amount DECIMAL(30,10) NOT NULL,
-                note TEXT NOT NULL
+                note TEXT NOT NULL,
+                approximate_value REAL NULL
             );
             INSERT INTO paged_sample (id, name) VALUES
                 (1, 'page-1'), (2, 'page-2'), (3, 'page-3'), (4, 'page-4'), (5, 'page-5');
@@ -638,6 +639,26 @@ static async Task TableDataEditingAsync()
         Assert(
             sqliteNumericColumn is { ValueKind: TableColumnValueKind.SqliteNumeric, IsEditable: true },
             "SQLite NUMERIC affinity 欄位應使用避免 REAL 精度損失的編輯器");
+        var sqliteDoubleColumn = emptyNumeric.Columns.Single(column => column.Name == "approximate_value");
+        Assert(
+            sqliteDoubleColumn is
+            {
+                ValueKind: TableColumnValueKind.DoublePrecisionFloatingPoint,
+                IsEditable: true
+            },
+            "SQLite REAL 應使用 8-byte 浮點安全編輯器");
+        Assert(
+            TableCellValueConverter.Parse(
+                sqliteDoubleColumn,
+                new TableCellInput("approximate_value", TableCellInputMode.Value, "1.23456789012345")) is
+            FloatingPointValue { Value: double, Text: "1.23456789012345" },
+            "SQLite REAL 應保留可 round-trip 的 canonical double");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqliteDoubleColumn,
+            new TableCellInput("approximate_value", TableCellInputMode.Value, "1.23456789012345678")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            sqliteDoubleColumn,
+            new TableCellInput("approximate_value", TableCellInputMode.Value, "1e-310")));
         Assert(
             TableCellValueConverter.Parse(
                 sqliteNumericColumn,
@@ -673,7 +694,8 @@ static async Task TableDataEditingAsync()
             new[]
             {
                 new TableCellInput("amount", TableCellInputMode.Value, "1234567890123.45"),
-                new TableCellInput("note", TableCellInputMode.Value, "safe-real")
+                new TableCellInput("note", TableCellInputMode.Value, "safe-real"),
+                new TableCellInput("approximate_value", TableCellInputMode.Value, "1.23456789012345")
             });
         await session.InsertTableRowAsync(
             profile.Database,
@@ -688,6 +710,22 @@ static async Task TableDataEditingAsync()
             Convert.ToString(numericRows.Rows[0].Values[1]) == "1234567890123.45" &&
             Convert.ToString(numericRows.Rows[1].Values[1]) == "9223372036854775807",
             "SQLite NUMERIC grid 應顯示實際儲存且可 round-trip 的 canonical 數值");
+        Assert(
+            TableCellValueConverter.Format(sqliteDoubleColumn, numericRows.Rows[0].Values[3]) ==
+            "1.23456789012345",
+            "SQLite REAL grid 應顯示實際儲存的 canonical double");
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            profile.Database,
+            numericTable,
+            new[]
+            {
+                new TableCellInput("amount", TableCellInputMode.Value, "1"),
+                new TableCellInput("note", TableCellInputMode.Value, "rejected-double"),
+                new TableCellInput(
+                    "approximate_value",
+                    TableCellInputMode.Value,
+                    "1.23456789012345678")
+            }));
         var numericStorage = await session.ExecuteAsync(
             profile.Database,
             "SELECT CAST(amount AS TEXT), typeof(amount) FROM numeric_sample ORDER BY id;");
@@ -1535,6 +1573,72 @@ static async Task TableDataEditingAsync()
                 aliasExactDecimal,
                 new TableCellInput("amount", TableCellInputMode.Value, "123456789012.123456")) is ExactDecimalValue,
             "SQL Server alias decimal 應使用 base type 安全解析");
+        var singlePrecisionColumn = new TableColumnInfo(
+            0,
+            "single_value",
+            "real",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.SinglePrecisionFloatingPoint);
+        var parsedSingle = TableCellValueConverter.Parse(
+            singlePrecisionColumn,
+            new TableCellInput("single_value", TableCellInputMode.Value, "1.2345678"));
+        Assert(
+            parsedSingle is FloatingPointValue { Value: float, Text: "1.2345678" },
+            "4-byte 浮點應保留可 round-trip 的 canonical single");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            singlePrecisionColumn,
+            new TableCellInput("single_value", TableCellInputMode.Value, "1.23456789")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            singlePrecisionColumn,
+            new TableCellInput("single_value", TableCellInputMode.Value, "16777217")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            singlePrecisionColumn,
+            new TableCellInput("single_value", TableCellInputMode.Value, "1e-40")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            singlePrecisionColumn,
+            new TableCellInput("single_value", TableCellInputMode.Value, "NaN")));
+        var doublePrecisionColumn = singlePrecisionColumn with
+        {
+            Name = "double_value",
+            DataTypeName = "double precision",
+            StorageDataTypeName = "double precision",
+            ValueKind = TableColumnValueKind.DoublePrecisionFloatingPoint
+        };
+        var parsedDouble = TableCellValueConverter.Parse(
+            doublePrecisionColumn,
+            new TableCellInput("double_value", TableCellInputMode.Value, "1.23456789012345"));
+        Assert(
+            parsedDouble is FloatingPointValue { Value: double, Text: "1.23456789012345" },
+            "8-byte 浮點應保留可 round-trip 的 canonical double");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            doublePrecisionColumn,
+            new TableCellInput("double_value", TableCellInputMode.Value, "1.23456789012345678")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            doublePrecisionColumn,
+            new TableCellInput("double_value", TableCellInputMode.Value, "9007199254740993")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            doublePrecisionColumn,
+            new TableCellInput("double_value", TableCellInputMode.Value, "1e-310")));
+        var scaledUnsignedFloatColumn = singlePrecisionColumn with
+        {
+            DataTypeName = "float(7,4) unsigned",
+            StorageDataTypeName = "float(7,4) unsigned"
+        };
+        Assert(
+            TableCellValueConverter.Parse(
+                scaledUnsignedFloatColumn,
+                new TableCellInput("single_value", TableCellInputMode.Value, "12.3456")) is
+            FloatingPointValue,
+            "MySQL／MariaDB FLOAT(M,D) 應接受不需取整的值");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            scaledUnsignedFloatColumn,
+            new TableCellInput("single_value", TableCellInputMode.Value, "12.34567")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            scaledUnsignedFloatColumn,
+            new TableCellInput("single_value", TableCellInputMode.Value, "-1")));
         var intervalColumn = new TableColumnInfo(
             0,
             "duration",
@@ -2176,7 +2280,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
         var nativeColumns = isMariaDb
             ? ", native_uuid UUID NULL, native_address INET6 NULL"
             : string.Empty;
-        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
+        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -2190,6 +2294,11 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             database,
             table!,
             id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyFloatingPointTypesAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE sample SET single_value = 2.5 WHERE id = {id};");
         await VerifyMySqlTemporalTypesAsync(session, database, table!);
         if (isMariaDb)
         {
@@ -2523,6 +2632,8 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 area POLYGON NULL,
                 radius CIRCLE NULL,
                 high_precision NUMERIC(100,50) NULL,
+                single_value REAL NULL,
+                double_value DOUBLE PRECISION NULL,
                 fractional_only NUMERIC(3,5) NULL,
                 rounded_thousands NUMERIC(2,-3) NULL,
                 search_path JSONPATH NULL,
@@ -2558,6 +2669,11 @@ static async Task PostgreSqlLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE public.sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyFloatingPointTypesAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE public.sample SET single_value = 2.5 WHERE id = {id};");
         await VerifyPostgreSqlTemporalTypesAsync(session, database, table!);
         await VerifyPostgreSqlIntervalRestrictionsAsync(session, database, table!);
         await VerifyPostgreSqlMoneyAsync(session, database, table!);
@@ -2970,7 +3086,7 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE dbo.short_label FROM nvarchar(30) NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.positive_count FROM int NOT NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.precise_amount FROM decimal(18,6) NULL;");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
         await session.ExecuteAsync(
@@ -2999,6 +3115,11 @@ static async Task SqlServerLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE dbo.sample SET name = N'Concurrent' WHERE id = {id};");
+        await VerifyFloatingPointTypesAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE dbo.sample SET single_value = 2.5 WHERE id = {id};");
         await VerifySqlServerMoneyAsync(session, database, table!);
         await VerifySqlServerTemporalTypesAsync(session, database, table!);
     }
@@ -3249,6 +3370,192 @@ static async Task VerifySqlServerTemporalTypesAsync(
     await session.DeleteTableRowAsync(database, table, concurrent);
     var afterDelete = await session.LoadTableDataAsync(database, table);
     Assert(afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0]) != id), "SQL Server temporal 安全刪除失敗");
+}
+
+static async Task VerifyFloatingPointTypesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table,
+    Func<long, string> buildConcurrentUpdateSql)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var singleColumn = before.Columns.Single(column => column.Name == "single_value");
+    var doubleColumn = before.Columns.Single(column => column.Name == "double_value");
+    Assert(
+        singleColumn is
+        {
+            ValueKind: TableColumnValueKind.SinglePrecisionFloatingPoint,
+            IsEditable: true
+        },
+        $"{session.Profile.ProviderDisplayName} 4-byte 浮點 metadata 應可安全編輯");
+    Assert(
+        doubleColumn is
+        {
+            ValueKind: TableColumnValueKind.DoublePrecisionFloatingPoint,
+            IsEditable: true
+        },
+        $"{session.Profile.ProviderDisplayName} 8-byte 浮點 metadata 應可安全編輯");
+
+    var insertInputs = new List<TableCellInput>
+    {
+        new("name", TableCellInputMode.Value, "Floating point"),
+        new("single_value", TableCellInputMode.Value, "1.2345678"),
+        new("double_value", TableCellInputMode.Value, "1.23456789012345")
+    };
+    var compactColumn = before.Columns.SingleOrDefault(column => column.Name == "compact_float");
+    if (compactColumn is not null)
+    {
+        Assert(
+            compactColumn is
+            {
+                ValueKind: TableColumnValueKind.SinglePrecisionFloatingPoint,
+                IsEditable: true
+            },
+            $"{session.Profile.ProviderDisplayName} compact FLOAT precision 應映射為 4-byte 浮點");
+        insertInputs.Add(new TableCellInput(
+            compactColumn.Name,
+            TableCellInputMode.Value,
+            "1.2345678"));
+    }
+
+    var wideColumn = before.Columns.SingleOrDefault(column => column.Name == "wide_float");
+    if (wideColumn is not null)
+    {
+        Assert(
+            wideColumn is
+            {
+                ValueKind: TableColumnValueKind.DoublePrecisionFloatingPoint,
+                IsEditable: true
+            },
+            $"{session.Profile.ProviderDisplayName} FLOAT(53) 應映射為 8-byte 浮點");
+        insertInputs.Add(new TableCellInput(
+            wideColumn.Name,
+            TableCellInputMode.Value,
+            "1.23456789012345"));
+    }
+
+    var scaledColumn = before.Columns.SingleOrDefault(column => column.Name == "scaled_value");
+    if (scaledColumn is not null)
+    {
+        Assert(
+            scaledColumn is
+            {
+                ValueKind: TableColumnValueKind.SinglePrecisionFloatingPoint,
+                IsEditable: true
+            },
+            $"{session.Profile.ProviderDisplayName} FLOAT(M,D) 應映射為 4-byte 浮點");
+        insertInputs.Add(new TableCellInput(
+            scaledColumn.Name,
+            TableCellInputMode.Value,
+            "12.3456"));
+    }
+
+    await session.InsertTableRowAsync(database, table, insertInputs);
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Floating point");
+    Assert(
+        TableCellValueConverter.Format(singleColumn, inserted.Values[singleColumn.Ordinal]) == "1.2345678",
+        $"{session.Profile.ProviderDisplayName} 4-byte 浮點實機 round-trip 不正確");
+    Assert(
+        TableCellValueConverter.Format(doubleColumn, inserted.Values[doubleColumn.Ordinal]) ==
+        "1.23456789012345",
+        $"{session.Profile.ProviderDisplayName} 8-byte 浮點實機 round-trip 不正確");
+    Assert(
+        TableCellValueConverter.MatchesOriginal(
+            singleColumn,
+            new TableCellInput("single_value", TableCellInputMode.Value, "+01.2345678e+0"),
+            inserted.Values[singleColumn.Ordinal]),
+        $"{session.Profile.ProviderDisplayName} 4-byte 浮點 optimistic predicate 應接受等值科學記號");
+
+    await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "Rejected single"),
+            new TableCellInput("single_value", TableCellInputMode.Value, "1.23456789")
+        }));
+    await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "Rejected double"),
+            new TableCellInput("double_value", TableCellInputMode.Value, "1.23456789012345678")
+        }));
+    if (scaledColumn is not null)
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected scaled float"),
+                new TableCellInput(scaledColumn.Name, TableCellInputMode.Value, "12.34567")
+            }));
+    }
+
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    Assert(
+        rejectedSnapshot.Rows.All(row =>
+            !Convert.ToString(row.Values[1])!.StartsWith("Rejected ", StringComparison.Ordinal)),
+        $"{session.Profile.ProviderDisplayName} 不可寫入會無聲降精度的浮點值");
+
+    var updateInputs = new List<TableCellInput>
+    {
+        new("single_value", TableCellInputMode.Value, "9.876543"),
+        new("double_value", TableCellInputMode.Value, "9.87654321012345")
+    };
+    if (compactColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            compactColumn.Name,
+            TableCellInputMode.Value,
+            "9.876543"));
+    }
+    if (wideColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            wideColumn.Name,
+            TableCellInputMode.Value,
+            "9.87654321012345"));
+    }
+    if (scaledColumn is not null)
+    {
+        updateInputs.Add(new TableCellInput(
+            scaledColumn.Name,
+            TableCellInputMode.Value,
+            "98.7654"));
+    }
+
+    await session.UpdateTableRowAsync(database, table, inserted, updateInputs);
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Floating point");
+    Assert(
+        TableCellValueConverter.Format(singleColumn, updated.Values[singleColumn.Ordinal]) == "9.876543" &&
+        TableCellValueConverter.Format(doubleColumn, updated.Values[doubleColumn.Ordinal]) ==
+        "9.87654321012345",
+        $"{session.Profile.ProviderDisplayName} 浮點更新後實機 round-trip 不正確");
+
+    var id = Convert.ToInt64(updated.Values[0], CultureInfo.InvariantCulture);
+    await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        updated,
+        new[] { new TableCellInput("note", TableCellInputMode.Value, "must-not-overwrite") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row => Convert.ToInt64(row.Values[0]) == id);
+    Assert(
+        TableCellValueConverter.Format(singleColumn, concurrent.Values[singleColumn.Ordinal]) == "2.5",
+        $"{session.Profile.ProviderDisplayName} 浮點 optimistic predicate 未攔截外部更新");
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    Assert(
+        (await session.LoadTableDataAsync(database, table)).Rows.All(row =>
+            Convert.ToInt64(row.Values[0]) != id),
+        $"{session.Profile.ProviderDisplayName} 浮點測試列安全刪除失敗");
 }
 
 static async Task VerifySafeTableEditingAsync(

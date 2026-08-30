@@ -76,6 +76,15 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             decimalParameter.MySqlDbType = MySqlDbType.VarChar;
         }
+        else if (column.ValueKind is TableColumnValueKind.SinglePrecisionFloatingPoint or
+                     TableColumnValueKind.DoublePrecisionFloatingPoint &&
+                 parameter is MySqlParameter floatingPointParameter)
+        {
+            floatingPointParameter.MySqlDbType =
+                column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint
+                    ? MySqlDbType.Float
+                    : MySqlDbType.Double;
+        }
         else if (column.ValueKind == TableColumnValueKind.Spatial && parameter is MySqlParameter spatialParameter)
         {
             spatialParameter.MySqlDbType = MySqlDbType.VarChar;
@@ -121,6 +130,11 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
         }
 
+        if (column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint)
+        {
+            return $"CAST({QuoteIdentifier(column.Name)} AS DOUBLE) = {parameterName}";
+        }
+
         if (column.ValueKind == TableColumnValueKind.Spatial)
         {
             var quotedName = QuoteIdentifier(column.Name);
@@ -129,6 +143,31 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         }
 
         return base.BuildOriginalValuePredicate(column, parameterName);
+    }
+
+    protected override void ConfigureOriginalParameter(
+        System.Data.Common.DbParameter parameter,
+        TableColumnInfo column)
+    {
+        if (column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint &&
+            parameter is MySqlParameter floatingPointParameter)
+        {
+            floatingPointParameter.MySqlDbType = MySqlDbType.Double;
+            return;
+        }
+
+        base.ConfigureOriginalParameter(parameter, column);
+    }
+
+    protected override object? PrepareOriginalParameterValue(TableColumnInfo column, object? value)
+    {
+        if (column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint &&
+            value is not null and not DBNull)
+        {
+            return Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return base.PrepareOriginalParameterValue(column, value);
     }
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
@@ -168,6 +207,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             TableColumnValueKind.Guid or
             TableColumnValueKind.NetworkAddress =>
                 $"CAST({quotedName} AS CHAR) AS {quotedName}",
+            TableColumnValueKind.SinglePrecisionFloatingPoint =>
+                $"CAST({quotedName} AS DOUBLE) AS {quotedName}",
             TableColumnValueKind.Spatial =>
                 $"CONCAT('SRID=', ST_SRID({quotedName}), ';', ST_AsText({quotedName})) AS {quotedName}",
             _ => base.BuildTableDataSelectExpression(column)
@@ -347,7 +388,10 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         {
             "year" => TableColumnValueKind.MySqlYear,
             "decimal" or "numeric" => TableColumnValueKind.ExactDecimal,
-            "float" or "double" or "real" => TableColumnValueKind.FloatingPoint,
+            "float" when IsDoublePrecisionFloat(columnType) =>
+                TableColumnValueKind.DoublePrecisionFloatingPoint,
+            "float" => TableColumnValueKind.SinglePrecisionFloatingPoint,
+            "double" or "real" => TableColumnValueKind.DoublePrecisionFloatingPoint,
             "bool" or "boolean" => TableColumnValueKind.Boolean,
             "bit" => TableColumnValueKind.UnsignedInteger,
             "date" or "datetime" or "timestamp" => TableColumnValueKind.MySqlTemporal,
@@ -363,5 +407,21 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                 TableColumnValueKind.String,
             _ => TableColumnValueKind.Unsupported
         };
+    }
+
+    private static bool IsDoublePrecisionFloat(string columnType)
+    {
+        var normalized = columnType.Trim().ToLowerInvariant();
+        var definitionStart = normalized.IndexOf('(');
+        var definitionEnd = normalized.IndexOf(')', definitionStart + 1);
+        if (definitionStart < 0 || definitionEnd < 0)
+        {
+            return false;
+        }
+
+        var arguments = normalized[(definitionStart + 1)..definitionEnd].Split(',');
+        return arguments.Length == 1 &&
+               int.TryParse(arguments[0].Trim(), out var precision) &&
+               precision >= 24;
     }
 }

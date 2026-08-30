@@ -49,7 +49,8 @@ public static class TableCellValueConverter
                 TableColumnValueKind.ExactDecimal => ParseExactDecimal(column, input.Text),
                 TableColumnValueKind.PostgreSqlMoney => ParsePostgreSqlMoney(column, input.Text),
                 TableColumnValueKind.SqlServerMoney => ParseSqlServerMoney(column, input.Text),
-                TableColumnValueKind.FloatingPoint => ParseFiniteDouble(input.Text),
+                TableColumnValueKind.SinglePrecisionFloatingPoint => ParseFloatingPoint(column, input.Text, true),
+                TableColumnValueKind.DoublePrecisionFloatingPoint => ParseFloatingPoint(column, input.Text, false),
                 TableColumnValueKind.Boolean => ParseBoolean(input.Text),
                 TableColumnValueKind.Date => DateTime.ParseExact(
                     input.Text.Trim(),
@@ -131,6 +132,7 @@ public static class TableCellValueConverter
         TimeOnly time => time.ToString("O", CultureInfo.InvariantCulture),
         TimeSpan duration => duration.ToString("c", CultureInfo.InvariantCulture),
         SqliteNumericValue numeric => numeric.Text,
+        FloatingPointValue floatingPoint => floatingPoint.Text,
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,
         SqlServerMoneyValue money => money.Text,
@@ -143,6 +145,26 @@ public static class TableCellValueConverter
     public static string Format(TableColumnInfo column, object? value)
     {
         ArgumentNullException.ThrowIfNull(column);
+        if (value is FloatingPointValue floatingPoint)
+        {
+            return floatingPoint.Text;
+        }
+
+        if (value is not null and not DBNull)
+        {
+            if (column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint)
+            {
+                return Convert.ToSingle(value, CultureInfo.InvariantCulture)
+                    .ToString("R", CultureInfo.InvariantCulture);
+            }
+
+            if (column.ValueKind == TableColumnValueKind.DoublePrecisionFloatingPoint)
+            {
+                return Convert.ToDouble(value, CultureInfo.InvariantCulture)
+                    .ToString("R", CultureInfo.InvariantCulture);
+            }
+        }
+
         if (column.ValueKind == TableColumnValueKind.Date)
         {
             return value switch
@@ -186,7 +208,9 @@ public static class TableCellValueConverter
         ArgumentNullException.ThrowIfNull(column);
         return value is null or DBNull
             ? FormatForDisplay(value)
-            : column.ValueKind == TableColumnValueKind.Date
+            : column.ValueKind is TableColumnValueKind.Date or
+                TableColumnValueKind.SinglePrecisionFloatingPoint or
+                TableColumnValueKind.DoublePrecisionFloatingPoint
                 ? Format(column, value)
                 : FormatForDisplay(value);
     }
@@ -227,7 +251,20 @@ public static class TableCellValueConverter
         if (column.ValueKind == TableColumnValueKind.SqliteNumeric)
         {
             return ParseSqliteNumeric(column, input.Text).Text ==
-                   NormalizeSqliteNumericText(column, Format(original));
+                   NormalizeDecimalText(column, Format(original));
+        }
+
+        if (column.ValueKind is TableColumnValueKind.SinglePrecisionFloatingPoint or
+            TableColumnValueKind.DoublePrecisionFloatingPoint)
+        {
+            var parsed = ParseFloatingPoint(
+                column,
+                input.Text,
+                column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint);
+            var originalText = column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint
+                ? Convert.ToSingle(original, CultureInfo.InvariantCulture).ToString("R", CultureInfo.InvariantCulture)
+                : Convert.ToDouble(original, CultureInfo.InvariantCulture).ToString("R", CultureInfo.InvariantCulture);
+            return NormalizeDecimalText(column, parsed.Text) == NormalizeDecimalText(column, originalText);
         }
 
         return string.Equals(input.Text, Format(original), StringComparison.Ordinal);
@@ -1042,7 +1079,7 @@ public static class TableCellValueConverter
 
     private static SqliteNumericValue ParseSqliteNumeric(TableColumnInfo column, string text)
     {
-        var normalized = NormalizeSqliteNumeric(column, text);
+        var normalized = NormalizeDecimal(column, text);
         if (normalized.IsSignedInt64 || normalized.IsZero)
         {
             return new SqliteNumericValue(normalized.Text);
@@ -1065,7 +1102,7 @@ public static class TableCellValueConverter
             throw new OverflowException($"{column.DataTypeName} 超出 SQLite REAL 可無損處理的有限範圍。");
         }
 
-        var sqliteRoundTrip = NormalizeSqliteNumeric(
+        var sqliteRoundTrip = NormalizeDecimal(
             column,
             doubleValue.ToString("G15", CultureInfo.InvariantCulture));
         if (!string.Equals(normalized.Text, sqliteRoundTrip.Text, StringComparison.Ordinal))
@@ -1077,10 +1114,90 @@ public static class TableCellValueConverter
         return new SqliteNumericValue(normalized.Text);
     }
 
-    private static string NormalizeSqliteNumericText(TableColumnInfo column, string text)
-        => NormalizeSqliteNumeric(column, text).Text;
+    private static FloatingPointValue ParseFloatingPoint(
+        TableColumnInfo column,
+        string text,
+        bool singlePrecision)
+    {
+        var normalized = NormalizeDecimal(column, text);
+        object value;
+        string canonical;
+        if (singlePrecision)
+        {
+            if (!float.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var single) ||
+                !float.IsFinite(single) ||
+                float.IsSubnormal(single))
+            {
+                throw new OverflowException($"{column.DataTypeName} 超出有限的 4-byte IEEE 754 normal 範圍。");
+            }
 
-    private static SqliteNumericParts NormalizeSqliteNumeric(TableColumnInfo column, string text)
+            value = single;
+            canonical = single.ToString("R", CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            if (!double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleValue) ||
+                !double.IsFinite(doubleValue) ||
+                double.IsSubnormal(doubleValue))
+            {
+                throw new OverflowException($"{column.DataTypeName} 超出有限的 8-byte IEEE 754 normal 範圍。");
+            }
+
+            value = doubleValue;
+            canonical = doubleValue.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        if (NormalizeDecimalText(column, canonical) != normalized.Text)
+        {
+            throw new OverflowException(
+                $"{column.DataTypeName} 無法無損保留輸入；請改用目標浮點精度的 canonical 值 {canonical}。");
+        }
+
+        ValidateMySqlFloatingPointDefinition(column, normalized);
+        return new FloatingPointValue(value, canonical);
+    }
+
+    private static void ValidateMySqlFloatingPointDefinition(
+        TableColumnInfo column,
+        DecimalNumericParts normalized)
+    {
+        var storageType = column.StorageDataTypeName.Trim().ToLowerInvariant();
+        if (storageType.Contains("unsigned", StringComparison.Ordinal) &&
+            normalized.IsNegative &&
+            !normalized.IsZero)
+        {
+            throw new OverflowException($"{column.DataTypeName} UNSIGNED 不可保存負值。");
+        }
+
+        var definitionStart = storageType.IndexOf('(');
+        var definitionEnd = storageType.IndexOf(')', definitionStart + 1);
+        if (definitionStart < 0 || definitionEnd < 0)
+        {
+            return;
+        }
+
+        var arguments = storageType[(definitionStart + 1)..definitionEnd].Split(',');
+        if (arguments.Length != 2 ||
+            !int.TryParse(arguments[0].Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var precision) ||
+            !int.TryParse(arguments[1].Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var scale))
+        {
+            return;
+        }
+
+        var integerDigits = Math.Max(0, normalized.Significant.Length + normalized.Power);
+        var fractionDigits = Math.Max(0, -normalized.Power);
+        if (integerDigits > precision - scale || fractionDigits > scale)
+        {
+            throw new OverflowException(
+                $"{column.DataTypeName} 無法無損保存這個值；MySQL／MariaDB FLOAT(M,D) 不可自動取整或溢位。");
+        }
+
+    }
+
+    private static string NormalizeDecimalText(TableColumnInfo column, string text)
+        => NormalizeDecimal(column, text).Text;
+
+    private static DecimalNumericParts NormalizeDecimal(TableColumnInfo column, string text)
     {
         var trimmed = text.Trim();
         if (trimmed.Length == 0 || trimmed.Length > 64 || trimmed.Contains('\0'))
@@ -1156,7 +1273,7 @@ public static class TableCellValueConverter
 
         if (firstSignificant == digits.Length)
         {
-            return new SqliteNumericParts("0", 0, true, true);
+            return new DecimalNumericParts("0", "0", 0, 0, true, true, false);
         }
 
         var lastSignificant = digits.Length - 1;
@@ -1176,7 +1293,14 @@ public static class TableCellValueConverter
                                 NumberStyles.Integer,
                                 CultureInfo.InvariantCulture,
                                 out _);
-        return new SqliteNumericParts(canonical, significant.Length, false, isSignedInt64);
+        return new DecimalNumericParts(
+            canonical,
+            significant,
+            power,
+            significant.Length,
+            false,
+            isSignedInt64,
+            isNegative);
     }
 
     private static string BuildSqliteNumericText(string significant, int power, bool isNegative)
@@ -1208,11 +1332,14 @@ public static class TableCellValueConverter
         return $"{sign}{coefficient}e{exponentText}";
     }
 
-    private sealed record SqliteNumericParts(
+    private sealed record DecimalNumericParts(
         string Text,
+        string Significant,
+        int Power,
         int SignificantDigits,
         bool IsZero,
-        bool IsSignedInt64);
+        bool IsSignedInt64,
+        bool IsNegative);
 
     private static bool FitsNonNegativeExactDecimalScale(
         string text,

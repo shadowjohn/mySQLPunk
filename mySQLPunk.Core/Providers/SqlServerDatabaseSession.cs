@@ -58,6 +58,15 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                     $"無法建立 SQL Server money 型別「{column.StorageDataTypeName}」的參數。")
             };
         }
+        else if (column.ValueKind is TableColumnValueKind.SinglePrecisionFloatingPoint or
+                     TableColumnValueKind.DoublePrecisionFloatingPoint &&
+                 parameter is SqlParameter floatingPointParameter)
+        {
+            floatingPointParameter.SqlDbType =
+                column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint
+                    ? SqlDbType.Real
+                    : SqlDbType.Float;
+        }
         else if (column.ValueKind == TableColumnValueKind.Spatial && parameter is SqlParameter spatialParameter)
         {
             spatialParameter.SqlDbType = System.Data.SqlDbType.VarChar;
@@ -580,7 +589,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                 reader.GetBoolean(6),
                 generated,
                 reader.GetInt32(9) != 0,
-                MapValueKind(baseType))
+                MapValueKind(baseType, reader.GetByte(11)))
             {
                 StorageDataTypeName = storageType
             });
@@ -597,6 +606,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         baseType.ToLowerInvariant() switch
         {
             "decimal" or "numeric" => $"{baseType}({precision},{scale})",
+            "float" => $"{baseType}({precision})",
             "char" or "varchar" or "binary" or "varbinary" =>
                 $"{baseType}({(maxLength < 0 ? "max" : maxLength.ToString(System.Globalization.CultureInfo.InvariantCulture))})",
             "nchar" or "nvarchar" =>
@@ -635,12 +645,14 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                $"OFFSET {rowOffset} ROWS FETCH NEXT {fetchLimit} ROWS ONLY;";
     }
 
-    private static TableColumnValueKind MapValueKind(string dataType) => dataType.ToLowerInvariant() switch
+    private static TableColumnValueKind MapValueKind(string dataType, byte precision) => dataType.ToLowerInvariant() switch
     {
         "tinyint" or "smallint" or "int" or "bigint" => TableColumnValueKind.Integer,
         "decimal" or "numeric" => TableColumnValueKind.ExactDecimal,
         "money" or "smallmoney" => TableColumnValueKind.SqlServerMoney,
-        "float" or "real" => TableColumnValueKind.FloatingPoint,
+        "real" => TableColumnValueKind.SinglePrecisionFloatingPoint,
+        "float" when precision <= 24 => TableColumnValueKind.SinglePrecisionFloatingPoint,
+        "float" => TableColumnValueKind.DoublePrecisionFloatingPoint,
         "bit" => TableColumnValueKind.Boolean,
         "date" or "datetime" or "datetime2" or "smalldatetime" or "datetimeoffset" or "time" =>
             TableColumnValueKind.SqlServerTemporal,

@@ -9,7 +9,8 @@ public enum TableColumnValueKind
     ExactDecimal,
     PostgreSqlMoney,
     SqlServerMoney,
-    FloatingPoint,
+    SinglePrecisionFloatingPoint,
+    DoublePrecisionFloatingPoint,
     Boolean,
     Date,
     PostgreSqlDate,
@@ -94,6 +95,8 @@ public sealed record IntervalComponents(int Months, int Days, long Microseconds)
 public sealed record ExactDecimalValue(string Text);
 
 public sealed record SqliteNumericValue(string Text);
+
+public sealed record FloatingPointValue(object Value, string Text);
 
 public sealed record PostgreSqlMoneyValue(string Text);
 

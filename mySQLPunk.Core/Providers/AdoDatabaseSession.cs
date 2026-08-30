@@ -434,7 +434,14 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     {
         var parameter = command.CreateParameter();
         parameter.ParameterName = name;
-        ConfigureParameter(parameter, column);
+        if (isOriginalValue)
+        {
+            ConfigureOriginalParameter(parameter, column);
+        }
+        else
+        {
+            ConfigureParameter(parameter, column);
+        }
         parameter.Value = (isOriginalValue
             ? PrepareOriginalParameterValue(column, value)
             : PrepareParameterValue(column, value)) ?? DBNull.Value;
@@ -445,6 +452,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) => value switch
     {
         SqliteNumericValue numeric => numeric.Text,
+        FloatingPointValue floatingPoint => floatingPoint.Value,
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,
         SqlServerMoneyValue money => money.Value,
@@ -452,7 +460,14 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     };
 
     protected virtual object? PrepareOriginalParameterValue(TableColumnInfo column, object? value) =>
-        PrepareParameterValue(column, value);
+        column.ValueKind switch
+        {
+            TableColumnValueKind.SinglePrecisionFloatingPoint when value is not null and not DBNull =>
+                Convert.ToSingle(value, System.Globalization.CultureInfo.InvariantCulture),
+            TableColumnValueKind.DoublePrecisionFloatingPoint when value is not null and not DBNull =>
+                Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture),
+            _ => PrepareParameterValue(column, value)
+        };
 
     protected virtual void ConfigureParameter(DbParameter parameter, TableColumnInfo column)
     {
@@ -461,7 +476,8 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             TableColumnValueKind.Integer => DbType.Int64,
             TableColumnValueKind.UnsignedInteger => DbType.UInt64,
             TableColumnValueKind.SqliteNumeric => DbType.String,
-            TableColumnValueKind.FloatingPoint => DbType.Double,
+            TableColumnValueKind.SinglePrecisionFloatingPoint => DbType.Single,
+            TableColumnValueKind.DoublePrecisionFloatingPoint => DbType.Double,
             TableColumnValueKind.Boolean => DbType.Boolean,
             TableColumnValueKind.Date => DbType.Date,
             TableColumnValueKind.DateTime => DbType.DateTime,
@@ -472,6 +488,9 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             _ => DbType.String
         };
     }
+
+    protected virtual void ConfigureOriginalParameter(DbParameter parameter, TableColumnInfo column) =>
+        ConfigureParameter(parameter, column);
 
     protected virtual void ConfigurePreparedParameter(DbParameter parameter, TableColumnInfo column)
     {

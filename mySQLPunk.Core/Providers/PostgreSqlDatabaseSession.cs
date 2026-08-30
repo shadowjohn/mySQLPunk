@@ -128,6 +128,15 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             serverValidatedTextParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
         }
+        else if (column.ValueKind is TableColumnValueKind.SinglePrecisionFloatingPoint or
+                     TableColumnValueKind.DoublePrecisionFloatingPoint &&
+                 parameter is NpgsqlParameter floatingPointParameter)
+        {
+            floatingPointParameter.NpgsqlDbType =
+                column.ValueKind == TableColumnValueKind.SinglePrecisionFloatingPoint
+                    ? NpgsqlDbType.Real
+                    : NpgsqlDbType.Double;
+        }
     }
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
@@ -470,7 +479,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "smallint" or "integer" or "bigint" => TableColumnValueKind.Integer,
             "numeric" or "decimal" => TableColumnValueKind.ExactDecimal,
             "money" => TableColumnValueKind.PostgreSqlMoney,
-            "real" or "double precision" => TableColumnValueKind.FloatingPoint,
+            "real" => TableColumnValueKind.SinglePrecisionFloatingPoint,
+            "double precision" => TableColumnValueKind.DoublePrecisionFloatingPoint,
             "boolean" => TableColumnValueKind.Boolean,
             "date" => TableColumnValueKind.PostgreSqlDate,
             "timestamp without time zone" or "timestamp with time zone" or "time without time zone" =>
