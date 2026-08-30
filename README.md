@@ -80,7 +80,7 @@ PostgreSQL `money` 會依資料庫目前的 `lc_monetary` 推導固定小數位�
 
 SQLite 的 `NUMERIC`／`DECIMAL` affinity 欄位會以 SQLite 實際儲存的 canonical 數值顯示；signed 64-bit 整數可完整編輯，其餘數值限制為 SQLite TEXT↔REAL 可穩定保留的 15 位有效數字。超出安全精度、千分位或無效格式會在送出前拒絕，避免 Microsoft.Data.Sqlite 的 decimal TEXT 參數再被 NUMERIC affinity 悄悄轉成失真的 REAL。
 
-SQLite `DATE`／`TIME`／`DATETIME`／`TIMESTAMP` 以嚴格 ISO 文字驗證後使用 TEXT 參數原樣保存：日期不附加午夜、純時間不注入當天日期，日期時間不接受會被丟掉的時區 offset，並可保留最多 7 位小數秒。既有非 canonical 或 numeric temporal 值未修改時不會被其他欄位的修改連帶重寫。
+SQLite `DATE`／`TIME`／`DATETIME`／`TIMESTAMP`／`DATETIMEOFFSET` 以嚴格 ISO 文字驗證後使用 TEXT 參數原樣保存：日期不附加午夜、純時間不注入當天日期，一般日期時間拒絕 offset，`DATETIMEOFFSET` 則要求並逐字保留明確的 `±HH:mm`，所有日期時間都可保留最多 7 位小數秒。既有非 canonical 或 numeric temporal 值未修改時不會被其他欄位的修改連帶重寫。
 
 SQLite `UUID`／`GUID` 宣告欄位使用 8-4-4-4-12 標準格式驗證，再以 TEXT 參數逐字保存大小寫；省略連字號、大括號或畸形值會在送出前拒絕。既有非標準 GUID 文字或 16-byte BLOB 未修改時仍以原 storage class 參與 optimistic concurrency，不會阻擋其它欄位的安全修改。
 

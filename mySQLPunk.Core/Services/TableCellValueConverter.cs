@@ -1176,6 +1176,29 @@ public static class TableCellValueConverter
     {
         var value = text.Trim();
         var normalizedType = column.StorageDataTypeName.Trim().ToUpperInvariant();
+        if (normalizedType.Contains("DATETIMEOFFSET", StringComparison.Ordinal))
+        {
+            string[] formats =
+            {
+                "yyyy-MM-dd HH:mm:sszzz",
+                "yyyy-MM-dd HH:mm:ss.FFFFFFFzzz",
+                "yyyy-MM-dd'T'HH:mm:sszzz",
+                "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz"
+            };
+            if (!DateTimeOffset.TryParseExact(
+                    value,
+                    formats,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out _))
+            {
+                throw new FormatException(
+                    "請使用 yyyy-MM-dd HH:mm:ss[.fffffff]±HH:mm 或 T 分隔格式，並保留明確 offset。");
+            }
+
+            return new SqliteTemporalValue(value);
+        }
+
         if (normalizedType.Contains("DATETIME", StringComparison.Ordinal) ||
             normalizedType.Contains("TIMESTAMP", StringComparison.Ordinal))
         {

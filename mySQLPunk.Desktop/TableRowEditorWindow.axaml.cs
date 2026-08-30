@@ -279,6 +279,11 @@ public sealed partial class TableRowEditorWindow : Window
     private static string BuildSqliteTemporalWatermark(TableColumnInfo column)
     {
         var normalizedType = column.StorageDataTypeName.ToUpperInvariant();
+        if (normalizedType.Contains("DATETIMEOFFSET", StringComparison.Ordinal))
+        {
+            return "yyyy-MM-dd HH:mm:ss[.fffffff]±HH:mm";
+        }
+
         if (normalizedType.Contains("DATETIME", StringComparison.Ordinal) ||
             normalizedType.Contains("TIMESTAMP", StringComparison.Ordinal))
         {

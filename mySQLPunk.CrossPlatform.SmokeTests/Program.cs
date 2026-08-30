@@ -577,16 +577,18 @@ static async Task TableDataEditingAsync()
                 clock_time TIME NULL,
                 recorded_at DATETIME NULL,
                 changed_at TIMESTAMP NULL,
+                offset_at DATETIMEOFFSET NULL,
                 legacy_time TIME NULL
             );
             INSERT INTO temporal_sample (
-                name, event_date, clock_time, recorded_at, changed_at, legacy_time)
+                name, event_date, clock_time, recorded_at, changed_at, offset_at, legacy_time)
             VALUES (
                 'Temporal before',
                 '2026-08-30',
                 '12:34:56.1234567',
                 '2026-08-30 12:34:56.1234567',
                 '2026-08-30 12:34:56',
+                '2026-08-30 13:14:15.1234567+08:00',
                 45296);
             CREATE TABLE identifier_sample (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -673,12 +675,16 @@ static async Task TableDataEditingAsync()
             .ToList();
         Assert(
             temporalColumns.Select(column => column.Name).SequenceEqual(
-                new[] { "event_date", "clock_time", "recorded_at", "changed_at", "legacy_time" }),
-            "SQLite DATE／TIME／DATETIME／TIMESTAMP metadata 應使用無損文字 temporal 編輯器");
+                new[]
+                {
+                    "event_date", "clock_time", "recorded_at", "changed_at", "offset_at", "legacy_time"
+                }),
+            "SQLite DATE／TIME／DATETIME／TIMESTAMP／DATETIMEOFFSET metadata 應使用無損文字 temporal 編輯器");
         var eventDateColumn = temporalColumns.Single(column => column.Name == "event_date");
         var clockTimeColumn = temporalColumns.Single(column => column.Name == "clock_time");
         var recordedAtColumn = temporalColumns.Single(column => column.Name == "recorded_at");
         var changedAtColumn = temporalColumns.Single(column => column.Name == "changed_at");
+        var offsetAtColumn = temporalColumns.Single(column => column.Name == "offset_at");
         Assert(
             TableCellValueConverter.Parse(
                 eventDateColumn,
@@ -691,8 +697,15 @@ static async Task TableDataEditingAsync()
             TableCellValueConverter.Parse(
                 recordedAtColumn,
                 new TableCellInput("recorded_at", TableCellInputMode.Value, "2026-09-01T01:02:03.1234567")) is
-            SqliteTemporalValue { Text: "2026-09-01T01:02:03.1234567" },
-            "SQLite temporal parser 應保留合法 ISO 日期、純時間與日期時間文字");
+            SqliteTemporalValue { Text: "2026-09-01T01:02:03.1234567" } &&
+            TableCellValueConverter.Parse(
+                offsetAtColumn,
+                new TableCellInput(
+                    "offset_at",
+                    TableCellInputMode.Value,
+                    "2026-09-01 07:08:09.1234567-04:30")) is
+            SqliteTemporalValue { Text: "2026-09-01 07:08:09.1234567-04:30" },
+            "SQLite temporal parser 應保留合法 ISO 日期、純時間、日期時間與 offset 日期時間文字");
         foreach (var invalid in new[]
                  {
                      (Column: eventDateColumn, Value: "2026-09-01 00:00:00"),
@@ -700,7 +713,10 @@ static async Task TableDataEditingAsync()
                      (Column: clockTimeColumn, Value: "1.00:00:00"),
                      (Column: clockTimeColumn, Value: "24:00:00"),
                      (Column: recordedAtColumn, Value: "2026-09-01T01:02:03+08:00"),
-                     (Column: changedAtColumn, Value: "2026-09-01 01:02:03.12345678")
+                     (Column: changedAtColumn, Value: "2026-09-01 01:02:03.12345678"),
+                     (Column: offsetAtColumn, Value: "2026-09-01 07:08:09.1234567"),
+                     (Column: offsetAtColumn, Value: "2026-09-01 07:08:09Z"),
+                     (Column: offsetAtColumn, Value: "2026-09-01 07:08:09.12345678+08:00")
                  })
         {
             AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
@@ -727,20 +743,27 @@ static async Task TableDataEditingAsync()
                 new TableCellInput("event_date", TableCellInputMode.Value, "2026-09-01"),
                 new TableCellInput("clock_time", TableCellInputMode.Value, "23:59:59.1234567"),
                 new TableCellInput("recorded_at", TableCellInputMode.Value, "2026-09-01T01:02:03.1234567"),
-                new TableCellInput("changed_at", TableCellInputMode.Value, "2026-09-01 04:05:06")
+                new TableCellInput("changed_at", TableCellInputMode.Value, "2026-09-01 04:05:06"),
+                new TableCellInput(
+                    "offset_at",
+                    TableCellInputMode.Value,
+                    "2026-09-01T07:08:09.1234567-04:30")
             });
         var storedTemporal = await session.ExecuteAsync(
             profile.Database,
-            "SELECT event_date, clock_time, recorded_at, changed_at, " +
-            "typeof(event_date), typeof(clock_time), typeof(recorded_at), typeof(changed_at) " +
+            "SELECT event_date, clock_time, recorded_at, changed_at, offset_at, " +
+            "typeof(event_date), typeof(clock_time), typeof(recorded_at), typeof(changed_at), " +
+            "typeof(offset_at) " +
             "FROM temporal_sample WHERE id = 1;");
         Assert(
             Convert.ToString(storedTemporal.Rows.Single()[0]) == "2026-09-01" &&
             Convert.ToString(storedTemporal.Rows.Single()[1]) == "23:59:59.1234567" &&
             Convert.ToString(storedTemporal.Rows.Single()[2]) == "2026-09-01T01:02:03.1234567" &&
             Convert.ToString(storedTemporal.Rows.Single()[3]) == "2026-09-01 04:05:06" &&
-            storedTemporal.Rows.Single().Skip(4).All(value => Convert.ToString(value) == "text"),
-            "SQLite temporal 寫入應以 TEXT 精確保留純日期、純時間與無 offset 日期時間");
+            Convert.ToString(storedTemporal.Rows.Single()[4]) ==
+                "2026-09-01T07:08:09.1234567-04:30" &&
+            storedTemporal.Rows.Single().Skip(5).All(value => Convert.ToString(value) == "text"),
+            "SQLite temporal 寫入應以 TEXT 精確保留純日期、純時間、無 offset 與含 offset 日期時間");
         var updatedTemporalRow = (await session.LoadTableDataAsync(profile.Database, temporalTable)).Rows.Single();
         await AssertThrowsAsync<InvalidOperationException>(() => session.UpdateTableRowAsync(
             profile.Database,
