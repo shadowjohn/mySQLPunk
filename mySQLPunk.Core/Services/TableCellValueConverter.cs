@@ -48,6 +48,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.Integer => ParseSignedInteger(column, input.Text),
                 TableColumnValueKind.UnsignedInteger => ParseUnsignedInteger(column, input.Text),
                 TableColumnValueKind.SqliteNumeric => ParseSqliteNumeric(column, input.Text),
+                TableColumnValueKind.SqliteTemporal => ParseSqliteTemporal(column, input.Text),
                 TableColumnValueKind.ExactDecimal => ParseExactDecimal(column, input.Text),
                 TableColumnValueKind.PostgreSqlMoney => ParsePostgreSqlMoney(column, input.Text),
                 TableColumnValueKind.SqlServerMoney => ParseSqlServerMoney(column, input.Text),
@@ -134,6 +135,7 @@ public static class TableCellValueConverter
         TimeOnly time => time.ToString("O", CultureInfo.InvariantCulture),
         TimeSpan duration => duration.ToString("c", CultureInfo.InvariantCulture),
         SqliteNumericValue numeric => numeric.Text,
+        SqliteTemporalValue temporal => temporal.Text,
         FloatingPointValue floatingPoint => floatingPoint.Text,
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,
@@ -254,6 +256,13 @@ public static class TableCellValueConverter
         {
             return ParseSqliteNumeric(column, input.Text).Text ==
                    NormalizeDecimalText(column, Format(original));
+        }
+
+        if (column.ValueKind == TableColumnValueKind.SqliteTemporal)
+        {
+            var originalText = Format(original);
+            return string.Equals(input.Text, originalText, StringComparison.Ordinal) ||
+                   ParseSqliteTemporal(column, input.Text).Text == originalText;
         }
 
         if (column.ValueKind is TableColumnValueKind.SinglePrecisionFloatingPoint or
@@ -1152,6 +1161,65 @@ public static class TableCellValueConverter
         }
 
         return new ExactDecimalValue(trimmed);
+    }
+
+    private static SqliteTemporalValue ParseSqliteTemporal(TableColumnInfo column, string text)
+    {
+        var value = text.Trim();
+        var normalizedType = column.StorageDataTypeName.Trim().ToUpperInvariant();
+        if (normalizedType.Contains("DATETIME", StringComparison.Ordinal) ||
+            normalizedType.Contains("TIMESTAMP", StringComparison.Ordinal))
+        {
+            string[] formats =
+            {
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm:ss.FFFFFFF",
+                "yyyy-MM-dd'T'HH:mm:ss",
+                "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF"
+            };
+            if (!DateTime.TryParseExact(
+                    value,
+                    formats,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out _))
+            {
+                throw new FormatException(
+                    "請使用 yyyy-MM-dd HH:mm:ss[.fffffff] 或 T 分隔格式；不可包含時區 offset。");
+            }
+
+            return new SqliteTemporalValue(value);
+        }
+
+        if (normalizedType.Contains("DATE", StringComparison.Ordinal) &&
+            !normalizedType.Contains("TIME", StringComparison.Ordinal))
+        {
+            if (!DateOnly.TryParseExact(
+                    value,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out _))
+            {
+                throw new FormatException("請使用純 yyyy-MM-dd 日期，不可包含時間。");
+            }
+
+            return new SqliteTemporalValue(value);
+        }
+
+        string[] timeFormats = { "HH:mm:ss", "HH:mm:ss.FFFFFFF" };
+        if (!TimeOnly.TryParseExact(
+                value,
+                timeFormats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out _))
+        {
+            throw new FormatException(
+                "請使用 00:00:00 到 23:59:59.fffffff 的純時間，不可包含日期、天數或時區 offset。");
+        }
+
+        return new SqliteTemporalValue(value);
     }
 
     private static SqliteNumericValue ParseSqliteNumeric(TableColumnInfo column, string text)

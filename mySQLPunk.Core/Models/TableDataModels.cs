@@ -6,6 +6,7 @@ public enum TableColumnValueKind
     Integer,
     UnsignedInteger,
     SqliteNumeric,
+    SqliteTemporal,
     ExactDecimal,
     PostgreSqlMoney,
     SqlServerMoney,
@@ -113,6 +114,8 @@ public sealed record IntervalComponents(int Months, int Days, long Microseconds)
 public sealed record ExactDecimalValue(string Text);
 
 public sealed record SqliteNumericValue(string Text);
+
+public sealed record SqliteTemporalValue(string Text);
 
 public sealed record FloatingPointValue(object Value, string Text);
 

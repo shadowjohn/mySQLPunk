@@ -455,6 +455,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) => value switch
     {
         SqliteNumericValue numeric => numeric.Text,
+        SqliteTemporalValue temporal => temporal.Text,
         FloatingPointValue floatingPoint => floatingPoint.Value,
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,

@@ -234,6 +234,7 @@ public sealed partial class TableRowEditorWindow : Window
             column.StorageDataTypeName.Equals("xid", StringComparison.OrdinalIgnoreCase) ||
             column.StorageDataTypeName.Equals("cid", StringComparison.OrdinalIgnoreCase) =>
             $"0–{uint.MaxValue}（十進位）",
+        TableColumnValueKind.SqliteTemporal => BuildSqliteTemporalWatermark(column),
         TableColumnValueKind.Date => "yyyy-MM-dd",
         TableColumnValueKind.PostgreSqlDate => "YYYY-MM-DD[ BC] 或 ±infinity",
         TableColumnValueKind.DateTime => "yyyy-MM-dd HH:mm:ss",
@@ -273,6 +274,21 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.Binary => "0x00FF（二進位十六進位，最多 1 MiB）",
         _ => string.Empty
     };
+
+    private static string BuildSqliteTemporalWatermark(TableColumnInfo column)
+    {
+        var normalizedType = column.StorageDataTypeName.ToUpperInvariant();
+        if (normalizedType.Contains("DATETIME", StringComparison.Ordinal) ||
+            normalizedType.Contains("TIMESTAMP", StringComparison.Ordinal))
+        {
+            return "yyyy-MM-dd HH:mm:ss[.fffffff]（不可含時區）";
+        }
+
+        return normalizedType.Contains("DATE", StringComparison.Ordinal) &&
+               !normalizedType.Contains("TIME", StringComparison.Ordinal)
+            ? "yyyy-MM-dd（純日期）"
+            : "HH:mm:ss[.fffffff]（純時間）";
+    }
 
     private static string BuildNetworkWatermark(TableColumnInfo column) => column.StorageDataTypeName.ToLowerInvariant() switch
     {

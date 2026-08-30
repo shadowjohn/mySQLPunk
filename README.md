@@ -80,6 +80,8 @@ PostgreSQL `money` 會依資料庫目前的 `lc_monetary` 推導固定小數位�
 
 SQLite 的 `NUMERIC`／`DECIMAL` affinity 欄位會以 SQLite 實際儲存的 canonical 數值顯示；signed 64-bit 整數可完整編輯，其餘數值限制為 SQLite TEXT↔REAL 可穩定保留的 15 位有效數字。超出安全精度、千分位或無效格式會在送出前拒絕，避免 Microsoft.Data.Sqlite 的 decimal TEXT 參數再被 NUMERIC affinity 悄悄轉成失真的 REAL。
 
+SQLite `DATE`／`TIME`／`DATETIME`／`TIMESTAMP` 以嚴格 ISO 文字驗證後使用 TEXT 參數原樣保存：日期不附加午夜、純時間不注入當天日期，日期時間不接受會被丟掉的時區 offset，並可保留最多 7 位小數秒。既有非 canonical 或 numeric temporal 值未修改時不會被其他欄位的修改連帶重寫。
+
 MySQL／MariaDB `FLOAT`、PostgreSQL `real`、SQL Server `real`／`float(1–24)` 使用 4-byte IEEE 754 編輯器，其餘 `DOUBLE`／`double precision`／`float(25–53)` 與 SQLite `REAL` 使用 8-byte 編輯器。輸入必須能以目標 single／double 的 canonical 十進位文字 round-trip；會改變數字、溢位、下溢為 subnormal／zero、NaN 與 Infinity 都會在送出前拒絕。MySQL／MariaDB `FLOAT(M,D)` 另外檢查 scale、整數位與 `UNSIGNED`，而 `FLOAT` 載入會先提升為 `DOUBLE`，避開伺服器 text protocol 只輸出約 6 位有效數字造成的二次失真。
 
 MySQL／MariaDB `TINYINT`／`SMALLINT`／`MEDIUMINT`／`INT`／`BIGINT` 會依 signed／unsigned／`ZEROFILL` 宣告驗證完整 1–8 byte 範圍；PostgreSQL `smallint`／`integer`／`bigint`、SQL Server `tinyint`／`smallint`／`int`／`bigint` 也使用各自的 metadata 邊界，domain 與 alias type 沿用 base type。越界值會在送出前拒絕，避免 MySQL／MariaDB non-strict 模式只回 warning 並把數值靜默截到最近邊界；`BIGINT UNSIGNED` 的 `18446744073709551615` 上界仍可完整 round-trip。

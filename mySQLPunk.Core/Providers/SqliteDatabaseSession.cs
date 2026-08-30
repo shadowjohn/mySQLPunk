@@ -30,7 +30,8 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
         TableColumnInfo column)
     {
         base.ConfigureParameter(parameter, column);
-        if (column.ValueKind == TableColumnValueKind.SqliteNumeric && parameter is SqliteParameter sqliteParameter)
+        if (column.ValueKind is TableColumnValueKind.SqliteNumeric or TableColumnValueKind.SqliteTemporal &&
+            parameter is SqliteParameter sqliteParameter)
         {
             sqliteParameter.SqliteType = SqliteType.Text;
         }
@@ -182,9 +183,7 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
         if (normalized.Contains("DATE", StringComparison.Ordinal) ||
             normalized.Contains("TIME", StringComparison.Ordinal))
         {
-            return normalized.Contains("TIME", StringComparison.Ordinal)
-                ? TableColumnValueKind.DateTime
-                : TableColumnValueKind.Date;
+            return TableColumnValueKind.SqliteTemporal;
         }
 
         return TableColumnValueKind.SqliteNumeric;

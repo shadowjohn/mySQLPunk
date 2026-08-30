@@ -570,6 +570,24 @@ static async Task TableDataEditingAsync()
                 note TEXT NOT NULL,
                 approximate_value REAL NULL
             );
+            CREATE TABLE temporal_sample (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                event_date DATE NULL,
+                clock_time TIME NULL,
+                recorded_at DATETIME NULL,
+                changed_at TIMESTAMP NULL,
+                legacy_time TIME NULL
+            );
+            INSERT INTO temporal_sample (
+                name, event_date, clock_time, recorded_at, changed_at, legacy_time)
+            VALUES (
+                'Temporal before',
+                '2026-08-30',
+                '12:34:56.1234567',
+                '2026-08-30 12:34:56.1234567',
+                '2026-08-30 12:34:56',
+                45296);
             INSERT INTO paged_sample (id, name) VALUES
                 (1, 'page-1'), (2, 'page-2'), (3, 'page-3'), (4, 'page-4'), (5, 'page-5');
             """);
@@ -632,6 +650,110 @@ static async Task TableDataEditingAsync()
                 "event_date",
                 TableCellInputMode.Value,
                 "2026-08-30T12:34:56.0000000")));
+
+        var temporalTable = new DatabaseObjectInfo(string.Empty, "temporal_sample", DatabaseObjectKind.Table);
+        var temporalSnapshot = await session.LoadTableDataAsync(profile.Database, temporalTable);
+        var temporalColumns = temporalSnapshot.Columns
+            .Where(column => column.ValueKind == TableColumnValueKind.SqliteTemporal)
+            .ToList();
+        Assert(
+            temporalColumns.Select(column => column.Name).SequenceEqual(
+                new[] { "event_date", "clock_time", "recorded_at", "changed_at", "legacy_time" }),
+            "SQLite DATE／TIME／DATETIME／TIMESTAMP metadata 應使用無損文字 temporal 編輯器");
+        var eventDateColumn = temporalColumns.Single(column => column.Name == "event_date");
+        var clockTimeColumn = temporalColumns.Single(column => column.Name == "clock_time");
+        var recordedAtColumn = temporalColumns.Single(column => column.Name == "recorded_at");
+        var changedAtColumn = temporalColumns.Single(column => column.Name == "changed_at");
+        Assert(
+            TableCellValueConverter.Parse(
+                eventDateColumn,
+                new TableCellInput("event_date", TableCellInputMode.Value, " 2026-09-01 ")) is
+            SqliteTemporalValue { Text: "2026-09-01" } &&
+            TableCellValueConverter.Parse(
+                clockTimeColumn,
+                new TableCellInput("clock_time", TableCellInputMode.Value, "23:59:59.1234567")) is
+            SqliteTemporalValue { Text: "23:59:59.1234567" } &&
+            TableCellValueConverter.Parse(
+                recordedAtColumn,
+                new TableCellInput("recorded_at", TableCellInputMode.Value, "2026-09-01T01:02:03.1234567")) is
+            SqliteTemporalValue { Text: "2026-09-01T01:02:03.1234567" },
+            "SQLite temporal parser 應保留合法 ISO 日期、純時間與日期時間文字");
+        foreach (var invalid in new[]
+                 {
+                     (Column: eventDateColumn, Value: "2026-09-01 00:00:00"),
+                     (Column: clockTimeColumn, Value: "2026-09-01 23:59:59"),
+                     (Column: clockTimeColumn, Value: "1.00:00:00"),
+                     (Column: clockTimeColumn, Value: "24:00:00"),
+                     (Column: recordedAtColumn, Value: "2026-09-01T01:02:03+08:00"),
+                     (Column: changedAtColumn, Value: "2026-09-01 01:02:03.12345678")
+                 })
+        {
+            AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+                invalid.Column,
+                new TableCellInput(invalid.Column.Name, TableCellInputMode.Value, invalid.Value)));
+        }
+        Assert(
+            TableCellValueConverter.MatchesOriginal(
+                recordedAtColumn,
+                new TableCellInput(
+                    "recorded_at",
+                    TableCellInputMode.Value,
+                    "2026-08-30 12:34:56Z"),
+                "2026-08-30 12:34:56Z"),
+            "SQLite legacy temporal 原值未修改時不可因新格式驗證被連帶重寫");
+
+        var originalTemporalRow = temporalSnapshot.Rows.Single();
+        await session.UpdateTableRowAsync(
+            profile.Database,
+            temporalTable,
+            originalTemporalRow,
+            new[]
+            {
+                new TableCellInput("event_date", TableCellInputMode.Value, "2026-09-01"),
+                new TableCellInput("clock_time", TableCellInputMode.Value, "23:59:59.1234567"),
+                new TableCellInput("recorded_at", TableCellInputMode.Value, "2026-09-01T01:02:03.1234567"),
+                new TableCellInput("changed_at", TableCellInputMode.Value, "2026-09-01 04:05:06")
+            });
+        var storedTemporal = await session.ExecuteAsync(
+            profile.Database,
+            "SELECT event_date, clock_time, recorded_at, changed_at, " +
+            "typeof(event_date), typeof(clock_time), typeof(recorded_at), typeof(changed_at) " +
+            "FROM temporal_sample WHERE id = 1;");
+        Assert(
+            Convert.ToString(storedTemporal.Rows.Single()[0]) == "2026-09-01" &&
+            Convert.ToString(storedTemporal.Rows.Single()[1]) == "23:59:59.1234567" &&
+            Convert.ToString(storedTemporal.Rows.Single()[2]) == "2026-09-01T01:02:03.1234567" &&
+            Convert.ToString(storedTemporal.Rows.Single()[3]) == "2026-09-01 04:05:06" &&
+            storedTemporal.Rows.Single().Skip(4).All(value => Convert.ToString(value) == "text"),
+            "SQLite temporal 寫入應以 TEXT 精確保留純日期、純時間與無 offset 日期時間");
+        var updatedTemporalRow = (await session.LoadTableDataAsync(profile.Database, temporalTable)).Rows.Single();
+        await AssertThrowsAsync<InvalidOperationException>(() => session.UpdateTableRowAsync(
+            profile.Database,
+            temporalTable,
+            updatedTemporalRow,
+            new[]
+            {
+                new TableCellInput("clock_time", TableCellInputMode.Value, "2026-09-01 23:59:59")
+            }));
+        var afterRejectedTemporal = await session.ExecuteAsync(
+            profile.Database,
+            "SELECT clock_time FROM temporal_sample WHERE id = 1;");
+        Assert(
+            Convert.ToString(afterRejectedTemporal.Rows.Single()[0]) == "23:59:59.1234567",
+            "SQLite 會被注入日期的 TIME 輸入不可落入資料庫");
+        await session.ExecuteAsync(
+            profile.Database,
+            "UPDATE temporal_sample SET recorded_at = '2030-01-02 03:04:05' WHERE id = 1;");
+        await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+            profile.Database,
+            temporalTable,
+            updatedTemporalRow,
+            new[] { new TableCellInput("name", TableCellInputMode.Value, "must-not-overwrite") }));
+        Assert(
+            Convert.ToString((await session.ExecuteAsync(
+                profile.Database,
+                "SELECT name FROM temporal_sample WHERE id = 1;")).Rows.Single()[0]) == "Temporal before",
+            "SQLite temporal optimistic predicate 應攔截外部修改");
 
         var numericTable = new DatabaseObjectInfo(string.Empty, "numeric_sample", DatabaseObjectKind.Table);
         var emptyNumeric = await session.LoadTableDataAsync(profile.Database, numericTable);
