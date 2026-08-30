@@ -121,6 +121,7 @@ else
     contents_root="$app_bundle/Contents"
     mkdir -p "$contents_root/MacOS" "$contents_root/Resources"
     cp -a "$publish_root/." "$contents_root/MacOS/"
+    cp "$repo_root/packaging/macos/apply-update.sh" "$contents_root/MacOS/apply-update.sh"
     cp "$repo_root/LICENSE" "$contents_root/Resources/LICENSE"
     cp "$repo_root/THIRD_PARTY_NOTICES.md" "$contents_root/Resources/THIRD_PARTY_NOTICES.md"
 
@@ -131,7 +132,7 @@ else
         -e "s/@BUNDLE_VERSION@/$bundle_version/g" \
         -e "s/@RUNTIME@/$runtime/g" \
         "$repo_root/packaging/macos/Info.plist.in" > "$contents_root/Info.plist"
-    chmod +x "$contents_root/MacOS/mySQLPunk"
+    chmod +x "$contents_root/MacOS/mySQLPunk" "$contents_root/MacOS/apply-update.sh"
 
     signing_identity="${MYSQLPUNK_MACOS_SIGN_IDENTITY:--}"
     if [[ "$signing_identity" == "-" ]]; then

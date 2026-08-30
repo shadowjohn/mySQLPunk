@@ -91,7 +91,7 @@ public sealed partial class MainWindow : Window
             await ShowErrorAsync("無法載入連線設定", exception);
         }
 
-        await ShowPreviousLinuxUpdateFailureAsync();
+        await ShowPreviousUpdateFailureAsync();
 
         UpdateActionState();
     }
@@ -414,11 +414,15 @@ public sealed partial class MainWindow : Window
                 cancellationToken);
             var installHint = isLinuxPackage
                 ? "可由程式安全套用並重新啟動；既有連線設定會保留。"
-                : "解壓後將 mySQLPunk.app 拖到 Applications。";
+                : "可由程式安全取代目前 app bundle 並重新啟動；既有連線設定會保留。";
             SetStatus($"已下載並驗證 {download.FormattedBytes}：{download.Path}");
             var canApplyLinuxUpdate = isLinuxPackage && OperatingSystem.IsLinux();
             var applyScriptPath = Path.Combine(AppContext.BaseDirectory, "apply-update.sh");
-            if (canApplyLinuxUpdate && File.Exists(applyScriptPath))
+            var macOsBundlePath = ResolveCurrentMacOsAppBundlePath();
+            var canApplyMacOsUpdate = !isLinuxPackage &&
+                                      OperatingSystem.IsMacOS() &&
+                                      macOsBundlePath is not null;
+            if ((canApplyLinuxUpdate || canApplyMacOsUpdate) && File.Exists(applyScriptPath))
             {
                 var shouldApply = await MessageDialog.ShowAsync(
                     this,
@@ -428,11 +432,18 @@ public sealed partial class MainWindow : Window
                     confirmText: "套用並重新啟動");
                 if (shouldApply)
                 {
-                    using var updaterProcess = _updateService.StartLinuxApply(
-                        update,
-                        download,
-                        applyScriptPath,
-                        Environment.ProcessId);
+                    using var updaterProcess = canApplyLinuxUpdate
+                        ? _updateService.StartLinuxApply(
+                            update,
+                            download,
+                            applyScriptPath,
+                            Environment.ProcessId)
+                        : _updateService.StartMacOsApply(
+                            update,
+                            download,
+                            applyScriptPath,
+                            macOsBundlePath!,
+                            Environment.ProcessId);
 
                     SetStatus($"正在關閉程式並套用 {update.LatestVersionText}…");
                     if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -458,22 +469,27 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private async Task ShowPreviousLinuxUpdateFailureAsync()
+    private async Task ShowPreviousUpdateFailureAsync()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
         try
         {
-            var result = _updateService.ReadAndClearLinuxApplyResult();
+            var platformName = OperatingSystem.IsMacOS() ? "macOS" : "Linux";
+            var result = OperatingSystem.IsMacOS()
+                ? _updateService.ReadAndClearMacOsApplyResult()
+                : _updateService.ReadAndClearLinuxApplyResult();
             if (result is null)
             {
                 return;
             }
 
-            var title = result.WasRolledBack ? "Linux 更新已回復" : "Linux 更新未完成";
+            var title = result.WasRolledBack
+                ? $"{platformName} 更新已回復"
+                : $"{platformName} 更新未完成";
             var recovery = result.WasRolledBack
                 ? "已重新啟動前一個可用版本。"
                 : "目前安裝內容沒有被替換。";
@@ -486,8 +502,22 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
-            SetStatus($"無法讀取前次 Linux 更新結果：{exception.Message}");
+            SetStatus($"無法讀取前次平台更新結果：{exception.Message}");
         }
+    }
+
+    private static string? ResolveCurrentMacOsAppBundlePath()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return null;
+        }
+
+        var bundlePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
+        return string.Equals(Path.GetFileName(bundlePath), "mySQLPunk.app", StringComparison.Ordinal) &&
+               File.Exists(Path.Combine(bundlePath, "Contents", "Info.plist"))
+            ? bundlePath
+            : null;
     }
 
     private void OpenReleasePage(CrossPlatformUpdateInfo update)

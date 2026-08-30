@@ -198,6 +198,89 @@ public sealed class CrossPlatformUpdateService
         return startInfo;
     }
 
+    public ProcessStartInfo BuildMacOsApplyStartInfo(
+        CrossPlatformUpdateInfo update,
+        CrossPlatformUpdateDownload download,
+        string applyScriptPath,
+        string targetBundlePath,
+        int processId,
+        string? lockToken = null)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        ArgumentNullException.ThrowIfNull(download);
+        if (!update.UpdateAvailable)
+        {
+            throw new InvalidOperationException("指定的 Release 並不是較新的版本。");
+        }
+        if (update.RuntimeIdentifier is not ("osx-x64" or "osx-arm64"))
+        {
+            throw new PlatformNotSupportedException("macOS 安全自動套用只支援 Intel 與 Apple Silicon。");
+        }
+        if (!Path.IsPathFullyQualified(download.Path) || !File.Exists(download.Path))
+        {
+            throw new FileNotFoundException("找不到已驗證的 macOS 更新安裝包。", download.Path);
+        }
+        if (!Regex.IsMatch(download.Sha256, "^[0-9a-fA-F]{64}$", RegexOptions.CultureInvariant))
+        {
+            throw new InvalidDataException("macOS 更新安裝包的 SHA-256 格式不正確。");
+        }
+        if (!Path.IsPathFullyQualified(applyScriptPath) || !File.Exists(applyScriptPath))
+        {
+            throw new FileNotFoundException("目前 app bundle 缺少 macOS 安全更新腳本。", applyScriptPath);
+        }
+
+        var normalizedBundlePath = Path.TrimEndingDirectorySeparator(targetBundlePath);
+        if (!Path.IsPathFullyQualified(normalizedBundlePath) ||
+            !string.Equals(Path.GetFileName(normalizedBundlePath), "mySQLPunk.app", StringComparison.Ordinal) ||
+            !Directory.Exists(normalizedBundlePath) ||
+            File.GetAttributes(normalizedBundlePath).HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw new InvalidDataException("目前 macOS 應用程式不是可安全取代的 mySQLPunk.app bundle。");
+        }
+        if (processId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(processId), "等待的程序識別碼必須大於零。");
+        }
+        if (lockToken is not null &&
+            !Regex.IsMatch(lockToken, "^[0-9a-f]{32}$", RegexOptions.CultureInvariant))
+        {
+            throw new ArgumentException("macOS 更新 lock token 格式不正確。", nameof(lockToken));
+        }
+
+        var expectedPackageName = BuildPackageFileName(
+            update.LatestVersionText,
+            update.RuntimeIdentifier);
+        if (!string.Equals(update.PackageFileName, expectedPackageName, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("更新資產名稱與 macOS 套用參數不一致。");
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = applyScriptPath,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var argument in new[]
+                 {
+                     "--archive", download.Path,
+                     "--sha256", download.Sha256.ToLowerInvariant(),
+                     "--version", update.LatestVersionText,
+                     "--runtime", update.RuntimeIdentifier,
+                     "--wait-pid", processId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                     "--target-bundle", normalizedBundlePath
+                 })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+        if (lockToken is not null)
+        {
+            startInfo.ArgumentList.Add("--lock-token");
+            startInfo.ArgumentList.Add(lockToken);
+        }
+        return startInfo;
+    }
+
     public Process StartLinuxApply(
         CrossPlatformUpdateInfo update,
         CrossPlatformUpdateDownload download,
@@ -217,7 +300,7 @@ public sealed class CrossPlatformUpdateService
 
         var lockToken = Guid.NewGuid().ToString("N");
         var lockPath = ResolveLinuxApplyLockPath();
-        AcquireLinuxApplyLock(lockPath, lockToken, processId);
+        AcquireApplyLock(lockPath, lockToken, processId, "Linux");
         try
         {
             var startInfo = BuildLinuxApplyStartInfo(
@@ -231,17 +314,71 @@ public sealed class CrossPlatformUpdateService
         }
         catch
         {
-            ReleaseLinuxApplyLock(lockPath, lockToken);
+            ReleaseApplyLock(lockPath, lockToken);
             throw;
         }
     }
 
-    public LinuxUpdateApplyResult? ReadAndClearLinuxApplyResult(string? resultPath = null)
+    public Process StartMacOsApply(
+        CrossPlatformUpdateInfo update,
+        CrossPlatformUpdateDownload download,
+        string applyScriptPath,
+        string targetBundlePath,
+        int processId)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            throw new PlatformNotSupportedException("macOS 安全更新程序只能在 macOS 上啟動。");
+        }
+        var currentRuntime = ResolveCurrentRuntimeIdentifier();
+        if (!string.Equals(update.RuntimeIdentifier, currentRuntime, StringComparison.Ordinal))
+        {
+            throw new PlatformNotSupportedException(
+                $"更新 RID {update.RuntimeIdentifier} 與目前平台 {currentRuntime} 不一致。");
+        }
+
+        var lockToken = Guid.NewGuid().ToString("N");
+        var lockPath = ResolveMacOsApplyLockPath();
+        AcquireApplyLock(lockPath, lockToken, processId, "macOS");
+        try
+        {
+            var startInfo = BuildMacOsApplyStartInfo(
+                update,
+                download,
+                applyScriptPath,
+                targetBundlePath,
+                processId,
+                lockToken);
+            return Process.Start(startInfo) ??
+                   throw new InvalidOperationException("無法啟動 macOS 安全更新程序。");
+        }
+        catch
+        {
+            ReleaseApplyLock(lockPath, lockToken);
+            throw;
+        }
+    }
+
+    public CrossPlatformUpdateApplyResult? ReadAndClearLinuxApplyResult(string? resultPath = null)
     {
         resultPath ??= ResolveLinuxApplyResultPath();
+        return ReadAndClearApplyResult(resultPath, ParseLinuxApplyResult, "Linux");
+    }
+
+    public CrossPlatformUpdateApplyResult? ReadAndClearMacOsApplyResult(string? resultPath = null)
+    {
+        resultPath ??= ResolveMacOsApplyResultPath();
+        return ReadAndClearApplyResult(resultPath, ParseMacOsApplyResult, "macOS");
+    }
+
+    private static CrossPlatformUpdateApplyResult? ReadAndClearApplyResult(
+        string resultPath,
+        Func<string, CrossPlatformUpdateApplyResult> parser,
+        string platformName)
+    {
         if (!Path.IsPathFullyQualified(resultPath))
         {
-            throw new ArgumentException("Linux 更新結果位置必須是完整路徑。", nameof(resultPath));
+            throw new ArgumentException($"{platformName} 更新結果位置必須是完整路徑。", nameof(resultPath));
         }
         if (!File.Exists(resultPath))
         {
@@ -253,12 +390,12 @@ public sealed class CrossPlatformUpdateService
             var resultLength = new FileInfo(resultPath).Length;
             if (resultLength is <= 0 or > MaximumApplyResultBytes)
             {
-                throw new InvalidDataException("Linux 更新結果為空或超過安全大小限制。");
+                throw new InvalidDataException($"{platformName} 更新結果為空或超過安全大小限制。");
             }
             var bytes = File.ReadAllBytes(resultPath);
             if (bytes.Length != resultLength || bytes.Length > MaximumApplyResultBytes)
             {
-                throw new InvalidDataException("Linux 更新結果在讀取時發生變更。");
+                throw new InvalidDataException($"{platformName} 更新結果在讀取時發生變更。");
             }
             string text;
             try
@@ -267,9 +404,9 @@ public sealed class CrossPlatformUpdateService
             }
             catch (DecoderFallbackException exception)
             {
-                throw new InvalidDataException("Linux 更新結果不是有效 UTF-8。", exception);
+                throw new InvalidDataException($"{platformName} 更新結果不是有效 UTF-8。", exception);
             }
-            return ParseLinuxApplyResult(text);
+            return parser(text);
         }
         finally
         {
@@ -288,7 +425,16 @@ public sealed class CrossPlatformUpdateService
         }
     }
 
-    public static LinuxUpdateApplyResult ParseLinuxApplyResult(string text)
+    public static CrossPlatformUpdateApplyResult ParseLinuxApplyResult(string text) =>
+        ParseApplyResult(text, new[] { "linux-x64", "linux-arm64" }, "Linux");
+
+    public static CrossPlatformUpdateApplyResult ParseMacOsApplyResult(string text) =>
+        ParseApplyResult(text, new[] { "osx-x64", "osx-arm64" }, "macOS");
+
+    private static CrossPlatformUpdateApplyResult ParseApplyResult(
+        string text,
+        IReadOnlyCollection<string> acceptedRuntimes,
+        string platformName)
     {
         var fields = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var line in text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
@@ -300,38 +446,38 @@ public sealed class CrossPlatformUpdateService
             var separator = line.IndexOf('=');
             if (separator <= 0 || !fields.TryAdd(line[..separator], line[(separator + 1)..]))
             {
-                throw new InvalidDataException("Linux 更新結果格式不正確。");
+                throw new InvalidDataException($"{platformName} 更新結果格式不正確。");
             }
         }
 
         var allowedFields = new[] { "status", "version", "runtime", "message", "log" };
         if (fields.Count != allowedFields.Length || fields.Keys.Any(key => !allowedFields.Contains(key, StringComparer.Ordinal)))
         {
-            throw new InvalidDataException("Linux 更新結果欄位不完整或包含未知欄位。");
+            throw new InvalidDataException($"{platformName} 更新結果欄位不完整或包含未知欄位。");
         }
 
         var status = fields["status"];
         if (status is not ("failed" or "rollback"))
         {
-            throw new InvalidDataException("Linux 更新結果狀態不正確。");
+            throw new InvalidDataException($"{platformName} 更新結果狀態不正確。");
         }
         ParseVersion(fields["version"], "version", out var version);
-        if (fields["runtime"] is not ("linux-x64" or "linux-arm64"))
+        if (!acceptedRuntimes.Contains(fields["runtime"], StringComparer.Ordinal))
         {
-            throw new InvalidDataException("Linux 更新結果 RID 不正確。");
+            throw new InvalidDataException($"{platformName} 更新結果 RID 不正確。");
         }
         var message = fields["message"].Trim();
         if (message.Length is 0 or > 500 || message.Contains('\r') || message.Contains('\n'))
         {
-            throw new InvalidDataException("Linux 更新結果訊息不正確。");
+            throw new InvalidDataException($"{platformName} 更新結果訊息不正確。");
         }
         var logPath = fields["log"];
         if (!Path.IsPathFullyQualified(logPath) || logPath.Contains('\r') || logPath.Contains('\n'))
         {
-            throw new InvalidDataException("Linux 更新 log 位置不正確。");
+            throw new InvalidDataException($"{platformName} 更新 log 位置不正確。");
         }
 
-        return new LinuxUpdateApplyResult(status, version, fields["runtime"], message, logPath);
+        return new CrossPlatformUpdateApplyResult(status, version, fields["runtime"], message, logPath);
     }
 
     public static string ResolveLinuxApplyResultPath()
@@ -356,7 +502,28 @@ public sealed class CrossPlatformUpdateService
             "apply.lock");
     }
 
-    private static void AcquireLinuxApplyLock(string lockPath, string token, int processId)
+    public static string ResolveMacOsApplyResultPath()
+    {
+        var applicationData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (!Path.IsPathFullyQualified(applicationData))
+        {
+            throw new InvalidOperationException("macOS Application Support 必須是完整路徑。");
+        }
+        return Path.Combine(applicationData, "mySQLPunk", "updates", "last-apply-result");
+    }
+
+    public static string ResolveMacOsApplyLockPath()
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(ResolveMacOsApplyResultPath())!,
+            "apply.lock");
+    }
+
+    private static void AcquireApplyLock(
+        string lockPath,
+        string token,
+        int processId,
+        string platformName)
     {
         var directory = Path.GetDirectoryName(lockPath)!;
         Directory.CreateDirectory(directory);
@@ -408,14 +575,14 @@ public sealed class CrossPlatformUpdateService
             }
             catch (IOException) when (File.Exists(lockPath))
             {
-                var ownerPid = TryReadLinuxApplyLockPid(lockPath);
+                var ownerPid = TryReadApplyLockPid(lockPath);
                 if (ownerPid is null)
                 {
-                    throw new InvalidOperationException("Linux 更新 lock 已存在，但無法安全驗證擁有者。");
+                    throw new InvalidOperationException($"{platformName} 更新 lock 已存在，但無法安全驗證擁有者。");
                 }
                 if (IsProcessRunning(ownerPid.Value))
                 {
-                    throw new InvalidOperationException("另一個 mySQLPunk 視窗正在準備或套用 Linux 更新。");
+                    throw new InvalidOperationException($"另一個 mySQLPunk 視窗正在準備或套用 {platformName} 更新。");
                 }
 
                 try
@@ -429,10 +596,10 @@ public sealed class CrossPlatformUpdateService
             }
         }
 
-        throw new InvalidOperationException("無法取得 Linux 更新的獨佔 lock。");
+        throw new InvalidOperationException($"無法取得 {platformName} 更新的獨佔 lock。");
     }
 
-    private static int? TryReadLinuxApplyLockPid(string lockPath)
+    private static int? TryReadApplyLockPid(string lockPath)
     {
         try
         {
@@ -478,7 +645,7 @@ public sealed class CrossPlatformUpdateService
         }
     }
 
-    private static void ReleaseLinuxApplyLock(string lockPath, string token)
+    private static void ReleaseApplyLock(string lockPath, string token)
     {
         try
         {

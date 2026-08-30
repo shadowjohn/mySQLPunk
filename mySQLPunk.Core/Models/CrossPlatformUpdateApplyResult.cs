@@ -1,6 +1,6 @@
 namespace MySqlPunk.Core.Models;
 
-public sealed record LinuxUpdateApplyResult(
+public sealed record CrossPlatformUpdateApplyResult(
     string Status,
     string Version,
     string RuntimeIdentifier,

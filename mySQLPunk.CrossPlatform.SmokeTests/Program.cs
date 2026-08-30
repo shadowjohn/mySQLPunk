@@ -368,6 +368,36 @@ static async Task CrossPlatformUpdateAssetsAsync()
             }),
             "Linux updater 參數未使用獨立 ArgumentList 或內容不正確");
 
+        var macBundlePath = Path.Combine(directory, "mySQLPunk.app");
+        Directory.CreateDirectory(macBundlePath);
+        var macUpdate = update with
+        {
+            RuntimeIdentifier = "osx-x64",
+            PackageFileName = "mySQLPunk-1.0.0.20-osx-x64.app.zip"
+        };
+        var macApplyStartInfo = new CrossPlatformUpdateService().BuildMacOsApplyStartInfo(
+            macUpdate,
+            new CrossPlatformUpdateDownload(destinationPath, packageBytes.Length, expectedHash),
+            applyScriptPath,
+            macBundlePath,
+            23456,
+            "fedcba9876543210fedcba9876543210");
+        Assert(
+            macApplyStartInfo.FileName == applyScriptPath && !macApplyStartInfo.UseShellExecute,
+            "macOS updater 啟動方式不正確");
+        Assert(
+            macApplyStartInfo.ArgumentList.SequenceEqual(new[]
+            {
+                "--archive", destinationPath,
+                "--sha256", expectedHash,
+                "--version", "1.0.0.20",
+                "--runtime", "osx-x64",
+                "--wait-pid", "23456",
+                "--target-bundle", macBundlePath,
+                "--lock-token", "fedcba9876543210fedcba9876543210"
+            }),
+            "macOS updater 參數未使用獨立 ArgumentList 或內容不正確");
+
         var resultPath = Path.Combine(directory, "last-apply-result");
         await File.WriteAllTextAsync(
             resultPath,
@@ -377,6 +407,16 @@ static async Task CrossPlatformUpdateAssetsAsync()
         Assert(!File.Exists(resultPath), "Linux rollback 結果顯示後未清除");
         AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseLinuxApplyResult(
             $"status=success\nversion=1.0.0.20\nruntime=linux-x64\nmessage=Unexpected.\nlog={Path.Combine(directory, "apply.log")}\n"));
+        await File.WriteAllTextAsync(
+            resultPath,
+            $"status=rollback\nversion=1.0.0.20\nruntime=osx-x64\nmessage=Startup failed.\nlog={Path.Combine(directory, "mac-apply.log")}\n");
+        var macApplyResult = new CrossPlatformUpdateService().ReadAndClearMacOsApplyResult(resultPath);
+        Assert(
+            macApplyResult is { WasRolledBack: true, RuntimeIdentifier: "osx-x64" },
+            "macOS rollback 結果解析不正確");
+        Assert(!File.Exists(resultPath), "macOS rollback 結果顯示後未清除");
+        AssertThrows<InvalidDataException>(() => CrossPlatformUpdateService.ParseMacOsApplyResult(
+            $"status=rollback\nversion=1.0.0.20\nruntime=linux-x64\nmessage=Wrong RID.\nlog={Path.Combine(directory, "mac-apply.log")}\n"));
 
         if (OperatingSystem.IsLinux())
         {

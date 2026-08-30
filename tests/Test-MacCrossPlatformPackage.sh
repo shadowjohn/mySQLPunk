@@ -46,7 +46,8 @@ for input_path in "$@"; do
     app_bundle="$extract_root/mySQLPunk.app"
     info_plist="$app_bundle/Contents/Info.plist"
     executable="$app_bundle/Contents/MacOS/mySQLPunk"
-    if [[ ! -d "$app_bundle" || ! -f "$info_plist" || ! -x "$executable" ]]; then
+    updater="$app_bundle/Contents/MacOS/apply-update.sh"
+    if [[ ! -d "$app_bundle" || ! -f "$info_plist" || ! -x "$executable" || ! -x "$updater" ]]; then
         printf 'Archive is missing the expected executable app bundle: %s\n' "$archive_name" >&2
         exit 6
     fi

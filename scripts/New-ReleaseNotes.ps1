@@ -87,7 +87,7 @@ $footer = @'
 | **macOS** | Intel | `mySQLPunk-{{VERSION}}-osx-x64.app.zip` | 解壓後將 `mySQLPunk.app` 拖到 Applications |
 | **macOS** | Apple Silicon | `mySQLPunk-{{VERSION}}-osx-arm64.app.zip` | 解壓後將 `mySQLPunk.app` 拖到 Applications |
 
-> Windows 是功能完整版本；Linux / macOS 是 Avalonia 跨平台預覽版。各跨平台壓縮檔旁都有同名 `.sha256`，macOS 預覽目前為 ad-hoc 簽署、尚未 Apple notarize，第一次開啟仍可能顯示 Gatekeeper 提示。
+> Windows 是功能完整版本；Linux / macOS 是 Avalonia 跨平台預覽版。各跨平台壓縮檔旁都有同名 `.sha256`，macOS 預覽目前為 ad-hoc 簽署、尚未 Apple notarize，第一次開啟仍可能顯示 Gatekeeper 提示。已安裝的 Linux／macOS 版本可直接從程式內安全套用新版；啟動失敗會自動 rollback 與重開舊版。
 
 ## 🛡️ 完整性與驗證
 
@@ -97,7 +97,7 @@ $footer = @'
 - {{SIGNATURE_NOTE}}
 - 本版本已通過 Windows Release 建置、SmokeTests、安裝、啟動、關閉與解除安裝驗證。
 - Linux x64 資產已通過隔離安裝、Xvfb 啟動與解除安裝驗證；Linux ARM64 已通過封裝與安裝檔案檢查。
-- macOS Intel／Apple Silicon 資產已在對應 runner 通過 app bundle、codesign 與 zip metadata 驗證。
+- macOS Intel／Apple Silicon 資產已在原生 runner 通過 app bundle、codesign、zip metadata、安全套用、啟動健康檢查與 rollback 驗證。
 '@
 $footer = $footer.Replace('{{INSTALLER_NAME}}', $installer.Name)
 $footer = $footer.Replace('{{VERSION}}', $Version)
