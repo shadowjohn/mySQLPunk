@@ -65,6 +65,8 @@ public sealed record TableColumnInfo(
 
     public int? MaximumStringLengthInBytes { get; init; }
 
+    public int? MaximumStringLengthInCharacters { get; init; }
+
     public string? StorageCollationName { get; init; }
 
     public bool TrailingSpacesAreNotRoundTrippable { get; init; }

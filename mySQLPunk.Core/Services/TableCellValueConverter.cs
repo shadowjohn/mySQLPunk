@@ -1,6 +1,8 @@
-using System.Globalization;
+using System.Buffers;
 using System.Data.SqlTypes;
+using System.Globalization;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Xml;
 using MySqlPunk.Core.Models;
@@ -294,6 +296,15 @@ public static class TableCellValueConverter
 
     private static string ParseString(TableColumnInfo column, string text)
     {
+        var characterCount = CountUnicodeScalars(text);
+        if (column.MaximumStringLengthInCharacters is { } maximumLength &&
+            characterCount > maximumLength)
+        {
+            throw new FormatException(
+                $"最多只能保存 {maximumLength:N0} 個 Unicode 字元，輸入值有 {characterCount:N0} 個；" +
+                "超出欄寬的內容（包括純尾端空白）不可無損保存。");
+        }
+
         if (column.TrailingSpacesAreNotRoundTrippable && text.EndsWith(' '))
         {
             throw new FormatException(
@@ -302,6 +313,25 @@ public static class TableCellValueConverter
         }
 
         return text;
+    }
+
+    private static int CountUnicodeScalars(string text)
+    {
+        var count = 0;
+        var remaining = text.AsSpan();
+        while (!remaining.IsEmpty)
+        {
+            var status = Rune.DecodeFromUtf16(remaining, out _, out var consumed);
+            if (status != OperationStatus.Done)
+            {
+                throw new FormatException("包含無效的 UTF-16 surrogate，無法無損轉成資料庫字串。");
+            }
+
+            count++;
+            remaining = remaining[consumed..];
+        }
+
+        return count;
     }
 
     private static SqlServerVariantValue ParseSqlServerVariant(string text)

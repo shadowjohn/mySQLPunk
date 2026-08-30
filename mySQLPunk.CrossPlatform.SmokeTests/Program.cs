@@ -938,6 +938,7 @@ static async Task TableDataEditingAsync()
         {
             DataTypeName = "char(6)",
             StorageDataTypeName = "char(6)",
+            MaximumStringLengthInCharacters = 6,
             TrailingSpacesAreNotRoundTrippable = true
         };
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
@@ -954,6 +955,29 @@ static async Task TableDataEditingAsync()
                 nonRoundTrippableCharColumn with { TrailingSpacesAreNotRoundTrippable = false },
                 new TableCellInput("name", TableCellInputMode.Value, "AB "))) == "AB ",
             "固定長度 CHAR 只應拒絕 provider 無法 round-trip 的尾端 U+0020 空白");
+        var boundedVaryingColumn = nonRoundTrippableCharColumn with
+        {
+            DataTypeName = "character varying(6)",
+            StorageDataTypeName = "character varying(6)",
+            TrailingSpacesAreNotRoundTrippable = false
+        };
+        Assert(
+            Convert.ToString(TableCellValueConverter.Parse(
+                boundedVaryingColumn,
+                new TableCellInput("name", TableCellInputMode.Value, "AB  "))) == "AB  " &&
+            Convert.ToString(TableCellValueConverter.Parse(
+                boundedVaryingColumn,
+                new TableCellInput("name", TableCellInputMode.Value, "🐧台灣ABC"))) == "🐧台灣ABC",
+            "PostgreSQL bounded varchar 應保留欄寬內尾端空白，並以 Unicode scalar 計算字元數");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            boundedVaryingColumn,
+            new TableCellInput("name", TableCellInputMode.Value, "ABCDEF ")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            boundedVaryingColumn,
+            new TableCellInput("name", TableCellInputMode.Value, "🐧台灣ABCD")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            boundedVaryingColumn,
+            new TableCellInput("name", TableCellInputMode.Value, new string('\ud800', 1))));
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             binaryColumn,
             new TableCellInput(
@@ -2804,7 +2828,8 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 type_name REGTYPE NULL,
                 fixed_text CHARACTER(6) NULL,
                 domain_fixed fixed_label NULL,
-                unbounded_fixed bpchar NULL
+                unbounded_fixed bpchar NULL,
+                bounded_varying VARCHAR(6) NULL
             );
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
@@ -2821,6 +2846,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
             table!,
             id => $"UPDATE public.sample SET name = 'Concurrent' WHERE id = {id};");
         await VerifyNonRoundTrippableTrailingSpacesAsync(session, database, table!);
+        await VerifyPostgreSqlBoundedStringsAsync(session, database, table!);
         await VerifyFloatingPointTypesAsync(
             session,
             database,
@@ -2842,6 +2868,113 @@ static async Task PostgreSqlLiveRoundTripAsync()
             $"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{database}' AND pid <> pg_backend_pid();");
         await session.ExecuteAsync("postgres", $"DROP DATABASE IF EXISTS \"{database}\";");
     }
+}
+
+static async Task VerifyPostgreSqlBoundedStringsAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var boundedColumn = before.Columns.Single(column => column.Name == "bounded_varying");
+    var fixedColumn = before.Columns.Single(column => column.Name == "fixed_text");
+    var domainColumn = before.Columns.Single(column => column.Name == "domain_label");
+    var unboundedColumn = before.Columns.Single(column => column.Name == "unbounded_fixed");
+    Assert(
+        boundedColumn.ValueKind == TableColumnValueKind.String &&
+        boundedColumn.StorageDataTypeName == "character varying(6)" &&
+        boundedColumn.MaximumStringLengthInCharacters == 6 &&
+        !boundedColumn.TrailingSpacesAreNotRoundTrippable,
+        "PostgreSQL varchar(n) metadata 應保留 Unicode 字元上限且允許欄寬內尾端空白");
+    Assert(
+        fixedColumn.MaximumStringLengthInCharacters == 6 &&
+        domainColumn.MaximumStringLengthInCharacters == 30 &&
+        unboundedColumn.MaximumStringLengthInCharacters is null,
+        "PostgreSQL character／varchar domain／unbounded bpchar 的字元上限 metadata 不正確");
+
+    await session.ExecuteAsync(
+        database,
+        "INSERT INTO public.sample (name, bounded_varying) " +
+        "VALUES ('Native bounded spaces', 'ABCDEF  ');");
+    var nativeSnapshot = await session.LoadTableDataAsync(database, table);
+    var nativeRow = nativeSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Native bounded spaces");
+    Assert(
+        Convert.ToString(nativeRow.Values[boundedColumn.Ordinal]) == "ABCDEF",
+        "PostgreSQL 原生 varchar(n) 應證實會靜默截掉超出欄寬的純尾端空白");
+    await session.DeleteTableRowAsync(database, table, nativeRow);
+
+    var invalidValues = new[]
+    {
+        (Name: "Rejected bounded spaces", Value: "ABCDEF "),
+        (Name: "Rejected bounded text", Value: "ABCDEFG"),
+        (Name: "Rejected bounded Unicode", Value: "🐧台灣ABCD")
+    };
+    foreach (var invalid in invalidValues)
+    {
+        var exception = await CaptureExceptionAsync<InvalidOperationException>(() =>
+            session.InsertTableRowAsync(
+                database,
+                table,
+                new[]
+                {
+                    new TableCellInput("name", TableCellInputMode.Value, invalid.Name),
+                    new TableCellInput("bounded_varying", TableCellInputMode.Value, invalid.Value)
+                }));
+        Assert(
+            exception.Message.Contains("最多只能保存 6 個 Unicode 字元", StringComparison.Ordinal),
+            $"PostgreSQL varchar(6) 超長輸入應回報 Unicode 字元上限；actual={exception.Message}");
+    }
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    Assert(
+        invalidValues.All(invalid => rejectedSnapshot.Rows.All(row =>
+            Convert.ToString(row.Values[1]) != invalid.Name)),
+        "PostgreSQL bounded varchar 超長輸入不可落地");
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "Bounded varchar editor"),
+            new TableCellInput("bounded_varying", TableCellInputMode.Value, "AB  ")
+        });
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Bounded varchar editor");
+    Assert(
+        Convert.ToString(inserted.Values[boundedColumn.Ordinal]) == "AB  ",
+        "PostgreSQL varchar(n) 應保留欄寬內的尾端空白");
+
+    var id = Convert.ToInt64(inserted.Values[0], CultureInfo.InvariantCulture);
+    await session.ExecuteAsync(
+        database,
+        $"UPDATE public.sample SET bounded_varying = 'AB ' WHERE id = {id};");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "77") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row =>
+        Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) == id);
+    Assert(
+        Convert.ToString(concurrent.Values[boundedColumn.Ordinal]) == "AB " &&
+        Convert.ToInt32(concurrent.Values[2], CultureInfo.InvariantCulture) != 77,
+        "PostgreSQL varchar(n) 尾端空白被外部修改時 optimistic concurrency 不可覆寫");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        concurrent,
+        new[] { new TableCellInput("bounded_varying", TableCellInputMode.Value, "🐧台灣ABC") });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row =>
+        Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) == id);
+    Assert(
+        Convert.ToString(updated.Values[boundedColumn.Ordinal]) == "🐧台灣ABC",
+        "PostgreSQL varchar(6) 應以 Unicode scalar 接受六字元多位元組值");
+    await session.DeleteTableRowAsync(database, table, updated);
 }
 
 static async Task VerifyPostgreSqlMoneyAsync(

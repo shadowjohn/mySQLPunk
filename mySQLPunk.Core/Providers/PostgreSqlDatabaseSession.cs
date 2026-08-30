@@ -482,6 +482,10 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                     : null,
                 IntegerMinimum = integerBounds?.Minimum,
                 IntegerMaximum = integerBounds?.Maximum,
+                MaximumStringLengthInCharacters = valueKind == TableColumnValueKind.String &&
+                                                  !reader.IsDBNull(9)
+                    ? reader.GetInt32(9)
+                    : null,
                 TrailingSpacesAreNotRoundTrippable = IsFixedLengthCharacterType(storageType)
             });
         }

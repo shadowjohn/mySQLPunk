@@ -84,6 +84,8 @@ MySQL／MariaDB 的 Table 新增、修改與刪除會在單列交易 commit 前�
 
 MySQL／MariaDB `CHAR(n)` 會在讀回時移除尾端 U+0020 空白，且超出欄寬的純空白即使在 strict mode 也可能以 0 warnings 靜默截掉；PostgreSQL `character(n)` 也會補滿欄寬，並在一般字串語意中移除 padding，未指定長度的原生 `bpchar` 同樣是 blank-trimmed。跨平台編輯器會依 provider metadata 精準標記這些欄位，拒絕無法 round-trip 的尾端 U+0020 空白並建議改用 `VARCHAR`／`TEXT`；tab、NBSP、一般可變長度字串，以及 SQL Server 已有的 collation／byte 無損檢查不受影響。PostgreSQL 固定長度／blank-trimmed 字串的載入與 optimistic concurrency 也會統一採用去 padding 的 canonical 文字，避免未修改的資料列被誤判為衝突。
 
+PostgreSQL `varchar(n)`／`character varying(n)` 會保留欄寬內的尾端空白，但規格允許在超出 n 的字元全是空白時無錯誤截斷。跨平台編輯器會從欄位與 domain metadata 保留字元上限，以 Unicode scalar 計數（emoji 不會被誤算成兩個 UTF-16 code units），並在送出 SQL 前拒絕所有超長輸入與無效 surrogate；未指定長度的 `varchar`、`text` 與 `citext` 不套用上限。`varchar(n)` 的 optimistic concurrency 仍保留尾端空白的差異。
+
 MySQL／MariaDB 與 SQL Server 的固定長度 `BINARY(n)` 會從 metadata 保留精確 byte 數，輸入必須剛好是 n bytes；短值與長值都會在產生 SQL 前拒絕，避免資料庫在沒有 warning 的情況下自動補 `0x00` 或截斷。SQL Server alias type 會沿用 base `binary(n)` 限制；`VARBINARY`、BLOB、PostgreSQL bytea 與 SQLite BLOB 仍維持可變長。
 
 SQL Server 一般 `char`／`varchar`／`text` 會先以 Unicode 參數保留原始輸入，再依欄位實際 collation 轉成 ANSI／UTF-8，核對 byte 上限及轉回 Unicode 後的完整內容；不可由 legacy code page 表示、或超出 multibyte byte 容量的文字會讓整筆交易回復，不再靜默變成 `?` 或被截斷。`nchar`／`nvarchar` 也依 metadata 的 UTF-16 byte 容量拒絕溢位；alias type 沿用 base type 限制。字串 optimistic concurrency 改比對實際 bytes，因此只改變尾端空白也會被視為外部修改。
