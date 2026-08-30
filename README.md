@@ -74,6 +74,8 @@ Linux 資產是 `.tar.gz`，解壓後執行 `./install.sh` 即會以交易方式
 
 PostgreSQL `money` 會依資料庫目前的 `lc_monetary` 推導固定小數位，以不含幣別符號或千分位的 canonical 十進位文字無損編輯，並拒絕多餘小數與 8-byte 範圍溢位，避免 server 無聲取整或 Linux／macOS locale 改變顯示內容。
 
+SQL Server `money`／`smallmoney` 會固定顯示 4 位小數，並以各自的原生參數與正負範圍安全編輯；需要取整的第 5 位小數、幣別符號、千分位、科學記號與溢位會在送出前拒絕，不交給 server 無聲四捨五入。
+
 MySQL／MariaDB 的 GEOMETRY、POINT、LINESTRING、POLYGON、MULTIPOINT、MULTILINESTRING、MULTIPOLYGON、GEOMETRYCOLLECTION，以及 SQL Server 的 geometry／geography，可用 `SRID=<非負整數>;<WKT>` 安全編輯；載入與寫回都保留 SRID，原值比對同時檢查 SRID 與 canonical WKT。畸形 WKT 會讓整筆交易回復；MariaDB 即使只回傳 warning／NULL，也會轉成明確錯誤，避免 nullable 欄位被靜默清空。超過 1 MiB 的 spatial 文字維持唯讀。
 
 MariaDB 原生 `UUID` 與 `INET6` 欄位也可直接編輯。UUID 會正規化為小寫標準格式；INET6 接受 IPv4／IPv6，IPv4 依 MariaDB 原生語意保存為 IPv4-mapped IPv6。兩者都先在本機拒絕無效格式，再以參數化原生 CAST 寫入，修改與刪除會用 canonical 值完成 optimistic concurrency 比對。

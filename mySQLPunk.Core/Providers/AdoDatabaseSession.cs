@@ -446,6 +446,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     {
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,
+        SqlServerMoneyValue money => money.Value,
         _ => value
     };
 

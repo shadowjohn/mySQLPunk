@@ -244,6 +244,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.ExactDecimal => BuildExactDecimalWatermark(column),
         TableColumnValueKind.PostgreSqlMoney =>
             $"十進位金額，最多 {TableCellValueConverter.GetPostgreSqlMoneyScale(column)} 位小數（不使用幣別符號或千分位）",
+        TableColumnValueKind.SqlServerMoney => "十進位金額，最多 4 位小數（不可使用指數或千分位）",
         TableColumnValueKind.TimeWithTimeZone => "HH:mm:ss.ffffff±HH:mm",
         TableColumnValueKind.Interval => "months=0;days=0;microseconds=0",
         TableColumnValueKind.LogSequenceNumber => "0/0（WAL LSN 十六進位）",

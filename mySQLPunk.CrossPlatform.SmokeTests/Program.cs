@@ -1762,6 +1762,65 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             sqlTimeColumn,
             new TableCellInput("clock_time", TableCellInputMode.Value, "1.00:00:00")));
+        var sqlMoneyColumn = new TableColumnInfo(
+            0,
+            "account_balance",
+            "money",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.SqlServerMoney)
+        {
+            StorageDataTypeName = "money"
+        };
+        var sqlSmallMoneyColumn = sqlMoneyColumn with
+        {
+            Name = "petty_cash",
+            DataTypeName = "smallmoney",
+            StorageDataTypeName = "smallmoney"
+        };
+        foreach (var expected in new[]
+                 {
+                     (Column: sqlMoneyColumn, Input: "1.2", Canonical: "1.2000"),
+                     (Column: sqlMoneyColumn, Input: "+0001.2345", Canonical: "1.2345"),
+                     (Column: sqlMoneyColumn, Input: "922337203685477.5807", Canonical: "922337203685477.5807"),
+                     (Column: sqlMoneyColumn, Input: "-922337203685477.5808", Canonical: "-922337203685477.5808"),
+                     (Column: sqlSmallMoneyColumn, Input: "214748.3647", Canonical: "214748.3647"),
+                     (Column: sqlSmallMoneyColumn, Input: "-214748.3648", Canonical: "-214748.3648")
+                 })
+        {
+            Assert(
+                TableCellValueConverter.Parse(
+                    expected.Column,
+                    new TableCellInput(expected.Column.Name, TableCellInputMode.Value, expected.Input)) is
+                    SqlServerMoneyValue money &&
+                money.Text == expected.Canonical &&
+                TableCellValueConverter.Format(money) == expected.Canonical,
+                $"SQL Server {expected.Column.StorageDataTypeName} 應正規化並無損保留 {expected.Input}");
+        }
+        Assert(
+            TableCellValueConverter.MatchesOriginal(
+                sqlMoneyColumn,
+                new TableCellInput("account_balance", TableCellInputMode.Value, "1.2"),
+                "1.2000"),
+            "SQL Server money 應把等值的小數位輸入視為未修改");
+        foreach (var invalid in new[]
+                 {
+                     (Column: sqlMoneyColumn, Value: "1.23455"),
+                     (Column: sqlMoneyColumn, Value: "922337203685477.5808"),
+                     (Column: sqlMoneyColumn, Value: "-922337203685477.5809"),
+                     (Column: sqlSmallMoneyColumn, Value: "214748.3648"),
+                     (Column: sqlSmallMoneyColumn, Value: "-214748.3649"),
+                     (Column: sqlSmallMoneyColumn, Value: "$1.23"),
+                     (Column: sqlSmallMoneyColumn, Value: "1,234.56"),
+                     (Column: sqlSmallMoneyColumn, Value: "1e2")
+                 })
+        {
+            AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+                invalid.Column,
+                new TableCellInput(invalid.Column.Name, TableCellInputMode.Value, invalid.Value)));
+        }
         var hierarchyIdColumn = new TableColumnInfo(
             0,
             "path",
@@ -2797,7 +2856,7 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE dbo.short_label FROM nvarchar(30) NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.positive_count FROM int NOT NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.precise_amount FROM decimal(18,6) NULL;");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
         await session.ExecuteAsync(
@@ -2826,6 +2885,7 @@ static async Task SqlServerLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE dbo.sample SET name = N'Concurrent' WHERE id = {id};");
+        await VerifySqlServerMoneyAsync(session, database, table!);
         await VerifySqlServerTemporalTypesAsync(session, database, table!);
     }
     finally
@@ -2834,6 +2894,99 @@ static async Task SqlServerLiveRoundTripAsync()
             "master",
             $"IF DB_ID(N'{database}') IS NOT NULL BEGIN ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}]; END");
     }
+}
+
+static async Task VerifySqlServerMoneyAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var moneyColumns = before.Columns
+        .Where(column => column.ValueKind == TableColumnValueKind.SqlServerMoney)
+        .ToDictionary(column => column.Name, StringComparer.Ordinal);
+    Assert(
+        moneyColumns.Count == 2 &&
+        moneyColumns["account_balance"].StorageDataTypeName == "money" &&
+        moneyColumns["petty_cash"].StorageDataTypeName == "smallmoney" &&
+        moneyColumns.Values.All(column => column.IsEditable),
+        "SQL Server money／smallmoney metadata 應映射為可安全編輯的專用型別");
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "SQL money"),
+            new TableCellInput("account_balance", TableCellInputMode.Value, "922337203685477.5807"),
+            new TableCellInput("petty_cash", TableCellInputMode.Value, "214748.3647")
+        });
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "SQL money");
+    Assert(
+        Convert.ToString(inserted.Values[moneyColumns["account_balance"].Ordinal]) == "922337203685477.5807" &&
+        Convert.ToString(inserted.Values[moneyColumns["petty_cash"].Ordinal]) == "214748.3647",
+        "SQL Server money／smallmoney 應無損保留正值上界 canonical 文字");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[]
+        {
+            new TableCellInput("account_balance", TableCellInputMode.Value, "-922337203685477.5808"),
+            new TableCellInput("petty_cash", TableCellInputMode.Value, "-214748.3648")
+        });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "SQL money");
+    Assert(
+        Convert.ToString(updated.Values[moneyColumns["account_balance"].Ordinal]) == "-922337203685477.5808" &&
+        Convert.ToString(updated.Values[moneyColumns["petty_cash"].Ordinal]) == "-214748.3648",
+        "SQL Server money／smallmoney 應無損保留負值下界 canonical 文字");
+
+    foreach (var invalid in new[]
+             {
+                 (Column: "account_balance", Value: "1.23455"),
+                 (Column: "account_balance", Value: "922337203685477.5808"),
+                 (Column: "petty_cash", Value: "214748.3648"),
+                 (Column: "petty_cash", Value: "1,234.56")
+             })
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.UpdateTableRowAsync(
+            database,
+            table,
+            updated,
+            new[] { new TableCellInput(invalid.Column, TableCellInputMode.Value, invalid.Value) }));
+    }
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    var unchanged = rejectedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "SQL money");
+    Assert(
+        Convert.ToString(unchanged.Values[moneyColumns["account_balance"].Ordinal]) == "-922337203685477.5808" &&
+        Convert.ToString(unchanged.Values[moneyColumns["petty_cash"].Ordinal]) == "-214748.3648",
+        "SQL Server money／smallmoney 不可把錯誤或需取整的輸入寫入");
+
+    var id = Convert.ToInt64(unchanged.Values[0], CultureInfo.InvariantCulture);
+    await session.ExecuteAsync(
+        database,
+        $"UPDATE dbo.sample SET account_balance = CAST(1.2345 AS money) WHERE id = {id};");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        unchanged,
+        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "77") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row =>
+        Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) == id);
+    Assert(
+        Convert.ToString(concurrent.Values[moneyColumns["account_balance"].Ordinal]) == "1.2345" &&
+        Convert.ToInt32(concurrent.Values[2], CultureInfo.InvariantCulture) != 77,
+        "SQL Server money 原值變更時 optimistic concurrency 不可覆寫外部資料");
+
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(
+        afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) != id),
+        "SQL Server money 安全刪除失敗");
 }
 
 static async Task VerifySqlServerTemporalTypesAsync(

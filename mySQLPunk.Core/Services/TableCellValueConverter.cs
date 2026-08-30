@@ -48,6 +48,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.Decimal => decimal.Parse(input.Text, NumberStyles.Number, CultureInfo.InvariantCulture),
                 TableColumnValueKind.ExactDecimal => ParseExactDecimal(column, input.Text),
                 TableColumnValueKind.PostgreSqlMoney => ParsePostgreSqlMoney(column, input.Text),
+                TableColumnValueKind.SqlServerMoney => ParseSqlServerMoney(column, input.Text),
                 TableColumnValueKind.FloatingPoint => ParseFiniteDouble(input.Text),
                 TableColumnValueKind.Boolean => ParseBoolean(input.Text),
                 TableColumnValueKind.Date => DateTime.ParseExact(
@@ -131,6 +132,7 @@ public static class TableCellValueConverter
         TimeSpan duration => duration.ToString("c", CultureInfo.InvariantCulture),
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,
+        SqlServerMoneyValue money => money.Text,
         SqlServerVariantValue variant => variant.CanonicalText,
         bool boolean => boolean ? "true" : "false",
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
@@ -214,6 +216,11 @@ public static class TableCellValueConverter
         if (column.ValueKind == TableColumnValueKind.PostgreSqlMoney)
         {
             return ParsePostgreSqlMoney(column, input.Text).Text == Format(original);
+        }
+
+        if (column.ValueKind == TableColumnValueKind.SqlServerMoney)
+        {
+            return ParseSqlServerMoney(column, input.Text).Text == Format(original);
         }
 
         return string.Equals(input.Text, Format(original), StringComparison.Ordinal);
@@ -334,17 +341,7 @@ public static class TableCellValueConverter
             case "money":
             case "smallmoney":
                 RequireNoVariantArguments(baseType, arguments, collationMetadata);
-                var money = decimal.Parse(
-                    valueText.Trim(),
-                    NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
-                    CultureInfo.InvariantCulture);
-                var minimumMoney = baseType == "smallmoney" ? -214_748.3648m : -922_337_203_685_477.5808m;
-                var maximumMoney = baseType == "smallmoney" ? 214_748.3647m : 922_337_203_685_477.5807m;
-                if (money < minimumMoney || money > maximumMoney || money * 10_000 != decimal.Truncate(money * 10_000))
-                {
-                    throw new OverflowException(
-                        $"{baseType} 必須介於 {minimumMoney} 與 {maximumMoney}，且最多 4 位小數。");
-                }
+                var money = ParseSqlServerMoneyAmount(baseType, valueText);
                 value = money;
                 canonicalValue = money.ToString(CultureInfo.InvariantCulture);
                 break;
@@ -922,6 +919,41 @@ public static class TableCellValueConverter
         var canonicalFraction = scale == 0 ? string.Empty : "." + fractionPart.PadRight(scale, '0');
         var canonicalSign = isNegative && scaledMagnitude.Length > 0 ? "-" : string.Empty;
         return new PostgreSqlMoneyValue(canonicalSign + canonicalInteger + canonicalFraction);
+    }
+
+    private static SqlServerMoneyValue ParseSqlServerMoney(TableColumnInfo column, string text)
+    {
+        var baseType = column.StorageDataTypeName.Trim().ToLowerInvariant();
+        var value = ParseSqlServerMoneyAmount(baseType, text);
+        return new SqlServerMoneyValue(value, value.ToString("0.0000", CultureInfo.InvariantCulture));
+    }
+
+    private static decimal ParseSqlServerMoneyAmount(string baseType, string text)
+    {
+        if (baseType is not ("money" or "smallmoney"))
+        {
+            throw new InvalidOperationException($"無法辨識 SQL Server money 型別：{baseType}");
+        }
+
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Length > 64 || trimmed.Contains('\0'))
+        {
+            throw new FormatException("SQL Server money 不可為空、包含 NUL，且不可超過 64 個字元。");
+        }
+
+        var value = decimal.Parse(
+            trimmed,
+            NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+            CultureInfo.InvariantCulture);
+        var minimum = baseType == "smallmoney" ? -214_748.3648m : -922_337_203_685_477.5808m;
+        var maximum = baseType == "smallmoney" ? 214_748.3647m : 922_337_203_685_477.5807m;
+        if (value < minimum || value > maximum || value * 10_000 != decimal.Truncate(value * 10_000))
+        {
+            throw new OverflowException(
+                $"{baseType} 必須介於 {minimum} 與 {maximum}，且不可包含需要取整的第 5 位小數。");
+        }
+
+        return value;
     }
 
     private static ExactDecimalValue ParseExactDecimal(TableColumnInfo column, string text)

@@ -47,6 +47,17 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             decimalParameter.SqlDbType = System.Data.SqlDbType.VarChar;
             decimalParameter.Size = -1;
         }
+        else if (column.ValueKind == TableColumnValueKind.SqlServerMoney &&
+                 parameter is SqlParameter moneyParameter)
+        {
+            moneyParameter.SqlDbType = GetBaseTypeName(column.StorageDataTypeName) switch
+            {
+                "money" => SqlDbType.Money,
+                "smallmoney" => SqlDbType.SmallMoney,
+                _ => throw new InvalidOperationException(
+                    $"無法建立 SQL Server money 型別「{column.StorageDataTypeName}」的參數。")
+            };
+        }
         else if (column.ValueKind == TableColumnValueKind.Spatial && parameter is SqlParameter spatialParameter)
         {
             spatialParameter.SqlDbType = System.Data.SqlDbType.VarChar;
@@ -97,6 +108,13 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
 
     protected override object? PrepareParameterValue(TableColumnInfo column, object? value)
     {
+        if (column.ValueKind == TableColumnValueKind.SqlServerMoney && value is string moneyText)
+        {
+            value = TableCellValueConverter.Parse(
+                column,
+                new TableCellInput(column.Name, TableCellInputMode.Value, moneyText));
+        }
+
         if (column.ValueKind == TableColumnValueKind.SqlServerVariant && value is string text)
         {
             return TableCellValueConverter.Parse(
@@ -270,6 +288,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         return column.ValueKind switch
         {
             TableColumnValueKind.ExactDecimal => $"CONVERT(varchar(max), {quotedName}) AS {quotedName}",
+            TableColumnValueKind.SqlServerMoney => BuildSqlServerMoneySelectExpression(column, quotedName),
             TableColumnValueKind.Spatial =>
                 $"CASE WHEN {quotedName} IS NULL THEN NULL ELSE " +
                 $"CONCAT('SRID=', {quotedName}.STSrid, ';', {quotedName}.STAsText()) END AS {quotedName}",
@@ -280,6 +299,18 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                 $"{BuildSqlVariantTextExpression(quotedName)} AS {quotedName}",
             _ => base.BuildTableDataSelectExpression(column)
         };
+    }
+
+    private static string BuildSqlServerMoneySelectExpression(TableColumnInfo column, string quotedName)
+    {
+        var precision = GetBaseTypeName(column.StorageDataTypeName) switch
+        {
+            "money" => 19,
+            "smallmoney" => 10,
+            _ => throw new InvalidOperationException(
+                $"無法載入 SQL Server money 型別「{column.StorageDataTypeName}」。")
+        };
+        return $"CONVERT(varchar(max), CONVERT(decimal({precision},4), {quotedName})) AS {quotedName}";
     }
 
     private static string BuildSqlVariantTextExpression(string quotedName)
@@ -608,7 +639,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
     {
         "tinyint" or "smallint" or "int" or "bigint" => TableColumnValueKind.Integer,
         "decimal" or "numeric" => TableColumnValueKind.ExactDecimal,
-        "money" or "smallmoney" => TableColumnValueKind.Decimal,
+        "money" or "smallmoney" => TableColumnValueKind.SqlServerMoney,
         "float" or "real" => TableColumnValueKind.FloatingPoint,
         "bit" => TableColumnValueKind.Boolean,
         "date" or "datetime" or "datetime2" or "smalldatetime" or "datetimeoffset" or "time" =>
