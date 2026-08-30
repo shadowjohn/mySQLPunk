@@ -45,6 +45,8 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 從原始碼建置需要 .NET 8 SDK；GitHub Release 的 Linux / macOS 壓縮檔為 self-contained，不需要另外安裝 .NET。桌面 UI 使用 Avalonia，資料庫驅動使用純 managed 的 MySqlConnector、Npgsql、Microsoft.Data.SqlClient 與 Microsoft.Data.Sqlite，因此不依賴 WinForms 或 Windows SQLite interop。Linux 若要保存密碼，另需安裝提供 `secret-tool` 的 `libsecret-tools`，並使用 GNOME Keyring 或相容的 Secret Service；macOS 直接使用系統內建 Keychain。
 
+跨平台 metadata 樹可依 schema 或物件名稱即時搜尋，空白分隔的多個關鍵字會同時套用；也可只顯示 Table 或 View，畫面會同步標示篩選後與總物件數。搜尋只處理已載入的 metadata，不會額外掃描資料表內容。
+
 ```bash
 dotnet restore mySQLPunk.CrossPlatform.sln
 dotnet build mySQLPunk.CrossPlatform.sln -c Release --no-restore

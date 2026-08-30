@@ -93,9 +93,31 @@
 
         <Grid Grid.Row="1" ColumnDefinitions="250,5,*">
           <Border Grid.Column="0" Padding="10" BorderBrush="#CDD5E0" BorderThickness="0,0,1,0">
-            <Grid RowDefinitions="Auto,*">
-              <TextBlock Grid.Row="0" Text="資料庫物件" FontWeight="SemiBold" Margin="3,2,3,8" />
-              <TreeView x:Name="ObjectsTree" Grid.Row="1" DoubleTapped="ObjectsTree_DoubleTapped">
+            <Grid RowDefinitions="Auto,Auto,*">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="3,2,3,8">
+                <TextBlock Text="資料庫物件" FontWeight="SemiBold" />
+                <TextBlock x:Name="ObjectCountText"
+                           Grid.Column="1"
+                           Text="0 個"
+                           Foreground="#667085"
+                           FontSize="12" />
+              </Grid>
+              <Grid Grid.Row="1" ColumnDefinitions="*,90" Margin="0,0,0,8">
+                <TextBox x:Name="ObjectSearchBox"
+                         PlaceholderText="搜尋 schema 或名稱"
+                         TextChanged="ObjectSearch_Changed"
+                         IsEnabled="False"
+                         Margin="0,0,6,0" />
+                <ComboBox x:Name="ObjectTypeCombo"
+                          Grid.Column="1"
+                          SelectionChanged="ObjectType_Changed"
+                          IsEnabled="False">
+                  <ComboBoxItem Content="全部" />
+                  <ComboBoxItem Content="資料表" />
+                  <ComboBoxItem Content="檢視表" />
+                </ComboBox>
+              </Grid>
+              <TreeView x:Name="ObjectsTree" Grid.Row="2" DoubleTapped="ObjectsTree_DoubleTapped">
                 <TreeView.ItemTemplate>
                   <TreeDataTemplate ItemsSource="{Binding Children}">
                     <TextBlock Text="{Binding Text}" />

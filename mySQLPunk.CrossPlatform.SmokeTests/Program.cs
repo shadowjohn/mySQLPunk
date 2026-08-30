@@ -13,6 +13,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 {
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("查詢結果安全匯出", QueryResultExportFormatsAsync),
+    ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
     ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
@@ -21,6 +22,36 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static Task DatabaseObjectFilteringAsync()
+{
+    IReadOnlyList<DatabaseObjectInfo> objects = new[]
+    {
+        new DatabaseObjectInfo("sales", "CustomerOrders", DatabaseObjectKind.Table),
+        new DatabaseObjectInfo("audit", "OrderHistory", DatabaseObjectKind.View),
+        new DatabaseObjectInfo("public", "customers", DatabaseObjectKind.Table),
+        new DatabaseObjectInfo(string.Empty, "StatusView", DatabaseObjectKind.View)
+    };
+
+    var allObjects = DatabaseObjectFilterService.Filter(objects, "  ");
+    Assert(allObjects.SequenceEqual(objects), "空白搜尋應保留全部物件及原始順序");
+
+    var schemaAndName = DatabaseObjectFilterService.Filter(objects, "SALES order");
+    Assert(schemaAndName.Count == 1 && schemaAndName[0].Name == "CustomerOrders",
+        "搜尋應忽略大小寫並支援 schema 與名稱的多個條件");
+
+    var tablesOnly = DatabaseObjectFilterService.Filter(objects, "customer", DatabaseObjectKind.Table);
+    Assert(tablesOnly.Count == 2 && tablesOnly.All(item => item.Kind == DatabaseObjectKind.Table),
+        "資料表類型篩選不應混入檢視表");
+
+    var viewsOnly = DatabaseObjectFilterService.Filter(objects, "order", DatabaseObjectKind.View);
+    Assert(viewsOnly.Count == 1 && viewsOnly[0].Schema == "audit",
+        "檢視表篩選應和搜尋條件同時生效");
+
+    Assert(DatabaseObjectFilterService.Filter(objects, "missing").Count == 0,
+        "無符合物件時應回傳空集合");
+    return Task.CompletedTask;
+}
 
 if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1", StringComparison.Ordinal))
 {

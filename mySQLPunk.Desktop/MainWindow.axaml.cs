@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private readonly ISecretStore _secretStore = SecretStoreFactory.CreateDefault();
     private readonly CrossPlatformUpdateService _updateService = new();
     private IDatabaseSession? _session;
+    private IReadOnlyList<DatabaseObjectInfo> _databaseObjects = Array.Empty<DatabaseObjectInfo>();
     private QueryResult? _lastResult;
     private CancellationTokenSource? _operationCancellation;
     private bool _loadingDatabases;
@@ -29,6 +30,9 @@ public sealed partial class MainWindow : Window
     private readonly ListBox _profilesList;
     private readonly ComboBox _databaseCombo;
     private readonly TreeView _objectsTree;
+    private readonly TextBox _objectSearchBox;
+    private readonly ComboBox _objectTypeCombo;
+    private readonly TextBlock _objectCountText;
     private readonly TextBox _sqlEditor;
     private readonly DataGrid _resultsGrid;
     private readonly ComboBox _exportFormatCombo;
@@ -47,6 +51,9 @@ public sealed partial class MainWindow : Window
         _profilesList = this.FindControl<ListBox>("ProfilesList")!;
         _databaseCombo = this.FindControl<ComboBox>("DatabaseCombo")!;
         _objectsTree = this.FindControl<TreeView>("ObjectsTree")!;
+        _objectSearchBox = this.FindControl<TextBox>("ObjectSearchBox")!;
+        _objectTypeCombo = this.FindControl<ComboBox>("ObjectTypeCombo")!;
+        _objectCountText = this.FindControl<TextBlock>("ObjectCountText")!;
         _sqlEditor = this.FindControl<TextBox>("SqlEditor")!;
         _resultsGrid = this.FindControl<DataGrid>("ResultsGrid")!;
         _exportFormatCombo = this.FindControl<ComboBox>("ExportFormatCombo")!;
@@ -60,6 +67,7 @@ public sealed partial class MainWindow : Window
         _updateButton = this.FindControl<Button>("UpdateButton")!;
 
         _profilesList.ItemsSource = _profiles;
+        _objectTypeCombo.SelectedIndex = 0;
         _sqlEditor.AddHandler(KeyDownEvent, SqlEditor_KeyDown, RoutingStrategies.Tunnel);
         Opened += MainWindow_Opened;
     }
@@ -299,6 +307,16 @@ public sealed partial class MainWindow : Window
         _sqlEditor.Focus();
         _sqlEditor.CaretIndex = _sqlEditor.Text?.Length ?? 0;
         SetStatus($"已產生 {databaseObject.DisplayName} 的前 200 列預覽 SQL；按 Ctrl+Enter 執行。");
+    }
+
+    private void ObjectSearch_Changed(object? sender, TextChangedEventArgs e)
+    {
+        ApplyObjectFilter();
+    }
+
+    private void ObjectType_Changed(object? sender, SelectionChangedEventArgs e)
+    {
+        ApplyObjectFilter();
     }
 
     private async void ExecuteSql_Click(object? sender, RoutedEventArgs e)
@@ -558,21 +576,45 @@ public sealed partial class MainWindow : Window
         }
 
         var objects = await _session.GetObjectsAsync(database, cancellationToken);
-        var tableItems = objects
+        _databaseObjects = objects;
+        var filteredCount = ApplyObjectFilter();
+        SetStatus($"{database}：已載入 {objects.Count} 個物件，目前顯示 {filteredCount} 個。");
+    }
+
+    private int ApplyObjectFilter()
+    {
+        var kind = _objectTypeCombo.SelectedIndex switch
+        {
+            1 => DatabaseObjectKind.Table,
+            2 => DatabaseObjectKind.View,
+            _ => (DatabaseObjectKind?)null
+        };
+        var filtered = DatabaseObjectFilterService.Filter(_databaseObjects, _objectSearchBox.Text, kind);
+        var tableItems = filtered
             .Where(item => item.Kind == DatabaseObjectKind.Table)
             .Select(item => new ObjectTreeItem(item.DisplayName, item))
             .ToList();
-        var viewItems = objects
+        var viewItems = filtered
             .Where(item => item.Kind == DatabaseObjectKind.View)
             .Select(item => new ObjectTreeItem(item.DisplayName, item))
             .ToList();
 
-        _objectsTree.ItemsSource = new[]
+        var roots = new List<ObjectTreeItem>();
+        if (kind is null or DatabaseObjectKind.Table)
         {
-            new ObjectTreeItem($"資料表 ({tableItems.Count})", children: tableItems),
-            new ObjectTreeItem($"檢視表 ({viewItems.Count})", children: viewItems)
-        };
-        SetStatus($"{database}：已載入 {objects.Count} 個物件。");
+            roots.Add(new ObjectTreeItem($"資料表 ({tableItems.Count})", children: tableItems));
+        }
+
+        if (kind is null or DatabaseObjectKind.View)
+        {
+            roots.Add(new ObjectTreeItem($"檢視表 ({viewItems.Count})", children: viewItems));
+        }
+
+        _objectsTree.ItemsSource = roots;
+        _objectCountText.Text = filtered.Count == _databaseObjects.Count
+            ? $"{filtered.Count} 個"
+            : $"{filtered.Count} / {_databaseObjects.Count} 個";
+        return filtered.Count;
     }
 
     private void DisplayResult(QueryResult result)
@@ -851,8 +893,10 @@ public sealed partial class MainWindow : Window
     private void Disconnect(string status)
     {
         _session = null;
+        _databaseObjects = Array.Empty<DatabaseObjectInfo>();
         _databaseCombo.ItemsSource = null;
         _objectsTree.ItemsSource = null;
+        _objectCountText.Text = "0 個";
         _resultsGrid.ItemsSource = null;
         _resultsGrid.Columns.Clear();
         _lastResult = null;
@@ -868,6 +912,8 @@ public sealed partial class MainWindow : Window
         _executeButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _exportButton.IsEnabled = !busy && _lastResult is not null;
         _databaseCombo.IsEnabled = !busy && _session is not null;
+        _objectSearchBox.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _objectTypeCombo.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _cancelButton.IsEnabled = busy;
         _updateButton.IsEnabled = !busy;
         if (!string.IsNullOrWhiteSpace(status))
