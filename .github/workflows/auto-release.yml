@@ -4,12 +4,10 @@ on:
   push:
     branches:
       - master
-  schedule:
-    - cron: "15 10 * * *"
   workflow_dispatch:
     inputs:
       force:
-        description: "忽略累積門檻，立即發布尚未發版的變更"
+        description: "人工核准並立即發布完整的 Unreleased 批次"
         required: false
         default: false
         type: boolean
@@ -40,8 +38,6 @@ jobs:
           $force = "${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.force }}" -eq "true"
           $parameters = @{
             RepositoryRoot = "."
-            ScoreThreshold = 5
-            MaxBatchDays = 7
             Force = $force
           }
           .\scripts\Invoke-AutoReleaseDecision.ps1 @parameters
@@ -57,9 +53,8 @@ jobs:
           - 原因：${{ steps.decision.outputs.reason }}
           - 最新版本：`${{ steps.decision.outputs.latest_tag }}`
           - 下一版本：`v${{ steps.decision.outputs.next_version }}`
-          - 累積分數：`${{ steps.decision.outputs.score }}/5`
-          - 有效 commit：`${{ steps.decision.outputs.impact_commit_count }}`
-          - 距上次發布：`${{ steps.decision.outputs.age_days }}` 天
+          - 尚未發版的程式 commit：`${{ steps.decision.outputs.impact_commit_count }}`
+          - 參考變更分數（不會觸發發版）：`${{ steps.decision.outputs.score }}`
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Prepare version files
@@ -79,14 +74,14 @@ jobs:
           $tagName = "v$version"
           git config user.name "Nick Lin"
           git config user.email "nicklin@gis.fcu.edu.tw"
-          git add -- .\mySQLPunk\Properties\AssemblyInfo.cs .\README.md
+          git add -- .\mySQLPunk\Properties\AssemblyInfo.cs .\README.md .\CHANGELOG.md
           git diff --cached --check
           if ($LASTEXITCODE -ne 0) { throw "Release preparation diff check failed." }
           git commit `
             -m "chore(release): 發佈 $tagName" `
-            -m "原因：已達自動發版門檻，將累積完成的功能與修正一起發布。" `
+            -m "原因：已標記重大里程碑，將累積完成的功能與修正一起發布。" `
             -m "調整：同步程式版本、README 與 Git tag，交由 Release workflow 建置安裝程式。" `
-            -m "影響：GitHub Release 會產生新的 Windows x64 單一安裝程式。"
+            -m "影響：GitHub Release 會一次產生 Windows、Linux 與 macOS 的已驗證安裝資產。"
           if ($LASTEXITCODE -ne 0) { throw "Cannot create the release commit." }
           git tag -a $tagName -m "發佈 $tagName"
           if ($LASTEXITCODE -ne 0) { throw "Cannot create $tagName." }

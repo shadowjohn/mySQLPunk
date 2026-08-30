@@ -50,6 +50,7 @@
 
 ### 🛠️ 問題修正與優化
 
+- 自動發版不再因少量修改累積到低分數門檻或經過七天就建立新版；只有明確標記重大里程碑、BREAKING CHANGE 或人工核准才會發版。重大批次會自動把完整 `[Unreleased]` 轉為下一版本段落，修正先前明明達門檻卻因缺少預建版本段落而只顯示 Gate 成功、不產生 GitHub Release 的問題；Release 驗證說明也同步反映 Linux x64／ARM64 都會在原生 runner 完成安裝、Xvfb 啟動、安全更新、rollback 與解除安裝。
 - Linux / macOS SQL 編輯器現在會優先執行非空白的選取範圍，否則只執行游標所在 statement；provider lexer 會依 MySQL、PostgreSQL、SQL Server 與 SQLite 規則略過字串、quoted identifier、註解、dollar quote 與 PostgreSQL `E''` 內分號。MySQL 反斜線字串若受 `NO_BACKSLASH_ESCAPES` 影響而有兩種可能邊界會 fail closed、要求明確反白；整份文件改由獨立按鈕或 `Ctrl/Cmd+Shift+Enter` 執行，避免開啟多段 SQL 後誤送出未選取的 DDL／DML，本次查詢記錄也會區分三種來源。
 - Linux／macOS Table 編輯器會從 MySQL／MariaDB 與 SQL Server metadata 保留 `BINARY(n)` 的固定 byte 數，並要求 hex 輸入剛好為 n bytes；較短值不再被 server 無 warning 補 `0x00`，較長值也不會被截斷。SQL Server alias type 沿用 base binary 長度，VARBINARY／BLOB／bytea／SQLite BLOB 仍維持可變長。
 - Linux／macOS 的 MySQL／MariaDB Table mutation 現在會在 commit 前讀取同連線 `SHOW WARNINGS`；non-strict 模式若把超長 VARCHAR／VARBINARY／TINYTEXT／TINYBLOB 或不可表示字元降成 warning，整筆單列交易會立即 rollback 並回報 server code，不再顯示成功卻留下截斷／替換值。MySQL optimistic predicate 也改用 `CAST(... AS BINARY)`，移除新版 server 對 deprecated `BINARY expr` 的警告。

@@ -9716,10 +9716,12 @@ public static class SmokeTests
         string autoReleaseWorkflowPath = Path.Combine(root, ".github", "workflows", "auto-release.yml");
         Assert(File.Exists(autoReleaseWorkflowPath), "Auto-release gate workflow should exist.");
         string autoReleaseWorkflow = File.ReadAllText(autoReleaseWorkflowPath, Encoding.UTF8);
-        AssertContains(autoReleaseWorkflow, "ScoreThreshold = 5", "Auto-release gate should batch small changes until the score reaches five.");
-        AssertContains(autoReleaseWorkflow, "MaxBatchDays = 7", "Auto-release gate should publish aged user-facing changes after seven days.");
+        Assert(autoReleaseWorkflow.IndexOf("ScoreThreshold", StringComparison.Ordinal) < 0, "Auto-release gate must not publish after a low change-score threshold.");
+        Assert(autoReleaseWorkflow.IndexOf("MaxBatchDays", StringComparison.Ordinal) < 0, "Auto-release gate must not publish small changes only because time passed.");
+        Assert(autoReleaseWorkflow.IndexOf("schedule:", StringComparison.Ordinal) < 0, "Auto-release gate should run on pushes or explicit approval, not a timed release schedule.");
         AssertContains(autoReleaseWorkflow, "Invoke-AutoReleaseDecision.ps1", "Auto-release gate should use the tested policy script.");
         AssertContains(autoReleaseWorkflow, "Prepare-AutoRelease.ps1", "Auto-release gate should prepare version files before tagging.");
+        AssertContains(autoReleaseWorkflow, ".\\CHANGELOG.md", "Automatic release commits should include the promoted changelog batch.");
         AssertContains(autoReleaseWorkflow, "gh workflow run release.yml", "Auto-release gate should explicitly dispatch the release build after a GITHUB_TOKEN tag push.");
         AssertContains(autoReleaseWorkflow, "nicklin@gis.fcu.edu.tw", "Automatic release commits should use the configured author email.");
 

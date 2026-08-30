@@ -52,7 +52,10 @@ $changelog = Get-Content -LiteralPath $changelogPath -Raw -Encoding UTF8
 $escapedVersion = [regex]::Escape($Version)
 $section = [regex]::Match($changelog, "(?ms)^## \[(?:v)?$escapedVersion\][^\r\n]*\r?\n(.*?)(?=^## \[|\z)")
 if (-not $section.Success) {
-    throw "CHANGELOG.md does not contain the next release section $Version."
+    $section = [regex]::Match($changelog, '(?ms)^## \[Unreleased\][^\r\n]*\r?\n(.*?)(?=^## \[|\z)')
+    if (-not $section.Success) {
+        throw "CHANGELOG.md contains neither the next release section $Version nor an Unreleased section."
+    }
 }
 if ($section.Groups[1].Value -notmatch '(?m)^### 🚀 新增功能\s*$' `
     -or $section.Groups[1].Value -notmatch '(?m)^### 🛠️ 問題修正與優化\s*$' `
@@ -73,7 +76,20 @@ if ($updatedReadme -eq $readme) {
     throw "README.md does not contain current version $currentVersion."
 }
 
+$updatedChangelog = $changelog
+if ($changelog -notmatch "(?m)^## \[(?:v)?$escapedVersion\]") {
+    $releaseHeader = "## [$Version] - $([DateTimeOffset]::UtcNow.ToString('yyyy-MM-dd'))"
+    $newLine = if ($changelog.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $emptyUnreleased = "## [Unreleased]${newLine}${newLine}### 🚀 新增功能${newLine}${newLine}### 🛠️ 問題修正與優化${newLine}${newLine}"
+    $unreleasedHeaderPattern = [regex]::new('(?m)^## \[Unreleased\][^\r\n]*\r?\n')
+    $updatedChangelog = $unreleasedHeaderPattern.Replace(
+        $changelog,
+        $emptyUnreleased + $releaseHeader + $newLine,
+        1)
+}
+
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
 [IO.File]::WriteAllText($assemblyInfoPath, $updatedAssemblyInfo, $utf8NoBom)
 [IO.File]::WriteAllText($readmePath, $updatedReadme, $utf8NoBom)
-Write-Host "Prepared v$Version in AssemblyInfo.cs and README.md."
+[IO.File]::WriteAllText($changelogPath, $updatedChangelog, $utf8NoBom)
+Write-Host "Prepared v$Version in AssemblyInfo.cs, README.md and CHANGELOG.md."

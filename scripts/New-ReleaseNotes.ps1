@@ -96,7 +96,7 @@ $footer = @'
 - Linux / macOS：下載對應的同名 `.sha256` 後執行 `sha256sum -c <檔名>.sha256` 或 `shasum -a 256 -c <檔名>.sha256`
 - {{SIGNATURE_NOTE}}
 - 本版本已通過 Windows Release 建置、SmokeTests、安裝、啟動、關閉與解除安裝驗證。
-- Linux x64 資產已通過隔離安裝、Xvfb 啟動與解除安裝驗證；Linux ARM64 已通過封裝與安裝檔案檢查。
+- Linux x64／ARM64 資產都已在原生 runner 通過隔離安裝、Xvfb 啟動、安全更新、rollback 與解除安裝驗證；四種資料庫實機往返另在 Linux x64 完成。
 - macOS Intel／Apple Silicon 資產已在原生 runner 通過 app bundle、codesign、zip metadata、安全套用、啟動健康檢查與 rollback 驗證。
 '@
 $footer = $footer.Replace('{{INSTALLER_NAME}}', $installer.Name)

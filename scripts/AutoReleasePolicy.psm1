@@ -70,17 +70,6 @@ function Get-AutoReleaseDecision {
         [Parameter(Mandatory = $true)]
         [string]$LatestTag,
 
-        [Parameter(Mandatory = $true)]
-        [DateTimeOffset]$LatestReleaseAt,
-
-        [DateTimeOffset]$Now = [DateTimeOffset]::UtcNow,
-
-        [ValidateRange(1, 100)]
-        [int]$ScoreThreshold = 5,
-
-        [ValidateRange(1, 365)]
-        [int]$MaxBatchDays = 7,
-
         [switch]$Force
     )
 
@@ -91,8 +80,6 @@ function Get-AutoReleaseDecision {
     foreach ($detail in $details) {
         $score += [int]$detail.Score
     }
-    $ageDays = [Math]::Max(0, [Math]::Floor(($Now.ToUniversalTime() - $LatestReleaseAt.ToUniversalTime()).TotalDays))
-
     $shouldRelease = $false
     $reason = '沒有需要發版的程式變更。'
     if ($CommitMessages.Count -eq 0) {
@@ -103,14 +90,8 @@ function Get-AutoReleaseDecision {
     } elseif ($immediateCommits.Count -gt 0) {
         $shouldRelease = $true
         $reason = '偵測到 Release-Now 或 BREAKING CHANGE，立即發版。'
-    } elseif ($score -ge $ScoreThreshold) {
-        $shouldRelease = $true
-        $reason = "累積分數 $score 已達門檻 $ScoreThreshold。"
-    } elseif ($impactCommits.Count -gt 0 -and $ageDays -ge $MaxBatchDays) {
-        $shouldRelease = $true
-        $reason = "已有程式變更且距上次發版 $ageDays 天，進入定期批次發版。"
     } elseif ($impactCommits.Count -gt 0) {
-        $reason = "目前累積分數 $score/$ScoreThreshold，先繼續累積小改動。"
+        $reason = "偵測到 $($impactCommits.Count) 筆程式變更；未標記重大里程碑，繼續累積但不自動發版。"
     }
 
     [pscustomobject]@{
@@ -122,9 +103,6 @@ function Get-AutoReleaseDecision {
         ImpactCommitCount = $impactCommits.Count
         ImmediateCommitCount = $immediateCommits.Count
         Score = $score
-        ScoreThreshold = $ScoreThreshold
-        AgeDays = $ageDays
-        MaxBatchDays = $MaxBatchDays
         Details = $details
     }
 }

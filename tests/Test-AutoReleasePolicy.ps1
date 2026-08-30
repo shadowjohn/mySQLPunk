@@ -19,22 +19,15 @@ function Assert-Equal {
     }
 }
 
-$now = [DateTimeOffset]'2026-08-25T12:00:00+08:00'
-$recent = $now.AddDays(-1)
-
 $singleFix = Get-AutoReleaseDecision `
     -CommitMessages @('fix(ai): 修正一個小問題') `
-    -LatestTag 'v1.0.0.15' `
-    -LatestReleaseAt $recent `
-    -Now $now
+    -LatestTag 'v1.0.0.15'
 Assert-True (-not $singleFix.ShouldRelease) 'A single small fix should stay in the batch.'
 Assert-Equal 1 $singleFix.Score 'A fix should count as one point.'
 
 $docsOnly = Get-AutoReleaseDecision `
     -CommitMessages @('docs(readme): 補上操作說明', 'test(release): 增加測試') `
-    -LatestTag 'v1.0.0.15' `
-    -LatestReleaseAt $recent `
-    -Now $now
+    -LatestTag 'v1.0.0.15'
 Assert-True (-not $docsOnly.ShouldRelease) 'Documentation and tests should not publish a product release by themselves.'
 Assert-Equal 0 $docsOnly.Score 'Documentation and tests should not add release points.'
 
@@ -44,33 +37,26 @@ $batched = Get-AutoReleaseDecision `
         'feat(query): 新增視覺化執行計畫',
         'fix(ai): 修正模型切換'
     ) `
-    -LatestTag 'v1.0.0.15' `
-    -LatestReleaseAt $recent `
-    -Now $now
-Assert-True $batched.ShouldRelease 'Accumulated user-facing changes should publish when the score reaches five.'
+    -LatestTag 'v1.0.0.15'
+Assert-True (-not $batched.ShouldRelease) 'Accumulated small changes must not publish without an explicit milestone.'
 Assert-Equal 5 $batched.Score 'Two features and one fix should total five points.'
 
 $largeUpdate = Get-AutoReleaseDecision `
     -CommitMessages @("feat(model): 新增完整模型設計器`n`nRelease-Now: true") `
-    -LatestTag 'v1.0.0.15' `
-    -LatestReleaseAt $recent `
-    -Now $now
+    -LatestTag 'v1.0.0.15'
 Assert-True $largeUpdate.ShouldRelease 'Release-Now should allow one large update to publish immediately.'
 Assert-Equal 1 $largeUpdate.ImmediateCommitCount 'Release-Now should be counted as one immediate commit.'
 
 $breaking = Get-AutoReleaseDecision `
     -CommitMessages @('feat(connection)!: 調整連線設定格式') `
-    -LatestTag 'v1.0.0.15' `
-    -LatestReleaseAt $recent `
-    -Now $now
+    -LatestTag 'v1.0.0.15'
 Assert-True $breaking.ShouldRelease 'A breaking Conventional Commit should publish immediately.'
 
-$aged = Get-AutoReleaseDecision `
+$forced = Get-AutoReleaseDecision `
     -CommitMessages @('fix(grid): 修正欄位顯示') `
     -LatestTag 'v1.0.0.15' `
-    -LatestReleaseAt $now.AddDays(-8) `
-    -Now $now
-Assert-True $aged.ShouldRelease 'A small user-facing change should publish after the seven-day batch window.'
+    -Force
+Assert-True $forced.ShouldRelease 'Manual force should remain available for an approved release.'
 
 Assert-Equal '1.0.0.16' (Get-NextAutoReleaseVersion -LatestTag 'v1.0.0.15') 'Four-part versions should increment the revision.'
 Assert-Equal '1.2.4' (Get-NextAutoReleaseVersion -LatestTag 'v1.2.3') 'Three-part versions should increment the patch.'
@@ -86,7 +72,7 @@ try {
     @'
 # Changelog
 
-## [1.0.0.16] - 2026-08-25
+## [Unreleased]
 
 ### 🚀 新增功能
 
@@ -100,8 +86,17 @@ try {
     & (Join-Path $repoRoot 'scripts\Prepare-AutoRelease.ps1') `
         -Version '1.0.0.16' `
         -LatestTag 'v1.0.0.15' `
-        -RepositoryRoot $prepareRoot `
-        -CheckOnly
+        -RepositoryRoot $prepareRoot
+
+    $preparedAssembly = Get-Content -LiteralPath (Join-Path $propertiesRoot 'AssemblyInfo.cs') -Raw -Encoding UTF8
+    $preparedReadme = Get-Content -LiteralPath (Join-Path $prepareRoot 'README.md') -Raw -Encoding UTF8
+    $preparedChangelog = Get-Content -LiteralPath (Join-Path $prepareRoot 'CHANGELOG.md') -Raw -Encoding UTF8
+    Assert-True ($preparedAssembly -match 'AssemblyFileVersion\("1\.0\.0\.16"\)') 'Release preparation should update the assembly version.'
+    Assert-True ($preparedReadme -match 'v1\.0\.0\.16') 'Release preparation should update the README version.'
+    Assert-True ($preparedChangelog -match '(?m)^## \[Unreleased\]\s*$') 'Release preparation should create a fresh Unreleased section.'
+    Assert-True ($preparedChangelog -match '(?m)^## \[1\.0\.0\.16\] - \d{4}-\d{2}-\d{2}\s*$') 'Release preparation should promote the accumulated batch to the next version.'
+    Assert-True ([regex]::Matches($preparedChangelog, '(?m)^- \*\*測試功能\*\*').Count -eq 1) 'Promoting Unreleased must preserve release-note content exactly once.'
+    Assert-True (-not $preparedChangelog.Contains("`r`n")) 'Release preparation should preserve the changelog newline style.'
 }
 finally {
     $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar

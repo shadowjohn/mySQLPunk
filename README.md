@@ -180,7 +180,7 @@ git push origin v1.0.0.19
 
 推送 `v*` tag 後，`.github/workflows/release.yml` 會先由 Linux x64、Linux ARM64、macOS Intel 與 macOS Apple Silicon 原生 runner 產生四種架構的 self-contained 壓縮檔與 `.sha256`；每個包都會在相同 OS／CPU 架構上完成安裝或安全套用、啟動健康檢查與 rollback，再暫存為 immutable workflow artifacts。Windows runner 接著還原 NuGet、用 MSBuild 編譯 Release、安裝固定版本且先驗證 SHA-256 的 Inno Setup、執行 `scripts/package-release.ps1`，下載並核對所有跨平台資產，九個預期檔案齊全後才會一次建立或更新 GitHub Release。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。所有平台都會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；`scripts/New-ReleaseNotes.ps1` 會從 `CHANGELOG.md` 的對應版本產生繁體中文 `🚀 新增功能`、`🛠️ 問題修正與優化`、`📦 下載與更新`、`🛡️ 完整性與驗證` 四段說明。若缺少對應版本、必要段落或任一平台資產，發佈會直接停止，不會建立內容不完整的 Release。
 
-日常開發由 `.github/workflows/auto-release.yml` 控制，不會每個小修改都建立 Release：`feat` 算 2 分，`fix`／`perf`／`refactor` 算 1 分，累積 5 分才發布；已有程式變更但七天未達門檻時會合併成一批發布。單一大更新可在 commit footer 加上 `Release-Now: true` 立即發布。完整規則與範例請見 [`docs/RELEASE_AUTOMATION.md`](docs/RELEASE_AUTOMATION.md)。
+日常開發由 `.github/workflows/auto-release.yml` 控制，小修改不會因數量或經過天數自動建立新版。只有明確標記重大里程碑的 `Release-Now: true`、不相容的 `BREAKING CHANGE`，或人工核准的手動發版才會發布；屆時 workflow 會把累積的 `[Unreleased]` 內容一次封存為版本段落。完整規則與範例請見 [`docs/RELEASE_AUTOMATION.md`](docs/RELEASE_AUTOMATION.md)。
 
 備註：
 
