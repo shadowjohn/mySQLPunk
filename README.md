@@ -37,7 +37,7 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 目前發版版本：`v1.0.0.20`，最新版請看 [GitHub Releases](https://github.com/shadowjohn/mySQLPunk/releases)。
 
-目前的 `v1.0.0.20` GitHub Release 仍只提供 Windows 完整版；下一版起，Release workflow 會同時發布 Windows x64 setup、self-contained Linux x64／ARM64 安裝壓縮檔，以及 macOS Intel／Apple Silicon `.app.zip`。Linux 壓縮檔內附目前使用者層級的 `install.sh`／`uninstall.sh`；macOS 預覽目前採 ad-hoc 簽署、尚未 Apple notarize。每個跨平台資產都有獨立 `.sha256` 可驗證完整性。完整變更請見 `CHANGELOG.md`。
+目前的 `v1.0.0.20` GitHub Release 同時提供 Windows x64 完整版 setup、self-contained Linux x64／ARM64 安裝壓縮檔，以及 macOS Intel／Apple Silicon `.app.zip`。Linux 壓縮檔內附使用者層級的 `install.sh`／`uninstall.sh`；macOS 預覽目前採 ad-hoc 簽署、尚未 Apple notarize。每個跨平台資產都有獨立 `.sha256` 可驗證完整性。完整變更請見 `CHANGELOG.md`。
 
 ## 開發環境
 
