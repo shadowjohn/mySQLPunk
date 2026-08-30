@@ -82,6 +82,8 @@ MySQL／MariaDB `TINYINT`／`SMALLINT`／`MEDIUMINT`／`INT`／`BIGINT` 會依 s
 
 MySQL／MariaDB 的 Table 新增、修改與刪除會在單列交易 commit 前讀取同一連線的 server diagnostics；只要 mutation 回傳 warning，就會完整 rollback 並顯示 code／原因。這項 fail-closed 防護涵蓋 non-strict 模式下的 `CHAR`／`VARCHAR`／binary 截斷、TEXT／BLOB byte 上限與字元集替換，也能攔住 trigger 或未來進階型別回報的其他警告；沒有 warning 的合法邊界值不受影響。
 
+MySQL／MariaDB 與 SQL Server 的固定長度 `BINARY(n)` 會從 metadata 保留精確 byte 數，輸入必須剛好是 n bytes；短值與長值都會在產生 SQL 前拒絕，避免資料庫在沒有 warning 的情況下自動補 `0x00` 或截斷。SQL Server alias type 會沿用 base `binary(n)` 限制；`VARBINARY`、BLOB、PostgreSQL bytea 與 SQLite BLOB 仍維持可變長。
+
 SQL Server `money`／`smallmoney` 會固定顯示 4 位小數，並以各自的原生參數與正負範圍安全編輯；需要取整的第 5 位小數、幣別符號、千分位、科學記號與溢位會在送出前拒絕，不交給 server 無聲四捨五入。
 
 MySQL／MariaDB 的 GEOMETRY、POINT、LINESTRING、POLYGON、MULTIPOINT、MULTILINESTRING、MULTIPOLYGON、GEOMETRYCOLLECTION，以及 SQL Server 的 geometry／geography，可用 `SRID=<非負整數>;<WKT>` 安全編輯；載入與寫回都保留 SRID，原值比對同時檢查 SRID 與 canonical WKT。畸形 WKT 會讓整筆交易回復；MariaDB 即使只回傳 warning／NULL，也會轉成明確錯誤，避免 nullable 欄位被靜默清空。超過 1 MiB 的 spatial 文字維持唯讀。

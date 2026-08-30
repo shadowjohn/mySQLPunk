@@ -61,6 +61,8 @@ public sealed record TableColumnInfo(
 
     public ulong? IntegerMaximum { get; init; }
 
+    public int? RequiredBinaryLength { get; init; }
+
     public bool IsEditable => !IsGenerated && ValueKind is not TableColumnValueKind.Unsupported;
 
     public string DisplayName => IsPrimaryKey ? $"{Name} · PK" : Name;

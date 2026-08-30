@@ -583,6 +583,9 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                             baseType.Equals("rowversion", StringComparison.OrdinalIgnoreCase);
             var valueKind = MapValueKind(baseType, reader.GetByte(11));
             var integerBounds = GetIntegerBounds(baseType, valueKind);
+            int? requiredBinaryLength = baseType.Equals("binary", StringComparison.OrdinalIgnoreCase)
+                ? reader.GetInt16(10)
+                : null;
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -595,7 +598,8 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             {
                 StorageDataTypeName = storageType,
                 IntegerMinimum = integerBounds?.Minimum,
-                IntegerMaximum = integerBounds?.Maximum
+                IntegerMaximum = integerBounds?.Maximum,
+                RequiredBinaryLength = requiredBinaryLength
             });
         }
 

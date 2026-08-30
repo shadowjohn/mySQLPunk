@@ -41,6 +41,7 @@
 
 ### 🛠️ 問題修正與優化
 
+- Linux／macOS Table 編輯器會從 MySQL／MariaDB 與 SQL Server metadata 保留 `BINARY(n)` 的固定 byte 數，並要求 hex 輸入剛好為 n bytes；較短值不再被 server 無 warning 補 `0x00`，較長值也不會被截斷。SQL Server alias type 沿用 base binary 長度，VARBINARY／BLOB／bytea／SQLite BLOB 仍維持可變長。
 - Linux／macOS 的 MySQL／MariaDB Table mutation 現在會在 commit 前讀取同連線 `SHOW WARNINGS`；non-strict 模式若把超長 VARCHAR／VARBINARY／TINYTEXT／TINYBLOB 或不可表示字元降成 warning，整筆單列交易會立即 rollback 並回報 server code，不再顯示成功卻留下截斷／替換值。MySQL optimistic predicate 也改用 `CAST(... AS BINARY)`，移除新版 server 對 deprecated `BINARY expr` 的警告。
 - Linux／macOS Table 編輯器的 PostgreSQL `date` 改用獨立 canonical 文字路徑，完整保留 4713 BC–5874897 AD 與 `±infinity`，也避免 Npgsql 把 `0001-01-01`／.NET 最小值誤送成 `-infinity`；一般 PostgreSQL／SQLite 日期只接受純日期，不再讓 timestamp 的時間部分被無聲丟掉。
 - Linux／macOS Table 編輯器現在會依 PostgreSQL `interval(p)` 與 `YEAR`、`YEAR TO MONTH`、`DAY TO HOUR` 等欄位限制驗證三個原生分量；會被 server 無聲丟棄的較小欄位或超出宣告精度的小數秒會在送出前拒絕，不再取整後誤顯示為儲存成功。

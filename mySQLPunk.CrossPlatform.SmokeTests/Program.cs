@@ -915,6 +915,25 @@ static async Task TableDataEditingAsync()
                 binaryColumn,
                 new TableCellInput("payload", TableCellInputMode.Value, "0x")) is byte[] { Length: 0 },
             "0x 應代表空 binary，而不是 NULL");
+        var fixedBinaryColumn = binaryColumn with
+        {
+            Name = "fixed_payload",
+            DataTypeName = "binary(3)",
+            StorageDataTypeName = "binary(3)",
+            RequiredBinaryLength = 3
+        };
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            fixedBinaryColumn,
+            new TableCellInput("fixed_payload", TableCellInputMode.Value, "0xCAFE")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            fixedBinaryColumn,
+            new TableCellInput("fixed_payload", TableCellInputMode.Value, "0xCAFEBABE")));
+        Assert(
+            TableCellValueConverter.Parse(
+                fixedBinaryColumn,
+                new TableCellInput("fixed_payload", TableCellInputMode.Value, "0xCAFE00")) is byte[] exactBytes &&
+            exactBytes.SequenceEqual(new byte[] { 0xCA, 0xFE, 0x00 }),
+            "固定長度 binary 應只接受精確 byte 數");
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             binaryColumn,
             new TableCellInput(
@@ -2334,7 +2353,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
         var nativeColumns = isMariaDb
             ? ", native_uuid UUID NULL, native_address INET6 NULL"
             : string.Empty;
-        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, tiny_value TINYINT NULL, unsigned_tiny_value TINYINT UNSIGNED NULL, small_value SMALLINT NULL, unsigned_small_value SMALLINT UNSIGNED NULL, zerofill_small_value SMALLINT ZEROFILL NULL, medium_value MEDIUMINT NULL, unsigned_medium_value MEDIUMINT UNSIGNED NULL, integer_value INT NULL, unsigned_integer_value INT UNSIGNED NULL, big_value BIGINT NULL, unsigned_big_value BIGINT UNSIGNED NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
+        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, fixed_payload BINARY(3) NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, tiny_value TINYINT NULL, unsigned_tiny_value TINYINT UNSIGNED NULL, small_value SMALLINT NULL, unsigned_small_value SMALLINT UNSIGNED NULL, zerofill_small_value SMALLINT ZEROFILL NULL, medium_value MEDIUMINT NULL, unsigned_medium_value MEDIUMINT UNSIGNED NULL, integer_value INT NULL, unsigned_integer_value INT UNSIGNED NULL, big_value BIGINT NULL, unsigned_big_value BIGINT UNSIGNED NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -2348,6 +2367,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             database,
             table!,
             id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyFixedLengthBinaryAsync(session, database, table!);
         await VerifyFloatingPointTypesAsync(
             session,
             database,
@@ -3154,7 +3174,8 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE dbo.short_label FROM nvarchar(30) NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.positive_count FROM int NOT NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.precise_amount FROM decimal(18,6) NULL;");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, tiny_value TINYINT NULL, small_value SMALLINT NULL, integer_value INT NULL, big_value BIGINT NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TYPE dbo.fixed_token FROM binary(4) NULL;");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, fixed_payload BINARY(3) NULL, alias_fixed_payload dbo.fixed_token NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, tiny_value TINYINT NULL, small_value SMALLINT NULL, integer_value INT NULL, big_value BIGINT NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
         await session.ExecuteAsync(
@@ -3183,6 +3204,7 @@ static async Task SqlServerLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE dbo.sample SET name = N'Concurrent' WHERE id = {id};");
+        await VerifyFixedLengthBinaryAsync(session, database, table!);
         await VerifyFloatingPointTypesAsync(
             session,
             database,
@@ -3624,6 +3646,155 @@ static async Task VerifyMySqlMutationWarningsRollbackAsync(
         await session.ExecuteAsync(database, $"SET GLOBAL sql_mode = '{escapedMode}';");
         await session.ExecuteAsync(database, $"SET GLOBAL max_error_count = {originalMaxErrorCount};");
     }
+}
+
+static async Task VerifyFixedLengthBinaryAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var fixedBinaryColumns = before.Columns
+        .Where(column => column.RequiredBinaryLength is not null)
+        .ToDictionary(column => column.Name, StringComparer.Ordinal);
+    var expectedCount = session.Profile.Provider == DatabaseProviderKind.SqlServer ? 2 : 1;
+    var fixedPayloadColumn = fixedBinaryColumns["fixed_payload"];
+    Assert(
+        fixedBinaryColumns.Count == expectedCount &&
+        fixedPayloadColumn.ValueKind == TableColumnValueKind.Binary &&
+        fixedPayloadColumn.StorageDataTypeName == "binary(3)" &&
+        fixedPayloadColumn.RequiredBinaryLength == 3,
+        $"{session.Profile.ProviderDisplayName} fixed binary metadata 不正確");
+
+    TableColumnInfo? aliasFixedPayloadColumn = null;
+    if (session.Profile.Provider == DatabaseProviderKind.SqlServer)
+    {
+        aliasFixedPayloadColumn = fixedBinaryColumns["alias_fixed_payload"];
+        Assert(
+            aliasFixedPayloadColumn.DataTypeName == "[dbo].[fixed_token] (binary(4))" &&
+            aliasFixedPayloadColumn.StorageDataTypeName == "binary(4)" &&
+            aliasFixedPayloadColumn.RequiredBinaryLength == 4,
+            $"SQL Server fixed binary alias metadata 不正確；actual={aliasFixedPayloadColumn.DataTypeName}");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            aliasFixedPayloadColumn,
+            new TableCellInput("alias_fixed_payload", TableCellInputMode.Value, "0x010203")));
+    }
+
+    var qualifiedTable = session.Profile.Provider == DatabaseProviderKind.SqlServer
+        ? "dbo.sample"
+        : "sample";
+    await session.ExecuteAsync(
+        database,
+        $"INSERT INTO {qualifiedTable} (name, fixed_payload) VALUES ('Native binary padding', 0xCAFE);");
+    var nativeSnapshot = await session.LoadTableDataAsync(database, table);
+    var nativePadded = nativeSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Native binary padding");
+    Assert(
+        nativePadded.Values[fixedPayloadColumn.Ordinal] is byte[] nativeBytes &&
+        nativeBytes.SequenceEqual(new byte[] { 0xCA, 0xFE, 0x00 }),
+        $"{session.Profile.ProviderDisplayName} BINARY(3) 原生短值應證實會無 warning 補 0x00");
+    await session.DeleteTableRowAsync(database, table, nativePadded);
+
+    var invalidValues = new[]
+    {
+        (Name: "Rejected short binary", Value: "0xCAFE"),
+        (Name: "Rejected long binary", Value: "0xCAFEBABE")
+    };
+    foreach (var invalid in invalidValues)
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, invalid.Name),
+                new TableCellInput("fixed_payload", TableCellInputMode.Value, invalid.Value)
+            }));
+    }
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    Assert(
+        invalidValues.All(invalid => rejectedSnapshot.Rows.All(row =>
+            Convert.ToString(row.Values[1]) != invalid.Name)),
+        $"{session.Profile.ProviderDisplayName} fixed binary 無效新增不可落地");
+
+    var validInputs = new List<TableCellInput>
+    {
+        new("name", TableCellInputMode.Value, "Fixed binary editor"),
+        new("fixed_payload", TableCellInputMode.Value, "0x00FF10")
+    };
+    if (aliasFixedPayloadColumn is not null)
+    {
+        validInputs.Add(new TableCellInput(
+            "alias_fixed_payload",
+            TableCellInputMode.Value,
+            "0x01020304"));
+    }
+    await session.InsertTableRowAsync(database, table, validInputs);
+
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Fixed binary editor");
+    Assert(
+        inserted.Values[fixedPayloadColumn.Ordinal] is byte[] insertedBytes &&
+        insertedBytes.SequenceEqual(new byte[] { 0x00, 0xFF, 0x10 }),
+        $"{session.Profile.ProviderDisplayName} fixed binary 精確長度新增不正確");
+    if (aliasFixedPayloadColumn is not null)
+    {
+        Assert(
+            inserted.Values[aliasFixedPayloadColumn.Ordinal] is byte[] aliasBytes &&
+            aliasBytes.SequenceEqual(new byte[] { 0x01, 0x02, 0x03, 0x04 }),
+            "SQL Server fixed binary alias 精確長度新增不正確");
+    }
+
+    await AssertThrowsAsync<InvalidOperationException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[]
+        {
+            new TableCellInput("fixed_payload", TableCellInputMode.Value, "0xABCD")
+        }));
+    var afterRejectedUpdate = await session.LoadTableDataAsync(database, table);
+    var unchanged = afterRejectedUpdate.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Fixed binary editor");
+    Assert(
+        unchanged.Values[fixedPayloadColumn.Ordinal] is byte[] unchangedBytes &&
+        unchangedBytes.SequenceEqual(new byte[] { 0x00, 0xFF, 0x10 }),
+        $"{session.Profile.ProviderDisplayName} fixed binary 短值修改不可自動補零後落地");
+
+    var validUpdates = new List<TableCellInput>
+    {
+        new("fixed_payload", TableCellInputMode.Value, "0xABCDEF")
+    };
+    if (aliasFixedPayloadColumn is not null)
+    {
+        validUpdates.Add(new TableCellInput(
+            "alias_fixed_payload",
+            TableCellInputMode.Value,
+            "0x10203040"));
+    }
+    await session.UpdateTableRowAsync(database, table, unchanged, validUpdates);
+
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Fixed binary editor");
+    Assert(
+        updated.Values[fixedPayloadColumn.Ordinal] is byte[] updatedBytes &&
+        updatedBytes.SequenceEqual(new byte[] { 0xAB, 0xCD, 0xEF }),
+        $"{session.Profile.ProviderDisplayName} fixed binary 精確長度修改不正確");
+    if (aliasFixedPayloadColumn is not null)
+    {
+        Assert(
+            updated.Values[aliasFixedPayloadColumn.Ordinal] is byte[] aliasUpdatedBytes &&
+            aliasUpdatedBytes.SequenceEqual(new byte[] { 0x10, 0x20, 0x30, 0x40 }),
+            "SQL Server fixed binary alias 精確長度修改不正確");
+    }
+
+    await session.DeleteTableRowAsync(database, table, updated);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(
+        afterDelete.Rows.All(row => Convert.ToString(row.Values[1]) != "Fixed binary editor"),
+        $"{session.Profile.ProviderDisplayName} fixed binary 安全刪除不正確");
 }
 
 static async Task VerifyIntegerTypesCoreAsync(

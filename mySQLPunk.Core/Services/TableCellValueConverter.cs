@@ -110,7 +110,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.Xml => ParseXml(input.Text),
                 TableColumnValueKind.NetworkAddress => ParseNetworkAddress(column, input.Text),
                 TableColumnValueKind.BitString => ParseBitString(column, input.Text),
-                TableColumnValueKind.Binary => ParseBinary(input.Text),
+                TableColumnValueKind.Binary => ParseBinary(column, input.Text),
                 _ => throw new InvalidOperationException($"「{column.Name}」的型別目前不支援直接編輯。")
             };
         }
@@ -2099,6 +2099,22 @@ public static class TableCellValueConverter
             "0" => false,
             _ => throw new FormatException("布林值必須是 true、false、1 或 0。")
         };
+    }
+
+    private static byte[] ParseBinary(TableColumnInfo column, string text)
+    {
+        var value = ParseBinary(text);
+        if (column.RequiredBinaryLength is { } requiredLength && value.Length != requiredLength)
+        {
+            var consequence = value.Length < requiredLength
+                ? "較短的值會被資料庫自動補 0x00"
+                : "較長的值可能被資料庫截斷";
+            throw new FormatException(
+                $"固定長度 BINARY({requiredLength}) 必須剛好是 {requiredLength:N0} bytes；" +
+                $"目前是 {value.Length:N0} bytes。{consequence}，因此本次未送出。");
+        }
+
+        return value;
     }
 
     private static byte[] ParseBinary(string text)

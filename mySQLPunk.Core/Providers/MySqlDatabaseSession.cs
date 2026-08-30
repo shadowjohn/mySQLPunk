@@ -404,6 +404,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                             !string.IsNullOrWhiteSpace(generationExpression);
             var valueKind = MapValueKind(dataType, columnType);
             var integerBounds = GetIntegerBounds(dataType, columnType, valueKind);
+            var requiredBinaryLength = GetRequiredBinaryLength(dataType, columnType);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -415,7 +416,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                 valueKind)
             {
                 IntegerMinimum = integerBounds?.Minimum,
-                IntegerMaximum = integerBounds?.Maximum
+                IntegerMaximum = integerBounds?.Maximum,
+                RequiredBinaryLength = requiredBinaryLength
             });
         }
 
@@ -481,6 +483,30 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         return arguments.Length == 1 &&
                int.TryParse(arguments[0].Trim(), out var precision) &&
                precision >= 24;
+    }
+
+    private static int? GetRequiredBinaryLength(string dataType, string columnType)
+    {
+        if (!dataType.Equals("binary", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        const string prefix = "binary(";
+        var normalized = columnType.Trim();
+        if (!normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            !normalized.EndsWith(')') ||
+            !int.TryParse(
+                normalized.AsSpan(prefix.Length, normalized.Length - prefix.Length - 1),
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var length) ||
+            length < 0)
+        {
+            throw new InvalidOperationException($"無法解析固定長度 binary metadata「{columnType}」。");
+        }
+
+        return length;
     }
 
     private static (long Minimum, ulong Maximum)? GetIntegerBounds(
