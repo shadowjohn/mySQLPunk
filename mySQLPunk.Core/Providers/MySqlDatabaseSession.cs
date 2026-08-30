@@ -414,6 +414,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             var valueKind = MapValueKind(dataType, columnType);
             var integerBounds = GetIntegerBounds(dataType, columnType, valueKind);
             var requiredBinaryLength = GetRequiredBinaryLength(dataType, columnType);
+            var allowedStringValues = GetAllowedStringValues(dataType, columnType);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -427,6 +428,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                 IntegerMinimum = integerBounds?.Minimum,
                 IntegerMaximum = integerBounds?.Maximum,
                 RequiredBinaryLength = requiredBinaryLength,
+                AllowedStringValues = allowedStringValues,
                 TrailingSpacesAreNotRoundTrippable = dataType.Equals(
                     "char",
                     StringComparison.OrdinalIgnoreCase)
@@ -435,6 +437,101 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
 
         return columns;
     }
+
+    private static IReadOnlyList<string>? GetAllowedStringValues(string dataType, string columnType) =>
+        dataType.Equals("enum", StringComparison.OrdinalIgnoreCase)
+            ? ParseEnumValues(columnType)
+            : null;
+
+    private static IReadOnlyList<string> ParseEnumValues(string columnType)
+    {
+        const string prefix = "enum(";
+        var definition = columnType.Trim();
+        if (!definition.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            !definition.EndsWith(')'))
+        {
+            throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+        }
+
+        var values = new List<string>();
+        var index = prefix.Length;
+        var end = definition.Length - 1;
+        while (index < end)
+        {
+            if (definition[index] != '\'')
+            {
+                throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+            }
+
+            index++;
+            var value = new System.Text.StringBuilder();
+            var closed = false;
+            while (index < end)
+            {
+                var character = definition[index++];
+                if (character == '\\')
+                {
+                    if (index >= end)
+                    {
+                        throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+                    }
+
+                    value.Append(DecodeMetadataEscape(definition[index++]));
+                    continue;
+                }
+
+                if (character != '\'')
+                {
+                    value.Append(character);
+                    continue;
+                }
+
+                if (index < end && definition[index] == '\'')
+                {
+                    value.Append('\'');
+                    index++;
+                    continue;
+                }
+
+                closed = true;
+                break;
+            }
+
+            if (!closed)
+            {
+                throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+            }
+
+            values.Add(value.ToString());
+            if (index == end)
+            {
+                break;
+            }
+
+            if (definition[index++] != ',' || index == end)
+            {
+                throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+            }
+        }
+
+        if (values.Count == 0 || index != end)
+        {
+            throw new InvalidOperationException($"無法解析 ENUM metadata「{columnType}」。");
+        }
+
+        return values;
+    }
+
+    private static char DecodeMetadataEscape(char escaped) => escaped switch
+    {
+        '0' => '\0',
+        'b' => '\b',
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        'Z' => '\u001A',
+        _ => escaped
+    };
 
     protected override string BuildDefaultInsertSql(DatabaseObjectInfo table) =>
         $"INSERT INTO {BuildQualifiedName(table)} () VALUES ();";

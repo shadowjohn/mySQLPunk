@@ -978,6 +978,29 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             boundedVaryingColumn,
             new TableCellInput("name", TableCellInputMode.Value, new string('\ud800', 1))));
+        var exactEnumColumn = inserted.Columns.Single(column => column.Name == "name") with
+        {
+            DataTypeName = "enum('draft','Published','café','2','','comma,value','quote''value','back\\\\slash')",
+            StorageDataTypeName = "enum('draft','Published','café','2','','comma,value','quote''value','back\\\\slash')",
+            AllowedStringValues = new[]
+            {
+                "draft", "Published", "café", "2", string.Empty, "comma,value", "quote'value", "back\\slash"
+            }
+        };
+        foreach (var allowedValue in exactEnumColumn.AllowedStringValues)
+        {
+            Assert(
+                Convert.ToString(TableCellValueConverter.Parse(
+                    exactEnumColumn,
+                    new TableCellInput("name", TableCellInputMode.Value, allowedValue))) == allowedValue,
+                $"ENUM 宣告成員應可精確保存：{allowedValue}");
+        }
+        foreach (var lossyValue in new[] { "DRAFT", "draft ", "cafe", "3" })
+        {
+            AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+                exactEnumColumn,
+                new TableCellInput("name", TableCellInputMode.Value, lossyValue)));
+        }
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             binaryColumn,
             new TableCellInput(
@@ -2416,7 +2439,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
         var nativeColumns = isMariaDb
             ? ", native_uuid UUID NULL, native_address INET6 NULL, native_ipv4 INET4 NULL"
             : string.Empty;
-        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, fixed_payload BINARY(3) NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, tiny_value TINYINT NULL, unsigned_tiny_value TINYINT UNSIGNED NULL, small_value SMALLINT NULL, unsigned_small_value SMALLINT UNSIGNED NULL, zerofill_small_value SMALLINT ZEROFILL NULL, medium_value MEDIUMINT NULL, unsigned_medium_value MEDIUMINT UNSIGNED NULL, integer_value INT NULL, unsigned_integer_value INT UNSIGNED NULL, big_value BIGINT NULL, unsigned_big_value BIGINT UNSIGNED NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL, fixed_text CHAR(6) NULL{nativeColumns});");
+        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, fixed_payload BINARY(3) NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived','café','2','','comma,value','quote''value','back\\\\slash') COLLATE utf8mb4_unicode_ci NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, tiny_value TINYINT NULL, unsigned_tiny_value TINYINT UNSIGNED NULL, small_value SMALLINT NULL, unsigned_small_value SMALLINT UNSIGNED NULL, zerofill_small_value SMALLINT ZEROFILL NULL, medium_value MEDIUMINT NULL, unsigned_medium_value MEDIUMINT UNSIGNED NULL, integer_value INT NULL, unsigned_integer_value INT UNSIGNED NULL, big_value BIGINT NULL, unsigned_big_value BIGINT UNSIGNED NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL, fixed_text CHAR(6) NULL{nativeColumns});");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -2430,6 +2453,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             database,
             table!,
             id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyMySqlEnumExactValuesAsync(session, database, table!);
         await VerifyNonRoundTrippableTrailingSpacesAsync(session, database, table!);
         await VerifyFixedLengthBinaryAsync(session, database, table!);
         await VerifyFloatingPointTypesAsync(
@@ -4038,6 +4062,96 @@ static async Task VerifyMySqlMutationWarningsRollbackAsync(
     }
 }
 
+static async Task VerifyMySqlEnumExactValuesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var snapshot = await session.LoadTableDataAsync(database, table);
+    var enumColumn = snapshot.Columns.Single(column => column.Name == "status");
+    string[] expectedValues =
+    {
+        "draft", "published", "archived", "café", "2", string.Empty,
+        "comma,value", "quote'value", "back\\slash"
+    };
+    Assert(
+        enumColumn.ValueKind == TableColumnValueKind.String &&
+        enumColumn.AllowedStringValues is not null &&
+        enumColumn.AllowedStringValues.SequenceEqual(expectedValues, StringComparer.Ordinal),
+        $"{session.Profile.ProviderDisplayName} ENUM metadata 應保留所有宣告成員與特殊字元");
+
+    string[] lossyValues = { "DRAFT", "draft ", "cafe", "4" };
+    foreach (var lossyValue in lossyValues)
+    {
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            enumColumn,
+            new TableCellInput(enumColumn.Name, TableCellInputMode.Value, lossyValue)));
+    }
+
+    await session.ExecuteAsync(
+        database,
+        "INSERT INTO sample (name, status) VALUES " +
+        "('Native ENUM case', 'DRAFT'), " +
+        "('Native ENUM spaces', 'draft '), " +
+        "('Native ENUM accent', 'cafe'), " +
+        "('Native ENUM numeric', '4');");
+    var nativeCanonicalization = await session.ExecuteAsync(
+        database,
+        "SELECT name, status FROM sample WHERE name LIKE 'Native ENUM %' ORDER BY id;");
+    Assert(
+        nativeCanonicalization.Rows.Count == lossyValues.Length &&
+        Convert.ToString(nativeCanonicalization.Rows[0][1]) == "draft" &&
+        Convert.ToString(nativeCanonicalization.Rows[1][1]) == "draft" &&
+        Convert.ToString(nativeCanonicalization.Rows[2][1]) == "café" &&
+        Convert.ToString(nativeCanonicalization.Rows[3][1]) == "café",
+        $"{session.Profile.ProviderDisplayName} 原生 ENUM 應重現無 warning 的大小寫、空白、重音與數字索引正規化");
+    await session.ExecuteAsync(database, "DELETE FROM sample WHERE name LIKE 'Native ENUM %';");
+
+    for (var index = 0; index < expectedValues.Length; index++)
+    {
+        await session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, $"Exact ENUM {index}"),
+                new TableCellInput(enumColumn.Name, TableCellInputMode.Value, expectedValues[index])
+            });
+    }
+
+    var exactRows = await session.ExecuteAsync(
+        database,
+        "SELECT status, status + 0 FROM sample WHERE name LIKE 'Exact ENUM %' ORDER BY id;");
+    Assert(exactRows.Rows.Count == expectedValues.Length, "ENUM 精確值 round-trip 筆數不正確");
+    for (var index = 0; index < expectedValues.Length; index++)
+    {
+        Assert(
+            Convert.ToString(exactRows.Rows[index][0]) == expectedValues[index] &&
+            Convert.ToInt32(exactRows.Rows[index][1], CultureInfo.InvariantCulture) == index + 1,
+            $"{session.Profile.ProviderDisplayName} ENUM 精確值未無損保存：index={index + 1}");
+    }
+    await session.ExecuteAsync(database, "DELETE FROM sample WHERE name LIKE 'Exact ENUM %';");
+
+    for (var index = 0; index < lossyValues.Length; index++)
+    {
+        var input = lossyValues[index];
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, $"Rejected exact ENUM {index}"),
+                new TableCellInput(enumColumn.Name, TableCellInputMode.Value, input)
+            }));
+    }
+    var rejectedCount = await session.ExecuteAsync(
+        database,
+        "SELECT COUNT(*) FROM sample WHERE name LIKE 'Rejected exact ENUM %';");
+    Assert(
+        Convert.ToInt32(rejectedCount.Rows.Single()[0], CultureInfo.InvariantCulture) == 0,
+        $"{session.Profile.ProviderDisplayName} 不可寫入會被 ENUM 靜默正規化的值");
+}
+
 static async Task VerifyNonRoundTrippableTrailingSpacesAsync(
     IDatabaseSession session,
     string database,
@@ -5218,7 +5332,7 @@ static async Task VerifySafeTableEditingAsync(
     }
     if (enumColumn is not null)
     {
-        await AssertThrowsAsync<MySqlException>(() => session.InsertTableRowAsync(
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
             database,
             table,
             new[]
@@ -5229,7 +5343,7 @@ static async Task VerifySafeTableEditingAsync(
         var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
         Assert(
             rejectedSnapshot.Rows.All(row => Convert.ToString(row.Values[1]) != "Rejected enum"),
-            "MySQL／MariaDB 不可在 strict mode 寫入未宣告的 ENUM 值");
+            "MySQL／MariaDB 應在送出 SQL 前拒絕未宣告的 ENUM 值");
     }
     var mySqlTimeColumn = before.Columns.SingleOrDefault(column =>
         column.ValueKind == TableColumnValueKind.MySqlTime);

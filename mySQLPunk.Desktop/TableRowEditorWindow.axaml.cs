@@ -222,7 +222,7 @@ public sealed partial class TableRowEditorWindow : Window
         TableColumnValueKind.String when column.TrailingSpacesAreNotRoundTrippable =>
             "固定長度字串（尾端空白無法保留）",
         TableColumnValueKind.String when column.StorageDataTypeName.StartsWith("enum(", StringComparison.OrdinalIgnoreCase) =>
-            "請輸入欄位宣告的 ENUM 值之一",
+            "ENUM 值（大小寫、重音與空白須完全符合宣告）",
         TableColumnValueKind.String when column.StorageDataTypeName.StartsWith("set(", StringComparison.OrdinalIgnoreCase) =>
             "以逗號分隔欄位宣告的 SET 值",
         TableColumnValueKind.UnsignedInteger when column.StorageDataTypeName.StartsWith("bit(", StringComparison.OrdinalIgnoreCase) =>

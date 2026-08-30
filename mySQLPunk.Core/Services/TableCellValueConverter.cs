@@ -296,6 +296,13 @@ public static class TableCellValueConverter
 
     private static string ParseString(TableColumnInfo column, string text)
     {
+        if (column.AllowedStringValues is { } allowedValues &&
+            !allowedValues.Contains(text, StringComparer.Ordinal))
+        {
+            throw new FormatException(
+                "必須與欄位宣告的 ENUM 成員完全一致；大小寫、重音字元與空白皆不可由資料庫自動轉換。");
+        }
+
         var characterCount = CountUnicodeScalars(text);
         if (column.MaximumStringLengthInCharacters is { } maximumLength &&
             characterCount > maximumLength)
