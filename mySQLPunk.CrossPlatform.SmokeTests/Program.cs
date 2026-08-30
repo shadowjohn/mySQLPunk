@@ -14,6 +14,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("查詢結果安全匯出", QueryResultExportFormatsAsync),
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
+    ("SQL 選取範圍安全執行", SqlExecutionSelectionAsync),
     ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
@@ -22,6 +23,31 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static Task SqlExecutionSelectionAsync()
+{
+    const string editorSql = "CREATE TABLE should_not_run(id INTEGER);\nSELECT 42 AS chosen;";
+    var selectStart = editorSql.IndexOf("SELECT", StringComparison.Ordinal);
+    var selected = SqlExecutionSelectionService.Resolve(editorSql, selectStart, editorSql.Length);
+    Assert(selected.UsesSelection && selected.Sql == "SELECT 42 AS chosen;",
+        "非空白選取範圍應是唯一送出的 SQL");
+
+    var reversed = SqlExecutionSelectionService.Resolve(editorSql, editorSql.Length, selectStart);
+    Assert(reversed == selected, "反向選取應解析成相同 SQL");
+
+    var whitespaceStart = editorSql.IndexOf('\n');
+    var whitespace = SqlExecutionSelectionService.Resolve(editorSql, whitespaceStart, whitespaceStart + 1);
+    Assert(!whitespace.UsesSelection && whitespace.Sql == editorSql,
+        "只選到空白時應安全退回完整 SQL");
+
+    var noSelection = SqlExecutionSelectionService.Resolve(editorSql, 0, 0);
+    Assert(!noSelection.UsesSelection && noSelection.Sql == editorSql,
+        "沒有選取範圍時應維持原本的全文執行");
+
+    var clamped = SqlExecutionSelectionService.Resolve(editorSql, selectStart, int.MaxValue);
+    Assert(clamped == selected, "超出文字長度的 UI selection index 應安全限制範圍");
+    return Task.CompletedTask;
+}
 
 static Task DatabaseObjectFilteringAsync()
 {

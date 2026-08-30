@@ -131,7 +131,7 @@
             <Border Grid.Row="0" Padding="12,10,12,7">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="SQL 編輯器" FontWeight="SemiBold" />
-                <TextBlock Grid.Column="1" Text="雙擊 Table 開啟資料編輯器；View 產生預覽查詢" Foreground="#667085" FontSize="12" />
+                <TextBlock Grid.Column="1" Text="有選取範圍時只執行選取 SQL；雙擊 Table 開啟資料編輯器" Foreground="#667085" FontSize="12" />
               </Grid>
             </Border>
             <TextBox x:Name="SqlEditor"

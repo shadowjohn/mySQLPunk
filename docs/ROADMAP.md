@@ -69,6 +69,8 @@
 
 > 最新安全進度：MySQL 8、MariaDB 11.4 與 PostgreSQL 16 的一般字串已使用 byte-exact 原值比對，可在大小寫／重音不敏感 collation 下支撐 optimistic concurrency 衝突；PostgreSQL `citext` 可安全載入與編輯，保留原始格式的 `json` 也會逐 byte 攔截外部改動，`json[]`、`xml[]` 等無 element equality 的陣列則改用 canonical text UTF-8 bytes 保留安全編輯與衝突防護。Linux X11 已實際操作驗證，macOS 由原生 Intel／Apple Silicon CI 持續建置與檢查 app archive。
 
+> 跨平台 SQL 執行安全：Linux / macOS 編輯器若有非空白選取範圍，只送出該段 SQL；沒有選取或只選到空白時才執行全文，避免同一文件中未反白的 DDL／DML 被意外執行。
+
 ## Provider 與服務覆蓋
 
 | 範圍 | 狀態 | 說明 |

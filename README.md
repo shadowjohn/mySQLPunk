@@ -47,6 +47,8 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 跨平台 metadata 樹可依 schema 或物件名稱即時搜尋，空白分隔的多個關鍵字會同時套用；也可只顯示 Table 或 View，畫面會同步標示篩選後與總物件數。搜尋只處理已載入的 metadata，不會額外掃描資料表內容。
 
+SQL 編輯器按下 `Ctrl+Enter`（macOS 為 `Cmd+Enter`）或「執行 SQL」時，若有反白且非空白的範圍，只會送出該段 SQL；未選取內容時才執行全文，避免同一文件裡未選取的 DDL／DML 被一併執行。
+
 ```bash
 dotnet restore mySQLPunk.CrossPlatform.sln
 dotnet build mySQLPunk.CrossPlatform.sln -c Release --no-restore

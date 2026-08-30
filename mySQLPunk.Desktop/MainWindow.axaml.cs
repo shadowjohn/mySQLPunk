@@ -555,16 +555,25 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var sql = _sqlEditor.Text ?? string.Empty;
-        await RunOperationAsync("正在執行 SQL…", async cancellationToken =>
+        var execution = SqlExecutionSelectionService.Resolve(
+            _sqlEditor.Text,
+            _sqlEditor.SelectionStart,
+            _sqlEditor.SelectionEnd);
+        var operationStatus = execution.UsesSelection
+            ? "正在執行選取的 SQL…"
+            : "正在執行 SQL…";
+        await RunOperationAsync(operationStatus, async cancellationToken =>
         {
-            var result = await _session.ExecuteAsync(database, sql, cancellationToken);
+            var result = await _session.ExecuteAsync(database, execution.Sql, cancellationToken);
             DisplayResult(result);
-            SetStatus(result.Summary);
             if (!result.HasResultSet)
             {
                 await LoadObjectsAsync(database, cancellationToken);
             }
+
+            SetStatus(execution.UsesSelection
+                ? $"{result.Summary}（已執行選取範圍）"
+                : result.Summary);
         });
     }
 
