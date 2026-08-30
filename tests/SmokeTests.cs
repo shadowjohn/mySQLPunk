@@ -9670,7 +9670,12 @@ public static class SmokeTests
         AssertContains(workflow, "build-cross-platform-release", "Release workflow should build cross-platform packages before publishing the public release.");
         AssertContains(workflow, "actions/download-artifact@v8", "Release workflow should download the immutable Linux/macOS package artifacts.");
         AssertContains(workflow, "linux-x64 linux-arm64", "Release workflow should package Linux x64 and ARM64.");
-        AssertContains(workflow, "osx-x64 osx-arm64", "Release workflow should package macOS Intel and Apple Silicon.");
+        AssertContains(workflow, "os: macos-15-intel", "Release workflow should use GitHub's native Intel macOS runner.");
+        AssertContains(workflow, "os: macos-15", "Release workflow should use GitHub's native Apple Silicon macOS runner.");
+        AssertContains(workflow, "runtimes: osx-x64", "Release workflow should package macOS Intel on its native runner.");
+        AssertContains(workflow, "runtimes: osx-arm64", "Release workflow should package macOS Apple Silicon on its native runner.");
+        AssertContains(workflow, "*-${{ matrix.runtimes }}.app.zip", "Release workflow should apply and launch the package matching each native macOS runner.");
+        Assert(!workflow.Contains("runtimes: osx-x64 osx-arm64"), "Release workflow should not validate both macOS architectures on only one host architecture.");
         AssertContains(workflow, "scripts/package-cross-platform.sh", "Release workflow should use the shared cross-platform packaging script.");
         AssertContains(workflow, "Cross-platform SHA-256 mismatch", "Release workflow should verify every cross-platform asset before changing the public release.");
         AssertContains(workflow, "Exactly one Windows setup and eight cross-platform asset/hash files", "Release workflow should require the complete platform asset set.");
@@ -9681,6 +9686,16 @@ public static class SmokeTests
         AssertContains(releaseNotesScript, "CHANGELOG.md", "Release notes must still be sourced from the changelog.");
         AssertContains(workflow, "api.github.com/repos/$env:REPOSITORY/releases", "Release workflow should create or update a GitHub Release through the API.");
         AssertContains(workflow, "${uploadBaseUrl}?name=$assetName", "Release workflow should preserve the upload host when appending asset query parameters.");
+
+        string crossPlatformWorkflowPath = Path.Combine(root, ".github", "workflows", "cross-platform.yml");
+        Assert(File.Exists(crossPlatformWorkflowPath), "Cross-platform desktop workflow should exist.");
+        string crossPlatformWorkflow = File.ReadAllText(crossPlatformWorkflowPath, Encoding.UTF8);
+        AssertContains(crossPlatformWorkflow, "os: macos-15-intel", "Cross-platform CI should use a native Intel macOS runner.");
+        AssertContains(crossPlatformWorkflow, "os: macos-15", "Cross-platform CI should use a native Apple Silicon macOS runner.");
+        AssertContains(crossPlatformWorkflow, "runtimes: osx-x64", "Cross-platform CI should build Intel macOS on Intel.");
+        AssertContains(crossPlatformWorkflow, "runtimes: osx-arm64", "Cross-platform CI should build Apple Silicon macOS on arm64.");
+        AssertContains(crossPlatformWorkflow, "*-${{ matrix.runtimes }}.app.zip", "Cross-platform CI should apply and launch the native macOS package.");
+        Assert(!crossPlatformWorkflow.Contains("runtimes: osx-x64 osx-arm64"), "Cross-platform CI should not validate both macOS architectures on only one host architecture.");
 
         string autoReleaseWorkflowPath = Path.Combine(root, ".github", "workflows", "auto-release.yml");
         Assert(File.Exists(autoReleaseWorkflowPath), "Auto-release gate workflow should exist.");

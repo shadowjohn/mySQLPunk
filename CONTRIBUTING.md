@@ -31,7 +31,7 @@ git push origin master
 
 - `tests/Run-SmokeTests.ps1` 是基本盤，任何行為變更都要全過。改了行為導致既有測試的預期跟著變，就把測試一起更新，並在 commit message 說明為什麼。
 - 跨平台 Core / Avalonia 有變更時，執行 `dotnet build mySQLPunk.CrossPlatform.sln -c Release` 與 `dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj -c Release`；動到 MySQL / PostgreSQL provider 時再跑 `./tests/Run-CrossPlatformLiveTests.sh`。UI 變更還要在 Linux 或 macOS 實際開啟並走一次連線、SQL 與結果網格。
-- 動到跨平台打包、安裝或 release workflow 時，至少用 `./scripts/package-cross-platform.sh --version <版本> --runtime linux-x64` 產生實際 self-contained 資產，再執行 `MYSQLPUNK_PACKAGE_RUN_UI=1 ./tests/Test-LinuxCrossPlatformPackage.sh <tar.gz>`，確認隔離安裝、Xvfb 啟動、解除安裝與路徑安全檢查皆通過；macOS app bundle、plist、CPU 架構、codesign 與 zip metadata 由 macOS CI runner 執行 `tests/Test-MacCrossPlatformPackage.sh` 驗證。
+- 動到跨平台打包、安裝或 release workflow 時，至少用 `./scripts/package-cross-platform.sh --version <版本> --runtime linux-x64` 產生實際 self-contained 資產，再執行 `MYSQLPUNK_PACKAGE_RUN_UI=1 ./tests/Test-LinuxCrossPlatformPackage.sh <tar.gz>`，確認隔離安裝、Xvfb 啟動、解除安裝與路徑安全檢查皆通過；macOS app bundle、plist、CPU 架構、codesign、zip metadata、安全套用與啟動健康檢查，分別由 `macos-15-intel` 與 `macos-15` 原生 CI runner 驗證。
 - 動到 provider 實際行為（匯出匯入、使用者管理、rename）時，視影響跑對應的 Docker 整合測試：`Run-MySqlUserIntegrationTests.ps1`、`Run-MySqlExportRenameIntegrationTests.ps1`、`Run-DatabaseRenameProviderIntegrationTests.ps1`。
 - UI 有變的話，除了測試，最好實際開起來看一眼。
 
@@ -62,7 +62,7 @@ git tag v1.0.0.5
 git push origin v1.0.0.5
 ```
 
-workflow 會檢查 tag 版本跟 `AssemblyFileVersion` 一致，不一致直接失敗（不然程式內的更新檢查會一直以為有新版）。Linux 與 macOS runner 會先產生並上傳四種架構的 immutable workflow artifacts；Windows runner 下載、核對四個壓縮檔與四個 `.sha256` 後，才會一次建立或更新包含九個資產的公開 Release，避免留下只有部分平台的版本。
+workflow 會檢查 tag 版本跟 `AssemblyFileVersion` 一致，不一致直接失敗（不然程式內的更新檢查會一直以為有新版）。Linux、macOS Intel 與 macOS Apple Silicon runner 會先產生並上傳四種架構的 immutable workflow artifacts；兩個 macOS job 各自套用並啟動同架構 app。Windows runner 下載、核對四個壓縮檔與四個 `.sha256` 後，才會一次建立或更新包含九個資產的公開 Release，避免留下只有部分平台的版本。
 
 ## 文件怎麼維護
 
