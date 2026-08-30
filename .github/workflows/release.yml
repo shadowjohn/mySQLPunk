@@ -329,10 +329,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux x64 + ARM64
-            os: ubuntu-latest
-            runtimes: linux-x64 linux-arm64
-            artifact_name: linux
+          - name: Linux x64
+            os: ubuntu-24.04
+            runtimes: linux-x64
+            artifact_name: linux-x64
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            runtimes: linux-arm64
+            artifact_name: linux-arm64
           - name: macOS Intel
             os: macos-15-intel
             runtimes: osx-x64
@@ -403,13 +407,11 @@ jobs:
         if: runner.os == 'Linux'
         env:
           MYSQLPUNK_PACKAGE_RUN_UI: "1"
-        run: |
-          ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-linux-x64.tar.gz
-          MYSQLPUNK_PACKAGE_RUN_UI=0 ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-linux-arm64.tar.gz
+        run: ./tests/Test-LinuxCrossPlatformPackage.sh dist/cross-platform/*-${{ matrix.runtimes }}.tar.gz
 
       - name: Smoke test Linux safe update apply and rollback
         if: runner.os == 'Linux'
-        run: ./tests/Test-LinuxUpdateApply.sh dist/cross-platform/*-linux-x64.tar.gz
+        run: ./tests/Test-LinuxUpdateApply.sh dist/cross-platform/*-${{ matrix.runtimes }}.tar.gz
 
       - name: Verify macOS app archives and safe update apply
         if: runner.os == 'macOS'

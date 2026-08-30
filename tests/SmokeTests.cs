@@ -9669,7 +9669,11 @@ public static class SmokeTests
         Assert(!workflow.Contains("release-manifest.json"), "Release workflow should not upload a separate manifest.");
         AssertContains(workflow, "build-cross-platform-release", "Release workflow should build cross-platform packages before publishing the public release.");
         AssertContains(workflow, "actions/download-artifact@v8", "Release workflow should download the immutable Linux/macOS package artifacts.");
-        AssertContains(workflow, "linux-x64 linux-arm64", "Release workflow should package Linux x64 and ARM64.");
+        AssertContains(workflow, "os: ubuntu-24.04-arm", "Release workflow should use GitHub's native Linux ARM64 runner.");
+        AssertContains(workflow, "runtimes: linux-x64", "Release workflow should package Linux x64 on its native runner.");
+        AssertContains(workflow, "runtimes: linux-arm64", "Release workflow should package Linux ARM64 on its native runner.");
+        AssertContains(workflow, "*-${{ matrix.runtimes }}.tar.gz", "Release workflow should install, launch and update the package matching each native Linux runner.");
+        Assert(!workflow.Contains("runtimes: linux-x64 linux-arm64"), "Release workflow should not validate Linux ARM64 on an x64 host.");
         AssertContains(workflow, "os: macos-15-intel", "Release workflow should use GitHub's native Intel macOS runner.");
         AssertContains(workflow, "os: macos-15", "Release workflow should use GitHub's native Apple Silicon macOS runner.");
         AssertContains(workflow, "runtimes: osx-x64", "Release workflow should package macOS Intel on its native runner.");
@@ -9690,12 +9694,24 @@ public static class SmokeTests
         string crossPlatformWorkflowPath = Path.Combine(root, ".github", "workflows", "cross-platform.yml");
         Assert(File.Exists(crossPlatformWorkflowPath), "Cross-platform desktop workflow should exist.");
         string crossPlatformWorkflow = File.ReadAllText(crossPlatformWorkflowPath, Encoding.UTF8);
+        AssertContains(crossPlatformWorkflow, "os: ubuntu-24.04-arm", "Cross-platform CI should use a native Linux ARM64 runner.");
+        AssertContains(crossPlatformWorkflow, "runtimes: linux-x64", "Cross-platform CI should build Linux x64 on x64.");
+        AssertContains(crossPlatformWorkflow, "runtimes: linux-arm64", "Cross-platform CI should build Linux ARM64 on arm64.");
+        AssertContains(crossPlatformWorkflow, "live_tests: true", "Cross-platform CI should keep the Docker provider matrix on its supported Linux x64 runner.");
+        AssertContains(crossPlatformWorkflow, "if: matrix.live_tests == true", "Cross-platform CI should not start the SQL Server live matrix on ARM64.");
+        AssertContains(crossPlatformWorkflow, "*-${{ matrix.runtimes }}.tar.gz", "Cross-platform CI should install, launch and update the native Linux package.");
+        Assert(!crossPlatformWorkflow.Contains("runtimes: linux-x64 linux-arm64"), "Cross-platform CI should not validate Linux ARM64 on an x64 host.");
         AssertContains(crossPlatformWorkflow, "os: macos-15-intel", "Cross-platform CI should use a native Intel macOS runner.");
         AssertContains(crossPlatformWorkflow, "os: macos-15", "Cross-platform CI should use a native Apple Silicon macOS runner.");
         AssertContains(crossPlatformWorkflow, "runtimes: osx-x64", "Cross-platform CI should build Intel macOS on Intel.");
         AssertContains(crossPlatformWorkflow, "runtimes: osx-arm64", "Cross-platform CI should build Apple Silicon macOS on arm64.");
         AssertContains(crossPlatformWorkflow, "*-${{ matrix.runtimes }}.app.zip", "Cross-platform CI should apply and launch the native macOS package.");
         Assert(!crossPlatformWorkflow.Contains("runtimes: osx-x64 osx-arm64"), "Cross-platform CI should not validate both macOS architectures on only one host architecture.");
+
+        string linuxUpdateTest = File.ReadAllText(Path.Combine(root, "tests", "Test-LinuxUpdateApply.sh"), Encoding.UTF8);
+        AssertContains(linuxUpdateTest, "aarch64|arm64", "Linux updater smoke test should recognize native ARM64 runners.");
+        AssertContains(linuxUpdateTest, "--runtime \"$runtime\"", "Linux updater smoke test should apply the package matching the current architecture.");
+        Assert(!linuxUpdateTest.Contains("--runtime \"linux-x64\""), "Linux updater smoke test should not hard-code x64.");
 
         string autoReleaseWorkflowPath = Path.Combine(root, ".github", "workflows", "auto-release.yml");
         Assert(File.Exists(autoReleaseWorkflowPath), "Auto-release gate workflow should exist.");

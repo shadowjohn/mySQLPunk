@@ -11,9 +11,22 @@ apply_script="$repo_root/packaging/linux/apply-update.sh"
 installer_template="$repo_root/packaging/linux/install.sh"
 real_package="${1:-}"
 if [[ -n "$real_package" && ! -f "$real_package" ]]; then
-    printf 'Optional real Linux x64 package does not exist: %s\n' "$real_package" >&2
+    printf 'Optional real Linux package does not exist: %s\n' "$real_package" >&2
     exit 2
 fi
+machine_arch=$(uname -m)
+case "$machine_arch" in
+    x86_64|amd64)
+        runtime="linux-x64"
+        ;;
+    aarch64|arm64)
+        runtime="linux-arm64"
+        ;;
+    *)
+        printf 'Unsupported Linux test architecture: %s\n' "$machine_arch" >&2
+        exit 2
+        ;;
+esac
 work_root=$(mktemp -d)
 launched_pid=""
 cleanup() {
@@ -35,7 +48,6 @@ export MYSQLPUNK_TEST_PID="$work_root/launched-pid"
 make_package() {
     version="$1"
     app_behavior="$2"
-    runtime="linux-x64"
     package_name="mySQLPunk-$version-$runtime"
     package_root="$work_root/build-$version/$package_name"
     mkdir -p "$package_root/app"
@@ -89,7 +101,7 @@ current_archive=$(make_package "1.0.0.1" "healthy")
 current_root="$work_root/current"
 mkdir "$current_root"
 tar -xzf "$current_archive" -C "$current_root"
-"$current_root/mySQLPunk-1.0.0.1-linux-x64/install.sh"
+"$current_root/mySQLPunk-1.0.0.1-$runtime/install.sh"
 
 healthy_archive=$(make_package "1.0.0.2" "healthy")
 wait_pid=$(wait_for_short_process)
@@ -100,7 +112,7 @@ printf '%s\n' "token=$reserved_lock_token" "pid=$$" > "$XDG_STATE_HOME/mySQLPunk
     --archive "$healthy_archive" \
     --sha256 "$(hash_file "$healthy_archive")" \
     --version "1.0.0.2" \
-    --runtime "linux-x64" \
+    --runtime "$runtime" \
     --wait-pid "$wait_pid" \
     --lock-token "$reserved_lock_token"
 
@@ -120,7 +132,7 @@ set +e
     --archive "$failing_archive" \
     --sha256 "$(hash_file "$failing_archive")" \
     --version "1.0.0.3" \
-    --runtime "linux-x64" \
+    --runtime "$runtime" \
     --wait-pid "$wait_pid"
 apply_exit=$?
 set -e
@@ -139,7 +151,7 @@ launched_pid=$(cat "$MYSQLPUNK_TEST_PID")
 if [[ "$(cat "$MYSQLPUNK_TEST_STARTED")" != "1.0.0.2" ||
       ! -x "$MYSQLPUNK_INSTALL_BASE/1.0.0.2/mySQLPunk" ||
       -e "$MYSQLPUNK_INSTALL_BASE/1.0.0.3" ||
-      "$(sed -n '2p' "$MYSQLPUNK_BIN_DIR/mysqlpunk")" != "# mySQLPunk 1.0.0.2 linux-x64" ]]; then
+      "$(sed -n '2p' "$MYSQLPUNK_BIN_DIR/mysqlpunk")" != "# mySQLPunk 1.0.0.2 $runtime" ]]; then
     printf 'Failed update did not restore and relaunch version 1.0.0.2.\n' >&2
     exit 5
 fi
@@ -157,12 +169,12 @@ set +e
     --archive "$healthy_archive" \
     --sha256 "$(printf '0%.0s' {1..64})" \
     --version "1.0.0.2" \
-    --runtime "linux-x64" \
+    --runtime "$runtime" \
     --wait-pid "$wait_pid"
 hash_exit=$?
 set -e
 if [[ "$hash_exit" -eq 0 || ! -f "$result_path" ||
-      "$(sed -n '2p' "$MYSQLPUNK_BIN_DIR/mysqlpunk")" != "# mySQLPunk 1.0.0.2 linux-x64" ]] ||
+      "$(sed -n '2p' "$MYSQLPUNK_BIN_DIR/mysqlpunk")" != "# mySQLPunk 1.0.0.2 $runtime" ]] ||
    ! grep -Fxq 'status=failed' "$result_path"; then
     printf 'Apply-time SHA-256 mismatch did not fail closed and preserve the current launcher.\n' >&2
     exit 7
@@ -176,12 +188,12 @@ set +e
     --archive "$unsafe_archive" \
     --sha256 "$(hash_file "$unsafe_archive")" \
     --version "1.0.0.4" \
-    --runtime "linux-x64" \
+    --runtime "$runtime" \
     --wait-pid "$wait_pid"
 unsafe_exit=$?
 set -e
 if [[ "$unsafe_exit" -eq 0 || -e "$MYSQLPUNK_INSTALL_BASE/1.0.0.4" ||
-      "$(sed -n '2p' "$MYSQLPUNK_BIN_DIR/mysqlpunk")" != "# mySQLPunk 1.0.0.2 linux-x64" ]]; then
+      "$(sed -n '2p' "$MYSQLPUNK_BIN_DIR/mysqlpunk")" != "# mySQLPunk 1.0.0.2 $runtime" ]]; then
     printf 'Archive link entry was not rejected before installation.\n' >&2
     exit 8
 fi
@@ -194,20 +206,25 @@ if [[ -n "$real_package" ]]; then
     fi
     real_package=$(cd "$(dirname "$real_package")" && pwd)/$(basename "$real_package")
     real_name=$(basename "$real_package")
-    if [[ ! "$real_name" =~ ^mySQLPunk-([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)-linux-x64\.tar\.gz$ ]]; then
-        printf 'Real update package name is not a Linux x64 release asset: %s\n' "$real_name" >&2
+    if [[ ! "$real_name" =~ ^mySQLPunk-([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)-(linux-(x64|arm64))\.tar\.gz$ ]]; then
+        printf 'Real update package name is not a supported Linux release asset: %s\n' "$real_name" >&2
         exit 9
     fi
     real_version="${BASH_REMATCH[1]}"
+    real_runtime="${BASH_REMATCH[3]}"
+    if [[ "$real_runtime" != "$runtime" ]]; then
+        printf 'Real update package architecture %s does not match this %s machine.\n' "$real_runtime" "$machine_arch" >&2
+        exit 9
+    fi
     wait_pid=$(wait_for_short_process)
     xvfb-run -a "$apply_script" \
         --archive "$real_package" \
         --sha256 "$(hash_file "$real_package")" \
         --version "$real_version" \
-        --runtime "linux-x64" \
+        --runtime "$runtime" \
         --wait-pid "$wait_pid"
     if [[ ! -x "$MYSQLPUNK_INSTALL_BASE/$real_version/mySQLPunk" ||
-          "$(sed -n '2p' "$MYSQLPUNK_BIN_DIR/mysqlpunk")" != "# mySQLPunk $real_version linux-x64" ||
+          "$(sed -n '2p' "$MYSQLPUNK_BIN_DIR/mysqlpunk")" != "# mySQLPunk $real_version $runtime" ||
           -e "$result_path" ]]; then
         printf 'Real self-contained package did not complete safe apply and UI startup health check.\n' >&2
         exit 10
