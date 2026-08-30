@@ -35,9 +35,9 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 ## 最新版本
 
-目前發版版本：`v1.0.0.19`，最新版請看 [GitHub Releases](https://github.com/shadowjohn/mySQLPunk/releases)。
+目前發版版本：`v1.0.0.20`，最新版請看 [GitHub Releases](https://github.com/shadowjohn/mySQLPunk/releases)。
 
-目前的 `v1.0.0.19` GitHub Release 仍只提供 Windows 完整版；下一版起，Release workflow 會同時發布 Windows x64 setup、self-contained Linux x64／ARM64 安裝壓縮檔，以及 macOS Intel／Apple Silicon `.app.zip`。Linux 壓縮檔內附目前使用者層級的 `install.sh`／`uninstall.sh`；macOS 預覽目前採 ad-hoc 簽署、尚未 Apple notarize。每個跨平台資產都有獨立 `.sha256` 可驗證完整性。完整變更請見 `CHANGELOG.md`。
+目前的 `v1.0.0.20` GitHub Release 仍只提供 Windows 完整版；下一版起，Release workflow 會同時發布 Windows x64 setup、self-contained Linux x64／ARM64 安裝壓縮檔，以及 macOS Intel／Apple Silicon `.app.zip`。Linux 壓縮檔內附目前使用者層級的 `install.sh`／`uninstall.sh`；macOS 預覽目前採 ad-hoc 簽署、尚未 Apple notarize。每個跨平台資產都有獨立 `.sha256` 可驗證完整性。完整變更請見 `CHANGELOG.md`。
 
 ## 開發環境
 
@@ -73,11 +73,11 @@ dotnet run --project mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release
 產生可安裝／攜帶的 self-contained 發佈資產：
 
 ```bash
-./scripts/package-cross-platform.sh --version 1.0.0.19 --runtime linux-x64
-./scripts/package-cross-platform.sh --version 1.0.0.19 --runtime linux-arm64
+./scripts/package-cross-platform.sh --version 1.0.0.20 --runtime linux-x64
+./scripts/package-cross-platform.sh --version 1.0.0.20 --runtime linux-arm64
 # 以下兩個命令需在 macOS 執行，才能驗證 codesign 與 .app archive metadata：
-./scripts/package-cross-platform.sh --version 1.0.0.19 --runtime osx-x64
-./scripts/package-cross-platform.sh --version 1.0.0.19 --runtime osx-arm64
+./scripts/package-cross-platform.sh --version 1.0.0.20 --runtime osx-x64
+./scripts/package-cross-platform.sh --version 1.0.0.20 --runtime osx-arm64
 ```
 
 Linux 資產是 `.tar.gz`，解壓後執行 `./install.sh` 即會以交易方式安裝到目前使用者的 XDG data 目錄並建立 `~/.local/bin/mysqlpunk` 與應用程式選單項目；任一步驟失敗會完整回復 app、launcher 與 desktop entry，`./uninstall.sh` 則只移除該版本程式並保留連線設定。macOS 資產是標準 `.app.zip`，首次安裝解壓後可拖到 Applications。兩個平台的已安裝版本都可從「檢查更新」下載、驗證、安全套用並重新啟動；新版若未通過啟動健康檢查會自動 rollback 與重開舊版。設定 `MYSQLPUNK_MACOS_SIGN_IDENTITY` 可用 Developer ID 簽署；另外設定已存在於 Keychain 的 `MYSQLPUNK_MACOS_NOTARY_PROFILE` 時，打包腳本才會送 Apple notarization 並 staple，沒有憑證時只做可驗證的 ad-hoc 簽署。
@@ -164,7 +164,7 @@ msbuild .\mySQLPunk.sln /p:Configuration=Debug /p:Platform="Any CPU"
 打包發布：
 
 ```powershell
-.\scripts\package-release.ps1 -Version 1.0.0.19
+.\scripts\package-release.ps1 -Version 1.0.0.20
 ```
 
 此腳本會使用 Release 組態建置專案，再以 Inno Setup 6 將 `mySQLPunk/bin/Release` 封裝成單一 `dist/mySQLPunk-<version>-win-x64-setup.exe`。安裝內容會帶入 `LICENSE`、`THIRD_PARTY_NOTICES.md` 與可取得的 NuGet license/notice 檔，並排除不屬於程式必要 runtime 的 `sqlite3.exe`、`libreadline8.dll`、`libtermcap-0.dll`。本機打包前需先安裝 Inno Setup 6，或用 `-InnoSetupCompiler` 指定 `ISCC.exe`。
@@ -173,9 +173,9 @@ GitHub Actions 發版：
 
 ```powershell
 # 1. 先確認 mySQLPunk/Properties/AssemblyInfo.cs 的 AssemblyVersion / AssemblyFileVersion
-#    已更新成要發布的版本，例如 1.0.0.19。
-git tag v1.0.0.19
-git push origin v1.0.0.19
+#    已更新成要發布的版本，例如 1.0.0.20。
+git tag v1.0.0.20
+git push origin v1.0.0.20
 ```
 
 推送 `v*` tag 後，`.github/workflows/release.yml` 會先由 Linux x64、Linux ARM64、macOS Intel 與 macOS Apple Silicon 原生 runner 產生四種架構的 self-contained 壓縮檔與 `.sha256`；每個包都會在相同 OS／CPU 架構上完成安裝或安全套用、啟動健康檢查與 rollback，再暫存為 immutable workflow artifacts。Windows runner 接著還原 NuGet、用 MSBuild 編譯 Release、安裝固定版本且先驗證 SHA-256 的 Inno Setup、執行 `scripts/package-release.ps1`，下載並核對所有跨平台資產，九個預期檔案齊全後才會一次建立或更新 GitHub Release。也可在 GitHub Actions 手動執行 `Release` workflow 並輸入版本號。所有平台都會檢查 tag / 手動輸入版本是否和 `AssemblyFileVersion` 一致，避免程式內更新檢查一直判定同一版本可更新；`scripts/New-ReleaseNotes.ps1` 會從 `CHANGELOG.md` 的對應版本產生繁體中文 `🚀 新增功能`、`🛠️ 問題修正與優化`、`📦 下載與更新`、`🛡️ 完整性與驗證` 四段說明。若缺少對應版本、必要段落或任一平台資產，發佈會直接停止，不會建立內容不完整的 Release。
