@@ -47,6 +47,7 @@ public static class TableCellValueConverter
                 TableColumnValueKind.UnsignedInteger => ParseUnsignedInteger(column, input.Text),
                 TableColumnValueKind.Decimal => decimal.Parse(input.Text, NumberStyles.Number, CultureInfo.InvariantCulture),
                 TableColumnValueKind.ExactDecimal => ParseExactDecimal(column, input.Text),
+                TableColumnValueKind.PostgreSqlMoney => ParsePostgreSqlMoney(column, input.Text),
                 TableColumnValueKind.FloatingPoint => ParseFiniteDouble(input.Text),
                 TableColumnValueKind.Boolean => ParseBoolean(input.Text),
                 TableColumnValueKind.Date => DateTime.ParseExact(
@@ -129,6 +130,7 @@ public static class TableCellValueConverter
         TimeOnly time => time.ToString("O", CultureInfo.InvariantCulture),
         TimeSpan duration => duration.ToString("c", CultureInfo.InvariantCulture),
         ExactDecimalValue exactDecimal => exactDecimal.Text,
+        PostgreSqlMoneyValue money => money.Text,
         SqlServerVariantValue variant => variant.CanonicalText,
         bool boolean => boolean ? "true" : "false",
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
@@ -204,9 +206,17 @@ public static class TableCellValueConverter
                    parsedBytes.AsSpan().SequenceEqual(originalBytes);
         }
 
-        return column.ValueKind == TableColumnValueKind.Date
-            ? string.Equals(input.Text.Trim(), Format(column, original), StringComparison.Ordinal)
-            : string.Equals(input.Text, Format(original), StringComparison.Ordinal);
+        if (column.ValueKind == TableColumnValueKind.Date)
+        {
+            return string.Equals(input.Text.Trim(), Format(column, original), StringComparison.Ordinal);
+        }
+
+        if (column.ValueKind == TableColumnValueKind.PostgreSqlMoney)
+        {
+            return ParsePostgreSqlMoney(column, input.Text).Text == Format(original);
+        }
+
+        return string.Equals(input.Text, Format(original), StringComparison.Ordinal);
     }
 
     public static bool IsBinaryValueTooLargeToEdit(TableColumnInfo column, object? value) =>
@@ -831,6 +841,87 @@ public static class TableCellValueConverter
         }
 
         return new ExactDecimalDefinition(precision, scale, isUnsigned);
+    }
+
+    public static int GetPostgreSqlMoneyScale(TableColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        return column.MonetaryScale is >= 0 and <= 127
+            ? column.MonetaryScale.Value
+            : throw new InvalidOperationException(
+                $"PostgreSQL money 欄位缺少有效的 lc_monetary 小數位 metadata：{column.DataTypeName}");
+    }
+
+    private static PostgreSqlMoneyValue ParsePostgreSqlMoney(TableColumnInfo column, string text)
+    {
+        const int maximumMoneyCharacters = 256;
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Length > maximumMoneyCharacters || trimmed.Contains('\0'))
+        {
+            throw new FormatException(
+                $"PostgreSQL money 不可為空、包含 NUL，且不可超過 {maximumMoneyCharacters} 個字元。");
+        }
+
+        var position = trimmed[0] is '+' or '-' ? 1 : 0;
+        var isNegative = trimmed[0] == '-';
+        var integerStart = position;
+        while (position < trimmed.Length && char.IsAsciiDigit(trimmed[position]))
+        {
+            position++;
+        }
+
+        if (position == integerStart)
+        {
+            throw new FormatException(
+                "PostgreSQL money 必須包含小數點前的十進位數字，不可使用幣別符號、指數或千分位格式。");
+        }
+
+        var integerEnd = position;
+        var fractionStart = -1;
+        if (position < trimmed.Length && trimmed[position] == '.')
+        {
+            fractionStart = ++position;
+            while (position < trimmed.Length && char.IsAsciiDigit(trimmed[position]))
+            {
+                position++;
+            }
+
+            if (position == fractionStart)
+            {
+                throw new FormatException("PostgreSQL money 的小數點後必須包含至少一位十進位數字。");
+            }
+        }
+
+        if (position != trimmed.Length)
+        {
+            throw new FormatException(
+                "PostgreSQL money 只能使用正負號、十進位數字與一個小數點，不可使用幣別符號、指數或千分位格式。");
+        }
+
+        var scale = GetPostgreSqlMoneyScale(column);
+        var fractionDigits = fractionStart < 0 ? 0 : trimmed.Length - fractionStart;
+        if (fractionDigits > scale)
+        {
+            throw new OverflowException(
+                $"{column.DataTypeName} 依目前 lc_monetary 只能無損保存 {scale} 位小數；拒絕由 PostgreSQL 自動取整。");
+        }
+
+        var integerPart = trimmed[integerStart..integerEnd].TrimStart('0');
+        var fractionPart = fractionStart < 0 ? string.Empty : trimmed[fractionStart..];
+        var scaledMagnitude = (integerPart + fractionPart + new string('0', scale - fractionDigits))
+            .TrimStart('0');
+        var maximumMagnitude = isNegative ? "9223372036854775808" : "9223372036854775807";
+        if (scaledMagnitude.Length > maximumMagnitude.Length ||
+            scaledMagnitude.Length == maximumMagnitude.Length &&
+            string.CompareOrdinal(scaledMagnitude, maximumMagnitude) > 0)
+        {
+            throw new OverflowException($"{column.DataTypeName} 超出 PostgreSQL 8-byte money 的可保存範圍。");
+        }
+
+        var canonicalInteger = integerPart.Length == 0 ? "0" : integerPart;
+        var canonicalFraction = scale == 0 ? string.Empty : "." + fractionPart.PadRight(scale, '0');
+        var canonicalSign = isNegative && scaledMagnitude.Length > 0 ? "-" : string.Empty;
+        return new PostgreSqlMoneyValue(canonicalSign + canonicalInteger + canonicalFraction);
     }
 
     private static ExactDecimalValue ParseExactDecimal(TableColumnInfo column, string text)

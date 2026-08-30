@@ -1118,6 +1118,75 @@ static async Task TableDataEditingAsync()
                 postgreSqlDateColumn,
                 new TableCellInput("event_date", TableCellInputMode.Value, invalid)));
         }
+        var postgreSqlMoneyColumn = new TableColumnInfo(
+            0,
+            "account_balance",
+            "money",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.PostgreSqlMoney)
+        {
+            StorageDataTypeName = "money",
+            MonetaryScale = 2
+        };
+        foreach (var expected in new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["1.2"] = "1.20",
+            ["+0001.20"] = "1.20",
+            ["-0"] = "0.00",
+            ["92233720368547758.07"] = "92233720368547758.07",
+            ["-92233720368547758.08"] = "-92233720368547758.08"
+        })
+        {
+            Assert(
+                TableCellValueConverter.Parse(
+                    postgreSqlMoneyColumn,
+                    new TableCellInput("account_balance", TableCellInputMode.Value, expected.Key)) is
+                    PostgreSqlMoneyValue money &&
+                money.Text == expected.Value &&
+                TableCellValueConverter.Format(money) == expected.Value,
+                $"PostgreSQL money 應正規化並無損保留 {expected.Key}");
+        }
+        Assert(
+            TableCellValueConverter.MatchesOriginal(
+                postgreSqlMoneyColumn,
+                new TableCellInput("account_balance", TableCellInputMode.Value, "1.2"),
+                "1.20"),
+            "PostgreSQL money 應把等值的小數位輸入視為未修改");
+        var threeDecimalMoneyColumn = postgreSqlMoneyColumn with { MonetaryScale = 3 };
+        Assert(
+            TableCellValueConverter.Parse(
+                threeDecimalMoneyColumn,
+                new TableCellInput("account_balance", TableCellInputMode.Value, "9223372036854775.807")) is
+                PostgreSqlMoneyValue threeDecimalMoney &&
+            threeDecimalMoney.Text == "9223372036854775.807",
+            "PostgreSQL money 應依 lc_monetary 小數位調整 signed 64-bit 正值上界");
+        var zeroDecimalMoneyColumn = postgreSqlMoneyColumn with { MonetaryScale = 0 };
+        Assert(
+            TableCellValueConverter.Parse(
+                zeroDecimalMoneyColumn,
+                new TableCellInput("account_balance", TableCellInputMode.Value, "-9223372036854775808")) is
+                PostgreSqlMoneyValue zeroDecimalMoney &&
+            zeroDecimalMoney.Text == "-9223372036854775808",
+            "PostgreSQL money 應支援 lc_monetary 為零位小數時的 signed 64-bit 負值下界");
+        foreach (var invalid in new[]
+                 {
+                     "1.234",
+                     "92233720368547758.08",
+                     "-92233720368547758.09",
+                     "$1.23",
+                     "1,234.56",
+                     "1e2"
+                 })
+        {
+            AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+                postgreSqlMoneyColumn,
+                new TableCellInput("account_balance", TableCellInputMode.Value, invalid)));
+        }
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.GetPostgreSqlMoneyScale(
+            postgreSqlMoneyColumn with { MonetaryScale = null }));
         var mySqlDateColumn = new TableColumnInfo(
             0,
             "event_date",
@@ -2226,6 +2295,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 varbits BIT VARYING(16) NULL,
                 alarm TIME WITH TIME ZONE NULL,
                 event_date DATE NULL,
+                account_balance MONEY NULL,
                 local_timestamp TIMESTAMP(3) WITHOUT TIME ZONE NULL,
                 precise_timestamp TIMESTAMP(6) WITHOUT TIME ZONE NULL,
                 utc_timestamp TIMESTAMP(4) WITH TIME ZONE NULL,
@@ -2317,6 +2387,7 @@ static async Task PostgreSqlLiveRoundTripAsync()
             id => $"UPDATE public.sample SET name = 'Concurrent' WHERE id = {id};");
         await VerifyPostgreSqlTemporalTypesAsync(session, database, table!);
         await VerifyPostgreSqlIntervalRestrictionsAsync(session, database, table!);
+        await VerifyPostgreSqlMoneyAsync(session, database, table!);
     }
     finally
     {
@@ -2325,6 +2396,90 @@ static async Task PostgreSqlLiveRoundTripAsync()
             $"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{database}' AND pid <> pg_backend_pid();");
         await session.ExecuteAsync("postgres", $"DROP DATABASE IF EXISTS \"{database}\";");
     }
+}
+
+static async Task VerifyPostgreSqlMoneyAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var moneyColumn = before.Columns.Single(column => column.Name == "account_balance");
+    Assert(
+        moneyColumn.ValueKind == TableColumnValueKind.PostgreSqlMoney &&
+        moneyColumn.IsEditable &&
+        moneyColumn.StorageDataTypeName == "money" &&
+        moneyColumn.MonetaryScale == 2,
+        $"PostgreSQL money metadata 不正確；kind={moneyColumn.ValueKind}, scale={moneyColumn.MonetaryScale}");
+
+    await session.InsertTableRowAsync(
+        database,
+        table,
+        new[]
+        {
+            new TableCellInput("name", TableCellInputMode.Value, "PostgreSQL money"),
+            new TableCellInput("account_balance", TableCellInputMode.Value, "92233720368547758.07")
+        });
+    var insertedSnapshot = await session.LoadTableDataAsync(database, table);
+    var inserted = insertedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "PostgreSQL money");
+    Assert(
+        Convert.ToString(inserted.Values[moneyColumn.Ordinal]) == "92233720368547758.07",
+        "PostgreSQL money 應無損保留正值上界 canonical 文字");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        inserted,
+        new[] { new TableCellInput("account_balance", TableCellInputMode.Value, "-92233720368547758.08") });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "PostgreSQL money");
+    Assert(
+        Convert.ToString(updated.Values[moneyColumn.Ordinal]) == "-92233720368547758.08",
+        "PostgreSQL money 應無損保留負值下界 canonical 文字");
+
+    foreach (var invalid in new[]
+             {
+                 "1.235",
+                 "92233720368547758.08",
+                 "-92233720368547758.09",
+                 "$1.23",
+                 "1,234.56"
+             })
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.UpdateTableRowAsync(
+            database,
+            table,
+            updated,
+            new[] { new TableCellInput("account_balance", TableCellInputMode.Value, invalid) }));
+    }
+    var rejectedSnapshot = await session.LoadTableDataAsync(database, table);
+    var unchanged = rejectedSnapshot.Rows.Single(row => Convert.ToString(row.Values[1]) == "PostgreSQL money");
+    Assert(
+        Convert.ToString(unchanged.Values[moneyColumn.Ordinal]) == "-92233720368547758.08",
+        "PostgreSQL money 不可把錯誤或需取整的輸入寫入");
+
+    var id = Convert.ToInt64(unchanged.Values[0], CultureInfo.InvariantCulture);
+    await session.ExecuteAsync(
+        database,
+        $"UPDATE public.sample SET account_balance = '1.23'::money WHERE id = {id};");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        unchanged,
+        new[] { new TableCellInput("quantity", TableCellInputMode.Value, "77") }));
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row =>
+        Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) == id);
+    Assert(
+        Convert.ToString(concurrent.Values[moneyColumn.Ordinal]) == "1.23" &&
+        Convert.ToInt32(concurrent.Values[2], CultureInfo.InvariantCulture) != 77,
+        "PostgreSQL money 原值變更時 optimistic concurrency 不可覆寫外部資料");
+
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(
+        afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0], CultureInfo.InvariantCulture) != id),
+        "PostgreSQL money 安全刪除失敗");
 }
 
 static async Task VerifyPostgreSqlTemporalTypesAsync(

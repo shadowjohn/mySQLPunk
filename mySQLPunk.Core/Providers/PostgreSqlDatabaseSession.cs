@@ -122,7 +122,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                      TableColumnValueKind.PostgreSqlArray or
                      TableColumnValueKind.PostgreSqlGeometric or
                      TableColumnValueKind.PostgreSqlServerValidatedText or
-                     TableColumnValueKind.ExactDecimal &&
+                     TableColumnValueKind.ExactDecimal or
+                     TableColumnValueKind.PostgreSqlMoney &&
                  parameter is NpgsqlParameter serverValidatedTextParameter)
         {
             serverValidatedTextParameter.NpgsqlDbType = NpgsqlDbType.Unknown;
@@ -207,7 +208,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             return $"CAST({QuoteIdentifier(column.Name)} AS text) = CAST({parameterName} AS text)";
         }
 
-        if (column.ValueKind == TableColumnValueKind.ExactDecimal)
+        if (column.ValueKind is TableColumnValueKind.ExactDecimal or TableColumnValueKind.PostgreSqlMoney)
         {
             return $"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName)}";
         }
@@ -233,6 +234,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         if (column.ValueKind == TableColumnValueKind.PostgreSqlDate)
         {
             return BuildPostgreSqlDateSelectExpression(quotedName);
+        }
+
+        if (column.ValueKind == TableColumnValueKind.PostgreSqlMoney)
+        {
+            return $"CAST(CAST({quotedName} AS numeric) AS text) AS {quotedName}";
         }
 
         if (column.ValueKind == TableColumnValueKind.PostgreSqlTemporal)
@@ -300,6 +306,11 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
 
     protected override string BuildParameterValueExpression(TableColumnInfo column, string parameterName)
     {
+        if (column.ValueKind == TableColumnValueKind.PostgreSqlMoney)
+        {
+            return $"CAST({parameterName} AS money)";
+        }
+
         if (column.ValueKind != TableColumnValueKind.ExactDecimal)
         {
             return base.BuildParameterValueExpression(column, parameterName);
@@ -385,7 +396,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                    CASE WHEN declared_ty.typtype = 'd'
                        THEN pg_catalog.format_type(declared_ty.typbasetype, declared_ty.typtypmod)
                        ELSE pg_catalog.format_type(a.atttypid, a.atttypmod)
-                   END AS storage_type
+                   END AS storage_type,
+                   scale(0::money::numeric) AS money_scale
             FROM information_schema.columns c
             JOIN pg_catalog.pg_namespace n ON n.nspname = c.table_schema
             JOIN pg_catalog.pg_class rel
@@ -431,6 +443,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             }
             var generated = string.Equals(reader.GetString(6), "YES", StringComparison.OrdinalIgnoreCase) ||
                             !string.Equals(reader.GetString(7), "NEVER", StringComparison.OrdinalIgnoreCase);
+            var valueKind = MapValueKind(dataType, userDefinedType);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -439,9 +452,12 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 reader.GetBoolean(5),
                 generated,
                 !reader.IsDBNull(8),
-                MapValueKind(dataType, userDefinedType))
+                valueKind)
             {
-                StorageDataTypeName = storageType
+                StorageDataTypeName = storageType,
+                MonetaryScale = valueKind == TableColumnValueKind.PostgreSqlMoney
+                    ? reader.GetInt32(14)
+                    : null
             });
         }
 
@@ -453,7 +469,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         {
             "smallint" or "integer" or "bigint" => TableColumnValueKind.Integer,
             "numeric" or "decimal" => TableColumnValueKind.ExactDecimal,
-            "money" => TableColumnValueKind.Decimal,
+            "money" => TableColumnValueKind.PostgreSqlMoney,
             "real" or "double precision" => TableColumnValueKind.FloatingPoint,
             "boolean" => TableColumnValueKind.Boolean,
             "date" => TableColumnValueKind.PostgreSqlDate,

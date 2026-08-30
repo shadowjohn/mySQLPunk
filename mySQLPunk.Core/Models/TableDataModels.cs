@@ -7,6 +7,7 @@ public enum TableColumnValueKind
     UnsignedInteger,
     Decimal,
     ExactDecimal,
+    PostgreSqlMoney,
     FloatingPoint,
     Boolean,
     Date,
@@ -52,6 +53,8 @@ public sealed record TableColumnInfo(
 {
     public string StorageDataTypeName { get; init; } = DataTypeName;
 
+    public int? MonetaryScale { get; init; }
+
     public bool IsEditable => !IsGenerated && ValueKind is not TableColumnValueKind.Unsupported;
 
     public string DisplayName => IsPrimaryKey ? $"{Name} · PK" : Name;
@@ -88,6 +91,8 @@ public sealed record TableCellInput(
 public sealed record IntervalComponents(int Months, int Days, long Microseconds);
 
 public sealed record ExactDecimalValue(string Text);
+
+public sealed record PostgreSqlMoneyValue(string Text);
 
 public sealed record ExactDecimalDefinition(int? Precision, int? Scale, bool IsUnsigned);
 

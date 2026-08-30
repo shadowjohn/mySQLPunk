@@ -442,8 +442,12 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         command.Parameters.Add(parameter);
     }
 
-    protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) =>
-        value is ExactDecimalValue exactDecimal ? exactDecimal.Text : value;
+    protected virtual object? PrepareParameterValue(TableColumnInfo column, object? value) => value switch
+    {
+        ExactDecimalValue exactDecimal => exactDecimal.Text,
+        PostgreSqlMoneyValue money => money.Text,
+        _ => value
+    };
 
     protected virtual object? PrepareOriginalParameterValue(TableColumnInfo column, object? value) =>
         PrepareParameterValue(column, value);
