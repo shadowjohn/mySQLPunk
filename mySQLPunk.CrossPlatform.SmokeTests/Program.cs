@@ -547,6 +547,29 @@ static async Task QueryResultExportFormatsAsync()
         Assert(tsv.Contains("\"tab\tvalue\"", StringComparison.Ordinal), "TSV tab escaping 錯誤");
         Assert(tsv.Contains("'-not-a-number", StringComparison.Ordinal), "TSV 公式注入未中和");
 
+        var clipboard = QueryResultExportService.BuildClipboardTsv(result, new[] { 1, 0 });
+        Assert(!clipboard.StartsWith('\uFEFF'), "系統剪貼簿文字不應包含 UTF-8 BOM 字元");
+        Assert(clipboard.StartsWith("name\tname\tamount\tcreated\tpayload\tempty\tnullable\tformula\r\n", StringComparison.Ordinal),
+            "剪貼簿 TSV 應包含欄名與固定 CRLF");
+        Assert(clipboard.IndexOf("Punky", StringComparison.Ordinal) < clipboard.IndexOf("崩琦", StringComparison.Ordinal),
+            "剪貼簿多列應依呼叫端提供的可視順序輸出");
+        Assert(clipboard.Contains("0x00FF", StringComparison.Ordinal) &&
+               clipboard.Contains("\t\"\"\t\t'=2+3\r\n", StringComparison.Ordinal),
+            "剪貼簿 TSV 應保留 binary、空字串、NULL 並中和公式注入");
+        AssertThrows<ArgumentException>(() => QueryResultExportService.BuildClipboardTsv(result, Array.Empty<int>()));
+        AssertThrows<ArgumentException>(() => QueryResultExportService.BuildClipboardTsv(result, new[] { 0, 0 }));
+        AssertThrows<ArgumentOutOfRangeException>(() => QueryResultExportService.BuildClipboardTsv(result, new[] { 2 }));
+        var oversizedClipboard = new QueryResult
+        {
+            Columns = new[] { "value" },
+            Rows = new IReadOnlyList<object?>[]
+            {
+                new object?[] { new string('x', QueryResultExportService.MaximumClipboardBytes) }
+            }
+        };
+        AssertThrows<InvalidOperationException>(() =>
+            QueryResultExportService.BuildClipboardTsv(oversizedClipboard, new[] { 0 }));
+
         var jsonPath = Path.Combine(directory, "result.json");
         await QueryResultExportService.WriteFileAsync(result, jsonPath, QueryResultExportFormat.Json);
         var jsonBytes = await File.ReadAllBytesAsync(jsonPath);

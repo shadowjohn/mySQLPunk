@@ -31,6 +31,8 @@ public sealed record QueryResultExportSummary(
 
 public static class QueryResultExportService
 {
+    public const int MaximumClipboardBytes = 4 * 1024 * 1024;
+
     private static readonly UTF8Encoding Utf8WithBom = new(true);
 
     public static QueryResult CreateTablePageResult(
@@ -113,6 +115,48 @@ public static class QueryResultExportService
             ".json" => QueryResultExportFormat.Json,
             _ => fallback
         };
+    }
+
+    public static string BuildClipboardTsv(
+        QueryResult result,
+        IReadOnlyList<int> rowIndices)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(rowIndices);
+        ValidateResult(result);
+        if (rowIndices.Count == 0)
+        {
+            throw new ArgumentException("請先選擇至少一列查詢結果。", nameof(rowIndices));
+        }
+
+        var requestedIndices = new List<int>(rowIndices.Count);
+        var seen = new HashSet<int>();
+        foreach (var rowIndex in rowIndices)
+        {
+            if (rowIndex < 0 || rowIndex >= result.Rows.Count)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(rowIndices),
+                    $"查詢結果列索引超出範圍：{rowIndex}");
+            }
+
+            if (!seen.Add(rowIndex))
+            {
+                throw new ArgumentException($"查詢結果列索引重複：{rowIndex}", nameof(rowIndices));
+            }
+
+            requestedIndices.Add(rowIndex);
+        }
+
+        var builder = new StringBuilder();
+        var bytes = 0;
+        AppendClipboardLine(builder, BuildDelimitedRow(result.Columns, '\t'), ref bytes);
+        foreach (var rowIndex in requestedIndices)
+        {
+            AppendClipboardLine(builder, BuildDelimitedRow(result.Rows[rowIndex], '\t'), ref bytes);
+        }
+
+        return builder.ToString();
     }
 
     public static async Task<QueryResultExportSummary> WriteFileAsync(
@@ -255,6 +299,19 @@ public static class QueryResultExportService
         }
 
         return value;
+    }
+
+    private static void AppendClipboardLine(StringBuilder builder, string line, ref int bytes)
+    {
+        var lineBytes = Encoding.UTF8.GetByteCount(line);
+        if (lineBytes > MaximumClipboardBytes - bytes - 2)
+        {
+            throw new InvalidOperationException(
+                $"選取結果超過剪貼簿 {MaximumClipboardBytes / (1024 * 1024)} MiB 安全上限，請減少選取列或改用匯出功能。");
+        }
+
+        builder.Append(line).Append("\r\n");
+        bytes += lineBytes + 2;
     }
 
     private static string NeutralizeSpreadsheetFormula(string value)

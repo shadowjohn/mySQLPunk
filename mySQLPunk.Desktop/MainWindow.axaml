@@ -207,15 +207,21 @@
                      Text="SELECT 1;" />
             <GridSplitter Grid.Row="2" ResizeDirection="Rows" Background="#E4E7EC" />
             <Grid Grid.Row="3" RowDefinitions="Auto,*">
-              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,90,Auto" Margin="12,7,10,7">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,90,Auto" Margin="12,7,10,7">
                 <TextBlock Grid.Column="0" Text="查詢結果" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="格式" VerticalAlignment="Center" Margin="0,0,7,0" />
-                <ComboBox Grid.Column="2" x:Name="ExportFormatCombo" SelectedIndex="0" Margin="0,0,7,0">
+                <Button Grid.Column="1"
+                        x:Name="CopyResultButton"
+                        Content="複製選取列"
+                        Click="CopyResult_Click"
+                        IsEnabled="False"
+                        Margin="0,0,12,0" />
+                <TextBlock Grid.Column="2" Text="格式" VerticalAlignment="Center" Margin="0,0,7,0" />
+                <ComboBox Grid.Column="3" x:Name="ExportFormatCombo" SelectedIndex="0" Margin="0,0,7,0">
                   <ComboBoxItem Content="CSV" />
                   <ComboBoxItem Content="TSV" />
                   <ComboBoxItem Content="JSON" />
                 </ComboBox>
-                <Button Grid.Column="3"
+                <Button Grid.Column="4"
                         x:Name="ExportButton"
                         Content="匯出結果…"
                         Click="ExportResult_Click"
@@ -226,6 +232,10 @@
                         Margin="10,0,10,10"
                         AutoGenerateColumns="False"
                         IsReadOnly="True"
+                        SelectionMode="Extended"
+                        ClipboardCopyMode="None"
+                        SelectionChanged="ResultsGrid_SelectionChanged"
+                        KeyDown="ResultsGrid_KeyDown"
                         CanUserResizeColumns="True"
                         CanUserSortColumns="True"
                         GridLinesVisibility="All"

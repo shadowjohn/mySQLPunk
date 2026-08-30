@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Data;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
@@ -54,6 +55,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _refreshButton;
     private readonly Button _executeButton;
     private readonly Button _executeDocumentButton;
+    private readonly Button _copyResultButton;
     private readonly Button _exportButton;
     private readonly Button _cancelButton;
     private readonly Button _updateButton;
@@ -88,6 +90,7 @@ public sealed partial class MainWindow : Window
         _refreshButton = this.FindControl<Button>("RefreshButton")!;
         _executeButton = this.FindControl<Button>("ExecuteButton")!;
         _executeDocumentButton = this.FindControl<Button>("ExecuteDocumentButton")!;
+        _copyResultButton = this.FindControl<Button>("CopyResultButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
         _updateButton = this.FindControl<Button>("UpdateButton")!;
@@ -1077,6 +1080,7 @@ public sealed partial class MainWindow : Window
     private void DisplayResult(QueryResult result)
     {
         _lastResult = result.HasResultSet ? result : null;
+        _copyResultButton.IsEnabled = false;
         _resultsGrid.Columns.Clear();
         for (var index = 0; index < result.Columns.Count; index++)
         {
@@ -1089,8 +1093,78 @@ public sealed partial class MainWindow : Window
         }
 
         _resultsGrid.ItemsSource = result.Rows
-            .Select(row => new ResultRow(row.Select(value => value ?? "(NULL)").ToArray()))
+            .Select((row, rowIndex) => new ResultRow(
+                rowIndex,
+                row.Select(value => value ?? "(NULL)").ToArray()))
             .ToList();
+    }
+
+    private void ResultsGrid_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        UpdateCopyResultState();
+    }
+
+    private async void ResultsGrid_KeyDown(object? sender, KeyEventArgs e)
+    {
+        var copyModifier = e.KeyModifiers.HasFlag(KeyModifiers.Control) ||
+                           e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+        if (!copyModifier || e.Key != Key.C)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await CopySelectedResultRowsAsync();
+    }
+
+    private async void CopyResult_Click(object? sender, RoutedEventArgs e)
+    {
+        await CopySelectedResultRowsAsync();
+    }
+
+    private async Task CopySelectedResultRowsAsync()
+    {
+        var result = _lastResult;
+        var selectedIndices = _resultsGrid.SelectedItems
+            .OfType<ResultRow>()
+            .Select(row => row.RowIndex)
+            .ToHashSet();
+        if (result is null || selectedIndices.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var selectedRows = _resultsGrid.CollectionView
+                .Cast<object>()
+                .OfType<ResultRow>()
+                .Where(row => selectedIndices.Contains(row.RowIndex))
+                .ToList();
+            var text = QueryResultExportService.BuildClipboardTsv(
+                result,
+                selectedRows.Select(row => row.RowIndex).ToArray());
+            var clipboard = TopLevel.GetTopLevel(_resultsGrid)?.Clipboard;
+            if (clipboard is null)
+            {
+                throw new InvalidOperationException("目前桌面環境未提供系統剪貼簿。");
+            }
+
+            await clipboard.SetTextAsync(text);
+            await clipboard.FlushAsync();
+            SetStatus($"已複製 {selectedRows.Count:N0} 列 TSV（含欄名）到系統剪貼簿；未寫入磁碟。");
+        }
+        catch (Exception exception)
+        {
+            await ShowErrorAsync("無法複製查詢結果", exception);
+        }
+    }
+
+    private void UpdateCopyResultState()
+    {
+        _copyResultButton.IsEnabled = _operationCancellation is null &&
+                                      _lastResult is not null &&
+                                      _resultsGrid.SelectedItems.OfType<ResultRow>().Any();
     }
 
     private async void ExportResult_Click(object? sender, RoutedEventArgs e)
@@ -1381,6 +1455,9 @@ public sealed partial class MainWindow : Window
         _refreshButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _executeButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _executeDocumentButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _copyResultButton.IsEnabled = !busy &&
+                                      _lastResult is not null &&
+                                      _resultsGrid.SelectedItems.OfType<ResultRow>().Any();
         _exportButton.IsEnabled = !busy && _lastResult is not null;
         _databaseCombo.IsEnabled = !busy && _session is not null;
         _objectSearchBox.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
@@ -1430,7 +1507,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private sealed record ResultRow(IReadOnlyList<object?> Values);
+    private sealed record ResultRow(int RowIndex, IReadOnlyList<object?> Values);
 
     private sealed record PasswordResolution(bool Found, string Password, string? Warning);
 }
