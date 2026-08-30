@@ -159,6 +159,49 @@ public static class QueryResultExportService
         return builder.ToString();
     }
 
+    public static QueryResult CreateReorderedResult(
+        QueryResult result,
+        IReadOnlyList<int> rowIndices)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(rowIndices);
+        ValidateResult(result);
+        if (rowIndices.Count != result.Rows.Count)
+        {
+            throw new ArgumentException(
+                "匯出列順序必須完整包含目前查詢結果的每一列。",
+                nameof(rowIndices));
+        }
+
+        var rows = new List<IReadOnlyList<object?>>(rowIndices.Count);
+        var seen = new HashSet<int>();
+        foreach (var rowIndex in rowIndices)
+        {
+            if (rowIndex < 0 || rowIndex >= result.Rows.Count)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(rowIndices),
+                    $"查詢結果列索引超出範圍：{rowIndex}");
+            }
+
+            if (!seen.Add(rowIndex))
+            {
+                throw new ArgumentException($"查詢結果列索引重複：{rowIndex}", nameof(rowIndices));
+            }
+
+            rows.Add(result.Rows[rowIndex]);
+        }
+
+        return new QueryResult
+        {
+            Columns = result.Columns,
+            Rows = rows,
+            RowsAffected = result.RowsAffected,
+            Elapsed = result.Elapsed,
+            WasTruncated = result.WasTruncated
+        };
+    }
+
     public static async Task<QueryResultExportSummary> WriteFileAsync(
         QueryResult result,
         string path,

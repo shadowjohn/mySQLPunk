@@ -526,6 +526,8 @@ static async Task QueryResultExportFormatsAsync()
         var result = new QueryResult
         {
             Columns = new[] { "name", "name", "amount", "created", "payload", "empty", "nullable", "formula" },
+            Elapsed = TimeSpan.FromMilliseconds(42),
+            WasTruncated = true,
             Rows = new IReadOnlyList<object?>[]
             {
                 new object?[]
@@ -585,6 +587,27 @@ static async Task QueryResultExportFormatsAsync()
         AssertThrows<ArgumentException>(() => QueryResultExportService.BuildClipboardTsv(result, Array.Empty<int>()));
         AssertThrows<ArgumentException>(() => QueryResultExportService.BuildClipboardTsv(result, new[] { 0, 0 }));
         AssertThrows<ArgumentOutOfRangeException>(() => QueryResultExportService.BuildClipboardTsv(result, new[] { 2 }));
+        var reordered = QueryResultExportService.CreateReorderedResult(result, new[] { 1, 0 });
+        Assert(ReferenceEquals(reordered.Rows[0], result.Rows[1]) &&
+               ReferenceEquals(reordered.Rows[1], result.Rows[0]),
+            "完整匯出應依目前結果網格的可視順序重排列");
+        Assert(reordered.Columns.SequenceEqual(result.Columns) &&
+               reordered.WasTruncated == result.WasTruncated &&
+               reordered.Elapsed == result.Elapsed,
+            "重排查詢結果不可遺失欄位或執行 metadata");
+        AssertThrows<ArgumentException>(() => QueryResultExportService.CreateReorderedResult(result, new[] { 0 }));
+        AssertThrows<ArgumentException>(() => QueryResultExportService.CreateReorderedResult(result, new[] { 0, 0 }));
+        AssertThrows<ArgumentOutOfRangeException>(() =>
+            QueryResultExportService.CreateReorderedResult(result, new[] { 0, 2 }));
+        var reorderedPath = Path.Combine(directory, "reordered.csv");
+        await QueryResultExportService.WriteFileAsync(
+            reordered,
+            reorderedPath,
+            QueryResultExportFormat.Csv);
+        var reorderedCsv = await File.ReadAllTextAsync(reorderedPath);
+        Assert(reorderedCsv.IndexOf("Punky", StringComparison.Ordinal) <
+               reorderedCsv.IndexOf("崩琦", StringComparison.Ordinal),
+            "實際匯出檔應沿用結果網格提供的重排順序");
         var oversizedClipboard = new QueryResult
         {
             Columns = new[] { "value" },

@@ -1259,10 +1259,16 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var visibleRowIndices = _resultsGrid.CollectionView
+            .Cast<object>()
+            .OfType<ResultRow>()
+            .Select(row => row.RowIndex)
+            .ToArray();
+        var visibleResult = QueryResultExportService.CreateReorderedResult(result, visibleRowIndices);
         var format = QueryResultExportService.ResolveFormat(path, selectedFormat);
         await RunOperationAsync("正在匯出查詢結果…", async cancellationToken =>
         {
-            var summary = await QueryResultExportService.WriteFileAsync(result, path, format, cancellationToken);
+            var summary = await QueryResultExportService.WriteFileAsync(visibleResult, path, format, cancellationToken);
             SetStatus(
                 $"已匯出 {summary.Rows:N0} 列 {summary.FormatDisplayName}（{summary.FormattedBytes}）：{summary.Path}");
         });
