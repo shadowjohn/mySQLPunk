@@ -456,6 +456,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     {
         SqliteNumericValue numeric => numeric.Text,
         SqliteTemporalValue temporal => temporal.Text,
+        SqliteGuidValue guid => guid.Text,
         FloatingPointValue floatingPoint => floatingPoint.Value,
         ExactDecimalValue exactDecimal => exactDecimal.Text,
         PostgreSqlMoneyValue money => money.Text,

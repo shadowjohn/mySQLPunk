@@ -588,6 +588,21 @@ static async Task TableDataEditingAsync()
                 '2026-08-30 12:34:56.1234567',
                 '2026-08-30 12:34:56',
                 45296);
+            CREATE TABLE identifier_sample (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                uuid_value UUID NOT NULL,
+                guid_value GUID NULL,
+                legacy_guid UUID NULL,
+                legacy_blob GUID NULL
+            );
+            INSERT INTO identifier_sample (name, uuid_value, guid_value, legacy_guid, legacy_blob)
+            VALUES (
+                'Identifier before',
+                '123e4567-e89b-12d3-a456-426614174000',
+                '6F9619FF-8B86-D011-B42D-00C04FC964FF',
+                '{00000000-0000-0000-0000-000000000001}',
+                X'00112233445566778899AABBCCDDEEFF');
             INSERT INTO paged_sample (id, name) VALUES
                 (1, 'page-1'), (2, 'page-2'), (3, 'page-3'), (4, 'page-4'), (5, 'page-5');
             """);
@@ -754,6 +769,137 @@ static async Task TableDataEditingAsync()
                 profile.Database,
                 "SELECT name FROM temporal_sample WHERE id = 1;")).Rows.Single()[0]) == "Temporal before",
             "SQLite temporal optimistic predicate 應攔截外部修改");
+
+        var identifierTable = new DatabaseObjectInfo(string.Empty, "identifier_sample", DatabaseObjectKind.Table);
+        var identifierSnapshot = await session.LoadTableDataAsync(profile.Database, identifierTable);
+        var identifierColumns = identifierSnapshot.Columns
+            .Where(column => column.ValueKind == TableColumnValueKind.SqliteGuid)
+            .ToList();
+        Assert(
+            identifierColumns.Select(column => column.Name).SequenceEqual(
+                new[] { "uuid_value", "guid_value", "legacy_guid", "legacy_blob" }),
+            "SQLite UUID／GUID metadata 應使用保留文字大小寫的 GUID 編輯器");
+        var uuidColumn = identifierColumns.Single(column => column.Name == "uuid_value");
+        var guidColumn = identifierColumns.Single(column => column.Name == "guid_value");
+        var legacyGuidColumn = identifierColumns.Single(column => column.Name == "legacy_guid");
+        var legacyBlobColumn = identifierColumns.Single(column => column.Name == "legacy_blob");
+        Assert(
+            TableCellValueConverter.Parse(
+                uuidColumn,
+                new TableCellInput(
+                    "uuid_value",
+                    TableCellInputMode.Value,
+                    " aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee ")) is
+            SqliteGuidValue { Text: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" } &&
+            TableCellValueConverter.Parse(
+                guidColumn,
+                new TableCellInput(
+                    "guid_value",
+                    TableCellInputMode.Value,
+                    "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")) is
+            SqliteGuidValue { Text: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" },
+            "SQLite GUID parser 應驗證標準 D 格式並保留輸入大小寫");
+        foreach (var invalid in new[]
+                 {
+                     "aaaaaaaaaaaabbbbccccddddeeeeeeeeeeee",
+                     "{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}",
+                     "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee",
+                     "not-a-guid"
+                 })
+        {
+            AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+                uuidColumn,
+                new TableCellInput("uuid_value", TableCellInputMode.Value, invalid)));
+        }
+        Assert(
+            TableCellValueConverter.MatchesOriginal(
+                legacyGuidColumn,
+                new TableCellInput(
+                    "legacy_guid",
+                    TableCellInputMode.Value,
+                    "{00000000-0000-0000-0000-000000000001}"),
+                "{00000000-0000-0000-0000-000000000001}"),
+            "SQLite legacy GUID 原值未修改時不可因新格式驗證阻擋其它欄位寫入");
+        var legacyBlobValue = identifierSnapshot.Rows.Single().Values[legacyBlobColumn.Ordinal];
+        Assert(
+            legacyBlobValue is byte[] { Length: 16 } &&
+            TableCellValueConverter.MatchesOriginal(
+                legacyBlobColumn,
+                new TableCellInput(
+                    "legacy_blob",
+                    TableCellInputMode.Value,
+                    TableCellValueConverter.Format(legacyBlobValue)),
+                legacyBlobValue),
+            "SQLite legacy BLOB GUID 未修改時應保留原始 bytes 與 storage class");
+
+        await session.UpdateTableRowAsync(
+            profile.Database,
+            identifierTable,
+            identifierSnapshot.Rows.Single(),
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Identifier after"),
+                new TableCellInput(
+                    "uuid_value",
+                    TableCellInputMode.Value,
+                    "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                new TableCellInput(
+                    "guid_value",
+                    TableCellInputMode.Value,
+                    "BBBBBBBB-CCCC-DDDD-EEEE-FFFFFFFFFFFF")
+            });
+        var storedIdentifiers = await session.ExecuteAsync(
+            profile.Database,
+            "SELECT name, uuid_value, guid_value, legacy_guid, legacy_blob, " +
+            "typeof(uuid_value), typeof(guid_value), typeof(legacy_guid), typeof(legacy_blob) " +
+            "FROM identifier_sample WHERE id = 1;");
+        Assert(
+            Convert.ToString(storedIdentifiers.Rows.Single()[0]) == "Identifier after" &&
+            Convert.ToString(storedIdentifiers.Rows.Single()[1]) ==
+                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" &&
+            Convert.ToString(storedIdentifiers.Rows.Single()[2]) ==
+                "BBBBBBBB-CCCC-DDDD-EEEE-FFFFFFFFFFFF" &&
+            Convert.ToString(storedIdentifiers.Rows.Single()[3]) ==
+                "{00000000-0000-0000-0000-000000000001}" &&
+            Convert.ToString(storedIdentifiers.Rows.Single()[4]) ==
+                "0x00112233445566778899AABBCCDDEEFF" &&
+            storedIdentifiers.Rows.Single().Skip(5).Take(3)
+                .All(value => Convert.ToString(value) == "text") &&
+            Convert.ToString(storedIdentifiers.Rows.Single()[8]) == "blob",
+            "SQLite UUID／GUID 寫入應以 TEXT 精確保留大小寫且不改寫 legacy TEXT／BLOB 原值");
+        var updatedIdentifierRow = (await session.LoadTableDataAsync(
+            profile.Database,
+            identifierTable)).Rows.Single();
+        await AssertThrowsAsync<InvalidOperationException>(() => session.UpdateTableRowAsync(
+            profile.Database,
+            identifierTable,
+            updatedIdentifierRow,
+            new[]
+            {
+                new TableCellInput(
+                    "uuid_value",
+                    TableCellInputMode.Value,
+                    "aaaaaaaaaaaabbbbccccddddeeeeeeeeeeee")
+            }));
+        Assert(
+            Convert.ToString((await session.ExecuteAsync(
+                profile.Database,
+                "SELECT uuid_value FROM identifier_sample WHERE id = 1;")).Rows.Single()[0]) ==
+                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "SQLite 非標準 GUID 格式不可落入資料庫");
+        await session.ExecuteAsync(
+            profile.Database,
+            "UPDATE identifier_sample SET guid_value = 'cccccccc-dddd-eeee-ffff-000000000000' WHERE id = 1;");
+        await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+            profile.Database,
+            identifierTable,
+            updatedIdentifierRow,
+            new[] { new TableCellInput("name", TableCellInputMode.Value, "must-not-overwrite") }));
+        Assert(
+            Convert.ToString((await session.ExecuteAsync(
+                profile.Database,
+                "SELECT name FROM identifier_sample WHERE id = 1;")).Rows.Single()[0]) == "Identifier after",
+            "SQLite GUID optimistic predicate 應攔截外部修改");
 
         var numericTable = new DatabaseObjectInfo(string.Empty, "numeric_sample", DatabaseObjectKind.Table);
         var emptyNumeric = await session.LoadTableDataAsync(profile.Database, numericTable);

@@ -30,10 +30,25 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
         TableColumnInfo column)
     {
         base.ConfigureParameter(parameter, column);
-        if (column.ValueKind is TableColumnValueKind.SqliteNumeric or TableColumnValueKind.SqliteTemporal &&
+        if ((column.ValueKind is TableColumnValueKind.SqliteNumeric or
+                TableColumnValueKind.SqliteTemporal or
+                TableColumnValueKind.SqliteGuid) &&
             parameter is SqliteParameter sqliteParameter)
         {
             sqliteParameter.SqliteType = SqliteType.Text;
+        }
+    }
+
+    protected override void ConfigurePreparedParameter(
+        System.Data.Common.DbParameter parameter,
+        TableColumnInfo column)
+    {
+        base.ConfigurePreparedParameter(parameter, column);
+        if (column.ValueKind == TableColumnValueKind.SqliteGuid &&
+            parameter.Value is byte[] &&
+            parameter is SqliteParameter sqliteParameter)
+        {
+            sqliteParameter.SqliteType = SqliteType.Blob;
         }
     }
 
@@ -141,6 +156,11 @@ internal sealed class SqliteDatabaseSession : AdoDatabaseSession
     private static TableColumnValueKind MapValueKind(string dataType)
     {
         var normalized = dataType.Trim().ToUpperInvariant();
+        if (normalized is "UUID" or "GUID")
+        {
+            return TableColumnValueKind.SqliteGuid;
+        }
+
         if (normalized.Contains("INT", StringComparison.Ordinal))
         {
             return TableColumnValueKind.Integer;

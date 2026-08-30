@@ -235,6 +235,7 @@ public sealed partial class TableRowEditorWindow : Window
             column.StorageDataTypeName.Equals("cid", StringComparison.OrdinalIgnoreCase) =>
             $"0–{uint.MaxValue}（十進位）",
         TableColumnValueKind.SqliteTemporal => BuildSqliteTemporalWatermark(column),
+        TableColumnValueKind.SqliteGuid => "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx（保留大小寫）",
         TableColumnValueKind.Date => "yyyy-MM-dd",
         TableColumnValueKind.PostgreSqlDate => "YYYY-MM-DD[ BC] 或 ±infinity",
         TableColumnValueKind.DateTime => "yyyy-MM-dd HH:mm:ss",

@@ -7,6 +7,7 @@ public enum TableColumnValueKind
     UnsignedInteger,
     SqliteNumeric,
     SqliteTemporal,
+    SqliteGuid,
     ExactDecimal,
     PostgreSqlMoney,
     SqlServerMoney,
@@ -116,6 +117,8 @@ public sealed record ExactDecimalValue(string Text);
 public sealed record SqliteNumericValue(string Text);
 
 public sealed record SqliteTemporalValue(string Text);
+
+public sealed record SqliteGuidValue(string Text);
 
 public sealed record FloatingPointValue(object Value, string Text);
 
