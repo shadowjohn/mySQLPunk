@@ -2199,9 +2199,23 @@ public static class TableCellValueConverter
             "cidr" => ParseIpNetwork(text, requireNetworkAddress: true),
             "macaddr" => ParseMacAddress(text, 6),
             "macaddr8" => ParseMacAddress(text, 8),
+            "inet4" => ParseMariaDbInet4(text),
             "inet6" => ParseMariaDbInet6(text),
             _ => throw new FormatException("不支援的網路位址型別。")
         };
+    }
+
+    private static string ParseMariaDbInet4(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Contains('/') || trimmed.Contains('%') ||
+            !IPAddress.TryParse(trimmed, out var address) ||
+            address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            throw new FormatException("MariaDB INET4 必須是不含 prefix 的 IPv4 位址。");
+        }
+
+        return address.ToString();
     }
 
     private static string ParseMariaDbInet6(string text)

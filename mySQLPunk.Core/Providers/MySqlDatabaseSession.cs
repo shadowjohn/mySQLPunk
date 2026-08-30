@@ -146,11 +146,15 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             uuidParameter.Size = 36;
         }
         else if (column.ValueKind == TableColumnValueKind.NetworkAddress &&
-                 column.StorageDataTypeName.Equals("inet6", StringComparison.OrdinalIgnoreCase) &&
-                 parameter is MySqlParameter inet6Parameter)
+                 column.StorageDataTypeName is var networkDataType &&
+                 (networkDataType.Equals("inet4", StringComparison.OrdinalIgnoreCase) ||
+                  networkDataType.Equals("inet6", StringComparison.OrdinalIgnoreCase)) &&
+                 parameter is MySqlParameter networkParameter)
         {
-            inet6Parameter.MySqlDbType = MySqlDbType.VarChar;
-            inet6Parameter.Size = 45;
+            networkParameter.MySqlDbType = MySqlDbType.VarChar;
+            networkParameter.Size = networkDataType.Equals("inet4", StringComparison.OrdinalIgnoreCase)
+                ? 15
+                : 45;
         }
         else if (column.ValueKind == TableColumnValueKind.String && parameter is MySqlParameter stringParameter)
         {
@@ -280,9 +284,14 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         }
 
         if (column.ValueKind == TableColumnValueKind.NetworkAddress &&
-            column.StorageDataTypeName.Equals("inet6", StringComparison.OrdinalIgnoreCase))
+            column.StorageDataTypeName is var networkDataType &&
+            (networkDataType.Equals("inet4", StringComparison.OrdinalIgnoreCase) ||
+             networkDataType.Equals("inet6", StringComparison.OrdinalIgnoreCase)))
         {
-            return $"CAST({parameterName} AS INET6)";
+            var networkTypeName = networkDataType.Equals("inet4", StringComparison.OrdinalIgnoreCase)
+                ? "INET4"
+                : "INET6";
+            return $"CAST({parameterName} AS {networkTypeName})";
         }
 
         if (column.ValueKind != TableColumnValueKind.ExactDecimal)
@@ -458,7 +467,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             "time" => TableColumnValueKind.MySqlTime,
             "json" => TableColumnValueKind.Json,
             "uuid" => TableColumnValueKind.Guid,
-            "inet6" => TableColumnValueKind.NetworkAddress,
+            "inet4" or "inet6" => TableColumnValueKind.NetworkAddress,
             "binary" or "varbinary" or "tinyblob" or "blob" or "mediumblob" or "longblob" =>
                 TableColumnValueKind.Binary,
             "geometry" or "point" or "linestring" or "polygon" or "multipoint" or "multilinestring" or

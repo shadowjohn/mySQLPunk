@@ -90,7 +90,7 @@ SQL Server `money`／`smallmoney` 會固定顯示 4 位小數，並以各自的�
 
 MySQL／MariaDB 的 GEOMETRY、POINT、LINESTRING、POLYGON、MULTIPOINT、MULTILINESTRING、MULTIPOLYGON、GEOMETRYCOLLECTION，以及 SQL Server 的 geometry／geography，可用 `SRID=<非負整數>;<WKT>` 安全編輯；載入與寫回都保留 SRID，原值比對同時檢查 SRID 與 canonical WKT。畸形 WKT 會讓整筆交易回復；MariaDB 即使只回傳 warning／NULL，也會轉成明確錯誤，避免 nullable 欄位被靜默清空。超過 1 MiB 的 spatial 文字維持唯讀。
 
-MariaDB 原生 `UUID` 與 `INET6` 欄位也可直接編輯。UUID 會正規化為小寫標準格式；INET6 接受 IPv4／IPv6，IPv4 依 MariaDB 原生語意保存為 IPv4-mapped IPv6。兩者都先在本機拒絕無效格式，再以參數化原生 CAST 寫入，修改與刪除會用 canonical 值完成 optimistic concurrency 比對。
+MariaDB 原生 `UUID`、`INET4` 與 `INET6` 欄位也可直接編輯。UUID 會正規化為小寫標準格式；INET4 僅接受 IPv4 並以原生 4-byte binary 保存，INET6 接受 IPv4／IPv6，且把 IPv4 依 MariaDB 原生語意保存為 IPv4-mapped IPv6。三者都先在本機拒絕無效格式，再以參數化原生 CAST 寫入，修改與刪除會用 canonical 值完成 optimistic concurrency 比對。
 
 MySQL／MariaDB `DATE`、`DATETIME(p)` 與 `TIMESTAMP(p)` 會依欄位宣告保留 0–6 位小數秒，使用 canonical ISO 格式與對應的原生參數。介面會在送出前拒絕 DATE／DATETIME 範圍外、帶 offset 或超過欄位 fsp 的輸入，避免資料庫預設在沒有 warning 的情況下無聲四捨五入。
 
@@ -227,7 +227,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 
 ## 已知限制
 
-- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、provider-aware integer range、無損高精度 DECIMAL／NUMERIC、single／double 浮點 round-trip 防護、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／YEAR／DATE／DATETIME／TIMESTAMP／UUID／INET6、PostgreSQL scalar temporal／bit string／timetz／interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery／range／multirange／array／geometric／jsonpath／snapshot／hstore／ltree／reg*／enum／composite／extension UDT／domain、1 MiB 內 binary、JSON、XML、PostgreSQL 網路位址，以及 SQL Server scalar temporal／legacy LOB／hierarchyid／alias type／sql_variant 欄位的 Table 資料編輯；Oracle、MongoDB、Redis、Snowflake、其餘進階型別、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；Linux 已可安全下載、關閉、套用、健康檢查與 rollback，macOS 則在正式 Developer ID 簽署與 Apple notarization 憑證完成前維持驗證後手動安裝。
+- Linux / macOS 目前是跨平台預覽版，涵蓋 MySQL / MariaDB、PostgreSQL、SQL Server、SQLite 的連線、metadata、SQL 工作流程、CSV / TSV / JSON 結果匯出、Primary Key 穩定分頁，以及常用 scalar、provider-aware integer range、無損高精度 DECIMAL／NUMERIC、single／double 浮點 round-trip 防護、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／YEAR／DATE／DATETIME／TIMESTAMP／UUID／INET4／INET6、PostgreSQL scalar temporal／bit string／timetz／interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery／range／multirange／array／geometric／jsonpath／snapshot／hstore／ltree／reg*／enum／composite／extension UDT／domain、1 MiB 內 binary、JSON、XML、PostgreSQL 網路位址，以及 SQL Server scalar temporal／legacy LOB／hierarchyid／alias type／sql_variant 欄位的 Table 資料編輯；Oracle、MongoDB、Redis、Snowflake、其餘進階型別、模型與 AI 等功能仍需從 Windows 完整版遷移。Linux 缺少 `secret-tool`／Secret Service、macOS Keychain 不可用，或使用者未勾選保存時，程式重開後仍需重新輸入密碼；Linux 已可安全下載、關閉、套用、健康檢查與 rollback，macOS 則在正式 Developer ID 簽署與 Apple notarization 憑證完成前維持驗證後手動安裝。
 - Oracle 的部分 DDL 還是會被權限、語法或物件型態擋下來；預覽會附上權限診斷 SQL 跟修復建議，但終究要看帳號實際有什麼權限。
 - Windows 完整版對沒有 Primary Key 的資料表仍可用原始值組 WHERE 條件；欄位有浮點數或大文字時可能比不準，可在選項中改成唯讀。Linux / macOS 預覽版會直接停用無 Primary Key Table 的修改與刪除，只保留新增與瀏覽。
 - XLSX 匯出要把整份結果放進記憶體；還原 SQL 備份也是整個檔一次讀進來，特別大的備份要留意。
