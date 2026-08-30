@@ -453,6 +453,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             var generated = string.Equals(reader.GetString(6), "YES", StringComparison.OrdinalIgnoreCase) ||
                             !string.Equals(reader.GetString(7), "NEVER", StringComparison.OrdinalIgnoreCase);
             var valueKind = MapValueKind(dataType, userDefinedType);
+            var integerBounds = GetIntegerBounds(storageType, valueKind);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -466,7 +467,9 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
                 StorageDataTypeName = storageType,
                 MonetaryScale = valueKind == TableColumnValueKind.PostgreSqlMoney
                     ? reader.GetInt32(14)
-                    : null
+                    : null,
+                IntegerMinimum = integerBounds?.Minimum,
+                IntegerMaximum = integerBounds?.Maximum
             });
         }
 
@@ -520,4 +523,22 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             "user-defined" => TableColumnValueKind.PostgreSqlServerValidatedText,
             _ => TableColumnValueKind.Unsupported
         };
+
+    private static (long Minimum, ulong Maximum)? GetIntegerBounds(
+        string storageType,
+        TableColumnValueKind valueKind)
+    {
+        if (valueKind != TableColumnValueKind.Integer)
+        {
+            return null;
+        }
+
+        return storageType.ToLowerInvariant() switch
+        {
+            "smallint" => (short.MinValue, (ulong)short.MaxValue),
+            "integer" => (int.MinValue, (ulong)int.MaxValue),
+            "bigint" => (long.MinValue, (ulong)long.MaxValue),
+            _ => null
+        };
+    }
 }

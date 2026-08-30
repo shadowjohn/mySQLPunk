@@ -581,6 +581,8 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             var generated = reader.GetBoolean(7) || reader.GetBoolean(8) ||
                             baseType.Equals("timestamp", StringComparison.OrdinalIgnoreCase) ||
                             baseType.Equals("rowversion", StringComparison.OrdinalIgnoreCase);
+            var valueKind = MapValueKind(baseType, reader.GetByte(11));
+            var integerBounds = GetIntegerBounds(baseType, valueKind);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -589,9 +591,11 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
                 reader.GetBoolean(6),
                 generated,
                 reader.GetInt32(9) != 0,
-                MapValueKind(baseType, reader.GetByte(11)))
+                valueKind)
             {
-                StorageDataTypeName = storageType
+                StorageDataTypeName = storageType,
+                IntegerMinimum = integerBounds?.Minimum,
+                IntegerMaximum = integerBounds?.Maximum
             });
         }
 
@@ -665,6 +669,25 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" => TableColumnValueKind.String,
         _ => TableColumnValueKind.Unsupported
     };
+
+    private static (long Minimum, ulong Maximum)? GetIntegerBounds(
+        string dataType,
+        TableColumnValueKind valueKind)
+    {
+        if (valueKind != TableColumnValueKind.Integer)
+        {
+            return null;
+        }
+
+        return dataType.ToLowerInvariant() switch
+        {
+            "tinyint" => (0, byte.MaxValue),
+            "smallint" => (short.MinValue, (ulong)short.MaxValue),
+            "int" => (int.MinValue, (ulong)int.MaxValue),
+            "bigint" => (long.MinValue, (ulong)long.MaxValue),
+            _ => null
+        };
+    }
 
     private sealed record SqlServerVariantOriginalText(string Text);
 }

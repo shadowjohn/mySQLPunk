@@ -1471,6 +1471,60 @@ static async Task TableDataEditingAsync()
         AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
             mySqlYearColumn,
             new TableCellInput("release_year", TableCellInputMode.Value, "70")));
+        var boundedSignedIntegerColumn = new TableColumnInfo(
+            0,
+            "tiny_value",
+            "tinyint",
+            true,
+            false,
+            false,
+            false,
+            TableColumnValueKind.Integer)
+        {
+            StorageDataTypeName = "tinyint",
+            IntegerMinimum = sbyte.MinValue,
+            IntegerMaximum = (ulong)sbyte.MaxValue
+        };
+        Assert(
+            Convert.ToInt64(TableCellValueConverter.Parse(
+                boundedSignedIntegerColumn,
+                new TableCellInput("tiny_value", TableCellInputMode.Value, "-128"))) == -128 &&
+            Convert.ToInt64(TableCellValueConverter.Parse(
+                boundedSignedIntegerColumn,
+                new TableCellInput("tiny_value", TableCellInputMode.Value, "127"))) == 127,
+            "Signed TINYINT 應接受完整正負邊界");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            boundedSignedIntegerColumn,
+            new TableCellInput("tiny_value", TableCellInputMode.Value, "-129")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            boundedSignedIntegerColumn,
+            new TableCellInput("tiny_value", TableCellInputMode.Value, "128")));
+        var boundedUnsignedIntegerColumn = boundedSignedIntegerColumn with
+        {
+            Name = "unsigned_big_value",
+            DataTypeName = "bigint unsigned",
+            StorageDataTypeName = "bigint unsigned",
+            ValueKind = TableColumnValueKind.UnsignedInteger,
+            IntegerMinimum = 0,
+            IntegerMaximum = ulong.MaxValue
+        };
+        Assert(
+            Convert.ToUInt64(TableCellValueConverter.Parse(
+                boundedUnsignedIntegerColumn,
+                new TableCellInput(
+                    "unsigned_big_value",
+                    TableCellInputMode.Value,
+                    "18446744073709551615"))) == ulong.MaxValue,
+            "BIGINT UNSIGNED 應接受 UInt64 上界");
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            boundedUnsignedIntegerColumn,
+            new TableCellInput("unsigned_big_value", TableCellInputMode.Value, "-1")));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            boundedUnsignedIntegerColumn,
+            new TableCellInput(
+                "unsigned_big_value",
+                TableCellInputMode.Value,
+                "18446744073709551616")));
         var exactDecimalColumn = new TableColumnInfo(
             0,
             "amount",
@@ -2280,7 +2334,7 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
         var nativeColumns = isMariaDb
             ? ", native_uuid UUID NULL, native_address INET6 NULL"
             : string.Empty;
-        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
+        await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived') NULL, labels SET('alpha','beta','gamma') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, tiny_value TINYINT NULL, unsigned_tiny_value TINYINT UNSIGNED NULL, small_value SMALLINT NULL, unsigned_small_value SMALLINT UNSIGNED NULL, zerofill_small_value SMALLINT ZEROFILL NULL, medium_value MEDIUMINT NULL, unsigned_medium_value MEDIUMINT UNSIGNED NULL, integer_value INT NULL, unsigned_integer_value INT UNSIGNED NULL, big_value BIGINT NULL, unsigned_big_value BIGINT UNSIGNED NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL{nativeColumns});");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -2304,6 +2358,11 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
         {
             await VerifyMariaDbNativeTypesAsync(session, database, table!);
         }
+        await VerifyIntegerTypesAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE sample SET integer_value = 1 WHERE id = {id};");
     }
     finally
     {
@@ -2632,6 +2691,9 @@ static async Task PostgreSqlLiveRoundTripAsync()
                 area POLYGON NULL,
                 radius CIRCLE NULL,
                 high_precision NUMERIC(100,50) NULL,
+                small_value SMALLINT NULL,
+                integer_value INTEGER NULL,
+                big_value BIGINT NULL,
                 single_value REAL NULL,
                 double_value DOUBLE PRECISION NULL,
                 fractional_only NUMERIC(3,5) NULL,
@@ -2674,6 +2736,11 @@ static async Task PostgreSqlLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE public.sample SET single_value = 2.5 WHERE id = {id};");
+        await VerifyIntegerTypesAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE public.sample SET integer_value = 1 WHERE id = {id};");
         await VerifyPostgreSqlTemporalTypesAsync(session, database, table!);
         await VerifyPostgreSqlIntervalRestrictionsAsync(session, database, table!);
         await VerifyPostgreSqlMoneyAsync(session, database, table!);
@@ -3086,7 +3153,7 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE dbo.short_label FROM nvarchar(30) NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.positive_count FROM int NOT NULL;");
         await session.ExecuteAsync(database, "CREATE TYPE dbo.precise_amount FROM decimal(18,6) NULL;");
-        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, document XML NULL, legacy_text TEXT NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, tiny_value TINYINT NULL, small_value SMALLINT NULL, integer_value INT NULL, big_value BIGINT NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
         await session.ExecuteAsync(
@@ -3120,6 +3187,11 @@ static async Task SqlServerLiveRoundTripAsync()
             database,
             table!,
             id => $"UPDATE dbo.sample SET single_value = 2.5 WHERE id = {id};");
+        await VerifyIntegerTypesAsync(
+            session,
+            database,
+            table!,
+            id => $"UPDATE dbo.sample SET integer_value = 1 WHERE id = {id};");
         await VerifySqlServerMoneyAsync(session, database, table!);
         await VerifySqlServerTemporalTypesAsync(session, database, table!);
     }
@@ -3370,6 +3442,216 @@ static async Task VerifySqlServerTemporalTypesAsync(
     await session.DeleteTableRowAsync(database, table, concurrent);
     var afterDelete = await session.LoadTableDataAsync(database, table);
     Assert(afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0]) != id), "SQL Server temporal 安全刪除失敗");
+}
+
+static async Task VerifyIntegerTypesAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table,
+    Func<long, string> buildConcurrentUpdateSql)
+{
+    if (session.Profile.Provider != DatabaseProviderKind.MySql)
+    {
+        await VerifyIntegerTypesCoreAsync(session, database, table, buildConcurrentUpdateSql);
+        return;
+    }
+
+    var originalModeResult = await session.ExecuteAsync(database, "SELECT @@GLOBAL.sql_mode;");
+    var originalMode = Convert.ToString(originalModeResult.Rows.Single()[0]) ?? string.Empty;
+    await session.ExecuteAsync(database, "SET GLOBAL sql_mode = '';");
+    try
+    {
+        var activeMode = await session.ExecuteAsync(database, "SELECT @@SESSION.sql_mode;");
+        Assert(
+            string.IsNullOrEmpty(Convert.ToString(activeMode.Rows.Single()[0])),
+            "MySQL／MariaDB integer 測試必須實際進入 non-strict session");
+        await VerifyIntegerTypesCoreAsync(session, database, table, buildConcurrentUpdateSql);
+    }
+    finally
+    {
+        var escapedMode = originalMode.Replace("'", "''", StringComparison.Ordinal);
+        await session.ExecuteAsync(database, $"SET GLOBAL sql_mode = '{escapedMode}';");
+    }
+}
+
+static async Task VerifyIntegerTypesCoreAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table,
+    Func<long, string> buildConcurrentUpdateSql)
+{
+    var expected = session.Profile.Provider switch
+    {
+        DatabaseProviderKind.MySql => new Dictionary<string, (long Minimum, ulong Maximum, TableColumnValueKind Kind)>(
+            StringComparer.Ordinal)
+        {
+            ["tiny_value"] = (sbyte.MinValue, (ulong)sbyte.MaxValue, TableColumnValueKind.Integer),
+            ["unsigned_tiny_value"] = (0, byte.MaxValue, TableColumnValueKind.UnsignedInteger),
+            ["small_value"] = (short.MinValue, (ulong)short.MaxValue, TableColumnValueKind.Integer),
+            ["unsigned_small_value"] = (0, ushort.MaxValue, TableColumnValueKind.UnsignedInteger),
+            ["zerofill_small_value"] = (0, ushort.MaxValue, TableColumnValueKind.UnsignedInteger),
+            ["medium_value"] = (-8_388_608, 8_388_607, TableColumnValueKind.Integer),
+            ["unsigned_medium_value"] = (0, 16_777_215, TableColumnValueKind.UnsignedInteger),
+            ["integer_value"] = (int.MinValue, int.MaxValue, TableColumnValueKind.Integer),
+            ["unsigned_integer_value"] = (0, uint.MaxValue, TableColumnValueKind.UnsignedInteger),
+            ["big_value"] = (long.MinValue, (ulong)long.MaxValue, TableColumnValueKind.Integer),
+            ["unsigned_big_value"] = (0, ulong.MaxValue, TableColumnValueKind.UnsignedInteger)
+        },
+        DatabaseProviderKind.PostgreSql => new Dictionary<string, (long Minimum, ulong Maximum, TableColumnValueKind Kind)>(
+            StringComparer.Ordinal)
+        {
+            ["small_value"] = (short.MinValue, (ulong)short.MaxValue, TableColumnValueKind.Integer),
+            ["integer_value"] = (int.MinValue, int.MaxValue, TableColumnValueKind.Integer),
+            ["big_value"] = (long.MinValue, (ulong)long.MaxValue, TableColumnValueKind.Integer)
+        },
+        DatabaseProviderKind.SqlServer => new Dictionary<string, (long Minimum, ulong Maximum, TableColumnValueKind Kind)>(
+            StringComparer.Ordinal)
+        {
+            ["tiny_value"] = (0, byte.MaxValue, TableColumnValueKind.Integer),
+            ["small_value"] = (short.MinValue, (ulong)short.MaxValue, TableColumnValueKind.Integer),
+            ["integer_value"] = (int.MinValue, int.MaxValue, TableColumnValueKind.Integer),
+            ["big_value"] = (long.MinValue, (ulong)long.MaxValue, TableColumnValueKind.Integer)
+        },
+        _ => throw new InvalidOperationException(
+            $"{session.Profile.ProviderDisplayName} 不在 integer 實機矩陣範圍內。")
+    };
+
+    var before = await session.LoadTableDataAsync(database, table);
+    var columns = expected.ToDictionary(
+        item => item.Key,
+        item => before.Columns.Single(column => column.Name == item.Key),
+        StringComparer.Ordinal);
+    foreach (var item in expected)
+    {
+        var column = columns[item.Key];
+        Assert(
+            column.ValueKind == item.Value.Kind &&
+            column.IntegerMinimum == item.Value.Minimum &&
+            column.IntegerMaximum == item.Value.Maximum &&
+            column.IsEditable,
+            $"{session.Profile.ProviderDisplayName} {column.DataTypeName} integer metadata 範圍不正確");
+
+        var minimumText = item.Value.Minimum.ToString(CultureInfo.InvariantCulture);
+        var maximumText = item.Value.Maximum.ToString(CultureInfo.InvariantCulture);
+        Assert(
+            TableCellValueConverter.Parse(
+                column,
+                new TableCellInput(column.Name, TableCellInputMode.Value, minimumText)) is not null &&
+            TableCellValueConverter.Parse(
+                column,
+                new TableCellInput(column.Name, TableCellInputMode.Value, maximumText)) is not null,
+            $"{session.Profile.ProviderDisplayName} {column.DataTypeName} 應接受正負範圍邊界");
+
+        var belowMinimum = item.Value.Minimum == long.MinValue
+            ? "-9223372036854775809"
+            : (item.Value.Minimum - 1).ToString(CultureInfo.InvariantCulture);
+        var aboveMaximum = item.Value.Maximum == ulong.MaxValue
+            ? "18446744073709551616"
+            : (item.Value.Maximum + 1).ToString(CultureInfo.InvariantCulture);
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            column,
+            new TableCellInput(column.Name, TableCellInputMode.Value, belowMinimum)));
+        AssertThrows<InvalidOperationException>(() => TableCellValueConverter.Parse(
+            column,
+            new TableCellInput(column.Name, TableCellInputMode.Value, aboveMaximum)));
+    }
+
+    var minimumInputs = new List<TableCellInput>
+    {
+        new("name", TableCellInputMode.Value, "Integer minimum")
+    };
+    var maximumInputs = new List<TableCellInput>
+    {
+        new("name", TableCellInputMode.Value, "Integer maximum")
+    };
+    foreach (var item in expected)
+    {
+        minimumInputs.Add(new TableCellInput(
+            item.Key,
+            TableCellInputMode.Value,
+            item.Value.Minimum.ToString(CultureInfo.InvariantCulture)));
+        maximumInputs.Add(new TableCellInput(
+            item.Key,
+            TableCellInputMode.Value,
+            item.Value.Maximum.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    await session.InsertTableRowAsync(database, table, minimumInputs);
+    await session.InsertTableRowAsync(database, table, maximumInputs);
+    var boundarySnapshot = await session.LoadTableDataAsync(database, table);
+    var minimumRow = boundarySnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Integer minimum");
+    var maximumRow = boundarySnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Integer maximum");
+    foreach (var item in expected)
+    {
+        var column = columns[item.Key];
+        Assert(
+            Convert.ToString(minimumRow.Values[column.Ordinal], CultureInfo.InvariantCulture) ==
+            item.Value.Minimum.ToString(CultureInfo.InvariantCulture) &&
+            Convert.ToString(maximumRow.Values[column.Ordinal], CultureInfo.InvariantCulture) ==
+            item.Value.Maximum.ToString(CultureInfo.InvariantCulture),
+            $"{session.Profile.ProviderDisplayName} {column.DataTypeName} 邊界實機 round-trip 不正確");
+    }
+
+    var representative = expected.First();
+    var representativeColumn = columns[representative.Key];
+    var invalidBelow = representative.Value.Minimum == long.MinValue
+        ? "-9223372036854775809"
+        : (representative.Value.Minimum - 1).ToString(CultureInfo.InvariantCulture);
+    var invalidAbove = representative.Value.Maximum == ulong.MaxValue
+        ? "18446744073709551616"
+        : (representative.Value.Maximum + 1).ToString(CultureInfo.InvariantCulture);
+    foreach (var invalid in new[] { invalidBelow, invalidAbove })
+    {
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
+            database,
+            table,
+            new[]
+            {
+                new TableCellInput("name", TableCellInputMode.Value, "Rejected integer"),
+                new TableCellInput(representativeColumn.Name, TableCellInputMode.Value, invalid)
+            }));
+    }
+    Assert(
+        (await session.LoadTableDataAsync(database, table)).Rows.All(row =>
+            Convert.ToString(row.Values[1]) != "Rejected integer"),
+        $"{session.Profile.ProviderDisplayName} 不可寫入會溢位或被截到邊界的 integer");
+
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        minimumRow,
+        new[]
+        {
+            new TableCellInput("note", TableCellInputMode.Value, "integer updated"),
+            new TableCellInput("integer_value", TableCellInputMode.Value, "0")
+        });
+    var updatedSnapshot = await session.LoadTableDataAsync(database, table);
+    var updated = updatedSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Integer minimum");
+    var id = Convert.ToInt64(updated.Values[0], CultureInfo.InvariantCulture);
+    await session.ExecuteAsync(database, buildConcurrentUpdateSql(id));
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        updated,
+        new[] { new TableCellInput("note", TableCellInputMode.Value, "must-not-overwrite") }));
+
+    var concurrentSnapshot = await session.LoadTableDataAsync(database, table);
+    var concurrent = concurrentSnapshot.Rows.Single(row => Convert.ToInt64(row.Values[0]) == id);
+    var currentMaximum = concurrentSnapshot.Rows.Single(row =>
+        Convert.ToString(row.Values[1]) == "Integer maximum");
+    Assert(
+        Convert.ToInt64(concurrent.Values[columns["integer_value"].Ordinal]) == 1,
+        $"{session.Profile.ProviderDisplayName} integer optimistic predicate 未攔截外部更新");
+    await session.DeleteTableRowAsync(database, table, concurrent);
+    await session.DeleteTableRowAsync(database, table, currentMaximum);
+    var afterDelete = await session.LoadTableDataAsync(database, table);
+    Assert(
+        afterDelete.Rows.All(row =>
+            Convert.ToString(row.Values[1]) is not ("Integer minimum" or "Integer maximum")),
+        $"{session.Profile.ProviderDisplayName} integer 邊界測試列安全刪除失敗");
 }
 
 static async Task VerifyFloatingPointTypesAsync(
@@ -3892,7 +4174,9 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             sqlServerAliasCountColumn!.ValueKind == TableColumnValueKind.Integer &&
             sqlServerAliasCountColumn.DataTypeName == "[dbo].[positive_count] (int)" &&
-            sqlServerAliasCountColumn.StorageDataTypeName == "int",
+            sqlServerAliasCountColumn.StorageDataTypeName == "int" &&
+            sqlServerAliasCountColumn.IntegerMinimum == int.MinValue &&
+            sqlServerAliasCountColumn.IntegerMaximum == int.MaxValue,
             $"SQL Server int alias metadata 不正確；actual={sqlServerAliasCountColumn.DataTypeName}");
         Assert(
             sqlServerAliasAmountColumn!.ValueKind == TableColumnValueKind.ExactDecimal &&
@@ -3917,7 +4201,7 @@ static async Task VerifySafeTableEditingAsync(
             TableCellInputMode.Value,
             "alias_object"));
 
-        await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => session.InsertTableRowAsync(
+        await AssertThrowsAsync<InvalidOperationException>(() => session.InsertTableRowAsync(
             database,
             table,
             new[]
@@ -3946,7 +4230,9 @@ static async Task VerifySafeTableEditingAsync(
         Assert(
             postgreSqlDomainCountColumn.ValueKind == TableColumnValueKind.Integer &&
             postgreSqlDomainCountColumn.DataTypeName == "\"public\".\"positive_count\" (integer)" &&
-            postgreSqlDomainCountColumn.StorageDataTypeName == "integer",
+            postgreSqlDomainCountColumn.StorageDataTypeName == "integer" &&
+            postgreSqlDomainCountColumn.IntegerMinimum == int.MinValue &&
+            postgreSqlDomainCountColumn.IntegerMaximum == int.MaxValue,
             $"PostgreSQL integer domain metadata 不正確；actual={postgreSqlDomainCountColumn.DataTypeName}");
         Assert(
             postgreSqlDomainLabelColumn!.ValueKind == TableColumnValueKind.String &&

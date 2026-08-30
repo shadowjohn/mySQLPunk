@@ -351,6 +351,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                             extra.Contains("virtual generated", StringComparison.OrdinalIgnoreCase) ||
                             extra.Contains("stored generated", StringComparison.OrdinalIgnoreCase) ||
                             !string.IsNullOrWhiteSpace(generationExpression);
+            var valueKind = MapValueKind(dataType, columnType);
+            var integerBounds = GetIntegerBounds(dataType, columnType, valueKind);
             columns.Add(new TableColumnInfo(
                 columns.Count,
                 reader.GetString(0),
@@ -359,7 +361,11 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                 string.Equals(reader.GetString(4), "PRI", StringComparison.OrdinalIgnoreCase),
                 generated,
                 !reader.IsDBNull(7),
-                MapValueKind(dataType, columnType)));
+                valueKind)
+            {
+                IntegerMinimum = integerBounds?.Minimum,
+                IntegerMaximum = integerBounds?.Maximum
+            });
         }
 
         return columns;
@@ -379,7 +385,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
 
         if (normalizedDataType is "tinyint" or "smallint" or "mediumint" or "int" or "integer" or "bigint")
         {
-            return normalizedColumnType.Contains("unsigned", StringComparison.Ordinal)
+            return normalizedColumnType.Contains("unsigned", StringComparison.Ordinal) ||
+                   normalizedColumnType.Contains("zerofill", StringComparison.Ordinal)
                 ? TableColumnValueKind.UnsignedInteger
                 : TableColumnValueKind.Integer;
         }
@@ -423,5 +430,28 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         return arguments.Length == 1 &&
                int.TryParse(arguments[0].Trim(), out var precision) &&
                precision >= 24;
+    }
+
+    private static (long Minimum, ulong Maximum)? GetIntegerBounds(
+        string dataType,
+        string columnType,
+        TableColumnValueKind valueKind)
+    {
+        if (valueKind is not (TableColumnValueKind.Integer or TableColumnValueKind.UnsignedInteger))
+        {
+            return null;
+        }
+
+        var isUnsigned = columnType.Contains("unsigned", StringComparison.OrdinalIgnoreCase) ||
+                         columnType.Contains("zerofill", StringComparison.OrdinalIgnoreCase);
+        return dataType.ToLowerInvariant() switch
+        {
+            "tinyint" => isUnsigned ? (0, byte.MaxValue) : (sbyte.MinValue, (ulong)sbyte.MaxValue),
+            "smallint" => isUnsigned ? (0, ushort.MaxValue) : (short.MinValue, (ulong)short.MaxValue),
+            "mediumint" => isUnsigned ? (0, 16_777_215UL) : (-8_388_608, 8_388_607UL),
+            "int" or "integer" => isUnsigned ? (0, uint.MaxValue) : (int.MinValue, (ulong)int.MaxValue),
+            "bigint" => isUnsigned ? (0, ulong.MaxValue) : (long.MinValue, (ulong)long.MaxValue),
+            _ => null
+        };
     }
 }

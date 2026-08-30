@@ -43,7 +43,7 @@ public static class TableCellValueConverter
             return column.ValueKind switch
             {
                 TableColumnValueKind.String => input.Text,
-                TableColumnValueKind.Integer => long.Parse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture),
+                TableColumnValueKind.Integer => ParseSignedInteger(column, input.Text),
                 TableColumnValueKind.UnsignedInteger => ParseUnsignedInteger(column, input.Text),
                 TableColumnValueKind.SqliteNumeric => ParseSqliteNumeric(column, input.Text),
                 TableColumnValueKind.ExactDecimal => ParseExactDecimal(column, input.Text),
@@ -1373,6 +1373,12 @@ public static class TableCellValueConverter
     private static ulong ParseUnsignedInteger(TableColumnInfo column, string text)
     {
         var value = ulong.Parse(text, NumberStyles.Integer, CultureInfo.InvariantCulture);
+        if (column.IntegerMaximum is { } metadataMaximum && value > metadataMaximum)
+        {
+            throw new OverflowException(
+                $"{column.DataTypeName} 必須介於 0 與 {metadataMaximum}。");
+        }
+
         var dataType = column.StorageDataTypeName.Trim();
         if (dataType.Equals("oid", StringComparison.OrdinalIgnoreCase) ||
             dataType.Equals("xid", StringComparison.OrdinalIgnoreCase) ||
@@ -1399,6 +1405,24 @@ public static class TableCellValueConverter
         return value <= maximum
             ? value
             : throw new OverflowException($"BIT({width}) 的十進位值不可超過 {maximum}。");
+    }
+
+    private static long ParseSignedInteger(TableColumnInfo column, string text)
+    {
+        var value = long.Parse(text, NumberStyles.Integer, CultureInfo.InvariantCulture);
+        var belowMinimum = column.IntegerMinimum is { } minimum && value < minimum;
+        var aboveMaximum = column.IntegerMaximum is { } maximum &&
+                           value >= 0 &&
+                           (ulong)value > maximum;
+        if (belowMinimum || aboveMaximum)
+        {
+            var minimumText = column.IntegerMinimum?.ToString(CultureInfo.InvariantCulture) ?? long.MinValue.ToString(CultureInfo.InvariantCulture);
+            var maximumText = column.IntegerMaximum?.ToString(CultureInfo.InvariantCulture) ?? long.MaxValue.ToString(CultureInfo.InvariantCulture);
+            throw new OverflowException(
+                $"{column.DataTypeName} 必須介於 {minimumText} 與 {maximumText}。");
+        }
+
+        return value;
     }
 
     private static DateTimeOffset ParseTimeWithTimeZone(TableColumnInfo column, string text)

@@ -57,6 +57,10 @@ public sealed record TableColumnInfo(
 
     public int? MonetaryScale { get; init; }
 
+    public long? IntegerMinimum { get; init; }
+
+    public ulong? IntegerMaximum { get; init; }
+
     public bool IsEditable => !IsGenerated && ValueKind is not TableColumnValueKind.Unsupported;
 
     public string DisplayName => IsPrimaryKey ? $"{Name} · PK" : Name;
