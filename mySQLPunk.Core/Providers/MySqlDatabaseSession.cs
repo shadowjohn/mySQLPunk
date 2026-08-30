@@ -177,6 +177,14 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
                    $"CAST(CAST({parameterName} AS CHAR) AS BINARY)";
         }
 
+        if (column.ValueKind == TableColumnValueKind.String)
+        {
+            var storedValue = column.TrailingSpacesAreNotRoundTrippable
+                ? $"RTRIM({QuoteIdentifier(column.Name)})"
+                : QuoteIdentifier(column.Name);
+            return $"CAST({storedValue} AS BINARY) = CAST({parameterName} AS BINARY)";
+        }
+
         if (column.ValueKind is TableColumnValueKind.ExactDecimal or
             TableColumnValueKind.Guid or
             TableColumnValueKind.NetworkAddress)

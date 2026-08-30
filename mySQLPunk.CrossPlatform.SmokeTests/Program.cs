@@ -2796,6 +2796,16 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             ? ", native_uuid UUID NULL, native_address INET6 NULL, native_ipv4 INET4 NULL"
             : string.Empty;
         await session.ExecuteAsync(database, $"CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, fixed_payload BINARY(3) NULL, metadata JSON NULL, flags8 BIT(8) NULL, flags64 BIT(64) NULL, status ENUM('draft','published','archived','café','2','','comma,value','quote''value','back\\\\slash') COLLATE utf8mb4_unicode_ci NULL, labels SET('alpha','Beta','café','2','quote''value','back\\\\slash') COLLATE utf8mb4_unicode_ci NULL, ambiguous_labels SET('') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, precise_at DATETIME(6) NULL, changed_at TIMESTAMP(2) NULL, duration TIME(6) NULL, release_year YEAR NULL, high_precision DECIMAL(65,30) NULL, tiny_value TINYINT NULL, unsigned_tiny_value TINYINT UNSIGNED NULL, small_value SMALLINT NULL, unsigned_small_value SMALLINT UNSIGNED NULL, zerofill_small_value SMALLINT ZEROFILL NULL, medium_value MEDIUMINT NULL, unsigned_medium_value MEDIUMINT UNSIGNED NULL, integer_value INT NULL, unsigned_integer_value INT UNSIGNED NULL, big_value BIGINT NULL, unsigned_big_value BIGINT UNSIGNED NULL, single_value FLOAT NULL, compact_float FLOAT(10) NULL, double_value DOUBLE NULL, wide_float FLOAT(53) NULL, scaled_value FLOAT(7,4) UNSIGNED NULL, shape GEOMETRY NULL, location POINT NULL, route LINESTRING NULL, area POLYGON NULL, stops MULTIPOINT NULL, paths MULTILINESTRING NULL, regions MULTIPOLYGON NULL, shapes GEOMETRYCOLLECTION NULL, fixed_text CHAR(6) NULL{nativeColumns});");
+        await session.ExecuteAsync(
+            database,
+            "CREATE TABLE collation_sample (" +
+            "id INT PRIMARY KEY, " +
+            "case_value VARCHAR(40) COLLATE utf8mb4_general_ci NOT NULL, " +
+            "accent_value VARCHAR(40) COLLATE utf8mb4_general_ci NOT NULL, " +
+            "marker VARCHAR(40) NOT NULL);");
+        await session.ExecuteAsync(
+            database,
+            "INSERT INTO collation_sample VALUES (1, 'Alpha', 'resume', 'before');");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
@@ -2809,6 +2819,10 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             database,
             table!,
             id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
+        await VerifyMySqlStringExactConflictAsync(
+            session,
+            database,
+            objects.Single(item => item.Name == "collation_sample" && item.Kind == DatabaseObjectKind.Table));
         await VerifyMySqlEnumExactValuesAsync(session, database, table!);
         await VerifyMySqlSetExactMembersAsync(session, database, table!);
         await VerifyNonRoundTrippableTrailingSpacesAsync(session, database, table!);
@@ -2834,6 +2848,50 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
     {
         await session.ExecuteAsync(string.Empty, $"DROP DATABASE IF EXISTS `{database}`;");
     }
+}
+
+static async Task VerifyMySqlStringExactConflictAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    Assert(
+        before.Columns.Where(column => column.Name is "case_value" or "accent_value")
+            .All(column => column.ValueKind == TableColumnValueKind.String && column.IsEditable),
+        "MySQL／MariaDB collated VARCHAR metadata 應映射為可編輯字串");
+    var stale = before.Rows.Single();
+
+    await session.ExecuteAsync(
+        database,
+        "UPDATE collation_sample SET case_value = 'alpha', accent_value = 'résumé' WHERE id = 1;");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        stale,
+        new[] { new TableCellInput("marker", TableCellInputMode.Value, "stale-overwrite") }));
+
+    var afterConflict = await session.ExecuteAsync(
+        database,
+        "SELECT HEX(case_value), HEX(accent_value), marker FROM collation_sample WHERE id = 1;");
+    Assert(
+        Convert.ToString(afterConflict.Rows.Single()[0]) == "616C706861" &&
+        Convert.ToString(afterConflict.Rows.Single()[1]) == "72C3A973756DC3A9" &&
+        Convert.ToString(afterConflict.Rows.Single()[2]) == "before",
+        $"{session.Profile.ProviderDisplayName} 大小寫／重音外部變更不可被過期編輯覆寫");
+
+    var refreshed = (await session.LoadTableDataAsync(database, table)).Rows.Single();
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        refreshed,
+        new[] { new TableCellInput("marker", TableCellInputMode.Value, "after-refresh") });
+    var afterRefresh = await session.ExecuteAsync(
+        database,
+        "SELECT marker FROM collation_sample WHERE id = 1;");
+    Assert(
+        Convert.ToString(afterRefresh.Rows.Single()[0]) == "after-refresh",
+        $"{session.Profile.ProviderDisplayName} 重新整理後應可正常修改 collated VARCHAR 資料列");
 }
 
 static async Task VerifyMySqlTemporalTypesAsync(
