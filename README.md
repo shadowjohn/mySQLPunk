@@ -80,6 +80,8 @@ MySQL／MariaDB `SET` 同樣逐一精確驗證逗號分隔成員，防止大小�
 
 PostgreSQL `citext` 會先轉為 `text` 載入，避免 Npgsql 無法以 `object` 讀取 extension type；一般 String 原值再統一轉成 UTF-8 bytes 比對，避免 `citext` 或 nondeterministic ICU collation 把不同內容判為相等。固定長度 `character(n)` 仍沿用 PostgreSQL 去 padding 後的 canonical 文字。
 
+PostgreSQL `json` 會保留原始空白與 key 順序，optimistic concurrency 因此也以 UTF-8 bytes 比對；其它連線即使只把 JSON 改成語意相同但文字不同的表示，也會觸發衝突而不放行 stale update。`jsonb` 仍使用原生結構等號，符合其 canonical storage 語意。
+
 PostgreSQL `money` 會依資料庫目前的 `lc_monetary` 推導固定小數位，以不含幣別符號或千分位的 canonical 十進位文字無損編輯，並拒絕多餘小數與 8-byte 範圍溢位，避免 server 無聲取整或 Linux／macOS locale 改變顯示內容。
 
 SQLite 的 `NUMERIC`／`DECIMAL` affinity 欄位會以 SQLite 實際儲存的 canonical 數值顯示；signed 64-bit 整數可完整編輯，其餘數值限制為 SQLite TEXT↔REAL 可穩定保留的 15 位有效數字。超出安全精度、千分位或無效格式會在送出前拒絕，避免 Microsoft.Data.Sqlite 的 decimal TEXT 參數再被 NUMERIC affinity 悄悄轉成失真的 REAL。

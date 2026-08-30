@@ -3287,6 +3287,13 @@ static async Task PostgreSqlLiveRoundTripAsync()
         await session.ExecuteAsync(
             database,
             "INSERT INTO collation_sample VALUES (1, 'Alpha', 'Resume', 'before');");
+        await session.ExecuteAsync(
+            database,
+            "CREATE TABLE json_sample (" +
+            "id INTEGER PRIMARY KEY, raw_value JSON NOT NULL, marker TEXT NOT NULL);");
+        await session.ExecuteAsync(
+            database,
+            "INSERT INTO json_sample VALUES (1, '{\"a\":1,\"b\":2}', 'before');");
         Assert(insert.RowsAffected == 2, "PostgreSQL INSERT 影響列數應為 2");
 
         var result = await session.ExecuteAsync(database, "SELECT id, name FROM sample ORDER BY id;");
@@ -3304,6 +3311,13 @@ static async Task PostgreSqlLiveRoundTripAsync()
             database,
             objects.Single(item =>
                 item.Name == "collation_sample" &&
+                item.Schema == "public" &&
+                item.Kind == DatabaseObjectKind.Table));
+        await VerifyPostgreSqlJsonExactConflictAsync(
+            session,
+            database,
+            objects.Single(item =>
+                item.Name == "json_sample" &&
                 item.Schema == "public" &&
                 item.Kind == DatabaseObjectKind.Table));
         await VerifyNonRoundTrippableTrailingSpacesAsync(session, database, table!);
@@ -3397,6 +3411,59 @@ static async Task VerifyPostgreSqlStringExactConflictAsync(
         Convert.ToString(afterRefresh.Rows.Single()[1]) == "Ångström" &&
         Convert.ToString(afterRefresh.Rows.Single()[2]) == "after-refresh",
         "PostgreSQL 重新整理後應可正常修改 citext／collated text 資料列");
+}
+
+static async Task VerifyPostgreSqlJsonExactConflictAsync(
+    IDatabaseSession session,
+    string database,
+    DatabaseObjectInfo table)
+{
+    var before = await session.LoadTableDataAsync(database, table);
+    var jsonColumn = before.Columns.Single(column => column.Name == "raw_value");
+    Assert(
+        jsonColumn.ValueKind == TableColumnValueKind.Json &&
+        jsonColumn.StorageDataTypeName == "json" &&
+        jsonColumn.IsEditable &&
+        Convert.ToString(before.Rows.Single().Values[jsonColumn.Ordinal]) == "{\"a\":1,\"b\":2}",
+        $"PostgreSQL json metadata／原始文字載入不正確；actual={jsonColumn}");
+    var stale = before.Rows.Single();
+
+    const string externalJson = "{ \"b\": 2, \"a\": 1 }";
+    await session.ExecuteAsync(
+        database,
+        $"UPDATE public.json_sample SET raw_value = '{externalJson}'::json WHERE id = 1;");
+    await AssertThrowsAsync<TableDataConflictException>(() => session.UpdateTableRowAsync(
+        database,
+        table,
+        stale,
+        new[] { new TableCellInput("marker", TableCellInputMode.Value, "stale-overwrite") }));
+
+    var afterConflict = await session.ExecuteAsync(
+        database,
+        "SELECT raw_value::text, marker FROM public.json_sample WHERE id = 1;");
+    Assert(
+        Convert.ToString(afterConflict.Rows.Single()[0]) == externalJson &&
+        Convert.ToString(afterConflict.Rows.Single()[1]) == "before",
+        "PostgreSQL json 格式／key 順序外部變更不可被過期編輯覆寫");
+
+    var refreshed = (await session.LoadTableDataAsync(database, table)).Rows.Single();
+    const string updatedJson = "{\"final\":[1,2,3]}";
+    await session.UpdateTableRowAsync(
+        database,
+        table,
+        refreshed,
+        new[]
+        {
+            new TableCellInput("raw_value", TableCellInputMode.Value, updatedJson),
+            new TableCellInput("marker", TableCellInputMode.Value, "after-refresh")
+        });
+    var afterRefresh = await session.ExecuteAsync(
+        database,
+        "SELECT raw_value::text, marker FROM public.json_sample WHERE id = 1;");
+    Assert(
+        Convert.ToString(afterRefresh.Rows.Single()[0]) == updatedJson &&
+        Convert.ToString(afterRefresh.Rows.Single()[1]) == "after-refresh",
+        "PostgreSQL 重新整理後應可無損修改 json 原始文字");
 }
 
 static async Task VerifyPostgreSqlBoundedStringsAsync(

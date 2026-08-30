@@ -209,7 +209,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         if (column.ValueKind == TableColumnValueKind.Json &&
             string.Equals(column.StorageDataTypeName, "json", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{QuoteIdentifier(column.Name)}::jsonb = CAST({parameterName} AS jsonb)";
+            return $"pg_catalog.convert_to(CAST({QuoteIdentifier(column.Name)} AS text), 'UTF8') = " +
+                   $"pg_catalog.convert_to(CAST({parameterName} AS text), 'UTF8')";
         }
 
         if (column.ValueKind == TableColumnValueKind.Xml)
