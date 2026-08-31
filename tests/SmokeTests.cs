@@ -55,6 +55,7 @@ public static class SmokeTests
         Run("Query AI SQL tools", TestQueryAiSqlTools, ref passed);
         Run("Query AI custom actions", TestQueryAiCustomActions, ref passed);
         Run("AI SQL diff review", TestAiSqlDiffReview, ref passed);
+        Run("AI assistant multi conversations", TestAiAssistantMultiConversations, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
@@ -6344,6 +6345,90 @@ public static class SmokeTests
         }
     }
 
+    private static void TestAiAssistantMultiConversations()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            using (AiAssistantPanel panel = new AiAssistantPanel(
+                () => string.Empty,
+                sql => { },
+                () => { },
+                () => { },
+                () => { }))
+            {
+                panel.Size = new Size(380, 680);
+                panel.CreateControl();
+                panel.PerformLayout();
+                ComboBox conversationCombo = GetPrivateField<ComboBox>(panel, "conversationCombo");
+                Button closeConversationButton = GetPrivateField<Button>(panel, "closeConversationButton");
+                TextBox inputBox = GetPrivateField<TextBox>(panel, "inputBox");
+                CheckBox includeContextBox = GetPrivateField<CheckBox>(panel, "includeContextBox");
+                Button reviewButton = GetPrivateField<Button>(panel, "reviewSqlButton");
+                MethodInfo createConversation = typeof(AiAssistantPanel).GetMethod("CreateNewConversation", BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo renameConversation = typeof(AiAssistantPanel).GetMethod("TryRenameActiveConversation", BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo closeConversation = typeof(AiAssistantPanel).GetMethod("CloseActiveConversation", BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo updateSqlActions = typeof(AiAssistantPanel).GetMethod("UpdateSqlActions", BindingFlags.Instance | BindingFlags.NonPublic);
+
+                AssertEquals("1", conversationCombo.Items.Count.ToString(), "The AI panel should begin with one in-memory conversation.");
+                AssertEquals("新對話 1", conversationCombo.SelectedItem.ToString(), "A fresh conversation should have a localized title.");
+                Assert(!closeConversationButton.Enabled, "The only conversation must not be closable.");
+
+                Action<string> firstReview = sql => { };
+                panel.SetDraft("第一個草稿", firstReview);
+                includeContextBox.Checked = false;
+                createConversation.Invoke(panel, null);
+                panel.PerformLayout();
+
+                AssertEquals("2", conversationCombo.Items.Count.ToString(), "Creating a conversation should keep the existing one available.");
+                AssertEquals("新對話 2", conversationCombo.SelectedItem.ToString(), "The new conversation should become active.");
+                AssertEquals(string.Empty, inputBox.Text, "A new conversation should start with an empty draft.");
+                Assert(includeContextBox.Checked, "A new conversation should use the default schema-context setting.");
+                Assert(closeConversationButton.Enabled, "Conversation close should become available when another conversation exists.");
+                Control activeChatView = GetPrivateField<Control>(panel, "chatView");
+                Panel pickerPanel = GetPrivateField<Panel>(panel, "pickerPanel");
+                FlowLayoutPanel suggestionPanel = GetPrivateField<FlowLayoutPanel>(panel, "suggestionPanel");
+                Assert(activeChatView.Top >= pickerPanel.Bottom, "A switched chat view must remain below the conversation and model rows.");
+                Assert(activeChatView.Bottom <= suggestionPanel.Top, "A switched chat view must not cover suggestions or the input area.");
+
+                panel.SetDraft("第二個草稿");
+                conversationCombo.SelectedIndex = 0;
+                AssertEquals("第一個草稿", inputBox.Text, "Switching conversations should restore each draft independently.");
+                Assert(!includeContextBox.Checked, "Switching conversations should restore each schema-context choice independently.");
+
+                typeof(AiAssistantPanel).GetField("_lastAssistantSql", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(panel, "SELECT 1;");
+                typeof(AiAssistantPanel).GetField("_lastAssistantSqlReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(panel, firstReview);
+                updateSqlActions.Invoke(panel, null);
+                Assert(reviewButton.Visible, "The first conversation should expose its own SQL review action.");
+
+                conversationCombo.SelectedIndex = 1;
+                AssertEquals("第二個草稿", inputBox.Text, "The second conversation draft should survive a round trip.");
+                Assert(!reviewButton.Visible, "SQL review callbacks must not leak into another conversation.");
+                conversationCombo.SelectedIndex = 0;
+                Assert(reviewButton.Visible, "Returning to a conversation should restore its SQL review action.");
+
+                Assert((bool)renameConversation.Invoke(panel, new object[] { "  查詢效能\r\n調整  " }), "A non-empty conversation title should be accepted.");
+                AssertEquals("查詢效能 調整", conversationCombo.SelectedItem.ToString(), "Conversation titles should normalize whitespace.");
+                Assert(!(bool)renameConversation.Invoke(panel, new object[] { "   " }), "A blank conversation title should be rejected.");
+                AssertEquals("查詢效能 調整", conversationCombo.SelectedItem.ToString(), "Rejecting a blank title should preserve the current title.");
+
+                conversationCombo.SelectedIndex = 1;
+                closeConversation.Invoke(panel, new object[] { false });
+                AssertEquals("1", conversationCombo.Items.Count.ToString(), "Closing a conversation should remove only the active conversation.");
+                AssertEquals("查詢效能 調整", conversationCombo.SelectedItem.ToString(), "Closing another conversation should preserve the remaining one.");
+                AssertEquals("第一個草稿", inputBox.Text, "Closing another conversation should restore the remaining draft.");
+                Assert(!closeConversationButton.Enabled, "The final conversation must remain open.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
+    }
+
     private static void RememberQueryFormConfiguredDirectory(string optionKey, string filePath)
     {
         MethodInfo method = typeof(QueryForm).GetMethod("RememberConfiguredDirectoryForPath", BindingFlags.Static | BindingFlags.NonPublic);
@@ -9822,8 +9907,10 @@ public static class SmokeTests
         AssertContains(source, "ThemeManager.SetGlyph(settingsButton, UiGlyph.Settings);", "AI settings button should use a vector glyph instead of clipped text.");
         AssertContains(source, "ThemeManager.SetGlyph(closeButton, UiGlyph.Close);", "AI close button should use a vector glyph instead of clipped text.");
         AssertContains(source, "ThemeManager.SetGlyph(refreshModelsButton, UiGlyph.Refresh);", "AI model refresh button should use a vector glyph instead of clipped text.");
+        AssertContains(source, "CreateConversationButton(UiGlyph.Plus", "AI new-conversation should use a vector glyph.");
+        AssertContains(source, "CreateConversationButton(UiGlyph.Pencil", "AI conversation rename should use a vector glyph.");
 
-        UiGlyph[] glyphs = { UiGlyph.Settings, UiGlyph.Close, UiGlyph.Refresh };
+        UiGlyph[] glyphs = { UiGlyph.Settings, UiGlyph.Close, UiGlyph.Refresh, UiGlyph.Plus, UiGlyph.Pencil };
         foreach (UiGlyph glyph in glyphs)
         {
             using (Bitmap bitmap = UiKit.RenderGlyph(glyph, 18, Color.Black, 0.9f))

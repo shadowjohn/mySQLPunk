@@ -483,6 +483,12 @@ namespace mySQLPunk
             Add("Query.ResultPinned", "已釘選查詢結果（{0} 列）；分頁可用滑鼠中鍵關閉", "Result pinned ({0} rows); close the tab with middle-click");
             Add("Query.ClosePinnedResult", "關閉此釘選結果", "Close this pinned result");
             Add("Ai.PanelTitle", "Punky 崩琦（AI 助理）", "Punky (AI Assistant)");
+            Add("Ai.Conversations", "對話", "Conversations");
+            Add("Ai.NewConversation", "新增對話", "New conversation");
+            Add("Ai.NewConversationTitle", "新對話 {0}", "New conversation {0}");
+            Add("Ai.RenameConversation", "重新命名對話", "Rename conversation");
+            Add("Ai.CloseConversation", "關閉對話", "Close conversation");
+            Add("Ai.CloseConversationConfirm", "要關閉「{0}」嗎？這段對話不會保留。", "Close \"{0}\"? This conversation will not be kept.");
             Add("Ai.IncludeContext", "附上目前資料庫結構", "Include current database schema");
             Add("Ai.Send", "送出", "Send");
             Add("Ai.InsertSql", "插入 SQL 到查詢分頁", "Insert SQL into a query tab");

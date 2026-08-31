@@ -34,11 +34,41 @@ namespace mySQLPunk
         private Button sendButton;
         private CheckBox includeContextBox;
 
-        private readonly List<AiChatMessage> _history = new List<AiChatMessage>();
+        private Panel conversationPanel;
+        private ComboBox conversationCombo;
+        private Button newConversationButton;
+        private Button renameConversationButton;
+        private Button closeConversationButton;
+        private readonly ToolTip conversationToolTip = new ToolTip();
+        private readonly List<AiConversationState> _conversations = new List<AiConversationState>();
+        private AiConversationState _activeConversation;
+        private int _nextConversationNumber = 1;
+        private bool _suppressConversationEvents;
+
         private bool _busy;
         private string _lastAssistantSql;
         private Action<string> _pendingSqlReviewAction;
         private Action<string> _lastAssistantSqlReviewAction;
+
+        private sealed class AiConversationState
+        {
+            public int Number;
+            public string Title;
+            public bool IsUntitled = true;
+            public bool HasUserContent;
+            public bool IncludeContext = true;
+            public string Draft = string.Empty;
+            public string LastAssistantSql;
+            public Action<string> PendingSqlReviewAction;
+            public Action<string> LastAssistantSqlReviewAction;
+            public readonly List<AiChatMessage> History = new List<AiChatMessage>();
+            public readonly AiChatView View = new AiChatView { Dock = DockStyle.Fill };
+
+            public override string ToString()
+            {
+                return Title ?? string.Empty;
+            }
+        }
 
         public AiAssistantPanel(Func<string> contextProvider, Action<string> insertSqlAction, Action closeAction, Action collapseAction, Action openSettingsAction)
         {
@@ -172,12 +202,16 @@ namespace mySQLPunk
             AddSuggestion(Localization.T("Ai.SuggestExplain"));
             AddSuggestion(Localization.T("Ai.SuggestOptimize"));
 
-            // ── 對話區（泡泡）──
-            chatView = new AiChatView { Dock = DockStyle.Fill };
-            chatView.AddAssistant("Punky", Localization.T("Ai.Welcome"));
-
             // ── 供應商／模型快速切換列 ──
             BuildPickerRow();
+
+            // ── 聊天室切換列 ──
+            BuildConversationRow();
+            AiConversationState initialConversation = CreateConversationState();
+            _conversations.Add(initialConversation);
+            _activeConversation = initialConversation;
+            chatView = initialConversation.View;
+            RefreshConversationPicker();
 
             // 新使用者什麼都沒設時，自動找本機已登入的 CLI（走訂閱、免金鑰）
             AutoDetectBackendAsync();
@@ -187,6 +221,7 @@ namespace mySQLPunk
             Controls.Add(actionPanel);
             Controls.Add(inputPanel);
             Controls.Add(pickerPanel);
+            Controls.Add(conversationPanel);
             Controls.Add(headerPanel);
 
             ApplyThemeColors();
@@ -230,6 +265,232 @@ namespace mySQLPunk
             sendButton.Text = Localization.T("Ai.Send");
             insertSqlButton.Text = Localization.T("Ai.OpenSqlInNewQuery");
             reviewSqlButton.Text = Localization.T("Ai.ReviewSql");
+            conversationCombo.AccessibleName = Localization.T("Ai.Conversations");
+            newConversationButton.AccessibleName = Localization.T("Ai.NewConversation");
+            renameConversationButton.AccessibleName = Localization.T("Ai.RenameConversation");
+            closeConversationButton.AccessibleName = Localization.T("Ai.CloseConversation");
+            conversationToolTip.SetToolTip(newConversationButton, Localization.T("Ai.NewConversation"));
+            conversationToolTip.SetToolTip(renameConversationButton, Localization.T("Ai.RenameConversation"));
+            conversationToolTip.SetToolTip(closeConversationButton, Localization.T("Ai.CloseConversation"));
+            foreach (AiConversationState conversation in _conversations)
+            {
+                if (conversation.IsUntitled)
+                    conversation.Title = Localization.Format("Ai.NewConversationTitle", conversation.Number);
+            }
+            RefreshConversationPicker();
+        }
+
+        private void BuildConversationRow()
+        {
+            conversationPanel = new Panel { Dock = DockStyle.Top, Height = 34, Padding = new Padding(10, 4, 10, 4) };
+            conversationCombo = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                AccessibleName = Localization.T("Ai.Conversations")
+            };
+            newConversationButton = CreateConversationButton(UiGlyph.Plus, Localization.T("Ai.NewConversation"));
+            renameConversationButton = CreateConversationButton(UiGlyph.Pencil, Localization.T("Ai.RenameConversation"));
+            closeConversationButton = CreateConversationButton(UiGlyph.Close, Localization.T("Ai.CloseConversation"));
+
+            Panel actions = new Panel { Dock = DockStyle.Right, Width = 94 };
+            closeConversationButton.Dock = DockStyle.Right;
+            renameConversationButton.Dock = DockStyle.Right;
+            newConversationButton.Dock = DockStyle.Right;
+            actions.Controls.Add(closeConversationButton);
+            actions.Controls.Add(renameConversationButton);
+            actions.Controls.Add(newConversationButton);
+            conversationPanel.Controls.Add(conversationCombo);
+            conversationPanel.Controls.Add(actions);
+
+            conversationCombo.SelectedIndexChanged += (s, e) =>
+            {
+                if (_suppressConversationEvents || _busy) return;
+                int index = conversationCombo.SelectedIndex;
+                if (index >= 0 && index < _conversations.Count)
+                    ActivateConversation(_conversations[index], true);
+            };
+            newConversationButton.Click += (s, e) => CreateNewConversation();
+            renameConversationButton.Click += (s, e) => ShowRenameConversationDialog();
+            closeConversationButton.Click += (s, e) => CloseActiveConversation(true);
+        }
+
+        private Button CreateConversationButton(UiGlyph glyph, string accessibleName)
+        {
+            Button button = new Button
+            {
+                Width = 30,
+                Text = string.Empty,
+                AccessibleName = accessibleName,
+                TabStop = false
+            };
+            ThemeManager.SetGlyph(button, glyph);
+            conversationToolTip.SetToolTip(button, accessibleName);
+            return button;
+        }
+
+        private AiConversationState CreateConversationState()
+        {
+            AiConversationState conversation = new AiConversationState
+            {
+                Number = _nextConversationNumber++
+            };
+            conversation.Title = Localization.Format("Ai.NewConversationTitle", conversation.Number);
+            conversation.View.AddAssistant("Punky", Localization.T("Ai.Welcome"));
+            return conversation;
+        }
+
+        private void CreateNewConversation()
+        {
+            if (_busy) return;
+            SaveActiveConversationState();
+            AiConversationState conversation = CreateConversationState();
+            _conversations.Add(conversation);
+            ActivateConversation(conversation, false);
+        }
+
+        private void ActivateConversation(AiConversationState conversation, bool saveCurrent)
+        {
+            if (conversation == null || ReferenceEquals(conversation, _activeConversation))
+            {
+                RefreshConversationPicker();
+                return;
+            }
+
+            if (saveCurrent) SaveActiveConversationState();
+            if (chatView != null) Controls.Remove(chatView);
+
+            _activeConversation = conversation;
+            _lastAssistantSql = conversation.LastAssistantSql;
+            _pendingSqlReviewAction = conversation.PendingSqlReviewAction;
+            _lastAssistantSqlReviewAction = conversation.LastAssistantSqlReviewAction;
+            chatView = conversation.View;
+            inputBox.Text = conversation.Draft ?? string.Empty;
+            inputBox.SelectionStart = inputBox.Text.Length;
+            includeContextBox.Checked = conversation.IncludeContext;
+            suggestionPanel.Visible = !conversation.HasUserContent;
+
+            Controls.Add(chatView);
+            // 維持第一次加入時的順序，DockStyle.Fill 才會避開上下兩側的操作列。
+            Controls.SetChildIndex(chatView, 0);
+            chatView.BackColor = ThemeManager.WindowBackColor;
+            chatView.RefreshTheme();
+            chatView.LayoutBubbles();
+            chatView.ScrollToBottom();
+            UpdateSqlActions();
+            RefreshConversationPicker();
+            inputBox.Focus();
+        }
+
+        private void SaveActiveConversationState()
+        {
+            if (_activeConversation == null) return;
+            _activeConversation.Draft = inputBox == null ? string.Empty : inputBox.Text;
+            _activeConversation.IncludeContext = includeContextBox != null && includeContextBox.Checked;
+            _activeConversation.LastAssistantSql = _lastAssistantSql;
+            _activeConversation.PendingSqlReviewAction = _pendingSqlReviewAction;
+            _activeConversation.LastAssistantSqlReviewAction = _lastAssistantSqlReviewAction;
+        }
+
+        private void RefreshConversationPicker()
+        {
+            if (conversationCombo == null) return;
+            _suppressConversationEvents = true;
+            conversationCombo.BeginUpdate();
+            conversationCombo.Items.Clear();
+            foreach (AiConversationState conversation in _conversations)
+                conversationCombo.Items.Add(conversation);
+            conversationCombo.SelectedItem = _activeConversation;
+            conversationCombo.EndUpdate();
+            _suppressConversationEvents = false;
+            if (closeConversationButton != null)
+                closeConversationButton.Enabled = !_busy && _conversations.Count > 1;
+        }
+
+        private bool TryRenameActiveConversation(string title)
+        {
+            string normalized = NormalizeConversationTitle(title);
+            if (_activeConversation == null || normalized.Length == 0) return false;
+            _activeConversation.Title = normalized;
+            _activeConversation.IsUntitled = false;
+            RefreshConversationPicker();
+            return true;
+        }
+
+        private static string NormalizeConversationTitle(string title)
+        {
+            string[] parts = (title ?? string.Empty).Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            string normalized = string.Join(" ", parts);
+            if (normalized.Length > 36) normalized = normalized.Substring(0, 35) + "…";
+            return normalized;
+        }
+
+        private void ShowRenameConversationDialog()
+        {
+            if (_busy || _activeConversation == null) return;
+            using (Form dialog = new Form())
+            using (TextBox nameBox = new TextBox())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = Localization.T("Ai.RenameConversation");
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ShowInTaskbar = false;
+                dialog.ClientSize = new Size(360, 104);
+                dialog.Padding = new Padding(12);
+
+                nameBox.Text = _activeConversation.Title;
+                nameBox.Dock = DockStyle.Top;
+                nameBox.MaxLength = 36;
+                Panel buttonRow = new Panel { Dock = DockStyle.Bottom, Height = 34 };
+                cancelButton.Text = Localization.T("Common.Cancel");
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.Dock = DockStyle.Right;
+                cancelButton.Width = 82;
+                okButton.Text = Localization.T("Common.OK");
+                okButton.DialogResult = DialogResult.OK;
+                okButton.Dock = DockStyle.Right;
+                okButton.Width = 82;
+                buttonRow.Controls.Add(cancelButton);
+                buttonRow.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 8 });
+                buttonRow.Controls.Add(okButton);
+                dialog.Controls.Add(nameBox);
+                dialog.Controls.Add(buttonRow);
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = cancelButton;
+                ThemeManager.ApplyTo(dialog);
+
+                nameBox.SelectAll();
+                if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
+                    TryRenameActiveConversation(nameBox.Text);
+            }
+        }
+
+        private void CloseActiveConversation(bool confirm)
+        {
+            if (_busy || _activeConversation == null || _conversations.Count <= 1) return;
+            SaveActiveConversationState();
+            if (confirm && (_activeConversation.HasUserContent || !string.IsNullOrWhiteSpace(_activeConversation.Draft)))
+            {
+                DialogResult result = MessageBox.Show(
+                    Localization.Format("Ai.CloseConversationConfirm", _activeConversation.Title),
+                    Localization.T("Ai.CloseConversation"),
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (result != DialogResult.Yes) return;
+            }
+
+            int index = _conversations.IndexOf(_activeConversation);
+            AiConversationState removed = _activeConversation;
+            _conversations.RemoveAt(index);
+            _activeConversation = null;
+            chatView = null;
+            removed.View.Dispose();
+            ActivateConversation(_conversations[Math.Min(index, _conversations.Count - 1)], false);
         }
 
         /// <summary>面板頂端的供應商／模型快速切換：使用者訂閱哪家、本機跑什麼，這裡直接換。</summary>
@@ -291,6 +552,7 @@ namespace mySQLPunk
             modelCombo.SelectedIndexChanged += (s, e) => { if (!_suppressPickerEvents) SaveModelFromPicker(); };
             refreshModelsButton.Click += async (s, e) =>
             {
+                AiConversationState targetConversation = _activeConversation;
                 AiChatSettings settings = AiChatSettings.Load();
                 if (settings.Preset.AuthStyle == "cli")
                 {
@@ -301,12 +563,12 @@ namespace mySQLPunk
                     foreach (string m in AiChatService.KnownCliModels(settings.Provider)) modelCombo.Items.Add(m);
                     modelCombo.Text = keep;
                     _suppressPickerEvents = false;
-                    chatView.AddSystem(Localization.Format("Ai.CliModelsHint", settings.Preset.DisplayName));
+                    targetConversation.View.AddSystem(Localization.Format("Ai.CliModelsHint", settings.Preset.DisplayName));
                     return;
                 }
                 if (settings.Preset.NeedsKey && !AiChatService.HasApiKey(settings.Provider))
                 {
-                    chatView.AddSystem(Localization.T("Ai.NoApiKeyHint"));
+                    targetConversation.View.AddSystem(Localization.T("Ai.NoApiKeyHint"));
                     return;
                 }
                 refreshModelsButton.Enabled = false;
@@ -319,15 +581,15 @@ namespace mySQLPunk
                     foreach (string m in models) modelCombo.Items.Add(m);
                     modelCombo.Text = current;
                     _suppressPickerEvents = false;
-                    chatView.AddSystem(Localization.Format("Ai.ModelsLoaded", models.Count));
+                    targetConversation.View.AddSystem(Localization.Format("Ai.ModelsLoaded", models.Count));
                 }
                 catch (Exception ex)
                 {
-                    chatView.AddError(Localization.Format("Ai.RequestFailed", ex.Message));
+                    targetConversation.View.AddError(Localization.Format("Ai.RequestFailed", ex.Message));
                 }
                 finally
                 {
-                    refreshModelsButton.Enabled = true;
+                    refreshModelsButton.Enabled = !_busy;
                 }
             };
         }
@@ -347,6 +609,7 @@ namespace mySQLPunk
         /// </summary>
         private async void AutoDetectBackendAsync()
         {
+            AiConversationState targetConversation = _activeConversation;
             try
             {
                 AiChatSettings settings = AiChatSettings.Load();
@@ -361,7 +624,7 @@ namespace mySQLPunk
                 ApplicationOptionSettings.SetString("AiModel", "");
                 ApplicationOptionSettings.Save();
                 SyncPickerFromSettings();
-                chatView.AddSystem(Localization.Format("Ai.AutoDetectedCli", pick.DisplayName));
+                targetConversation.View.AddSystem(Localization.Format("Ai.AutoDetectedCli", pick.DisplayName));
             }
             catch { }
         }
@@ -418,7 +681,12 @@ namespace mySQLPunk
             suggestionPanel.BackColor = ThemeManager.WindowBackColor;
             includeContextBox.ForeColor = ThemeManager.TextColor;
             if (pickerPanel != null) pickerPanel.BackColor = ThemeManager.SurfaceColor;
-            chatView.RefreshTheme();
+            if (conversationPanel != null) conversationPanel.BackColor = ThemeManager.SurfaceColor;
+            foreach (AiConversationState conversation in _conversations)
+            {
+                conversation.View.BackColor = ThemeManager.WindowBackColor;
+                conversation.View.RefreshTheme();
+            }
         }
 
         private void SendCurrentInput()
@@ -436,28 +704,41 @@ namespace mySQLPunk
 
             inputBox.Text = "";
             suggestionPanel.Visible = false;
+            AiConversationState conversation = _activeConversation;
+            conversation.HasUserContent = true;
+            conversation.IncludeContext = includeContextBox.Checked;
+            if (conversation.IsUntitled)
+            {
+                conversation.Title = NormalizeConversationTitle(text);
+                conversation.IsUntitled = false;
+                RefreshConversationPicker();
+            }
             Action<string> reviewSqlAction = _pendingSqlReviewAction;
             _pendingSqlReviewAction = null;
             _lastAssistantSql = null;
             _lastAssistantSqlReviewAction = null;
+            conversation.Draft = string.Empty;
+            conversation.PendingSqlReviewAction = null;
+            conversation.LastAssistantSql = null;
+            conversation.LastAssistantSqlReviewAction = null;
             UpdateSqlActions();
-            SendAsync(text, reviewSqlAction);
+            SendAsync(conversation, text, reviewSqlAction);
         }
 
-        private async void SendAsync(string userText, Action<string> reviewSqlAction)
+        private async void SendAsync(AiConversationState conversation, string userText, Action<string> reviewSqlAction)
         {
             _busy = true;
-            sendButton.Enabled = false;
-            chatView.AddUser(userText);
+            SetBusyState(true);
+            conversation.View.AddUser(userText);
 
             AiChatSettings settings = AiChatSettings.Load();
             string modelLabel = string.IsNullOrWhiteSpace(settings.Model) ? Localization.T("Ai.CliDefaultModel") : settings.Model;
-            AiChatBubble replyBubble = chatView.AddAssistant("Punky · " + modelLabel, Localization.T("Ai.Thinking"));
+            AiChatBubble replyBubble = conversation.View.AddAssistant("Punky · " + modelLabel, Localization.T("Ai.Thinking"));
             try
             {
                 List<AiChatMessage> messages = new List<AiChatMessage>();
                 messages.Add(new AiChatMessage("system", Localization.T("Ai.SystemPrompt")));
-                if (includeContextBox.Checked && _contextProvider != null)
+                if (conversation.IncludeContext && _contextProvider != null)
                 {
                     string context = "";
                     try { context = _contextProvider() ?? ""; } catch { }
@@ -466,37 +747,56 @@ namespace mySQLPunk
                         messages.Add(new AiChatMessage("system", Localization.T("Ai.ContextPrefix") + "\n" + context));
                     }
                 }
-                foreach (AiChatMessage m in _history) messages.Add(m);
+                foreach (AiChatMessage m in conversation.History) messages.Add(m);
                 messages.Add(new AiChatMessage("user", userText));
 
                 string reply = await Task.Run(() => AiChatService.ChatCompletion(settings, messages));
 
                 replyBubble.SetContent(reply);
-                chatView.ScrollToBottom();
+                conversation.View.ScrollToBottom();
 
-                _history.Add(new AiChatMessage("user", userText));
-                _history.Add(new AiChatMessage("assistant", reply));
+                conversation.History.Add(new AiChatMessage("user", userText));
+                conversation.History.Add(new AiChatMessage("assistant", reply));
                 // 上下文別無限長大：保留最近 12 則
-                while (_history.Count > 12) _history.RemoveAt(0);
+                while (conversation.History.Count > 12) conversation.History.RemoveAt(0);
 
-                _lastAssistantSql = AiChatService.ExtractLastSqlBlock(reply);
-                _lastAssistantSqlReviewAction = reviewSqlAction;
-                UpdateSqlActions();
+                conversation.LastAssistantSql = AiChatService.ExtractLastSqlBlock(reply);
+                conversation.LastAssistantSqlReviewAction = reviewSqlAction;
+                if (ReferenceEquals(conversation, _activeConversation))
+                {
+                    _lastAssistantSql = conversation.LastAssistantSql;
+                    _lastAssistantSqlReviewAction = conversation.LastAssistantSqlReviewAction;
+                    UpdateSqlActions();
+                }
             }
             catch (Exception ex)
             {
-                chatView.RemoveBubble(replyBubble);
-                chatView.AddError(Localization.Format("Ai.RequestFailed", ex.Message));
+                conversation.View.RemoveBubble(replyBubble);
+                conversation.View.AddError(Localization.Format("Ai.RequestFailed", ex.Message));
                 if (settings.Preset.NeedsKey && !AiChatService.HasApiKey(settings.Provider))
                 {
-                    chatView.AddSystem(Localization.T("Ai.NoApiKeyHint"));
+                    conversation.View.AddSystem(Localization.T("Ai.NoApiKeyHint"));
                 }
             }
             finally
             {
                 _busy = false;
-                sendButton.Enabled = true;
+                SetBusyState(false);
             }
+        }
+
+        private void SetBusyState(bool busy)
+        {
+            sendButton.Enabled = !busy;
+            inputBox.Enabled = !busy;
+            includeContextBox.Enabled = !busy;
+            conversationCombo.Enabled = !busy;
+            newConversationButton.Enabled = !busy;
+            renameConversationButton.Enabled = !busy;
+            closeConversationButton.Enabled = !busy && _conversations.Count > 1;
+            providerCombo.Enabled = !busy;
+            modelCombo.Enabled = !busy;
+            refreshModelsButton.Enabled = !busy;
         }
 
         private void UpdateSqlActions()
@@ -505,6 +805,19 @@ namespace mySQLPunk
             bool canReview = hasSql && _lastAssistantSqlReviewAction != null;
             if (reviewSqlButton != null) reviewSqlButton.Visible = canReview;
             if (actionPanel != null) actionPanel.Visible = hasSql;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                conversationToolTip.Dispose();
+                foreach (AiConversationState conversation in _conversations)
+                {
+                    if (!conversation.View.IsDisposed) conversation.View.Dispose();
+                }
+            }
+            base.Dispose(disposing);
         }
     }
 
