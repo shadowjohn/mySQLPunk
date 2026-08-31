@@ -56,6 +56,7 @@ public static class SmokeTests
         Run("Query AI custom actions", TestQueryAiCustomActions, ref passed);
         Run("AI SQL diff review", TestAiSqlDiffReview, ref passed);
         Run("AI assistant multi conversations", TestAiAssistantMultiConversations, ref passed);
+        Run("AI model answer comparison", TestAiModelAnswerComparison, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
         Run("Auto recovery draft service", TestAutoRecoveryDraftService, ref passed);
@@ -6425,6 +6426,112 @@ public static class SmokeTests
         }
         finally
         {
+            Localization.SetLanguage(previousLanguage, false);
+        }
+    }
+
+    private static void TestAiModelAnswerComparison()
+    {
+        AiChatSettings current = new AiChatSettings
+        {
+            Provider = "codex-cli",
+            Endpoint = string.Empty,
+            Model = "gpt-5.6-sol"
+        };
+        AiChatSettings left = AiModelComparisonService.CreateSettings("codex-cli", "gpt-5.6-sol", current);
+        AiChatSettings right = AiModelComparisonService.CreateSettings("codex-cli", "gpt-5.6-terra", current);
+        AiModelComparisonFailure failure;
+        Assert(AiModelComparisonService.TryValidate(left, right, out failure), "Two distinct CLI models should be comparable.");
+        Assert(failure == AiModelComparisonFailure.None, "A valid comparison should not report a failure.");
+        Assert(!AiModelComparisonService.TryValidate(left, left, out failure), "The same provider, endpoint, and model must be rejected.");
+        Assert(failure == AiModelComparisonFailure.SameModel, "An identical choice should report the same-model reason.");
+
+        AiChatSettings openAi = AiModelComparisonService.CreateSettings("openai", string.Empty, current);
+        AssertEquals("https://api.openai.com/v1", openAi.Endpoint, "A secondary API provider should use its preset endpoint.");
+        AssertEquals("gpt-4o-mini", openAi.Model, "A secondary API provider should use its default model when left blank.");
+        AiChatSettings custom = AiModelComparisonService.CreateSettings("custom", "custom-model", current);
+        Assert(!AiModelComparisonService.TryValidate(left, custom, out failure), "A custom comparison provider without an endpoint must fail closed.");
+        Assert(failure == AiModelComparisonFailure.MissingEndpoint, "A blank custom endpoint should report the endpoint reason.");
+        AiChatSettings unknown = AiModelComparisonService.CreateSettings("not-a-provider", "model", current);
+        Assert(!AiModelComparisonService.TryValidate(left, unknown, out failure), "An unknown comparison provider must fail closed.");
+        Assert(failure == AiModelComparisonFailure.InvalidProvider, "An unknown provider should report the provider reason.");
+
+        List<AiChatMessage> history = new List<AiChatMessage>
+        {
+            new AiChatMessage("user", "先前問題"),
+            new AiChatMessage("assistant", "先前答案"),
+            new AiChatMessage("system", "不應沿用的系統訊息")
+        };
+        List<AiChatMessage> messages = AiModelComparisonService.BuildMessages(
+            "system prompt",
+            "schema:",
+            "users(id, name)",
+            history,
+            "比較這段查詢");
+        AssertEquals("5", messages.Count.ToString(), "Both model requests should receive the same bounded system, schema, chat, and prompt sequence.");
+        AssertEquals("system", messages[0].Role, "The comparison request should begin with the Punky system prompt.");
+        AssertContains(messages[1].Content, "users(id, name)", "The schema snapshot should be included when requested.");
+        AssertEquals("先前問題", messages[2].Content, "The current conversation's user context should be copied.");
+        AssertEquals("先前答案", messages[3].Content, "The current conversation's assistant context should be copied.");
+        AssertEquals("比較這段查詢", messages[4].Content, "The unsent prompt should be the final user message.");
+        messages[2].Content = "changed";
+        AssertEquals("先前問題", history[0].Content, "Comparison requests must not mutate the active conversation history.");
+
+        string previousLanguage = Localization.CurrentLanguage;
+        string previousCompareProvider = ApplicationOptionSettings.GetString("AiCompareProvider");
+        string previousCompareModel = ApplicationOptionSettings.GetString("AiCompareModel");
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            ApplicationOptionSettings.SetString("AiCompareProvider", string.Empty);
+            ApplicationOptionSettings.SetString("AiCompareModel", string.Empty);
+            using (AiModelComparisonForm form = new AiModelComparisonForm(current, "比較", "", history))
+            {
+                SplitContainer results = form.Controls.OfType<SplitContainer>().FirstOrDefault();
+                Assert(results != null && results.Orientation == Orientation.Vertical, "Model answers should use a vertical split for side-by-side results.");
+                Assert(results.Panel1.Controls.Count == 1 && results.Panel2.Controls.Count == 1, "Each comparison side should own an isolated answer view.");
+                Button compareButton = GetPrivateField<Button>(form, "_compareButton");
+                ComboBox leftProvider = GetPrivateField<ComboBox>(form, "_leftProviderCombo");
+                ComboBox leftModel = GetPrivateField<ComboBox>(form, "_leftModelCombo");
+                ComboBox rightModel = GetPrivateField<ComboBox>(form, "_rightModelCombo");
+                AssertEquals("開始比較", compareButton.Text, "The explicit two-request action should be localized.");
+                AssertEquals("Codex CLI（ChatGPT 訂閱）", leftProvider.Text, "The left side should begin with the panel's active provider.");
+                AssertEquals("gpt-5.6-sol", leftModel.Text, "An explicit current CLI model should remain visible on the left side.");
+                AssertEquals("gpt-5.6-terra", rightModel.Text, "The right side should prefer a distinct known model.");
+            }
+
+            using (AiModelComparisonForm defaultModelForm = new AiModelComparisonForm(
+                new AiChatSettings { Provider = "codex-cli", Endpoint = string.Empty, Model = string.Empty },
+                "比較",
+                "",
+                history))
+            {
+                ComboBox leftModel = GetPrivateField<ComboBox>(defaultModelForm, "_leftModelCombo");
+                AssertEquals("CLI 預設模型", leftModel.Text, "A blank CLI model should be explained instead of showing an empty selector.");
+            }
+
+            using (AiAssistantPanel panel = new AiAssistantPanel(
+                () => string.Empty,
+                sql => { },
+                () => { },
+                () => { },
+                () => { }))
+            {
+                panel.Size = new Size(380, 680);
+                panel.CreateControl();
+                panel.PerformLayout();
+                Button compareButton = GetPrivateField<Button>(panel, "compareModelsButton");
+                Button sendButton = GetPrivateField<Button>(panel, "sendButton");
+                UiInputShell inputShell = GetPrivateField<UiInputShell>(panel, "inputShell");
+                AssertEquals("比較", compareButton.Text, "The AI input area should expose model comparison without changing the normal send action.");
+                Assert(compareButton.Visible && sendButton.Visible, "Compare and send should both remain visible in the narrow AI pane.");
+                Assert(inputShell.Width >= 120, "Adding comparison should leave a usable prompt editor at the default pane width.");
+            }
+        }
+        finally
+        {
+            ApplicationOptionSettings.SetString("AiCompareProvider", previousCompareProvider);
+            ApplicationOptionSettings.SetString("AiCompareModel", previousCompareModel);
             Localization.SetLanguage(previousLanguage, false);
         }
     }

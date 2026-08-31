@@ -32,6 +32,7 @@ namespace mySQLPunk
         private TextBox inputBox;
         private UiInputShell inputShell;
         private Button sendButton;
+        private Button compareModelsButton;
         private CheckBox includeContextBox;
 
         private Panel conversationPanel;
@@ -143,6 +144,13 @@ namespace mySQLPunk
             };
             ThemeManager.MarkAsPrimary(sendButton);
             sendButton.Click += (s, e) => SendCurrentInput();
+            compareModelsButton = new Button
+            {
+                Text = Localization.T("Ai.CompareButton"),
+                Dock = DockStyle.Right,
+                Width = 74
+            };
+            compareModelsButton.Click += (s, e) => OpenModelComparison();
             inputBox = new TextBox { Multiline = true, AcceptsReturn = true };
             inputShell = new UiInputShell(inputBox) { Dock = DockStyle.Fill, Height = 60 };
             inputBox.KeyDown += (s, e) =>
@@ -157,6 +165,8 @@ namespace mySQLPunk
             };
             Panel inputRow = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 4, 0, 0) };
             inputRow.Controls.Add(inputShell);
+            inputRow.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 8 });
+            inputRow.Controls.Add(compareModelsButton);
             inputRow.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 8 });
             inputRow.Controls.Add(sendButton);
             inputPanel.Controls.Add(inputRow);
@@ -263,6 +273,7 @@ namespace mySQLPunk
             refreshModelsButton.AccessibleName = Localization.T("Query.Refresh");
             includeContextBox.Text = Localization.T("Ai.IncludeContext");
             sendButton.Text = Localization.T("Ai.Send");
+            compareModelsButton.Text = Localization.T("Ai.CompareButton");
             insertSqlButton.Text = Localization.T("Ai.OpenSqlInNewQuery");
             reviewSqlButton.Text = Localization.T("Ai.ReviewSql");
             conversationCombo.AccessibleName = Localization.T("Ai.Conversations");
@@ -725,6 +736,35 @@ namespace mySQLPunk
             SendAsync(conversation, text, reviewSqlAction);
         }
 
+        private void OpenModelComparison()
+        {
+            string prompt = (inputBox.Text ?? string.Empty).Trim();
+            if (_busy) return;
+            if (prompt.Length == 0)
+            {
+                MessageBox.Show(
+                    Localization.T("Ai.CompareNoPrompt"),
+                    Localization.T("Ai.CompareTitle"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            string schemaContext = string.Empty;
+            if (includeContextBox.Checked && _contextProvider != null)
+            {
+                try { schemaContext = _contextProvider() ?? string.Empty; } catch { }
+            }
+            using (AiModelComparisonForm form = new AiModelComparisonForm(
+                AiChatSettings.Load(),
+                prompt,
+                schemaContext,
+                _activeConversation.History))
+            {
+                form.ShowDialog(FindForm());
+            }
+        }
+
         private async void SendAsync(AiConversationState conversation, string userText, Action<string> reviewSqlAction)
         {
             _busy = true;
@@ -788,6 +828,7 @@ namespace mySQLPunk
         private void SetBusyState(bool busy)
         {
             sendButton.Enabled = !busy;
+            compareModelsButton.Enabled = !busy;
             inputBox.Enabled = !busy;
             includeContextBox.Enabled = !busy;
             conversationCombo.Enabled = !busy;

@@ -188,6 +188,9 @@
     <Compile Include="AiAssistantPanel.cs">
       <SubType>Component</SubType>
     </Compile>
+    <Compile Include="AiModelComparisonForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="AiSqlReviewForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -263,6 +266,7 @@
     <Compile Include="lib\AdvancedRegistrationService.cs" />
     <Compile Include="lib\ObjectUriService.cs" />
     <Compile Include="lib\AiChatService.cs" />
+    <Compile Include="lib\AiModelComparisonService.cs" />
     <Compile Include="lib\AiOAuthService.cs" />
     <Compile Include="lib\QueryAiPromptService.cs" />
     <Compile Include="lib\QueryAiActionService.cs" />
