@@ -754,6 +754,30 @@ namespace mySQLPunk
             };
             contentPanel.Controls.Add(hint);
 
+            // ── 代為操作（代理模式）開關 ──
+            CheckBox agentModeCheck = new CheckBox
+            {
+                Text = T("允許 Punky 代為操作（代理模式）", "Allow Punky to operate the app (agent mode)"),
+                Checked = ApplicationOptionSettings.GetBool("AiAgentModeEnabled"),
+                AutoSize = true,
+                MaximumSize = new Size(560, 0),
+                Location = new Point(18, 712)
+            };
+            agentModeCheck.CheckedChanged += (s, e) => ApplicationOptionSettings.SetBool("AiAgentModeEnabled", agentModeCheck.Checked);
+            optionCheckBoxes["AiAgentModeEnabled"] = agentModeCheck;
+            contentPanel.Controls.Add(agentModeCheck);
+
+            Label agentModeHint = new Label
+            {
+                Text = T("開啟後，Punky 輸入區會出現「請 Punky 代為操作」勾選，AI 可直接查詢、執行變更與操作應用程式。危險操作（DROP、TRUNCATE、DELETE 等）仍會逐一跳出確認；所有操作都會寫入查詢歷史。",
+                         "When enabled, a \"Let Punky operate for me\" checkbox appears in the Punky input area, letting the AI query, run changes, and drive the app. Dangerous operations (DROP, TRUNCATE, DELETE, etc.) still prompt for confirmation each time, and every operation is written to the query history."),
+                AutoSize = true,
+                MaximumSize = new Size(560, 0),
+                Location = new Point(18, 742),
+                ForeColor = ThemeManager.MutedTextColor
+            };
+            contentPanel.Controls.Add(agentModeHint);
+
             updateAdvancedLayout = () =>
             {
                 lib.AiProviderPreset preset = lib.AiChatService.FindPreset(currentProviderId());
@@ -826,7 +850,10 @@ namespace mySQLPunk
                 probeResult.Top = buttonTop + 40;
                 hint.Visible = showKey;
                 if (hint.Visible) hint.Top = probeResult.Top + 50;
-                int contentBottom = hint.Visible ? hint.Bottom + 24 : probeResult.Top + 64;
+                int agentTop = (hint.Visible ? hint.Bottom : probeResult.Top + 24) + 20;
+                agentModeCheck.Top = agentTop;
+                agentModeHint.Top = agentModeCheck.Bottom + 4;
+                int contentBottom = agentModeHint.Bottom + 24;
                 contentPanel.AutoScrollMinSize = new Size(0, Math.Max(540, contentBottom));
             };
 

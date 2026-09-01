@@ -194,6 +194,12 @@
     <Compile Include="AiSqlReviewForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="AiAgentDangerConfirmForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Form1.AiAgentHost.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="QueryAiActionManagerForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -266,6 +272,10 @@
     <Compile Include="lib\AdvancedRegistrationService.cs" />
     <Compile Include="lib\ObjectUriService.cs" />
     <Compile Include="lib\AiChatService.cs" />
+    <Compile Include="lib\AiAgentProtocol.cs" />
+    <Compile Include="lib\AiAgentSqlClassifier.cs" />
+    <Compile Include="lib\AiAgentToolService.cs" />
+    <Compile Include="lib\IAiAgentHost.cs" />
     <Compile Include="lib\AiModelComparisonService.cs" />
     <Compile Include="lib\AiOAuthService.cs" />
     <Compile Include="lib\QueryAiPromptService.cs" />
