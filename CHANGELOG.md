@@ -9,6 +9,7 @@
 
 ### 🛠️ 問題修正與優化
 
+- 修正部分機器上 AI 訂閱 CLI「卡片偵測得到、按測試卻失敗」：npm 版 CLI 的 `.cmd` 啟動器要靠 PATH 找 node，但 GUI 程式繼承的 PATH 可能沒有（nvm/fnm 只寫在 shell 設定檔，或裝完 Node.js 還沒重開程式）。現在啟動前會從常見安裝位置與登錄檔 PATH 自動補上 Node.js；若 node 真的不存在，錯誤訊息也會明確指向缺 Node.js，而不是誤報「找不到該 CLI」。
 - Linux／macOS 的 Avalonia DataGrid 更新至 12.1.2，納入垂直捲軸範圍同步、版面取整邊界捲動鏈結與 clipboard binding 型別繼承修正。
 - Linux／macOS 查詢結果在欄位排序後匯出 CSV、TSV 或 JSON 時，現在會沿用目前網格的完整可視順序，不再悄悄回到原始查詢列序；匯出前也會驗證列索引是完整且不重複的排列。
 - Linux／macOS 查詢結果欄位改以原始 provider 值做型別感知排序；NULL、跨 CLR 數字、日期、文字與 binary 都能安全比較，相同值保留資料庫回傳順序。畫面替代文字 `(NULL)` 不再與 nullable 數字／日期進行異質型別比較，也不會和資料本身真的等於 `(NULL)` 的字串混淆。

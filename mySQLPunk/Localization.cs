@@ -547,6 +547,7 @@ namespace mySQLPunk
             Add("Ai.CopyMessage", "複製這則訊息", "Copy this message");
             Add("Ai.CliNotFound", "找不到「{0}」指令：請先安裝並登入該 CLI（選項 > AI 的「前往取得金鑰／認證頁面」有安裝說明），或在端點欄填入執行檔完整路徑。", "Command \"{0}\" not found: install and sign in to the CLI first (the key/sign-up link in Options > AI has install instructions), or put the full executable path in the endpoint field.");
             Add("Ai.CliFailed", "CLI「{0}」執行失敗：{1}", "CLI \"{0}\" failed: {1}");
+            Add("Ai.CliNodeMissing", "「{0}」有安裝，但它的啟動器在 PATH 找不到 Node.js（node）：請安裝 Node.js（nodejs.org），或重新啟動 mySQLPunk／電腦讓新的 PATH 生效。", "\"{0}\" is installed, but its launcher could not find Node.js (node) on PATH: install Node.js (nodejs.org), or restart mySQLPunk / your PC so the updated PATH takes effect.");
             Add("Ai.CliTimeout", "CLI「{0}」回應逾時（180 秒），已中止。", "CLI \"{0}\" timed out (180 seconds) and was terminated.");
             Add("Ai.CliInvalidModel", "模型名稱只能包含英文字母、數字、句點、斜線、冒號、底線與連字號。", "Model names may only contain letters, numbers, periods, slashes, colons, underscores, and hyphens.");
             Add("Ai.CliDefaultModel", "CLI 預設模型", "CLI default model");

@@ -9146,6 +9146,30 @@ public static class SmokeTests
             {
                 Assert(ex.Message.IndexOf('\uFFFD') < 0, "CLI errors should not contain UTF-8 replacement-character mojibake.");
             }
+
+            Assert(AiChatService.IsMissingNodeError("'\"node\"' is not recognized as an internal or external command"), "Missing-node stderr from npm shims should be classified as a Node.js problem.");
+            Assert(AiChatService.IsMissingNodeError("'node' \u4E0D\u662F\u5167\u90E8\u6216\u5916\u90E8\u547D\u4EE4\u3001\u53EF\u57F7\u884C\u7684\u7A0B\u5F0F\u6216\u6279\u6B21\u6A94\u3002"), "Localized missing-node stderr should be classified as a Node.js problem.");
+            Assert(!AiChatService.IsMissingNodeError("'claude' is not recognized as an internal or external command"), "A missing CLI itself should not be misreported as missing Node.js.");
+
+            string nodeDirectory = AiChatService.FindNodeDirectoryForCliShims();
+            Assert(nodeDirectory == null || File.Exists(Path.Combine(nodeDirectory, "node.exe")), "Node directory discovery should only return folders that actually contain node.exe.");
+
+            string nodeMissingCli = Path.Combine(tempRoot, "node missing cli.cmd");
+            File.WriteAllText(nodeMissingCli, "@echo off\r\necho 'node' is not recognized as an internal or external command 1>&2\r\nexit /b 1\r\n", Encoding.ASCII);
+            try
+            {
+                AiChatService.CliVersion(new AiChatSettings
+                {
+                    Provider = "gemini-cli",
+                    Endpoint = nodeMissingCli,
+                    Model = ""
+                });
+                Assert(false, "A shim that cannot find node should raise a Node.js-specific error.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "Node.js", "The missing-node error should tell the user to install Node.js instead of claiming the CLI is missing.");
+            }
         }
         finally
         {
