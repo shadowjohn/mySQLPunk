@@ -56,6 +56,7 @@ public static class SmokeTests
         Run("Query AI custom actions", TestQueryAiCustomActions, ref passed);
         Run("AI SQL diff review", TestAiSqlDiffReview, ref passed);
         Run("AI assistant multi conversations", TestAiAssistantMultiConversations, ref passed);
+        Run("AI assistant settings dialog", TestAiAssistantSettingsDialog, ref passed);
         Run("AI model answer comparison", TestAiModelAnswerComparison, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
@@ -3014,6 +3015,17 @@ public static class SmokeTests
         AssertContains(mysqlSql, "CREATE TABLE", "MySQL create table SQL should be generated.");
         AssertContains(mysqlSql, "codex_smoke_mysql", "MySQL create table SQL should include table name.");
         AssertContains(mysqlSql, "PRIMARY KEY", "MySQL create table SQL should include primary key.");
+        string mysqlColumnPropertySql = BuildMySqlCreateTableSqlWithColumnProperties();
+        AssertContains(mysqlColumnPropertySql, "`Id` int(11) unsigned zerofill NOT NULL AUTO_INCREMENT", "MySQL integer column properties should generate unsigned zerofill auto-increment SQL.");
+        AssertContains(mysqlColumnPropertySql, "PRIMARY KEY (`Id`)", "MySQL auto-increment primary key should stay in the primary key clause.");
+        AssertContains(mysqlColumnPropertySql, "`UpdatedAt` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", "MySQL timestamp update column property should generate ON UPDATE CURRENT_TIMESTAMP.");
+
+        DataTable mysqlMetadataColumns = LoadMySqlDesignerColumnsFromMetadata();
+        Assert(GetDesignerColumnBool(mysqlMetadataColumns.Rows[0], "AutoIncrement"), "MySQL auto_increment metadata should load into the designer property model.");
+        Assert(GetDesignerColumnBool(mysqlMetadataColumns.Rows[0], "Unsigned"), "MySQL unsigned metadata should load into the designer property model.");
+        Assert(GetDesignerColumnBool(mysqlMetadataColumns.Rows[0], "Zerofill"), "MySQL zerofill metadata should load into the designer property model.");
+        Assert(GetDesignerColumnBool(mysqlMetadataColumns.Rows[1], "OnUpdateCurrentTimestamp"), "MySQL ON UPDATE metadata should load into the designer property model.");
+        AssertMySqlColumnPropertiesPanelShowsIntegerOptions();
 
         string sqliteSql = BuildCreateTableSql(new my_sqlite(), "codex_smoke_sqlite");
         AssertContains(sqliteSql, "CREATE TABLE", "SQLite create table SQL should be generated.");
@@ -3081,6 +3093,139 @@ public static class SmokeTests
         }
     }
 
+    private static string BuildMySqlCreateTableSqlWithColumnProperties()
+    {
+        using (TableDesignerForm form = new TableDesignerForm(new my_mysql(), "main", null))
+        {
+            SetTextBoxField(form, "txtTableName", "codex_smoke_mysql_properties");
+
+            MethodInfo createTableMethod = typeof(TableDesignerForm).GetMethod("CreateColumnsDisplayTable", BindingFlags.Instance | BindingFlags.NonPublic);
+            DataTable columns = (DataTable)createTableMethod.Invoke(form, null);
+            EnsureDesignerPropertyColumnsForTest(columns);
+
+            DataRow id = columns.NewRow();
+            id["Name"] = "Id";
+            id["Type"] = "int";
+            id["Length"] = "11";
+            id["NotNull"] = true;
+            id["PK"] = true;
+            id["AutoIncrement"] = true;
+            id["Unsigned"] = true;
+            id["Zerofill"] = true;
+            columns.Rows.Add(id);
+
+            DataRow updatedAt = columns.NewRow();
+            updatedAt["Name"] = "UpdatedAt";
+            updatedAt["Type"] = "datetime";
+            updatedAt["Default"] = "CURRENT_TIMESTAMP";
+            updatedAt["OnUpdateCurrentTimestamp"] = true;
+            columns.Rows.Add(updatedAt);
+
+            MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod("BuildCreateTableSql", BindingFlags.Instance | BindingFlags.NonPublic);
+            return (string)buildMethod.Invoke(form, new object[] { columns });
+        }
+    }
+
+    private static DataTable LoadMySqlDesignerColumnsFromMetadata()
+    {
+        using (TableDesignerForm form = new TableDesignerForm(new my_mysql(), "main", null))
+        {
+            MethodInfo createTableMethod = typeof(TableDesignerForm).GetMethod("CreateColumnsDisplayTable", BindingFlags.Instance | BindingFlags.NonPublic);
+            DataTable columns = (DataTable)createTableMethod.Invoke(form, null);
+            MethodInfo populateMethod = typeof(TableDesignerForm).GetMethod("PopulateDesignerColumnRow", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            DataTable metadata = new DataTable();
+            metadata.Columns.Add("Field");
+            metadata.Columns.Add("Type");
+            metadata.Columns.Add("Null");
+            metadata.Columns.Add("Key");
+            metadata.Columns.Add("Default");
+            metadata.Columns.Add("Extra");
+            metadata.Columns.Add("Comment");
+            metadata.Rows.Add("Id", "bigint(20) unsigned zerofill", "NO", "PRI", DBNull.Value, "auto_increment", "流水號");
+            metadata.Rows.Add("UpdatedAt", "datetime", "YES", "", "CURRENT_TIMESTAMP", "on update CURRENT_TIMESTAMP", "修改時間");
+
+            foreach (DataRow metadataRow in metadata.Rows)
+            {
+                DataRow designerRow = columns.NewRow();
+                populateMethod.Invoke(form, new object[] { designerRow, metadataRow });
+                columns.Rows.Add(designerRow);
+            }
+
+            return columns;
+        }
+    }
+
+    private static void EnsureDesignerPropertyColumnsForTest(DataTable table)
+    {
+        AddDesignerPropertyColumnForTest(table, "AutoIncrement");
+        AddDesignerPropertyColumnForTest(table, "Unsigned");
+        AddDesignerPropertyColumnForTest(table, "Zerofill");
+        AddDesignerPropertyColumnForTest(table, "OnUpdateCurrentTimestamp");
+    }
+
+    private static void AddDesignerPropertyColumnForTest(DataTable table, string columnName)
+    {
+        if (!table.Columns.Contains(columnName)) table.Columns.Add(columnName, typeof(bool));
+    }
+
+    private static bool GetDesignerColumnBool(DataRow row, string columnName)
+    {
+        return row.Table.Columns.Contains(columnName) &&
+               row[columnName] != DBNull.Value &&
+               (bool)row[columnName];
+    }
+
+    private static void AssertMySqlColumnPropertiesPanelShowsIntegerOptions()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            using (TableDesignerForm form = new TableDesignerForm(new my_mysql(), "main", null))
+            {
+                form.CreateControl();
+                DataGridView grid = GetPrivateField<DataGridView>(form, "dgvColumns");
+                Panel propertiesPanel = GetPrivateField<Panel>(form, "pnlColumnProperties");
+                DataTable columns = (DataTable)grid.DataSource;
+
+                Assert(!grid.AllowUserToAddRows, "Table Designer column grid should not show an extra blank placeholder row.");
+
+                DataRow row = columns.NewRow();
+                row["Name"] = "Id";
+                row["Type"] = "int";
+                row["Length"] = "11";
+                row["NotNull"] = true;
+                row["PK"] = true;
+                columns.Rows.Add(row);
+
+                grid.CurrentCell = grid.Rows[0].Cells["Type"];
+                grid.Rows[0].Selected = true;
+                form.PerformLayout();
+                Application.DoEvents();
+
+                Assert(ControlTreeContainsText(propertiesPanel, "自動遞增"), "MySQL integer columns should expose an auto-increment property checkbox.");
+                Assert(ControlTreeContainsText(propertiesPanel, "不帶正負號"), "MySQL integer columns should expose an unsigned property checkbox.");
+                Assert(ControlTreeContainsText(propertiesPanel, "填滿零"), "MySQL integer columns should expose a zerofill property checkbox.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
+    }
+
+    private static bool ControlTreeContainsText(Control root, string text)
+    {
+        if (root == null) return false;
+        if (!string.IsNullOrEmpty(root.Text) && root.Text.IndexOf(text, StringComparison.Ordinal) >= 0) return true;
+        foreach (Control child in root.Controls)
+        {
+            if (ControlTreeContainsText(child, text)) return true;
+        }
+        return false;
+    }
+
     private static string BuildCreateTableSql(IDatabase db, string tableName)
     {
         using (TableDesignerForm form = new TableDesignerForm(db, "main", null))
@@ -3116,6 +3261,10 @@ public static class SmokeTests
         AssertContains(mysqlSql, "DROP COLUMN `removed_col`", "MySQL ALTER should drop removed columns.");
         AssertContains(mysqlSql, "CHANGE COLUMN `legacy_name` `display_name`", "MySQL ALTER should rename changed columns.");
         AssertContains(mysqlSql, "ADD COLUMN `created_at`", "MySQL ALTER should add new columns.");
+        string mysqlTableCommentSql = BuildExistingMySqlAlterSqlWithTableComment("每日工作");
+        AssertContains(mysqlTableCommentSql, "ALTER TABLE `main`.`demo_table`", "MySQL ALTER should target the table when only the table comment changes.");
+        AssertContains(mysqlTableCommentSql, "COMMENT = '每日工作'", "MySQL ALTER should update table comments when the comment tab changes.");
+        Assert(!mysqlTableCommentSql.Contains("沒有偵測到變更"), "MySQL table comment changes should not show the no-change preview.");
 
         string postgresqlSql = BuildExistingAlterSql(
             CreateProvider<my_postgresql>(),
@@ -6435,6 +6584,79 @@ public static class SmokeTests
         }
     }
 
+    private static void TestAiAssistantSettingsDialog()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        string previousTheme = ThemeManager.CurrentTheme;
+        TestFileSnapshot languageFile = TestFileSnapshot.Capture(Path.Combine(Application.UserAppDataPath, "language.txt"));
+        TestFileSnapshot themeFile = TestFileSnapshot.Capture(Path.Combine(Application.UserAppDataPath, "theme.txt"));
+
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            ThemeManager.SetTheme(ThemeManager.Light, false);
+
+            using (Form1 form = new Form1())
+            {
+                form.CreateControl();
+                MethodInfo ensureAiPanel = typeof(Form1).GetMethod("EnsureAiPanel", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert(ensureAiPanel != null, "Form1 should expose AI panel creation internally for smoke tests.");
+                ensureAiPanel.Invoke(form, null);
+
+                AiAssistantPanel panel = GetPrivateField<AiAssistantPanel>(form, "aiPanel");
+                Button settingsButton = GetPrivateField<Button>(panel, "settingsButton");
+                bool handledDialog = false;
+                string dialogFailure = null;
+
+                using (System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer())
+                {
+                    timer.Interval = 25;
+                    timer.Tick += (s, e) =>
+                    {
+                        OptionsForm optionsForm = null;
+                        foreach (Form openForm in Application.OpenForms)
+                        {
+                            optionsForm = openForm as OptionsForm;
+                            if (optionsForm != null) break;
+                        }
+                        if (optionsForm == null) return;
+
+                        timer.Stop();
+                        try
+                        {
+                            GetPrivateField<RadioButton>(optionsForm, "darkThemeRadio").Checked = true;
+                            GetPrivateField<ComboBox>(optionsForm, "languageCombo").SelectedIndex = 1;
+                            GetPrivateField<Button>(optionsForm, "okButton").PerformClick();
+                            handledDialog = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            dialogFailure = ex.Message;
+                            optionsForm.Close();
+                        }
+                    };
+
+                    timer.Start();
+                    InvokeButtonClick(settingsButton);
+                    timer.Stop();
+                }
+
+                Assert(dialogFailure == null, "AI settings dialog automation should complete: " + dialogFailure);
+                Assert(handledDialog, "AI settings button should open OptionsForm.");
+                AssertEquals(Localization.English, Localization.CurrentLanguage, "AI settings OK should apply selected language immediately.");
+                AssertEquals(ThemeManager.Dark, ThemeManager.CurrentTheme, "AI settings OK should apply selected theme immediately.");
+                AssertEquals("Connections", GetPrivateField<Label>(form, "label1").Text, "AI settings OK should relocalize the main window immediately.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+            ThemeManager.SetTheme(previousTheme, false);
+            languageFile.Restore();
+            themeFile.Restore();
+        }
+    }
+
     private static void TestAiModelAnswerComparison()
     {
         AiChatSettings current = new AiChatSettings
@@ -7386,6 +7608,7 @@ public static class SmokeTests
         MethodInfo objectDistributionBIMethod = typeof(Form1).GetMethod("BuildObjectDistributionBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo rowCountRankingBIMethod = typeof(Form1).GetMethod("BuildRowCountRankingBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo groupListMethod = typeof(Form1).GetMethod("BuildDatabaseGroupList", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo showObjectListMethod = typeof(Form1).GetMethod("ShowDatabaseObjectList", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo searchResultsMethod = typeof(Form1).GetMethod("BuildDatabaseSearchResults", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo detailObjectTypeMethod = typeof(Form1).GetMethod("LocalizeDetailObjectType", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo sidebarObjectTitleMethod = typeof(Form1).GetMethod("BuildSidebarObjectTitle", BindingFlags.Static | BindingFlags.NonPublic);
@@ -7483,6 +7706,32 @@ public static class SmokeTests
             DataRow zhFailedRankingTable = FindDataRow(zhFailedRanking, "名稱", "public.users");
             Assert(zhFailedRankingTable != null, "Row count ranking BI should keep rows when count fails.");
             AssertEquals("未知錯誤", zhFailedRankingTable["狀態"].ToString(), "Blank ranking row count errors should localize Traditional Chinese unknown fallback.");
+
+            using (Form1 tableListForm = new Form1())
+            {
+                DataGridView tableListGrid = GetPrivateField<DataGridView>(tableListForm, "table_top");
+                tableListForm.Cursor = Cursors.WaitCursor;
+                tableListForm.UseWaitCursor = true;
+                tableListGrid.Cursor = Cursors.WaitCursor;
+                tableListGrid.UseWaitCursor = true;
+                FakeDumpDatabase tableStatusDb = new FakeDumpDatabase
+                {
+                    Provider = "mysql",
+                    TableStatus = CreateTableStatusTable()
+                };
+                showObjectListMethod.Invoke(tableListForm, new object[] { tableStatusDb, "main" });
+                Assert(tableListGrid.ReadOnly, "Database table list should be selectable but not editable.");
+                Assert(tableListGrid.EditMode == DataGridViewEditMode.EditProgrammatically, "Database table list should not enter edit mode from accidental clicks.");
+                Assert(!tableListForm.UseWaitCursor, "Database table list should clear a stale form wait cursor after binding.");
+                Assert(tableListForm.Cursor == Cursors.Default, "Database table list should restore the form cursor after binding.");
+                Assert(!tableListGrid.UseWaitCursor, "Database table list should clear a stale wait cursor after binding.");
+                Assert(tableListGrid.Cursor == Cursors.Default, "Database table list should use the normal mouse pointer after binding.");
+                DataTable zhTableList = tableListGrid.DataSource as DataTable;
+                Assert(zhTableList != null, "Database table list should bind a display table.");
+                DataRow zhTableStatusRow = FindDataRow(zhTableList, "名稱", "work_daily");
+                Assert(zhTableStatusRow != null, "Database table list should include table status rows.");
+                AssertEquals("2026-06-28 16:27:10", zhTableStatusRow["修改日期"].ToString(), "Database table list should format update time as yyyy-MM-dd HH:mm:ss.");
+            }
 
             DataTable zhViewsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Views", new Dictionary<string, object>() });
             DataRow zhViewGroupRow = FindDataRow(zhViewsGroup, "名稱", "public.active_users");
@@ -9052,6 +9301,30 @@ public static class SmokeTests
         AssertEquals("", AiChatService.NormalizeCliModel("codex-cli", "gpt-5.1-codex-max"), "Deprecated Codex model variants should fall back to the CLI default.");
         AssertEquals("gpt-5.6-sol", AiChatService.NormalizeCliModel("codex-cli", "gpt-5.6-sol"), "Current Codex models should remain selected.");
         AssertEquals("gpt-5.1-codex", AiChatService.NormalizeCliModel("openai", "gpt-5.1-codex"), "API providers should preserve explicitly selected models.");
+        AssertEquals("antigravity-cli", AiChatService.NormalizeProviderId("gemini-cli"), "Legacy Gemini CLI settings should migrate to Antigravity CLI.");
+        AssertEquals("", AiChatService.NormalizeCliModel("gemini-cli", "gemini-2.5-flash"), "Legacy Gemini CLI model overrides should not be sent to Antigravity CLI.");
+        AssertEquals("agy", AiChatService.CliExecutableFor("antigravity-cli"), "Antigravity CLI should use the official agy executable.");
+        AssertEquals("antigravity-cli", AiChatService.FindPreset("gemini-cli").Id, "Legacy Gemini CLI provider lookups should resolve to Antigravity CLI.");
+        string expectedAntigravityCliPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin", "agy.exe");
+        AssertEquals(expectedAntigravityCliPath, AiChatService.AntigravityDefaultCliPath(), "Antigravity CLI should look in its official per-user Windows installation directory.");
+
+        System.Diagnostics.ProcessStartInfo antigravityInstall = AiChatService.BuildAntigravityInstallStartInfo();
+        AssertEquals("powershell.exe", Path.GetFileName(antigravityInstall.FileName), "Antigravity automatic installation should use the current user's PowerShell.");
+        AssertContains(antigravityInstall.Arguments, "https://antigravity.google/cli/install.ps1", "Antigravity automatic installation should use only the official HTTPS installer.");
+        AssertContains(antigravityInstall.Arguments, "-NoProfile", "Antigravity automatic installation should not load the user's PowerShell profile.");
+        Assert(!antigravityInstall.Arguments.Contains("ExecutionPolicy"), "Antigravity automatic installation must not bypass the machine's PowerShell execution policy.");
+        Assert(!antigravityInstall.CreateNoWindow, "Antigravity automatic installation should remain visible so the user can inspect its progress.");
+        Assert(!antigravityInstall.UseShellExecute, "Antigravity automatic installation should start directly without requesting elevation.");
+
+        string[] antigravityArguments = AiChatService.BuildAntigravityArguments("gemini-3.7-flash-high");
+        Assert(Array.IndexOf(antigravityArguments, "--input-format") >= 0, "Antigravity CLI should use stdin stream input instead of command-line prompts.");
+        Assert(Array.IndexOf(antigravityArguments, "stream-json") >= 0, "Antigravity CLI should use stream-json input/output for safe programmatic prompts.");
+        Assert(Array.IndexOf(antigravityArguments, "--model") >= 0, "Antigravity CLI should pass an explicit selected model.");
+        Assert(Array.IndexOf(antigravityArguments, "gemini-3.7-flash-high") >= 0, "Antigravity CLI should preserve an explicit current model slug.");
+        Assert(Array.IndexOf(antigravityArguments, "-p") < 0, "Antigravity CLI should not place prompt text in a command-line -p argument.");
+        JObject antigravityInput = JObject.Parse(AiChatService.BuildAntigravityStreamInput("hello"));
+        AssertEquals("user", (string)antigravityInput["event"], "Antigravity CLI stdin should use a user event.");
+        AssertEquals("hello", (string)antigravityInput.SelectToken("message.content"), "Antigravity CLI stdin should put prompt text in the stream event.");
 
         string[] codexModels = AiChatService.KnownCliModels("codex-cli");
         Assert(Array.IndexOf(codexModels, "gpt-5.6-sol") >= 0, "Codex CLI model suggestions should include the current default family.");
@@ -9074,24 +9347,53 @@ public static class SmokeTests
         AssertEquals("claude@example.com", claudeAccount.Label, "Claude account metadata should expose only the account label.");
         AssertEquals("Claude.ai", claudeAccount.Method, "Claude account metadata should report the sign-in method.");
 
-        AiCliAccountInfo geminiAccount = AiChatService.ParseCliAccountInfo(
-            "gemini-cli",
-            "{\"active\":\"gemini@example.com\",\"oauth\":\"must-not-escape\"}");
-        Assert(geminiAccount.State == AiCliAccountState.SignedIn, "Gemini account metadata should detect a Google sign-in.");
-        AssertEquals("gemini@example.com", geminiAccount.Label, "Gemini account metadata should expose only the account label.");
-        AssertEquals("Google", geminiAccount.Method, "Gemini account metadata should report the sign-in method.");
+        AiCliAccountInfo antigravityAccount = AiChatService.ParseCliAccountInfo(
+            "antigravity-cli",
+            "{\"oauth\":\"must-not-read\"}");
+        Assert(antigravityAccount.State == AiCliAccountState.Unsupported, "Antigravity account detection should not read keyring-backed token metadata.");
 
         AiCliAccountInfo malformedAccount = AiChatService.ParseCliAccountInfo("codex-cli", "not-json");
         Assert(malformedAccount.State == AiCliAccountState.Unknown, "Malformed account metadata should fail closed.");
+
+        MethodInfo detectCliAccountMethod = typeof(AiChatService).GetMethod("DetectCliAccount", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert(detectCliAccountMethod != null, "AI CLI account detection should remain available to the provider scanner.");
+        string previousCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        string fakeCodexHome = Path.Combine(Path.GetTempPath(), "mySQLPunk CodexHome " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fakeCodexHome);
+        try
+        {
+            File.WriteAllText(Path.Combine(fakeCodexHome, "auth.json"),
+                "{\"auth_mode\":\"chatgpt\",\"tokens\":{\"id_token\":\"header." + claims + ".signature\",\"access_token\":\"must-not-read\"}}",
+                Encoding.UTF8);
+            Environment.SetEnvironmentVariable("CODEX_HOME", fakeCodexHome);
+            AiCliAccountInfo detectedCodexAccount = (AiCliAccountInfo)detectCliAccountMethod.Invoke(null, new object[] { "codex-cli" });
+            Assert(detectedCodexAccount.State == AiCliAccountState.SignedIn, "Codex account detection should report sign-in data when CODEX_HOME auth exists.");
+            Assert(string.IsNullOrWhiteSpace(detectedCodexAccount.Label), "Codex account detection should not parse labels from token-bearing auth files.");
+            AssertContains(detectedCodexAccount.Method, "Codex", "Codex account detection should identify the CLI without reading token metadata.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", previousCodexHome);
+            try { Directory.Delete(fakeCodexHome, true); } catch { }
+        }
+
         List<AiCliDetectionResult> cliDetections = AiChatService.DetectCliProviders();
         Assert(cliDetections.Count == 3, "AI CLI detection should return all three supported subscription providers.");
         Assert(cliDetections.All(item => item.Account != null), "AI CLI detection should always return a safe account state.");
+        Assert(cliDetections.Any(item => item.Preset.Id == "antigravity-cli"), "AI CLI detection should include Antigravity CLI after the Gemini CLI migration.");
+        Assert(!cliDetections.Any(item => item.Preset.Id == "gemini-cli"), "AI CLI detection should stop exposing the deprecated Gemini CLI provider.");
 
         string root = FindRepositoryRootForTest();
         string optionsSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "OptionsForm.cs"), Encoding.UTF8);
+        string aiServiceSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "lib", "AiChatService.cs"), Encoding.UTF8);
         AssertContains(optionsSource, "bool showEndpoint = !isCli || !selectedCliInstalled", "Installed subscription CLIs should hide the unnecessary custom-path field.");
         AssertContains(optionsSource, "keyLabel.Visible = showKey", "API key controls should only appear for providers that need them.");
         AssertContains(optionsSource, "detectButton.Visible = isLocal", "Local model detection should only appear for local providers.");
+        AssertContains(optionsSource, "官方安裝教學", "Missing CLI cards should label the documentation action as official installation guidance.");
+        AssertContains(optionsSource, "自動安裝", "The missing Antigravity CLI card should offer an explicit automatic installation action.");
+        AssertContains(optionsSource, "BuildAntigravityInstallStartInfo", "The Antigravity automatic installation button should use the verified official installer command.");
+        AssertContains(optionsSource, "Size = new Size(560, 209)", "The CLI card container should be tall enough to display Antigravity's second installation action.");
+        AssertContains(aiServiceSource, "FirstExistingCliPath(AntigravityDefaultCliPath())", "Antigravity CLI resolution should check its official install directory even when this app started before PATH was refreshed.");
 
         string cliWorkspace = AiChatService.EnsureCliWorkspaceDirectory();
         Assert(Directory.Exists(cliWorkspace), "AI CLI workspace should be created before launching a provider.");
@@ -9105,6 +9407,14 @@ public static class SmokeTests
         Assert(!string.IsNullOrWhiteSpace(resolvedCmd) && File.Exists(resolvedCmd), "CLI executable resolution should find Windows system commands without cmd.exe indirection.");
         string missingName = "mysqlpunk-missing-cli-" + Guid.NewGuid().ToString("N");
         Assert(AiChatService.ResolveCliExecutablePath(missingName) == null, "CLI executable resolution should reject missing commands cleanly.");
+        string fakeNpmCodex = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "codex.cmd");
+        string fakeDesktopCodex = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenAI", "Codex", "bin", "desktop-build", "codex.exe");
+        AssertEquals(fakeDesktopCodex,
+            AiChatService.SelectPreferredCodexCliPath(new[] { fakeNpmCodex, fakeDesktopCodex }),
+            "Codex CLI resolution should prefer the Codex Desktop executable over older npm shims when both share CODEX_HOME.");
+        AssertEquals(fakeNpmCodex,
+            AiChatService.SelectPreferredCodexCliPath(new[] { fakeNpmCodex }),
+            "Codex CLI resolution should keep the first candidate when no Desktop-managed executable is available.");
 
         string tempRoot = Path.Combine(Path.GetTempPath(), "mySQLPunk AI CLI " + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
@@ -9120,6 +9430,50 @@ public static class SmokeTests
             });
             AssertContains(output, "ai-cli-ok", "CLI batch shims in paths containing spaces should execute successfully.");
 
+            string npmShimBase = Path.Combine(tempRoot, "npm style cli");
+            File.WriteAllText(npmShimBase, "#!/bin/sh\necho should-not-run\n", Encoding.ASCII);
+            File.WriteAllText(npmShimBase + ".cmd", "@echo off\r\necho npm-shim-ok\r\n", Encoding.ASCII);
+            string resolvedNpmShim = AiChatService.ResolveCliExecutablePath(npmShimBase);
+            AssertEquals(Path.GetFullPath(npmShimBase + ".cmd"), resolvedNpmShim, "Windows CLI resolution should prefer executable npm .cmd shims over extensionless shell shims.");
+            string npmShimOutput = AiChatService.CliVersion(new AiChatSettings
+            {
+                Provider = "antigravity-cli",
+                Endpoint = npmShimBase,
+                Model = ""
+            });
+            AssertContains(npmShimOutput, "npm-shim-ok", "Windows npm-style extensionless CLI shims should execute through the sibling .cmd file.");
+
+            string codexCacheErrorCli = Path.Combine(tempRoot, "codex cache error.cmd");
+            File.WriteAllText(codexCacheErrorCli,
+                "@echo off\r\n" +
+                ">&2 echo 2026-09-01T03:07:34.045352Z ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 97 column 5\r\n" +
+                ">&2 echo OpenAI Codex v0.142.2\r\n" +
+                "exit /b 1\r\n",
+                Encoding.ASCII);
+            string previousLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                AiChatService.CliVersion(new AiChatSettings
+                {
+                    Provider = "codex-cli",
+                    Endpoint = codexCacheErrorCli,
+                    Model = ""
+                });
+                Assert(false, "Codex models cache parse errors should raise an actionable repair message.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "models_cache.json", "Codex models cache parse errors should identify the non-token cache file.");
+                AssertContains(ex.Message, "版本", "Codex models cache parse errors should identify CLI/cache schema compatibility as the likely cause.");
+                AssertContains(ex.Message, "Codex Desktop", "Codex models cache parse errors should point users at the Desktop-managed CLI when available.");
+                AssertNotContains(ex.Message, "OpenAI Codex v0.142.2", "Codex models cache parse errors should not bury the repair hint behind the CLI banner.");
+            }
+            finally
+            {
+                Localization.SetLanguage(previousLanguage, false);
+            }
+
             string inspectCli = Path.Combine(tempRoot, "inspect cli.cmd");
             File.WriteAllText(inspectCli, "@echo off\r\nmore >nul\r\necho cwd=%CD%\r\necho args=%*\r\n", Encoding.ASCII);
             string codexOutput = AiChatService.ChatCompletion(
@@ -9130,11 +9484,18 @@ public static class SmokeTests
             AssertContains(codexOutput, "read-only", "Codex CLI should remain in the read-only sandbox while the workspace is trusted.");
             Assert(codexOutput.IndexOf("dangerously-bypass", StringComparison.OrdinalIgnoreCase) < 0, "Trusting the workspace must not disable Codex approvals or sandboxing.");
 
-            string geminiOutput = AiChatService.ChatCompletion(
-                new AiChatSettings { Provider = "gemini-cli", Endpoint = inspectCli, Model = "gemini-2.5-flash" },
+            string antigravityCli = Path.Combine(tempRoot, "antigravity cli.cmd");
+            File.WriteAllText(antigravityCli,
+                "@echo off\r\n" +
+                "set /p input=\r\n" +
+                "echo args=%*\r\n" +
+                "echo input=%input%\r\n" +
+                "echo {\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"antigravity-ok\"}}\r\n",
+                Encoding.ASCII);
+            string antigravityOutput = AiChatService.ChatCompletion(
+                new AiChatSettings { Provider = "antigravity-cli", Endpoint = antigravityCli, Model = "gemini-3.7-flash-high" },
                 new[] { new AiChatMessage("user", "hello") });
-            AssertContains(geminiOutput, "cwd=" + cliWorkspace, "Gemini CLI should run from the isolated mySQLPunk workspace.");
-            AssertContains(geminiOutput, "--skip-trust", "Gemini CLI should trust the isolated workspace for the session.");
+            AssertEquals("antigravity-ok", antigravityOutput, "Antigravity CLI should return the response from its terminal stream-json result event.");
 
             string failedCli = Path.Combine(tempRoot, "failed cli.cmd");
             File.WriteAllText(failedCli, "@echo off\r\ndefinitely-not-a-real-command --version\r\n", Encoding.ASCII);
@@ -9942,6 +10303,10 @@ public static class SmokeTests
         using (Form aboutDialog = (Form)Activator.CreateInstance(aboutDialogType, new object[] { "1.0.0.0" }))
         {
             Assert(aboutDialog.ClientSize.Height >= 340, "About dialog should leave enough vertical room for authors and the close button.");
+        }
+        using (Form1 mainForm = new Form1())
+        {
+            Assert(mainForm.StartPosition == FormStartPosition.CenterScreen, "Main window should open centered on screen by default.");
         }
 
         Type programType = typeof(Form1).Assembly.GetType("mySQLPunk.Program");
@@ -11219,6 +11584,20 @@ public static class SmokeTests
         return table;
     }
 
+    private static DataTable CreateTableStatusTable()
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("Name", typeof(string));
+        table.Columns.Add("Auto_increment", typeof(long));
+        table.Columns.Add("Update_time", typeof(DateTime));
+        table.Columns.Add("Data_length", typeof(long));
+        table.Columns.Add("Engine", typeof(string));
+        table.Columns.Add("Rows", typeof(long));
+        table.Columns.Add("Comment", typeof(string));
+        table.Rows.Add("work_daily", 1041L, new DateTime(2026, 6, 28, 16, 27, 10), 50391L, "MyISAM", 978L, "每日工作");
+        return table;
+    }
+
     private static string BuildExistingAlterSql(IDatabase db, string databaseName, string tableName, DataTable originalColumns, DataTable currentColumns, string methodName)
     {
         TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
@@ -11241,6 +11620,36 @@ public static class SmokeTests
         finally
         {
             indexesGrid.Dispose();
+        }
+    }
+
+    private static string BuildExistingMySqlAlterSqlWithTableComment(string tableComment)
+    {
+        TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
+        DataGridView indexesGrid = new DataGridView();
+        TextBox tableCommentBox = new TextBox();
+        DataTable indexes = CreateDesignerIndexesTable();
+        DataTable originalColumns = CreateOriginalColumnsForAlter(includeRemovedColumn: false);
+        indexesGrid.DataSource = indexes;
+        tableCommentBox.Text = tableComment;
+
+        SetPrivateField(form, "_db", new my_mysql());
+        SetPrivateField(form, "_databaseName", "main");
+        SetPrivateField(form, "_tableName", "demo_table");
+        SetPrivateField(form, "_originalDt", originalColumns);
+        SetPrivateField(form, "_originalIdxDt", indexes.Copy());
+        SetPrivateField(form, "dgvIndexes", indexesGrid);
+        SetPrivateField(form, "txtTableComment", tableCommentBox);
+
+        try
+        {
+            MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod("BuildMySqlAlterTableSql", BindingFlags.Instance | BindingFlags.NonPublic);
+            return (string)buildMethod.Invoke(form, new object[] { originalColumns.Copy() });
+        }
+        finally
+        {
+            indexesGrid.Dispose();
+            tableCommentBox.Dispose();
         }
     }
 
@@ -11462,6 +11871,55 @@ public static class SmokeTests
     {
         FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         return (T)field.GetValue(target);
+    }
+
+    private static void InvokeButtonClick(Button button)
+    {
+        MethodInfo onClick = typeof(Button).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic);
+        onClick.Invoke(button, new object[] { EventArgs.Empty });
+    }
+
+    private sealed class TestFileSnapshot
+    {
+        private readonly string _path;
+        private readonly bool _exists;
+        private readonly byte[] _bytes;
+
+        private TestFileSnapshot(string path, bool exists, byte[] bytes)
+        {
+            _path = path;
+            _exists = exists;
+            _bytes = bytes;
+        }
+
+        public static TestFileSnapshot Capture(string path)
+        {
+            if (File.Exists(path))
+            {
+                return new TestFileSnapshot(path, true, File.ReadAllBytes(path));
+            }
+
+            return new TestFileSnapshot(path, false, null);
+        }
+
+        public void Restore()
+        {
+            try
+            {
+                if (_exists)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(_path));
+                    File.WriteAllBytes(_path, _bytes);
+                }
+                else if (File.Exists(_path))
+                {
+                    File.Delete(_path);
+                }
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static void SetTextBoxField(object target, string fieldName, string value)
@@ -12792,6 +13250,7 @@ public static class SmokeTests
         public string GetTablesExceptionMessage = "table timeout";
         public bool ThrowOnCountRows;
         public string CountRowsExceptionMessage = "row count timeout";
+        public DataTable TableStatus = new DataTable();
         public string ProviderName => Provider;
         public string ConnectionString;
         public bool WasOpened;
@@ -12825,7 +13284,7 @@ public static class SmokeTests
             return table;
         }
         public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
-        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return TableStatus; }
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
         public string GetTableCreateStatement(string databaseName, string tableName) { return "CREATE TABLE \"public\".\"users\" (\"id\" integer, \"name\" text, \"payload\" bytea)"; }
         public bool TableExists(string databaseName, string tableName) { return true; }

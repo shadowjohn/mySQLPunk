@@ -57,6 +57,9 @@ namespace mySQLPunk
         private TextBox txtTableComment;
         private ComboBox cbEngine;
         private Panel pnlColumnProperties; // 屬性面板
+        private bool _isUpdatingColumnPropertiesPanel;
+        private bool _isLoadingTableDesignerState;
+        private string _originalTableComment = "";
         private bool _isModified = false;
         private bool IsNewTable => string.IsNullOrWhiteSpace(_tableName);
 
@@ -124,6 +127,7 @@ namespace mySQLPunk
             UpdateTitle();
             LoadColumns();
             LoadIndexes();
+            LoadTableOptions();
 
             dgvColumns.CellValueChanged += DgvColumns_CellValueChanged;
             dgvIndexes.CellValueChanged += (s, e) => MarkAsModified();
@@ -152,6 +156,7 @@ namespace mySQLPunk
 
         private void MarkAsModified()
         {
+            if (_isLoadingTableDesignerState) return;
             if (!_isModified) IsModified = true;
         }
 
@@ -257,7 +262,8 @@ namespace mySQLPunk
                 BackgroundColor = Color.White, 
                 BorderStyle = BorderStyle.None, 
                 RowHeadersWidth = 25,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AllowUserToAddRows = false
             };
             pnlColumnProperties = new Panel() { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(10) };
             pnlColumnProperties.Controls.Add(new Label() { Text = Localization.T("Designer.ColumnProperties"), ForeColor = Color.Gray, Location = new Point(10, 10), AutoSize = true });
@@ -304,7 +310,12 @@ namespace mySQLPunk
             // 4. 註解分頁
             tpComment = new TabPage(Localization.T("Designer.Comment"));
             txtTableComment = new TextBox() { Dock = DockStyle.Fill, Multiline = true };
-            txtTableComment.TextChanged += (s, e) => MarkAsModified();
+            txtTableComment.TextChanged += (s, e) =>
+            {
+                MarkAsModified();
+                RefreshSqlPreviewIfVisible();
+            };
+            txtTableComment.Leave += (s, e) => RefreshSqlPreviewIfVisible();
             tpComment.Controls.Add(txtTableComment);
 
             // 5. SQL 預覽分頁
@@ -336,6 +347,16 @@ namespace mySQLPunk
             };
 
             dgvIndexes.CellClick += DgvIndexes_CellClick;
+            dgvColumns.SelectionChanged += (s, e) => UpdateColumnPropertiesPanel();
+            dgvColumns.CellEndEdit += (s, e) => UpdateColumnPropertiesPanel();
+            dgvColumns.DataBindingComplete += (s, e) => UpdateColumnPropertiesPanel();
+            dgvColumns.CurrentCellDirtyStateChanged += (s, e) =>
+            {
+                if (dgvColumns.IsCurrentCellDirty)
+                {
+                    dgvColumns.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                }
+            };
 
             this.Controls.Add(tcMain);
             this.Controls.Add(tsTop);
@@ -419,6 +440,7 @@ namespace mySQLPunk
                 ApplyAutoColumnCommentForGridRow(e.RowIndex);
             }
 
+            UpdateColumnPropertiesPanel();
             MarkAsModified();
         }
 
@@ -538,6 +560,41 @@ namespace mySQLPunk
             }
         }
 
+        private void LoadTableOptions()
+        {
+            _originalTableComment = "";
+            if (IsNewTable || !(_db is my_mysql)) return;
+
+            try
+            {
+                DataTable tableStatus = _db.GetTableStatus(_databaseName);
+                if (tableStatus == null) return;
+
+                foreach (DataRow row in tableStatus.Rows)
+                {
+                    string statusTableName = GetMetadataString(row, "Name", "TABLE_NAME", "Table");
+                    if (!string.Equals(statusTableName, _tableName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    string tableComment = NormalizeTableComment(GetMetadataString(row, "Comment", "TABLE_COMMENT"));
+                    _isLoadingTableDesignerState = true;
+                    try
+                    {
+                        _originalTableComment = tableComment;
+                        if (txtTableComment != null) txtTableComment.Text = tableComment;
+                    }
+                    finally
+                    {
+                        _isLoadingTableDesignerState = false;
+                    }
+                    return;
+                }
+            }
+            catch
+            {
+                _originalTableComment = GetCurrentTableComment();
+            }
+        }
+
         private DataTable CreateColumnsDisplayTable()
         {
             DataTable displayDt = new DataTable();
@@ -552,6 +609,10 @@ namespace mySQLPunk
             displayDt.Columns.Add("_OldName");
             displayDt.Columns.Add("_AutoComment");
             displayDt.Columns.Add("_TypeSuffix");
+            displayDt.Columns.Add("AutoIncrement", typeof(bool)).DefaultValue = false;
+            displayDt.Columns.Add("Unsigned", typeof(bool)).DefaultValue = false;
+            displayDt.Columns.Add("Zerofill", typeof(bool)).DefaultValue = false;
+            displayDt.Columns.Add("OnUpdateCurrentTimestamp", typeof(bool)).DefaultValue = false;
             return displayDt;
         }
 
@@ -567,11 +628,20 @@ namespace mySQLPunk
                 newRow["Type"] = baseType;
                 if (!string.IsNullOrEmpty(lengthPart)) newRow["Length"] = lengthPart;
                 if (!string.IsNullOrEmpty(decimalsPart)) newRow["Decimals"] = decimalsPart;
-                if (!string.IsNullOrEmpty(typeSuffix)) newRow["_TypeSuffix"] = typeSuffix;
+                bool isUnsigned = ContainsMySqlTypeSuffixWord(typeSuffix, "unsigned");
+                bool isZerofill = ContainsMySqlTypeSuffixWord(typeSuffix, "zerofill");
+                if (isZerofill) isUnsigned = true;
+                SetRowBool(newRow, "Unsigned", isUnsigned);
+                SetRowBool(newRow, "Zerofill", isZerofill);
+                string remainingTypeSuffix = RemoveKnownMySqlColumnPropertySuffixes(typeSuffix);
+                if (!string.IsNullOrEmpty(remainingTypeSuffix)) newRow["_TypeSuffix"] = remainingTypeSuffix;
                 newRow["NotNull"] = (row["Null"].ToString() == "NO");
                 newRow["PK"] = (row["Key"].ToString() == "PRI");
                 newRow["Default"] = row["Default"];
                 newRow["Comment"] = row["Comment"];
+                string extra = GetMetadataString(row, "Extra", "extra");
+                SetRowBool(newRow, "AutoIncrement", extra.IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0);
+                SetRowBool(newRow, "OnUpdateCurrentTimestamp", extra.IndexOf("on update current_timestamp", StringComparison.OrdinalIgnoreCase) >= 0);
                 return;
             }
 
@@ -2315,6 +2385,204 @@ namespace mySQLPunk
             dgvColumns.Columns["_OldName"].Visible = false;
             dgvColumns.Columns["_AutoComment"].Visible = false;
             dgvColumns.Columns["_TypeSuffix"].Visible = false;
+            dgvColumns.Columns["AutoIncrement"].Visible = false;
+            dgvColumns.Columns["Unsigned"].Visible = false;
+            dgvColumns.Columns["Zerofill"].Visible = false;
+            dgvColumns.Columns["OnUpdateCurrentTimestamp"].Visible = false;
+            UpdateColumnPropertiesPanel();
+        }
+
+        private void UpdateColumnPropertiesPanel()
+        {
+            if (pnlColumnProperties == null || _isUpdatingColumnPropertiesPanel) return;
+
+            _isUpdatingColumnPropertiesPanel = true;
+            pnlColumnProperties.SuspendLayout();
+            try
+            {
+                pnlColumnProperties.Controls.Clear();
+
+                DataRow row = GetCurrentColumnDataRow();
+                if (row == null)
+                {
+                    AddColumnPropertiesHint(Localization.T("Designer.ColumnProperties"));
+                    return;
+                }
+
+                if (!(_db is my_mysql))
+                {
+                    AddColumnPropertiesHint(Localization.T("Designer.ColumnPropertiesProviderHint"));
+                    return;
+                }
+
+                TableLayoutPanel layout = new TableLayoutPanel
+                {
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    ColumnCount = 2,
+                    Dock = DockStyle.Top,
+                    Padding = new Padding(0),
+                    Margin = new Padding(0)
+                };
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+                AddDefaultColumnPropertyRow(layout, row);
+
+                string columnType = NormalizeMySqlType(GetRowString(row, "Type"));
+                bool hasSpecificOptions = false;
+                if (IsMySqlIntegerType(columnType))
+                {
+                    AddBooleanColumnPropertyRow(layout, row, "AutoIncrement", Localization.T("Designer.AutoIncrement"));
+                    hasSpecificOptions = true;
+                }
+
+                if (IsMySqlNumericType(columnType))
+                {
+                    AddBooleanColumnPropertyRow(layout, row, "Unsigned", Localization.T("Designer.Unsigned"));
+                    AddBooleanColumnPropertyRow(layout, row, "Zerofill", Localization.T("Designer.Zerofill"));
+                    hasSpecificOptions = true;
+                }
+
+                if (IsMySqlCurrentTimestampUpdatableType(columnType))
+                {
+                    AddBooleanColumnPropertyRow(layout, row, "OnUpdateCurrentTimestamp", Localization.T("Designer.OnUpdateCurrentTimestamp"));
+                    hasSpecificOptions = true;
+                }
+
+                if (!hasSpecificOptions)
+                {
+                    AddColumnPropertyNoteRow(layout, Localization.T("Designer.ColumnPropertiesDefaultOnly"));
+                }
+
+                pnlColumnProperties.Controls.Add(layout);
+                ThemeManager.ApplyTo(pnlColumnProperties);
+            }
+            finally
+            {
+                pnlColumnProperties.ResumeLayout();
+                _isUpdatingColumnPropertiesPanel = false;
+            }
+        }
+
+        private DataRow GetCurrentColumnDataRow()
+        {
+            if (dgvColumns == null || dgvColumns.CurrentRow == null || dgvColumns.CurrentRow.IsNewRow) return null;
+            return GetBoundDataRow(dgvColumns.CurrentRow);
+        }
+
+        private void AddColumnPropertiesHint(string text)
+        {
+            Label label = new Label
+            {
+                Text = text,
+                AutoSize = true,
+                Location = new Point(10, 10),
+                ForeColor = ThemeManager.MutedTextColor
+            };
+            pnlColumnProperties.Controls.Add(label);
+            ThemeManager.ApplyTo(pnlColumnProperties);
+            label.ForeColor = ThemeManager.MutedTextColor;
+        }
+
+        private void AddDefaultColumnPropertyRow(TableLayoutPanel layout, DataRow row)
+        {
+            ComboBox defaultBox = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDown,
+                Margin = new Padding(0, 0, 0, 6)
+            };
+            defaultBox.Items.AddRange(new object[] { "", "NULL", "CURRENT_TIMESTAMP" });
+            defaultBox.Text = GetRowString(row, "Default");
+            defaultBox.TextChanged += (s, e) =>
+            {
+                if (_isUpdatingColumnPropertiesPanel) return;
+                ApplyColumnPropertyValue("Default", defaultBox.Text);
+            };
+
+            AddColumnPropertyControlRow(layout, Localization.T("Designer.Default"), defaultBox);
+        }
+
+        private void AddBooleanColumnPropertyRow(TableLayoutPanel layout, DataRow row, string columnName, string text)
+        {
+            CheckBox checkBox = new CheckBox
+            {
+                Text = text,
+                AutoSize = true,
+                Checked = GetRowBool(row, columnName),
+                Margin = new Padding(0, 0, 0, 6)
+            };
+            checkBox.CheckedChanged += (s, e) =>
+            {
+                if (_isUpdatingColumnPropertiesPanel) return;
+                ApplyColumnPropertyValue(columnName, checkBox.Checked);
+            };
+
+            AddColumnPropertyControlRow(layout, "", checkBox);
+        }
+
+        private void AddColumnPropertyNoteRow(TableLayoutPanel layout, string text)
+        {
+            Label note = new Label
+            {
+                Text = text,
+                AutoSize = true,
+                ForeColor = ThemeManager.MutedTextColor,
+                Margin = new Padding(0, 2, 0, 0)
+            };
+            AddColumnPropertyControlRow(layout, "", note);
+        }
+
+        private void AddColumnPropertyControlRow(TableLayoutPanel layout, string labelText, Control editor)
+        {
+            int rowIndex = layout.RowCount;
+            layout.RowCount++;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            Label label = new Label
+            {
+                Text = labelText,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 4, 12, 6)
+            };
+            editor.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+
+            layout.Controls.Add(label, 0, rowIndex);
+            layout.Controls.Add(editor, 1, rowIndex);
+        }
+
+        private void ApplyColumnPropertyValue(string columnName, object value)
+        {
+            DataRow row = GetCurrentColumnDataRow();
+            if (row == null || !row.Table.Columns.Contains(columnName)) return;
+
+            row[columnName] = value ?? "";
+
+            if (columnName == "AutoIncrement" && value is bool && (bool)value)
+            {
+                SetRowBool(row, "NotNull", true);
+                SetRowBool(row, "PK", true);
+            }
+
+            if (columnName == "Zerofill" && value is bool && (bool)value)
+            {
+                SetRowBool(row, "Unsigned", true);
+            }
+
+            dgvColumns.Refresh();
+            MarkAsModified();
+            RefreshSqlPreviewIfVisible();
+            UpdateColumnPropertiesPanel();
+        }
+
+        private void RefreshSqlPreviewIfVisible()
+        {
+            if (tcMain != null && tpSqlPreview != null && tcMain.SelectedTab == tpSqlPreview)
+            {
+                GeneratePreviewSql();
+            }
         }
 
         public void ApplyLanguage()
@@ -2354,6 +2622,7 @@ namespace mySQLPunk
                 }
             }
             ApplyColumnHeaders();
+            UpdateColumnPropertiesPanel();
             UpdateTitle();
             ApplyTheme();
         }
@@ -2445,40 +2714,19 @@ namespace mySQLPunk
                 if (row.RowState == DataRowState.Deleted) continue;
                 if (string.IsNullOrEmpty(row["Name"].ToString())) continue;
 
-                string colName = row["Name"].ToString();
-                string oldName = row["_OldName"]?.ToString();
-                string colType = row["Type"].ToString();
-                string colLen = row["Length"].ToString();
-                string colDec = row["Decimals"]?.ToString();
-                bool notNull = row["NotNull"] != DBNull.Value && (bool)row["NotNull"];
-                string colDefault = row["Default"].ToString();
-                string colComment = row["Comment"].ToString();
-
-                // 組合類型字串
-                string typeFull = colType;
-                if (!string.IsNullOrEmpty(colLen))
-                {
-                    typeFull += "(" + colLen;
-                    if (!string.IsNullOrEmpty(colDec)) typeFull += "," + colDec;
-                    typeFull += ")";
-                }
-                string colTypeSuffix = GetRowString(row, "_TypeSuffix").Trim();
-                if (!string.IsNullOrEmpty(colTypeSuffix)) typeFull += " " + colTypeSuffix;
-
-                string nullStr = notNull ? "NOT NULL" : "NULL";
-                // FormatMySqlDefault 會處理 NULL / CURRENT_TIMESTAMP / 數值與引號跳脫（CREATE 路徑同款）
-                string defStr = string.IsNullOrEmpty(colDefault) ? "" : "DEFAULT " + FormatMySqlDefault(colDefault);
-                string commentStr = string.IsNullOrEmpty(colComment) ? "" : "COMMENT " + EscapeMySqlStringLiteral(colComment);
+                string colName = GetRowString(row, "Name").Trim();
+                string oldName = GetRowString(row, "_OldName").Trim();
+                string columnDefinition = BuildMySqlColumnDefinition(row);
                 
                 // 位置語法
-                string posStr = (prevCol == null) ? "FIRST" : $"AFTER `{prevCol}`";
+                string posStr = (prevCol == null) ? "FIRST" : "AFTER " + QuoteMySqlIdentifier(prevCol);
 
                 DataRow[] origRows = string.IsNullOrEmpty(oldName) ? new DataRow[0] : _originalDt.Select("Name = '" + oldName.Replace("'", "''") + "'");
                 
                 if (origRows.Length == 0)
                 {
                     // 新增欄位
-                    changes.Add($"ADD COLUMN `{colName}` {typeFull} {nullStr} {defStr} {commentStr} {posStr}");
+                    changes.Add("ADD COLUMN " + columnDefinition + " " + posStr);
                 }
                 else
                 {
@@ -2487,21 +2735,15 @@ namespace mySQLPunk
                     int origIdx = _originalDt.Rows.IndexOf(orig);
                     
                     bool changed = (colName != oldName) ||
-                                   (orig["Type"].ToString() != colType) ||
-                                   (orig["Length"].ToString() != colLen) ||
-                                   (GetRowString(orig, "Decimals") != (colDec ?? "")) ||
-                                   (GetRowString(orig, "_TypeSuffix").Trim() != colTypeSuffix) ||
-                                   (orig["NotNull"] != DBNull.Value && (bool)orig["NotNull"] != notNull) || 
-                                   (orig["Default"].ToString() != colDefault) ||
-                                   (orig["Comment"].ToString() != colComment) ||
+                                   (BuildMySqlColumnDefinition(orig) != columnDefinition) ||
                                    (origIdx != i); // 位置變動
 
                     if (changed)
                     {
                         if (colName != oldName)
-                            changes.Add($"CHANGE COLUMN `{oldName}` `{colName}` {typeFull} {nullStr} {defStr} {commentStr} {posStr}");
+                            changes.Add("CHANGE COLUMN " + QuoteMySqlIdentifier(oldName) + " " + columnDefinition + " " + posStr);
                         else
-                            changes.Add($"MODIFY COLUMN `{colName}` {typeFull} {nullStr} {defStr} {commentStr} {posStr}");
+                            changes.Add("MODIFY COLUMN " + columnDefinition + " " + posStr);
                     }
                 }
                 prevCol = colName;
@@ -2575,6 +2817,13 @@ namespace mySQLPunk
                         }
                     }
                 }
+            }
+
+            string currentTableComment = GetCurrentTableComment();
+            string originalTableComment = NormalizeTableComment(_originalTableComment);
+            if (!string.Equals(currentTableComment, originalTableComment, StringComparison.Ordinal))
+            {
+                changes.Add("COMMENT = " + EscapeMySqlStringLiteral(currentTableComment));
             }
 
             if (changes.Count > 0)
@@ -4177,7 +4426,7 @@ namespace mySQLPunk
 
                 definitions.Add("  " + BuildMySqlColumnDefinition(row));
 
-                if (row["PK"] != DBNull.Value && (bool)row["PK"])
+                if (GetRowBool(row, "PK") || GetRowBool(row, "AutoIncrement"))
                 {
                     primaryColumns.Add(QuoteMySqlIdentifier(columnName));
                 }
@@ -4252,6 +4501,78 @@ namespace mySQLPunk
             }
         }
 
+        private static string NormalizeMySqlType(string columnType)
+        {
+            string type = (columnType ?? "").Trim().ToLowerInvariant();
+            int paren = type.IndexOf('(');
+            if (paren >= 0) type = type.Substring(0, paren).Trim();
+            int space = type.IndexOf(' ');
+            if (space >= 0) type = type.Substring(0, space).Trim();
+            return type;
+        }
+
+        private static bool IsMySqlIntegerType(string columnType)
+        {
+            string type = NormalizeMySqlType(columnType);
+            return type == "tinyint" ||
+                   type == "smallint" ||
+                   type == "mediumint" ||
+                   type == "int" ||
+                   type == "integer" ||
+                   type == "bigint";
+        }
+
+        private static bool IsMySqlNumericType(string columnType)
+        {
+            string type = NormalizeMySqlType(columnType);
+            return IsMySqlIntegerType(type) ||
+                   type == "decimal" ||
+                   type == "dec" ||
+                   type == "numeric" ||
+                   type == "fixed" ||
+                   type == "float" ||
+                   type == "double" ||
+                   type == "real";
+        }
+
+        private static bool IsMySqlCurrentTimestampUpdatableType(string columnType)
+        {
+            string type = NormalizeMySqlType(columnType);
+            return type == "datetime" || type == "timestamp";
+        }
+
+        private static bool ContainsMySqlTypeSuffixWord(string typeSuffix, string word)
+        {
+            if (string.IsNullOrWhiteSpace(typeSuffix) || string.IsNullOrWhiteSpace(word)) return false;
+            return Regex.IsMatch(typeSuffix, @"\b" + Regex.Escape(word) + @"\b", RegexOptions.IgnoreCase);
+        }
+
+        private static string RemoveKnownMySqlColumnPropertySuffixes(string typeSuffix)
+        {
+            if (string.IsNullOrWhiteSpace(typeSuffix)) return "";
+            string result = Regex.Replace(typeSuffix, @"\b(unsigned|zerofill)\b", "", RegexOptions.IgnoreCase);
+            return Regex.Replace(result, @"\s+", " ").Trim();
+        }
+
+        private static string BuildMySqlColumnTypeSuffix(DataRow row, string columnType)
+        {
+            string rawSuffix = GetRowString(row, "_TypeSuffix").Trim();
+            string normalizedType = NormalizeMySqlType(columnType);
+            List<string> suffixParts = new List<string>();
+
+            if (IsMySqlNumericType(normalizedType))
+            {
+                bool zerofill = GetRowBool(row, "Zerofill") || ContainsMySqlTypeSuffixWord(rawSuffix, "zerofill");
+                bool unsigned = GetRowBool(row, "Unsigned") || zerofill || ContainsMySqlTypeSuffixWord(rawSuffix, "unsigned");
+                if (unsigned) suffixParts.Add("unsigned");
+                if (zerofill) suffixParts.Add("zerofill");
+            }
+
+            string remainingSuffix = RemoveKnownMySqlColumnPropertySuffixes(rawSuffix);
+            if (!string.IsNullOrWhiteSpace(remainingSuffix)) suffixParts.Add(remainingSuffix);
+            return string.Join(" ", suffixParts.ToArray());
+        }
+
         private string BuildMySqlColumnDefinition(DataRow row)
         {
             string columnName = GetRowString(row, "Name").Trim();
@@ -4267,10 +4588,12 @@ namespace mySQLPunk
                 if (!string.IsNullOrWhiteSpace(decimals)) typeFull += "," + decimals;
                 typeFull += ")";
             }
-            string typeSuffix = GetRowString(row, "_TypeSuffix").Trim();
+            string typeSuffix = BuildMySqlColumnTypeSuffix(row, columnType);
             if (!string.IsNullOrWhiteSpace(typeSuffix)) typeFull += " " + typeSuffix;
 
-            bool notNull = row["NotNull"] != DBNull.Value && (bool)row["NotNull"];
+            bool autoIncrement = GetRowBool(row, "AutoIncrement") && IsMySqlIntegerType(columnType);
+            bool onUpdateCurrentTimestamp = GetRowBool(row, "OnUpdateCurrentTimestamp") && IsMySqlCurrentTimestampUpdatableType(columnType);
+            bool notNull = GetRowBool(row, "NotNull") || autoIncrement;
             string defaultValue = GetRowString(row, "Default").Trim();
             string comment = GetRowString(row, "Comment");
 
@@ -4281,9 +4604,19 @@ namespace mySQLPunk
                 notNull ? "NOT NULL" : "NULL"
             };
 
-            if (!string.IsNullOrWhiteSpace(defaultValue))
+            if (!autoIncrement && !string.IsNullOrWhiteSpace(defaultValue))
             {
                 parts.Add("DEFAULT " + FormatMySqlDefault(defaultValue));
+            }
+
+            if (autoIncrement)
+            {
+                parts.Add("AUTO_INCREMENT");
+            }
+
+            if (onUpdateCurrentTimestamp)
+            {
+                parts.Add("ON UPDATE CURRENT_TIMESTAMP");
             }
 
             if (!string.IsNullOrWhiteSpace(comment))
@@ -4355,11 +4688,41 @@ namespace mySQLPunk
             return IsNewTable ? (txtTableName?.Text.Trim() ?? "") : _tableName;
         }
 
+        private string GetCurrentTableComment()
+        {
+            return NormalizeTableComment(txtTableComment == null ? "" : txtTableComment.Text);
+        }
+
+        private static string NormalizeTableComment(string comment)
+        {
+            return (comment ?? "").Trim();
+        }
+
         private static string GetRowString(DataRow row, string columnName)
         {
             if (!row.Table.Columns.Contains(columnName) || row[columnName] == DBNull.Value)
                 return "";
             return row[columnName].ToString();
+        }
+
+        private static bool GetRowBool(DataRow row, string columnName)
+        {
+            if (row == null || !row.Table.Columns.Contains(columnName) || row[columnName] == DBNull.Value) return false;
+            object value = row[columnName];
+            if (value is bool) return (bool)value;
+            string text = value.ToString().Trim();
+            return text == "1" ||
+                   text.Equals("T", StringComparison.OrdinalIgnoreCase) ||
+                   text.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   text.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void SetRowBool(DataRow row, string columnName, bool value)
+        {
+            if (row != null && row.Table.Columns.Contains(columnName))
+            {
+                row[columnName] = value;
+            }
         }
 
         private static string FormatMySqlDefault(string value)

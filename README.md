@@ -18,8 +18,9 @@ Open-source Windows database client, SQL editor, database GUI and DBA workbench 
 - 依連線設定 SSL/TLS 憑證驗證，或透過有 SHA256 主機金鑰固定的 SSH Tunnel 連到內網資料庫。
 - 使用具自動完成、程式碼片段、查詢歷史、唯讀執行計畫與多格式匯出的 SQL 編輯器。
 - 編輯資料列、設計資料表、產生 DDL / DML、搬移 Table / View、建立 ER 圖並比較兩個資料庫結構。
+- 在 MySQL Table Designer 依欄位型別設定 `AUTO_INCREMENT`、`UNSIGNED`、`ZEROFILL` 與 `ON UPDATE CURRENT_TIMESTAMP`。
 - 建立每日查詢、CSV / Excel / JSON 等格式匯出與 SQL 備份作業，交由 Windows Task Scheduler 執行並保留紀錄。
-- 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Gemini CLI 作為 SQL 助理；選項頁會列出三種 CLI 的安裝路徑與非敏感登入帳號資訊，沒有 AI 服務也能使用其他資料庫功能。
+- 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Antigravity CLI 作為 SQL 助理；選項頁會列出三種 CLI 的安裝路徑與安全登入狀態。Antigravity 未安裝時可開啟「官方安裝教學」，或在確認後以可見 PowerShell 執行官方 `agy` 安裝程式；完成後程式會直接辨識官方的使用者安裝路徑，不必為了刷新 PATH 重啟 mySQLPunk。不提權、不繞過本機 PowerShell 原則，也不讀取 Desktop、Google 或 Windows Credential Manager 的登入資料。沒有 AI 服務也能使用其他資料庫功能。
 
 Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密碼、私鑰密語與用戶端憑證密碼存在 Windows 認證管理員，不會以明文留在設定檔或自動執行作業檔。跨平台預覽版目前使用繁體中文介面，連線設定採 JSON 保存；資料庫密碼可由使用者選擇交給 Linux Secret Service 或 macOS Keychain，系統密碼庫不可用或未勾選時才只保留在程式記憶體。
 
@@ -241,7 +242,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | SQL 編輯輔助 | 可用 | 自動完成會解析目前 statement 的資料表與 alias，提供欄位、`alias.column`、資料表、關鍵字與片段捷徑；metadata 依 provider/database 快取。`Ctrl+Shift+P` 可搜尋、插入、新增、刪除自訂 SQL 片段，並以 JSON 匯入／匯出。 |
 | 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；可為每張資料表保存多組具名篩選、排序與顯示欄位設定，並從底部工具列快速切換。若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
 | 資料分析 | 可用 | 資料表右鍵可開啟欄位分析工作區；支援抽樣／全表、NULL、相異值、極值、數值平均、Top 10 比例，並可從分佈值開啟對應 WHERE 查詢。 |
-| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；既有資料表欄位改名、型別、NULL、DEFAULT、註解、MySQL 刪欄位與 SQLite 重建表已納入 smoke test，部分進階索引與 constraint 情境仍需實機驗證。 |
+| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；MySQL 欄位屬性會依型別顯示預設值、自動遞增、無號、補零與 `ON UPDATE CURRENT_TIMESTAMP` 等設定，資料表註解變更也會納入 SQL 預覽；既有資料表欄位改名、型別、NULL、DEFAULT、註解、MySQL 刪欄位與 SQLite 重建表已納入 smoke test，部分進階索引與 constraint 情境仍需實機驗證。 |
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 會寫入 sidecar metadata table。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
 | 資料產生 | 可用 | Tables 節點可產生指定資料表的 INSERT SQL，可開到查詢視窗檢查，也可確認後逐筆直接寫入。 |
@@ -255,7 +256,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | 單一實例、檔案關聯與物件 URI | 可用 | 「允許重複執行 mySQLPunk」選項關掉時強制單一實例（預設允許多開）；`.sql` 檔可以用「開啟方式」直接開進查詢分頁。database、Table、View、Function、User、Event 與內建工具物件可複製 `mysqlpunk://object` URI，啟動後會沿用目前設定檔的同名連線定位；URI 不保存主機、帳號或密碼。 |
 | 介面與語系 | 可用 | 圖示全面向量繪製（引擎專屬色＋形狀徽章），支援淺色／深色主題，繁中／英文可即時切換；「說明 > 關於」會播放去背的看板娘 Punky 崩琦眨眼動畫。 |
 | 應用程式更新 | 可用 | GitHub Release 只發布一個 setup EXE；說明選單可手動檢查，也可在啟動時背景檢查。程式會讀取 GitHub release asset 的 SHA-256 digest，下載後先校驗再啟動安裝程式；舊版 portable ZIP 更新仍保留相容處理。 |
-| Punky AI 助理 | 可用 | 預設開啟的右側聊天面板，可關閉並從「檢視」選單重開，也能和物件詳細資料暫時收合到右側圖示列；可新增、切換、重新命名與關閉多段彼此隔離的記憶體內對話，不會把聊天或草稿寫入磁碟。輸入區可把同一問題、最近對話與 schema 快照同時交給左右兩個服務／模型並排比較，結果不加入聊天室或自動套用 SQL。支援 OpenAI 相容 API、Ollama／LM Studio，以及 Codex／Claude Code／Gemini CLI。選項頁以卡片顯示 CLI 路徑、帳號標籤與登入方式，可直接切換目前服務，進階區只顯示該服務需要的欄位；只讀取非敏感帳號欄位，不顯示 token 或金鑰。查詢工具列可把選取／目前 SQL 帶入解釋、最佳化、格式化或錯誤修正草稿，也能選擇 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 目標方言，或建立自己的提示動作並釘選到選單；自訂檔只保存名稱、提示與釘選狀態。內容會先供使用者確認，不會自動送出。所有會改寫 SQL 的動作都能逐行比較，勾選要採用的連續變更區段後再套回原選取範圍或全文；編輯器中途有變更就拒絕覆寫，套用後也不會自動執行。可附上目前資料庫結構當上下文；API 金鑰存 Windows 認證管理員。 |
+| Punky AI 助理 | 可用 | 預設開啟的右側聊天面板，可關閉並從「檢視」選單重開，也能和物件詳細資料暫時收合到右側圖示列；可新增、切換、重新命名與關閉多段彼此隔離的記憶體內對話，不會把聊天或草稿寫入磁碟。輸入區可把同一問題、最近對話與 schema 快照同時交給左右兩個服務／模型並排比較，結果不加入聊天室或自動套用 SQL。支援 OpenAI 相容 API、Ollama／LM Studio，以及 Codex／Claude Code／Antigravity CLI。Google 個人訂閱的舊 Gemini CLI 設定會自動轉為 Antigravity；它以官方 `agy` 的 stream-json 介面在隔離工作目錄中取得單次回覆，不把 SQL/schema 放入命令列，也不讀取 Antigravity Desktop、Google 或 Windows Credential Manager 的登入資料。選項頁以卡片顯示 CLI 路徑與安全登入狀態，可直接切換目前服務；Codex 會優先選用 Codex Desktop 內建 CLI，避免舊版 npm shim 讀到新版 Desktop cache 後失敗。進階區只顯示該服務需要的欄位；帳號偵測只確認可安全判定的 CLI 狀態，不讀取 token 或金鑰檔案內容。查詢工具列可把選取／目前 SQL 帶入解釋、最佳化、格式化或錯誤修正草稿，也能選擇 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 目標方言，或建立自己的提示動作並釘選到選單；自訂檔只保存名稱、提示與釘選狀態。內容會先供使用者確認，不會自動送出。所有會改寫 SQL 的動作都能逐行比較，勾選要採用的連續變更區段後再套回原選取範圍或全文；編輯器中途有變更就拒絕覆寫，套用後也不會自動執行。可附上目前資料庫結構當上下文；API 金鑰存 Windows 認證管理員。 |
 | 資料字典 | 可用 | 資料庫節點右鍵產生整庫結構文件（欄位、索引、CREATE 語句、目錄），輸出 HTML，瀏覽器可另存 PDF。 |
 | 唯讀 ER 圖 | 可用 | 五種 provider 共用 schema 快照，可顯示資料表、欄位、主鍵與外鍵關聯；支援縮放、適合視窗、中鍵平移、重新整理與完整圖面 PNG 匯出。 |
 | 資料庫結構差異 | 可用 | 可從 Models 或資料庫右鍵選擇另一個已開啟的資料庫，比對資料表、欄位型別、空值、主鍵與外鍵；支援跨 provider、交換方向、重新比較及 HTML 報告。整個流程唯讀，不會執行 DDL。 |

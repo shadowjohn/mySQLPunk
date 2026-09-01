@@ -51,8 +51,8 @@ namespace mySQLPunk.lib
     }
 
     /// <summary>
-    /// 從 CLI 自己的本機設定檔讀到的非敏感帳號資訊。
-    /// 只保留帳號標籤與登入方式，token、金鑰和 credential 值一律不離開解析流程。
+    /// 從 CLI 自己的本機狀態推估出的非敏感帳號狀態。
+    /// 偵測流程只確認登入資料檔是否存在，不讀取 token-bearing 檔案內容。
     /// </summary>
     public sealed class AiCliAccountInfo
     {
@@ -88,13 +88,23 @@ namespace mySQLPunk.lib
 
         public static AiChatSettings Load()
         {
+            string rawProvider = ApplicationOptionSettings.GetString("AiProvider");
+            bool migrateGeminiCli = string.Equals(rawProvider, "gemini-cli", StringComparison.OrdinalIgnoreCase);
             AiChatSettings s = new AiChatSettings
             {
-                Provider = ApplicationOptionSettings.GetString("AiProvider"),
+                Provider = AiChatService.NormalizeProviderId(rawProvider),
                 Endpoint = (ApplicationOptionSettings.GetString("AiEndpoint") ?? "").Trim(),
                 Model = (ApplicationOptionSettings.GetString("AiModel") ?? "").Trim()
             };
             if (string.IsNullOrWhiteSpace(s.Provider)) s.Provider = "openai";
+
+            // Gemini CLI no longer accepts personal Google-account subscriptions.
+            // Its executable and Gemini 2.x model overrides must not leak into the Antigravity migration.
+            if (migrateGeminiCli)
+            {
+                s.Endpoint = "";
+                s.Model = "";
+            }
 
             AiProviderPreset preset = AiChatService.FindPreset(s.Provider);
             if (string.IsNullOrWhiteSpace(s.Endpoint)) s.Endpoint = preset.Endpoint;
@@ -117,7 +127,7 @@ namespace mySQLPunk.lib
         {
             new AiProviderPreset("codex-cli",  "Codex CLI（ChatGPT 訂閱）",  "", "", "cli", false, "https://developers.openai.com/codex/cli"),
             new AiProviderPreset("claude-cli", "Claude Code CLI（Claude 訂閱）", "", "", "cli", false, "https://claude.com/claude-code"),
-            new AiProviderPreset("gemini-cli", "Gemini CLI（Google 帳號）",  "", "", "cli", false, "https://github.com/google-gemini/gemini-cli"),
+            new AiProviderPreset("antigravity-cli", "Antigravity CLI（Google 訂閱）", "", "", "cli", false, "https://antigravity.google/docs/cli/install/"),
             new AiProviderPreset("openai",    "OpenAI",                 "https://api.openai.com/v1",                                  "gpt-4o-mini",               "bearer",    true,  "https://platform.openai.com/api-keys"),
             new AiProviderPreset("anthropic", "Anthropic Claude",       "https://api.anthropic.com",                                  "claude-haiku-4-5",          "x-api-key", true,  "https://console.anthropic.com/settings/keys"),
             new AiProviderPreset("gemini",    "Google Gemini",          "https://generativelanguage.googleapis.com/v1beta/openai",    "gemini-2.0-flash",          "bearer",    true,  "https://aistudio.google.com/apikey"),
@@ -134,11 +144,21 @@ namespace mySQLPunk.lib
 
         public static AiProviderPreset FindPreset(string providerId)
         {
+            providerId = NormalizeProviderId(providerId);
             foreach (AiProviderPreset p in Presets)
             {
                 if (string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase)) return p;
             }
             return Presets[0];
+        }
+
+        /// <summary>Gemini CLI 已停止個人訂閱登入，保留設定相容並導向官方遷移後的 Antigravity CLI。</summary>
+        public static string NormalizeProviderId(string providerId)
+        {
+            string value = (providerId ?? "").Trim();
+            return string.Equals(value, "gemini-cli", StringComparison.OrdinalIgnoreCase)
+                ? "antigravity-cli"
+                : value;
         }
 
         // ── 金鑰：一家一把，存 Windows 認證管理員 ────────────────────
@@ -180,31 +200,32 @@ namespace mySQLPunk.lib
         }
 
         // ── 本機 CLI 後端（走使用者訂閱，不用 API 金鑰）────────────
-        // Codex CLI（codex exec）、Claude Code（claude -p）、Gemini CLI 都有
+        // Codex CLI（codex exec）、Claude Code（claude -p）、Antigravity CLI 都有
         // 官方的非互動模式：prompt 從 stdin 餵進去、回覆從 stdout 收回來。
         // 用 cmd /c 啟動，npm 的 .cmd shim 與 winget 的 exe 都吃得到。
 
         /// <summary>該 CLI 供應商的預設執行檔名（Endpoint 欄位可覆寫成完整路徑）。</summary>
         public static string CliExecutableFor(string providerId)
         {
-            switch ((providerId ?? "").ToLowerInvariant())
+            switch (NormalizeProviderId(providerId).ToLowerInvariant())
             {
                 case "codex-cli": return "codex";
                 case "claude-cli": return "claude";
-                case "gemini-cli": return "gemini";
+                case "antigravity-cli": return "agy";
                 default: return null;
             }
         }
 
         private static string CliChat(AiChatSettings settings, IList<AiChatMessage> messages)
         {
-            string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(settings.Provider);
-            string model = NormalizeCliModel(settings.Provider, settings.Model);
+            string providerId = NormalizeProviderId(settings.Provider);
+            string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(providerId);
+            string model = NormalizeCliModel(providerId, settings.Model);
             string promptText = BuildCliPrompt(messages);
             string workspace = EnsureCliWorkspaceDirectory();
 
             string[][] argumentTries;
-            switch (settings.Provider)
+            switch (providerId)
             {
                 case "codex-cli":
                     // read-only sandbox + mySQLPunk 專屬空白工作目錄：純問答，不讓它動到使用者檔案。
@@ -224,16 +245,11 @@ namespace mySQLPunk.lib
                     ValidateCliModel(model);
                     argumentTries = new[] { model.Length > 0 ? new[] { "-p", "--model", model } : new[] { "-p" } };
                     break;
-                case "gemini-cli":
+                case "antigravity-cli":
                     ValidateCliModel(model);
-                    string[] trustedGeminiArguments = model.Length > 0
-                        ? new[] { "--skip-trust", "-m", model }
-                        : new[] { "--skip-trust" };
-                    string[] legacyGeminiArguments = model.Length > 0 ? new[] { "-m", model } : new string[0];
-                    argumentTries = new[] { trustedGeminiArguments, legacyGeminiArguments };
-                    break;
+                    return RunAntigravityCliProcess(exe, BuildAntigravityArguments(model), BuildAntigravityStreamInput(promptText), 180000);
                 default:
-                    throw new InvalidOperationException("unknown cli provider: " + settings.Provider);
+                    throw new InvalidOperationException("unknown cli provider: " + providerId);
             }
 
             InvalidOperationException lastError = null;
@@ -280,6 +296,54 @@ namespace mySQLPunk.lib
             }
             arguments.Add("-");
             return arguments.ToArray();
+        }
+
+        /// <summary>Antigravity CLI 的單次無互動對話：prompt 從 stdin stream-json 傳入，不出現在命令列。</summary>
+        public static string[] BuildAntigravityArguments(string model)
+        {
+            var arguments = new List<string>
+            {
+                "--input-format", "stream-json",
+                "--output-format", "stream-json"
+            };
+            if (!string.IsNullOrWhiteSpace(model))
+            {
+                arguments.Add("--model");
+                arguments.Add(model);
+            }
+            return arguments.ToArray();
+        }
+
+        /// <summary>將單次 prompt 編碼成 Antigravity CLI 接受的 user stream event。</summary>
+        public static string BuildAntigravityStreamInput(string promptText)
+        {
+            var message = new JObject
+            {
+                ["event"] = "user",
+                ["message"] = new JObject
+                {
+                    ["content"] = promptText ?? string.Empty
+                }
+            };
+            return message.ToString(Newtonsoft.Json.Formatting.None) + "\n";
+        }
+
+        /// <summary>啟動官方 Windows 安裝腳本：保留可見主控台，不提權或變更本機執行原則。</summary>
+        public static System.Diagnostics.ProcessStartInfo BuildAntigravityInstallStartInfo()
+        {
+            const string installerUrl = "https://antigravity.google/cli/install.ps1";
+            string command = "irm " + installerUrl + " | iex; "
+                + "Write-Host ''; "
+                + "Write-Host 'Antigravity CLI installer finished. Press Enter to return to mySQLPunk.'; "
+                + "Read-Host";
+            return new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoLogo -NoProfile -Command " + QuoteWindowsArgument(command),
+                UseShellExecute = false,
+                CreateNoWindow = false,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+            };
         }
 
         /// <summary>Codex CLI 的單次專案信任覆寫，不修改使用者的全域 config.toml。</summary>
@@ -340,8 +404,45 @@ namespace mySQLPunk.lib
         /// <summary>跑 CLI 的 --version 當「測試連線」：確認裝了、抓得到。</summary>
         public static string CliVersion(AiChatSettings settings)
         {
-            string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(settings.Provider);
+            string providerId = NormalizeProviderId(settings.Provider);
+            string exe = !string.IsNullOrWhiteSpace(settings.Endpoint) ? settings.Endpoint : CliExecutableFor(providerId);
             return RunCliProcess(exe, new[] { "--version" }, null, 20000);
+        }
+
+        private static string RunAntigravityCliProcess(string exe, IList<string> arguments, string stdin, int timeoutMs)
+        {
+            string output = RunCliProcess(exe, arguments, stdin, timeoutMs);
+            string lastError = null;
+            foreach (string line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                try
+                {
+                    JObject envelope = JObject.Parse(line);
+                    if (!string.Equals((string)envelope["event"], "result", StringComparison.OrdinalIgnoreCase)) continue;
+                    JObject result = envelope["result"] as JObject;
+                    if (result == null) continue;
+
+                    string status = (string)result["status"] ?? string.Empty;
+                    string response = (string)result["response"] ?? string.Empty;
+                    if (string.Equals(status, "SUCCESS", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.IsNullOrWhiteSpace(response)) return response.Trim();
+                        lastError = Localization.T("Ai.AntigravityCliInvalidResult");
+                    }
+                    else
+                    {
+                        lastError = (string)result["error"];
+                        if (string.IsNullOrWhiteSpace(lastError)) lastError = status;
+                    }
+                }
+                catch (Newtonsoft.Json.JsonException)
+                {
+                    // stderr diagnostics and future stream events are not terminal result envelopes.
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(lastError)) lastError = Localization.T("Ai.AntigravityCliInvalidResult");
+            throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, BuildCliFailureDetail(lastError)));
         }
 
         private static string RunCliProcess(string exe, IList<string> arguments, string stdin, int timeoutMs)
@@ -409,14 +510,49 @@ namespace mySQLPunk.lib
                             throw new InvalidOperationException(Localization.Format("Ai.CliNodeMissing", exe));
                         throw new InvalidOperationException(Localization.Format("Ai.CliNotFound", exe));
                     }
-                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, Truncate(detail, 400)));
+                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, BuildCliFailureDetail(detail)));
                 }
                 if (output.Length == 0)
                 {
-                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, Truncate(SanitizeCliText(stderr.ToString()), 400)));
+                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, BuildCliFailureDetail(SanitizeCliText(stderr.ToString()))));
                 }
                 return output;
             }
+        }
+
+        private static string BuildCliFailureDetail(string detail)
+        {
+            if (IsCodexModelsCacheFailure(detail))
+                return Localization.Format("Ai.CodexModelsCacheInvalid", GetCodexModelsCachePath());
+            return Truncate(detail, 400);
+        }
+
+        private static bool IsCodexModelsCacheFailure(string detail)
+        {
+            if (string.IsNullOrEmpty(detail)) return false;
+            return detail.IndexOf("codex_models_manager::cache", StringComparison.OrdinalIgnoreCase) >= 0
+                && detail.IndexOf("failed to load models cache", StringComparison.OrdinalIgnoreCase) >= 0
+                && detail.IndexOf("base_instructions", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string GetCodexModelsCachePath()
+        {
+            return Path.Combine(GetCodexHomeDirectory(), "models_cache.json");
+        }
+
+        private static string GetCodexHomeDirectory()
+        {
+            string codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+            if (!string.IsNullOrWhiteSpace(codexHome)) return codexHome;
+            string home = GetUserHomeDirectory();
+            return string.IsNullOrWhiteSpace(home) ? ".codex" : Path.Combine(home, ".codex");
+        }
+
+        private static string GetUserHomeDirectory()
+        {
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrWhiteSpace(home)) home = Environment.GetEnvironmentVariable("USERPROFILE");
+            return string.IsNullOrWhiteSpace(home) ? null : home;
         }
 
         /// <summary>
@@ -441,6 +577,12 @@ namespace mySQLPunk.lib
                 return null;
             }
 
+            var candidates = new List<string>();
+            bool isCodex = string.Equals(candidate, "codex", StringComparison.OrdinalIgnoreCase);
+            bool isAntigravity = string.Equals(candidate, "agy", StringComparison.OrdinalIgnoreCase);
+            if (isCodex) AddCodexDesktopCliCandidates(candidates);
+            if (isAntigravity) AddCliCandidate(candidates, FirstExistingCliPath(AntigravityDefaultCliPath()));
+
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             foreach (string folder in new[]
@@ -451,7 +593,7 @@ namespace mySQLPunk.lib
             })
             {
                 string found = FirstExistingCliPath(Path.Combine(folder, candidate));
-                if (found != null) return found;
+                AddCliCandidate(candidates, found);
             }
 
             try
@@ -476,16 +618,99 @@ namespace mySQLPunk.lib
                         try { process.Kill(); } catch { }
                         return null;
                     }
-                    if (process.ExitCode != 0) return null;
-                    foreach (string line in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    if (process.ExitCode == 0)
                     {
-                        string found = FirstExistingCliPath(line.Trim());
-                        if (found != null) return found;
+                        foreach (string line in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            string found = FirstExistingCliPath(line.Trim());
+                            AddCliCandidate(candidates, found);
+                        }
                     }
                 }
             }
             catch { }
+            if (isCodex) return SelectPreferredCodexCliPath(candidates);
+            if (candidates.Count > 0) return candidates[0];
             return null;
+        }
+
+        /// <summary>Antigravity 官方 Windows installer 的目前使用者安裝位置。</summary>
+        public static string AntigravityDefaultCliPath()
+        {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return string.IsNullOrWhiteSpace(localAppData)
+                ? null
+                : Path.Combine(localAppData, "agy", "bin", "agy.exe");
+        }
+
+        public static string SelectPreferredCodexCliPath(IEnumerable<string> candidates)
+        {
+            if (candidates == null) return null;
+            string first = null;
+            string desktop = null;
+            foreach (string candidate in candidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate)) continue;
+                string fullPath;
+                try { fullPath = Path.GetFullPath(candidate); }
+                catch { fullPath = candidate; }
+                if (first == null) first = fullPath;
+                if (desktop == null && IsCodexDesktopCliPath(fullPath)) desktop = fullPath;
+            }
+            return desktop ?? first;
+        }
+
+        private static void AddCodexDesktopCliCandidates(List<string> candidates)
+        {
+            try
+            {
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(localAppData)) return;
+                string binRoot = Path.Combine(localAppData, "OpenAI", "Codex", "bin");
+                if (!Directory.Exists(binRoot)) return;
+                var found = new List<KeyValuePair<string, DateTime>>();
+                foreach (string directory in Directory.GetDirectories(binRoot))
+                {
+                    string executable = Path.Combine(directory, "codex.exe");
+                    if (File.Exists(executable))
+                        found.Add(new KeyValuePair<string, DateTime>(executable, File.GetLastWriteTimeUtc(executable)));
+                }
+                found.Sort((left, right) => right.Value.CompareTo(left.Value));
+                foreach (KeyValuePair<string, DateTime> item in found) AddCliCandidate(candidates, item.Key);
+            }
+            catch { }
+        }
+
+        private static bool IsCodexDesktopCliPath(string path)
+        {
+            try
+            {
+                if (!string.Equals(Path.GetFileName(path), "codex.exe", StringComparison.OrdinalIgnoreCase)) return false;
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(localAppData)) return false;
+                string root = Path.GetFullPath(Path.Combine(localAppData, "OpenAI", "Codex", "bin"))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                string fullPath = Path.GetFullPath(path);
+                return fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void AddCliCandidate(List<string> candidates, string path)
+        {
+            if (candidates == null || string.IsNullOrWhiteSpace(path)) return;
+            string fullPath;
+            try { fullPath = Path.GetFullPath(path); }
+            catch { return; }
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (string.Equals(candidates[i], fullPath, StringComparison.OrdinalIgnoreCase)) return;
+            }
+            candidates.Add(fullPath);
         }
 
         private static string FirstExistingCliPath(string path)
@@ -493,7 +718,6 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(path)) return null;
             try
             {
-                if (File.Exists(path)) return Path.GetFullPath(path);
                 if (Path.GetExtension(path).Length == 0)
                 {
                     foreach (string extension in new[] { ".exe", ".cmd", ".bat" })
@@ -502,6 +726,7 @@ namespace mySQLPunk.lib
                         if (File.Exists(withExtension)) return Path.GetFullPath(withExtension);
                     }
                 }
+                if (File.Exists(path)) return Path.GetFullPath(path);
             }
             catch { }
             return null;
@@ -896,14 +1121,15 @@ namespace mySQLPunk.lib
         /// </summary>
         public static string[] KnownCliModels(string providerId)
         {
-            switch ((providerId ?? "").ToLowerInvariant())
+            switch (NormalizeProviderId(providerId).ToLowerInvariant())
             {
                 case "codex-cli":
                     return new[] { "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna" };
                 case "claude-cli":
                     return new[] { "sonnet", "opus", "haiku" };
-                case "gemini-cli":
-                    return new[] { "gemini-2.5-pro", "gemini-2.5-flash" };
+                case "antigravity-cli":
+                    // Model availability is account-specific; users can inspect it through `agy models`.
+                    return new string[0];
                 default:
                     return new string[0];
             }
@@ -913,6 +1139,9 @@ namespace mySQLPunk.lib
         public static string NormalizeCliModel(string providerId, string model)
         {
             string value = (model ?? "").Trim();
+            providerId = NormalizeProviderId(providerId);
+            if (string.Equals(providerId, "antigravity-cli", StringComparison.OrdinalIgnoreCase)
+                && value.StartsWith("gemini-2.", StringComparison.OrdinalIgnoreCase)) return "";
             if (!string.Equals(providerId, "codex-cli", StringComparison.OrdinalIgnoreCase)) return value;
 
             string lower = value.ToLowerInvariant();
@@ -924,7 +1153,7 @@ namespace mySQLPunk.lib
             return value;
         }
 
-        /// <summary>偵測本機已安裝的 AI CLI（codex / claude / gemini）：用 where 快查 PATH，不真的執行。</summary>
+        /// <summary>偵測本機已安裝的 AI CLI（codex / claude / agy）：用 where 快查 PATH，不真的執行。</summary>
         public static List<AiProviderPreset> DetectInstalledClis()
         {
             var found = new List<AiProviderPreset>();
@@ -973,13 +1202,8 @@ namespace mySQLPunk.lib
                             claudeEmail,
                             "Claude.ai",
                             claudeEmail != null);
-                    case "gemini-cli":
-                        string geminiAccount = SafeAccountLabel((string)document["active"]);
-                        return BuildAccount(
-                            AiCliAccountState.SignedIn,
-                            geminiAccount,
-                            "Google",
-                            geminiAccount != null);
+                    case "antigravity-cli":
+                        return BuildAccount(AiCliAccountState.Unsupported, null, "Antigravity CLI", false);
                     default:
                         return BuildAccount(AiCliAccountState.Unsupported, null, null, false);
                 }
@@ -992,26 +1216,32 @@ namespace mySQLPunk.lib
 
         private static AiCliAccountInfo DetectCliAccount(string providerId)
         {
-            string relativePath;
+            string path = null;
+            string method = null;
             switch ((providerId ?? "").ToLowerInvariant())
             {
-                case "codex-cli": relativePath = Path.Combine(".codex", "auth.json"); break;
-                case "claude-cli": relativePath = ".claude.json"; break;
-                case "gemini-cli": relativePath = Path.Combine(".gemini", "google_accounts.json"); break;
+                case "codex-cli":
+                    path = Path.Combine(GetCodexHomeDirectory(), "auth.json");
+                    method = "OpenAI Codex CLI";
+                    break;
+                case "claude-cli":
+                    path = Path.Combine(GetUserHomeDirectory() ?? string.Empty, ".claude.json");
+                    method = "Claude Code";
+                    break;
+                case "antigravity-cli":
+                    // Antigravity uses the native OS keyring. Do not inspect it from mySQLPunk.
+                    return BuildAccount(AiCliAccountState.Unsupported, null, "Antigravity CLI", false);
                 default: return BuildAccount(AiCliAccountState.Unsupported, null, null, false);
             }
 
             try
             {
-                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                if (string.IsNullOrWhiteSpace(home)) home = Environment.GetEnvironmentVariable("USERPROFILE");
-                if (string.IsNullOrWhiteSpace(home))
+                if (string.IsNullOrWhiteSpace(path))
                     return BuildAccount(AiCliAccountState.Unknown, null, null, false);
 
-                string path = Path.Combine(home, relativePath);
                 if (!File.Exists(path))
                     return BuildAccount(AiCliAccountState.NotFound, null, null, false);
-                return ParseCliAccountInfo(providerId, File.ReadAllText(path, Encoding.UTF8));
+                return BuildAccount(AiCliAccountState.SignedIn, null, method, true);
             }
             catch
             {

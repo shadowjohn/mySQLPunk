@@ -69,19 +69,11 @@ try {
         Set-Content -LiteralPath (Join-Path $propertiesRoot 'AssemblyInfo.cs') -Encoding UTF8
     '目前發版版本：`v1.0.0.15`' |
         Set-Content -LiteralPath (Join-Path $prepareRoot 'README.md') -Encoding UTF8
-    @'
-# Changelog
-
-## [Unreleased]
-
-### 🚀 新增功能
-
-- **測試功能**：驗證發版準備流程。
-
-### 🛠️ 問題修正與優化
-
-- 測試修正。
-'@ | Set-Content -LiteralPath (Join-Path $prepareRoot 'CHANGELOG.md') -Encoding UTF8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    [System.IO.File]::WriteAllText(
+        (Join-Path $prepareRoot 'CHANGELOG.md'),
+        "# Changelog`n`n## [Unreleased]`n`n### 🚀 新增功能`n`n- **測試功能**：驗證發版準備流程。`n`n### 🛠️ 問題修正與優化`n`n- 測試修正。`n",
+        $utf8NoBom)
 
     & (Join-Path $repoRoot 'scripts\Prepare-AutoRelease.ps1') `
         -Version '1.0.0.16' `

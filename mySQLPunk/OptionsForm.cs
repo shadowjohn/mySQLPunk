@@ -426,7 +426,7 @@ namespace mySQLPunk
             FlowLayoutPanel cliCards = new FlowLayoutPanel
             {
                 Location = new Point(18, 112),
-                Size = new Size(560, 178),
+                Size = new Size(560, 209),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 WrapContents = false,
                 AutoScroll = false,
@@ -437,11 +437,11 @@ namespace mySQLPunk
 
             Label cliPrivacyHint = new Label
             {
-                Text = T("只讀取 CLI 保存的帳號標籤與登入方式，不會顯示 token 或金鑰；找到登入資料不代表已驗證訂閱權限。",
-                    "Only the account label and sign-in method saved by each CLI are read. Tokens and keys are never shown; detected sign-in data does not verify subscription access."),
+                Text = T("只檢查 CLI 登入資料檔是否存在，不讀取 token 或金鑰；找到登入資料不代表已驗證訂閱權限。",
+                    "Only checks whether the CLI sign-in data file exists. Tokens and keys are not read; detected sign-in data does not verify subscription access."),
                 AutoSize = true,
                 MaximumSize = new Size(560, 0),
-                Location = new Point(18, 296),
+                Location = new Point(18, 327),
                 ForeColor = ThemeManager.MutedTextColor
             };
             contentPanel.Controls.Add(cliPrivacyHint);
@@ -451,7 +451,7 @@ namespace mySQLPunk
                 Text = T("目前服務與進階設定", "Current service and advanced settings"),
                 AutoSize = true,
                 Font = UiKit.Subtitle,
-                Location = new Point(18, 340)
+                Location = new Point(18, 371)
             };
             contentPanel.Controls.Add(advancedTitle);
 
@@ -460,7 +460,7 @@ namespace mySQLPunk
             {
                 providerChoices.Add(new OptionChoice(preset.Id, preset.DisplayName));
             }
-            ComboBox providerCombo = AddOptionCombo("AiProvider", T("服務提供者:", "Provider:"), providerChoices.ToArray(), 374, 350);
+            ComboBox providerCombo = AddOptionCombo("AiProvider", T("服務提供者:", "Provider:"), providerChoices.ToArray(), 405, 350);
             providerCombo.Left = 220;
 
             Label endpointLabel = new Label
@@ -704,7 +704,8 @@ namespace mySQLPunk
 
             List<lib.AiCliDetectionResult> cliDetections = lib.AiChatService.DetectCliProviders();
             Action updateAdvancedLayout = () => { };
-            Action renderCliCards = () =>
+            Action renderCliCards = null;
+            renderCliCards = () =>
             {
                 cliCards.SuspendLayout();
                 cliCards.Controls.Clear();
@@ -714,7 +715,13 @@ namespace mySQLPunk
                 {
                     Control card = CreateAiCliCard(result,
                         string.Equals(result.Preset.Id, selectedProvider, StringComparison.OrdinalIgnoreCase),
-                        id => SelectAiProvider(providerCombo, id));
+                        id => SelectAiProvider(providerCombo, id),
+                        async () =>
+                        {
+                            cliDetections = await System.Threading.Tasks.Task.Run(() => lib.AiChatService.DetectCliProviders());
+                            renderCliCards();
+                            updateAdvancedLayout();
+                        });
                     card.Width = cardWidth;
                     cliCards.Controls.Add(card);
                 }
@@ -796,7 +803,7 @@ namespace mySQLPunk
 
                 bool showEndpoint = !isCli || !selectedCliInstalled || !string.IsNullOrWhiteSpace(endpointBox.Text);
                 bool showKey = preset.NeedsKey;
-                int nextTop = 416;
+                int nextTop = 447;
 
                 endpointLabel.Visible = showEndpoint;
                 endpointBox.Visible = showEndpoint;
@@ -891,11 +898,13 @@ namespace mySQLPunk
             }
         }
 
-        private Control CreateAiCliCard(lib.AiCliDetectionResult result, bool selected, Action<string> selectProvider)
+        private Control CreateAiCliCard(lib.AiCliDetectionResult result, bool selected, Action<string> selectProvider, Func<System.Threading.Tasks.Task> refreshCliProviders)
         {
+            bool canAutoInstall = !result.Installed
+                && string.Equals(result.Preset.Id, "antigravity-cli", StringComparison.OrdinalIgnoreCase);
             AiCliCardPanel card = new AiCliCardPanel
             {
-                Height = 174,
+                Height = canAutoInstall ? 205 : 174,
                 Margin = new Padding(0, 0, 8, 0),
                 IsSelected = selected
             };
@@ -983,10 +992,12 @@ namespace mySQLPunk
             {
                 Text = result.Installed
                     ? selected ? T("目前使用中", "Currently selected") : T("設為目前使用", "Use this CLI")
-                    : T("開啟安裝頁", "Open install page"),
+                    : T("官方安裝教學", "Official install guide"),
                 Location = new Point(12, 137),
                 Size = new Size(card.Width - 24, 27),
-                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
+                Anchor = canAutoInstall
+                    ? AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+                    : AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
                 Enabled = !selected
             };
             action.Click += (s, e) =>
@@ -999,7 +1010,73 @@ namespace mySQLPunk
                 OpenExternalUrl(result.Preset.KeySignupUrl);
             };
             card.Controls.Add(action);
+
+            if (canAutoInstall)
+            {
+                Button autoInstall = new Button
+                {
+                    Text = T("自動安裝", "Auto install"),
+                    Location = new Point(12, 168),
+                    Size = new Size(card.Width - 24, 27),
+                    Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
+                };
+                autoInstall.Click += (s, e) => StartAntigravityAutoInstall(autoInstall, refreshCliProviders);
+                card.Controls.Add(autoInstall);
+            }
             return card;
+        }
+
+        private void StartAntigravityAutoInstall(Button autoInstall, Func<System.Threading.Tasks.Task> refreshCliProviders)
+        {
+            DialogResult confirmed = MessageBox.Show(
+                this,
+                T("這會開啟可見的 PowerShell，從 antigravity.google 下載並安裝 agy 到目前 Windows 使用者帳號，並更新使用者 PATH。\r\n\r\nmySQLPunk 不會要求系統管理員權限，也不會讀取或傳送登入資料。是否繼續？",
+                    "This opens a visible PowerShell window to download and install agy from antigravity.google for the current Windows user, and updates the user PATH.\r\n\r\nmySQLPunk will not request administrator rights or read or send sign-in data. Continue?"),
+                T("自動安裝 Antigravity CLI", "Install Antigravity CLI"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (confirmed != DialogResult.Yes) return;
+
+            try
+            {
+                System.Diagnostics.Process process = System.Diagnostics.Process.Start(lib.AiChatService.BuildAntigravityInstallStartInfo());
+                if (process == null) throw new InvalidOperationException(T("無法啟動官方安裝程式。", "Could not start the official installer."));
+
+                autoInstall.Enabled = false;
+                process.Exited += (s, e) =>
+                {
+                    try
+                    {
+                        if (!IsDisposed && IsHandleCreated)
+                        {
+                            BeginInvoke(new MethodInvoker(async () =>
+                            {
+                                try { await refreshCliProviders(); }
+                                catch { }
+                                finally { try { process.Dispose(); } catch { } }
+                            }));
+                        }
+                        else
+                        {
+                            process.Dispose();
+                        }
+                    }
+                    catch
+                    {
+                        try { process.Dispose(); } catch { }
+                    }
+                };
+                process.EnableRaisingEvents = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    T("無法啟動官方安裝程式：", "Could not start the official installer: ") + ex.Message,
+                    T("自動安裝 Antigravity CLI", "Install Antigravity CLI"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
 
         private string AiCliAccountText(lib.AiCliDetectionResult result)
@@ -1027,7 +1104,7 @@ namespace mySQLPunk
             {
                 case "codex-cli": return "OpenAI Codex";
                 case "claude-cli": return "Claude Code";
-                case "gemini-cli": return "Gemini CLI";
+                case "antigravity-cli": return "Google Antigravity";
                 default: return providerId;
             }
         }

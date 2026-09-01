@@ -4,12 +4,22 @@
 
 ### 🚀 新增功能
 
+- **MySQL Table Designer 型別屬性面板**：欄位下方新增 Navicat 風格的型別屬性區，選到整數或數值欄位時可設定 `AUTO_INCREMENT`、`UNSIGNED`、`ZEROFILL`，選到 `datetime`／`timestamp` 可設定 `ON UPDATE CURRENT_TIMESTAMP`；勾選自動遞增會同步設定 Not Null 與 Primary Key，SQL 預覽也會產生對應 DDL。
 - **Punky 代為操作（代理模式）**：於「選項 > AI」開啟後，Punky 輸入區會出現「請 Punky 代為操作」勾選；勾選送出的請求會讓 Punky 以多回合工具迴圈直接操作應用程式——查詢資料、執行變更、開查詢分頁、切換與開啟既有連線、重新整理物件樹、導覽物件。回覆若含多項建議，會在下方呈現可勾選清單，勾選後一鍵依序執行。所有工具走統一文字協定（相容 API 與訂閱 CLI 後端），唯讀操作靜默執行，一般變更直接執行，破壞性操作（DROP、TRUNCATE、DELETE、無 WHERE 的 UPDATE 等）一律先跳出確認並顯示確切 SQL；每個操作都寫入查詢歷史稽核。只操作既有連線，永不要求或猜測帳號密碼；查詢結果在提示中明示為資料而非指令。整體為 opt-in，預設關閉。
 - **跨模型答案並排比較**：Punky 輸入區新增「比較」，可替左右兩側各選一個服務與模型，把相同的問題、目前聊天室最近上下文及勾選的 schema 快照同時送出，並在獨立寬視窗左右呈現答案。兩次呼叫各自計量，任一側失敗只影響該欄；結果不加入聊天室、不自動執行或套用 SQL，只記住右側 provider 與模型名稱供下次選用。
 - **Punky 多聊天室**：AI 面板可新增、切換、重新命名與關閉多段彼此隔離的對話；每段對話會分開保留本次執行期間的訊息上下文、未送出草稿、schema 勾選與 SQL 差異套用回呼。對話不寫入磁碟，最後一段不允許關閉，有內容的對話關閉前會再次確認；模型回覆期間會暫停切換，避免回覆串到別的聊天室。
 
 ### 🛠️ 問題修正與優化
 
+- Google 個人帳號的 Gemini CLI 已停止服務，AI 助理現以官方 Antigravity CLI（`agy`）取代；既有 `gemini-cli` 設定會自動遷移，不沿用舊的 executable 或 Gemini 2.x model 覆寫。Antigravity prompt 會以官方 `stream-json` stdin 協定傳遞並只讀取 terminal `result`，不把 SQL/schema 放進命令列，也不使用危險的自動授權旗標。未偵測到 `agy` 時，卡片提供「官方安裝教學」與需二次確認的「自動安裝」；自動安裝只開啟可見的非提權 PowerShell 執行官方 HTTPS installer，不會略過本機 PowerShell 執行原則。安裝後會直接檢查官方使用者安裝目錄，不會因 mySQLPunk 尚未重啟、PATH 尚未刷新而誤判未安裝。
+- AI 助理在偵測到 OpenAI Codex CLI 的 `models_cache.json` 與 CLI 版本不相容時，現在會提示使用 Codex Desktop 內建 CLI 或更新／移除舊版 npm `@openai/codex`，並明確標示該檔案不是 token 檔，不再把原始 CLI banner 直接丟給使用者。
+- AI 助理預設解析 `codex` 指令時，若同時找到 npm shim 與 Codex Desktop 管理的 `codex.exe`，會優先使用 Desktop 版本，避免舊版 npm CLI 讀到新版 Desktop cache 後失敗；使用者在端點欄明確填入完整路徑時仍會尊重指定路徑。
+- AI 訂閱 CLI 卡片的帳號偵測改為只確認登入資料檔是否存在，不再讀取 Codex／Claude 的 token-bearing 帳號檔案內容；Antigravity 使用 Windows Credential Manager 時直接標示為不支援帳號偵測，卡片會顯示登入資料狀態而不顯示帳號 email。
+- Punky 右上齒輪開啟的選項視窗，按「確定」後現在會立即套用佈景主題與語言，行為與主選單「選項」一致。
+- 主視窗啟動時預設置中螢幕顯示，只影響第一次開啟位置，不會鎖定視窗位置或阻止使用者拖曳調整。
+- Database 的資料表/物件清單現在只允許選取、不會因誤點進入儲存格編輯；清單綁定完成後也會清除殘留的等待游標，避免滑鼠停在清單上仍顯示沙漏。資料表清單的「修改日期」固定顯示為 `yyyy-MM-dd HH:mm:ss`，不再受 Windows 區域格式影響出現 `下午` 等文化化時間字串。
+- Table Designer 的欄位 grid 不再顯示 WinForms 內建的空白新增 placeholder 列，避免剛開啟設計資料表時誤以為 schema 多了一個空欄位；新增欄位仍透過工具列的「加入欄位／插入欄位」操作。
+- MySQL Table Designer 既有資料表的「註解」分頁現在會載入原始 table comment，使用者修改後切到 SQL 預覽或離開輸入框時會產生 `ALTER TABLE ... COMMENT = ...`，不再只顯示「沒有偵測到變更」。
 - 修正部分機器上 AI 訂閱 CLI「卡片偵測得到、按測試卻失敗」：npm 版 CLI 的 `.cmd` 啟動器要靠 PATH 找 node，但 GUI 程式繼承的 PATH 可能沒有（nvm/fnm 只寫在 shell 設定檔，或裝完 Node.js 還沒重開程式）。現在啟動前會從常見安裝位置與登錄檔 PATH 自動補上 Node.js；若 node 真的不存在，錯誤訊息也會明確指向缺 Node.js，而不是誤報「找不到該 CLI」。
 - Linux／macOS 的 Avalonia DataGrid 更新至 12.1.2，納入垂直捲軸範圍同步、版面取整邊界捲動鏈結與 clipboard binding 型別繼承修正。
 - Linux／macOS 查詢結果在欄位排序後匯出 CSV、TSV 或 JSON 時，現在會沿用目前網格的完整可視順序，不再悄悄回到原始查詢列序；匯出前也會驗證列索引是完整且不重複的排列。
@@ -25,7 +35,7 @@
 - **AI 格式化與資料庫語法轉換**：「詢問 AI」選單新增只調整排版的 SQL 格式化，以及 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 五種目標方言；目前使用中的 provider 會停用。動作只建立 Punky 草稿，不會自動送出；回覆 SQL 仍需經過逐行差異預覽與變更區段勾選才能套回編輯器。
 - **自訂與釘選 AI 動作**：查詢工具列的「詢問 AI」可建立自己的提示動作，決定是否直接釘選到選單；管理視窗支援新增、修改、刪除與立即使用。執行時只把選取範圍或目前 SQL 帶入 Punky 草稿，不會自動送出或執行；回覆若含 SQL，仍需經過差異預覽才能套回編輯器。自訂檔只保存名稱、提示與釘選狀態，不包含 SQL、連線資訊或 AI 認證。
 - **查詢編輯器詢問 AI 與錯誤交接**：查詢工具列新增「詢問 AI」，可把選取範圍或目前 SQL 帶入解釋、最佳化草稿；查詢執行失敗後會啟用「修正上次執行錯誤」，一併附上資料庫類型、資料庫名稱與錯誤原因。草稿會先顯示在 Punky 面板供確認，不會自動送出；錯誤裡常見的 password、token、API key、secret 與 Bearer credential 會先遮蔽，也不會帶入主機、帳號或連線字串。最佳化與修正回覆可逐行並排比較，並勾選要採用的連續變更區段，確認後才套回當次選取範圍或全文；若編輯器已變更就拒絕覆寫，套用後也不會自動執行。
-- **AI 訂閱 CLI 卡片與帳號偵測**：重做「選項 > AI」，用卡片列出 OpenAI Codex、Claude Code 與 Gemini CLI 的安裝狀態、實際執行路徑、帳號標籤和登入方式，可直接切換目前使用的 CLI；API、Ollama、LM Studio 與 OpenRouter 設定保留在同頁下方，並依目前服務隱藏不適用的欄位。帳號偵測只解析 CLI 自己保存的非敏感欄位，不會把 token 或金鑰帶進畫面，也不把找到登入資料誤當成已驗證訂閱權限。
+- **AI 訂閱 CLI 卡片與帳號偵測**：重做「選項 > AI」，用卡片列出 OpenAI Codex、Claude Code 與 Antigravity CLI 的安裝狀態、實際執行路徑與登入資料狀態，可直接切換目前使用的 CLI；Codex 會優先選用 Codex Desktop 內建 CLI，以避開舊版 npm shim 和新版 Desktop cache 的格式落差。API、Ollama、LM Studio 與 OpenRouter 設定保留在同頁下方，並依目前服務隱藏不適用的欄位。帳號偵測只確認可安全判定的 CLI 狀態，不讀取 token 或金鑰檔案內容，也不把找到登入資料誤當成已驗證訂閱權限。
 - **Linux / macOS 跨平台預覽版與安裝資產**：保留既有 Windows WinForms 完整版，新增獨立 .NET 8 Core 與 Avalonia 桌面程式，可在 Linux / macOS 管理 MySQL / MariaDB、PostgreSQL 與 SQLite 連線，瀏覽 database、Table / View，執行 DDL / DML / SELECT、匯出 CSV／TSV／JSON 結果，並以主鍵與樂觀並行保護安全新增、修改或刪除 Table 資料。Release 會同時產生免另裝 .NET 的 Linux x64／ARM64 使用者層級安裝包與 macOS Intel／Apple Silicon `.app.zip`，每個資產附 SHA-256；CI 會在 Linux x64／ARM64 與 Intel／Apple Silicon macOS 原生 runner 分別驗證同架構安裝包、安全套用、啟動健康檢查與 rollback。macOS 預覽目前採 ad-hoc 簽署，Developer ID 與 Apple notarization 仍需發版環境提供憑證。
 - **跨平台 SQL 文件工作流程**：Linux / macOS 可從按鈕、`Ctrl/Cmd+O` 或 `.sql` 檔案關聯開啟 SQL，並用 `Ctrl/Cmd+S` 儲存、`Ctrl/Cmd+Shift+S` 另存；支援嚴格 UTF-8 與帶 BOM 的 UTF-16，保留原始編碼並限制為 4 MiB。儲存採同目錄私有 staging 與原子替換，覆寫會比對載入時 SHA-256，外部修改或刪除時拒絕覆蓋；切換文件、關閉程式或套用更新前也會保護未儲存內容。Linux desktop entry 與 macOS app bundle 都註冊 `.sql` 文件。
 - **Linux / macOS 安全更新檢查**：跨平台主視窗可手動檢查最新公開 GitHub Release，依目前 OS 與 CPU 精確尋找 `linux-x64`／`linux-arm64`／`osx-x64`／`osx-arm64` 安裝包及同名 `.sha256`；解析會拒絕非 GitHub、非 HTTPS、錯誤版本與不支援架構。Linux 與 macOS 都可在驗證後直接關閉、交易式套用並重新啟動；新版若無法通過啟動健康檢查會回復舊版並重新啟動。Developer ID/notarization 仍需發版環境提供 Apple 憑證。
