@@ -504,6 +504,10 @@ namespace mySQLPunk.lib
                     if (detail.IndexOf("不是內部或外部命令", StringComparison.Ordinal) >= 0
                         || detail.IndexOf("is not recognized", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
+                        // npm 啟動器找不到 node 時也會回「不是內部或外部命令」，
+                        // 不能誤報成 CLI 沒安裝——卡片明明偵測得到，訊息要指向真正缺的 Node.js
+                        if (IsMissingNodeError(detail))
+                            throw new InvalidOperationException(Localization.Format("Ai.CliNodeMissing", exe));
                         throw new InvalidOperationException(Localization.Format("Ai.CliNotFound", exe));
                     }
                     throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, BuildCliFailureDetail(detail)));
@@ -753,6 +757,7 @@ namespace mySQLPunk.lib
                 string command = "chcp 65001 >nul & call \"%MYSQLPUNK_AI_CLI%\"";
                 if (joinedArguments.Length > 0) command += " " + joinedArguments;
                 psi.Arguments = "/d /s /c \"" + command + "\"";
+                EnsureNodeOnChildPath(psi);
             }
             else
             {
@@ -760,6 +765,91 @@ namespace mySQLPunk.lib
                 psi.Arguments = joinedArguments;
             }
             return psi;
+        }
+
+        /// <summary>
+        /// npm 版 CLI 的 .cmd 啟動器要靠 PATH 找 node，但 GUI 程式繼承的 PATH 常常沒有
+        /// （nvm/fnm 只寫在 shell 設定檔、或裝完 Node 還沒重開程式），造成
+        /// 「卡片偵測得到、一執行就失敗」。啟動前把找得到的 Node 位置補進子行程 PATH。
+        /// </summary>
+        private static void EnsureNodeOnChildPath(System.Diagnostics.ProcessStartInfo psi)
+        {
+            try
+            {
+                string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                if (DirectoryWithNode(currentPath.Split(';')) != null) return;
+
+                string nodeDirectory = FindNodeDirectoryForCliShims();
+                if (nodeDirectory != null)
+                    psi.EnvironmentVariables["PATH"] = nodeDirectory + ";" + currentPath;
+            }
+            catch { }
+        }
+
+        /// <summary>在常見安裝位置與登錄檔 PATH（新裝完還沒重開程式時的最新值）裡找 node.exe 所在資料夾。</summary>
+        public static string FindNodeDirectoryForCliShims()
+        {
+            var candidates = new List<string>();
+            candidates.Add(Environment.GetEnvironmentVariable("NVM_SYMLINK"));
+            candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs"));
+            string programW6432 = Environment.GetEnvironmentVariable("ProgramW6432");
+            if (!string.IsNullOrWhiteSpace(programW6432)) candidates.Add(Path.Combine(programW6432, "nodejs"));
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            candidates.Add(Path.Combine(localAppData, "Programs", "nodejs"));
+            candidates.Add(Path.Combine(localAppData, "Volta", "bin"));
+            candidates.Add(Path.Combine(localAppData, "Microsoft", "WinGet", "Links"));
+            candidates.AddRange(ReadRegistryPathDirectories());
+            return DirectoryWithNode(candidates);
+        }
+
+        private static string DirectoryWithNode(IEnumerable<string> directories)
+        {
+            foreach (string directory in directories)
+            {
+                string trimmed = (directory ?? "").Trim().Trim('"');
+                if (trimmed.Length == 0) continue;
+                try
+                {
+                    if (File.Exists(Path.Combine(trimmed, "node.exe"))) return trimmed;
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        private static List<string> ReadRegistryPathDirectories()
+        {
+            var directories = new List<string>();
+            AppendRegistryPath(directories, Microsoft.Win32.Registry.CurrentUser, "Environment");
+            AppendRegistryPath(directories, Microsoft.Win32.Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+            return directories;
+        }
+
+        private static void AppendRegistryPath(List<string> directories, Microsoft.Win32.RegistryKey root, string subKey)
+        {
+            try
+            {
+                using (Microsoft.Win32.RegistryKey key = root.OpenSubKey(subKey))
+                {
+                    string value = key == null ? null : key.GetValue("Path") as string;
+                    if (string.IsNullOrWhiteSpace(value)) return;
+                    foreach (string entry in Environment.ExpandEnvironmentVariables(value).Split(';'))
+                    {
+                        if (!string.IsNullOrWhiteSpace(entry)) directories.Add(entry);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>「不是內部或外部命令」指的是 node 而不是 CLI 本身時，錯誤要導向缺 Node.js。</summary>
+        public static bool IsMissingNodeError(string detail)
+        {
+            string text = detail ?? "";
+            return text.IndexOf("'node'", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("\"node\"", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("'node.exe'", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("\"node.exe\"", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static string JoinWindowsArguments(IList<string> arguments)

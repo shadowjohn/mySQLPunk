@@ -3692,7 +3692,8 @@ namespace mySQLPunk
                 {
                     OpenOptionsDialog();
                     if (aiPanel != null) aiPanel.SyncPickerFromSettings();
-                })
+                },
+                this)
             {
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -3809,24 +3810,30 @@ namespace mySQLPunk
             if (aiPanel != null) aiPanel.SetDraft(prompt, reviewSqlAction);
         }
 
+        /// <summary>從物件樹目前選取解析連線索引與資料庫名稱；選取無法對應連線時回 false。</summary>
+        private bool TryGetSelectedConnection(out int connIndex, out string dbName)
+        {
+            connIndex = -1;
+            dbName = "";
+            TreeNode node = db_tree != null ? db_tree.SelectedNode : null;
+            if (node == null) return false;
+            TreeNode root = node;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            connIndex = GetConnectionIndex(root);
+            var pathParts = GetTreePathParts(node);
+            if (pathParts.Length >= 2) dbName = pathParts[1];
+            return connIndex >= 0 && connIndex < myN.connections.Count;
+        }
+
         /// <summary>AI 助理用：目前選取連線的資料庫上下文（引擎、資料庫、資料表清單、選取物件 DDL）。</summary>
         private string BuildAiSchemaContext()
         {
             try
             {
                 var sb = new StringBuilder();
-                TreeNode node = db_tree != null ? db_tree.SelectedNode : null;
-                int connIndex = -1;
-                string dbName = "";
-                if (node != null)
-                {
-                    TreeNode root = node;
-                    while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
-                    connIndex = GetConnectionIndex(root);
-                    var pathParts = GetTreePathParts(node);
-                    if (pathParts.Length >= 2) dbName = pathParts[1];
-                }
-                if (connIndex < 0 || connIndex >= myN.connections.Count) return "";
+                int connIndex;
+                string dbName;
+                if (!TryGetSelectedConnection(out connIndex, out dbName)) return "";
 
                 var connInfo = myN.connections[connIndex];
                 sb.AppendLine("engine: " + GetConnectionValue(connInfo, "db_kind"));
@@ -3865,19 +3872,9 @@ namespace mySQLPunk
         /// <summary>AI 助理用：以目前選取的連線/資料庫開新查詢分頁並帶入 SQL。</summary>
         private void OpenQueryWithSqlFromCurrentSelection(string sql)
         {
-            TreeNode node = db_tree != null ? db_tree.SelectedNode : null;
-            int connIndex = -1;
-            string dbName = "";
-            if (node != null)
-            {
-                TreeNode root = node;
-                while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
-                connIndex = GetConnectionIndex(root);
-                var pathParts = GetTreePathParts(node);
-                if (pathParts.Length >= 2) dbName = pathParts[1];
-            }
-
-            if (connIndex < 0 || connIndex >= myN.connections.Count
+            int connIndex;
+            string dbName;
+            if (!TryGetSelectedConnection(out connIndex, out dbName)
                 || myN.connections[connIndex]["isConnect"].ToString() != "T")
             {
                 MessageBox.Show(Localization.T("Ai.NeedOpenConnection"), Localization.T("Ai.PanelTitle"),

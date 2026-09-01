@@ -87,6 +87,9 @@ public static class SmokeTests
         Run("MySQL GuidFormat 預設關閉", TestMySqlGuidFormatNone, ref passed);
         Run("Connection proxy settings service", TestConnectionProxySettingsService, ref passed);
         Run("AI CLI process integration", TestAiCliProcessIntegration, ref passed);
+        Run("AI agent protocol", TestAiAgentProtocol, ref passed);
+        Run("AI agent SQL classifier", TestAiAgentSqlClassifier, ref passed);
+        Run("AI agent tool service", TestAiAgentToolService, ref passed);
         Run("Advanced registration service", TestAdvancedRegistrationService, ref passed);
         Run("Scheduled job service", TestScheduledJobService, ref passed);
         Run("Scheduled job manager form", TestScheduledJobManagerForm, ref passed);
@@ -6453,7 +6456,8 @@ public static class SmokeTests
                 sql => { },
                 () => { },
                 () => { },
-                () => { }))
+                () => { },
+                null))
             {
                 Action<string> reviewAction = sql => reviewedSql = sql;
                 panel.SetDraft("請最佳化 SQL", reviewAction);
@@ -6506,7 +6510,8 @@ public static class SmokeTests
                 sql => { },
                 () => { },
                 () => { },
-                () => { }))
+                () => { },
+                null))
             {
                 panel.Size = new Size(380, 680);
                 panel.CreateControl();
@@ -6737,7 +6742,8 @@ public static class SmokeTests
                 sql => { },
                 () => { },
                 () => { },
-                () => { }))
+                () => { },
+                null))
             {
                 panel.Size = new Size(380, 680);
                 panel.CreateControl();
@@ -9507,11 +9513,291 @@ public static class SmokeTests
             {
                 Assert(ex.Message.IndexOf('\uFFFD') < 0, "CLI errors should not contain UTF-8 replacement-character mojibake.");
             }
+
+            Assert(AiChatService.IsMissingNodeError("'\"node\"' is not recognized as an internal or external command"), "Missing-node stderr from npm shims should be classified as a Node.js problem.");
+            Assert(AiChatService.IsMissingNodeError("'node' \u4E0D\u662F\u5167\u90E8\u6216\u5916\u90E8\u547D\u4EE4\u3001\u53EF\u57F7\u884C\u7684\u7A0B\u5F0F\u6216\u6279\u6B21\u6A94\u3002"), "Localized missing-node stderr should be classified as a Node.js problem.");
+            Assert(!AiChatService.IsMissingNodeError("'claude' is not recognized as an internal or external command"), "A missing CLI itself should not be misreported as missing Node.js.");
+
+            string nodeDirectory = AiChatService.FindNodeDirectoryForCliShims();
+            Assert(nodeDirectory == null || File.Exists(Path.Combine(nodeDirectory, "node.exe")), "Node directory discovery should only return folders that actually contain node.exe.");
+
+            string nodeMissingCli = Path.Combine(tempRoot, "node missing cli.cmd");
+            File.WriteAllText(nodeMissingCli, "@echo off\r\necho 'node' is not recognized as an internal or external command 1>&2\r\nexit /b 1\r\n", Encoding.ASCII);
+            try
+            {
+                AiChatService.CliVersion(new AiChatSettings
+                {
+                    Provider = "gemini-cli",
+                    Endpoint = nodeMissingCli,
+                    Model = ""
+                });
+                Assert(false, "A shim that cannot find node should raise a Node.js-specific error.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "Node.js", "The missing-node error should tell the user to install Node.js instead of claiming the CLI is missing.");
+            }
         }
         finally
         {
             try { Directory.Delete(tempRoot, true); } catch { }
         }
+    }
+
+    private static void TestAiAgentProtocol()
+    {
+        string reply = "先確認資料量。\n" +
+            "```punky-action\n{\"tool\":\"run_select\",\"args\":{\"sql\":\"SELECT COUNT(*) FROM orders\",\"database\":\"shop\"},\"why\":\"確認筆數\"}\n```\n" +
+            "接著建索引。\n" +
+            "```punky-action\n{\"tool\":\"execute_sql\",\"args\":{\"sql\":\"CREATE INDEX idx_o ON orders(cid)\"}}\n```\n";
+        List<AiAgentAction> actions = AiAgentProtocol.ParseActions(reply);
+        AssertEquals("2", actions.Count.ToString(), "Multiple punky-action blocks should all be parsed.");
+        AssertEquals("run_select", actions[0].Tool, "Actions should be returned in order of appearance.");
+        AssertEquals("shop", (string)actions[0].Args["database"], "Action args should be parsed as JSON.");
+        AssertEquals("確認筆數", actions[0].Why, "The why field should survive parsing.");
+        AssertEquals("execute_sql", actions[1].Tool, "The second action should parse independently.");
+
+        List<AiAgentAction> broken = AiAgentProtocol.ParseActions("```punky-action\n{not valid json\n```");
+        AssertEquals("1", broken.Count.ToString(), "Malformed action JSON should yield a carrier entry, not crash.");
+        Assert(broken[0].Tool == null, "Malformed action JSON should surface as Tool == null for corrective feedback.");
+        AssertContains(broken[0].RawJson, "not valid json", "The raw text of a malformed action should be preserved.");
+
+        Assert(AiAgentProtocol.ParseActions("純文字回覆，沒有動作。").Count == 0, "Replies without punky-action blocks should parse to zero actions.");
+
+        string planReply = "建議如下：\n```punky-plan\n{\"title\":\"整理 orders\",\"items\":[" +
+            "{\"id\":1,\"note\":\"建索引\",\"sql\":\"CREATE INDEX idx_o ON orders(cid)\",\"database\":\"shop\"}," +
+            "{\"id\":2,\"note\":\"開分頁\",\"action\":{\"tool\":\"open_query_tab\",\"args\":{\"sql\":\"SELECT 1\"}}}," +
+            "{\"id\":3,\"note\":\"沒有內容\"}]}\n```";
+        AiAgentPlan plan = AiAgentProtocol.ParsePlan(planReply);
+        Assert(plan != null, "A valid punky-plan block should parse.");
+        AssertEquals("整理 orders", plan.Title, "Plan title should be preserved.");
+        AssertEquals("2", plan.Items.Count.ToString(), "Plan items with neither sql nor action should be dropped.");
+        AssertEquals("execute_sql", plan.Items[0].Action.Tool, "The sql shorthand should normalize to execute_sql.");
+        AssertEquals("shop", (string)plan.Items[0].Action.Args["database"], "Item-level database should merge into the action args.");
+        AssertContains(plan.Items[0].SqlText, "CREATE INDEX", "SqlText should expose the SQL preview for the checklist card.");
+        Assert(plan.Items[1].SqlText != null && plan.Items[1].SqlText.Contains("SELECT 1"), "Explicit actions keep their own args.");
+
+        Assert(AiAgentProtocol.ParsePlan("no plan here") == null, "Replies without a plan should return null.");
+
+        string stripped = AiAgentProtocol.StripProtocolBlocks(reply);
+        AssertContains(stripped, "先確認資料量。", "StripProtocolBlocks should keep the prose.");
+        Assert(stripped.IndexOf("punky-action", StringComparison.Ordinal) < 0 && stripped.IndexOf("run_select", StringComparison.Ordinal) < 0,
+            "StripProtocolBlocks should remove protocol fences and their content.");
+
+        string envelope = AiAgentProtocol.BuildToolResultMessage(new List<AiAgentToolResult>
+        {
+            new AiAgentToolResult { Tool = "run_select", Ok = true, Summary = "12 rows", ElapsedMs = 34, Truncated = true },
+            new AiAgentToolResult { Tool = "execute_sql", Ok = false, Error = "Unknown column", ElapsedMs = 8 }
+        });
+        AssertContains(envelope, "```punky-result", "The result envelope should use the punky-result fence.");
+        AssertContains(envelope, "\"ok\":true", "Successful results should serialize ok:true.");
+        AssertContains(envelope, "\"truncated\":true", "Truncated results should be flagged for the model.");
+        AssertContains(envelope, "Unknown column", "Failed results should carry the error text.");
+    }
+
+    private static void TestAiAgentSqlClassifier()
+    {
+        Func<string, AiSqlRisk> classify = sql => { string reason; return AiAgentSqlClassifier.Classify(sql, out reason); };
+
+        Assert(classify("SELECT * FROM t") == AiSqlRisk.ReadOnly, "Plain SELECT should classify as read-only.");
+        Assert(classify("WITH x AS (SELECT 1) SELECT * FROM x") == AiSqlRisk.ReadOnly, "WITH-CTE SELECT should classify as read-only.");
+        Assert(classify("EXPLAIN SELECT * FROM t") == AiSqlRisk.ReadOnly, "EXPLAIN should classify as read-only.");
+        Assert(classify("SELECT 'DROP TABLE t' AS hint") == AiSqlRisk.ReadOnly, "Keywords inside string literals must not affect classification.");
+
+        Assert(classify("INSERT INTO t (a) VALUES (1)") == AiSqlRisk.Mutating, "INSERT should classify as mutating.");
+        Assert(classify("UPDATE t SET a = 1 WHERE id = 2") == AiSqlRisk.Mutating, "UPDATE with WHERE should classify as mutating.");
+        Assert(classify("CREATE INDEX idx ON t(a)") == AiSqlRisk.Mutating, "CREATE INDEX should classify as mutating.");
+        Assert(classify("ALTER TABLE t ADD COLUMN b INT") == AiSqlRisk.Mutating, "ALTER should classify as mutating.");
+
+        string dangerReason;
+        Assert(AiAgentSqlClassifier.Classify("DELETE FROM t WHERE id = 1", out dangerReason) == AiSqlRisk.Dangerous, "DELETE should always require confirmation.");
+        Assert(dangerReason.Length > 0, "Dangerous classification should carry a reason.");
+        Assert(classify("UPDATE t SET a = 1") == AiSqlRisk.Dangerous, "UPDATE without WHERE should be dangerous.");
+        Assert(classify("DROP TABLE t") == AiSqlRisk.Dangerous, "DROP should be dangerous.");
+        Assert(classify("TRUNCATE TABLE t") == AiSqlRisk.Dangerous, "TRUNCATE should be dangerous.");
+        Assert(classify("GRANT ALL ON db.* TO 'u'@'%'") == AiSqlRisk.Dangerous, "GRANT should be dangerous.");
+        Assert(classify("CALL cleanup_all()") == AiSqlRisk.Dangerous, "Stored procedure calls should be dangerous.");
+        Assert(classify("SELECT 1 FROM t /*! UNION SELECT pwd FROM u */") == AiSqlRisk.Dangerous, "MySQL executable comments should be dangerous.");
+
+        Assert(classify("SELECT 1; SELECT 2") == AiSqlRisk.Blocked, "Multiple statements should be blocked.");
+        Assert(classify("DROP TABLE a; DROP TABLE b") == AiSqlRisk.Blocked, "Multiple dangerous statements should still be blocked outright.");
+        Assert(classify("   ") == AiSqlRisk.Blocked, "Blank SQL should be blocked.");
+
+        string readOnlyReason;
+        Assert(ScheduledJobValidator.IsReadOnlySql("SELECT 1", out readOnlyReason), "TryGetSqlTokens wrapper must not change IsReadOnlySql behavior.");
+        Assert(!ScheduledJobValidator.IsReadOnlySql("DELETE FROM t", out readOnlyReason), "Mutating SQL should still fail IsReadOnlySql.");
+    }
+
+    private static void TestAiAgentToolService()
+    {
+        // 前面的測試建立過 WinForms 控制項，會在此執行緒裝上同步環境；
+        // 直接 GetResult 會與 ExecuteAsync 內部的 await 死結，改在執行緒集區上跑再取結果。
+        Func<string, string, AiAgentToolResult> run = (tool, argsJson) =>
+        {
+            var action = new AiAgentAction
+            {
+                Tool = tool,
+                Args = string.IsNullOrEmpty(argsJson) ? new Newtonsoft.Json.Linq.JObject() : Newtonsoft.Json.Linq.JObject.Parse(argsJson)
+            };
+            return System.Threading.Tasks.Task.Run(() => AiAgentToolService.ExecuteAsync(action, _aiAgentHost)).GetAwaiter().GetResult();
+        };
+
+        _aiAgentHost = new FakeAiAgentHost();
+
+        AiAgentToolResult connections = run("list_connections", null);
+        Assert(connections.Ok, "list_connections should succeed against the fake host.");
+        string serialized = connections.Data.ToString();
+        AssertContains(serialized, "local", "list_connections should report the connection name.");
+        Assert(serialized.IndexOf("pwd", StringComparison.OrdinalIgnoreCase) < 0 && serialized.IndexOf("password", StringComparison.OrdinalIgnoreCase) < 0,
+            "list_connections output must never contain credential-shaped fields.");
+
+        AiAgentToolResult reject = run("run_select", "{\"sql\":\"DELETE FROM t\"}");
+        Assert(!reject.Ok, "run_select must reject non-read-only SQL.");
+        Assert(_aiAgentHost.Database.ExecutedSql.Count == 0, "Rejected SQL must never reach the database.");
+
+        AiAgentToolResult select = run("run_select", "{\"sql\":\"SELECT * FROM big\"}");
+        Assert(select.Ok, "run_select should succeed for read-only SQL.");
+        Assert(select.Truncated, "run_select should flag truncation when rows exceed the cap.");
+        AssertEquals(AiAgentToolService.SelectRowCap.ToString(),
+            ((Newtonsoft.Json.Linq.JArray)select.Data["rows"]).Count.ToString(),
+            "run_select should cap returned rows at SelectRowCap.");
+        AssertEquals("1", _aiAgentHost.AuditCalls.Count(c => c.StartsWith("run_select:")).ToString(),
+            "Each executed tool should audit exactly once.");
+
+        _aiAgentHost.ConfirmResult = false;
+        AiAgentToolResult denied = run("execute_sql", "{\"sql\":\"DROP TABLE big\"}");
+        Assert(!denied.Ok, "A declined dangerous confirmation should fail the action.");
+        Assert(_aiAgentHost.ConfirmCalls == 1, "Dangerous SQL must go through ConfirmDangerousSql.");
+        Assert(_aiAgentHost.Database.ExecutedSql.Count == 0, "Declined dangerous SQL must never reach ExecSQL.");
+        Assert(_aiAgentHost.AuditCalls.Any(c => c.Contains(AiAgentToolService.AuditStatusDenied)), "Declined executions should audit as denied.");
+
+        _aiAgentHost.ConfirmResult = true;
+        AiAgentToolResult mutate = run("execute_sql", "{\"sql\":\"CREATE INDEX idx ON big(id)\"}");
+        Assert(mutate.Ok, "Ordinary mutating SQL should execute directly without confirmation.");
+        Assert(_aiAgentHost.ConfirmCalls == 1, "Mutating (non-dangerous) SQL must not trigger the confirmation dialog.");
+        AssertEquals("1", _aiAgentHost.Database.ExecutedSql.Count.ToString(), "Mutating SQL should reach ExecSQL exactly once.");
+
+        AiAgentToolResult unknown = run("format_disk", null);
+        Assert(!unknown.Ok && !string.IsNullOrEmpty(unknown.Error), "Unknown tools should return a structured error.");
+
+        AiAgentToolResult missing = run("run_select", "{}");
+        Assert(!missing.Ok, "Missing required arguments should return a structured error.");
+
+        AiAgentToolResult schema = run("describe_schema", null);
+        Assert(schema.Ok, "describe_schema should succeed against the fake database.");
+        AssertContains((string)schema.Data["schema"], "users", "describe_schema should include table names.");
+
+        _aiAgentHost = null;
+    }
+
+    private static FakeAiAgentHost _aiAgentHost;
+
+    private sealed class FakeAiAgentHost : IAiAgentHost
+    {
+        public readonly FakeAiAgentDatabase Database = new FakeAiAgentDatabase();
+        public readonly List<string> AuditCalls = new List<string>();
+        public bool ConfirmResult = true;
+        public int ConfirmCalls;
+
+        public List<AiAgentConnectionInfo> ListConnections()
+        {
+            return new List<AiAgentConnectionInfo>
+            {
+                new AiAgentConnectionInfo { Index = 0, Name = "local", Kind = "mysql", Host = "127.0.0.1", IsOpen = true }
+            };
+        }
+
+        public System.Threading.Tasks.Task<bool> OpenConnectionAsync(string connectionName)
+        {
+            return System.Threading.Tasks.Task.FromResult(connectionName == "local");
+        }
+
+        public AiAgentDbContext ResolveDatabase(string connectionName, string databaseName)
+        {
+            return new AiAgentDbContext
+            {
+                Db = Database,
+                ConnectionName = connectionName ?? "local",
+                DatabaseName = databaseName ?? "sample",
+                ProviderName = Database.ProviderName,
+                HostName = "127.0.0.1"
+            };
+        }
+
+        public void OpenQueryTab(AiAgentDbContext context, string sql) { }
+        public System.Threading.Tasks.Task<bool> NavigateToObjectAsync(string objectUri) { return System.Threading.Tasks.Task.FromResult(true); }
+        public System.Threading.Tasks.Task RefreshTreeAsync(AiAgentDbContext context) { return System.Threading.Tasks.Task.FromResult(0); }
+
+        public bool ConfirmDangerousSql(AiAgentDbContext context, string sql, string riskReason)
+        {
+            ConfirmCalls++;
+            return ConfirmResult;
+        }
+
+        public void Audit(AiAgentDbContext context, string toolName, string description, string status, long elapsedMs, int rows, bool isQuery)
+        {
+            AuditCalls.Add(toolName + ":" + status + ":" + rows);
+        }
+    }
+
+    private sealed class FakeAiAgentDatabase : IDatabase
+    {
+        public readonly List<string> ExecutedSql = new List<string>();
+
+        public ConnectionState State => ConnectionState.Open;
+        public string ProviderName => "mysql";
+        public void SetConn(string connectionString) { }
+        public void Open() { }
+        public void Close() { }
+        public void Dispose() { }
+
+        public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("id", typeof(object));
+            table.Columns.Add("name", typeof(object));
+            for (int i = 0; i < 250; i++) table.Rows.Add(i, "row-" + i);
+            return table;
+        }
+
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
+        {
+            ExecutedSql.Add(sql);
+            return new Dictionary<string, string> { ["status"] = "OK", ["rowsAffected"] = "1" };
+        }
+
+        public System.Threading.Tasks.Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { return System.Threading.Tasks.Task.FromResult(SelectSQL(sql, parameters)); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { return System.Threading.Tasks.Task.FromResult(ExecSQL(sql, parameters)); }
+        public List<string> GetDatabases() { return new List<string> { "sample" }; }
+        public List<string> GetTables(string databaseName) { return new List<string> { "users" }; }
+        public List<string> GetViews(string databaseName) { return new List<string>(); }
+
+        public DataTable GetColumns(string databaseName, string tableName)
+        {
+            DataTable table = new DataTable();
+            foreach (string column in new[] { "COLUMN_NAME", "DATA_TYPE", "IS_NULLABLE", "ORDINAL_POSITION" }) table.Columns.Add(column, typeof(object));
+            table.Rows.Add("id", "integer", "NO", 1);
+            return table;
+        }
+
+        public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return "CREATE TABLE " + tableName + " (id INT)"; }
+        public bool TableExists(string databaseName, string tableName) { return true; }
+        public bool ViewExists(string databaseName, string viewName) { return false; }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { throw new NotSupportedException(); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { throw new NotSupportedException(); }
+        public long CountRows(string databaseName, string tableName) { return 0L; }
+        public DataTable GetCopyColumns(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public DataTable GetCopyIndexes(string databaseName, string tableName) { throw new NotSupportedException(); }
+        public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { throw new NotSupportedException(); }
+        public void DropTableForCopy(string databaseName, string tableName) { }
+        public void CreateIndexesForCopy(string databaseName, string tableName, DataTable sourceIndexes, string sourceProvider) { throw new NotSupportedException(); }
+        public DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { throw new NotSupportedException(); }
+        public void InsertTableBatch(string databaseName, string tableName, DataTable rows) { throw new NotSupportedException(); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return string.Empty; }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { throw new NotSupportedException(); }
     }
 
     private static void TestAdvancedRegistrationService()

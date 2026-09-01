@@ -208,6 +208,15 @@ namespace mySQLPunk.lib
             return true;
         }
 
+        /// <summary>
+        /// 讓其他安全分類器（如 AI 代為操作的 SQL 分級）共用同一套註解/字串感知的 tokenizer，
+        /// 避免兩套解析器對同一句 SQL 給出不同判定。
+        /// </summary>
+        public static void TryGetSqlTokens(string sql, out List<string> allTokens, out List<string> topLevelTokens, out bool multipleStatements)
+        {
+            Tokenize(sql, out allTokens, out topLevelTokens, out multipleStatements);
+        }
+
         private static void Tokenize(string sql, out List<string> allTokens, out List<string> topLevelTokens, out bool multipleStatements)
         {
             allTokens = new List<string>();
