@@ -9295,6 +9295,30 @@ public static class SmokeTests
         AssertEquals("", AiChatService.NormalizeCliModel("codex-cli", "gpt-5.1-codex-max"), "Deprecated Codex model variants should fall back to the CLI default.");
         AssertEquals("gpt-5.6-sol", AiChatService.NormalizeCliModel("codex-cli", "gpt-5.6-sol"), "Current Codex models should remain selected.");
         AssertEquals("gpt-5.1-codex", AiChatService.NormalizeCliModel("openai", "gpt-5.1-codex"), "API providers should preserve explicitly selected models.");
+        AssertEquals("antigravity-cli", AiChatService.NormalizeProviderId("gemini-cli"), "Legacy Gemini CLI settings should migrate to Antigravity CLI.");
+        AssertEquals("", AiChatService.NormalizeCliModel("gemini-cli", "gemini-2.5-flash"), "Legacy Gemini CLI model overrides should not be sent to Antigravity CLI.");
+        AssertEquals("agy", AiChatService.CliExecutableFor("antigravity-cli"), "Antigravity CLI should use the official agy executable.");
+        AssertEquals("antigravity-cli", AiChatService.FindPreset("gemini-cli").Id, "Legacy Gemini CLI provider lookups should resolve to Antigravity CLI.");
+        string expectedAntigravityCliPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin", "agy.exe");
+        AssertEquals(expectedAntigravityCliPath, AiChatService.AntigravityDefaultCliPath(), "Antigravity CLI should look in its official per-user Windows installation directory.");
+
+        System.Diagnostics.ProcessStartInfo antigravityInstall = AiChatService.BuildAntigravityInstallStartInfo();
+        AssertEquals("powershell.exe", Path.GetFileName(antigravityInstall.FileName), "Antigravity automatic installation should use the current user's PowerShell.");
+        AssertContains(antigravityInstall.Arguments, "https://antigravity.google/cli/install.ps1", "Antigravity automatic installation should use only the official HTTPS installer.");
+        AssertContains(antigravityInstall.Arguments, "-NoProfile", "Antigravity automatic installation should not load the user's PowerShell profile.");
+        Assert(!antigravityInstall.Arguments.Contains("ExecutionPolicy"), "Antigravity automatic installation must not bypass the machine's PowerShell execution policy.");
+        Assert(!antigravityInstall.CreateNoWindow, "Antigravity automatic installation should remain visible so the user can inspect its progress.");
+        Assert(!antigravityInstall.UseShellExecute, "Antigravity automatic installation should start directly without requesting elevation.");
+
+        string[] antigravityArguments = AiChatService.BuildAntigravityArguments("gemini-3.7-flash-high");
+        Assert(Array.IndexOf(antigravityArguments, "--input-format") >= 0, "Antigravity CLI should use stdin stream input instead of command-line prompts.");
+        Assert(Array.IndexOf(antigravityArguments, "stream-json") >= 0, "Antigravity CLI should use stream-json input/output for safe programmatic prompts.");
+        Assert(Array.IndexOf(antigravityArguments, "--model") >= 0, "Antigravity CLI should pass an explicit selected model.");
+        Assert(Array.IndexOf(antigravityArguments, "gemini-3.7-flash-high") >= 0, "Antigravity CLI should preserve an explicit current model slug.");
+        Assert(Array.IndexOf(antigravityArguments, "-p") < 0, "Antigravity CLI should not place prompt text in a command-line -p argument.");
+        JObject antigravityInput = JObject.Parse(AiChatService.BuildAntigravityStreamInput("hello"));
+        AssertEquals("user", (string)antigravityInput["event"], "Antigravity CLI stdin should use a user event.");
+        AssertEquals("hello", (string)antigravityInput.SelectToken("message.content"), "Antigravity CLI stdin should put prompt text in the stream event.");
 
         string[] codexModels = AiChatService.KnownCliModels("codex-cli");
         Assert(Array.IndexOf(codexModels, "gpt-5.6-sol") >= 0, "Codex CLI model suggestions should include the current default family.");
@@ -9317,12 +9341,10 @@ public static class SmokeTests
         AssertEquals("claude@example.com", claudeAccount.Label, "Claude account metadata should expose only the account label.");
         AssertEquals("Claude.ai", claudeAccount.Method, "Claude account metadata should report the sign-in method.");
 
-        AiCliAccountInfo geminiAccount = AiChatService.ParseCliAccountInfo(
-            "gemini-cli",
-            "{\"active\":\"gemini@example.com\",\"oauth\":\"must-not-escape\"}");
-        Assert(geminiAccount.State == AiCliAccountState.SignedIn, "Gemini account metadata should detect a Google sign-in.");
-        AssertEquals("gemini@example.com", geminiAccount.Label, "Gemini account metadata should expose only the account label.");
-        AssertEquals("Google", geminiAccount.Method, "Gemini account metadata should report the sign-in method.");
+        AiCliAccountInfo antigravityAccount = AiChatService.ParseCliAccountInfo(
+            "antigravity-cli",
+            "{\"oauth\":\"must-not-read\"}");
+        Assert(antigravityAccount.State == AiCliAccountState.Unsupported, "Antigravity account detection should not read keyring-backed token metadata.");
 
         AiCliAccountInfo malformedAccount = AiChatService.ParseCliAccountInfo("codex-cli", "not-json");
         Assert(malformedAccount.State == AiCliAccountState.Unknown, "Malformed account metadata should fail closed.");
@@ -9352,12 +9374,20 @@ public static class SmokeTests
         List<AiCliDetectionResult> cliDetections = AiChatService.DetectCliProviders();
         Assert(cliDetections.Count == 3, "AI CLI detection should return all three supported subscription providers.");
         Assert(cliDetections.All(item => item.Account != null), "AI CLI detection should always return a safe account state.");
+        Assert(cliDetections.Any(item => item.Preset.Id == "antigravity-cli"), "AI CLI detection should include Antigravity CLI after the Gemini CLI migration.");
+        Assert(!cliDetections.Any(item => item.Preset.Id == "gemini-cli"), "AI CLI detection should stop exposing the deprecated Gemini CLI provider.");
 
         string root = FindRepositoryRootForTest();
         string optionsSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "OptionsForm.cs"), Encoding.UTF8);
+        string aiServiceSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "lib", "AiChatService.cs"), Encoding.UTF8);
         AssertContains(optionsSource, "bool showEndpoint = !isCli || !selectedCliInstalled", "Installed subscription CLIs should hide the unnecessary custom-path field.");
         AssertContains(optionsSource, "keyLabel.Visible = showKey", "API key controls should only appear for providers that need them.");
         AssertContains(optionsSource, "detectButton.Visible = isLocal", "Local model detection should only appear for local providers.");
+        AssertContains(optionsSource, "官方安裝教學", "Missing CLI cards should label the documentation action as official installation guidance.");
+        AssertContains(optionsSource, "自動安裝", "The missing Antigravity CLI card should offer an explicit automatic installation action.");
+        AssertContains(optionsSource, "BuildAntigravityInstallStartInfo", "The Antigravity automatic installation button should use the verified official installer command.");
+        AssertContains(optionsSource, "Size = new Size(560, 209)", "The CLI card container should be tall enough to display Antigravity's second installation action.");
+        AssertContains(aiServiceSource, "FirstExistingCliPath(AntigravityDefaultCliPath())", "Antigravity CLI resolution should check its official install directory even when this app started before PATH was refreshed.");
 
         string cliWorkspace = AiChatService.EnsureCliWorkspaceDirectory();
         Assert(Directory.Exists(cliWorkspace), "AI CLI workspace should be created before launching a provider.");
@@ -9401,7 +9431,7 @@ public static class SmokeTests
             AssertEquals(Path.GetFullPath(npmShimBase + ".cmd"), resolvedNpmShim, "Windows CLI resolution should prefer executable npm .cmd shims over extensionless shell shims.");
             string npmShimOutput = AiChatService.CliVersion(new AiChatSettings
             {
-                Provider = "gemini-cli",
+                Provider = "antigravity-cli",
                 Endpoint = npmShimBase,
                 Model = ""
             });
@@ -9448,12 +9478,18 @@ public static class SmokeTests
             AssertContains(codexOutput, "read-only", "Codex CLI should remain in the read-only sandbox while the workspace is trusted.");
             Assert(codexOutput.IndexOf("dangerously-bypass", StringComparison.OrdinalIgnoreCase) < 0, "Trusting the workspace must not disable Codex approvals or sandboxing.");
 
-            string geminiOutput = AiChatService.ChatCompletion(
-                new AiChatSettings { Provider = "gemini-cli", Endpoint = inspectCli, Model = "gemini-2.5-flash" },
+            string antigravityCli = Path.Combine(tempRoot, "antigravity cli.cmd");
+            File.WriteAllText(antigravityCli,
+                "@echo off\r\n" +
+                "set /p input=\r\n" +
+                "echo args=%*\r\n" +
+                "echo input=%input%\r\n" +
+                "echo {\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"antigravity-ok\"}}\r\n",
+                Encoding.ASCII);
+            string antigravityOutput = AiChatService.ChatCompletion(
+                new AiChatSettings { Provider = "antigravity-cli", Endpoint = antigravityCli, Model = "gemini-3.7-flash-high" },
                 new[] { new AiChatMessage("user", "hello") });
-            AssertContains(geminiOutput, "cwd=" + cliWorkspace, "Gemini CLI should run from the isolated mySQLPunk workspace.");
-            AssertContains(geminiOutput, "--skip-trust", "Gemini CLI should trust the isolated workspace for the session.");
-            AssertContains(geminiOutput, "-p", "Gemini CLI should enter non-interactive prompt mode instead of launching the interactive UI.");
+            AssertEquals("antigravity-ok", antigravityOutput, "Antigravity CLI should return the response from its terminal stream-json result event.");
 
             string failedCli = Path.Combine(tempRoot, "failed cli.cmd");
             File.WriteAllText(failedCli, "@echo off\r\ndefinitely-not-a-real-command --version\r\n", Encoding.ASCII);

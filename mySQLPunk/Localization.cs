@@ -548,6 +548,7 @@ namespace mySQLPunk
             Add("Ai.CliNotFound", "找不到「{0}」指令：請先安裝並登入該 CLI（選項 > AI 的「前往取得金鑰／認證頁面」有安裝說明），或在端點欄填入執行檔完整路徑。", "Command \"{0}\" not found: install and sign in to the CLI first (the key/sign-up link in Options > AI has install instructions), or put the full executable path in the endpoint field.");
             Add("Ai.CliFailed", "CLI「{0}」執行失敗：{1}", "CLI \"{0}\" failed: {1}");
             Add("Ai.CodexModelsCacheInvalid", "Codex CLI 版本和模型快取格式不相容。通常是舊版 npm `@openai/codex` 讀到 Codex Desktop 新版建立的「{0}」；請改用 Codex Desktop 內建 CLI，或更新／移除舊版 npm CLI。這不是 token 檔。", "The Codex CLI version is not compatible with the models cache format. This usually means an older npm `@openai/codex` is reading \"{0}\" created by a newer Codex Desktop; use the Codex Desktop bundled CLI, or update/remove the old npm CLI. This is not a token file.");
+            Add("Ai.AntigravityCliInvalidResult", "Antigravity CLI 沒有回傳有效的最終結果。請先在終端執行 agy 完成登入，然後再試。", "Antigravity CLI did not return a valid final result. Run agy in a terminal to finish signing in, then try again.");
             Add("Ai.CliTimeout", "CLI「{0}」回應逾時（180 秒），已中止。", "CLI \"{0}\" timed out (180 seconds) and was terminated.");
             Add("Ai.CliInvalidModel", "模型名稱只能包含英文字母、數字、句點、斜線、冒號、底線與連字號。", "Model names may only contain letters, numbers, periods, slashes, colons, underscores, and hyphens.");
             Add("Ai.CliDefaultModel", "CLI 預設模型", "CLI default model");
