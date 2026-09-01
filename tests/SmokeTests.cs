@@ -9326,6 +9326,29 @@ public static class SmokeTests
 
         AiCliAccountInfo malformedAccount = AiChatService.ParseCliAccountInfo("codex-cli", "not-json");
         Assert(malformedAccount.State == AiCliAccountState.Unknown, "Malformed account metadata should fail closed.");
+
+        MethodInfo detectCliAccountMethod = typeof(AiChatService).GetMethod("DetectCliAccount", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert(detectCliAccountMethod != null, "AI CLI account detection should remain available to the provider scanner.");
+        string previousCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        string fakeCodexHome = Path.Combine(Path.GetTempPath(), "mySQLPunk CodexHome " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fakeCodexHome);
+        try
+        {
+            File.WriteAllText(Path.Combine(fakeCodexHome, "auth.json"),
+                "{\"auth_mode\":\"chatgpt\",\"tokens\":{\"id_token\":\"header." + claims + ".signature\",\"access_token\":\"must-not-read\"}}",
+                Encoding.UTF8);
+            Environment.SetEnvironmentVariable("CODEX_HOME", fakeCodexHome);
+            AiCliAccountInfo detectedCodexAccount = (AiCliAccountInfo)detectCliAccountMethod.Invoke(null, new object[] { "codex-cli" });
+            Assert(detectedCodexAccount.State == AiCliAccountState.SignedIn, "Codex account detection should report sign-in data when CODEX_HOME auth exists.");
+            Assert(string.IsNullOrWhiteSpace(detectedCodexAccount.Label), "Codex account detection should not parse labels from token-bearing auth files.");
+            AssertContains(detectedCodexAccount.Method, "Codex", "Codex account detection should identify the CLI without reading token metadata.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", previousCodexHome);
+            try { Directory.Delete(fakeCodexHome, true); } catch { }
+        }
+
         List<AiCliDetectionResult> cliDetections = AiChatService.DetectCliProviders();
         Assert(cliDetections.Count == 3, "AI CLI detection should return all three supported subscription providers.");
         Assert(cliDetections.All(item => item.Account != null), "AI CLI detection should always return a safe account state.");
@@ -9348,6 +9371,14 @@ public static class SmokeTests
         Assert(!string.IsNullOrWhiteSpace(resolvedCmd) && File.Exists(resolvedCmd), "CLI executable resolution should find Windows system commands without cmd.exe indirection.");
         string missingName = "mysqlpunk-missing-cli-" + Guid.NewGuid().ToString("N");
         Assert(AiChatService.ResolveCliExecutablePath(missingName) == null, "CLI executable resolution should reject missing commands cleanly.");
+        string fakeNpmCodex = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "codex.cmd");
+        string fakeDesktopCodex = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenAI", "Codex", "bin", "desktop-build", "codex.exe");
+        AssertEquals(fakeDesktopCodex,
+            AiChatService.SelectPreferredCodexCliPath(new[] { fakeNpmCodex, fakeDesktopCodex }),
+            "Codex CLI resolution should prefer the Codex Desktop executable over older npm shims when both share CODEX_HOME.");
+        AssertEquals(fakeNpmCodex,
+            AiChatService.SelectPreferredCodexCliPath(new[] { fakeNpmCodex }),
+            "Codex CLI resolution should keep the first candidate when no Desktop-managed executable is available.");
 
         string tempRoot = Path.Combine(Path.GetTempPath(), "mySQLPunk AI CLI " + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
@@ -9362,6 +9393,50 @@ public static class SmokeTests
                 Model = ""
             });
             AssertContains(output, "ai-cli-ok", "CLI batch shims in paths containing spaces should execute successfully.");
+
+            string npmShimBase = Path.Combine(tempRoot, "npm style cli");
+            File.WriteAllText(npmShimBase, "#!/bin/sh\necho should-not-run\n", Encoding.ASCII);
+            File.WriteAllText(npmShimBase + ".cmd", "@echo off\r\necho npm-shim-ok\r\n", Encoding.ASCII);
+            string resolvedNpmShim = AiChatService.ResolveCliExecutablePath(npmShimBase);
+            AssertEquals(Path.GetFullPath(npmShimBase + ".cmd"), resolvedNpmShim, "Windows CLI resolution should prefer executable npm .cmd shims over extensionless shell shims.");
+            string npmShimOutput = AiChatService.CliVersion(new AiChatSettings
+            {
+                Provider = "gemini-cli",
+                Endpoint = npmShimBase,
+                Model = ""
+            });
+            AssertContains(npmShimOutput, "npm-shim-ok", "Windows npm-style extensionless CLI shims should execute through the sibling .cmd file.");
+
+            string codexCacheErrorCli = Path.Combine(tempRoot, "codex cache error.cmd");
+            File.WriteAllText(codexCacheErrorCli,
+                "@echo off\r\n" +
+                ">&2 echo 2026-09-01T03:07:34.045352Z ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 97 column 5\r\n" +
+                ">&2 echo OpenAI Codex v0.142.2\r\n" +
+                "exit /b 1\r\n",
+                Encoding.ASCII);
+            string previousLanguage = Localization.CurrentLanguage;
+            try
+            {
+                Localization.SetLanguage(Localization.TraditionalChinese, false);
+                AiChatService.CliVersion(new AiChatSettings
+                {
+                    Provider = "codex-cli",
+                    Endpoint = codexCacheErrorCli,
+                    Model = ""
+                });
+                Assert(false, "Codex models cache parse errors should raise an actionable repair message.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AssertContains(ex.Message, "models_cache.json", "Codex models cache parse errors should identify the non-token cache file.");
+                AssertContains(ex.Message, "版本", "Codex models cache parse errors should identify CLI/cache schema compatibility as the likely cause.");
+                AssertContains(ex.Message, "Codex Desktop", "Codex models cache parse errors should point users at the Desktop-managed CLI when available.");
+                AssertNotContains(ex.Message, "OpenAI Codex v0.142.2", "Codex models cache parse errors should not bury the repair hint behind the CLI banner.");
+            }
+            finally
+            {
+                Localization.SetLanguage(previousLanguage, false);
+            }
 
             string inspectCli = Path.Combine(tempRoot, "inspect cli.cmd");
             File.WriteAllText(inspectCli, "@echo off\r\nmore >nul\r\necho cwd=%CD%\r\necho args=%*\r\n", Encoding.ASCII);
@@ -9378,6 +9453,7 @@ public static class SmokeTests
                 new[] { new AiChatMessage("user", "hello") });
             AssertContains(geminiOutput, "cwd=" + cliWorkspace, "Gemini CLI should run from the isolated mySQLPunk workspace.");
             AssertContains(geminiOutput, "--skip-trust", "Gemini CLI should trust the isolated workspace for the session.");
+            AssertContains(geminiOutput, "-p", "Gemini CLI should enter non-interactive prompt mode instead of launching the interactive UI.");
 
             string failedCli = Path.Combine(tempRoot, "failed cli.cmd");
             File.WriteAllText(failedCli, "@echo off\r\ndefinitely-not-a-real-command --version\r\n", Encoding.ASCII);

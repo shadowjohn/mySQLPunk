@@ -437,8 +437,8 @@ namespace mySQLPunk
 
             Label cliPrivacyHint = new Label
             {
-                Text = T("只讀取 CLI 保存的帳號標籤與登入方式，不會顯示 token 或金鑰；找到登入資料不代表已驗證訂閱權限。",
-                    "Only the account label and sign-in method saved by each CLI are read. Tokens and keys are never shown; detected sign-in data does not verify subscription access."),
+                Text = T("只檢查 CLI 登入資料檔是否存在，不讀取 token 或金鑰；找到登入資料不代表已驗證訂閱權限。",
+                    "Only checks whether the CLI sign-in data file exists. Tokens and keys are not read; detected sign-in data does not verify subscription access."),
                 AutoSize = true,
                 MaximumSize = new Size(560, 0),
                 Location = new Point(18, 296),

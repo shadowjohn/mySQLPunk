@@ -51,8 +51,8 @@ namespace mySQLPunk.lib
     }
 
     /// <summary>
-    /// 從 CLI 自己的本機設定檔讀到的非敏感帳號資訊。
-    /// 只保留帳號標籤與登入方式，token、金鑰和 credential 值一律不離開解析流程。
+    /// 從 CLI 自己的本機狀態推估出的非敏感帳號狀態。
+    /// 偵測流程只確認登入資料檔是否存在，不讀取 token-bearing 檔案內容。
     /// </summary>
     public sealed class AiCliAccountInfo
     {
@@ -227,9 +227,11 @@ namespace mySQLPunk.lib
                 case "gemini-cli":
                     ValidateCliModel(model);
                     string[] trustedGeminiArguments = model.Length > 0
-                        ? new[] { "--skip-trust", "-m", model }
-                        : new[] { "--skip-trust" };
-                    string[] legacyGeminiArguments = model.Length > 0 ? new[] { "-m", model } : new string[0];
+                        ? new[] { "--skip-trust", "-m", model, "-p", "" }
+                        : new[] { "--skip-trust", "-p", "" };
+                    string[] legacyGeminiArguments = model.Length > 0
+                        ? new[] { "-m", model, "-p", "" }
+                        : new[] { "-p", "" };
                     argumentTries = new[] { trustedGeminiArguments, legacyGeminiArguments };
                     break;
                 default:
@@ -405,14 +407,49 @@ namespace mySQLPunk.lib
                     {
                         throw new InvalidOperationException(Localization.Format("Ai.CliNotFound", exe));
                     }
-                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, Truncate(detail, 400)));
+                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, BuildCliFailureDetail(detail)));
                 }
                 if (output.Length == 0)
                 {
-                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, Truncate(SanitizeCliText(stderr.ToString()), 400)));
+                    throw new InvalidOperationException(Localization.Format("Ai.CliFailed", exe, BuildCliFailureDetail(SanitizeCliText(stderr.ToString()))));
                 }
                 return output;
             }
+        }
+
+        private static string BuildCliFailureDetail(string detail)
+        {
+            if (IsCodexModelsCacheFailure(detail))
+                return Localization.Format("Ai.CodexModelsCacheInvalid", GetCodexModelsCachePath());
+            return Truncate(detail, 400);
+        }
+
+        private static bool IsCodexModelsCacheFailure(string detail)
+        {
+            if (string.IsNullOrEmpty(detail)) return false;
+            return detail.IndexOf("codex_models_manager::cache", StringComparison.OrdinalIgnoreCase) >= 0
+                && detail.IndexOf("failed to load models cache", StringComparison.OrdinalIgnoreCase) >= 0
+                && detail.IndexOf("base_instructions", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string GetCodexModelsCachePath()
+        {
+            return Path.Combine(GetCodexHomeDirectory(), "models_cache.json");
+        }
+
+        private static string GetCodexHomeDirectory()
+        {
+            string codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+            if (!string.IsNullOrWhiteSpace(codexHome)) return codexHome;
+            string home = GetUserHomeDirectory();
+            return string.IsNullOrWhiteSpace(home) ? ".codex" : Path.Combine(home, ".codex");
+        }
+
+        private static string GetUserHomeDirectory()
+        {
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrWhiteSpace(home)) home = Environment.GetEnvironmentVariable("USERPROFILE");
+            return string.IsNullOrWhiteSpace(home) ? null : home;
         }
 
         /// <summary>
@@ -437,6 +474,10 @@ namespace mySQLPunk.lib
                 return null;
             }
 
+            var candidates = new List<string>();
+            bool isCodex = string.Equals(candidate, "codex", StringComparison.OrdinalIgnoreCase);
+            if (isCodex) AddCodexDesktopCliCandidates(candidates);
+
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             foreach (string folder in new[]
@@ -447,7 +488,7 @@ namespace mySQLPunk.lib
             })
             {
                 string found = FirstExistingCliPath(Path.Combine(folder, candidate));
-                if (found != null) return found;
+                AddCliCandidate(candidates, found);
             }
 
             try
@@ -472,16 +513,90 @@ namespace mySQLPunk.lib
                         try { process.Kill(); } catch { }
                         return null;
                     }
-                    if (process.ExitCode != 0) return null;
-                    foreach (string line in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    if (process.ExitCode == 0)
                     {
-                        string found = FirstExistingCliPath(line.Trim());
-                        if (found != null) return found;
+                        foreach (string line in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            string found = FirstExistingCliPath(line.Trim());
+                            AddCliCandidate(candidates, found);
+                        }
                     }
                 }
             }
             catch { }
+            if (isCodex) return SelectPreferredCodexCliPath(candidates);
+            if (candidates.Count > 0) return candidates[0];
             return null;
+        }
+
+        public static string SelectPreferredCodexCliPath(IEnumerable<string> candidates)
+        {
+            if (candidates == null) return null;
+            string first = null;
+            string desktop = null;
+            foreach (string candidate in candidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate)) continue;
+                string fullPath;
+                try { fullPath = Path.GetFullPath(candidate); }
+                catch { fullPath = candidate; }
+                if (first == null) first = fullPath;
+                if (desktop == null && IsCodexDesktopCliPath(fullPath)) desktop = fullPath;
+            }
+            return desktop ?? first;
+        }
+
+        private static void AddCodexDesktopCliCandidates(List<string> candidates)
+        {
+            try
+            {
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(localAppData)) return;
+                string binRoot = Path.Combine(localAppData, "OpenAI", "Codex", "bin");
+                if (!Directory.Exists(binRoot)) return;
+                var found = new List<KeyValuePair<string, DateTime>>();
+                foreach (string directory in Directory.GetDirectories(binRoot))
+                {
+                    string executable = Path.Combine(directory, "codex.exe");
+                    if (File.Exists(executable))
+                        found.Add(new KeyValuePair<string, DateTime>(executable, File.GetLastWriteTimeUtc(executable)));
+                }
+                found.Sort((left, right) => right.Value.CompareTo(left.Value));
+                foreach (KeyValuePair<string, DateTime> item in found) AddCliCandidate(candidates, item.Key);
+            }
+            catch { }
+        }
+
+        private static bool IsCodexDesktopCliPath(string path)
+        {
+            try
+            {
+                if (!string.Equals(Path.GetFileName(path), "codex.exe", StringComparison.OrdinalIgnoreCase)) return false;
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(localAppData)) return false;
+                string root = Path.GetFullPath(Path.Combine(localAppData, "OpenAI", "Codex", "bin"))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                string fullPath = Path.GetFullPath(path);
+                return fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void AddCliCandidate(List<string> candidates, string path)
+        {
+            if (candidates == null || string.IsNullOrWhiteSpace(path)) return;
+            string fullPath;
+            try { fullPath = Path.GetFullPath(path); }
+            catch { return; }
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (string.Equals(candidates[i], fullPath, StringComparison.OrdinalIgnoreCase)) return;
+            }
+            candidates.Add(fullPath);
         }
 
         private static string FirstExistingCliPath(string path)
@@ -489,7 +604,6 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(path)) return null;
             try
             {
-                if (File.Exists(path)) return Path.GetFullPath(path);
                 if (Path.GetExtension(path).Length == 0)
                 {
                     foreach (string extension in new[] { ".exe", ".cmd", ".bat" })
@@ -498,6 +612,7 @@ namespace mySQLPunk.lib
                         if (File.Exists(withExtension)) return Path.GetFullPath(withExtension);
                     }
                 }
+                if (File.Exists(path)) return Path.GetFullPath(path);
             }
             catch { }
             return null;
@@ -902,26 +1017,33 @@ namespace mySQLPunk.lib
 
         private static AiCliAccountInfo DetectCliAccount(string providerId)
         {
-            string relativePath;
+            string path = null;
+            string method = null;
             switch ((providerId ?? "").ToLowerInvariant())
             {
-                case "codex-cli": relativePath = Path.Combine(".codex", "auth.json"); break;
-                case "claude-cli": relativePath = ".claude.json"; break;
-                case "gemini-cli": relativePath = Path.Combine(".gemini", "google_accounts.json"); break;
+                case "codex-cli":
+                    path = Path.Combine(GetCodexHomeDirectory(), "auth.json");
+                    method = "OpenAI Codex CLI";
+                    break;
+                case "claude-cli":
+                    path = Path.Combine(GetUserHomeDirectory() ?? string.Empty, ".claude.json");
+                    method = "Claude Code";
+                    break;
+                case "gemini-cli":
+                    path = Path.Combine(GetUserHomeDirectory() ?? string.Empty, ".gemini", "google_accounts.json");
+                    method = "Gemini CLI";
+                    break;
                 default: return BuildAccount(AiCliAccountState.Unsupported, null, null, false);
             }
 
             try
             {
-                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                if (string.IsNullOrWhiteSpace(home)) home = Environment.GetEnvironmentVariable("USERPROFILE");
-                if (string.IsNullOrWhiteSpace(home))
+                if (string.IsNullOrWhiteSpace(path))
                     return BuildAccount(AiCliAccountState.Unknown, null, null, false);
 
-                string path = Path.Combine(home, relativePath);
                 if (!File.Exists(path))
                     return BuildAccount(AiCliAccountState.NotFound, null, null, false);
-                return ParseCliAccountInfo(providerId, File.ReadAllText(path, Encoding.UTF8));
+                return BuildAccount(AiCliAccountState.SignedIn, null, method, true);
             }
             catch
             {

@@ -10,6 +10,10 @@
 
 ### 🛠️ 問題修正與優化
 
+- AI 助理的 OpenAI Codex CLI 與 Gemini CLI 在 Windows npm 安裝環境下，現在會優先使用可執行的 `.cmd` shim，不再誤啟動無副檔名 shell shim 而顯示「不是這個作業系統平台的有效應用程式」；Gemini CLI 對話也會明確使用 headless `-p` 模式，避免啟動互動介面。
+- AI 助理在偵測到 OpenAI Codex CLI 的 `models_cache.json` 與 CLI 版本不相容時，現在會提示使用 Codex Desktop 內建 CLI 或更新／移除舊版 npm `@openai/codex`，並明確標示該檔案不是 token 檔，不再把原始 CLI banner 直接丟給使用者。
+- AI 助理預設解析 `codex` 指令時，若同時找到 npm shim 與 Codex Desktop 管理的 `codex.exe`，會優先使用 Desktop 版本，避免舊版 npm CLI 讀到新版 Desktop cache 後失敗；使用者在端點欄明確填入完整路徑時仍會尊重指定路徑。
+- AI 訂閱 CLI 卡片的帳號偵測改為只確認登入資料檔是否存在，不再讀取 Codex／Claude／Gemini 的 token-bearing 帳號檔案內容；卡片會顯示登入資料狀態，不顯示帳號 email。
 - Punky 右上齒輪開啟的選項視窗，按「確定」後現在會立即套用佈景主題與語言，行為與主選單「選項」一致。
 - 主視窗啟動時預設置中螢幕顯示，只影響第一次開啟位置，不會鎖定視窗位置或阻止使用者拖曳調整。
 - Database 的資料表/物件清單現在只允許選取、不會因誤點進入儲存格編輯；清單綁定完成後也會清除殘留的等待游標，避免滑鼠停在清單上仍顯示沙漏。資料表清單的「修改日期」固定顯示為 `yyyy-MM-dd HH:mm:ss`，不再受 Windows 區域格式影響出現 `下午` 等文化化時間字串。
@@ -29,7 +33,7 @@
 - **AI 格式化與資料庫語法轉換**：「詢問 AI」選單新增只調整排版的 SQL 格式化，以及 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 五種目標方言；目前使用中的 provider 會停用。動作只建立 Punky 草稿，不會自動送出；回覆 SQL 仍需經過逐行差異預覽與變更區段勾選才能套回編輯器。
 - **自訂與釘選 AI 動作**：查詢工具列的「詢問 AI」可建立自己的提示動作，決定是否直接釘選到選單；管理視窗支援新增、修改、刪除與立即使用。執行時只把選取範圍或目前 SQL 帶入 Punky 草稿，不會自動送出或執行；回覆若含 SQL，仍需經過差異預覽才能套回編輯器。自訂檔只保存名稱、提示與釘選狀態，不包含 SQL、連線資訊或 AI 認證。
 - **查詢編輯器詢問 AI 與錯誤交接**：查詢工具列新增「詢問 AI」，可把選取範圍或目前 SQL 帶入解釋、最佳化草稿；查詢執行失敗後會啟用「修正上次執行錯誤」，一併附上資料庫類型、資料庫名稱與錯誤原因。草稿會先顯示在 Punky 面板供確認，不會自動送出；錯誤裡常見的 password、token、API key、secret 與 Bearer credential 會先遮蔽，也不會帶入主機、帳號或連線字串。最佳化與修正回覆可逐行並排比較，並勾選要採用的連續變更區段，確認後才套回當次選取範圍或全文；若編輯器已變更就拒絕覆寫，套用後也不會自動執行。
-- **AI 訂閱 CLI 卡片與帳號偵測**：重做「選項 > AI」，用卡片列出 OpenAI Codex、Claude Code 與 Gemini CLI 的安裝狀態、實際執行路徑、帳號標籤和登入方式，可直接切換目前使用的 CLI；API、Ollama、LM Studio 與 OpenRouter 設定保留在同頁下方，並依目前服務隱藏不適用的欄位。帳號偵測只解析 CLI 自己保存的非敏感欄位，不會把 token 或金鑰帶進畫面，也不把找到登入資料誤當成已驗證訂閱權限。
+- **AI 訂閱 CLI 卡片與帳號偵測**：重做「選項 > AI」，用卡片列出 OpenAI Codex、Claude Code 與 Gemini CLI 的安裝狀態、實際執行路徑與登入資料狀態，可直接切換目前使用的 CLI；Codex 會優先選用 Codex Desktop 內建 CLI，以避開舊版 npm shim 和新版 Desktop cache 的格式落差。API、Ollama、LM Studio 與 OpenRouter 設定保留在同頁下方，並依目前服務隱藏不適用的欄位。帳號偵測只確認 CLI 登入資料檔是否存在，不讀取 token 或金鑰檔案內容，也不把找到登入資料誤當成已驗證訂閱權限。
 - **Linux / macOS 跨平台預覽版與安裝資產**：保留既有 Windows WinForms 完整版，新增獨立 .NET 8 Core 與 Avalonia 桌面程式，可在 Linux / macOS 管理 MySQL / MariaDB、PostgreSQL 與 SQLite 連線，瀏覽 database、Table / View，執行 DDL / DML / SELECT、匯出 CSV／TSV／JSON 結果，並以主鍵與樂觀並行保護安全新增、修改或刪除 Table 資料。Release 會同時產生免另裝 .NET 的 Linux x64／ARM64 使用者層級安裝包與 macOS Intel／Apple Silicon `.app.zip`，每個資產附 SHA-256；CI 會在 Linux x64／ARM64 與 Intel／Apple Silicon macOS 原生 runner 分別驗證同架構安裝包、安全套用、啟動健康檢查與 rollback。macOS 預覽目前採 ad-hoc 簽署，Developer ID 與 Apple notarization 仍需發版環境提供憑證。
 - **跨平台 SQL 文件工作流程**：Linux / macOS 可從按鈕、`Ctrl/Cmd+O` 或 `.sql` 檔案關聯開啟 SQL，並用 `Ctrl/Cmd+S` 儲存、`Ctrl/Cmd+Shift+S` 另存；支援嚴格 UTF-8 與帶 BOM 的 UTF-16，保留原始編碼並限制為 4 MiB。儲存採同目錄私有 staging 與原子替換，覆寫會比對載入時 SHA-256，外部修改或刪除時拒絕覆蓋；切換文件、關閉程式或套用更新前也會保護未儲存內容。Linux desktop entry 與 macOS app bundle 都註冊 `.sql` 文件。
 - **Linux / macOS 安全更新檢查**：跨平台主視窗可手動檢查最新公開 GitHub Release，依目前 OS 與 CPU 精確尋找 `linux-x64`／`linux-arm64`／`osx-x64`／`osx-arm64` 安裝包及同名 `.sha256`；解析會拒絕非 GitHub、非 HTTPS、錯誤版本與不支援架構。Linux 與 macOS 都可在驗證後直接關閉、交易式套用並重新啟動；新版若無法通過啟動健康檢查會回復舊版並重新啟動。Developer ID/notarization 仍需發版環境提供 Apple 憑證。
