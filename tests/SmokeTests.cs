@@ -56,6 +56,7 @@ public static class SmokeTests
         Run("Query AI custom actions", TestQueryAiCustomActions, ref passed);
         Run("AI SQL diff review", TestAiSqlDiffReview, ref passed);
         Run("AI assistant multi conversations", TestAiAssistantMultiConversations, ref passed);
+        Run("AI assistant settings dialog", TestAiAssistantSettingsDialog, ref passed);
         Run("AI model answer comparison", TestAiModelAnswerComparison, ref passed);
         Run("Query table edit optimistic WHERE", TestQueryTableEditOptimisticWhere, ref passed);
         Run("Dockable tab option service", TestDockableTabOptionService, ref passed);
@@ -3011,6 +3012,17 @@ public static class SmokeTests
         AssertContains(mysqlSql, "CREATE TABLE", "MySQL create table SQL should be generated.");
         AssertContains(mysqlSql, "codex_smoke_mysql", "MySQL create table SQL should include table name.");
         AssertContains(mysqlSql, "PRIMARY KEY", "MySQL create table SQL should include primary key.");
+        string mysqlColumnPropertySql = BuildMySqlCreateTableSqlWithColumnProperties();
+        AssertContains(mysqlColumnPropertySql, "`Id` int(11) unsigned zerofill NOT NULL AUTO_INCREMENT", "MySQL integer column properties should generate unsigned zerofill auto-increment SQL.");
+        AssertContains(mysqlColumnPropertySql, "PRIMARY KEY (`Id`)", "MySQL auto-increment primary key should stay in the primary key clause.");
+        AssertContains(mysqlColumnPropertySql, "`UpdatedAt` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", "MySQL timestamp update column property should generate ON UPDATE CURRENT_TIMESTAMP.");
+
+        DataTable mysqlMetadataColumns = LoadMySqlDesignerColumnsFromMetadata();
+        Assert(GetDesignerColumnBool(mysqlMetadataColumns.Rows[0], "AutoIncrement"), "MySQL auto_increment metadata should load into the designer property model.");
+        Assert(GetDesignerColumnBool(mysqlMetadataColumns.Rows[0], "Unsigned"), "MySQL unsigned metadata should load into the designer property model.");
+        Assert(GetDesignerColumnBool(mysqlMetadataColumns.Rows[0], "Zerofill"), "MySQL zerofill metadata should load into the designer property model.");
+        Assert(GetDesignerColumnBool(mysqlMetadataColumns.Rows[1], "OnUpdateCurrentTimestamp"), "MySQL ON UPDATE metadata should load into the designer property model.");
+        AssertMySqlColumnPropertiesPanelShowsIntegerOptions();
 
         string sqliteSql = BuildCreateTableSql(new my_sqlite(), "codex_smoke_sqlite");
         AssertContains(sqliteSql, "CREATE TABLE", "SQLite create table SQL should be generated.");
@@ -3078,6 +3090,139 @@ public static class SmokeTests
         }
     }
 
+    private static string BuildMySqlCreateTableSqlWithColumnProperties()
+    {
+        using (TableDesignerForm form = new TableDesignerForm(new my_mysql(), "main", null))
+        {
+            SetTextBoxField(form, "txtTableName", "codex_smoke_mysql_properties");
+
+            MethodInfo createTableMethod = typeof(TableDesignerForm).GetMethod("CreateColumnsDisplayTable", BindingFlags.Instance | BindingFlags.NonPublic);
+            DataTable columns = (DataTable)createTableMethod.Invoke(form, null);
+            EnsureDesignerPropertyColumnsForTest(columns);
+
+            DataRow id = columns.NewRow();
+            id["Name"] = "Id";
+            id["Type"] = "int";
+            id["Length"] = "11";
+            id["NotNull"] = true;
+            id["PK"] = true;
+            id["AutoIncrement"] = true;
+            id["Unsigned"] = true;
+            id["Zerofill"] = true;
+            columns.Rows.Add(id);
+
+            DataRow updatedAt = columns.NewRow();
+            updatedAt["Name"] = "UpdatedAt";
+            updatedAt["Type"] = "datetime";
+            updatedAt["Default"] = "CURRENT_TIMESTAMP";
+            updatedAt["OnUpdateCurrentTimestamp"] = true;
+            columns.Rows.Add(updatedAt);
+
+            MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod("BuildCreateTableSql", BindingFlags.Instance | BindingFlags.NonPublic);
+            return (string)buildMethod.Invoke(form, new object[] { columns });
+        }
+    }
+
+    private static DataTable LoadMySqlDesignerColumnsFromMetadata()
+    {
+        using (TableDesignerForm form = new TableDesignerForm(new my_mysql(), "main", null))
+        {
+            MethodInfo createTableMethod = typeof(TableDesignerForm).GetMethod("CreateColumnsDisplayTable", BindingFlags.Instance | BindingFlags.NonPublic);
+            DataTable columns = (DataTable)createTableMethod.Invoke(form, null);
+            MethodInfo populateMethod = typeof(TableDesignerForm).GetMethod("PopulateDesignerColumnRow", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            DataTable metadata = new DataTable();
+            metadata.Columns.Add("Field");
+            metadata.Columns.Add("Type");
+            metadata.Columns.Add("Null");
+            metadata.Columns.Add("Key");
+            metadata.Columns.Add("Default");
+            metadata.Columns.Add("Extra");
+            metadata.Columns.Add("Comment");
+            metadata.Rows.Add("Id", "bigint(20) unsigned zerofill", "NO", "PRI", DBNull.Value, "auto_increment", "流水號");
+            metadata.Rows.Add("UpdatedAt", "datetime", "YES", "", "CURRENT_TIMESTAMP", "on update CURRENT_TIMESTAMP", "修改時間");
+
+            foreach (DataRow metadataRow in metadata.Rows)
+            {
+                DataRow designerRow = columns.NewRow();
+                populateMethod.Invoke(form, new object[] { designerRow, metadataRow });
+                columns.Rows.Add(designerRow);
+            }
+
+            return columns;
+        }
+    }
+
+    private static void EnsureDesignerPropertyColumnsForTest(DataTable table)
+    {
+        AddDesignerPropertyColumnForTest(table, "AutoIncrement");
+        AddDesignerPropertyColumnForTest(table, "Unsigned");
+        AddDesignerPropertyColumnForTest(table, "Zerofill");
+        AddDesignerPropertyColumnForTest(table, "OnUpdateCurrentTimestamp");
+    }
+
+    private static void AddDesignerPropertyColumnForTest(DataTable table, string columnName)
+    {
+        if (!table.Columns.Contains(columnName)) table.Columns.Add(columnName, typeof(bool));
+    }
+
+    private static bool GetDesignerColumnBool(DataRow row, string columnName)
+    {
+        return row.Table.Columns.Contains(columnName) &&
+               row[columnName] != DBNull.Value &&
+               (bool)row[columnName];
+    }
+
+    private static void AssertMySqlColumnPropertiesPanelShowsIntegerOptions()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            using (TableDesignerForm form = new TableDesignerForm(new my_mysql(), "main", null))
+            {
+                form.CreateControl();
+                DataGridView grid = GetPrivateField<DataGridView>(form, "dgvColumns");
+                Panel propertiesPanel = GetPrivateField<Panel>(form, "pnlColumnProperties");
+                DataTable columns = (DataTable)grid.DataSource;
+
+                Assert(!grid.AllowUserToAddRows, "Table Designer column grid should not show an extra blank placeholder row.");
+
+                DataRow row = columns.NewRow();
+                row["Name"] = "Id";
+                row["Type"] = "int";
+                row["Length"] = "11";
+                row["NotNull"] = true;
+                row["PK"] = true;
+                columns.Rows.Add(row);
+
+                grid.CurrentCell = grid.Rows[0].Cells["Type"];
+                grid.Rows[0].Selected = true;
+                form.PerformLayout();
+                Application.DoEvents();
+
+                Assert(ControlTreeContainsText(propertiesPanel, "自動遞增"), "MySQL integer columns should expose an auto-increment property checkbox.");
+                Assert(ControlTreeContainsText(propertiesPanel, "不帶正負號"), "MySQL integer columns should expose an unsigned property checkbox.");
+                Assert(ControlTreeContainsText(propertiesPanel, "填滿零"), "MySQL integer columns should expose a zerofill property checkbox.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+        }
+    }
+
+    private static bool ControlTreeContainsText(Control root, string text)
+    {
+        if (root == null) return false;
+        if (!string.IsNullOrEmpty(root.Text) && root.Text.IndexOf(text, StringComparison.Ordinal) >= 0) return true;
+        foreach (Control child in root.Controls)
+        {
+            if (ControlTreeContainsText(child, text)) return true;
+        }
+        return false;
+    }
+
     private static string BuildCreateTableSql(IDatabase db, string tableName)
     {
         using (TableDesignerForm form = new TableDesignerForm(db, "main", null))
@@ -3113,6 +3258,10 @@ public static class SmokeTests
         AssertContains(mysqlSql, "DROP COLUMN `removed_col`", "MySQL ALTER should drop removed columns.");
         AssertContains(mysqlSql, "CHANGE COLUMN `legacy_name` `display_name`", "MySQL ALTER should rename changed columns.");
         AssertContains(mysqlSql, "ADD COLUMN `created_at`", "MySQL ALTER should add new columns.");
+        string mysqlTableCommentSql = BuildExistingMySqlAlterSqlWithTableComment("每日工作");
+        AssertContains(mysqlTableCommentSql, "ALTER TABLE `main`.`demo_table`", "MySQL ALTER should target the table when only the table comment changes.");
+        AssertContains(mysqlTableCommentSql, "COMMENT = '每日工作'", "MySQL ALTER should update table comments when the comment tab changes.");
+        Assert(!mysqlTableCommentSql.Contains("沒有偵測到變更"), "MySQL table comment changes should not show the no-change preview.");
 
         string postgresqlSql = BuildExistingAlterSql(
             CreateProvider<my_postgresql>(),
@@ -6430,6 +6579,79 @@ public static class SmokeTests
         }
     }
 
+    private static void TestAiAssistantSettingsDialog()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        string previousTheme = ThemeManager.CurrentTheme;
+        TestFileSnapshot languageFile = TestFileSnapshot.Capture(Path.Combine(Application.UserAppDataPath, "language.txt"));
+        TestFileSnapshot themeFile = TestFileSnapshot.Capture(Path.Combine(Application.UserAppDataPath, "theme.txt"));
+
+        try
+        {
+            Localization.SetLanguage(Localization.TraditionalChinese, false);
+            ThemeManager.SetTheme(ThemeManager.Light, false);
+
+            using (Form1 form = new Form1())
+            {
+                form.CreateControl();
+                MethodInfo ensureAiPanel = typeof(Form1).GetMethod("EnsureAiPanel", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert(ensureAiPanel != null, "Form1 should expose AI panel creation internally for smoke tests.");
+                ensureAiPanel.Invoke(form, null);
+
+                AiAssistantPanel panel = GetPrivateField<AiAssistantPanel>(form, "aiPanel");
+                Button settingsButton = GetPrivateField<Button>(panel, "settingsButton");
+                bool handledDialog = false;
+                string dialogFailure = null;
+
+                using (System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer())
+                {
+                    timer.Interval = 25;
+                    timer.Tick += (s, e) =>
+                    {
+                        OptionsForm optionsForm = null;
+                        foreach (Form openForm in Application.OpenForms)
+                        {
+                            optionsForm = openForm as OptionsForm;
+                            if (optionsForm != null) break;
+                        }
+                        if (optionsForm == null) return;
+
+                        timer.Stop();
+                        try
+                        {
+                            GetPrivateField<RadioButton>(optionsForm, "darkThemeRadio").Checked = true;
+                            GetPrivateField<ComboBox>(optionsForm, "languageCombo").SelectedIndex = 1;
+                            GetPrivateField<Button>(optionsForm, "okButton").PerformClick();
+                            handledDialog = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            dialogFailure = ex.Message;
+                            optionsForm.Close();
+                        }
+                    };
+
+                    timer.Start();
+                    InvokeButtonClick(settingsButton);
+                    timer.Stop();
+                }
+
+                Assert(dialogFailure == null, "AI settings dialog automation should complete: " + dialogFailure);
+                Assert(handledDialog, "AI settings button should open OptionsForm.");
+                AssertEquals(Localization.English, Localization.CurrentLanguage, "AI settings OK should apply selected language immediately.");
+                AssertEquals(ThemeManager.Dark, ThemeManager.CurrentTheme, "AI settings OK should apply selected theme immediately.");
+                AssertEquals("Connections", GetPrivateField<Label>(form, "label1").Text, "AI settings OK should relocalize the main window immediately.");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguage(previousLanguage, false);
+            ThemeManager.SetTheme(previousTheme, false);
+            languageFile.Restore();
+            themeFile.Restore();
+        }
+    }
+
     private static void TestAiModelAnswerComparison()
     {
         AiChatSettings current = new AiChatSettings
@@ -7380,6 +7602,7 @@ public static class SmokeTests
         MethodInfo objectDistributionBIMethod = typeof(Form1).GetMethod("BuildObjectDistributionBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo rowCountRankingBIMethod = typeof(Form1).GetMethod("BuildRowCountRankingBI", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo groupListMethod = typeof(Form1).GetMethod("BuildDatabaseGroupList", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo showObjectListMethod = typeof(Form1).GetMethod("ShowDatabaseObjectList", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo searchResultsMethod = typeof(Form1).GetMethod("BuildDatabaseSearchResults", BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo detailObjectTypeMethod = typeof(Form1).GetMethod("LocalizeDetailObjectType", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo sidebarObjectTitleMethod = typeof(Form1).GetMethod("BuildSidebarObjectTitle", BindingFlags.Static | BindingFlags.NonPublic);
@@ -7477,6 +7700,32 @@ public static class SmokeTests
             DataRow zhFailedRankingTable = FindDataRow(zhFailedRanking, "名稱", "public.users");
             Assert(zhFailedRankingTable != null, "Row count ranking BI should keep rows when count fails.");
             AssertEquals("未知錯誤", zhFailedRankingTable["狀態"].ToString(), "Blank ranking row count errors should localize Traditional Chinese unknown fallback.");
+
+            using (Form1 tableListForm = new Form1())
+            {
+                DataGridView tableListGrid = GetPrivateField<DataGridView>(tableListForm, "table_top");
+                tableListForm.Cursor = Cursors.WaitCursor;
+                tableListForm.UseWaitCursor = true;
+                tableListGrid.Cursor = Cursors.WaitCursor;
+                tableListGrid.UseWaitCursor = true;
+                FakeDumpDatabase tableStatusDb = new FakeDumpDatabase
+                {
+                    Provider = "mysql",
+                    TableStatus = CreateTableStatusTable()
+                };
+                showObjectListMethod.Invoke(tableListForm, new object[] { tableStatusDb, "main" });
+                Assert(tableListGrid.ReadOnly, "Database table list should be selectable but not editable.");
+                Assert(tableListGrid.EditMode == DataGridViewEditMode.EditProgrammatically, "Database table list should not enter edit mode from accidental clicks.");
+                Assert(!tableListForm.UseWaitCursor, "Database table list should clear a stale form wait cursor after binding.");
+                Assert(tableListForm.Cursor == Cursors.Default, "Database table list should restore the form cursor after binding.");
+                Assert(!tableListGrid.UseWaitCursor, "Database table list should clear a stale wait cursor after binding.");
+                Assert(tableListGrid.Cursor == Cursors.Default, "Database table list should use the normal mouse pointer after binding.");
+                DataTable zhTableList = tableListGrid.DataSource as DataTable;
+                Assert(zhTableList != null, "Database table list should bind a display table.");
+                DataRow zhTableStatusRow = FindDataRow(zhTableList, "名稱", "work_daily");
+                Assert(zhTableStatusRow != null, "Database table list should include table status rows.");
+                AssertEquals("2026-06-28 16:27:10", zhTableStatusRow["修改日期"].ToString(), "Database table list should format update time as yyyy-MM-dd HH:mm:ss.");
+            }
 
             DataTable zhViewsGroup = (DataTable)groupListMethod.Invoke(form, new object[] { new FakeDumpDatabase(), "main", "Views", new Dictionary<string, object>() });
             DataRow zhViewGroupRow = FindDataRow(zhViewsGroup, "名稱", "public.active_users");
@@ -9657,6 +9906,10 @@ public static class SmokeTests
         {
             Assert(aboutDialog.ClientSize.Height >= 340, "About dialog should leave enough vertical room for authors and the close button.");
         }
+        using (Form1 mainForm = new Form1())
+        {
+            Assert(mainForm.StartPosition == FormStartPosition.CenterScreen, "Main window should open centered on screen by default.");
+        }
 
         Type programType = typeof(Form1).Assembly.GetType("mySQLPunk.Program");
         Assert(programType != null, "Program type should be available for smoke tests.");
@@ -10933,6 +11186,20 @@ public static class SmokeTests
         return table;
     }
 
+    private static DataTable CreateTableStatusTable()
+    {
+        DataTable table = new DataTable();
+        table.Columns.Add("Name", typeof(string));
+        table.Columns.Add("Auto_increment", typeof(long));
+        table.Columns.Add("Update_time", typeof(DateTime));
+        table.Columns.Add("Data_length", typeof(long));
+        table.Columns.Add("Engine", typeof(string));
+        table.Columns.Add("Rows", typeof(long));
+        table.Columns.Add("Comment", typeof(string));
+        table.Rows.Add("work_daily", 1041L, new DateTime(2026, 6, 28, 16, 27, 10), 50391L, "MyISAM", 978L, "每日工作");
+        return table;
+    }
+
     private static string BuildExistingAlterSql(IDatabase db, string databaseName, string tableName, DataTable originalColumns, DataTable currentColumns, string methodName)
     {
         TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
@@ -10955,6 +11222,36 @@ public static class SmokeTests
         finally
         {
             indexesGrid.Dispose();
+        }
+    }
+
+    private static string BuildExistingMySqlAlterSqlWithTableComment(string tableComment)
+    {
+        TableDesignerForm form = (TableDesignerForm)FormatterServices.GetUninitializedObject(typeof(TableDesignerForm));
+        DataGridView indexesGrid = new DataGridView();
+        TextBox tableCommentBox = new TextBox();
+        DataTable indexes = CreateDesignerIndexesTable();
+        DataTable originalColumns = CreateOriginalColumnsForAlter(includeRemovedColumn: false);
+        indexesGrid.DataSource = indexes;
+        tableCommentBox.Text = tableComment;
+
+        SetPrivateField(form, "_db", new my_mysql());
+        SetPrivateField(form, "_databaseName", "main");
+        SetPrivateField(form, "_tableName", "demo_table");
+        SetPrivateField(form, "_originalDt", originalColumns);
+        SetPrivateField(form, "_originalIdxDt", indexes.Copy());
+        SetPrivateField(form, "dgvIndexes", indexesGrid);
+        SetPrivateField(form, "txtTableComment", tableCommentBox);
+
+        try
+        {
+            MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod("BuildMySqlAlterTableSql", BindingFlags.Instance | BindingFlags.NonPublic);
+            return (string)buildMethod.Invoke(form, new object[] { originalColumns.Copy() });
+        }
+        finally
+        {
+            indexesGrid.Dispose();
+            tableCommentBox.Dispose();
         }
     }
 
@@ -11176,6 +11473,55 @@ public static class SmokeTests
     {
         FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         return (T)field.GetValue(target);
+    }
+
+    private static void InvokeButtonClick(Button button)
+    {
+        MethodInfo onClick = typeof(Button).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic);
+        onClick.Invoke(button, new object[] { EventArgs.Empty });
+    }
+
+    private sealed class TestFileSnapshot
+    {
+        private readonly string _path;
+        private readonly bool _exists;
+        private readonly byte[] _bytes;
+
+        private TestFileSnapshot(string path, bool exists, byte[] bytes)
+        {
+            _path = path;
+            _exists = exists;
+            _bytes = bytes;
+        }
+
+        public static TestFileSnapshot Capture(string path)
+        {
+            if (File.Exists(path))
+            {
+                return new TestFileSnapshot(path, true, File.ReadAllBytes(path));
+            }
+
+            return new TestFileSnapshot(path, false, null);
+        }
+
+        public void Restore()
+        {
+            try
+            {
+                if (_exists)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(_path));
+                    File.WriteAllBytes(_path, _bytes);
+                }
+                else if (File.Exists(_path))
+                {
+                    File.Delete(_path);
+                }
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static void SetTextBoxField(object target, string fieldName, string value)
@@ -12506,6 +12852,7 @@ public static class SmokeTests
         public string GetTablesExceptionMessage = "table timeout";
         public bool ThrowOnCountRows;
         public string CountRowsExceptionMessage = "row count timeout";
+        public DataTable TableStatus = new DataTable();
         public string ProviderName => Provider;
         public string ConnectionString;
         public bool WasOpened;
@@ -12539,7 +12886,7 @@ public static class SmokeTests
             return table;
         }
         public DataTable GetIndexes(string databaseName, string tableName) { return new DataTable(); }
-        public DataTable GetTableStatus(string databaseName) { return new DataTable(); }
+        public DataTable GetTableStatus(string databaseName) { return TableStatus; }
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return new Dictionary<string, string>(); }
         public string GetTableCreateStatement(string databaseName, string tableName) { return "CREATE TABLE \"public\".\"users\" (\"id\" integer, \"name\" text, \"payload\" bytea)"; }
         public bool TableExists(string databaseName, string tableName) { return true; }

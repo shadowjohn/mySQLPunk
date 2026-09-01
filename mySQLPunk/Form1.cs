@@ -1020,6 +1020,7 @@ namespace mySQLPunk
             Localization.Load();
             ThemeManager.Load();
             InitializeComponent();
+            StartPosition = FormStartPosition.CenterScreen;
             _backupIntegrityTimer.Interval = 60 * 60 * 1000;
             _backupIntegrityTimer.Tick += (s, e) => RunBackupIntegrityScheduleIfDue();
         }
@@ -2788,8 +2789,13 @@ namespace mySQLPunk
             ArrangeMainLayout();
 
             table_top.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            table_top.ReadOnly = true;
+            table_top.EditMode = DataGridViewEditMode.EditProgrammatically;
             table_top.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             table_top.AllowUserToAddRows = false;
+            table_top.AllowUserToDeleteRows = false;
+            table_top.UseWaitCursor = false;
+            table_top.Cursor = Cursors.Default;
             table_top.BackgroundColor = Color.White;
             table_top.GridColor = Color.FromArgb(240, 240, 240);
             table_top.BorderStyle = BorderStyle.None;
@@ -3684,10 +3690,7 @@ namespace mySQLPunk
                 CollapseAiPanel,
                 () =>
                 {
-                    using (OptionsForm form = new OptionsForm())
-                    {
-                        form.ShowDialog(this);
-                    }
+                    OpenOptionsDialog();
                     if (aiPanel != null) aiPanel.SyncPickerFromSettings();
                 })
             {
@@ -10242,7 +10245,7 @@ namespace mySQLPunk
                     DataRow newRow = displayDt.NewRow();
                     newRow["名稱"] = objectName;
                     newRow["自動遞增值"] = FirstColumnValue(row, "Auto_increment", "AUTO_INCREMENT");
-                    newRow["修改日期"] = FirstColumnValue(row, "Update_time", "UPDATE_TIME");
+                    newRow["修改日期"] = FormatDatabaseObjectDateTimeValue(FirstColumnRawValue(row, "Update_time", "UPDATE_TIME"));
                     newRow["資料長度"] = FormatBytesValue(FirstColumnValue(row, "Data_length", "DATA_LENGTH"));
                     newRow["引擎"] = FirstColumnValue(row, "Engine", "ENGINE");
                     string rowCount = FirstColumnValue(row, "Rows", "ROWS", "NUM_ROWS");
@@ -10251,9 +10254,7 @@ namespace mySQLPunk
                     displayDt.Rows.Add(newRow);
                 }
 
-                table_top.DataSource = displayDt;
-                ApplyCurrentColumnPreferences("Tables");
-                ApplyGridSortPreference();
+                BindDatabaseObjectList(displayDt, "Tables");
             }
             catch (Exception ex)
             {
@@ -10272,13 +10273,34 @@ namespace mySQLPunk
             }
 
             DataTable displayDt = BuildDatabaseGroupList(db, dbName, groupName, connInfo);
-            table_top.DataSource = displayDt;
-            ApplyCurrentColumnPreferences(groupName);
-            ApplyGridSortPreference();
+            BindDatabaseObjectList(displayDt, groupName);
             if (table_top.Columns.Contains("分頁索引"))
             {
                 table_top.Columns["分頁索引"].Visible = false;
             }
+        }
+
+        private void BindDatabaseObjectList(DataTable displayDt, string groupName)
+        {
+            if (table_top == null) return;
+            table_top.ReadOnly = true;
+            table_top.EditMode = DataGridViewEditMode.EditProgrammatically;
+            table_top.AllowUserToAddRows = false;
+            table_top.AllowUserToDeleteRows = false;
+            table_top.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            ResetDatabaseObjectListCursor();
+            table_top.DataSource = displayDt;
+            ApplyCurrentColumnPreferences(groupName);
+            ApplyGridSortPreference();
+        }
+
+        private void ResetDatabaseObjectListCursor()
+        {
+            UseWaitCursor = false;
+            Cursor = Cursors.Default;
+            if (table_top == null) return;
+            table_top.UseWaitCursor = false;
+            table_top.Cursor = Cursors.Default;
         }
 
         private DataTable BuildDatabaseGroupList(IDatabase db, string dbName, string groupName, Dictionary<string, object> connInfo = null)
@@ -11044,6 +11066,38 @@ namespace mySQLPunk
             return string.Empty;
         }
 
+        private static object FirstColumnRawValue(DataRow row, params string[] names)
+        {
+            foreach (string name in names)
+            {
+                object value = GetColumnRawValue(row, name);
+                if (value == null) continue;
+                if (!string.IsNullOrWhiteSpace(Convert.ToString(value, System.Globalization.CultureInfo.CurrentCulture))) return value;
+            }
+            return null;
+        }
+
+        private static string FormatDatabaseObjectDateTimeValue(object value)
+        {
+            if (value == null || value == DBNull.Value) return string.Empty;
+            if (value is DateTime dateTime)
+            {
+                return dateTime.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            string text = Convert.ToString(value, System.Globalization.CultureInfo.CurrentCulture);
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+
+            DateTime parsed;
+            if (DateTime.TryParse(text, System.Globalization.CultureInfo.CurrentCulture, System.Globalization.DateTimeStyles.None, out parsed) ||
+                DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out parsed))
+            {
+                return parsed.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            return text;
+        }
+
         private void ShowDatabaseBIReport(IDatabase db, string dbName, string biName, Dictionary<string, object> connInfo = null)
         {
             table_top.DataSource = BuildDatabaseBIReport(db, dbName, biName, connInfo);
@@ -11776,15 +11830,21 @@ namespace mySQLPunk
 
         private static string GetColumnValue(DataRow row, string name)
         {
-            if (row.Table.Columns.Contains(name) && row[name] != DBNull.Value) return row[name].ToString();
+            object value = GetColumnRawValue(row, name);
+            return value == null ? string.Empty : value.ToString();
+        }
+
+        private static object GetColumnRawValue(DataRow row, string name)
+        {
+            if (row.Table.Columns.Contains(name) && row[name] != DBNull.Value) return row[name];
             foreach (DataColumn column in row.Table.Columns)
             {
                 if (string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase) && row[column] != DBNull.Value)
                 {
-                    return row[column].ToString();
+                    return row[column];
                 }
             }
-            return string.Empty;
+            return null;
         }
 
         private static string EscapeSqlLiteral(string value)

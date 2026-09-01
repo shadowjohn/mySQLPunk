@@ -1897,6 +1897,12 @@ namespace mySQLPunk
             Add("Designer.Comment", "註解", "Comment");
             Add("Designer.SqlPreview", "SQL 預覽", "SQL Preview");
             Add("Designer.ColumnProperties", "欄位屬性 (選取欄位以進行詳細設定)", "Column properties (select a column for details)");
+            Add("Designer.ColumnPropertiesProviderHint", "此連線類型目前沒有額外欄位屬性。", "This provider does not expose extra column properties yet.");
+            Add("Designer.ColumnPropertiesDefaultOnly", "此型別目前只需要設定預設值。", "This type currently only needs a default value.");
+            Add("Designer.AutoIncrement", "自動遞增", "Auto increment");
+            Add("Designer.Unsigned", "不帶正負號", "Unsigned");
+            Add("Designer.Zerofill", "填滿零", "Zerofill");
+            Add("Designer.OnUpdateCurrentTimestamp", "根據目前時間戳記更新", "On update current timestamp");
             Add("Designer.TableName", "資料表名稱:", "Table Name:");
             Add("Designer.Engine", "引擎:", "Engine:");
             Add("Designer.SelectDatabase", "請先選取一個已展開的資料庫或 Tables 節點。", "Select an expanded database or Tables node first.");

@@ -18,6 +18,7 @@ Open-source Windows database client, SQL editor, database GUI and DBA workbench 
 - 依連線設定 SSL/TLS 憑證驗證，或透過有 SHA256 主機金鑰固定的 SSH Tunnel 連到內網資料庫。
 - 使用具自動完成、程式碼片段、查詢歷史、唯讀執行計畫與多格式匯出的 SQL 編輯器。
 - 編輯資料列、設計資料表、產生 DDL / DML、搬移 Table / View、建立 ER 圖並比較兩個資料庫結構。
+- 在 MySQL Table Designer 依欄位型別設定 `AUTO_INCREMENT`、`UNSIGNED`、`ZEROFILL` 與 `ON UPDATE CURRENT_TIMESTAMP`。
 - 建立每日查詢、CSV / Excel / JSON 等格式匯出與 SQL 備份作業，交由 Windows Task Scheduler 執行並保留紀錄。
 - 選用 OpenAI 相容 API、Ollama、LM Studio、Codex CLI、Claude Code CLI 或 Gemini CLI 作為 SQL 助理；選項頁會列出三種 CLI 的安裝路徑與非敏感登入帳號資訊，沒有 AI 服務也能使用其他資料庫功能。
 
@@ -241,7 +242,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | SQL 編輯輔助 | 可用 | 自動完成會解析目前 statement 的資料表與 alias，提供欄位、`alias.column`、資料表、關鍵字與片段捷徑；metadata 依 provider/database 快取。`Ctrl+Shift+P` 可搜尋、插入、新增、刪除自訂 SQL 片段，並以 JSON 匯入／匯出。 |
 | 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；可為每張資料表保存多組具名篩選、排序與顯示欄位設定，並從底部工具列快速切換。若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
 | 資料分析 | 可用 | 資料表右鍵可開啟欄位分析工作區；支援抽樣／全表、NULL、相異值、極值、數值平均、Top 10 比例，並可從分佈值開啟對應 WHERE 查詢。 |
-| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；既有資料表欄位改名、型別、NULL、DEFAULT、註解、MySQL 刪欄位與 SQLite 重建表已納入 smoke test，部分進階索引與 constraint 情境仍需實機驗證。 |
+| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；MySQL 欄位屬性會依型別顯示預設值、自動遞增、無號、補零與 `ON UPDATE CURRENT_TIMESTAMP` 等設定，資料表註解變更也會納入 SQL 預覽；既有資料表欄位改名、型別、NULL、DEFAULT、註解、MySQL 刪欄位與 SQLite 重建表已納入 smoke test，部分進階索引與 constraint 情境仍需實機驗證。 |
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 會寫入 sidecar metadata table。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
 | 資料產生 | 可用 | Tables 節點可產生指定資料表的 INSERT SQL，可開到查詢視窗檢查，也可確認後逐筆直接寫入。 |
