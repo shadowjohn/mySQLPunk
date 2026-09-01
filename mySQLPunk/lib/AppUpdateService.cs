@@ -216,8 +216,51 @@ namespace mySQLPunk.lib
             return new ProcessStartInfo("powershell.exe")
             {
                 Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + scriptPath.Replace("\"", "\\\"") + "\"",
-                UseShellExecute = true
+                UseShellExecute = true,
+                // 自我更新腳本不需要使用者互動，藏起黑視窗讓「更新→重啟」看起來是一氣呵成
+                WindowStyle = ProcessWindowStyle.Hidden
             };
+        }
+
+        public static string WriteInstallerUpdateApplyScript(string installerPath, string executablePath, int processId, string scriptDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(installerPath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(installerPath));
+            if (!File.Exists(installerPath)) throw new FileNotFoundException(Localization.Format("AppUpdate.InstallerMissing", installerPath), installerPath);
+            if (string.IsNullOrWhiteSpace(executablePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(executablePath));
+            if (string.IsNullOrWhiteSpace(scriptDirectory)) throw new ArgumentException(Localization.T("Common.DownloadDirectoryRequired"), nameof(scriptDirectory));
+
+            Directory.CreateDirectory(scriptDirectory);
+            string scriptPath = Path.Combine(scriptDirectory, "apply-installer-update-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".ps1");
+            // 同 portable 腳本：無 BOM 的 .ps1 會被 Windows PowerShell 5.1 用 ANSI 解碼，中文路徑必亂
+            File.WriteAllText(scriptPath, BuildInstallerUpdateApplyScript(installerPath, executablePath, processId), new UTF8Encoding(true));
+            return scriptPath;
+        }
+
+        /// <summary>
+        /// 安裝版靜默更新：等 mySQLPunk 結束 → 以 /VERYSILENT 執行 Inno Setup 安裝檔（per-user、免 UAC）→
+        /// 無論安裝成功與否都重新啟動原路徑的 mySQLPunk（失敗時舊版仍在原位，使用者不會被留在沒程式可開的狀態）。
+        /// </summary>
+        public static string BuildInstallerUpdateApplyScript(string installerPath, string executablePath, int processId)
+        {
+            if (string.IsNullOrWhiteSpace(installerPath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(installerPath));
+            if (string.IsNullOrWhiteSpace(executablePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(executablePath));
+
+            StringBuilder script = new StringBuilder();
+            script.AppendLine("$ErrorActionPreference = 'Continue'");
+            script.AppendLine("$installerPath = '" + EscapePowerShellSingleQuotedString(installerPath) + "'");
+            script.AppendLine("$exePath = '" + EscapePowerShellSingleQuotedString(executablePath) + "'");
+            script.AppendLine("$processIdToWait = " + Math.Max(0, processId));
+            script.AppendLine("if ($processIdToWait -gt 0) {");
+            script.AppendLine("    try { Wait-Process -Id $processIdToWait -Timeout 120 -ErrorAction SilentlyContinue } catch { }");
+            script.AppendLine("}");
+            script.AppendLine("try {");
+            script.AppendLine("    Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait");
+            script.AppendLine("}");
+            script.AppendLine("catch { }");
+            script.AppendLine("if (Test-Path -LiteralPath $exePath) {");
+            script.AppendLine("    Start-Process -FilePath $exePath");
+            script.AppendLine("}");
+            return script.ToString();
         }
 
         public static string GetInstallerFileName(AppUpdateCheckResult result)

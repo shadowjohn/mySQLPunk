@@ -1736,19 +1736,31 @@ namespace mySQLPunk
             string downloadDirectory = Path.Combine(Path.GetTempPath(), "mySQLPunk", "updates");
             Directory.CreateDirectory(downloadDirectory);
             string targetPath = AppUpdateService.BuildInstallerDownloadPath(result, downloadDirectory);
-            UpdateMainStatus(Localization.Format("Update.Downloading", AppUpdateService.GetInstallerFileName(result)));
 
-            using (System.Net.WebClient client = new System.Net.WebClient())
-            {
-                client.Headers[System.Net.HttpRequestHeader.UserAgent] = "mySQLPunk-update-download";
-                System.Net.IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();
-                if (proxy != null) client.Proxy = proxy;
-                await client.DownloadFileTaskAsync(new Uri(result.InstallerDownloadUrl), targetPath);
-                await VerifyDownloadedUpdatePackageAsync(client, result, targetPath);
-            }
+            if (!await DownloadUpdatePackageWithProgressAsync(result, result.InstallerDownloadUrl, targetPath)) return;
 
             UpdateMainStatus(Localization.Format("Update.Downloaded", targetPath));
-            Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
+            if (MessageBox.Show(
+                Localization.T("Update.InstallApplyPrompt"),
+                Localization.T("Menu.CheckUpdates"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                // 背景靜默安裝（installer 是 per-user、免 UAC）：腳本等本程式結束、
+                // /VERYSILENT 安裝完直接重啟 mySQLPunk，全程不再需要使用者按任何鍵
+                string scriptPath = AppUpdateService.WriteInstallerUpdateApplyScript(
+                    targetPath,
+                    Application.ExecutablePath,
+                    Process.GetCurrentProcess().Id,
+                    downloadDirectory);
+                Process.Start(AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(scriptPath));
+                UpdateMainStatus(Localization.T("Update.SilentInstallStarted"));
+                BeginInvoke(new Action(Application.Exit));
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
+            }
         }
 
         private async Task DownloadAndOpenPortableUpdateAsync(AppUpdateCheckResult result)
@@ -1756,16 +1768,8 @@ namespace mySQLPunk
             string downloadDirectory = Path.Combine(Path.GetTempPath(), "mySQLPunk", "updates");
             Directory.CreateDirectory(downloadDirectory);
             string targetPath = AppUpdateService.BuildPortableZipDownloadPath(result, downloadDirectory);
-            UpdateMainStatus(Localization.Format("Update.Downloading", AppUpdateService.GetPortableZipFileName(result)));
 
-            using (System.Net.WebClient client = new System.Net.WebClient())
-            {
-                client.Headers[System.Net.HttpRequestHeader.UserAgent] = "mySQLPunk-update-download";
-                System.Net.IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();
-                if (proxy != null) client.Proxy = proxy;
-                await client.DownloadFileTaskAsync(new Uri(result.PortableZipDownloadUrl), targetPath);
-                await VerifyDownloadedUpdatePackageAsync(client, result, targetPath);
-            }
+            if (!await DownloadUpdatePackageWithProgressAsync(result, result.PortableZipDownloadUrl, targetPath)) return;
 
             UpdateMainStatus(Localization.Format("Update.PortableDownloaded", targetPath));
             if (MessageBox.Show(
@@ -1788,6 +1792,45 @@ namespace mySQLPunk
             {
                 Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
             }
+        }
+
+        /// <summary>
+        /// 顯示進度視窗下載更新檔並校驗 SHA-256。
+        /// 回傳 false 表示使用者取消（部分下載檔會清掉）；下載或校驗失敗仍丟例外，由呼叫端統一顯示。
+        /// </summary>
+        private async Task<bool> DownloadUpdatePackageWithProgressAsync(AppUpdateCheckResult result, string downloadUrl, string targetPath)
+        {
+            string fileName = Path.GetFileName(targetPath);
+            UpdateMainStatus(Localization.Format("Update.Downloading", fileName));
+
+            using (System.Net.WebClient client = new System.Net.WebClient())
+            using (UpdateDownloadProgressDialog progress = new UpdateDownloadProgressDialog(fileName))
+            {
+                client.Headers[System.Net.HttpRequestHeader.UserAgent] = "mySQLPunk-update-download";
+                System.Net.IWebProxy proxy = ConnectionProxySettingsService.CreateWebProxyFromOptions();
+                if (proxy != null) client.Proxy = proxy;
+
+                client.DownloadProgressChanged += (s, e) => progress.ReportProgress(e.BytesReceived, e.TotalBytesToReceive);
+                progress.CancelRequested += (s, e) => client.CancelAsync();
+                progress.Show(this);
+                try
+                {
+                    await client.DownloadFileTaskAsync(new Uri(downloadUrl), targetPath);
+                    progress.SetStatus(Localization.Format("Update.Verifying", fileName));
+                    await VerifyDownloadedUpdatePackageAsync(client, result, targetPath);
+                }
+                catch (System.Net.WebException ex) when (ex.Status == System.Net.WebExceptionStatus.RequestCanceled || progress.IsCancelRequested)
+                {
+                    try { if (File.Exists(targetPath)) File.Delete(targetPath); } catch { }
+                    UpdateMainStatus(Localization.T("Update.Cancelled"));
+                    return false;
+                }
+                finally
+                {
+                    progress.Close();
+                }
+            }
+            return true;
         }
 
         private async Task VerifyDownloadedUpdatePackageAsync(System.Net.WebClient client, AppUpdateCheckResult result, string targetPath)

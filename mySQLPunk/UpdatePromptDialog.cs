@@ -71,15 +71,15 @@ namespace mySQLPunk
                 Margin = new Padding(0, 0, 0, 10)
             };
 
-            TextBox notes = new TextBox
+            RichTextBox notes = new RichTextBox
             {
-                Multiline = true,
                 ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
                 Dock = DockStyle.Fill,
-                Text = NormalizeNotes(result.ReleaseNotes),
                 Margin = new Padding(0, 0, 0, 12),
-                TabStop = false
+                TabStop = false,
+                DetectUrls = false,
+                WordWrap = true
             };
 
             TableLayoutPanel footer = new TableLayoutPanel
@@ -143,12 +143,88 @@ namespace mySQLPunk
             Controls.Add(root);
 
             ThemeManager.ApplyTo(this);
+            // ThemeManager.ApplyTo 設定 ForeColor 會覆寫 RichTextBox 全部文字的顏色，
+            // 所以更新內容必須在套完主題之後才渲染。
+            RenderNotes(notes, result.ReleaseNotes);
         }
 
-        private static string NormalizeNotes(string notes)
+        /// <summary>
+        /// 把 GitHub Release 的 Markdown 摘要轉成可讀的排版：
+        /// 標題粗體＋強調色、`- ` 清單縮排成「•」、**粗體** 生效、去除反引號與連結語法。
+        /// 只處理發版腳本會產生的子集，不是完整 Markdown 解析。
+        /// </summary>
+        private static void RenderNotes(RichTextBox box, string notes)
         {
-            if (string.IsNullOrWhiteSpace(notes)) return Localization.T("Update.PromptNoNotes");
-            return notes.Replace("\r\n", "\n").Replace("\n", Environment.NewLine);
+            if (string.IsNullOrWhiteSpace(notes))
+            {
+                box.Text = Localization.T("Update.PromptNoNotes");
+                return;
+            }
+
+            Color headingColor = ThemeManager.AccentColor;
+            string[] lines = notes.Replace("\r\n", "\n").Split('\n');
+            bool previousBlank = true;
+            foreach (string raw in lines)
+            {
+                string line = raw.TrimEnd();
+                string trimmed = line.TrimStart();
+                if (trimmed.Length == 0)
+                {
+                    if (!previousBlank) box.AppendText(Environment.NewLine);
+                    previousBlank = true;
+                    continue;
+                }
+
+                if (trimmed.StartsWith("#", StringComparison.Ordinal))
+                {
+                    string heading = trimmed.TrimStart('#').Trim();
+                    if (!previousBlank) box.AppendText(Environment.NewLine);
+                    box.SelectionIndent = 0;
+                    box.SelectionHangingIndent = 0;
+                    box.SelectionFont = UiKit.Subtitle;
+                    box.SelectionColor = headingColor;
+                    box.AppendText(StripInlineMarkup(heading) + Environment.NewLine);
+                }
+                else if (trimmed.StartsWith("- ", StringComparison.Ordinal) || trimmed.StartsWith("* ", StringComparison.Ordinal))
+                {
+                    box.SelectionIndent = 6;
+                    box.SelectionHangingIndent = 14;
+                    AppendInline(box, "• " + trimmed.Substring(2).Trim());
+                    box.AppendText(Environment.NewLine);
+                }
+                else
+                {
+                    box.SelectionIndent = 0;
+                    box.SelectionHangingIndent = 0;
+                    AppendInline(box, trimmed);
+                    box.AppendText(Environment.NewLine);
+                }
+                previousBlank = false;
+            }
+
+            box.SelectionStart = 0;
+            box.SelectionLength = 0;
+            box.ScrollToCaret();
+        }
+
+        /// <summary>依 **…** 交替切換粗體，其餘 Markdown 記號先剝掉再輸出。</summary>
+        private static void AppendInline(RichTextBox box, string text)
+        {
+            string[] segments = text.Split(new[] { "**" }, StringSplitOptions.None);
+            for (int i = 0; i < segments.Length; i++)
+            {
+                if (segments[i].Length == 0) continue;
+                box.SelectionFont = (i % 2 == 1) ? UiKit.BodyBold : UiKit.Body;
+                box.SelectionColor = ThemeManager.TextColor;
+                box.AppendText(StripInlineMarkup(segments[i]));
+            }
+        }
+
+        private static string StripInlineMarkup(string text)
+        {
+            text = text.Replace("**", "").Replace("`", "");
+            // [文字](網址) → 文字
+            return System.Text.RegularExpressions.Regex.Replace(text, @"\[([^\]]+)\]\([^)]*\)", "$1");
         }
     }
 }

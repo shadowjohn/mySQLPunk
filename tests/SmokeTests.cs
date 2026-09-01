@@ -10177,6 +10177,34 @@ public static class SmokeTests
             if (Directory.Exists(portableScriptDir)) Directory.Delete(portableScriptDir, true);
         }
 
+        string installerScriptExePath = Path.Combine(Path.GetTempPath(), "mysqlpunk_installer_update_" + Guid.NewGuid().ToString("N") + ".exe");
+        string installerScriptDir = Path.Combine(Path.GetTempPath(), "mysqlpunk_installer_update_script_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            File.WriteAllText(installerScriptExePath, "installer-content", Encoding.UTF8);
+            string installerApplyScriptPath = AppUpdateService.WriteInstallerUpdateApplyScript(
+                installerScriptExePath,
+                @"C:\Users\Punk\AppData\Local\Programs\mySQLPunk\mySQLPunk.exe",
+                1234,
+                installerScriptDir);
+            Assert(File.Exists(installerApplyScriptPath), "Installer updater should write an apply script.");
+
+            string installerApplyScript = File.ReadAllText(installerApplyScriptPath, Encoding.UTF8);
+            AssertContains(installerApplyScript, "Wait-Process -Id $processIdToWait", "Installer updater should wait for the current process before installing.");
+            AssertContains(installerApplyScript, "'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'", "Installer updater should run the Inno Setup installer silently.");
+            AssertContains(installerApplyScript, "Start-Process -FilePath $exePath", "Installer updater should relaunch the application after installing.");
+
+            System.Diagnostics.ProcessStartInfo installerStartInfo = AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(installerApplyScriptPath);
+            Assert(
+                installerStartInfo.WindowStyle == System.Diagnostics.ProcessWindowStyle.Hidden,
+                "Self-update apply scripts should run without flashing a PowerShell window.");
+        }
+        finally
+        {
+            if (File.Exists(installerScriptExePath)) File.Delete(installerScriptExePath);
+            if (Directory.Exists(installerScriptDir)) Directory.Delete(installerScriptDir, true);
+        }
+
         string updatePackagePath = Path.Combine(Path.GetTempPath(), "mysqlpunk_update_hash_" + Guid.NewGuid().ToString("N") + ".zip");
         try
         {

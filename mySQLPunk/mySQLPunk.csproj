@@ -234,6 +234,9 @@
     <Compile Include="UpdatePromptDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="UpdateDownloadProgressDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="RunnerProgressOverlay.cs">
       <SubType>Form</SubType>
     </Compile>
