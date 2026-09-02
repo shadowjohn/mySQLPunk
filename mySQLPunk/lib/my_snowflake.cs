@@ -181,7 +181,8 @@ namespace mySQLPunk.lib
             string schemaName, objectName;
             SplitSchemaObject(tableName, out schemaName, out objectName);
             SnowflakeStatementResult result = ExecuteLocked(
-                "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COMMENT, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE"
+                "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COMMENT, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, "
+                + "IS_IDENTITY, IDENTITY_GENERATION, IDENTITY_START, IDENTITY_INCREMENT, EXPRESSION, COLLATION_NAME"
                 + " FROM " + QuoteIdentifier(databaseName) + ".INFORMATION_SCHEMA.COLUMNS"
                 + " WHERE TABLE_SCHEMA = '" + EscapeLiteral(schemaName) + "' AND TABLE_NAME = '" + EscapeLiteral(objectName) + "'"
                 + " ORDER BY ORDINAL_POSITION");
@@ -193,6 +194,12 @@ namespace mySQLPunk.lib
             table.Columns.Add("Default");
             table.Columns.Add("Extra");
             table.Columns.Add("Comment");
+            table.Columns.Add("IsIdentity");
+            table.Columns.Add("IdentityGeneration");
+            table.Columns.Add("IdentityStart");
+            table.Columns.Add("IdentityIncrement");
+            table.Columns.Add("GenerationExpression");
+            table.Columns.Add("Collation");
             foreach (object[] row in result.Rows)
             {
                 DataRow output = table.NewRow();
@@ -203,6 +210,12 @@ namespace mySQLPunk.lib
                 output["Default"] = row[3] == DBNull.Value ? string.Empty : Convert.ToString(row[3], CultureInfo.InvariantCulture);
                 output["Extra"] = string.Empty;
                 output["Comment"] = row[4] == DBNull.Value ? string.Empty : Convert.ToString(row[4], CultureInfo.InvariantCulture);
+                output["IsIdentity"] = row.Length > 8 && row[8] != DBNull.Value ? Convert.ToString(row[8], CultureInfo.InvariantCulture) : string.Empty;
+                output["IdentityGeneration"] = row.Length > 9 && row[9] != DBNull.Value ? Convert.ToString(row[9], CultureInfo.InvariantCulture) : string.Empty;
+                output["IdentityStart"] = row.Length > 10 && row[10] != DBNull.Value ? Convert.ToString(row[10], CultureInfo.InvariantCulture) : string.Empty;
+                output["IdentityIncrement"] = row.Length > 11 && row[11] != DBNull.Value ? Convert.ToString(row[11], CultureInfo.InvariantCulture) : string.Empty;
+                output["GenerationExpression"] = row.Length > 12 && row[12] != DBNull.Value ? Convert.ToString(row[12], CultureInfo.InvariantCulture) : string.Empty;
+                output["Collation"] = row.Length > 13 && row[13] != DBNull.Value ? Convert.ToString(row[13], CultureInfo.InvariantCulture) : string.Empty;
                 table.Rows.Add(output);
             }
             return table;

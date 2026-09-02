@@ -206,7 +206,9 @@ namespace mySQLPunk.lib
         {
             PostgreSqlObjectName target = ParsePostgreSqlObjectName(tableName);
             var p = new Dictionary<string, object> { { "schema", target.Schema }, { "tableName", target.Name } };
-            return SelectSQL(@"
+            try
+            {
+                return SelectSQL(@"
                 SELECT
                     c.column_name,
                     c.data_type,
@@ -215,13 +217,50 @@ namespace mySQLPunk.lib
                     c.character_maximum_length,
                     c.numeric_precision,
                     c.numeric_scale,
+                    pg_catalog.format_type(a.atttypid, a.atttypmod) AS ""ProviderType"",
+                    c.is_identity AS ""IsIdentity"",
+                    c.identity_generation AS ""IdentityGeneration"",
+                    c.is_generated AS ""IsGenerated"",
+                    COALESCE(pg_get_expr(ad.adbin, ad.adrelid), '') AS ""GenerationExpression"",
+                    COALESCE(coll_ns.nspname || '.' || coll.collname, '') AS ""Collation"",
+                    a.attstorage AS ""StorageMode"",
+                    a.attcompression AS ""Compression"",
                     COALESCE(col_description(cls.oid, a.attnum), '') AS ""Comment""
                 FROM information_schema.columns c
                 LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
                 LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
                 LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped
+                LEFT JOIN pg_attrdef ad ON ad.adrelid = cls.oid AND ad.adnum = a.attnum
+                LEFT JOIN pg_collation coll ON coll.oid = a.attcollation
+                LEFT JOIN pg_namespace coll_ns ON coll_ns.oid = coll.collnamespace
                 WHERE c.table_schema = :schema AND c.table_name = :tableName
                 ORDER BY c.ordinal_position", p);
+            }
+            catch
+            {
+                // PostgreSQL 11 以下沒有 generated column metadata；退回基本查詢仍可開啟設計器。
+                return SelectSQL(@"
+                    SELECT
+                        c.column_name,
+                        c.data_type,
+                        c.is_nullable,
+                        c.column_default,
+                        c.character_maximum_length,
+                        c.numeric_precision,
+                        c.numeric_scale,
+                        pg_catalog.format_type(a.atttypid, a.atttypmod) AS ""ProviderType"",
+                        COALESCE(coll_ns.nspname || '.' || coll.collname, '') AS ""Collation"",
+                        a.attstorage AS ""StorageMode"",
+                        COALESCE(col_description(cls.oid, a.attnum), '') AS ""Comment""
+                    FROM information_schema.columns c
+                    LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
+                    LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
+                    LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped
+                    LEFT JOIN pg_collation coll ON coll.oid = a.attcollation
+                    LEFT JOIN pg_namespace coll_ns ON coll_ns.oid = coll.collnamespace
+                    WHERE c.table_schema = :schema AND c.table_name = :tableName
+                    ORDER BY c.ordinal_position", p);
+            }
         }
 
         public DataTable GetTableStatus(string databaseName)

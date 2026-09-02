@@ -13,6 +13,7 @@ namespace mySQLPunk.lib
     public class my_sqlite : IDatabase
     {
         public const string ColumnCommentTableName = "__mysqlpunk_column_comments";
+        public const string TableCommentTableName = "__mysqlpunk_table_comments";
         public const string QueryErrorExtendedProperty = "QueryError";
         myinclude my = new myinclude();
         public SQLiteConnection MCT = null;
@@ -272,7 +273,8 @@ namespace mySQLPunk.lib
             DataTable dt = SelectSQL(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 + "AND name NOT LIKE 'sqlite_%' "
-                + "AND name <> '" + ColumnCommentTableName + "';");
+                + "AND name <> '" + ColumnCommentTableName + "' "
+                + "AND name <> '" + TableCommentTableName + "';");
             // FTS/RTree 影子表（<virtual_table>_xxx）不列出；
             // virtual table 本體要列出來，否則用精靈建完就永遠看不到、也刪不掉。
             var virtualNames = GetVirtualTableNames();
@@ -324,15 +326,28 @@ namespace mySQLPunk.lib
         public DataTable GetColumns(string databaseName, string tableName)
         {
             string safeTable = tableName.Replace("'", "''");
-            DataTable columns = SelectSQL($"PRAGMA table_info('{safeTable}');");
+            DataTable columns = SelectSQL($"PRAGMA table_xinfo('{safeTable}');");
+            if (HasQueryError(columns))
+            {
+                columns = SelectSQL($"PRAGMA table_info('{safeTable}');");
+            }
             if (!columns.Columns.Contains("Comment")) columns.Columns.Add("Comment");
+            if (!columns.Columns.Contains("GenerationExpression")) columns.Columns.Add("GenerationExpression");
+            if (!columns.Columns.Contains("Collation")) columns.Columns.Add("Collation");
 
             Dictionary<string, string> comments = GetColumnComments(tableName);
+            Dictionary<string, SqliteColumnDefinitionDetails> definitionDetails = GetSqliteColumnDefinitionDetails(tableName);
             foreach (DataRow row in columns.Rows)
             {
                 string columnName = row["name"].ToString();
                 string comment;
                 row["Comment"] = comments.TryGetValue(columnName, out comment) ? comment : "";
+                SqliteColumnDefinitionDetails details;
+                if (definitionDetails.TryGetValue(columnName, out details))
+                {
+                    row["GenerationExpression"] = details.GenerationExpression;
+                    row["Collation"] = details.Collation;
+                }
             }
             return columns;
         }
@@ -344,8 +359,10 @@ namespace mySQLPunk.lib
                 "SELECT name, sql FROM sqlite_master WHERE type='table' "
                 + "AND name NOT LIKE 'sqlite_%' "
                 + "AND name <> '" + ColumnCommentTableName + "' "
+                + "AND name <> '" + TableCommentTableName + "' "
                 + "ORDER BY name;");
             var virtualNames = GetVirtualTableNames();
+            Dictionary<string, string> tableComments = GetTableComments();
             foreach (DataRow row in tables.Rows)
             {
                 string tableName = row["name"].ToString();
@@ -365,7 +382,8 @@ namespace mySQLPunk.lib
                 nr["Engine"] = isVirtual ? "SQLite " + GetVirtualTableModule(row["sql"]) : "SQLite";
                 try { nr["Rows"] = CountRows(databaseName, tableName); }
                 catch { nr["Rows"] = -1L; } // 無法計數（如被鎖定、尚未初始化等）時展示 -1
-                nr["Comment"] = "";
+                string tableComment;
+                nr["Comment"] = tableComments.TryGetValue(tableName, out tableComment) ? tableComment : "";
                 nr["Row_format"] = "";
                 nr["Collation"] = "";
                 nr["Create_options"] = "";
@@ -582,6 +600,163 @@ namespace mySQLPunk.lib
             return dt;
         }
 
+        private sealed class SqliteColumnDefinitionDetails
+        {
+            public string GenerationExpression = "";
+            public string Collation = "";
+        }
+
+        private Dictionary<string, SqliteColumnDefinitionDetails> GetSqliteColumnDefinitionDetails(string tableName)
+        {
+            Dictionary<string, SqliteColumnDefinitionDetails> result = new Dictionary<string, SqliteColumnDefinitionDetails>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(tableName)) return result;
+
+            try
+            {
+                DataTable table = SelectSQL("SELECT sql FROM sqlite_master WHERE type='table' AND name='" + EscapeSqliteLiteral(tableName) + "';");
+                if (HasQueryError(table) || table.Rows.Count == 0 || table.Rows[0]["sql"] == DBNull.Value) return result;
+
+                foreach (string definition in SplitSqliteColumnDefinitions(table.Rows[0]["sql"].ToString()))
+                {
+                    string columnName = ReadSqliteColumnName(definition);
+                    if (string.IsNullOrWhiteSpace(columnName) || IsSqliteTableConstraint(definition)) continue;
+
+                    SqliteColumnDefinitionDetails details = new SqliteColumnDefinitionDetails();
+                    Match generated = Regex.Match(definition, @"\b(?:GENERATED\s+ALWAYS\s+)?AS\s*\(", RegexOptions.IgnoreCase);
+                    if (generated.Success)
+                    {
+                        int open = generated.Index + generated.Length - 1;
+                        int close = FindSqliteMatchingParenthesis(definition, open);
+                        if (close > open) details.GenerationExpression = definition.Substring(open + 1, close - open - 1).Trim();
+                    }
+
+                    Match collation = Regex.Match(definition, "\\bCOLLATE\\s+((?:\\\"(?:\\\"\\\"|[^\\\"])*\\\")|(?:`[^`]*`)|(?:\\[[^\\]]+\\])|(?:[A-Za-z_][A-Za-z0-9_$]*))", RegexOptions.IgnoreCase);
+                    if (collation.Success) details.Collation = UnquoteSqliteIdentifier(collation.Groups[1].Value);
+                    if (!string.IsNullOrWhiteSpace(details.GenerationExpression) || !string.IsNullOrWhiteSpace(details.Collation))
+                        result[columnName] = details;
+                }
+            }
+            catch
+            {
+                // sqlite_master 的 DDL 可能來自 extension；無法解析時仍保留 PRAGMA metadata。
+            }
+
+            return result;
+        }
+
+        private static List<string> SplitSqliteColumnDefinitions(string createSql)
+        {
+            List<string> output = new List<string>();
+            if (string.IsNullOrWhiteSpace(createSql)) return output;
+            int open = createSql.IndexOf('(');
+            if (open < 0) return output;
+            int close = FindSqliteMatchingParenthesis(createSql, open);
+            if (close <= open) return output;
+
+            StringBuilder current = new StringBuilder();
+            int depth = 0;
+            char quote = '\0';
+            for (int i = open + 1; i < close; i++)
+            {
+                char ch = createSql[i];
+                if (quote != '\0')
+                {
+                    current.Append(ch);
+                    if (ch == quote)
+                    {
+                        if (quote != ']' && i + 1 < close && createSql[i + 1] == quote)
+                        {
+                            current.Append(createSql[++i]);
+                        }
+                        else quote = '\0';
+                    }
+                    continue;
+                }
+
+                if (ch == '\'' || ch == '\"' || ch == '`')
+                {
+                    quote = ch;
+                    current.Append(ch);
+                    continue;
+                }
+                if (ch == '[')
+                {
+                    quote = ']';
+                    current.Append(ch);
+                    continue;
+                }
+                if (ch == '(') depth++;
+                else if (ch == ')' && depth > 0) depth--;
+                if (ch == ',' && depth == 0)
+                {
+                    output.Add(current.ToString());
+                    current.Clear();
+                    continue;
+                }
+                current.Append(ch);
+            }
+            if (current.Length > 0) output.Add(current.ToString());
+            return output;
+        }
+
+        private static int FindSqliteMatchingParenthesis(string text, int open)
+        {
+            int depth = 0;
+            char quote = '\0';
+            for (int i = open; i < text.Length; i++)
+            {
+                char ch = text[i];
+                if (quote != '\0')
+                {
+                    if (ch == quote)
+                    {
+                        if (quote != ']' && i + 1 < text.Length && text[i + 1] == quote) i++;
+                        else quote = '\0';
+                    }
+                    continue;
+                }
+                if (ch == '\'' || ch == '\"' || ch == '`') { quote = ch; continue; }
+                if (ch == '[') { quote = ']'; continue; }
+                if (ch == '(') depth++;
+                else if (ch == ')' && --depth == 0) return i;
+            }
+            return -1;
+        }
+
+        private static string ReadSqliteColumnName(string definition)
+        {
+            string value = (definition ?? "").Trim();
+            if (value.Length == 0) return "";
+            if (value[0] == '\"' || value[0] == '`' || value[0] == '[')
+            {
+                char close = value[0] == '[' ? ']' : value[0];
+                int end = value.IndexOf(close, 1);
+                if (end > 0) return UnquoteSqliteIdentifier(value.Substring(0, end + 1));
+            }
+            int space = value.IndexOfAny(new[] { ' ', '\t', '\r', '\n' });
+            return space < 0 ? value : value.Substring(0, space);
+        }
+
+        private static bool IsSqliteTableConstraint(string definition)
+        {
+            string upper = (definition ?? "").TrimStart().ToUpperInvariant();
+            return upper.StartsWith("CONSTRAINT ") || upper.StartsWith("PRIMARY ") || upper.StartsWith("UNIQUE ") ||
+                   upper.StartsWith("CHECK ") || upper.StartsWith("FOREIGN ");
+        }
+
+        private static string UnquoteSqliteIdentifier(string value)
+        {
+            string text = (value ?? "").Trim();
+            if (text.Length >= 2 && ((text[0] == '\"' && text[text.Length - 1] == '\"') ||
+                                     (text[0] == '`' && text[text.Length - 1] == '`') ||
+                                     (text[0] == '[' && text[text.Length - 1] == ']')))
+            {
+                text = text.Substring(1, text.Length - 2);
+                return text.Replace("\"\"", "\"").Replace("``", "`");
+            }
+            return text;
+        }
+
         private Dictionary<string, string> GetColumnComments(string tableName)
         {
             Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -605,6 +780,30 @@ namespace mySQLPunk.lib
             catch
             {
                 // 讀取失敗時保留已讀到的部分；清空會讓設計師把空註解寫回而毀掉原資料
+            }
+
+            return comments;
+        }
+
+        private Dictionary<string, string> GetTableComments()
+        {
+            Dictionary<string, string> comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                DataTable exists = SelectSQL("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='" + TableCommentTableName + "';");
+                if (exists.Rows.Count == 0 || Convert.ToInt64(exists.Rows[0][0]) <= 0) return comments;
+
+                DataTable rows = SelectSQL("SELECT table_name, comment FROM " + QuoteSqlite(TableCommentTableName) + ";");
+                foreach (DataRow row in rows.Rows)
+                {
+                    string tableName = row["table_name"] == DBNull.Value ? "" : row["table_name"].ToString();
+                    if (string.IsNullOrWhiteSpace(tableName)) continue;
+                    comments[tableName] = row["comment"] == DBNull.Value ? "" : row["comment"].ToString();
+                }
+            }
+            catch
+            {
+                // 註解 sidecar 無法讀取時，不要影響 SQLite 原本的資料表瀏覽。
             }
 
             return comments;

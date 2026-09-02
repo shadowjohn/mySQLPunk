@@ -468,6 +468,16 @@ namespace mySQLPunk
                 ApplyAutoColumnCommentForGridRow(e.RowIndex);
             }
 
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0)
+            {
+                string columnName = dgvColumns.Columns[e.ColumnIndex].Name;
+                if (columnName == "Type" || columnName == "Length" || columnName == "Decimals")
+                {
+                    DataRow row = GetBoundDataRow(dgvColumns.Rows[e.RowIndex]);
+                    if (row != null && row.Table.Columns.Contains("_ProviderType")) row["_ProviderType"] = "";
+                }
+            }
+
             UpdateColumnPropertiesPanel();
             MarkAsModified();
         }
@@ -591,7 +601,7 @@ namespace mySQLPunk
         private void LoadTableOptions()
         {
             _originalTableComment = "";
-            if (IsNewTable || !(_db is my_mysql)) return;
+            if (IsNewTable) return;
 
             try
             {
@@ -601,7 +611,7 @@ namespace mySQLPunk
                 foreach (DataRow row in tableStatus.Rows)
                 {
                     string statusTableName = GetMetadataString(row, "Name", "TABLE_NAME", "Table");
-                    if (!string.Equals(statusTableName, _tableName, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!AreDesignerTableNamesEqual(statusTableName, _tableName)) continue;
 
                     string tableComment = NormalizeTableComment(GetMetadataString(row, "Comment", "TABLE_COMMENT"));
                     _isLoadingTableDesignerState = true;
@@ -623,6 +633,18 @@ namespace mySQLPunk
             }
         }
 
+        private static bool AreDesignerTableNamesEqual(string left, string right)
+        {
+            string normalizedLeft = (left ?? "").Trim();
+            string normalizedRight = (right ?? "").Trim();
+            if (string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase)) return true;
+            int leftDot = normalizedLeft.LastIndexOf('.');
+            int rightDot = normalizedRight.LastIndexOf('.');
+            string leftName = leftDot >= 0 ? normalizedLeft.Substring(leftDot + 1) : normalizedLeft;
+            string rightName = rightDot >= 0 ? normalizedRight.Substring(rightDot + 1) : normalizedRight;
+            return string.Equals(leftName, rightName, StringComparison.OrdinalIgnoreCase);
+        }
+
         private DataTable CreateColumnsDisplayTable()
         {
             DataTable displayDt = new DataTable();
@@ -637,10 +659,21 @@ namespace mySQLPunk
             displayDt.Columns.Add("_OldName");
             displayDt.Columns.Add("_AutoComment");
             displayDt.Columns.Add("_TypeSuffix");
+            displayDt.Columns.Add("_ProviderType");
             displayDt.Columns.Add("AutoIncrement", typeof(bool)).DefaultValue = false;
             displayDt.Columns.Add("Unsigned", typeof(bool)).DefaultValue = false;
             displayDt.Columns.Add("Zerofill", typeof(bool)).DefaultValue = false;
             displayDt.Columns.Add("OnUpdateCurrentTimestamp", typeof(bool)).DefaultValue = false;
+            displayDt.Columns.Add("Identity", typeof(bool)).DefaultValue = false;
+            displayDt.Columns.Add("IdentityGeneration");
+            displayDt.Columns.Add("IdentityOptions");
+            displayDt.Columns.Add("GeneratedExpression");
+            displayDt.Columns.Add("GeneratedStorage");
+            displayDt.Columns.Add("Collation");
+            displayDt.Columns.Add("CharacterSet");
+            displayDt.Columns.Add("DefaultOnNull", typeof(bool)).DefaultValue = false;
+            displayDt.Columns.Add("StorageMode");
+            displayDt.Columns.Add("Compression");
             return displayDt;
         }
 
@@ -651,6 +684,7 @@ namespace mySQLPunk
                 newRow["Name"] = row["Field"];
                 newRow["_OldName"] = row["Field"];
                 string typeStr = row["Type"].ToString();
+                newRow["_ProviderType"] = typeStr;
                 string baseType, lengthPart, decimalsPart, typeSuffix;
                 ParseMySqlColumnType(typeStr, out baseType, out lengthPart, out decimalsPart, out typeSuffix);
                 newRow["Type"] = baseType;
@@ -670,6 +704,13 @@ namespace mySQLPunk
                 string extra = GetMetadataString(row, "Extra", "extra");
                 SetRowBool(newRow, "AutoIncrement", extra.IndexOf("auto_increment", StringComparison.OrdinalIgnoreCase) >= 0);
                 SetRowBool(newRow, "OnUpdateCurrentTimestamp", extra.IndexOf("on update current_timestamp", StringComparison.OrdinalIgnoreCase) >= 0);
+                newRow["CharacterSet"] = GetMetadataString(row, "CharacterSet", "character_set_name");
+                newRow["Collation"] = GetMetadataString(row, "Collation", "collation", "collation_name");
+                newRow["GeneratedExpression"] = GetMetadataString(row, "GenerationExpression", "generation_expression");
+                if (!string.IsNullOrWhiteSpace(GetRowString(newRow, "GeneratedExpression")))
+                {
+                    newRow["GeneratedStorage"] = extra.IndexOf("stored", StringComparison.OrdinalIgnoreCase) >= 0 ? "STORED" : "VIRTUAL";
+                }
                 return;
             }
 
@@ -683,6 +724,14 @@ namespace mySQLPunk
                 newRow["NotNull"] = (row["is_nullable"].ToString() == "NO");
                 newRow["Default"] = row["column_default"];
                 newRow["Comment"] = GetMetadataString(row, "Comment", "comment");
+                newRow["_ProviderType"] = GetMetadataString(row, "ProviderType", "providertype");
+                SetRowBool(newRow, "Identity", GetMetadataString(row, "IsIdentity", "is_identity").Equals("YES", StringComparison.OrdinalIgnoreCase));
+                newRow["IdentityGeneration"] = GetMetadataString(row, "IdentityGeneration", "identity_generation");
+                newRow["GeneratedExpression"] = GetMetadataString(row, "GenerationExpression", "generation_expression");
+                if (!string.IsNullOrWhiteSpace(GetRowString(newRow, "GeneratedExpression"))) newRow["GeneratedStorage"] = "STORED";
+                newRow["Collation"] = GetMetadataString(row, "Collation", "collation");
+                newRow["StorageMode"] = NormalizePostgreSqlStorageMode(GetMetadataString(row, "StorageMode", "storage_mode"));
+                newRow["Compression"] = GetMetadataString(row, "Compression", "compression");
                 return;
             }
 
@@ -695,6 +744,12 @@ namespace mySQLPunk
                 newRow["PK"] = (row["pk"].ToString() == "1");
                 newRow["Default"] = row["dflt_value"];
                 newRow["Comment"] = GetMetadataString(row, "Comment", "comment");
+                newRow["_ProviderType"] = row["type"];
+                newRow["GeneratedExpression"] = GetMetadataString(row, "GenerationExpression", "generation_expression");
+                newRow["Collation"] = GetMetadataString(row, "Collation", "collation");
+                string hidden = GetMetadataString(row, "hidden");
+                if (hidden == "2") newRow["GeneratedStorage"] = "VIRTUAL";
+                else if (hidden == "3") newRow["GeneratedStorage"] = "STORED";
                 return;
             }
 
@@ -708,6 +763,7 @@ namespace mySQLPunk
                 newRow["NotNull"] = (row["IS_NULLABLE"].ToString() == "NO");
                 newRow["Default"] = row["COLUMN_DEFAULT"];
                 newRow["Comment"] = GetMetadataString(row, "Comment", "COMMENT");
+                newRow["_ProviderType"] = GetMetadataString(row, "DATA_TYPE");
                 return;
             }
 
@@ -721,6 +777,42 @@ namespace mySQLPunk
                 newRow["NotNull"] = (row["IS_NULLABLE"].ToString() == "N");
                 newRow["Default"] = row["COLUMN_DEFAULT"];
                 newRow["Comment"] = GetMetadataString(row, "Comment", "COMMENT");
+                newRow["_ProviderType"] = GetMetadataString(row, "DATA_TYPE");
+                SetRowBool(newRow, "Identity", GetMetadataString(row, "IDENTITY_COLUMN").Equals("YES", StringComparison.OrdinalIgnoreCase));
+                newRow["IdentityGeneration"] = GetMetadataString(row, "IDENTITY_GENERATION");
+                newRow["IdentityOptions"] = GetMetadataString(row, "IDENTITY_OPTIONS");
+                string virtualColumn = GetMetadataString(row, "VIRTUAL_COLUMN");
+                if (virtualColumn.Equals("YES", StringComparison.OrdinalIgnoreCase))
+                {
+                    newRow["GeneratedExpression"] = GetMetadataString(row, "COLUMN_DEFAULT");
+                    newRow["GeneratedStorage"] = "VIRTUAL";
+                    newRow["Default"] = "";
+                }
+                newRow["Collation"] = GetMetadataString(row, "COLLATION");
+                SetRowBool(newRow, "DefaultOnNull", GetMetadataString(row, "DEFAULT_ON_NULL").Equals("YES", StringComparison.OrdinalIgnoreCase));
+                return;
+            }
+
+            if (_db is my_snowflake)
+            {
+                newRow["Name"] = row["Field"];
+                newRow["_OldName"] = row["Field"];
+                newRow["Type"] = row["Type"];
+                newRow["_ProviderType"] = row["Type"];
+                newRow["NotNull"] = (row["Null"].ToString() == "NO");
+                newRow["PK"] = (row["Key"].ToString() == "PRI");
+                newRow["Default"] = row["Default"];
+                newRow["Comment"] = GetMetadataString(row, "Comment", "comment");
+                SetRowBool(newRow, "Identity", GetMetadataString(row, "IsIdentity", "IS_IDENTITY").Equals("YES", StringComparison.OrdinalIgnoreCase));
+                newRow["IdentityGeneration"] = GetMetadataString(row, "IdentityGeneration", "IDENTITY_GENERATION");
+                string identityStart = GetMetadataString(row, "IdentityStart", "IDENTITY_START");
+                string identityIncrement = GetMetadataString(row, "IdentityIncrement", "IDENTITY_INCREMENT");
+                if (!string.IsNullOrWhiteSpace(identityStart) || !string.IsNullOrWhiteSpace(identityIncrement))
+                    newRow["IdentityOptions"] = "START " + (string.IsNullOrWhiteSpace(identityStart) ? "1" : identityStart) +
+                                                " INCREMENT " + (string.IsNullOrWhiteSpace(identityIncrement) ? "1" : identityIncrement);
+                newRow["GeneratedExpression"] = GetMetadataString(row, "GenerationExpression", "EXPRESSION");
+                if (!string.IsNullOrWhiteSpace(GetRowString(newRow, "GeneratedExpression"))) newRow["GeneratedStorage"] = "VIRTUAL";
+                newRow["Collation"] = GetMetadataString(row, "Collation", "COLLATION_NAME");
                 return;
             }
 
@@ -761,6 +853,18 @@ namespace mySQLPunk
             string value = GetMetadataString(row, columnNames).Trim();
             int parsed;
             return int.TryParse(value, out parsed) ? parsed : 0;
+        }
+
+        private static string NormalizePostgreSqlStorageMode(string value)
+        {
+            switch ((value ?? "").Trim().ToLowerInvariant())
+            {
+                case "p": return "PLAIN";
+                case "e": return "EXTERNAL";
+                case "x": return "EXTENDED";
+                case "m": return "MAIN";
+                default: return (value ?? "").Trim().ToUpperInvariant();
+            }
         }
 
         private void BeginLoadAutoColumnComments()
@@ -2413,10 +2517,21 @@ namespace mySQLPunk
             dgvColumns.Columns["_OldName"].Visible = false;
             dgvColumns.Columns["_AutoComment"].Visible = false;
             dgvColumns.Columns["_TypeSuffix"].Visible = false;
+            dgvColumns.Columns["_ProviderType"].Visible = false;
             dgvColumns.Columns["AutoIncrement"].Visible = false;
             dgvColumns.Columns["Unsigned"].Visible = false;
             dgvColumns.Columns["Zerofill"].Visible = false;
             dgvColumns.Columns["OnUpdateCurrentTimestamp"].Visible = false;
+            dgvColumns.Columns["Identity"].Visible = false;
+            dgvColumns.Columns["IdentityGeneration"].Visible = false;
+            dgvColumns.Columns["IdentityOptions"].Visible = false;
+            dgvColumns.Columns["GeneratedExpression"].Visible = false;
+            dgvColumns.Columns["GeneratedStorage"].Visible = false;
+            dgvColumns.Columns["Collation"].Visible = false;
+            dgvColumns.Columns["CharacterSet"].Visible = false;
+            dgvColumns.Columns["DefaultOnNull"].Visible = false;
+            dgvColumns.Columns["StorageMode"].Visible = false;
+            dgvColumns.Columns["Compression"].Visible = false;
             UpdateColumnPropertiesPanel();
         }
 
@@ -2437,7 +2552,7 @@ namespace mySQLPunk
                     return;
                 }
 
-                if (!(_db is my_mysql))
+                if (!SupportsDesignerColumnProperties())
                 {
                     AddColumnPropertiesHint(Localization.T("Designer.ColumnPropertiesProviderHint"));
                     return;
@@ -2457,30 +2572,25 @@ namespace mySQLPunk
 
                 AddDefaultColumnPropertyRow(layout, row);
 
-                string columnType = NormalizeMySqlType(GetRowString(row, "Type"));
-                bool hasSpecificOptions = false;
-                if (IsMySqlIntegerType(columnType))
+                if (_db is my_postgresql)
                 {
-                    AddBooleanColumnPropertyRow(layout, row, "AutoIncrement", Localization.T("Designer.AutoIncrement"));
-                    hasSpecificOptions = true;
+                    AddPostgreSqlColumnPropertyRows(layout, row);
                 }
-
-                if (IsMySqlNumericType(columnType))
+                else if (_db is my_sqlite)
                 {
-                    AddBooleanColumnPropertyRow(layout, row, "Unsigned", Localization.T("Designer.Unsigned"));
-                    AddBooleanColumnPropertyRow(layout, row, "Zerofill", Localization.T("Designer.Zerofill"));
-                    hasSpecificOptions = true;
+                    AddSqliteColumnPropertyRows(layout, row);
                 }
-
-                if (IsMySqlCurrentTimestampUpdatableType(columnType))
+                else if (_db is my_oracle)
                 {
-                    AddBooleanColumnPropertyRow(layout, row, "OnUpdateCurrentTimestamp", Localization.T("Designer.OnUpdateCurrentTimestamp"));
-                    hasSpecificOptions = true;
+                    AddOracleColumnPropertyRows(layout, row);
                 }
-
-                if (!hasSpecificOptions)
+                else if (_db is my_snowflake)
                 {
-                    AddColumnPropertyNoteRow(layout, Localization.T("Designer.ColumnPropertiesDefaultOnly"));
+                    AddSnowflakeColumnPropertyRows(layout, row);
+                }
+                else
+                {
+                    AddMySqlColumnPropertyRows(layout, row);
                 }
 
                 pnlColumnProperties.Controls.Add(layout);
@@ -2491,6 +2601,86 @@ namespace mySQLPunk
                 pnlColumnProperties.ResumeLayout();
                 _isUpdatingColumnPropertiesPanel = false;
             }
+        }
+
+        private bool SupportsDesignerColumnProperties()
+        {
+            return _db is my_mysql || _db is my_postgresql || _db is my_sqlite ||
+                   _db is my_oracle || _db is my_snowflake;
+        }
+
+        private void AddMySqlColumnPropertyRows(TableLayoutPanel layout, DataRow row)
+        {
+            AddTextColumnPropertyRow(layout, row, "CharacterSet", Localization.T("Designer.CharacterSet"));
+            AddTextColumnPropertyRow(layout, row, "Collation", Localization.T("Designer.Collation"));
+            AddGeneratedColumnPropertyRows(layout, row, new[] { "VIRTUAL", "STORED" });
+
+            string columnType = NormalizeMySqlType(GetRowString(row, "Type"));
+            bool hasSpecificOptions = false;
+            if (IsMySqlIntegerType(columnType))
+            {
+                AddBooleanColumnPropertyRow(layout, row, "AutoIncrement", Localization.T("Designer.AutoIncrement"));
+                hasSpecificOptions = true;
+            }
+
+            if (IsMySqlNumericType(columnType))
+            {
+                AddBooleanColumnPropertyRow(layout, row, "Unsigned", Localization.T("Designer.Unsigned"));
+                AddBooleanColumnPropertyRow(layout, row, "Zerofill", Localization.T("Designer.Zerofill"));
+                hasSpecificOptions = true;
+            }
+
+            if (IsMySqlCurrentTimestampUpdatableType(columnType))
+            {
+                AddBooleanColumnPropertyRow(layout, row, "OnUpdateCurrentTimestamp", Localization.T("Designer.OnUpdateCurrentTimestamp"));
+                hasSpecificOptions = true;
+            }
+
+            if (!hasSpecificOptions)
+            {
+                AddColumnPropertyNoteRow(layout, Localization.T("Designer.ColumnPropertiesDefaultOnly"));
+            }
+        }
+
+        private void AddPostgreSqlColumnPropertyRows(TableLayoutPanel layout, DataRow row)
+        {
+            AddBooleanColumnPropertyRow(layout, row, "Identity", Localization.T("Designer.Identity"));
+            AddSelectionColumnPropertyRow(layout, row, "IdentityGeneration", Localization.T("Designer.IdentityGeneration"), new[] { "BY DEFAULT", "ALWAYS" });
+            AddTextColumnPropertyRow(layout, row, "IdentityOptions", Localization.T("Designer.IdentityOptions"));
+            AddGeneratedColumnPropertyRows(layout, row, new[] { "STORED" });
+            AddSelectionColumnPropertyRow(layout, row, "StorageMode", Localization.T("Designer.StorageMode"), new[] { "DEFAULT", "PLAIN", "EXTERNAL", "EXTENDED", "MAIN" });
+            AddTextColumnPropertyRow(layout, row, "Compression", Localization.T("Designer.Compression"));
+            AddTextColumnPropertyRow(layout, row, "Collation", Localization.T("Designer.Collation"));
+        }
+
+        private void AddSqliteColumnPropertyRows(TableLayoutPanel layout, DataRow row)
+        {
+            AddGeneratedColumnPropertyRows(layout, row, new[] { "VIRTUAL", "STORED" });
+            AddTextColumnPropertyRow(layout, row, "Collation", Localization.T("Designer.Collation"));
+        }
+
+        private void AddOracleColumnPropertyRows(TableLayoutPanel layout, DataRow row)
+        {
+            AddBooleanColumnPropertyRow(layout, row, "DefaultOnNull", Localization.T("Designer.DefaultOnNull"));
+            AddBooleanColumnPropertyRow(layout, row, "Identity", Localization.T("Designer.Identity"));
+            AddSelectionColumnPropertyRow(layout, row, "IdentityGeneration", Localization.T("Designer.IdentityGeneration"), new[] { "BY DEFAULT", "ALWAYS" });
+            AddTextColumnPropertyRow(layout, row, "IdentityOptions", Localization.T("Designer.IdentityOptions"));
+            AddGeneratedColumnPropertyRows(layout, row, new[] { "VIRTUAL" });
+            AddTextColumnPropertyRow(layout, row, "Collation", Localization.T("Designer.Collation"));
+        }
+
+        private void AddSnowflakeColumnPropertyRows(TableLayoutPanel layout, DataRow row)
+        {
+            AddBooleanColumnPropertyRow(layout, row, "Identity", Localization.T("Designer.Identity"));
+            AddTextColumnPropertyRow(layout, row, "IdentityOptions", Localization.T("Designer.IdentityOptions"));
+            AddGeneratedColumnPropertyRows(layout, row, new[] { "VIRTUAL" });
+            AddTextColumnPropertyRow(layout, row, "Collation", Localization.T("Designer.Collation"));
+        }
+
+        private void AddGeneratedColumnPropertyRows(TableLayoutPanel layout, DataRow row, string[] storageOptions)
+        {
+            AddTextColumnPropertyRow(layout, row, "GeneratedExpression", Localization.T("Designer.GeneratedExpression"));
+            AddSelectionColumnPropertyRow(layout, row, "GeneratedStorage", Localization.T("Designer.GeneratedStorage"), storageOptions);
         }
 
         private DataRow GetCurrentColumnDataRow()
@@ -2550,6 +2740,43 @@ namespace mySQLPunk
             AddColumnPropertyControlRow(layout, "", checkBox);
         }
 
+        private void AddTextColumnPropertyRow(TableLayoutPanel layout, DataRow row, string columnName, string text)
+        {
+            TextBox textBox = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Text = GetRowString(row, columnName),
+                Margin = new Padding(0, 0, 0, 6)
+            };
+            textBox.TextChanged += (s, e) =>
+            {
+                if (_isUpdatingColumnPropertiesPanel) return;
+                ApplyColumnPropertyValue(columnName, textBox.Text);
+            };
+
+            AddColumnPropertyControlRow(layout, text, textBox);
+        }
+
+        private void AddSelectionColumnPropertyRow(TableLayoutPanel layout, DataRow row, string columnName, string text, string[] values)
+        {
+            ComboBox comboBox = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDown,
+                Margin = new Padding(0, 0, 0, 6)
+            };
+            comboBox.Items.Add("");
+            foreach (string value in values ?? new string[0]) comboBox.Items.Add(value);
+            comboBox.Text = GetRowString(row, columnName);
+            comboBox.TextChanged += (s, e) =>
+            {
+                if (_isUpdatingColumnPropertiesPanel) return;
+                ApplyColumnPropertyValue(columnName, comboBox.Text);
+            };
+
+            AddColumnPropertyControlRow(layout, text, comboBox);
+        }
+
         private void AddColumnPropertyNoteRow(TableLayoutPanel layout, string text)
         {
             Label note = new Label
@@ -2588,6 +2815,17 @@ namespace mySQLPunk
             DataRow row = GetCurrentColumnDataRow();
             if (row == null || !row.Table.Columns.Contains(columnName)) return;
 
+            if ((columnName == "GeneratedExpression" || columnName == "IdentityOptions") &&
+                !IsSafeColumnOption(Convert.ToString(value)))
+            {
+                return;
+            }
+
+            if (columnName == "Default" && !string.IsNullOrWhiteSpace(GetRowString(row, "GeneratedExpression")))
+            {
+                return;
+            }
+
             row[columnName] = value ?? "";
 
             if (columnName == "AutoIncrement" && value is bool && (bool)value)
@@ -2599,6 +2837,18 @@ namespace mySQLPunk
             if (columnName == "Zerofill" && value is bool && (bool)value)
             {
                 SetRowBool(row, "Unsigned", true);
+            }
+
+            if (columnName == "Identity" && value is bool && (bool)value)
+            {
+                SetRowBool(row, "NotNull", true);
+            }
+
+            if (columnName == "GeneratedExpression" && !string.IsNullOrWhiteSpace(Convert.ToString(value)))
+            {
+                SetRowBool(row, "Identity", false);
+                SetRowBool(row, "AutoIncrement", false);
+                row["Default"] = "";
             }
 
             dgvColumns.Refresh();
@@ -2947,6 +3197,17 @@ namespace mySQLPunk
         {
             if (_db is my_sqlite && NeedsSqliteTableRebuild(currentDt))
             {
+                foreach (DataRow original in _originalDt.Rows)
+                {
+                    if (!string.IsNullOrWhiteSpace(GetRowString(original, "GeneratedStorage")) &&
+                        string.IsNullOrWhiteSpace(GetRowString(original, "GeneratedExpression")))
+                    {
+                        return FormatUnsupportedChanges(new List<string>
+                        {
+                            Localization.Format("Designer.SqliteGeneratedColumnDefinitionUnavailable", GetRowString(original, "Name"))
+                        });
+                    }
+                }
                 return BuildSqliteRebuildTableSql(currentDt);
             }
 
@@ -3019,6 +3280,12 @@ namespace mySQLPunk
             statements.AddRange(BuildGenericAlterIndexStatements(unsupported));
             statements.AddRange(constraintChanges.AddStatements);
 
+            string currentTableComment = GetCurrentTableComment();
+            if (!string.Equals(currentTableComment, NormalizeTableComment(_originalTableComment), StringComparison.Ordinal))
+            {
+                statements.AddRange(BuildGenericTableCommentStatements(_tableName, currentTableComment));
+            }
+
             if (unsupported.Count > 0)
             {
                 return FormatUnsupportedChanges(unsupported);
@@ -3064,6 +3331,7 @@ namespace mySQLPunk
                 if (HasBoolChanged(original, current, "NotNull")) return true;
                 if (HasTextChanged(original, current, "Default")) return true;
                 if (HasBoolChanged(original, current, "PK")) return true;
+                if (HasProviderColumnPropertyChanged(original, current)) return true;
                 if (_originalDt.Rows.IndexOf(original) != visibleIndex) return true;
 
                 visibleIndex++;
@@ -3155,6 +3423,7 @@ namespace mySQLPunk
             }
 
             statements.AddRange(BuildSqliteReplaceAllColumnCommentStatements(_tableName, currentDt));
+            statements.AddRange(BuildGenericTableCommentStatements(_tableName, GetCurrentTableComment()));
 
             statements.Add("COMMIT;");
             statements.Add("PRAGMA foreign_keys=ON;");
@@ -3337,6 +3606,7 @@ namespace mySQLPunk
             bool nullChanged = HasBoolChanged(original, current, "NotNull");
             bool defaultChanged = HasTextChanged(original, current, "Default");
             bool commentChanged = HasTextChanged(original, current, "Comment");
+            bool providerPropertyChanged = HasProviderColumnPropertyChanged(original, current);
 
             if (_db is my_sqlite)
             {
@@ -3349,6 +3619,10 @@ namespace mySQLPunk
 
             if (_db is my_postgresql)
             {
+                if (providerPropertyChanged)
+                {
+                    unsupported.Add(Localization.Format("Designer.ProviderPropertyAlterUnsupported", columnName, "PostgreSQL"));
+                }
                 if (typeChanged)
                 {
                     statements.Add("ALTER TABLE " + GetQualifiedDesignerTableName(_tableName) +
@@ -3403,6 +3677,10 @@ namespace mySQLPunk
 
             if (_db is my_oracle)
             {
+                if (providerPropertyChanged)
+                {
+                    unsupported.Add(Localization.Format("Designer.ProviderPropertyAlterUnsupported", columnName, "Oracle"));
+                }
                 if (typeChanged || nullChanged || defaultChanged)
                 {
                     string defaultValue = GetRowString(current, "Default").Trim();
@@ -3432,7 +3710,26 @@ namespace mySQLPunk
                 }
             }
 
+            if (_db is my_snowflake && (typeChanged || nullChanged || defaultChanged || commentChanged || providerPropertyChanged))
+            {
+                unsupported.Add(Localization.Format("Designer.ProviderPropertyAlterUnsupported", columnName, "Snowflake"));
+            }
+
             return statements;
+        }
+
+        private static bool HasProviderColumnPropertyChanged(DataRow original, DataRow current)
+        {
+            return HasBoolChanged(original, current, "Identity") ||
+                   HasTextChanged(original, current, "IdentityGeneration") ||
+                   HasTextChanged(original, current, "IdentityOptions") ||
+                   HasTextChanged(original, current, "GeneratedExpression") ||
+                   HasTextChanged(original, current, "GeneratedStorage") ||
+                   HasTextChanged(original, current, "Collation") ||
+                   HasTextChanged(original, current, "CharacterSet") ||
+                   HasBoolChanged(original, current, "DefaultOnNull") ||
+                   HasTextChanged(original, current, "StorageMode") ||
+                   HasTextChanged(original, current, "Compression");
         }
 
         private string BuildSqlServerDropDefaultConstraintStatement(string columnName)
@@ -3978,6 +4275,12 @@ namespace mySQLPunk
                 sql += "\n" + string.Join("\n", comments.ToArray());
             }
 
+            List<string> tableComments = BuildGenericTableCommentStatements(tableName, GetCurrentTableComment());
+            if (tableComments.Count > 0)
+            {
+                sql += "\n" + string.Join("\n", tableComments.ToArray());
+            }
+
             List<string> constraints = TableDesignerConstraintService.BuildCreateStatements(
                 _db.ProviderName,
                 GetQualifiedDesignerTableName(tableName),
@@ -4069,6 +4372,36 @@ namespace mySQLPunk
             return statements;
         }
 
+        private List<string> BuildGenericTableCommentStatements(string tableName, string comment)
+        {
+            List<string> statements = new List<string>();
+            if (string.IsNullOrWhiteSpace(tableName)) return statements;
+
+            if (_db is my_sqlite)
+            {
+                statements.Add(BuildSqliteEnsureTableCommentTableStatement());
+                statements.Add(string.IsNullOrWhiteSpace(comment)
+                    ? BuildSqliteDeleteTableCommentStatement(tableName)
+                    : BuildSqliteUpsertTableCommentStatement(tableName, comment));
+                return statements;
+            }
+
+            if (_db is my_postgresql || _db is my_oracle)
+            {
+                statements.Add("COMMENT ON TABLE " + GetQualifiedDesignerTableName(tableName) +
+                               " IS " + EscapeSqlStringLiteral(comment) + ";");
+                return statements;
+            }
+
+            if (_db is my_snowflake)
+            {
+                statements.Add("ALTER TABLE " + GetQualifiedDesignerTableName(tableName) +
+                               " SET COMMENT = " + EscapeSqlStringLiteral(comment) + ";");
+            }
+
+            return statements;
+        }
+
         private List<string> BuildSqliteReplaceAllColumnCommentStatements(string tableName, DataTable currentDt)
         {
             List<string> statements = new List<string>();
@@ -4118,6 +4451,27 @@ namespace mySQLPunk
                    ");";
         }
 
+        private string BuildSqliteEnsureTableCommentTableStatement()
+        {
+            return "CREATE TABLE IF NOT EXISTS " + QuoteDesignerIdentifier(my_sqlite.TableCommentTableName) + " (" +
+                   "table_name TEXT NOT NULL PRIMARY KEY, " +
+                   "comment TEXT NOT NULL" +
+                   ");";
+        }
+
+        private string BuildSqliteUpsertTableCommentStatement(string tableName, string comment)
+        {
+            return "INSERT OR REPLACE INTO " + QuoteDesignerIdentifier(my_sqlite.TableCommentTableName) +
+                   " (table_name, comment) VALUES (" +
+                   EscapeSqlStringLiteral(tableName) + ", " + EscapeSqlStringLiteral(comment) + ");";
+        }
+
+        private string BuildSqliteDeleteTableCommentStatement(string tableName)
+        {
+            return "DELETE FROM " + QuoteDesignerIdentifier(my_sqlite.TableCommentTableName) +
+                   " WHERE table_name = " + EscapeSqlStringLiteral(tableName) + ";";
+        }
+
         private string BuildSqliteUpsertColumnCommentStatement(string tableName, string columnName, string comment)
         {
             return "INSERT OR REPLACE INTO " + QuoteDesignerIdentifier(my_sqlite.ColumnCommentTableName) +
@@ -4137,27 +4491,159 @@ namespace mySQLPunk
         private string BuildGenericColumnDefinition(DataRow row)
         {
             string columnName = GetRowString(row, "Name").Trim();
-            string columnType = GetRowString(row, "Type").Trim();
-            string length = GetRowString(row, "Length").Trim();
-            string decimals = GetRowString(row, "Decimals").Trim();
             bool notNull = row["NotNull"] != DBNull.Value && (bool)row["NotNull"];
             string defaultValue = GetRowString(row, "Default").Trim();
             // 勾了 PK 沒勾 NotNull 時要隱含 NOT NULL：SQL Server 對 nullable 的主鍵欄直接拒絕
             bool isPrimaryKey = row.Table.Columns.Contains("PK") && row["PK"] != DBNull.Value && (bool)row["PK"];
+            bool isGenerated = !string.IsNullOrWhiteSpace(GetRowString(row, "GeneratedExpression"));
 
             List<string> parts = new List<string>
             {
                 QuoteDesignerIdentifier(columnName),
-                MapDesignerType(columnType, length, decimals),
-                (notNull || isPrimaryKey) ? "NOT NULL" : "NULL"
+                GetDesignerColumnType(row)
             };
 
-            if (!string.IsNullOrWhiteSpace(defaultValue))
+            AppendGenericColumnCollation(row, parts);
+            AppendGenericColumnGeneration(row, parts);
+
+            if (!isGenerated)
             {
-                parts.Add("DEFAULT " + FormatGenericDefault(defaultValue));
+                if (GetRowBool(row, "Identity"))
+                {
+                    AppendGenericIdentityDefinition(row, parts);
+                }
+
+                if (!string.IsNullOrWhiteSpace(defaultValue))
+                {
+                    bool defaultOnNull = _db is my_oracle && GetRowBool(row, "DefaultOnNull");
+                    parts.Add((defaultOnNull ? "DEFAULT ON NULL " : "DEFAULT ") + FormatGenericDefault(defaultValue));
+                }
+
+                parts.Add((notNull || isPrimaryKey || GetRowBool(row, "Identity")) ? "NOT NULL" : "NULL");
+            }
+            else if (!(_db is my_snowflake))
+            {
+                parts.Add((notNull || isPrimaryKey) ? "NOT NULL" : "NULL");
+            }
+
+            if (_db is my_snowflake)
+            {
+                string comment = GetRowString(row, "Comment").Trim();
+                if (!string.IsNullOrWhiteSpace(comment)) parts.Add("COMMENT " + EscapeSqlStringLiteral(comment));
             }
 
             return string.Join(" ", parts.ToArray());
+        }
+
+        private string GetDesignerColumnType(DataRow row)
+        {
+            string providerType = GetRowString(row, "_ProviderType").Trim();
+            if (!string.IsNullOrWhiteSpace(providerType)) return providerType;
+            return MapDesignerType(GetRowString(row, "Type"), GetRowString(row, "Length"), GetRowString(row, "Decimals"));
+        }
+
+        private void AppendGenericColumnCollation(DataRow row, List<string> parts)
+        {
+            if (_db is my_postgresql)
+            {
+                string storage = GetRowString(row, "StorageMode").Trim().ToUpperInvariant();
+                if (storage == "PLAIN" || storage == "EXTERNAL" || storage == "EXTENDED" || storage == "MAIN" || storage == "DEFAULT")
+                {
+                    parts.Add("STORAGE " + storage);
+                }
+
+                string compression = GetRowString(row, "Compression").Trim();
+                if (IsSafeQualifiedIdentifier(compression)) parts.Add("COMPRESSION " + QuoteQualifiedDesignerIdentifier(compression));
+            }
+
+            string collation = GetRowString(row, "Collation").Trim();
+            if (string.IsNullOrWhiteSpace(collation)) return;
+
+            if (_db is my_snowflake)
+            {
+                parts.Add("COLLATE " + EscapeSqlStringLiteral(collation));
+                return;
+            }
+
+            if (IsSafeQualifiedIdentifier(collation))
+            {
+                parts.Add("COLLATE " + QuoteQualifiedDesignerIdentifier(collation));
+            }
+        }
+
+        private void AppendGenericColumnGeneration(DataRow row, List<string> parts)
+        {
+            string expression = GetRowString(row, "GeneratedExpression").Trim();
+            if (string.IsNullOrWhiteSpace(expression)) return;
+
+            string storage = GetRowString(row, "GeneratedStorage").Trim().ToUpperInvariant();
+            if (_db is my_postgresql)
+            {
+                parts.Add("GENERATED ALWAYS AS (" + expression + ") STORED");
+                return;
+            }
+            if (_db is my_sqlite)
+            {
+                parts.Add("GENERATED ALWAYS AS (" + expression + ") " + (storage == "STORED" ? "STORED" : "VIRTUAL"));
+                return;
+            }
+            if (_db is my_oracle)
+            {
+                parts.Add("GENERATED ALWAYS AS (" + expression + ") VIRTUAL");
+                return;
+            }
+            if (_db is my_snowflake)
+            {
+                parts.Add("AS (" + expression + ") VIRTUAL");
+            }
+        }
+
+        private void AppendGenericIdentityDefinition(DataRow row, List<string> parts)
+        {
+            string mode = GetRowString(row, "IdentityGeneration").Trim().ToUpperInvariant();
+            if (mode != "ALWAYS") mode = "BY DEFAULT";
+            string options = GetRowString(row, "IdentityOptions").Trim();
+            if (!IsSafeColumnOption(options)) options = "";
+
+            if (_db is my_postgresql)
+            {
+                parts.Add("GENERATED " + mode + " AS IDENTITY" + (string.IsNullOrWhiteSpace(options) ? "" : " (" + options + ")"));
+                return;
+            }
+            if (_db is my_oracle)
+            {
+                parts.Add("GENERATED " + mode + " AS IDENTITY" + (string.IsNullOrWhiteSpace(options) ? "" : " (" + options + ")"));
+                return;
+            }
+            if (_db is my_snowflake)
+            {
+                parts.Add("AUTOINCREMENT" + (string.IsNullOrWhiteSpace(options) ? "" : " " + options));
+            }
+        }
+
+        private static bool IsSafeColumnOption(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ||
+                   (value.IndexOf(';') < 0 && value.IndexOf("--", StringComparison.Ordinal) < 0 && value.IndexOf("/*", StringComparison.Ordinal) < 0);
+        }
+
+        private static bool IsSafeQualifiedIdentifier(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            foreach (string part in value.Split('.'))
+            {
+                if (string.IsNullOrWhiteSpace(part)) return false;
+                foreach (char ch in part)
+                {
+                    if (!(char.IsLetterOrDigit(ch) || ch == '_' || ch == '$')) return false;
+                }
+            }
+            return true;
+        }
+
+        private string QuoteQualifiedDesignerIdentifier(string value)
+        {
+            return string.Join(".", value.Split('.').Select(QuoteDesignerIdentifier).ToArray());
         }
 
         private List<string> BuildGenericCreateIndexStatements(string tableName)
@@ -4486,6 +4972,12 @@ namespace mySQLPunk
             {
                 return QuoteDesignerIdentifier(_databaseName) + "." + QuoteDesignerIdentifier(tableName);
             }
+            if (_db is my_snowflake)
+            {
+                string schemaName, objectName;
+                my_snowflake.SplitSchemaObject(tableName, out schemaName, out objectName);
+                return QuoteDesignerIdentifier(_databaseName) + "." + QuoteDesignerIdentifier(schemaName) + "." + QuoteDesignerIdentifier(objectName);
+            }
             return QuoteDesignerIdentifier(tableName);
         }
 
@@ -4559,7 +5051,7 @@ namespace mySQLPunk
             {
                 return "[" + name.Replace("]", "]]") + "]";
             }
-            if (_db is my_postgresql || _db is my_sqlite || _db is my_oracle)
+            if (_db is my_postgresql || _db is my_sqlite || _db is my_oracle || _db is my_snowflake)
             {
                 return "\"" + name.Replace("\"", "\"\"") + "\"";
             }
@@ -4778,27 +5270,44 @@ namespace mySQLPunk
             bool notNull = GetRowBool(row, "NotNull") || autoIncrement;
             string defaultValue = GetRowString(row, "Default").Trim();
             string comment = GetRowString(row, "Comment");
+            string characterSet = GetRowString(row, "CharacterSet").Trim();
+            string collation = GetRowString(row, "Collation").Trim();
+            string generatedExpression = GetRowString(row, "GeneratedExpression").Trim();
+            bool isGenerated = !string.IsNullOrWhiteSpace(generatedExpression);
+            string generatedStorage = GetRowString(row, "GeneratedStorage").Trim().Equals("STORED", StringComparison.OrdinalIgnoreCase)
+                ? "STORED"
+                : "VIRTUAL";
 
             List<string> parts = new List<string>
             {
                 QuoteMySqlIdentifier(columnName),
-                typeFull,
-                notNull ? "NOT NULL" : "NULL"
+                typeFull
             };
 
-            if (!autoIncrement && !string.IsNullOrWhiteSpace(defaultValue))
-            {
-                parts.Add("DEFAULT " + FormatMySqlDefault(defaultValue));
-            }
+            if (IsSafeMySqlIdentifier(characterSet)) parts.Add("CHARACTER SET " + characterSet);
+            if (IsSafeMySqlIdentifier(collation)) parts.Add("COLLATE " + collation);
 
-            if (autoIncrement)
+            if (isGenerated)
             {
-                parts.Add("AUTO_INCREMENT");
+                parts.Add("GENERATED ALWAYS AS (" + generatedExpression + ") " + generatedStorage);
             }
-
-            if (onUpdateCurrentTimestamp)
+            else
             {
-                parts.Add("ON UPDATE CURRENT_TIMESTAMP");
+                parts.Add(notNull ? "NOT NULL" : "NULL");
+                if (!autoIncrement && !string.IsNullOrWhiteSpace(defaultValue))
+                {
+                    parts.Add("DEFAULT " + FormatMySqlDefault(defaultValue));
+                }
+
+                if (autoIncrement)
+                {
+                    parts.Add("AUTO_INCREMENT");
+                }
+
+                if (onUpdateCurrentTimestamp)
+                {
+                    parts.Add("ON UPDATE CURRENT_TIMESTAMP");
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(comment))
@@ -4807,6 +5316,16 @@ namespace mySQLPunk
             }
 
             return string.Join(" ", parts);
+        }
+
+        private static bool IsSafeMySqlIdentifier(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            foreach (char ch in value)
+            {
+                if (!(char.IsLetterOrDigit(ch) || ch == '_' || ch == '$')) return false;
+            }
+            return true;
         }
 
         private List<string> BuildMySqlCreateIndexDefinitions(List<string> primaryColumns)

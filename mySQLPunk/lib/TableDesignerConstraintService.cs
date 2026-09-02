@@ -122,6 +122,9 @@ namespace mySQLPunk.lib
             string provider = NormalizeProvider(database.ProviderName);
             if (provider == "mssql") return LoadSqlServerConstraints(database, databaseName, tableName);
             if (provider == "mysql") return LoadMySqlConstraints(database, databaseName, tableName);
+            if (provider == "postgresql") return LoadPostgreSqlConstraints(database, tableName);
+            if (provider == "oracle") return LoadOracleConstraints(database, databaseName, tableName);
+            if (provider == "sqlite") return LoadSqliteConstraints(database, tableName);
             return new List<TableDesignerConstraint>();
         }
 
@@ -209,6 +212,157 @@ ORDER BY tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                 { "tableName", tableName }
             });
             return GroupMetadataRows(rows);
+        }
+
+        private static List<TableDesignerConstraint> LoadPostgreSqlConstraints(IDatabase database, string tableName)
+        {
+            PostgreSqlTableName target = ParsePostgreSqlTableName(tableName);
+            const string sql = @"
+SELECT
+    con.conname AS ""ConstraintName"",
+    'FOREIGN KEY' AS ""ConstraintKind"",
+    parent_col.attname AS ""ColumnName"",
+    referenced_col.attname AS ""ReferencedColumnName"",
+    CASE WHEN referenced_schema.nspname = 'public' THEN referenced_table.relname ELSE referenced_schema.nspname || '.' || referenced_table.relname END AS ""ReferencedTable"",
+    CASE con.confdeltype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE '' END AS ""OnDelete"",
+    CASE con.confupdtype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE '' END AS ""OnUpdate"",
+    '' AS ""Expression"",
+    key_columns.ordinality AS ""Ordinal""
+FROM pg_constraint con
+INNER JOIN pg_class parent_table ON parent_table.oid = con.conrelid
+INNER JOIN pg_namespace parent_schema ON parent_schema.oid = parent_table.relnamespace
+INNER JOIN pg_class referenced_table ON referenced_table.oid = con.confrelid
+INNER JOIN pg_namespace referenced_schema ON referenced_schema.oid = referenced_table.relnamespace
+INNER JOIN LATERAL unnest(con.conkey, con.confkey) WITH ORDINALITY AS key_columns(parent_attnum, referenced_attnum, ordinality) ON TRUE
+INNER JOIN pg_attribute parent_col ON parent_col.attrelid = con.conrelid AND parent_col.attnum = key_columns.parent_attnum
+INNER JOIN pg_attribute referenced_col ON referenced_col.attrelid = con.confrelid AND referenced_col.attnum = key_columns.referenced_attnum
+WHERE con.contype = 'f' AND parent_schema.nspname = :schemaName AND parent_table.relname = :tableName
+UNION ALL
+SELECT
+    con.conname AS ""ConstraintName"",
+    'CHECK' AS ""ConstraintKind"",
+    '' AS ""ColumnName"",
+    '' AS ""ReferencedColumnName"",
+    '' AS ""ReferencedTable"",
+    '' AS ""OnDelete"",
+    '' AS ""OnUpdate"",
+    pg_get_expr(con.conbin, con.conrelid) AS ""Expression"",
+    1 AS ""Ordinal""
+FROM pg_constraint con
+INNER JOIN pg_class parent_table ON parent_table.oid = con.conrelid
+INNER JOIN pg_namespace parent_schema ON parent_schema.oid = parent_table.relnamespace
+WHERE con.contype = 'c' AND parent_schema.nspname = :schemaName AND parent_table.relname = :tableName
+ORDER BY ""ConstraintName"", ""Ordinal"";";
+            DataTable rows = database.SelectSQL(sql, new Dictionary<string, object>
+            {
+                { "schemaName", target.Schema },
+                { "tableName", target.Name }
+            });
+            return GroupMetadataRows(rows);
+        }
+
+        private static List<TableDesignerConstraint> LoadOracleConstraints(IDatabase database, string databaseName, string tableName)
+        {
+            string owner = (databaseName ?? string.Empty).Trim().ToUpperInvariant();
+            string name = (tableName ?? string.Empty).Trim().ToUpperInvariant();
+            const string foreignKeysSql = @"
+SELECT
+    fk.CONSTRAINT_NAME AS ConstraintName,
+    'FOREIGN KEY' AS ConstraintKind,
+    local_col.COLUMN_NAME AS ColumnName,
+    referenced_col.COLUMN_NAME AS ReferencedColumnName,
+    CASE WHEN referenced_key.OWNER = USER THEN referenced_key.TABLE_NAME ELSE referenced_key.OWNER || '.' || referenced_key.TABLE_NAME END AS ReferencedTable,
+    fk.DELETE_RULE AS OnDelete,
+    '' AS OnUpdate,
+    '' AS Expression,
+    local_col.POSITION AS Ordinal
+FROM ALL_CONSTRAINTS fk
+INNER JOIN ALL_CONS_COLUMNS local_col
+    ON local_col.OWNER = fk.OWNER AND local_col.CONSTRAINT_NAME = fk.CONSTRAINT_NAME
+INNER JOIN ALL_CONSTRAINTS referenced_key
+    ON referenced_key.OWNER = fk.R_OWNER AND referenced_key.CONSTRAINT_NAME = fk.R_CONSTRAINT_NAME
+INNER JOIN ALL_CONS_COLUMNS referenced_col
+    ON referenced_col.OWNER = referenced_key.OWNER AND referenced_col.CONSTRAINT_NAME = referenced_key.CONSTRAINT_NAME
+    AND referenced_col.POSITION = local_col.POSITION
+WHERE fk.CONSTRAINT_TYPE = 'R' AND fk.OWNER = :owner AND fk.TABLE_NAME = :tableName
+ORDER BY fk.CONSTRAINT_NAME, local_col.POSITION";
+            DataTable rows = database.SelectSQL(foreignKeysSql, new Dictionary<string, object>
+            {
+                { "owner", owner },
+                { "tableName", name }
+            });
+
+            try
+            {
+                DataTable checks = database.SelectSQL(@"
+SELECT
+    c.CONSTRAINT_NAME AS ConstraintName,
+    'CHECK' AS ConstraintKind,
+    '' AS ColumnName,
+    '' AS ReferencedColumnName,
+    '' AS ReferencedTable,
+    '' AS OnDelete,
+    '' AS OnUpdate,
+    c.SEARCH_CONDITION_VC AS Expression,
+    1 AS Ordinal
+FROM ALL_CONSTRAINTS c
+WHERE c.CONSTRAINT_TYPE = 'C' AND c.GENERATED = 'USER NAME'
+    AND c.OWNER = :owner AND c.TABLE_NAME = :tableName
+ORDER BY c.CONSTRAINT_NAME", new Dictionary<string, object>
+                {
+                    { "owner", owner },
+                    { "tableName", name }
+                });
+                rows.Merge(checks);
+            }
+            catch
+            {
+                // 12c 之前沒有 SEARCH_CONDITION_VC；外鍵仍可完整載入。
+            }
+
+            return GroupMetadataRows(rows);
+        }
+
+        private static List<TableDesignerConstraint> LoadSqliteConstraints(IDatabase database, string tableName)
+        {
+            List<TableDesignerConstraint> result = new List<TableDesignerConstraint>();
+            string safeTable = (tableName ?? string.Empty).Replace("'", "''");
+            DataTable rows = database.SelectSQL("PRAGMA foreign_key_list('" + safeTable + "');");
+            Dictionary<string, TableDesignerConstraint> byId = new Dictionary<string, TableDesignerConstraint>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, List<string>> columns = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, List<string>> referenceColumns = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataRow row in rows.Rows)
+            {
+                string id = ReadRow(row, "id");
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                TableDesignerConstraint item;
+                if (!byId.TryGetValue(id, out item))
+                {
+                    item = new TableDesignerConstraint
+                    {
+                        Name = SanitizeIdentifier("FK_" + LastIdentifierPart(tableName) + "_" + id),
+                        Kind = ForeignKeyKind,
+                        ReferencedTable = ReadRow(row, "table"),
+                        OnDelete = NormalizeAction(ReadRow(row, "on_delete")),
+                        OnUpdate = NormalizeAction(ReadRow(row, "on_update"))
+                    };
+                    item.OriginalName = item.Name;
+                    byId.Add(id, item);
+                    columns.Add(id, new List<string>());
+                    referenceColumns.Add(id, new List<string>());
+                }
+                string column = ReadRow(row, "from");
+                string referencedColumn = ReadRow(row, "to");
+                if (!string.IsNullOrWhiteSpace(column)) columns[id].Add(column);
+                if (!string.IsNullOrWhiteSpace(referencedColumn)) referenceColumns[id].Add(referencedColumn);
+            }
+            foreach (KeyValuePair<string, TableDesignerConstraint> pair in byId)
+            {
+                pair.Value.Columns = string.Join(", ", columns[pair.Key].ToArray());
+                pair.Value.ReferencedColumns = string.Join(", ", referenceColumns[pair.Key].ToArray());
+                result.Add(pair.Value);
+            }
+            return result.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         private static List<TableDesignerConstraint> GroupMetadataRows(DataTable rows)
@@ -527,6 +681,22 @@ ORDER BY tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                 return new SqlServerTableName { Schema = parts[parts.Length - 2].Trim(), Name = parts[parts.Length - 1].Trim() };
             }
             return new SqlServerTableName { Schema = "dbo", Name = (value ?? string.Empty).Trim() };
+        }
+
+        private struct PostgreSqlTableName
+        {
+            public string Schema;
+            public string Name;
+        }
+
+        private static PostgreSqlTableName ParsePostgreSqlTableName(string value)
+        {
+            string[] parts = (value ?? string.Empty).Split('.');
+            if (parts.Length >= 2)
+            {
+                return new PostgreSqlTableName { Schema = parts[parts.Length - 2].Trim(), Name = parts[parts.Length - 1].Trim() };
+            }
+            return new PostgreSqlTableName { Schema = "public", Name = (value ?? string.Empty).Trim() };
         }
     }
 }

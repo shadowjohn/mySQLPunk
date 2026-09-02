@@ -158,7 +158,9 @@ namespace mySQLPunk.lib
                 { "owner", NormalizeOwner(databaseName) },
                 { "tableName", NormalizeName(tableName) }
             };
-            return SelectSQL(@"
+            try
+            {
+                return SelectSQL(@"
                 SELECT
                     c.COLUMN_NAME,
                     c.DATA_TYPE,
@@ -168,11 +170,40 @@ namespace mySQLPunk.lib
                     c.DATA_PRECISION,
                     c.DATA_SCALE,
                     c.COLUMN_ID,
+                    c.CHAR_LENGTH,
+                    c.CHAR_USED,
+                    c.COLLATION,
+                    c.VIRTUAL_COLUMN,
+                    c.DEFAULT_ON_NULL,
+                    c.IDENTITY_COLUMN,
+                    ic.GENERATION_TYPE AS IDENTITY_GENERATION,
+                    ic.IDENTITY_OPTIONS,
                     COALESCE(cc.COMMENTS, '') AS ""Comment""
                 FROM ALL_TAB_COLUMNS c
                 LEFT JOIN ALL_COL_COMMENTS cc ON cc.OWNER = c.OWNER AND cc.TABLE_NAME = c.TABLE_NAME AND cc.COLUMN_NAME = c.COLUMN_NAME
+                LEFT JOIN ALL_TAB_IDENTITY_COLS ic ON ic.OWNER = c.OWNER AND ic.TABLE_NAME = c.TABLE_NAME AND ic.COLUMN_NAME = c.COLUMN_NAME
                 WHERE c.OWNER = :owner AND c.TABLE_NAME = :tableName
                 ORDER BY c.COLUMN_ID", p);
+            }
+            catch
+            {
+                // 12c 之前缺少 identity／collation metadata，保留原有基本欄位即可。
+                return SelectSQL(@"
+                    SELECT
+                        c.COLUMN_NAME,
+                        c.DATA_TYPE,
+                        c.NULLABLE AS IS_NULLABLE,
+                        c.DATA_DEFAULT AS COLUMN_DEFAULT,
+                        c.DATA_LENGTH,
+                        c.DATA_PRECISION,
+                        c.DATA_SCALE,
+                        c.COLUMN_ID,
+                        COALESCE(cc.COMMENTS, '') AS ""Comment""
+                    FROM ALL_TAB_COLUMNS c
+                    LEFT JOIN ALL_COL_COMMENTS cc ON cc.OWNER = c.OWNER AND cc.TABLE_NAME = c.TABLE_NAME AND cc.COLUMN_NAME = c.COLUMN_NAME
+                    WHERE c.OWNER = :owner AND c.TABLE_NAME = :tableName
+                    ORDER BY c.COLUMN_ID", p);
+            }
         }
 
         public DataTable GetIndexes(string databaseName, string tableName)

@@ -302,10 +302,30 @@ namespace mySQLPunk.lib
         {
             string safeDB = databaseName.Replace("`", "``");
             string safeTable = tableName.Replace("`", "``");
-            return ExecuteDataTable(
-                $"SHOW FULL COLUMNS FROM `{safeDB}`.`{safeTable}`;",
-                null,
-                MetadataCommandTimeoutSeconds);
+            try
+            {
+                return ExecuteDataTable(
+                    "SELECT COLUMN_NAME AS Field, COLUMN_TYPE AS Type, IS_NULLABLE AS `Null`, " +
+                    "COLUMN_KEY AS `Key`, COLUMN_DEFAULT AS `Default`, EXTRA AS Extra, " +
+                    "COLUMN_COMMENT AS Comment, CHARACTER_SET_NAME AS CharacterSet, " +
+                    "COLLATION_NAME AS Collation, GENERATION_EXPRESSION AS GenerationExpression " +
+                    "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ?db AND TABLE_NAME = ?tableName " +
+                    "ORDER BY ORDINAL_POSITION;",
+                    new Dictionary<string, object>
+                    {
+                        { "db", databaseName },
+                        { "tableName", tableName }
+                    },
+                    MetadataCommandTimeoutSeconds);
+            }
+            catch
+            {
+                // 舊版 MariaDB／MySQL 若缺少延伸欄位，仍要能開啟設計器。
+                return ExecuteDataTable(
+                    $"SHOW FULL COLUMNS FROM `{safeDB}`.`{safeTable}`;",
+                    null,
+                    MetadataCommandTimeoutSeconds);
+            }
         }
 
         public DataTable GetIndexes(string databaseName, string tableName)
