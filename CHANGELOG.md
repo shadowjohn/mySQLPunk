@@ -4,6 +4,9 @@
 
 ### 🚀 新增功能
 
+- **資料表約束與 SQL Server XML 索引**：Table Designer 新增外鍵與 CHECK 約束分頁，可讀取並預覽 MySQL、PostgreSQL、SQL Server、Oracle、SQLite 的既有約束；新增或修改時會產生各 provider 對應的 DDL。SQL Server 索引頁也可建立 PRIMARY／PATH／VALUE／PROPERTY XML 索引，並正確保留次要 XML 索引的父索引關係。
+- **跨資料庫欄位屬性**：Table Designer 會讀取並呈現 MySQL/MariaDB 的字元集、排序規則與 generated column，PostgreSQL 的 identity、generated、storage、compression 與 collation，SQLite 的 generated column／collation，Oracle 與 Snowflake 的 identity、虛擬欄位及 collation。SQL 預覽會保留可安全重建的屬性；既有資料表不支援直接 ALTER 的進階變更會明確阻擋，避免靜默遺失設定。
+
 ### 🛠️ 問題修正與優化
 
 - 設定、連線與各類編輯視窗的文字、下拉、數字與日期欄位改用同一套圓角外框、焦點與停用狀態；原本混雜的 WinForms 原生方框不再讓表單看起來像不同時期拼在一起。

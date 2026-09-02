@@ -57,6 +57,21 @@ jobs:
           - 參考變更分數（不會觸發發版）：`${{ steps.decision.outputs.score }}`
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      # 日常驗證由 Windows Desktop workflow 處理；真正發版前再在同一條流程重跑一次，
+      # 避免版本 commit、tag 與公開 Release 在 smoke 失敗時仍被建立。
+      - name: Setup MSBuild for release verification
+        if: steps.decision.outputs.should_release == 'true'
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Setup NuGet for release verification
+        if: steps.decision.outputs.should_release == 'true'
+        uses: NuGet/setup-nuget@v4
+
+      - name: Verify Windows desktop build and smoke tests
+        if: steps.decision.outputs.should_release == 'true'
+        shell: pwsh
+        run: .\tests\Run-SmokeTests.ps1
+
       - name: Prepare version files
         if: steps.decision.outputs.should_release == 'true'
         shell: pwsh

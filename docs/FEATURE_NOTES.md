@@ -457,11 +457,13 @@
 
 - **既有資料表修改仍有不支援情境 ✅ provider ALTER 與進階索引 smoke test 已補齊**
   - 現況：部分 ALTER TABLE 操作會列入「目前不支援以下既有資料表變更」；PostgreSQL Table Designer 已支援 `schema.table` 形式的既有資料表 SQL 產生，不再固定套用 `public` schema；PostgreSQL / SQL Server / Oracle 的 FULLTEXT、SPATIAL 索引 SQL 產生已納入可重跑 smoke test。
+  - 本輪補齊：約束分頁可載入 MySQL、PostgreSQL、SQL Server、Oracle、SQLite 的外鍵與 CHECK 約束，新增、刪除或修改會先正規化名稱、欄位、參照目標與動作，再生成 provider 對應的 DDL；SQL Server 索引分頁也支援 PRIMARY／PATH／VALUE／PROPERTY XML 索引與父 XML 索引關係。
+  - 本輪補齊：欄位屬性保留各 provider 的原始 metadata。MySQL/MariaDB 支援字元集、collation、generated expression/storage；PostgreSQL 支援 identity、generated expression、storage、compression、collation；SQLite 支援 generated expression/storage、collation；Oracle 與 Snowflake 支援 identity、虛擬欄位、collation，Oracle 另保留 `DEFAULT ON NULL`。可安全建立的屬性會進入 SQL 預覽；既有資料表無法安全 ALTER 的進階屬性會明確列為不支援，SQLite 若無法解析既有 generated expression 也拒絕重建，避免遺失 schema 設定。
   - 本輪補齊：SQLite 既有欄位型別、NULL 或 DEFAULT 變更需要重建表的限制說明已改用語系字串，繁中與英文預覽都會顯示一致原因。
   - 本輪補齊：MySQL 既有資料表沒有偵測到任何欄位或索引變更時，SQL 預覽的無變更註解已改用語系字串，繁中與英文介面都會顯示一致文字。
   - 本輪補齊：Table Designer 載入既有資料表索引 metadata 失敗時不再沉默吞錯，會顯示可理解的警告訊息，索引頁改以空白狀態開啟，欄位設計仍可繼續使用；若 provider 未提供錯誤原因，儲存失敗與索引 metadata 載入失敗的 fallback 也會依繁中/英文語系顯示「未知錯誤 / Unknown error」。
   - 本輪補齊：PostgreSQL provider 會列出非 `public` schema 的 Table/View、Function 與 Trigger，並讓欄位、索引、資料瀏覽、列數、複製建表、View DDL 與批次寫入等主要操作依 `schema.table` 產生正確 SQL；QueryForm 資料表新增/更新/刪除與 Form1 共用物件 SQL（開啟查詢、Drop、Dump/DDL、資料產生、補註解）也會依 `schema.table` 寫入正確 schema；Table Designer 欄位修改、註解、Primary Key 變更與索引刪除的 SQL 預覽也會依目前資料表 schema 產生正確物件名稱；新增 View / Function 範本會沿用目前選取物件的 schema，避免在非預設 schema 工作時又產生 `public` / `dbo` 範本。
-  - 本輪驗證：新增 MySQL / PostgreSQL / SQL Server / Oracle / SQLite 既有資料表 ALTER smoke test，覆蓋欄位改名、型別變更、NULL / DEFAULT、註解、新增欄位、MySQL 刪欄位，以及 SQLite 受限 ALTER 的重建表策略。
+  - 本輪驗證：新增 MySQL / PostgreSQL / SQL Server / Oracle / SQLite 既有資料表 ALTER smoke test，覆蓋欄位改名、型別變更、NULL / DEFAULT、註解、新增欄位、MySQL 刪欄位、外鍵／CHECK 約束、SQL Server XML 索引、跨資料庫欄位屬性，以及 SQLite 受限 ALTER 的重建表策略。
   - 後續方向：Primary Key 與 constraint 變更仍需依 provider 增加更多實機測試資料庫案例；進階索引已先以 SQL builder smoke test 固定語法輸出，後續仍可補實機建立/刪除案例。
 
 - **FULLTEXT / SPATIAL 索引只支援部分 provider 與語法 ✅ 主要 provider 與 SQLite 專用精靈已補齊**

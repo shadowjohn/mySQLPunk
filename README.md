@@ -193,7 +193,7 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 70 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 主要 DDL builder、連線 URI 匯入、MongoDB provider 基礎與文件樹／安全編輯規則、Redis RESP／URI／provider 瀏覽與 WATCH/MULTI/EXEC string／集合安全編輯的 loopback 連線流程、Snowflake SQL REST API 的 loopback HTTP 流程（bearer 驗證、202 輪詢、partition 合併、唯讀結果入口與 DML 寫入）、連線星號／色彩／批次屬性、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
+目前 83 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 的主要 DDL、外鍵／CHECK 約束、SQL Server XML 索引與跨資料庫欄位屬性 builder、連線 URI 匯入、MongoDB provider 基礎與文件樹／安全編輯規則、Redis RESP／URI／provider 瀏覽與 WATCH/MULTI/EXEC string／集合安全編輯的 loopback 連線流程、Snowflake SQL REST API 的 loopback HTTP 流程（bearer 驗證、202 輪詢、partition 合併、唯讀結果入口與 DML 寫入）、連線星號／色彩／批次屬性、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
 
 需要只重跑單一測試群組時，可在執行測試程式前設定 `MYSQLPUNK_SMOKE_FILTER`（不分大小寫比對測試名稱）；沒有任何項目符合時會以錯誤碼結束，避免空跑誤判成功。
 
@@ -242,7 +242,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | SQL 編輯輔助 | 可用 | 自動完成會解析目前 statement 的資料表與 alias，提供欄位、`alias.column`、資料表、關鍵字與片段捷徑；metadata 依 provider/database 快取。`Ctrl+Shift+P` 可搜尋、插入、新增、刪除自訂 SQL 片段，並以 JSON 匯入／匯出。 |
 | 資料表資料編輯 | 可用 | 支援新增、修改、刪除與儲存；可為每張資料表保存多組具名篩選、排序與顯示欄位設定，並從底部工具列快速切換。若沒有 Primary Key，預設更新/刪除前會顯示風險警告，也可在選項中改為唯讀開啟。 |
 | 資料分析 | 可用 | 資料表右鍵可開啟欄位分析工作區；支援抽樣／全表、NULL、相異值、極值、數值平均、Top 10 比例，並可從分佈值開啟對應 WHERE 查詢。 |
-| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存；MySQL 欄位屬性會依型別顯示預設值、自動遞增、無號、補零與 `ON UPDATE CURRENT_TIMESTAMP` 等設定，資料表註解變更也會納入 SQL 預覽；既有資料表欄位改名、型別、NULL、DEFAULT、註解、MySQL 刪欄位與 SQLite 重建表已納入 smoke test，部分進階索引與 constraint 情境仍需實機驗證。 |
+| Table Designer | 部分可用 | 支援新增資料表與多 provider ALTER 預覽/儲存、外鍵／CHECK 約束及 SQL Server XML 索引；MySQL/MariaDB 的字元集、排序規則、generated column，PostgreSQL 的 identity／generated／storage／compression／collation，SQLite 的 generated column／collation，以及 Oracle／Snowflake 的 identity、虛擬欄位與 collation 都會顯示在欄位屬性中。既有資料表不支援直接 ALTER 的進階屬性會明確阻擋，避免靜默遺失；部分進階索引與 constraint 情境仍需實機驗證。 |
 | 自動補註解 | 可用 | 可從遠端字典補欄位註解，支援「補空白註解」與「覆蓋註解」兩種模式；SQLite 會寫入 sidecar metadata table。 |
 | 補註解進度視窗 | 可用 | 使用遮罩視窗與 CC0 貓咪跑者 GIF 顯示逐筆進度。 |
 | 資料產生 | 可用 | Tables 節點可產生指定資料表的 INSERT SQL，可開到查詢視窗檢查，也可確認後逐筆直接寫入。 |

@@ -1,0 +1,42 @@
+name: Windows Desktop
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    name: Release build and smoke tests
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v4
+
+      - name: Restore Windows desktop solution
+        shell: pwsh
+        run: nuget restore .\mySQLPunk.sln -NonInteractive
+
+      - name: Build Windows desktop release
+        shell: pwsh
+        run: msbuild .\mySQLPunk.sln /p:Configuration=Release /p:Platform="Any CPU" /verbosity:minimal /nologo
+
+      - name: Run Windows desktop smoke tests
+        shell: pwsh
+        run: .\tests\Run-SmokeTests.ps1
