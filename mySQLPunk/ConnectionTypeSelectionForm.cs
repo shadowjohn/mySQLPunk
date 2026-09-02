@@ -124,6 +124,10 @@ namespace mySQLPunk
                 }
             };
             searchBox.LostFocus += (s, e) => ApplySearchPlaceholder();
+            Padding searchMargin = searchBox.Margin;
+            Control searchField = UiField.Wrap(searchBox);
+            searchField.Width = 190;
+            searchField.Margin = searchMargin;
 
             FlowLayoutPanel headerTools = new FlowLayoutPanel
             {
@@ -133,7 +137,7 @@ namespace mySQLPunk
                 AutoSize = false,
                 Width = 290
             };
-            headerTools.Controls.Add(searchBox);
+            headerTools.Controls.Add(searchField);
             headerTools.Controls.Add(listButton);
             headerTools.Controls.Add(gridButton);
 

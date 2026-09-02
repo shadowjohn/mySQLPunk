@@ -147,8 +147,11 @@ namespace mySQLPunk
                 WordWrap = true,
                 Margin = new Padding(0, 3, 0, 5)
             };
+            Control field = UiField.Wrap(box);
+            field.Dock = DockStyle.Fill;
+            field.Margin = box.Margin;
             panel.Controls.Add(label, 0, row);
-            panel.Controls.Add(box, 1, row);
+            panel.Controls.Add(field, 1, row);
             return box;
         }
 

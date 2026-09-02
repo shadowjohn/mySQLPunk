@@ -70,7 +70,6 @@ namespace mySQLPunk
             };
             TextBox sourceTextBox = new TextBox
             {
-                Dock = DockStyle.Top,
                 ReadOnly = true,
                 Text = source == null ? string.Empty : source.DisplayName,
                 Margin = new Padding(0, 5, 0, 8)
@@ -83,7 +82,6 @@ namespace mySQLPunk
             };
             targetComboBox = new ComboBox
             {
-                Dock = DockStyle.Top,
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Margin = new Padding(0, 5, 0, 8)
             };
@@ -108,9 +106,15 @@ namespace mySQLPunk
             buttons.Controls.Add(cancelButton);
 
             layout.Controls.Add(sourceLabel, 0, 0);
-            layout.Controls.Add(sourceTextBox, 1, 0);
+            Control sourceField = UiField.Wrap(sourceTextBox);
+            sourceField.Dock = DockStyle.Top;
+            sourceField.Margin = sourceTextBox.Margin;
+            layout.Controls.Add(sourceField, 1, 0);
             layout.Controls.Add(targetLabel, 0, 1);
-            layout.Controls.Add(targetComboBox, 1, 1);
+            Control targetField = UiField.Wrap(targetComboBox);
+            targetField.Dock = DockStyle.Top;
+            targetField.Margin = targetComboBox.Margin;
+            layout.Controls.Add(targetField, 1, 1);
             layout.Controls.Add(buttons, 0, 2);
             layout.SetColumnSpan(buttons, 2);
             Controls.Add(layout);

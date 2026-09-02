@@ -110,7 +110,10 @@ namespace mySQLPunk
             _sortColumnBox.Items.Add(Localization.T("TableProfile.DefaultSort"));
             foreach (string column in _columns) _sortColumnBox.Items.Add(column);
             _sortColumnBox.SelectedIndex = 0;
-            editor.Controls.Add(_sortColumnBox, 1, 2);
+            Control sortColumnField = UiField.Wrap(_sortColumnBox);
+            sortColumnField.Dock = DockStyle.Fill;
+            sortColumnField.Margin = new Padding(0, 3, 0, 5);
+            editor.Controls.Add(sortColumnField, 1, 2);
 
             AddLabel(editor, 3, Localization.T("TableProfile.SortDirection"));
             _descendingBox = new CheckBox
@@ -175,7 +178,10 @@ namespace mySQLPunk
                 WordWrap = multiline,
                 Margin = new Padding(0, 3, 0, 5)
             };
-            panel.Controls.Add(box, 1, row);
+            Control field = UiField.Wrap(box);
+            field.Dock = DockStyle.Fill;
+            field.Margin = box.Margin;
+            panel.Controls.Add(field, 1, row);
             return box;
         }
 

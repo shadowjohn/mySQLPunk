@@ -109,7 +109,6 @@ namespace mySQLPunk
             }, 0, 0);
             _jsonBox = new TextBox
             {
-                Dock = DockStyle.Fill,
                 Multiline = true,
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
@@ -118,7 +117,9 @@ namespace mySQLPunk
                 Font = new Font("Consolas", 10f),
                 ReadOnly = _readOnly
             };
-            rightPanel.Controls.Add(_jsonBox, 0, 1);
+            Control jsonField = UiField.Wrap(_jsonBox);
+            jsonField.Dock = DockStyle.Fill;
+            rightPanel.Controls.Add(jsonField, 0, 1);
             split.Panel2.Controls.Add(rightPanel);
             root.Controls.Add(split, 0, 0);
 

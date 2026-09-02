@@ -297,26 +297,32 @@ namespace mySQLPunk
                 if (IsNewTable) MarkAsModified();
                 UpdateTitle();
             };
-            tlpOptions.Controls.Add(txtTableName, 1, 0);
+            Control tableNameField = UiField.Wrap(txtTableName);
+            tableNameField.Width = 260;
+            tlpOptions.Controls.Add(tableNameField, 1, 0);
 
             tlpOptions.Controls.Add(new Label() { Text = Localization.T("Designer.Engine"), Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
             cbEngine = new ComboBox() { Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
             cbEngine.Items.AddRange(new object[] { "InnoDB", "MyISAM", "MEMORY" });
             cbEngine.SelectedItem = "InnoDB";
             cbEngine.SelectedIndexChanged += (s, e) => MarkAsModified();
-            tlpOptions.Controls.Add(cbEngine, 1, 1);
+            Control engineField = UiField.Wrap(cbEngine);
+            engineField.Width = 200;
+            tlpOptions.Controls.Add(engineField, 1, 1);
             tpOptions.Controls.Add(tlpOptions);
 
             // 4. 註解分頁
             tpComment = new TabPage(Localization.T("Designer.Comment"));
-            txtTableComment = new TextBox() { Dock = DockStyle.Fill, Multiline = true };
+            txtTableComment = new TextBox() { Multiline = true };
             txtTableComment.TextChanged += (s, e) =>
             {
                 MarkAsModified();
                 RefreshSqlPreviewIfVisible();
             };
             txtTableComment.Leave += (s, e) => RefreshSqlPreviewIfVisible();
-            tpComment.Controls.Add(txtTableComment);
+            Control tableCommentField = UiField.Wrap(txtTableComment);
+            tableCommentField.Dock = DockStyle.Fill;
+            tpComment.Controls.Add(tableCommentField);
 
             // 5. SQL 預覽分頁
             tpSqlPreview = new TabPage(Localization.T("Designer.SqlPreview"));
@@ -2547,10 +2553,12 @@ namespace mySQLPunk
                 Anchor = AnchorStyles.Left,
                 Margin = new Padding(0, 4, 12, 6)
             };
-            editor.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            Control field = UiField.Wrap(editor);
+            field.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            field.Margin = editor.Margin;
 
             layout.Controls.Add(label, 0, rowIndex);
-            layout.Controls.Add(editor, 1, rowIndex);
+            layout.Controls.Add(field, 1, rowIndex);
         }
 
         private void ApplyColumnPropertyValue(string columnName, object value)

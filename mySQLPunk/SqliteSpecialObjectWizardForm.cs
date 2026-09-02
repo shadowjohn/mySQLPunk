@@ -121,7 +121,9 @@ namespace mySQLPunk
         private void AddRow(TableLayoutPanel layout, int row, string labelText, Control control)
         {
             layout.Controls.Add(new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left }, 0, row);
-            layout.Controls.Add(control, 1, row);
+            Control field = UiField.Wrap(control);
+            field.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            layout.Controls.Add(field, 1, row);
         }
 
         private void ApplyLanguage()

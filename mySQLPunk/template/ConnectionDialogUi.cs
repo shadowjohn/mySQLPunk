@@ -137,11 +137,10 @@ namespace mySQLPunk.template
             shell.Fields.Controls.Add(cell, 1, row);
         }
 
-        /// <summary>文字框包進圓角外殼；其它控制項原樣使用。</summary>
+        /// <summary>所有可編輯欄位都交給共用外殼，避免文字、選單與數字欄位長相不一致。</summary>
         public static Control WrapInput(Control field)
         {
-            TextBoxBase textBox = field as TextBoxBase;
-            return textBox != null ? new UiInputShell(textBox) : field;
+            return UiField.Wrap(field);
         }
 
         /// <summary>加一列只有輸入側的控制項（核取方塊、次要按鈕這類）。</summary>

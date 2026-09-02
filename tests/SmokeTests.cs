@@ -101,6 +101,7 @@ public static class SmokeTests
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
         Run("SQL script splitter", TestSqlScriptSplitter, ref passed);
         Run("Dark theme control coverage", TestDarkThemeControlCoverage, ref passed);
+        Run("表單欄位一致樣式", TestFormFieldShells, ref passed);
         Run("Right pane collapse behavior", TestRightPaneCollapseBehavior, ref passed);
         Run("AI assistant compact button glyphs", TestAiAssistantCompactButtonGlyphs, ref passed);
         Run("Main toolbar vector icons", TestMainToolbarVectorIcons, ref passed);
@@ -10657,6 +10658,45 @@ public static class SmokeTests
         {
             ThemeManager.SetTheme(originalTheme, false);
         }
+    }
+
+    private static void TestFormFieldShells()
+    {
+        using (Form form = new Form())
+        using (TextBox textBox = new TextBox { Width = 260 })
+        using (ComboBox comboBox = new ComboBox { Width = 220, DropDownStyle = ComboBoxStyle.DropDownList })
+        using (NumericUpDown numeric = new NumericUpDown { Width = 90 })
+        using (DateTimePicker picker = new DateTimePicker { Width = 120 })
+        {
+            Control textField = UiField.Wrap(textBox);
+            Control comboField = UiField.Wrap(comboBox);
+            Control numericField = UiField.Wrap(numeric);
+            Control pickerField = UiField.Wrap(picker);
+            form.Controls.Add(textField);
+            form.Controls.Add(comboField);
+            form.Controls.Add(numericField);
+            form.Controls.Add(pickerField);
+
+            ThemeManager.ApplyTo(form);
+
+            Assert(textField is UiInputShell, "Text fields should use the rounded input shell.");
+            Assert(comboField is UiFieldShell && numericField is UiFieldShell && pickerField is UiFieldShell,
+                "Lists, numeric inputs, and date pickers should share the form-field shell.");
+            AssertEquals(UiMetrics.ControlHeight.ToString(), textField.Height.ToString(), "Text field shell should use the shared control height.");
+            AssertEquals("260", textField.Width.ToString(), "Text field shell should preserve the requested width.");
+            AssertEquals("220", comboField.Width.ToString(), "Combo field shell should preserve the requested width.");
+            AssertEquals(BorderStyle.None.ToString(), textBox.BorderStyle.ToString(), "Text input should leave its border to the shared shell.");
+            AssertEquals(FlatStyle.Flat.ToString(), comboBox.FlatStyle.ToString(), "Combo input should use the shared flat interior.");
+            AssertSameColor(ThemeManager.TextBoxBackColor, textField.BackColor, "Input shell should use the theme input background.");
+        }
+
+        string root = FindRepositoryRootForTest();
+        string optionsSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "OptionsForm.cs"), Encoding.UTF8);
+        string connectionUiSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "template", "ConnectionDialogUi.cs"), Encoding.UTF8);
+        string designerSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "TableDesignerForm.cs"), Encoding.UTF8);
+        AssertContains(optionsSource, "CreateOptionField", "Options should use the shared field wrapper for every settings input.");
+        AssertContains(connectionUiSource, "UiField.Wrap(field)", "Connection dialogs should wrap every editable control.");
+        AssertContains(designerSource, "UiField.Wrap(txtTableName)", "Table designer options should use the shared input style.");
     }
 
     private static void TestRightPaneCollapseBehavior()

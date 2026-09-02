@@ -265,7 +265,6 @@ namespace mySQLPunk
             languageCombo = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Location = new Point(105, 210),
                 Width = 250
             };
             languageCombo.Items.Add(new LanguageItem(Localization.T("Menu.LanguageZh"), Localization.TraditionalChinese));
@@ -305,7 +304,7 @@ namespace mySQLPunk
             contentPanel.Controls.Add(lightThemeRadio);
             contentPanel.Controls.Add(darkThemeRadio);
             contentPanel.Controls.Add(languageLabel);
-            contentPanel.Controls.Add(languageCombo);
+            contentPanel.Controls.Add(CreateOptionField(languageCombo, new Point(105, 210), 250));
             contentPanel.Controls.Add(noteLabel);
             contentPanel.Controls.Add(noPrimaryKeyReadOnlyCheckBox);
         }
@@ -461,7 +460,8 @@ namespace mySQLPunk
                 providerChoices.Add(new OptionChoice(preset.Id, preset.DisplayName));
             }
             ComboBox providerCombo = AddOptionCombo("AiProvider", T("服務提供者:", "Provider:"), providerChoices.ToArray(), 405, 350);
-            providerCombo.Left = 220;
+            Control providerField = UiField.Host(providerCombo);
+            providerField.Left = 220;
 
             Label endpointLabel = new Label
             {
@@ -477,8 +477,9 @@ namespace mySQLPunk
             };
             endpointBox.TextChanged += (s, e) => ApplicationOptionSettings.SetString("AiEndpoint", endpointBox.Text);
             optionTextBoxes["AiEndpoint"] = endpointBox;
+            Control endpointField = CreateOptionField(endpointBox, new Point(220, 416), 350);
             contentPanel.Controls.Add(endpointLabel);
-            contentPanel.Controls.Add(endpointBox);
+            contentPanel.Controls.Add(endpointField);
 
             Label modelLabel = new Label
             {
@@ -495,7 +496,8 @@ namespace mySQLPunk
                 Text = initialAiSettings.Model
             };
             modelCombo.TextChanged += (s, e) => ApplicationOptionSettings.SetString("AiModel", modelCombo.Text);
-            contentPanel.Controls.Add(modelCombo);
+            Control modelField = CreateOptionField(modelCombo, new Point(220, 458), 350);
+            contentPanel.Controls.Add(modelField);
 
             // API 金鑰不落地設定檔，直接進 Windows 認證管理員；一家一把
             Label keyLabel = new Label
@@ -511,6 +513,7 @@ namespace mySQLPunk
                 Width = 350,
                 UseSystemPasswordChar = true
             };
+            Control keyField = CreateOptionField(keyBox, new Point(220, 500), 350);
             Label keyState = new Label
             {
                 AutoSize = true,
@@ -563,7 +566,7 @@ namespace mySQLPunk
                 keyBox.Text = "";
                 refreshKeyState();
             };
-            contentPanel.Controls.Add(keyBox);
+            contentPanel.Controls.Add(keyField);
             contentPanel.Controls.Add(keyState);
 
             // 一鍵跳到該服務的金鑰／認證網頁（本機服務則是下載頁）
@@ -806,14 +809,14 @@ namespace mySQLPunk
                 int nextTop = 447;
 
                 endpointLabel.Visible = showEndpoint;
-                endpointBox.Visible = showEndpoint;
+                endpointField.Visible = showEndpoint;
                 if (showEndpoint)
                 {
                     endpointLabel.Text = isCli
                         ? T("自訂 CLI 路徑:", "Custom CLI path:")
                         : T("端點 URL:", "Endpoint URL:");
                     endpointLabel.Top = nextTop + 4;
-                    endpointBox.Top = nextTop;
+                    endpointField.Top = nextTop;
                     nextTop += 42;
                 }
 
@@ -821,17 +824,17 @@ namespace mySQLPunk
                     ? T("模型（留空由 CLI 決定）:", "Model (blank = CLI default):")
                     : T("模型（留空用預設）:", "Model (blank = default):");
                 modelLabel.Top = nextTop + 4;
-                modelCombo.Top = nextTop;
+                modelField.Top = nextTop;
                 nextTop += 42;
 
                 keyLabel.Visible = showKey;
-                keyBox.Visible = showKey;
+                keyField.Visible = showKey;
                 keyLink.Visible = showKey;
                 keyState.Visible = showKey;
                 if (showKey)
                 {
                     keyLabel.Top = nextTop + 4;
-                    keyBox.Top = nextTop;
+                    keyField.Top = nextTop;
                     keyLink.Top = nextTop + 32;
                     keyState.Top = nextTop + 32;
                     nextTop += 74;
@@ -1278,7 +1281,7 @@ namespace mySQLPunk
             };
             input.ValueChanged += (s, e) => ApplicationOptionSettings.SetInt(key, (int)input.Value);
             optionNumbers[key] = input;
-            contentPanel.Controls.Add(input);
+            contentPanel.Controls.Add(CreateOptionField(input, new Point(250, top), 95));
             return input;
         }
 
@@ -1314,7 +1317,7 @@ namespace mySQLPunk
                 ApplicationOptionSettings.SetString(key, choice == null ? string.Empty : choice.Value);
             };
             optionCombos[key] = combo;
-            contentPanel.Controls.Add(combo);
+            contentPanel.Controls.Add(CreateOptionField(combo, new Point(250, top), width));
             return combo;
         }
 
@@ -1340,8 +1343,19 @@ namespace mySQLPunk
             };
             input.TextChanged += (s, e) => ApplicationOptionSettings.SetString(key, input.Text);
             optionTextBoxes[key] = input;
-            contentPanel.Controls.Add(input);
+            contentPanel.Controls.Add(CreateOptionField(input, new Point(250, top), width));
             return input;
+        }
+
+        /// <summary>設定頁採絕對座標排版時，仍讓輸入控制項保有一致的欄位外殼與焦點樣式。</summary>
+        private static Control CreateOptionField(Control input, Point location, int width)
+        {
+            AnchorStyles anchor = input.Anchor;
+            Control field = UiField.Wrap(input);
+            field.Location = location;
+            field.Width = width;
+            field.Anchor = anchor;
+            return field;
         }
 
         private OptionChoice[] BuildFontChoices()
@@ -1424,10 +1438,9 @@ namespace mySQLPunk
             remoteBackupDirectoryInput = new TextBox
             {
                 Text = BackupMirrorSettings.RemoteDirectory,
-                Location = new Point(150, 100),
-                Width = 390,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
             };
+            Control remoteBackupDirectoryField = CreateOptionField(remoteBackupDirectoryInput, new Point(150, 100), 390);
             Button browseButton = new Button
             {
                 Text = Localization.T("Common.Browse"),
@@ -1457,10 +1470,9 @@ namespace mySQLPunk
             {
                 Minimum = 1,
                 Maximum = 999,
-                Value = BackupMirrorSettings.RetainCount,
-                Location = new Point(150, 146),
-                Width = 90
+                Value = BackupMirrorSettings.RetainCount
             };
+            Control remoteBackupRetainCountField = CreateOptionField(remoteBackupRetainCountInput, new Point(150, 146), 90);
             backupIntegrityScheduleEnabledCheckBox = new CheckBox
             {
                 Text = Localization.T("Options.BackupIntegrityScheduleEnabled"),
@@ -1479,10 +1491,9 @@ namespace mySQLPunk
             {
                 Minimum = 1,
                 Maximum = 720,
-                Value = BackupMirrorSettings.IntegrityIntervalHours,
-                Location = new Point(150, 234),
-                Width = 90
+                Value = BackupMirrorSettings.IntegrityIntervalHours
             };
+            Control backupIntegrityIntervalField = CreateOptionField(backupIntegrityIntervalInput, new Point(150, 234), 90);
             backupIntegrityAutoQuarantineCheckBox = new CheckBox
             {
                 Text = Localization.T("Options.BackupIntegrityAutoQuarantine"),
@@ -1501,10 +1512,9 @@ namespace mySQLPunk
             {
                 Minimum = 1,
                 Maximum = 999,
-                Value = BackupMirrorSettings.IntegrityQuarantineRetainCount,
-                Location = new Point(150, 316),
-                Width = 90
+                Value = BackupMirrorSettings.IntegrityQuarantineRetainCount
             };
+            Control backupIntegrityQuarantineRetainCountField = CreateOptionField(backupIntegrityQuarantineRetainCountInput, new Point(150, 316), 90);
             Label restoreSampleRowsLabel = new Label
             {
                 Text = Localization.T("Options.RestoreContentSnapshotRows"),
@@ -1515,10 +1525,9 @@ namespace mySQLPunk
             {
                 Minimum = 1,
                 Maximum = mySQLPunk.lib.BackupRestoreDiffService.MaxConfigurableContentSnapshotRows,
-                Value = BackupMirrorSettings.RestoreContentSnapshotMaxRows,
-                Location = new Point(150, 358),
-                Width = 110
+                Value = BackupMirrorSettings.RestoreContentSnapshotMaxRows
             };
+            Control backupRestoreContentSampleRowsField = CreateOptionField(backupRestoreContentSampleRowsInput, new Point(150, 358), 110);
             backupIntegrityScheduleEnabledCheckBox.CheckedChanged += (s, e) =>
             {
                 backupIntegrityIntervalInput.Enabled = backupIntegrityScheduleEnabledCheckBox.Checked;
@@ -1536,18 +1545,18 @@ namespace mySQLPunk
             contentPanel.Controls.Add(sectionTitle);
             contentPanel.Controls.Add(hintLabel);
             contentPanel.Controls.Add(pathLabel);
-            contentPanel.Controls.Add(remoteBackupDirectoryInput);
+            contentPanel.Controls.Add(remoteBackupDirectoryField);
             contentPanel.Controls.Add(browseButton);
             contentPanel.Controls.Add(retainLabel);
-            contentPanel.Controls.Add(remoteBackupRetainCountInput);
+            contentPanel.Controls.Add(remoteBackupRetainCountField);
             contentPanel.Controls.Add(backupIntegrityScheduleEnabledCheckBox);
             contentPanel.Controls.Add(intervalLabel);
-            contentPanel.Controls.Add(backupIntegrityIntervalInput);
+            contentPanel.Controls.Add(backupIntegrityIntervalField);
             contentPanel.Controls.Add(backupIntegrityAutoQuarantineCheckBox);
             contentPanel.Controls.Add(quarantineRetainLabel);
-            contentPanel.Controls.Add(backupIntegrityQuarantineRetainCountInput);
+            contentPanel.Controls.Add(backupIntegrityQuarantineRetainCountField);
             contentPanel.Controls.Add(restoreSampleRowsLabel);
-            contentPanel.Controls.Add(backupRestoreContentSampleRowsInput);
+            contentPanel.Controls.Add(backupRestoreContentSampleRowsField);
 
             AddOptionTextBox("FileLogDirectory", T("記錄位置:", "Log folder:"), 412, 390);
             AddOptionTextBox("FileQueryDirectory", T("查詢檔案位置:", "Query folder:"), 454, 390);
@@ -1565,10 +1574,9 @@ namespace mySQLPunk
             TextBox input = new TextBox
             {
                 Text = CliPathSettings.GetPath(provider),
-                Location = new Point(150, top),
-                Width = 390,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
             };
+            Control pathField = CreateOptionField(input, new Point(150, top), 390);
             Button browseButton = new Button
             {
                 Text = Localization.T("Common.Browse"),
@@ -1591,7 +1599,7 @@ namespace mySQLPunk
 
             cliPathInputs[provider] = input;
             contentPanel.Controls.Add(label);
-            contentPanel.Controls.Add(input);
+            contentPanel.Controls.Add(pathField);
             contentPanel.Controls.Add(browseButton);
         }
 

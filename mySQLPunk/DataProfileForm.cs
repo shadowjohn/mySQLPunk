@@ -84,7 +84,10 @@ namespace mySQLPunk
             _sampleRows.Items.Add("50,000");
             _sampleRows.Items.Add(Localization.T("DataProfile.AllRows"));
             _sampleRows.SelectedIndex = 1;
-            commands.Controls.Add(_sampleRows);
+            Control sampleRowsField = UiField.Wrap(_sampleRows);
+            sampleRowsField.Width = 130;
+            sampleRowsField.Margin = new Padding(0, 2, UiMetrics.Space3, 0);
+            commands.Controls.Add(sampleRowsField);
 
             _runButton = new Button
             {

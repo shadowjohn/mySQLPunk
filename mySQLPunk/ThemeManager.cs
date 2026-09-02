@@ -381,6 +381,14 @@ namespace mySQLPunk
                 ApplyToolStrip(control.ContextMenuStrip);
             }
 
+            UiFieldShell fieldShell = control as UiFieldShell;
+            if (fieldShell != null)
+            {
+                fieldShell.SyncColors();
+                fieldShell.Invalidate();
+                return;
+            }
+
             ToolStrip toolStrip = control as ToolStrip;
             if (toolStrip != null)
             {
@@ -405,6 +413,14 @@ namespace mySQLPunk
             UpDownBase upDown = control as UpDownBase;
             if (upDown != null)
             {
+                UiFieldShell hostShell = upDown.Parent as UiFieldShell;
+                if (hostShell != null)
+                {
+                    hostShell.SyncColors();
+                    hostShell.Invalidate();
+                    WatchInteractiveState(upDown);
+                    return;
+                }
                 upDown.BackColor = TextBoxBackColor;
                 upDown.ForeColor = TextColor;
                 upDown.BorderStyle = BorderStyle.FixedSingle;
@@ -415,6 +431,14 @@ namespace mySQLPunk
             DateTimePicker dateTimePicker = control as DateTimePicker;
             if (dateTimePicker != null)
             {
+                UiFieldShell hostShell = dateTimePicker.Parent as UiFieldShell;
+                if (hostShell != null)
+                {
+                    hostShell.SyncColors();
+                    hostShell.Invalidate();
+                    WatchInteractiveState(dateTimePicker);
+                    return;
+                }
                 dateTimePicker.BackColor = TextBoxBackColor;
                 dateTimePicker.ForeColor = TextColor;
                 dateTimePicker.CalendarMonthBackground = TextBoxBackColor;
@@ -450,7 +474,7 @@ namespace mySQLPunk
             if (textBox != null)
             {
                 // UiInputShell 內的文字框：外殼負責邊框與底色，這裡別把 BorderStyle 改回方框
-                UiInputShell hostShell = textBox.Parent as UiInputShell;
+                UiFieldShell hostShell = textBox.Parent as UiFieldShell;
                 if (hostShell != null)
                 {
                     hostShell.SyncColors();
@@ -471,6 +495,14 @@ namespace mySQLPunk
             ComboBox comboBox = control as ComboBox;
             if (comboBox != null)
             {
+                UiFieldShell hostShell = comboBox.Parent as UiFieldShell;
+                if (hostShell != null)
+                {
+                    hostShell.SyncColors();
+                    hostShell.Invalidate();
+                    WatchInteractiveState(comboBox);
+                    return;
+                }
                 comboBox.BackColor = comboBox.Enabled ? TextBoxBackColor : DisabledBackColor;
                 comboBox.ForeColor = comboBox.Enabled ? TextColor : DisabledTextColor;
                 // 淺色主題交給系統畫，才有邊框與正常的下拉箭頭；

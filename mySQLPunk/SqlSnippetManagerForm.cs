@@ -65,7 +65,10 @@ namespace mySQLPunk
             }, 0, 0);
             _searchBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
             _searchBox.TextChanged += (sender, args) => RefreshList(null);
-            left.Controls.Add(_searchBox, 0, 1);
+            Control searchField = UiField.Wrap(_searchBox);
+            searchField.Dock = DockStyle.Top;
+            searchField.Margin = new Padding(0, 0, 0, 8);
+            left.Controls.Add(searchField, 0, 1);
             _snippetList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
             _snippetList.SelectedIndexChanged += (sender, args) => LoadSelectedSnippet();
             _snippetList.DoubleClick += (sender, args) => InsertSelectedSnippet();
@@ -145,8 +148,11 @@ namespace mySQLPunk
                 WordWrap = !multiline,
                 Margin = new Padding(0, 3, 0, 5)
             };
+            Control field = UiField.Wrap(box);
+            field.Dock = DockStyle.Fill;
+            field.Margin = box.Margin;
             panel.Controls.Add(label, 0, row);
-            panel.Controls.Add(box, 1, row);
+            panel.Controls.Add(field, 1, row);
             return box;
         }
 

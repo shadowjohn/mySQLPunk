@@ -546,8 +546,11 @@ namespace mySQLPunk
             label.Text = labelText;
             label.Dock = DockStyle.Fill;
             label.TextAlign = ContentAlignment.MiddleLeft;
+            Control field = UiField.Wrap(control);
+            field.Dock = DockStyle.Fill;
+            field.Margin = new Padding(0, 2, 0, 2);
             layout.Controls.Add(label, 0, row);
-            layout.Controls.Add(control, 1, row);
+            layout.Controls.Add(field, 1, row);
         }
 
         private static void ResizeFlowChildren(FlowLayoutPanel panel)

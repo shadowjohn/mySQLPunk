@@ -208,8 +208,10 @@ namespace mySQLPunk
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft
             };
+            Control field = UiField.Wrap(control);
+            field.Margin = new Padding(0, 4, 0, 4);
             panel.Controls.Add(fieldLabel, 0, row);
-            panel.Controls.Add(control, 1, row);
+            panel.Controls.Add(field, 1, row);
         }
 
         private void ShowWarning(string key)

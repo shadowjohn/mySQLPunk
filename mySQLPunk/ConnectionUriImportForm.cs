@@ -45,10 +45,11 @@ namespace mySQLPunk
 
             uriTextBox = new TextBox
             {
-                Dock = DockStyle.Top,
-                Height = UiMetrics.ControlHeight,
                 UseSystemPasswordChar = true
             };
+            Control uriField = UiField.Wrap(uriTextBox);
+            uriField.Dock = DockStyle.Top;
+            uriField.Height = UiMetrics.ControlHeight;
             showUriCheckBox = new CheckBox
             {
                 Text = Localization.T("ConnectionUri.Show"),
@@ -84,7 +85,7 @@ namespace mySQLPunk
             buttons.Controls.Add(importButton);
 
             Controls.Add(showUriCheckBox);
-            Controls.Add(uriTextBox);
+            Controls.Add(uriField);
             Controls.Add(supported);
             Controls.Add(description);
             Controls.Add(title);

@@ -313,10 +313,11 @@ namespace mySQLPunk.template
             int row = table.RowCount++;
             table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Label label = new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 9, 12, 8) };
-            control.Margin = new Padding(0, 5, 0, 5);
-            control.Anchor = AnchorStyles.Left;
+            Control field = UiField.Wrap(control);
+            field.Margin = new Padding(0, 5, 0, 5);
+            field.Anchor = AnchorStyles.Left;
             table.Controls.Add(label, 0, row);
-            table.Controls.Add(control, 1, row);
+            table.Controls.Add(field, 1, row);
         }
 
         private static TextBox AddPathRow(TableLayoutPanel table, string label, string filter)
@@ -331,7 +332,9 @@ namespace mySQLPunk.template
                 }
             };
             FlowLayoutPanel row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
-            row.Controls.Add(text);
+            Control field = UiField.Wrap(text);
+            field.Width = 360;
+            row.Controls.Add(field);
             row.Controls.Add(browse);
             AddRow(table, label, row);
             return text;
@@ -349,7 +352,9 @@ namespace mySQLPunk.template
                 }
             };
             FlowLayoutPanel row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
-            row.Controls.Add(text);
+            Control field = UiField.Wrap(text);
+            field.Width = 360;
+            row.Controls.Add(field);
             row.Controls.Add(browse);
             AddRow(table, label, row);
             return text;

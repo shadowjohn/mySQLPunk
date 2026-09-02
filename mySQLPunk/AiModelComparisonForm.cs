@@ -180,8 +180,14 @@ namespace mySQLPunk
             };
             panel.Controls.Add(providerLabel, 0, 0);
             panel.Controls.Add(modelLabel, 1, 0);
-            panel.Controls.Add(providerCombo, 0, 1);
-            panel.Controls.Add(modelCombo, 1, 1);
+            Control providerField = UiField.Wrap(providerCombo);
+            providerField.Dock = DockStyle.Fill;
+            providerField.Margin = new Padding(0, 1, UiMetrics.Space2, 1);
+            Control modelField = UiField.Wrap(modelCombo);
+            modelField.Dock = DockStyle.Fill;
+            modelField.Margin = new Padding(0, 1, 0, 1);
+            panel.Controls.Add(providerField, 0, 1);
+            panel.Controls.Add(modelField, 1, 1);
 
             PopulateProviders(providerCombo, initialProvider);
             PopulateModels(providerCombo, modelCombo, initialModel);

@@ -194,10 +194,11 @@ namespace mySQLPunk.template
         {
             panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             Label label = new Label { Text = labelText, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, AutoSize = true };
-            control.Dock = DockStyle.Fill;
-            control.Margin = new Padding(8, 5, 0, 5);
+            Control field = UiField.Wrap(control);
+            field.Dock = DockStyle.Fill;
+            field.Margin = new Padding(8, 4, 0, 4);
             panel.Controls.Add(label, 0, row);
-            panel.Controls.Add(control, 1, row);
+            panel.Controls.Add(field, 1, row);
         }
 
         private static bool IsTrue(Dictionary<string, object> conn, string key)

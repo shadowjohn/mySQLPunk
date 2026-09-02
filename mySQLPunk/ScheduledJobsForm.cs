@@ -505,17 +505,26 @@ namespace mySQLPunk
             AddLabel(root, 1, Localization.T("Automation.Type"));
             typeBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = FieldMargin() };
             typeBox.Items.AddRange(new object[] { ScheduledJobType.Query, ScheduledJobType.Export, ScheduledJobType.Backup });
-            root.Controls.Add(typeBox, 1, 1);
-            root.SetColumnSpan(typeBox, 2);
+            Control typeField = UiField.Wrap(typeBox);
+            typeField.Dock = DockStyle.Fill;
+            typeField.Margin = FieldMargin();
+            root.Controls.Add(typeField, 1, 1);
+            root.SetColumnSpan(typeField, 2);
 
             AddLabel(root, 2, Localization.T("Automation.Profile"));
             profileBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = FieldMargin() };
-            root.Controls.Add(profileBox, 1, 2);
-            root.SetColumnSpan(profileBox, 2);
+            Control profileField = UiField.Wrap(profileBox);
+            profileField.Dock = DockStyle.Fill;
+            profileField.Margin = FieldMargin();
+            root.Controls.Add(profileField, 1, 2);
+            root.SetColumnSpan(profileField, 2);
             AddLabel(root, 3, Localization.T("Automation.Connection"));
             connectionBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = "DisplayName", Margin = FieldMargin() };
-            root.Controls.Add(connectionBox, 1, 3);
-            root.SetColumnSpan(connectionBox, 2);
+            Control connectionField = UiField.Wrap(connectionBox);
+            connectionField.Dock = DockStyle.Fill;
+            connectionField.Margin = FieldMargin();
+            root.Controls.Add(connectionField, 1, 3);
+            root.SetColumnSpan(connectionField, 2);
             databaseBox = AddTextBox(root, 4, Localization.T("Automation.Database"));
 
             AddLabel(root, 5, Localization.T("Automation.Schedule"));
@@ -523,20 +532,29 @@ namespace mySQLPunk
             scheduleBox = new CheckBox { AutoSize = true, Text = Localization.T("Automation.EnableDailySchedule"), Margin = new Padding(0, 4, 14, 0) };
             dailyTimePicker = new DateTimePicker { Width = 90, Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
             schedulePanel.Controls.Add(scheduleBox);
-            schedulePanel.Controls.Add(dailyTimePicker);
+            Control timeField = UiField.Wrap(dailyTimePicker);
+            timeField.Width = 90;
+            timeField.Margin = new Padding(0, 1, 0, 0);
+            schedulePanel.Controls.Add(timeField);
             root.Controls.Add(schedulePanel, 1, 5);
             root.SetColumnSpan(schedulePanel, 2);
 
             AddLabel(root, 6, Localization.T("Automation.ExportFormat"));
             formatBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = FieldMargin() };
             formatBox.Items.AddRange(Enum.GetValues(typeof(QueryResultExportFormat)).Cast<object>().ToArray());
-            root.Controls.Add(formatBox, 1, 6);
-            root.SetColumnSpan(formatBox, 2);
+            Control formatField = UiField.Wrap(formatBox);
+            formatField.Dock = DockStyle.Fill;
+            formatField.Margin = FieldMargin();
+            root.Controls.Add(formatField, 1, 6);
+            root.SetColumnSpan(formatField, 2);
 
             AddLabel(root, 7, Localization.T("Automation.OutputPath"));
             outputBox = new TextBox { Dock = DockStyle.Fill, Margin = FieldMargin() };
             browseButton = new Button { AutoSize = true, Text = Localization.T("Common.Browse"), Margin = new Padding(6, 3, 0, 5) };
-            root.Controls.Add(outputBox, 1, 7);
+            Control outputField = UiField.Wrap(outputBox);
+            outputField.Dock = DockStyle.Fill;
+            outputField.Margin = FieldMargin();
+            root.Controls.Add(outputField, 1, 7);
             root.Controls.Add(browseButton, 2, 7);
 
             AddLabel(root, 8, "SQL");
@@ -551,8 +569,11 @@ namespace mySQLPunk
                 Font = new Font("Consolas", 10f),
                 Margin = FieldMargin()
             };
-            root.Controls.Add(sqlBox, 1, 8);
-            root.SetColumnSpan(sqlBox, 2);
+            Control sqlField = UiField.Wrap(sqlBox);
+            sqlField.Dock = DockStyle.Fill;
+            sqlField.Margin = FieldMargin();
+            root.Controls.Add(sqlField, 1, 8);
+            root.SetColumnSpan(sqlField, 2);
 
             hintLabel = new Label
             {
@@ -761,8 +782,11 @@ namespace mySQLPunk
         {
             AddLabel(panel, row, label);
             TextBox box = new TextBox { Dock = DockStyle.Fill, Margin = FieldMargin() };
-            panel.Controls.Add(box, 1, row);
-            panel.SetColumnSpan(box, 2);
+            Control field = UiField.Wrap(box);
+            field.Dock = DockStyle.Fill;
+            field.Margin = FieldMargin();
+            panel.Controls.Add(field, 1, row);
+            panel.SetColumnSpan(field, 2);
             return box;
         }
 

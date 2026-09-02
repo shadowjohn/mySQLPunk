@@ -438,53 +438,165 @@ namespace mySQLPunk
     }
 
     /// <summary>
-    /// 圓角輸入框外殼：WinForms 的 TextBox 畫不出圓角與內距，
-    /// 把 BorderStyle.None 的 TextBox 包進來自繪邊框，聚焦時邊框亮主色。
-    /// ThemeManager 會透過 SyncColors 套用主題色。
+    /// 統一的表單欄位外殼。原生 TextBox、ComboBox、數字欄位各自使用不同邊框，
+    /// 因此由外殼提供一致的圓角、焦點色和停用狀態。
     /// </summary>
-    public class UiInputShell : Panel
+    public class UiFieldShell : Panel
     {
-        private readonly TextBoxBase _inner;
+        private readonly Control _inner;
+        private readonly TextBoxBase _textBox;
+        private Region _innerRegion;
 
-        public UiInputShell(TextBoxBase inner)
+        public UiFieldShell(Control inner)
         {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            if (inner == null) throw new ArgumentNullException("inner");
+
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             _inner = inner;
-            inner.BorderStyle = BorderStyle.None;
+            _textBox = inner as TextBoxBase;
+            Width = Math.Max(32, inner.Width);
             Height = UiMetrics.ControlHeight;
-            int vertical = Math.Max(0, (Height - inner.PreferredHeight) / 2);
-            Padding = new Padding(10, vertical, 10, vertical);
+            MinimumSize = new Size(32, UiMetrics.ControlHeight);
+
+            TextBoxBase textBox = inner as TextBoxBase;
+            if (textBox != null)
+            {
+                textBox.BorderStyle = BorderStyle.None;
+                Padding = new Padding(10, textBox.Multiline ? 8 : 5, 10, textBox.Multiline ? 8 : 5);
+                Cursor = Cursors.IBeam;
+            }
+            else
+            {
+                ComboBox comboBox = inner as ComboBox;
+                if (comboBox != null) comboBox.FlatStyle = FlatStyle.Flat;
+
+                UpDownBase upDown = inner as UpDownBase;
+                if (upDown != null) upDown.BorderStyle = BorderStyle.None;
+
+                Padding = new Padding(1);
+            }
+
             inner.Dock = DockStyle.Fill;
+            inner.Margin = Padding.Empty;
             Controls.Add(inner);
             SyncColors();
 
             inner.GotFocus += (s, e) => Invalidate();
             inner.LostFocus += (s, e) => Invalidate();
             inner.EnabledChanged += (s, e) => { SyncColors(); Invalidate(); };
-            inner.ReadOnlyChanged += (s, e) => { SyncColors(); Invalidate(); };
+            if (_textBox != null) _textBox.ReadOnlyChanged += (s, e) => { SyncColors(); Invalidate(); };
+            inner.Resize += (s, e) => ApplyInnerRegion();
+            inner.HandleCreated += (s, e) => ApplyInnerRegion();
             Click += (s, e) => inner.Focus();
-            Cursor = Cursors.IBeam;
+            ApplyInnerRegion();
         }
 
-        public TextBoxBase Inner { get { return _inner; } }
+        public Control Inner { get { return _inner; } }
 
         public void SyncColors()
         {
-            Color back = !_inner.Enabled || _inner.ReadOnly ? ThemeManager.DisabledBackColor : ThemeManager.TextBoxBackColor;
+            bool editable = _inner.Enabled && (_textBox == null || !_textBox.ReadOnly);
+            Color back = editable ? ThemeManager.TextBoxBackColor : ThemeManager.DisabledBackColor;
             BackColor = back;
             _inner.BackColor = back;
             _inner.ForeColor = _inner.Enabled ? ThemeManager.TextColor : ThemeManager.DisabledTextColor;
+
+            ComboBox comboBox = _inner as ComboBox;
+            if (comboBox != null) comboBox.FlatStyle = FlatStyle.Flat;
+
+            DateTimePicker picker = _inner as DateTimePicker;
+            if (picker != null)
+            {
+                picker.CalendarMonthBackground = back;
+                picker.CalendarForeColor = _inner.ForeColor;
+                picker.CalendarTitleBackColor = ThemeManager.SurfaceColor;
+                picker.CalendarTitleForeColor = ThemeManager.TextColor;
+                picker.CalendarTrailingForeColor = ThemeManager.MutedTextColor;
+            }
+        }
+
+        private void ApplyInnerRegion()
+        {
+            if (_textBox != null || _inner.Width <= 2 || _inner.Height <= 2) return;
+            try
+            {
+                if (_innerRegion != null)
+                {
+                    _inner.Region = null;
+                    _innerRegion.Dispose();
+                }
+                using (GraphicsPath path = UiKit.RoundedRect(
+                    new RectangleF(0, 0, _inner.Width, _inner.Height), UiMetrics.RadiusSm))
+                {
+                    _innerRegion = new Region(path);
+                }
+                _inner.Region = _innerRegion;
+            }
+            catch
+            {
+                // 少數原生控制項不支援 Region；仍保留外殼的邊框與色彩。
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _innerRegion != null)
+            {
+                _innerRegion.Dispose();
+                _innerRegion = null;
+            }
+            base.Dispose(disposing);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
             g.Clear(Parent != null ? Parent.BackColor : BackColor);
-            RectangleF bounds = new RectangleF(0.5f, 0.5f, Width - 1f, Height - 1f);
+            RectangleF bounds = new RectangleF(0.5f, 0.5f, Math.Max(0, Width - 1f), Math.Max(0, Height - 1f));
             UiKit.FillRounded(g, bounds, UiMetrics.RadiusMd, BackColor);
-            bool focusRing = _inner.Focused && _inner.Enabled && !_inner.ReadOnly;
+            bool focusRing = _inner.ContainsFocus && _inner.Enabled && (_textBox == null || !_textBox.ReadOnly);
             Color border = focusRing ? ThemeManager.AccentColor : ThemeManager.BorderStrongColor;
             UiKit.DrawRounded(g, bounds, UiMetrics.RadiusMd, border, focusRing ? 1.6f : 1f);
+        }
+    }
+
+    /// <summary>保留既有呼叫端的語意：文字輸入欄使用共用欄位外殼。</summary>
+    public class UiInputShell : UiFieldShell
+    {
+        private readonly TextBoxBase _textBox;
+
+        public UiInputShell(TextBoxBase inner)
+            : base(inner)
+        {
+            _textBox = inner;
+        }
+
+        public new TextBoxBase Inner { get { return _textBox; } }
+    }
+
+    /// <summary>建立表單欄位外殼，讓各表單不必重複處理原生控制項的外觀差異。</summary>
+    public static class UiField
+    {
+        public static Control Wrap(Control control)
+        {
+            if (control == null) return null;
+            if (control is UiFieldShell) return control;
+
+            TextBoxBase textBox = control as TextBoxBase;
+            if (textBox != null) return new UiInputShell(textBox);
+            if (control is ComboBox || control is UpDownBase || control is DateTimePicker)
+            {
+                return new UiFieldShell(control);
+            }
+            return control;
+        }
+
+        public static Control Host(Control control)
+        {
+            if (control == null) return null;
+            UiFieldShell shell = control.Parent as UiFieldShell;
+            return shell ?? control;
         }
     }
 }

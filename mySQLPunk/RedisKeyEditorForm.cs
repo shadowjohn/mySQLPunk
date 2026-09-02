@@ -100,14 +100,15 @@ namespace mySQLPunk
             _stringPanel = new Panel { Dock = DockStyle.Fill };
             _valueBox = new TextBox
             {
-                Dock = DockStyle.Fill,
                 Multiline = true,
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
                 AcceptsReturn = true,
                 Font = new Font("Consolas", 10f)
             };
-            _stringPanel.Controls.Add(_valueBox);
+            Control valueField = UiField.Wrap(_valueBox);
+            valueField.Dock = DockStyle.Fill;
+            _stringPanel.Controls.Add(valueField);
 
             // 集合模式：項目網格＋輸入列
             _collectionPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Visible = false };
@@ -140,10 +141,16 @@ namespace mySQLPunk
             _entryNameBox = new TextBox { Width = 170, Margin = new Padding(0, 3, 10, 0) };
             _entryValueLabel = new Label { AutoSize = true, Margin = new Padding(0, 6, 4, 0) };
             _entryValueBox = new TextBox { Width = 220, Margin = new Padding(0, 3, 10, 0) };
+            Control entryNameField = UiField.Wrap(_entryNameBox);
+            entryNameField.Width = 170;
+            entryNameField.Margin = new Padding(0, 3, 10, 0);
+            Control entryValueField = UiField.Wrap(_entryValueBox);
+            entryValueField.Width = 220;
+            entryValueField.Margin = new Padding(0, 3, 10, 0);
             _addUpdateButton = MakeButton(Localization.T("Redis.AddOrUpdateEntry"), async (s, e) => await AddOrUpdateEntryAsync());
             _deleteEntryButton = MakeButton(Localization.T("Redis.DeleteEntry"), async (s, e) => await DeleteEntryAsync());
             _appendButton = MakeButton(Localization.T("Redis.AppendListEntry"), async (s, e) => await AppendListEntryAsync());
-            entryRow.Controls.AddRange(new Control[] { _entryNameLabel, _entryNameBox, _entryValueLabel, _entryValueBox, _addUpdateButton, _deleteEntryButton, _appendButton });
+            entryRow.Controls.AddRange(new Control[] { _entryNameLabel, entryNameField, _entryValueLabel, entryValueField, _addUpdateButton, _deleteEntryButton, _appendButton });
             _collectionPanel.Controls.Add(entryRow, 0, 1);
             _collectionNoteLabel = new Label
             {
@@ -169,7 +176,10 @@ namespace mySQLPunk
             };
             ttlRow.Controls.Add(new Label { AutoSize = true, Text = Localization.T("Redis.TtlSecondsLabel"), Margin = new Padding(0, 6, 4, 0) });
             _ttlSecondsBox = new TextBox { Width = 90, Margin = new Padding(0, 3, 8, 0) };
-            ttlRow.Controls.Add(_ttlSecondsBox);
+            Control ttlField = UiField.Wrap(_ttlSecondsBox);
+            ttlField.Width = 90;
+            ttlField.Margin = new Padding(0, 3, 8, 0);
+            ttlRow.Controls.Add(ttlField);
             _applyTtlButton = MakeButton(Localization.T("Redis.ApplyTtl"), async (s, e) => await ApplyTtlAsync());
             _removeTtlButton = MakeButton(Localization.T("Redis.RemoveTtl"), async (s, e) => await RemoveTtlAsync());
             ttlRow.Controls.Add(_applyTtlButton);

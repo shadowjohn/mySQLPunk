@@ -129,13 +129,14 @@ namespace mySQLPunk
             {
                 Text = value ?? "",
                 ReadOnly = true,
-                BorderStyle = BorderStyle.None,
-                Dock = DockStyle.Fill,
                 Margin = new Padding(0, 3, 0, 3)
             };
+            Control valueField = UiField.Wrap(valueText);
+            valueField.Dock = DockStyle.Fill;
+            valueField.Margin = valueText.Margin;
 
             details.Controls.Add(keyLabel, 0, row);
-            details.Controls.Add(valueText, 1, row);
+            details.Controls.Add(valueField, 1, row);
         }
 
         private static void OpenTarget(string target)
