@@ -33,6 +33,7 @@ public static class SmokeTests
         Run("SQLite 專用物件 SQL builder", TestSqliteSpecialObjectSqlBuilder, ref passed);
         Run("SQLite 專用物件精靈執行 fallback", TestSqliteSpecialObjectWizardExecutionFallback, ref passed);
         Run("Table Designer DDL builder", TestTableDesignerDdlBuilder, ref passed);
+        Run("Table Designer 約束 DDL", TestTableDesignerConstraints, ref passed);
         Run("Table Designer ALTER provider matrix", TestTableDesignerAlterProviderMatrix, ref passed);
         Run("Table Designer comment dictionary diff", TestTableDesignerCommentDictionaryDiff, ref passed);
         Run("Table Designer comment dictionary versions", TestTableDesignerCommentDictionaryVersions, ref passed);
@@ -3036,6 +3037,9 @@ public static class SmokeTests
         DataTable advancedIndexes = CreateDesignerIndexesTable();
         AddDesignerIndex(advancedIndexes, "idx_docs_body_ft", "body, title", "FULLTEXT", "GIN", "");
         AddDesignerIndex(advancedIndexes, "idx_docs_geom", "geom", "SPATIAL", "GIST", "");
+        AddDesignerIndex(advancedIndexes, "px_docs_payload", "payload", "XML", "PRIMARY XML", "");
+        AddDesignerIndex(advancedIndexes, "sx_docs_payload_path", "payload", "XML", "PATH", "");
+        advancedIndexes.Rows[advancedIndexes.Rows.Count - 1]["父 XML 索引"] = "px_docs_payload";
 
         string postgresqlIndexSql = BuildGenericCreateIndexSql(
             CreateProvider<my_postgresql>(),
@@ -3054,6 +3058,8 @@ public static class SmokeTests
         AssertContains(sqlServerIndexSql, "CREATE FULLTEXT INDEX ON [dbo].[docs]", "SQL Server FULLTEXT index should create a full-text index statement.");
         AssertContains(sqlServerIndexSql, "[body] LANGUAGE 0x0", "SQL Server FULLTEXT index should include language-neutral columns.");
         AssertContains(sqlServerIndexSql, "CREATE SPATIAL INDEX [idx_docs_geom]", "SQL Server SPATIAL index should create a spatial index.");
+        AssertContains(sqlServerIndexSql, "CREATE PRIMARY XML INDEX [px_docs_payload] ON [main].[dbo].[docs] ([payload])", "SQL Server primary XML indexes should be generated from the index tab.");
+        AssertContains(sqlServerIndexSql, "CREATE XML INDEX [sx_docs_payload_path] ON [main].[dbo].[docs] ([payload]) USING XML INDEX [px_docs_payload] FOR PATH", "SQL Server secondary XML indexes should retain their parent index and type.");
 
         string oracleIndexSql = BuildGenericCreateIndexSql(
             CreateProvider<my_oracle>(),
@@ -3247,6 +3253,83 @@ public static class SmokeTests
             MethodInfo buildMethod = typeof(TableDesignerForm).GetMethod("BuildCreateTableSql", BindingFlags.Instance | BindingFlags.NonPublic);
             return (string)buildMethod.Invoke(form, new object[] { columns });
         }
+    }
+
+    private static void TestTableDesignerConstraints()
+    {
+        List<TableDesignerConstraint> constraints = new List<TableDesignerConstraint>
+        {
+            new TableDesignerConstraint
+            {
+                Name = "FK_orders_customer",
+                Kind = TableDesignerConstraintService.ForeignKeyKind,
+                Columns = "customer_id",
+                ReferencedTable = "dbo.customers",
+                ReferencedColumns = "id",
+                OnDelete = "CASCADE",
+                OnUpdate = "NO ACTION"
+            },
+            new TableDesignerConstraint
+            {
+                Name = "CK_orders_amount",
+                Kind = TableDesignerConstraintService.CheckKind,
+                Expression = "[amount] >= 0"
+            }
+        };
+        TableDesignerConstraintChangeSet creates = TableDesignerConstraintService.BuildChanges(
+            "mssql",
+            "[main].[dbo].[orders]",
+            new TableDesignerConstraint[0],
+            constraints);
+        Assert(creates.Errors.Count == 0, "SQL Server constraint creation should validate a complete foreign key and CHECK constraint.");
+        string createSql = string.Join("\n", creates.AddStatements.ToArray());
+        AssertContains(createSql, "ADD CONSTRAINT [FK_orders_customer] FOREIGN KEY ([customer_id]) REFERENCES [dbo].[customers] ([id]) ON DELETE CASCADE", "SQL Server foreign keys should be quoted and retain delete actions.");
+        AssertContains(createSql, "ADD CONSTRAINT [CK_orders_amount] CHECK ([amount] >= 0)", "SQL Server CHECK constraints should retain their expression.");
+
+        List<TableDesignerConstraint> original = new List<TableDesignerConstraint>
+        {
+            new TableDesignerConstraint
+            {
+                Name = "FK_orders_customer",
+                OriginalName = "FK_orders_customer",
+                Kind = TableDesignerConstraintService.ForeignKeyKind,
+                Columns = "customer_id",
+                ReferencedTable = "dbo.customers",
+                ReferencedColumns = "id",
+                OnDelete = "NO ACTION"
+            }
+        };
+        TableDesignerConstraintChangeSet changed = TableDesignerConstraintService.BuildChanges(
+            "mssql",
+            "[main].[dbo].[orders]",
+            original,
+            constraints.Take(1));
+        AssertContains(string.Join("\n", changed.DropStatements.ToArray()), "DROP CONSTRAINT [FK_orders_customer]", "Changed foreign keys should be dropped before recreation.");
+        AssertContains(string.Join("\n", changed.AddStatements.ToArray()), "ON DELETE CASCADE", "Changed foreign keys should be recreated with the new action.");
+
+        List<string> sqliteErrors = new List<string>();
+        List<string> sqliteDefinitions = TableDesignerConstraintService.BuildInlineDefinitions(
+            "sqlite",
+            "\"orders\"",
+            constraints,
+            sqliteErrors);
+        Assert(sqliteErrors.Count == 0, "SQLite new-table constraints should be valid inline definitions.");
+        AssertContains(string.Join("\n", sqliteDefinitions.ToArray()), "FOREIGN KEY (\"customer_id\") REFERENCES \"dbo\".\"customers\" (\"id\")", "SQLite foreign keys should be generated inside CREATE TABLE.");
+
+        TableDesignerConstraintChangeSet invalid = TableDesignerConstraintService.BuildChanges(
+            "mssql",
+            "[main].[dbo].[orders]",
+            new TableDesignerConstraint[0],
+            new[]
+            {
+                new TableDesignerConstraint
+                {
+                    Name = "CK_invalid",
+                    Kind = TableDesignerConstraintService.CheckKind,
+                    Expression = "amount >= 0; DROP TABLE orders"
+                }
+            });
+        Assert(invalid.Errors.Count == 1, "Constraint expressions with extra statements should be rejected before they reach SQL preview.");
     }
 
     private static void TestTableDesignerAlterProviderMatrix()
@@ -11889,6 +11972,7 @@ public static class SmokeTests
         indexes.Columns.Add("欄位");
         indexes.Columns.Add("索引類型");
         indexes.Columns.Add("索引方法");
+        indexes.Columns.Add("父 XML 索引");
         indexes.Columns.Add("註解");
         indexes.Columns.Add("_OldName");
         return indexes;

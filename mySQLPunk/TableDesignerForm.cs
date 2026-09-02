@@ -39,8 +39,10 @@ namespace mySQLPunk
         
         private DataGridView dgvColumns;
         private DataGridView dgvIndexes;
+        private DataGridView dgvConstraints;
         private DataTable _originalDt; // 儲存欄位原始狀態
         private DataTable _originalIdxDt; // 儲存索引原始狀態
+        private DataTable _originalConstraintDt; // 儲存外鍵與 CHECK 約束原始狀態
         private Form1 _mainHost;
         private bool _isDocked;
         private ToolStripButton btnFloat;
@@ -51,7 +53,7 @@ namespace mySQLPunk
         private bool _isFillingAutoComments;
 
         private TabControl tcMain;
-        private TabPage tpColumns, tpIndexes, tpOptions, tpComment, tpSqlPreview;
+        private TabPage tpColumns, tpIndexes, tpConstraints, tpOptions, tpComment, tpSqlPreview;
         private RichTextBox rtbSqlPreview;
         private TextBox txtTableName;
         private TextBox txtTableComment;
@@ -127,13 +129,16 @@ namespace mySQLPunk
             UpdateTitle();
             LoadColumns();
             LoadIndexes();
+            LoadConstraints();
             LoadTableOptions();
 
             dgvColumns.CellValueChanged += DgvColumns_CellValueChanged;
             dgvIndexes.CellValueChanged += (s, e) => MarkAsModified();
+            dgvConstraints.CellValueChanged += (s, e) => MarkAsModified();
             // 監聽刪除行等操作
             dgvColumns.RowsRemoved += (s, e) => MarkAsModified();
             dgvIndexes.RowsRemoved += (s, e) => MarkAsModified();
+            dgvConstraints.RowsRemoved += (s, e) => MarkAsModified();
             BeginLoadAutoColumnComments();
         }
 
@@ -245,10 +250,11 @@ namespace mySQLPunk
             tcMain.SelectedIndexChanged += (s, e) => {
                 bool isCol = tcMain.SelectedTab == tpColumns;
                 bool isIdx = tcMain.SelectedTab == tpIndexes;
+                bool isConstraint = tcMain.SelectedTab == tpConstraints;
                 
-                btnAddCol.Text = isCol ? Localization.T("Designer.AddColumn") : (isIdx ? Localization.T("Designer.AddIndex") : Localization.T("Query.Add"));
+                btnAddCol.Text = isCol ? Localization.T("Designer.AddColumn") : (isIdx ? Localization.T("Designer.AddIndex") : (isConstraint ? "新增約束" : Localization.T("Query.Add")));
                 btnInsertCol.Visible = isCol; // 索引通常沒有「插入」概念
-                btnDelCol.Text = isCol ? Localization.T("Designer.DeleteColumn") : (isIdx ? Localization.T("Designer.DeleteIndex") : Localization.T("Query.Delete"));
+                btnDelCol.Text = isCol ? Localization.T("Designer.DeleteColumn") : (isIdx ? Localization.T("Designer.DeleteIndex") : (isConstraint ? "刪除約束" : Localization.T("Query.Delete")));
                 
                 if (tcMain.SelectedTab == tpSqlPreview) GeneratePreviewSql();
             };
@@ -284,7 +290,19 @@ namespace mySQLPunk
             };
             tpIndexes.Controls.Add(dgvIndexes);
 
-            // 3. 選項分頁
+            // 3. 約束分頁：外鍵與 CHECK 約束跟索引一樣在預覽 SQL 中一起處理。
+            tpConstraints = new TabPage("約束");
+            dgvConstraints = new DataGridView()
+            {
+                Dock = DockStyle.Fill,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AllowUserToAddRows = true
+            };
+            tpConstraints.Controls.Add(dgvConstraints);
+
+            // 4. 選項分頁
             tpOptions = new TabPage(Localization.T("Designer.Options"));
             TableLayoutPanel tlpOptions = new TableLayoutPanel() { Dock = DockStyle.Top, Height = 200, RowCount = 4, ColumnCount = 2, Padding = new Padding(20) };
             tlpOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
@@ -311,7 +329,7 @@ namespace mySQLPunk
             tlpOptions.Controls.Add(engineField, 1, 1);
             tpOptions.Controls.Add(tlpOptions);
 
-            // 4. 註解分頁
+            // 5. 註解分頁
             tpComment = new TabPage(Localization.T("Designer.Comment"));
             txtTableComment = new TextBox() { Multiline = true };
             txtTableComment.TextChanged += (s, e) =>
@@ -324,17 +342,18 @@ namespace mySQLPunk
             tableCommentField.Dock = DockStyle.Fill;
             tpComment.Controls.Add(tableCommentField);
 
-            // 5. SQL 預覽分頁
+            // 6. SQL 預覽分頁
             tpSqlPreview = new TabPage(Localization.T("Designer.SqlPreview"));
             rtbSqlPreview = new RichTextBox() { Dock = DockStyle.Fill, ReadOnly = false, Font = new Font("Consolas", 11), BackColor = Color.White };
             tpSqlPreview.Controls.Add(rtbSqlPreview);
 
-            tcMain.TabPages.AddRange(new TabPage[] { tpColumns, tpIndexes, tpOptions, tpComment, tpSqlPreview });
+            tcMain.TabPages.AddRange(new TabPage[] { tpColumns, tpIndexes, tpConstraints, tpOptions, tpComment, tpSqlPreview });
             
             // 配置工具列通用事件
             btnAddCol.Click += (s, e) => {
                 if (tcMain.SelectedTab == tpColumns) AddColumn(false);
                 else if (tcMain.SelectedTab == tpIndexes) AddIndex();
+                else if (tcMain.SelectedTab == tpConstraints) AddConstraint();
             };
             btnInsertCol.Click += (s, e) => {
                 if (tcMain.SelectedTab == tpColumns) AddColumn(true);
@@ -342,14 +361,17 @@ namespace mySQLPunk
             btnDelCol.Click += (s, e) => {
                 if (tcMain.SelectedTab == tpColumns) DeleteColumn();
                 else if (tcMain.SelectedTab == tpIndexes) DeleteIndex();
+                else if (tcMain.SelectedTab == tpConstraints) DeleteConstraint();
             };
             btnMoveUp.Click += (s, e) => {
                 if (tcMain.SelectedTab == tpColumns) MoveColumn(-1);
                 else if (tcMain.SelectedTab == tpIndexes) MoveIndex(-1);
+                else if (tcMain.SelectedTab == tpConstraints) MoveConstraint(-1);
             };
             btnMoveDown.Click += (s, e) => {
                 if (tcMain.SelectedTab == tpColumns) MoveColumn(1);
                 else if (tcMain.SelectedTab == tpIndexes) MoveIndex(1);
+                else if (tcMain.SelectedTab == tpConstraints) MoveConstraint(1);
             };
 
             dgvIndexes.CellClick += DgvIndexes_CellClick;
@@ -2598,6 +2620,7 @@ namespace mySQLPunk
             Localization.ApplyTo(this);
             if (tpColumns != null) tpColumns.Text = Localization.T("Designer.Columns");
             if (tpIndexes != null) tpIndexes.Text = Localization.T("Designer.Indexes");
+            if (tpConstraints != null) tpConstraints.Text = "約束";
             if (tpOptions != null) tpOptions.Text = Localization.T("Designer.Options");
             if (tpComment != null) tpComment.Text = Localization.T("Designer.Comment");
             if (tpSqlPreview != null) tpSqlPreview.Text = Localization.T("Designer.SqlPreview");
@@ -2648,6 +2671,11 @@ namespace mySQLPunk
                 dgvIndexes.BackgroundColor = ThemeManager.WindowBackColor;
                 dgvIndexes.GridColor = ThemeManager.GridColor;
             }
+            if (dgvConstraints != null)
+            {
+                dgvConstraints.BackgroundColor = ThemeManager.WindowBackColor;
+                dgvConstraints.GridColor = ThemeManager.GridColor;
+            }
             if (pnlColumnProperties != null) pnlColumnProperties.BackColor = ThemeManager.WindowBackColor;
             if (rtbSqlPreview != null)
             {
@@ -2692,6 +2720,11 @@ namespace mySQLPunk
         private string BuildMySqlAlterTableSql(DataTable currentDt)
         {
             List<string> changes = new List<string>();
+            TableDesignerConstraintChangeSet constraintChanges = BuildConstraintChanges();
+            if (constraintChanges.Errors.Count > 0)
+            {
+                return FormatConstraintErrors(constraintChanges.Errors);
+            }
             string prevCol = null;
 
             foreach (DataRow original in _originalDt.Rows)
@@ -2834,13 +2867,18 @@ namespace mySQLPunk
                 changes.Add("COMMENT = " + EscapeMySqlStringLiteral(currentTableComment));
             }
 
+            List<string> statements = new List<string>();
+            statements.AddRange(constraintChanges.DropStatements);
             if (changes.Count > 0)
             {
-                return $"ALTER TABLE `{_databaseName}`.`{_tableName}`\n  " +
-                       string.Join(",\n  ", changes) + ";";
+                statements.Add($"ALTER TABLE `{_databaseName}`.`{_tableName}`\n  " +
+                               string.Join(",\n  ", changes) + ";");
             }
+            statements.AddRange(constraintChanges.AddStatements);
 
-            return BuildNoChangesSqlPreview();
+            return statements.Count > 0
+                ? string.Join("\r\n", statements.ToArray())
+                : BuildNoChangesSqlPreview();
         }
 
         private static string BuildNoChangesSqlPreview()
@@ -2888,7 +2926,20 @@ namespace mySQLPunk
 
         private string BuildCreateTableSql(DataTable currentDt)
         {
-            if (_db is my_mysql) return BuildMySqlCreateTableSql(currentDt);
+            if (_db is my_mysql)
+            {
+                string sql = BuildMySqlCreateTableSql(currentDt);
+                if (sql.TrimStart().StartsWith("--", StringComparison.Ordinal)) return sql;
+
+                List<string> errors = new List<string>();
+                List<string> constraints = TableDesignerConstraintService.BuildCreateStatements(
+                    _db.ProviderName,
+                    GetQualifiedDesignerTableName(GetTableNameForSave()),
+                    GetCurrentConstraints(),
+                    errors);
+                if (errors.Count > 0) return FormatConstraintErrors(errors);
+                return constraints.Count == 0 ? sql : sql + "\r\n" + string.Join("\r\n", constraints.ToArray());
+            }
             return BuildGenericCreateTableSql(currentDt);
         }
 
@@ -2901,6 +2952,12 @@ namespace mySQLPunk
 
             List<string> statements = new List<string>();
             List<string> unsupported = new List<string>();
+            TableDesignerConstraintChangeSet constraintChanges = BuildConstraintChanges();
+            if (constraintChanges.Errors.Count > 0)
+            {
+                return FormatConstraintErrors(constraintChanges.Errors);
+            }
+            statements.AddRange(constraintChanges.DropStatements);
 
             foreach (DataRow original in _originalDt.Rows)
             {
@@ -2960,6 +3017,7 @@ namespace mySQLPunk
             }
 
             statements.AddRange(BuildGenericAlterIndexStatements(unsupported));
+            statements.AddRange(constraintChanges.AddStatements);
 
             if (unsupported.Count > 0)
             {
@@ -3565,6 +3623,11 @@ namespace mySQLPunk
                     unsupported.Add(Localization.Format("Designer.SpatialUnsupported", indexName));
                     continue;
                 }
+                if (type == "XML" && !(_db is my_mssql))
+                {
+                    unsupported.Add("XML 索引目前只支援 SQL Server：" + indexName);
+                    continue;
+                }
 
                 DataRow original = FindOriginalIndex(indexName);
                 if (original == null || IsIndexChanged(original, current))
@@ -3730,6 +3793,10 @@ namespace mySQLPunk
             string indexName = GetRowString(row, "名稱").Trim();
             string type = GetRowString(row, "索引類型").Trim().ToUpperInvariant();
             string columns = GetRowString(row, "欄位").Trim();
+            if (type == "XML" && _db is my_mssql)
+            {
+                return BuildSqlServerXmlIndexStatement(row, _tableName);
+            }
             if (type == "FULLTEXT" && _db is my_postgresql)
             {
                 return "CREATE INDEX " + QuoteDesignerIdentifier(indexName) +
@@ -3825,6 +3892,7 @@ namespace mySQLPunk
                    GetRowString(original, "欄位") != GetRowString(current, "欄位") ||
                    GetRowString(original, "索引類型") != GetRowString(current, "索引類型") ||
                    GetRowString(original, "索引方法") != GetRowString(current, "索引方法") ||
+                   GetRowString(original, "父 XML 索引") != GetRowString(current, "父 XML 索引") ||
                    GetRowString(original, "註解") != GetRowString(current, "註解");
         }
 
@@ -3879,6 +3947,21 @@ namespace mySQLPunk
                 definitions.Add("  PRIMARY KEY (" + string.Join(", ", primaryColumns.ToArray()) + ")");
             }
 
+            List<string> constraintErrors = new List<string>();
+            if (_db is my_sqlite)
+            {
+                List<string> inlineConstraints = TableDesignerConstraintService.BuildInlineDefinitions(
+                    _db.ProviderName,
+                    GetQualifiedDesignerTableName(tableName),
+                    GetCurrentConstraints(),
+                    constraintErrors);
+                foreach (string definition in inlineConstraints)
+                {
+                    definitions.Add("  " + definition);
+                }
+            }
+            if (constraintErrors.Count > 0) return FormatConstraintErrors(constraintErrors);
+
             string sql = "CREATE TABLE " + GetQualifiedDesignerTableName(tableName) + " (\n" +
                          string.Join(",\n", definitions.ToArray()) + "\n" +
                          ");";
@@ -3895,7 +3978,61 @@ namespace mySQLPunk
                 sql += "\n" + string.Join("\n", comments.ToArray());
             }
 
+            List<string> constraints = TableDesignerConstraintService.BuildCreateStatements(
+                _db.ProviderName,
+                GetQualifiedDesignerTableName(tableName),
+                GetCurrentConstraints(),
+                constraintErrors);
+            if (constraintErrors.Count > 0) return FormatConstraintErrors(constraintErrors);
+            if (constraints.Count > 0)
+            {
+                sql += "\n" + string.Join("\n", constraints.ToArray());
+            }
+
             return sql;
+        }
+
+        private TableDesignerConstraintChangeSet BuildConstraintChanges()
+        {
+            return TableDesignerConstraintService.BuildChanges(
+                _db == null ? "" : _db.ProviderName,
+                GetQualifiedDesignerTableName(_tableName),
+                GetConstraints(_originalConstraintDt),
+                GetCurrentConstraints());
+        }
+
+        private List<TableDesignerConstraint> GetCurrentConstraints()
+        {
+            return GetConstraints(dgvConstraints == null ? null : dgvConstraints.DataSource as DataTable);
+        }
+
+        private static List<TableDesignerConstraint> GetConstraints(DataTable table)
+        {
+            List<TableDesignerConstraint> result = new List<TableDesignerConstraint>();
+            if (table == null) return result;
+
+            foreach (DataRow row in table.Rows)
+            {
+                if (row.RowState == DataRowState.Deleted) continue;
+                result.Add(new TableDesignerConstraint
+                {
+                    Name = GetRowString(row, "名稱"),
+                    OriginalName = GetRowString(row, "_OldName"),
+                    Kind = GetRowString(row, "類型"),
+                    Columns = GetRowString(row, "欄位"),
+                    ReferencedTable = GetRowString(row, "參照資料表"),
+                    ReferencedColumns = GetRowString(row, "參照欄位"),
+                    OnDelete = GetRowString(row, "刪除行為"),
+                    OnUpdate = GetRowString(row, "更新行為"),
+                    Expression = GetRowString(row, "條件")
+                });
+            }
+            return result;
+        }
+
+        private static string FormatConstraintErrors(List<string> errors)
+        {
+            return "-- 無法產生約束 DDL\r\n-- " + string.Join("\r\n-- ", (errors ?? new List<string>()).ToArray());
         }
 
         private List<string> BuildGenericCreateColumnCommentStatements(string tableName, DataTable currentDt)
@@ -4085,6 +4222,12 @@ namespace mySQLPunk
                     continue;
                 }
 
+                if (type == "XML" && _db is my_mssql)
+                {
+                    statements.Add(BuildSqlServerXmlIndexStatement(row, tableName));
+                    continue;
+                }
+
                 string unique = type == "UNIQUE" ? "UNIQUE " : "";
                 statements.Add("CREATE " + unique + "INDEX " + QuoteDesignerIdentifier(indexName) +
                                " ON " + GetQualifiedDesignerTableName(tableName) +
@@ -4170,6 +4313,37 @@ namespace mySQLPunk
             return "CREATE SPATIAL INDEX " + QuoteDesignerIdentifier(indexName) +
                    " ON " + GetQualifiedDesignerTableName(tableName) +
                    " (" + spatialColumn + ") USING " + method + ";";
+        }
+
+        private string BuildSqlServerXmlIndexStatement(DataRow row, string tableName)
+        {
+            string indexName = GetRowString(row, "名稱").Trim();
+            string column = FormatSqlServerSingleIndexColumn(GetRowString(row, "欄位").Trim());
+            string method = NormalizeSqlServerXmlIndexMethod(GetRowString(row, "索引方法"));
+            string parentIndex = GetRowString(row, "父 XML 索引").Trim();
+            if (string.IsNullOrWhiteSpace(indexName) || string.IsNullOrWhiteSpace(column))
+            {
+                return "-- XML 索引必須填寫名稱與一個 XML 欄位。";
+            }
+
+            if (method == "PRIMARY XML" || string.IsNullOrWhiteSpace(parentIndex))
+            {
+                return "CREATE PRIMARY XML INDEX " + QuoteDesignerIdentifier(indexName) +
+                       " ON " + GetQualifiedDesignerTableName(tableName) +
+                       " (" + column + ");";
+            }
+
+            return "CREATE XML INDEX " + QuoteDesignerIdentifier(indexName) +
+                   " ON " + GetQualifiedDesignerTableName(tableName) +
+                   " (" + column + ") USING XML INDEX " + QuoteDesignerIdentifier(parentIndex) +
+                   " FOR " + method + ";";
+        }
+
+        private static string NormalizeSqlServerXmlIndexMethod(string value)
+        {
+            string method = (value ?? string.Empty).Trim().ToUpperInvariant();
+            if (method == "PATH" || method == "VALUE" || method == "PROPERTY") return method;
+            return "PRIMARY XML";
         }
 
         private string BuildSqlServerFullTextIndexStatement(string tableName, string columns)
@@ -4867,6 +5041,7 @@ namespace mySQLPunk
                     IsModified = false;
                     LoadColumns(); // 重新載入
                     LoadIndexes();
+                    LoadConstraints();
                     GeneratePreviewSql(); // 預覽不重生的話，接著按「執行 SQL」會把剛執行過的再送一次
                     UpdateTitle();
                 }
@@ -4911,6 +5086,7 @@ namespace mySQLPunk
                 IsModified = false;
                 LoadColumns();
                 LoadIndexes();
+                LoadConstraints();
                 GeneratePreviewSql();
                 UpdateTitle();
                 return;
@@ -5862,6 +6038,124 @@ namespace mySQLPunk
             MoveBoundRow(dgvIndexes, direction);
         }
 
+        private void AddConstraint()
+        {
+            DataTable table = dgvConstraints == null ? null : dgvConstraints.DataSource as DataTable;
+            if (table == null) return;
+
+            DataRow row = table.NewRow();
+            row["名稱"] = "FK_new";
+            row["類型"] = TableDesignerConstraintService.ForeignKeyKind;
+            row["刪除行為"] = "NO ACTION";
+            row["更新行為"] = "NO ACTION";
+            table.Rows.Add(row);
+            MarkAsModified();
+        }
+
+        private void DeleteConstraint()
+        {
+            if (dgvConstraints == null || dgvConstraints.CurrentRow == null || dgvConstraints.CurrentRow.IsNewRow) return;
+            dgvConstraints.Rows.RemoveAt(dgvConstraints.CurrentRow.Index);
+        }
+
+        private void MoveConstraint(int direction)
+        {
+            MoveBoundRow(dgvConstraints, direction);
+        }
+
+        private void LoadConstraints()
+        {
+            DataTable display = CreateConstraintsDisplayTable();
+            if (IsNewTable)
+            {
+                _originalConstraintDt = display.Copy();
+                BindConstraints(display);
+                return;
+            }
+
+            try
+            {
+                foreach (TableDesignerConstraint item in TableDesignerConstraintService.LoadExistingConstraints(_db, _databaseName, _tableName))
+                {
+                    DataRow row = display.NewRow();
+                    row["名稱"] = item.Name;
+                    row["_OldName"] = item.OriginalName;
+                    row["類型"] = item.Kind;
+                    row["欄位"] = item.Columns;
+                    row["參照資料表"] = item.ReferencedTable;
+                    row["參照欄位"] = item.ReferencedColumns;
+                    row["刪除行為"] = item.OnDelete;
+                    row["更新行為"] = item.OnUpdate;
+                    row["條件"] = item.Expression;
+                    display.Rows.Add(row);
+                }
+                _originalConstraintDt = display.Copy();
+                BindConstraints(display);
+            }
+            catch (Exception ex)
+            {
+                _originalConstraintDt = display.Copy();
+                BindConstraints(display);
+                MessageBox.Show(
+                    "無法載入外鍵與 CHECK 約束，仍可在約束頁新增設定。\r\n" + ex.Message,
+                    "約束",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
+        private static DataTable CreateConstraintsDisplayTable()
+        {
+            DataTable display = new DataTable();
+            display.Columns.Add("名稱");
+            display.Columns.Add("類型");
+            display.Columns.Add("欄位");
+            display.Columns.Add("參照資料表");
+            display.Columns.Add("參照欄位");
+            display.Columns.Add("刪除行為");
+            display.Columns.Add("更新行為");
+            display.Columns.Add("條件");
+            display.Columns.Add("_OldName");
+            return display;
+        }
+
+        private void BindConstraints(DataTable display)
+        {
+            if (dgvConstraints == null) return;
+            dgvConstraints.DataSource = display;
+            ReplaceConstraintComboBoxColumn("類型", new object[]
+            {
+                TableDesignerConstraintService.ForeignKeyKind,
+                TableDesignerConstraintService.CheckKind
+            });
+            ReplaceConstraintComboBoxColumn("刪除行為", ConstraintReferentialActions);
+            ReplaceConstraintComboBoxColumn("更新行為", ConstraintReferentialActions);
+            if (dgvConstraints.Columns.Contains("_OldName")) dgvConstraints.Columns["_OldName"].Visible = false;
+            dgvConstraints.DataError -= DesignerGrid_DataError;
+            dgvConstraints.DataError += DesignerGrid_DataError;
+        }
+
+        private void ReplaceConstraintComboBoxColumn(string columnName, object[] values)
+        {
+            if (!dgvConstraints.Columns.Contains(columnName) || dgvConstraints.Columns[columnName] is DataGridViewComboBoxColumn) return;
+            int index = dgvConstraints.Columns[columnName].Index;
+            dgvConstraints.Columns.RemoveAt(index);
+            DataGridViewComboBoxColumn combo = new DataGridViewComboBoxColumn
+            {
+                Name = columnName,
+                HeaderText = columnName,
+                DataPropertyName = columnName,
+                FlatStyle = FlatStyle.Flat
+            };
+            combo.Items.AddRange(values);
+            dgvConstraints.Columns.Insert(index, combo);
+        }
+
+        private static readonly object[] ConstraintReferentialActions =
+        {
+            "NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT"
+        };
+
         private void LoadIndexes()
         {
             try
@@ -5909,7 +6203,10 @@ namespace mySQLPunk
                     string indexType = GetMetadataString(first, "Index_type", "INDEX_TYPE", "IndexType", "INDEXTYPE", "type_desc");
                     newRow["索引類型"] = GetDesignerIndexType(group.Key, nonUnique, indexType);
 
-                    newRow["索引方法"] = NormalizeDesignerIndexMethod(indexType);
+                    newRow["索引方法"] = GetDesignerIndexType(group.Key, nonUnique, indexType) == "XML"
+                        ? NormalizeSqlServerXmlIndexMethod(indexType)
+                        : NormalizeDesignerIndexMethod(indexType);
+                    newRow["父 XML 索引"] = GetMetadataString(first, "XmlParentIndex", "XMLPARENTINDEX");
                     newRow["註解"] = GetMetadataString(first, "Index_comment", "INDEX_COMMENT", "IndexComment", "INDEXCOMMENT", "comment");
                     
                     displayIdx.Rows.Add(newRow);
@@ -5951,6 +6248,7 @@ namespace mySQLPunk
             if (string.Equals(keyName, "PRIMARY", StringComparison.OrdinalIgnoreCase)) return "PRIMARY";
             if (normalizedType == "FULLTEXT" || normalizedType.Contains("FULLTEXT")) return "FULLTEXT";
             if (normalizedType == "SPATIAL" || normalizedType.Contains("SPATIAL")) return "SPATIAL";
+            if (normalizedType.Contains("XML")) return "XML";
             if (nonUnique == "0" || string.Equals(nonUnique, "False", StringComparison.OrdinalIgnoreCase)) return "UNIQUE";
             return "NORMAL";
         }
@@ -5962,6 +6260,7 @@ namespace mySQLPunk
             displayIdx.Columns.Add("欄位");
             displayIdx.Columns.Add("索引類型");
             displayIdx.Columns.Add("索引方法");
+            displayIdx.Columns.Add("父 XML 索引");
             displayIdx.Columns.Add("註解");
             displayIdx.Columns.Add("_OldName");
             return displayIdx;
@@ -5986,7 +6285,7 @@ namespace mySQLPunk
 
             if (_db is my_mssql)
             {
-                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL" };
+                return new object[] { "NORMAL", "UNIQUE", "PRIMARY", "FULLTEXT", "SPATIAL", "XML" };
             }
 
             return new object[] { "NORMAL", "UNIQUE", "PRIMARY" };
@@ -6043,7 +6342,7 @@ namespace mySQLPunk
         // PG amname（btree/gin/gist/brin）、MSSQL type_desc、Oracle INDEX_TYPE
         private static readonly object[] DesignerIndexMethodChoices =
         {
-            "BTREE", "HASH", "FULLTEXT", "SPATIAL", "GIN", "GIST", "BRIN", "CLUSTERED", "NONCLUSTERED", "NORMAL", "BITMAP"
+            "BTREE", "HASH", "FULLTEXT", "SPATIAL", "GIN", "GIST", "BRIN", "CLUSTERED", "NONCLUSTERED", "NORMAL", "BITMAP", "PRIMARY XML", "PATH", "VALUE", "PROPERTY"
         };
 
         private static string NormalizeDesignerIndexMethod(string indexType)

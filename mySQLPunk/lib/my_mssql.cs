@@ -244,13 +244,20 @@ namespace mySQLPunk.lib
                     c.name AS [Column_name],
                     CASE WHEN i.is_unique = 1 OR i.is_primary_key = 1 THEN 0 ELSE 1 END AS [Non_unique],
                     ic.key_ordinal AS [Seq_in_index],
-                    i.type_desc AS [Index_type],
+                    CASE
+                        WHEN i.type_desc = 'XML' AND xi.secondary_type_desc IS NULL THEN 'PRIMARY XML'
+                        WHEN i.type_desc = 'XML' THEN xi.secondary_type_desc
+                        ELSE i.type_desc
+                    END AS [Index_type],
+                    COALESCE(parentXml.name, '') AS [XmlParentIndex],
                     '' AS [Index_comment]
                 FROM [" + EscapeSqlServerName(databaseName) + @"].sys.indexes i
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.objects o ON o.object_id = i.object_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.schemas s ON s.schema_id = o.schema_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
                 INNER JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.xml_indexes xi ON xi.object_id = i.object_id AND xi.index_id = i.index_id
+                LEFT JOIN [" + EscapeSqlServerName(databaseName) + @"].sys.indexes parentXml ON parentXml.object_id = xi.object_id AND parentXml.index_id = xi.using_xml_index_id
                 WHERE s.name = @schemaName AND o.name = @name AND i.name IS NOT NULL AND ic.is_included_column = 0
                 ORDER BY i.name, ic.key_ordinal;", p);
         }
