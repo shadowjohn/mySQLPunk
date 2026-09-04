@@ -58,3 +58,27 @@ CA、用戶端憑證、私鑰與 Oracle Wallet 的檔案本身不會複製進 my
 Linux 密碼內容直接從 stdin 傳給 `secret-tool`；macOS 密碼先轉為 UTF-8／Base64，再透過 `security` 互動模式的 stdin 寫入。兩者都不把祕密放在 process arguments，寫入後也會立即讀回比對。刪除連線、取消勾選保存或清空已載入的密碼時，程式會刪除對應 Keyring 項目。
 
 若平台工具不存在、桌面 Secret Service 未啟動、Keyring 尚未解鎖或操作驗證失敗，程式不會建立明文或自行加密的檔案 fallback；密碼只保留到本次程式關閉，下一次連線時重新要求輸入。
+
+#### 跨平台版 TLS 模式
+
+跨平台版的連線設定頁以「TLS 模式」下拉取代舊的「優先使用 SSL/TLS」勾選，選項依 provider 原生語意列出：
+
+| Provider | 可用模式 | 驅動程式預設 |
+| --- | --- | --- |
+| MySQL / MariaDB | Disabled、Preferred、Required、VerifyCA、VerifyFull | Preferred（可退回未加密） |
+| PostgreSQL | Disable、Allow、Prefer、Require、VerifyCA、VerifyFull | Prefer（可退回未加密） |
+| SQL Server | Optional、Mandatory、Strict | Mandatory（驗證憑證鏈與主機名稱） |
+| SQLite | 不適用 | 固定 Disabled |
+
+`connections.json` 以 `tlsMode` 字串保存模式；舊檔案的 `useSsl` 會在載入時依 provider 遷移：MySQL／PostgreSQL 的 `true` 對應 Preferred、`false` 對應 Disabled，SQL Server 的 `true` 對應 Mandatory、`false` 對應 Optional。同一筆設定同時包含 `useSsl` 與 `tlsMode`、`tlsMode` 不是明確名稱、模式與 provider 不相容，或檔案含 `password` 欄位時，載入一律 fail closed 並提示修正，不會猜測較弱的模式。切換資料庫類型時，畫面會把目前模式映射到新 provider 最接近且不較弱的選項，並在狀態列提示確認。
+
+#### 跨平台版連線 URI
+
+連線設定頁最上方可貼上 `mysql://`／`mariadb://`、`postgres://`／`postgresql://`、`mssql://`／`sqlserver://` 或 `sqlite:///絕對路徑` URI，按「安全套用」後會填入 provider、主機、port、使用者、密碼、資料庫、逾時與 TLS 模式，不會自動連線或儲存。支援的查詢參數：
+
+- 共同：`name`（連線名稱）、`timeout`（1–300 秒）。
+- MySQL / MariaDB：`sslmode=disabled|preferred|required|verify-ca|verify-full`，或 `ssl=true|false`（分別對應 Required 與 Disabled）；兩者不可同時出現。
+- PostgreSQL：`sslmode=disable|allow|prefer|require|verify-ca|verify-full`。
+- SQL Server：`encrypt=true|false|yes|no|mandatory|optional|strict`。
+
+URI 輸入框以遮蔽字元顯示，成功套用後立即清空。未知、重複或空白參數、fragment、多層資料庫路徑、dot-segment、未編碼空白、非法百分比編碼、非 UTF-8 位元組、Unicode 控制／格式／noncharacter 字元、超過 8,192 字元的內容，以及與 provider 不相容的 TLS 值，一律拒絕並只顯示不含密碼的錯誤訊息。

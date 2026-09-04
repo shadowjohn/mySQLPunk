@@ -2,21 +2,34 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="MySqlPunk.Desktop.ConnectionEditorWindow"
         Title="連線設定"
-        Width="560"
-        SizeToContent="Height"
-        CanResize="False"
+        Width="640"
+        Height="720"
+        MinWidth="560"
+        MinHeight="560"
+        CanResize="True"
         WindowStartupLocation="CenterOwner">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
   <Border Padding="22">
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="130,*">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="130,*">
       <TextBlock Grid.Row="0" Grid.ColumnSpan="2" x:Name="HintText" Foreground="#475467" Margin="0,0,0,14" TextWrapping="Wrap" />
 
-      <TextBlock Grid.Row="1" Grid.Column="0" Text="連線名稱" VerticalAlignment="Center" Margin="0,6" />
-      <TextBox Grid.Row="1" Grid.Column="1" x:Name="NameBox" Margin="0,4" />
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="連線 URI" VerticalAlignment="Center" Margin="0,6" />
+      <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,Auto">
+        <TextBox Grid.Column="0"
+                 x:Name="ConnectionUriBox"
+                 PasswordChar="●"
+                 PlaceholderText="貼上 mysql://、postgresql://、mssql:// 或 sqlite:/// URI"
+                 Margin="0,4" />
+        <Button Grid.Column="1" x:Name="ImportUriButton" Content="安全套用" Click="ImportUri_Click" Margin="8,4,0,4" />
+      </Grid>
 
-      <TextBlock Grid.Row="2" Grid.Column="0" Text="資料庫類型" VerticalAlignment="Center" Margin="0,6" />
-      <ComboBox Grid.Row="2" Grid.Column="1" x:Name="ProviderCombo" Margin="0,4" SelectionChanged="ProviderCombo_SelectionChanged" />
+      <TextBlock Grid.Row="2" Grid.Column="0" Text="連線名稱" VerticalAlignment="Center" Margin="0,6" />
+      <TextBox Grid.Row="2" Grid.Column="1" x:Name="NameBox" Margin="0,4" />
 
-      <Grid Grid.Row="3" Grid.ColumnSpan="2" x:Name="NetworkFields" RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="130,*,100">
+      <TextBlock Grid.Row="3" Grid.Column="0" Text="資料庫類型" VerticalAlignment="Center" Margin="0,6" />
+      <ComboBox Grid.Row="3" Grid.Column="1" x:Name="ProviderCombo" Margin="0,4" SelectionChanged="ProviderCombo_SelectionChanged" />
+
+      <Grid Grid.Row="4" Grid.ColumnSpan="2" x:Name="NetworkFields" RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="130,*,100">
         <TextBlock Grid.Row="0" Grid.Column="0" Text="主機" VerticalAlignment="Center" Margin="0,6" />
         <TextBox Grid.Row="0" Grid.Column="1" x:Name="HostBox" Margin="0,4,8,4" />
         <TextBox Grid.Row="0" Grid.Column="2" x:Name="PortBox" Margin="0,4" PlaceholderText="Port" />
@@ -28,26 +41,36 @@
         <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" x:Name="PasswordBox" PasswordChar="●" Margin="0,4" />
       </Grid>
 
-      <TextBlock Grid.Row="4" Grid.Column="0" x:Name="DatabaseLabel" Text="預設資料庫" VerticalAlignment="Center" Margin="0,6" />
-      <Grid Grid.Row="4" Grid.Column="1" ColumnDefinitions="*,Auto">
+      <TextBlock Grid.Row="5" Grid.Column="0" x:Name="DatabaseLabel" Text="預設資料庫" VerticalAlignment="Center" Margin="0,6" />
+      <Grid Grid.Row="5" Grid.Column="1" ColumnDefinitions="*,Auto">
         <TextBox Grid.Column="0" x:Name="DatabaseBox" Margin="0,4" />
         <Button Grid.Column="1" x:Name="BrowseButton" Content="選擇檔案…" Click="BrowseSqlite_Click" Margin="8,4,0,4" IsVisible="False" />
       </Grid>
 
-      <TextBlock Grid.Row="5" Grid.Column="0" Text="連線逾時（秒）" VerticalAlignment="Center" Margin="0,6" />
-      <TextBox Grid.Row="5" Grid.Column="1" x:Name="TimeoutBox" Margin="0,4" />
+      <TextBlock Grid.Row="6" Grid.Column="0" Text="連線逾時（秒）" VerticalAlignment="Center" Margin="0,6" />
+      <TextBox Grid.Row="6" Grid.Column="1" x:Name="TimeoutBox" Margin="0,4" />
 
-      <CheckBox Grid.Row="6" Grid.Column="1" x:Name="UseSslCheck" Content="優先使用 SSL/TLS" Margin="0,8,0,4" />
+      <TextBlock Grid.Row="7" Grid.Column="0" x:Name="TlsModeLabel" Text="TLS 模式" VerticalAlignment="Top" Margin="0,10,0,6" />
+      <Grid Grid.Row="7" Grid.Column="1" RowDefinitions="Auto,Auto">
+        <ComboBox Grid.Row="0" x:Name="TlsModeCombo" SelectionChanged="TlsModeCombo_SelectionChanged" Margin="0,4" />
+        <TextBlock Grid.Row="1"
+                   x:Name="TlsModeDescription"
+                   Foreground="#667085"
+                   FontSize="12"
+                   TextWrapping="Wrap"
+                   Margin="2,2,0,4" />
+      </Grid>
 
-      <CheckBox Grid.Row="7" Grid.Column="1" x:Name="RememberPasswordCheck" Margin="0,6,0,2" />
+      <CheckBox Grid.Row="8" Grid.Column="1" x:Name="RememberPasswordCheck" Margin="0,6,0,2" />
 
-      <TextBlock Grid.Row="8" Grid.ColumnSpan="2" x:Name="TestStatus" Margin="0,12,0,0" TextWrapping="Wrap" />
+      <TextBlock Grid.Row="9" Grid.ColumnSpan="2" x:Name="TestStatus" Margin="0,12,0,0" TextWrapping="Wrap" />
 
-      <Grid Grid.Row="9" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,18,0,0">
+      <Grid Grid.Row="10" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,18,0,0">
         <Button Grid.Column="0" x:Name="TestButton" Content="測試連線" Click="TestConnection_Click" Padding="13,7" />
         <Button Grid.Column="2" Content="取消" Click="Cancel_Click" Margin="8,0,0,0" Padding="13,7" />
         <Button Grid.Column="3" x:Name="SaveButton" Content="儲存" Click="Save_Click" Margin="8,0,0,0" Padding="13,7" />
       </Grid>
     </Grid>
   </Border>
+  </ScrollViewer>
 </Window>

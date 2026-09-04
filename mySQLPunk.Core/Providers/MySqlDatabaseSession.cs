@@ -22,7 +22,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             Password = Profile.Password,
             ConnectionTimeout = (uint)Profile.TimeoutSeconds,
             DefaultCommandTimeout = (uint)Math.Max(1, Profile.TimeoutSeconds * 4),
-            SslMode = Profile.UseSsl ? MySqlSslMode.Preferred : MySqlSslMode.None,
+            SslMode = ConnectionTlsModeMapper.ToMySql(Profile.TlsMode),
             AllowUserVariables = false
         };
 

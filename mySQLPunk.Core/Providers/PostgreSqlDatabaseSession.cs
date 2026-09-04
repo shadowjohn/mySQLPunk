@@ -25,7 +25,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             Database = string.IsNullOrWhiteSpace(database) ? "postgres" : database,
             Timeout = Profile.TimeoutSeconds,
             CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 4),
-            SslMode = Profile.UseSsl ? SslMode.Prefer : SslMode.Disable
+            SslMode = ConnectionTlsModeMapper.ToPostgreSql(Profile.TlsMode)
         };
 
         return new NpgsqlConnection(builder.ConnectionString);

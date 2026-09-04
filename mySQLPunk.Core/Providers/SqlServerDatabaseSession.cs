@@ -23,7 +23,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             IntegratedSecurity = false,
             ConnectTimeout = Profile.TimeoutSeconds,
             CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 4),
-            Encrypt = Profile.UseSsl,
+            Encrypt = ConnectionTlsModeMapper.ToSqlServer(Profile.TlsMode),
             TrustServerCertificate = false,
             ApplicationName = "mySQLPunk"
         };

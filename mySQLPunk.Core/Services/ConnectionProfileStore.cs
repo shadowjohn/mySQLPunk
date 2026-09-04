@@ -10,7 +10,8 @@ public sealed class ConnectionProfileStore
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) }
     };
 
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -33,15 +34,37 @@ public sealed class ConnectionProfileStore
             }
 
             await using var stream = File.OpenRead(FilePath);
-            var profiles = await JsonSerializer.DeserializeAsync<List<ConnectionProfile>>(
+            using var document = await JsonDocument.ParseAsync(
                 stream,
-                JsonOptions,
-                cancellationToken).ConfigureAwait(false) ?? new List<ConnectionProfile>();
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = 32
+                },
+                cancellationToken).ConfigureAwait(false);
+            ValidateSerializedProfiles(document.RootElement);
+            var profiles = document.RootElement.Deserialize<List<ConnectionProfile>>(JsonOptions) ??
+                           new List<ConnectionProfile>();
 
+            var profileIds = new HashSet<Guid>();
             foreach (var profile in profiles)
             {
                 profile.Password = string.Empty;
-                profile.ApplyProviderDefaults();
+                profile.ApplyPersistedCompatibility();
+                try
+                {
+                    profile.Validate();
+                }
+                catch (InvalidOperationException exception)
+                {
+                    throw new InvalidDataException("連線設定包含無效或不相容的欄位。", exception);
+                }
+
+                if (profile.Id == Guid.Empty || !profileIds.Add(profile.Id))
+                {
+                    throw new InvalidDataException("連線設定包含空白或重複的識別碼。");
+                }
             }
 
             return profiles;
@@ -141,6 +164,61 @@ public sealed class ConnectionProfileStore
         }
 
         throw new InvalidOperationException("無法定位使用者設定目錄；不會把連線設定寫入程式安裝目錄。");
+    }
+
+    private static void ValidateSerializedProfiles(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("連線設定檔根節點必須是陣列。");
+        }
+
+        foreach (var element in root.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidDataException("每筆連線設定都必須是 JSON 物件。");
+            }
+
+            var propertyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var hasLegacyUseSsl = false;
+            var hasTlsMode = false;
+            foreach (var property in element.EnumerateObject())
+            {
+                if (!propertyNames.Add(property.Name))
+                {
+                    throw new InvalidDataException("連線設定不可包含重複欄位。");
+                }
+
+                if (property.Name.Equals("password", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException("連線設定檔不可包含密碼欄位。");
+                }
+
+                if (property.Name.Equals("useSsl", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasLegacyUseSsl = true;
+                    if (property.Value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+                    {
+                        throw new InvalidDataException("舊 useSsl 欄位必須是布林值。");
+                    }
+                }
+                else if (property.Name.Equals("tlsMode", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasTlsMode = true;
+                    if (property.Value.ValueKind != JsonValueKind.String)
+                    {
+                        throw new InvalidDataException("tlsMode 欄位必須是明確的模式名稱。");
+                    }
+                }
+            }
+
+            if (hasLegacyUseSsl && hasTlsMode)
+            {
+                throw new InvalidDataException(
+                    "連線設定不可同時包含舊 useSsl 與新 tlsMode；請移除其中一個後重試。");
+            }
+        }
     }
 
     private static void RestrictFilePermissions(string path)

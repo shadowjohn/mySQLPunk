@@ -12,6 +12,7 @@ using Npgsql;
 var tests = new List<(string Name, Func<Task> Run)>
 {
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
+    ("連線 URI 安全匯入", ConnectionUriImportAsync),
     ("查詢結果安全匯出", QueryResultExportFormatsAsync),
     ("查詢結果型別感知排序", QueryResultValueSortingAsync),
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
@@ -27,6 +28,151 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static Task ConnectionUriImportAsync()
+{
+    var mysql = ConnectionUriImportService.Parse(
+        "mariadb://app%40team:p%3Aass@db.example.test:3307/sales?name=Sales%20DB&sslmode=prefer&timeout=45");
+    Assert(mysql.Provider == DatabaseProviderKind.MySql &&
+           mysql.Name == "Sales DB" &&
+           mysql.Host == "db.example.test" &&
+           mysql.Port == 3307 &&
+           mysql.Username == "app@team" &&
+           mysql.Password == "p:ass" &&
+           mysql.Database == "sales" &&
+           mysql.TlsMode == ConnectionTlsMode.Preferred &&
+           mysql.TimeoutSeconds == 45,
+        "MariaDB URI 應安全轉成完整 MySQL profile 並 percent-decode 認證資訊");
+
+    var postgres = ConnectionUriImportService.Parse(
+        "postgres://report:secret@pg.example.test/warehouse?sslmode=prefer");
+    Assert(postgres.Provider == DatabaseProviderKind.PostgreSql &&
+           postgres.Port == 5432 &&
+           postgres.Database == "warehouse" &&
+           postgres.TlsMode == ConnectionTlsMode.Preferred,
+        "PostgreSQL URI 應套用預設 port、database 與可無損對應的 TLS 偏好");
+
+    var sqlServer = ConnectionUriImportService.Parse(
+        "mssql://sa:secret@sql.example.test/inventory?encrypt=mandatory&timeout=30");
+    Assert(sqlServer.Provider == DatabaseProviderKind.SqlServer &&
+           sqlServer.Port == 1433 &&
+           sqlServer.TlsMode == ConnectionTlsMode.Mandatory &&
+           sqlServer.TimeoutSeconds == 30,
+        "SQL Server URI 應套用預設 port 與 mandatory encryption");
+
+    Assert(ConnectionUriImportService.Parse("mysql://user:secret@localhost/db").TlsMode ==
+               ConnectionTlsMode.Default &&
+           ConnectionTlsModeMapper.ToMySql(ConnectionTlsMode.Default) == MySqlSslMode.Preferred,
+        "MySQL URI 未指定 TLS 時應保留驅動程式 Preferred 預設，不可降成 Disabled");
+    Assert(ConnectionUriImportService.Parse("postgresql://user:secret@localhost/db").TlsMode ==
+               ConnectionTlsMode.Default &&
+           ConnectionTlsModeMapper.ToPostgreSql(ConnectionTlsMode.Default) == Npgsql.SslMode.Prefer,
+        "PostgreSQL URI 未指定 TLS 時應保留驅動程式 Prefer 預設，不可降成 Disable");
+    Assert(ConnectionUriImportService.Parse("sqlserver://user:secret@localhost/db").TlsMode ==
+               ConnectionTlsMode.Default &&
+           ConnectionTlsModeMapper.ToSqlServer(ConnectionTlsMode.Default) ==
+               Microsoft.Data.SqlClient.SqlConnectionEncryptOption.Mandatory,
+        "SQL Server URI 未指定 TLS 時應保留驅動程式 Mandatory 預設");
+    Assert(ConnectionUriImportService.Parse(
+               "mysql://user:secret@localhost/db?ssl=true").TlsMode == ConnectionTlsMode.Required &&
+           ConnectionUriImportService.Parse(
+               "postgres://user:secret@localhost/db?sslmode=verify-full").TlsMode ==
+               ConnectionTlsMode.VerifyFull &&
+           ConnectionUriImportService.Parse(
+               "mssql://user:secret@localhost/db?encrypt=strict").TlsMode == ConnectionTlsMode.Strict,
+        "URI 應無損保留強制 TLS、完整憑證驗證與 SQL Server Strict 模式");
+
+    var sqlitePath = Path.Combine(Path.GetTempPath(), "uri sample.sqlite");
+    var sqliteUri = "sqlite://" + Uri.EscapeDataString(sqlitePath)
+        .Replace("%2F", "/", StringComparison.OrdinalIgnoreCase) + "?name=Local%20Sample";
+    var sqlite = ConnectionUriImportService.Parse(sqliteUri);
+    Assert(sqlite.Provider == DatabaseProviderKind.Sqlite &&
+           sqlite.Database == Path.GetFullPath(sqlitePath) &&
+           sqlite.Name == "Local Sample" &&
+           sqlite.Password.Length == 0,
+        "SQLite URI 應只接受不含認證資訊的本機絕對路徑");
+
+    var trailingSpacePath = Path.Combine(Path.GetTempPath(), "uri-trailing-space ");
+    var trailingSpaceUri = "sqlite://" + Uri.EscapeDataString(trailingSpacePath)
+        .Replace("%2F", "/", StringComparison.OrdinalIgnoreCase) + "?name=Trailing%20Path";
+    Assert(ConnectionUriImportService.Parse(trailingSpaceUri).Database == Path.GetFullPath(trailingSpacePath),
+        "Linux／macOS SQLite 路徑的合法尾端空白不可被 Validate 靜默移除");
+
+    var ipv6 = ConnectionUriImportService.Parse("mysql://user:secret@[::1]:3307/db");
+    Assert(ipv6.Host == "::1" && ipv6.Name.Contains("[::1]:3307/db", StringComparison.Ordinal),
+        "IPv6 URI 應保留主機與 port，預設名稱也應包含完整目標避免同名資料庫混淆");
+    var spacedPassword = ConnectionUriImportService.Parse(
+        "mysql://user:%20secret%20@localhost/db?sslmode=required");
+    Assert(spacedPassword.Password == " secret " && spacedPassword.TlsMode == ConnectionTlsMode.Required,
+        "密碼前後空白是有效 credential，不可被修剪或把 Required 降級");
+
+    var invalidUris = new[]
+    {
+        "mysql://user:secret@localhost/db?unsupported=1",
+        "mysql://user:secret@localhost/db#fragment",
+        "mysql://user:secret@localhost/first/second",
+        "mysql://user:secret@localhost/first/../second",
+        "mysql://user:secret@localhost/./db",
+        "mysql://user:secret@localhost/%2e%2e/db",
+        "mysql://user:secret@localhost/%2E.",
+        "mysql://user:secret@localhost/%2e%2E",
+        "mysql://:secret@localhost/db",
+        "mysql://user name:secret@localhost/db",
+        "mysql://user:p ass@localhost/db",
+        "mysql://user:secret@localhost/d b",
+        "mysql://user:secret@localhost/db?name=raw name",
+        "mysql://user:\u00A0secret@localhost/db",
+        "mysql://user:secret@localhost/db?timeout=0",
+        "mysql://user:secret@localhost/db?ssl=true&sslmode=prefer",
+        "mysql://user:secret@localhost/db?name=one&name=two",
+        "mysql://user:%ZZ@localhost/db",
+        "mysql://user:%C3%28@localhost/db",
+        "mysql://user%20:secret@localhost/db",
+        "mysql://user:secret@localhost/db%20",
+        "mysql://user:secret@localhost/db?name=visual%E2%80%AEoverride",
+        "mysql://user:secret@localhost/db?name=raw\uFDD0value",
+        "mysql://user:secret@localhost/db?name=encoded%EF%B7%90value",
+        "mysql://user:secret@localhost/db?name=encoded%EF%BF%BEvalue",
+        "mysql://user:secret@localhost/db?name=raw\U0001FFFEvalue",
+        "mysql://user:secret@localhost/db?name=encoded%F0%9F%BF%BEvalue",
+        "mysql://user:secret@localhost/db?sslmode=allow",
+        "postgres://user:secret@localhost/db?sslmode=none",
+        "postgresql://user:secret@/db?host=%2Fvar%2Frun%2Fpostgresql",
+        "mssql://sa:secret@localhost/db?encrypt=prefer",
+        "sqlite://remote-host/tmp/sample.db",
+        " mysql://user:secret@localhost/db",
+        "mysql://user:secret@localhost/db ",
+        new string(' ', ConnectionUriImportService.MaximumUriCharacters) + "mysql://user:secret@localhost/db"
+    };
+    foreach (var invalidUri in invalidUris)
+    {
+        AssertThrows<InvalidDataException>(() => ConnectionUriImportService.Parse(invalidUri));
+    }
+
+    const string hiddenSecret = "must-not-appear";
+    try
+    {
+        ConnectionUriImportService.Parse($"mysql://user:{hiddenSecret}@localhost/db?unsupported=1");
+        throw new InvalidOperationException("未知 URI 參數應 fail closed");
+    }
+    catch (InvalidDataException exception)
+    {
+        Assert(!exception.Message.Contains(hiddenSecret, StringComparison.Ordinal),
+            "URI 驗證錯誤不可回顯密碼");
+    }
+
+    AssertThrows<InvalidDataException>(() => ConnectionUriImportService.Parse(
+        "mysql://user:secret@localhost/db?name=" + new string('x', 257)));
+    AssertThrows<InvalidDataException>(() => ConnectionUriImportService.Parse(
+        "mysql://user:secret@localhost/db?name=line%0Abreak"));
+    AssertThrows<InvalidDataException>(() => ConnectionUriImportService.Parse(
+        "mysql://user:secret@localhost/db" + new string('x', ConnectionUriImportService.MaximumUriCharacters)));
+    var directoryUri = "sqlite://" + Uri.EscapeDataString(Path.GetTempPath())
+        .Replace("%2F", "/", StringComparison.OrdinalIgnoreCase);
+    AssertThrows<InvalidDataException>(() => ConnectionUriImportService.Parse(directoryUri));
+
+    return Task.CompletedTask;
+}
 
 static Task QueryResultValueSortingAsync()
 {
@@ -454,6 +600,143 @@ static async Task ProfileStoreDoesNotPersistPasswordsAsync()
         Assert(loaded.Count == 1, "設定檔數量不正確");
         Assert(loaded[0].Password.Length == 0, "載入後不應存在密碼");
         Assert(loaded[0].UseSecretStore, "系統密碼庫 opt-in 旗標應保存");
+        Assert(loaded[0].TlsMode == ConnectionTlsMode.Default,
+            "新 profile 應明確保存並還原安全的 provider 預設 TLS 模式");
+
+        var legacyPath = Path.Combine(directory, "legacy-connections.json");
+        await File.WriteAllTextAsync(
+            legacyPath,
+            """
+            [
+              {
+                "name": "Legacy MySQL off",
+                "provider": "MySql",
+                "host": "localhost",
+                "port": 3306,
+                "username": "root",
+                "useSsl": false
+              },
+              {
+                "name": "Legacy MySQL on",
+                "provider": "MySql",
+                "host": "localhost",
+                "port": 3306,
+                "username": "root",
+                "useSsl": true
+              },
+              {
+                "name": "Legacy PostgreSQL off",
+                "provider": "PostgreSql",
+                "host": "localhost",
+                "port": 5432,
+                "username": "postgres",
+                "database": "postgres",
+                "useSsl": false
+              },
+              {
+                "name": "Legacy PostgreSQL on",
+                "provider": "PostgreSql",
+                "host": "localhost",
+                "port": 5432,
+                "username": "postgres",
+                "database": "postgres",
+                "useSsl": true
+              },
+              {
+                "name": "Legacy SQL Server off",
+                "provider": "SqlServer",
+                "host": "localhost",
+                "port": 1433,
+                "username": "sa",
+                "database": "master",
+                "useSsl": false
+              },
+              {
+                "name": "Legacy SQL Server on",
+                "provider": "SqlServer",
+                "host": "localhost",
+                "port": 1433,
+                "username": "sa",
+                "database": "master",
+                "useSsl": true
+              },
+              {
+                "name": "Legacy missing MySQL TLS",
+                "provider": "MySql",
+                "host": "localhost",
+                "port": 3306,
+                "username": "root"
+              },
+              {
+                "name": "Legacy missing SQL Server TLS",
+                "provider": "SqlServer",
+                "host": "localhost",
+                "port": 1433,
+                "username": "sa"
+              }
+            ]
+            """);
+        var legacyStore = new ConnectionProfileStore(legacyPath);
+        var legacy = await legacyStore.LoadAsync();
+        Assert(legacy.Single(item => item.Name == "Legacy MySQL off").TlsMode == ConnectionTlsMode.Disabled &&
+               legacy.Single(item => item.Name == "Legacy MySQL on").TlsMode == ConnectionTlsMode.Preferred &&
+               legacy.Single(item => item.Name == "Legacy PostgreSQL off").TlsMode == ConnectionTlsMode.Disabled &&
+               legacy.Single(item => item.Name == "Legacy PostgreSQL on").TlsMode == ConnectionTlsMode.Preferred &&
+               legacy.Single(item => item.Name == "Legacy SQL Server off").TlsMode == ConnectionTlsMode.Optional &&
+               legacy.Single(item => item.Name == "Legacy SQL Server on").TlsMode == ConnectionTlsMode.Mandatory &&
+               legacy.Single(item => item.Name == "Legacy missing MySQL TLS").TlsMode == ConnectionTlsMode.Disabled &&
+               legacy.Single(item => item.Name == "Legacy missing SQL Server TLS").TlsMode == ConnectionTlsMode.Optional,
+            "舊 useSsl 與缺少 TLS 欄位的 profile 應依 provider 遷移成舊版等價模式");
+        await legacyStore.SaveAsync(legacy);
+        var migratedJson = await File.ReadAllTextAsync(legacyPath);
+        Assert(!migratedJson.Contains("useSsl", StringComparison.OrdinalIgnoreCase) &&
+               migratedJson.Contains("\"tlsMode\": \"Disabled\"", StringComparison.Ordinal) &&
+               migratedJson.Contains("\"tlsMode\": \"Mandatory\"", StringComparison.Ordinal),
+            "保存遷移後 profile 應只寫明確 tlsMode，不保留雙重 TLS 狀態");
+
+        var invalidProfileDocuments = new[]
+        {
+            ("conflicting", """
+                [{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","useSsl":false,"tlsMode":"VerifyFull"}]
+                """),
+            ("null-legacy", """
+                [{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","useSsl":null}]
+                """),
+            ("duplicate-legacy", """
+                [{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","useSsl":true,"useSsl":false}]
+                """),
+            ("duplicate-mode-case", """
+                [{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Required","TLSMODE":"Disabled"}]
+                """),
+            ("numeric-mode", """
+                [{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":5}]
+                """),
+            ("mysql-strict", """
+                [{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Strict"}]
+                """),
+            ("postgres-optional", """
+                [{"name":"Bad","provider":"PostgreSql","host":"localhost","port":5432,"username":"postgres","tlsMode":"Optional"}]
+                """),
+            ("sqlite-strict", """
+                [{"name":"Bad","provider":"Sqlite","database":"/tmp/bad.sqlite","tlsMode":"Strict"}]
+                """),
+            ("persisted-password", """
+                [{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","password":"must-not-load","tlsMode":"Default"}]
+                """),
+            ("duplicate-id", """
+                [
+                  {"id":"11111111-1111-1111-1111-111111111111","name":"One","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Default"},
+                  {"id":"11111111-1111-1111-1111-111111111111","name":"Two","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Default"}
+                ]
+                """)
+        };
+        foreach (var (caseName, invalidJson) in invalidProfileDocuments)
+        {
+            var invalidPath = Path.Combine(directory, $"{caseName}.json");
+            await File.WriteAllTextAsync(invalidPath, invalidJson);
+            await AssertThrowsAsync<InvalidDataException>(() =>
+                new ConnectionProfileStore(invalidPath).LoadAsync());
+        }
     }
     finally
     {
@@ -3320,6 +3603,30 @@ static async Task TableDataEditingAsync()
 
 static Task ProviderFactoryValidatesProfilesAsync()
 {
+    Assert(ConnectionTlsModeMapper.ToMySql(ConnectionTlsMode.Disabled) == MySqlSslMode.None &&
+           ConnectionTlsModeMapper.ToMySql(ConnectionTlsMode.Required) == MySqlSslMode.Required &&
+           ConnectionTlsModeMapper.ToMySql(ConnectionTlsMode.VerifyCertificateAuthority) == MySqlSslMode.VerifyCA &&
+           ConnectionTlsModeMapper.ToMySql(ConnectionTlsMode.VerifyFull) == MySqlSslMode.VerifyFull,
+        "MySQL TLS 模式應完整映射且不可壓成布林值");
+    Assert(ConnectionTlsModeMapper.ToPostgreSql(ConnectionTlsMode.Allow) == Npgsql.SslMode.Allow &&
+           ConnectionTlsModeMapper.ToPostgreSql(ConnectionTlsMode.Required) == Npgsql.SslMode.Require &&
+           ConnectionTlsModeMapper.ToPostgreSql(ConnectionTlsMode.VerifyCertificateAuthority) == Npgsql.SslMode.VerifyCA &&
+           ConnectionTlsModeMapper.ToPostgreSql(ConnectionTlsMode.VerifyFull) == Npgsql.SslMode.VerifyFull,
+        "PostgreSQL TLS 模式應完整映射且保留 Allow／憑證驗證語意");
+    Assert(ConnectionTlsModeMapper.ToSqlServer(ConnectionTlsMode.Optional) ==
+               Microsoft.Data.SqlClient.SqlConnectionEncryptOption.Optional &&
+           ConnectionTlsModeMapper.ToSqlServer(ConnectionTlsMode.Mandatory) ==
+               Microsoft.Data.SqlClient.SqlConnectionEncryptOption.Mandatory &&
+           ConnectionTlsModeMapper.ToSqlServer(ConnectionTlsMode.Strict) ==
+               Microsoft.Data.SqlClient.SqlConnectionEncryptOption.Strict,
+        "SQL Server TLS 模式應無損映射 Optional／Mandatory／Strict");
+    AssertThrows<InvalidOperationException>(() =>
+        ConnectionTlsModeMapper.ToMySql(ConnectionTlsMode.Strict));
+    AssertThrows<InvalidOperationException>(() =>
+        ConnectionTlsModeMapper.ToPostgreSql(ConnectionTlsMode.Optional));
+    AssertThrows<InvalidOperationException>(() =>
+        ConnectionTlsModeMapper.ToSqlServer(ConnectionTlsMode.Required));
+
     var mysql = new ConnectionProfile
     {
         Name = "MySQL",
@@ -3358,6 +3665,9 @@ static Task ProviderFactoryValidatesProfilesAsync()
     var invalid = mysql.Clone();
     invalid.Username = string.Empty;
     AssertThrows<InvalidOperationException>(() => DatabaseProviderFactory.Create(invalid));
+    invalid = mysql.Clone();
+    invalid.TlsMode = ConnectionTlsMode.Strict;
+    AssertThrows<InvalidOperationException>(() => DatabaseProviderFactory.Create(invalid));
     return Task.CompletedTask;
 }
 
@@ -3379,10 +3689,38 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
         Port = ReadRequiredIntEnvironment($"{environmentPrefix}_PORT"),
         Username = Environment.GetEnvironmentVariable($"{environmentPrefix}_USER") ?? "root",
         Password = ReadRequiredEnvironment($"{environmentPrefix}_PASSWORD"),
+        TlsMode = ConnectionTlsMode.Disabled,
         TimeoutSeconds = 20
     };
     var session = DatabaseProviderFactory.Create(profile);
     await session.TestConnectionAsync();
+    var disabledCipher = await session.ExecuteAsync(string.Empty, "SHOW STATUS LIKE 'Ssl_cipher';");
+    Assert(disabledCipher.Rows.Count == 1 &&
+           string.IsNullOrEmpty(Convert.ToString(disabledCipher.Rows[0][1], CultureInfo.InvariantCulture)),
+        $"{profile.Name} Disabled 模式不得建立 TLS channel");
+
+    var requiredProfile = profile.Clone();
+    requiredProfile.TlsMode = ConnectionTlsMode.Required;
+    var requiredSession = DatabaseProviderFactory.Create(requiredProfile);
+    try
+    {
+        await requiredSession.TestConnectionAsync();
+        var requiredCipher = await requiredSession.ExecuteAsync(string.Empty, "SHOW STATUS LIKE 'Ssl_cipher';");
+        Assert(requiredCipher.Rows.Count == 1 &&
+               !string.IsNullOrEmpty(Convert.ToString(requiredCipher.Rows[0][1], CultureInfo.InvariantCulture)),
+            $"{profile.Name} Required 模式成功時必須實際使用 TLS，不可降級");
+    }
+    catch (MySqlException)
+    {
+        var tlsCapability = await session.ExecuteAsync(string.Empty, "SHOW VARIABLES LIKE 'have_ssl';");
+        var serverReportsTls = tlsCapability.Rows.Count == 1 &&
+                               string.Equals(
+                                   Convert.ToString(tlsCapability.Rows[0][1], CultureInfo.InvariantCulture),
+                                   "YES",
+                                   StringComparison.OrdinalIgnoreCase);
+        Assert(!serverReportsTls,
+            $"{profile.Name} server 宣告支援 TLS 時，Required 連線不應失敗");
+    }
 
     try
     {
@@ -3742,10 +4080,22 @@ static async Task PostgreSqlLiveRoundTripAsync()
         Username = Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_USER") ?? "postgres",
         Password = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_PASSWORD"),
         Database = "postgres",
+        TlsMode = ConnectionTlsMode.Disabled,
         TimeoutSeconds = 20
     };
     var session = DatabaseProviderFactory.Create(profile);
     await session.TestConnectionAsync();
+    var sslSetting = await session.ExecuteAsync("postgres", "SHOW ssl;");
+    Assert(sslSetting.Rows.Count == 1 &&
+           string.Equals(
+               Convert.ToString(sslSetting.Rows[0][0], CultureInfo.InvariantCulture),
+               "off",
+               StringComparison.OrdinalIgnoreCase),
+        "PostgreSQL live harness 應明確停用 server TLS，才能驗證 Require 不降級");
+    var requiredProfile = profile.Clone();
+    requiredProfile.TlsMode = ConnectionTlsMode.Required;
+    await AssertThrowsAsync<NpgsqlException>(() =>
+        DatabaseProviderFactory.Create(requiredProfile).TestConnectionAsync());
 
     try
     {
@@ -4640,10 +4990,27 @@ static async Task SqlServerLiveRoundTripAsync()
         Username = Environment.GetEnvironmentVariable("MYSQLPUNK_SQLSERVER_USER") ?? "sa",
         Password = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_PASSWORD"),
         Database = "master",
+        TlsMode = ConnectionTlsMode.Optional,
         TimeoutSeconds = 30
     };
     var session = DatabaseProviderFactory.Create(profile);
     await session.TestConnectionAsync();
+    var optionalEncryption = await session.ExecuteAsync(
+        "master",
+        "SELECT encrypt_option FROM sys.dm_exec_connections WHERE session_id = @@SPID;");
+    Assert(optionalEncryption.Rows.Count == 1 &&
+           string.Equals(
+               Convert.ToString(optionalEncryption.Rows[0][0], CultureInfo.InvariantCulture),
+               "FALSE",
+               StringComparison.OrdinalIgnoreCase),
+        "SQL Server Optional live harness 應維持未加密，才能驗證 Mandatory／Strict 不降級");
+    foreach (var strictMode in new[] { ConnectionTlsMode.Mandatory, ConnectionTlsMode.Strict })
+    {
+        var strictProfile = profile.Clone();
+        strictProfile.TlsMode = strictMode;
+        await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() =>
+            DatabaseProviderFactory.Create(strictProfile).TestConnectionAsync());
+    }
 
     try
     {
@@ -5585,7 +5952,7 @@ static async Task VerifyNonRoundTrippableTrailingSpacesAsync(
             UserID = session.Profile.Username,
             Password = session.Profile.Password,
             Database = database,
-            SslMode = session.Profile.UseSsl ? MySqlSslMode.Preferred : MySqlSslMode.None
+            SslMode = ConnectionTlsModeMapper.ToMySql(session.Profile.TlsMode)
         };
         await using var connection = new MySqlConnection(builder.ConnectionString);
         await connection.OpenAsync();

@@ -16,6 +16,8 @@ public sealed partial class ConnectionEditorWindow : Window
     private bool _passwordChanged;
 
     private readonly TextBlock _hintText;
+    private readonly TextBox _connectionUriBox;
+    private readonly Button _importUriButton;
     private readonly TextBox _nameBox;
     private readonly ComboBox _providerCombo;
     private readonly Grid _networkFields;
@@ -27,7 +29,9 @@ public sealed partial class ConnectionEditorWindow : Window
     private readonly TextBox _databaseBox;
     private readonly Button _browseButton;
     private readonly TextBox _timeoutBox;
-    private readonly CheckBox _useSslCheck;
+    private readonly TextBlock _tlsModeLabel;
+    private readonly ComboBox _tlsModeCombo;
+    private readonly TextBlock _tlsModeDescription;
     private readonly CheckBox _rememberPasswordCheck;
     private readonly TextBlock _testStatus;
     private readonly Button _testButton;
@@ -49,6 +53,8 @@ public sealed partial class ConnectionEditorWindow : Window
         _lastProvider = _source.Provider;
 
         _hintText = this.FindControl<TextBlock>("HintText")!;
+        _connectionUriBox = this.FindControl<TextBox>("ConnectionUriBox")!;
+        _importUriButton = this.FindControl<Button>("ImportUriButton")!;
         _nameBox = this.FindControl<TextBox>("NameBox")!;
         _providerCombo = this.FindControl<ComboBox>("ProviderCombo")!;
         _networkFields = this.FindControl<Grid>("NetworkFields")!;
@@ -60,7 +66,9 @@ public sealed partial class ConnectionEditorWindow : Window
         _databaseBox = this.FindControl<TextBox>("DatabaseBox")!;
         _browseButton = this.FindControl<Button>("BrowseButton")!;
         _timeoutBox = this.FindControl<TextBox>("TimeoutBox")!;
-        _useSslCheck = this.FindControl<CheckBox>("UseSslCheck")!;
+        _tlsModeLabel = this.FindControl<TextBlock>("TlsModeLabel")!;
+        _tlsModeCombo = this.FindControl<ComboBox>("TlsModeCombo")!;
+        _tlsModeDescription = this.FindControl<TextBlock>("TlsModeDescription")!;
         _rememberPasswordCheck = this.FindControl<CheckBox>("RememberPasswordCheck")!;
         _testStatus = this.FindControl<TextBlock>("TestStatus")!;
         _testButton = this.FindControl<Button>("TestButton")!;
@@ -76,7 +84,6 @@ public sealed partial class ConnectionEditorWindow : Window
         _passwordBox.Text = _source.Password;
         _databaseBox.Text = _source.Database;
         _timeoutBox.Text = _source.TimeoutSeconds.ToString();
-        _useSslCheck.IsChecked = _source.UseSsl;
         _rememberPasswordCheck.IsChecked = _source.UseSecretStore;
         _rememberPasswordCheck.IsEnabled = _secretStore.IsAvailable || _source.UseSecretStore;
         _rememberPasswordCheck.Content = _secretStore.IsAvailable
@@ -86,6 +93,31 @@ public sealed partial class ConnectionEditorWindow : Window
         ApplyProviderVisibility(_source.Provider, resetPort: false);
     }
 
+    private void ImportUri_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var imported = ConnectionUriImportService.Parse(_connectionUriBox.Text);
+            _providerCombo.SelectedItem = imported.Provider;
+            _nameBox.Text = imported.Name;
+            _hostBox.Text = imported.Host;
+            _portBox.Text = imported.Port > 0 ? imported.Port.ToString() : string.Empty;
+            _usernameBox.Text = imported.Username;
+            _passwordBox.Text = imported.Password;
+            _databaseBox.Text = imported.Database;
+            _timeoutBox.Text = imported.TimeoutSeconds.ToString();
+            SelectTlsMode(imported.Provider, imported.TlsMode);
+            _rememberPasswordCheck.IsChecked = false;
+            _connectionUriBox.Text = string.Empty;
+            var tlsLabel = (_tlsModeCombo.SelectedItem as TlsModeOption)?.Label ?? imported.TlsMode.ToString();
+            _testStatus.Text = $"URI 已安全套用並從輸入框清除；TLS：{tlsLabel}。密碼仍不會寫入連線設定檔。";
+        }
+        catch (InvalidDataException exception)
+        {
+            _testStatus.Text = exception.Message;
+        }
+    }
+
     private void ProviderCombo_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_providerCombo?.SelectedItem is not DatabaseProviderKind provider || _networkFields is null)
@@ -93,9 +125,10 @@ public sealed partial class ConnectionEditorWindow : Window
             return;
         }
 
-        var changed = provider != _lastProvider;
+        var previousProvider = _lastProvider;
+        var changed = provider != previousProvider;
+        ApplyProviderVisibility(provider, changed, previousProvider);
         _lastProvider = provider;
-        ApplyProviderVisibility(provider, changed);
     }
 
     private async void BrowseSqlite_Click(object? sender, RoutedEventArgs e)
@@ -197,17 +230,23 @@ public sealed partial class ConnectionEditorWindow : Window
             PasswordChanged = _passwordChanged,
             Database = _databaseBox.Text ?? string.Empty,
             TimeoutSeconds = timeout,
-            UseSsl = _useSslCheck.IsChecked == true
+            TlsMode = (_tlsModeCombo.SelectedItem as TlsModeOption)?.Mode ??
+                      throw new InvalidOperationException("請選擇 TLS 模式。")
         };
         profile.Validate();
         return profile;
     }
 
-    private void ApplyProviderVisibility(DatabaseProviderKind provider, bool resetPort)
+    private void ApplyProviderVisibility(
+        DatabaseProviderKind provider,
+        bool resetPort,
+        DatabaseProviderKind? previousProvider = null)
     {
+        var previousMode = (_tlsModeCombo.SelectedItem as TlsModeOption)?.Mode ?? _source.TlsMode;
         var sqlite = provider == DatabaseProviderKind.Sqlite;
         _networkFields.IsVisible = !sqlite;
-        _useSslCheck.IsVisible = !sqlite;
+        _tlsModeLabel.IsVisible = !sqlite;
+        _tlsModeCombo.IsVisible = !sqlite;
         _rememberPasswordCheck.IsVisible = !sqlite;
         _browseButton.IsVisible = sqlite;
         _databaseLabel.Text = sqlite ? "資料庫檔案" : "預設資料庫";
@@ -221,11 +260,140 @@ public sealed partial class ConnectionEditorWindow : Window
                 _ => "3306"
             };
         }
+
+        var requestedMode = resetPort
+            ? previousProvider == DatabaseProviderKind.Sqlite
+                ? ConnectionTlsMode.Default
+                : ResolveProviderChangedTlsMode(provider, previousMode)
+            : previousMode;
+        SelectTlsMode(provider, sqlite ? ConnectionTlsMode.Disabled : requestedMode);
+        if (resetPort)
+        {
+            var selectedLabel = (_tlsModeCombo.SelectedItem as TlsModeOption)?.Label ?? requestedMode.ToString();
+            _testStatus.Text = $"資料庫類型已變更；TLS 已安全調整為「{selectedLabel}」，請確認後再儲存。";
+        }
     }
+
+    private void SelectTlsMode(DatabaseProviderKind provider, ConnectionTlsMode requestedMode)
+    {
+        var options = GetTlsModeOptions(provider);
+        _tlsModeCombo.ItemsSource = options;
+        _tlsModeCombo.SelectedItem = options.FirstOrDefault(option => option.Mode == requestedMode) ?? options[0];
+        UpdateTlsModeDescription();
+    }
+
+    private void TlsModeCombo_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        UpdateTlsModeDescription();
+    }
+
+    private void UpdateTlsModeDescription()
+    {
+        if (_tlsModeDescription is null ||
+            _providerCombo?.SelectedItem is not DatabaseProviderKind provider ||
+            _tlsModeCombo?.SelectedItem is not TlsModeOption option)
+        {
+            return;
+        }
+
+        _tlsModeDescription.Text = GetTlsModeDescription(provider, option.Mode);
+    }
+
+    private static ConnectionTlsMode ResolveProviderChangedTlsMode(
+        DatabaseProviderKind provider,
+        ConnectionTlsMode previousMode)
+    {
+        if (provider == DatabaseProviderKind.Sqlite)
+        {
+            return ConnectionTlsMode.Disabled;
+        }
+
+        if (ConnectionTlsModeRules.IsSupported(provider, previousMode))
+        {
+            return previousMode;
+        }
+
+        if (provider == DatabaseProviderKind.SqlServer)
+        {
+            return previousMode == ConnectionTlsMode.Optional
+                ? ConnectionTlsMode.Optional
+                : ConnectionTlsMode.Mandatory;
+        }
+
+        return previousMode switch
+        {
+            ConnectionTlsMode.Strict or ConnectionTlsMode.Mandatory or ConnectionTlsMode.VerifyFull =>
+                ConnectionTlsMode.VerifyFull,
+            ConnectionTlsMode.VerifyCertificateAuthority => ConnectionTlsMode.VerifyCertificateAuthority,
+            ConnectionTlsMode.Required => ConnectionTlsMode.Required,
+            ConnectionTlsMode.Optional or ConnectionTlsMode.Allow => provider == DatabaseProviderKind.PostgreSql
+                ? ConnectionTlsMode.Allow
+                : ConnectionTlsMode.Preferred,
+            _ => ConnectionTlsMode.Default
+        };
+    }
+
+    private static string GetTlsModeDescription(DatabaseProviderKind provider, ConnectionTlsMode mode) => mode switch
+    {
+        ConnectionTlsMode.Default when provider == DatabaseProviderKind.SqlServer =>
+            "SqlClient 7 預設為 Mandatory：要求 TLS，並驗證憑證鏈與主機名稱。",
+        ConnectionTlsMode.Default => "沿用驅動程式的 Prefer／Preferred：優先 TLS，但 server 不支援時可退回未加密。",
+        ConnectionTlsMode.Disabled => "明確停用 TLS；只適合受控的本機或隔離測試環境。",
+        ConnectionTlsMode.Optional => "允許未加密；SQL Server 要求加密時仍會協商 TLS。",
+        ConnectionTlsMode.Allow => "先嘗試未加密；PostgreSQL server 要求時才改用 TLS。",
+        ConnectionTlsMode.Preferred => "優先使用 TLS，但 server 不支援時可退回未加密。",
+        ConnectionTlsMode.Required => "強制使用 TLS，但不驗證 server 憑證身分。",
+        ConnectionTlsMode.Mandatory => "強制 TLS，並驗證 SQL Server 憑證鏈與主機名稱。",
+        ConnectionTlsMode.VerifyCertificateAuthority => "強制 TLS 並驗證憑證授權單位，但不核對主機名稱。",
+        ConnectionTlsMode.VerifyFull => "強制 TLS，同時驗證憑證授權單位與主機名稱，建議正式環境使用。",
+        ConnectionTlsMode.Strict => "要求 TDS 8.0 嚴格加密與憑證驗證；不支援時直接失敗，不會降級。",
+        _ => throw new ArgumentOutOfRangeException(nameof(mode))
+    };
+
+    private static IReadOnlyList<TlsModeOption> GetTlsModeOptions(DatabaseProviderKind provider) => provider switch
+    {
+        DatabaseProviderKind.MySql => new[]
+        {
+            new TlsModeOption(ConnectionTlsMode.Default, "驅動程式預設（Preferred，可退回未加密）"),
+            new TlsModeOption(ConnectionTlsMode.Disabled, "Disabled（停用 TLS）"),
+            new TlsModeOption(ConnectionTlsMode.Preferred, "Preferred（可退回未加密）"),
+            new TlsModeOption(ConnectionTlsMode.Required, "Required（強制 TLS，不驗證憑證）"),
+            new TlsModeOption(ConnectionTlsMode.VerifyCertificateAuthority, "VerifyCA（驗證憑證授權單位）"),
+            new TlsModeOption(ConnectionTlsMode.VerifyFull, "VerifyFull（驗證憑證與主機名稱）")
+        },
+        DatabaseProviderKind.PostgreSql => new[]
+        {
+            new TlsModeOption(ConnectionTlsMode.Default, "驅動程式預設（Prefer，可退回未加密）"),
+            new TlsModeOption(ConnectionTlsMode.Disabled, "Disable（停用 TLS）"),
+            new TlsModeOption(ConnectionTlsMode.Allow, "Allow（server 要求時使用 TLS）"),
+            new TlsModeOption(ConnectionTlsMode.Preferred, "Prefer（可退回未加密）"),
+            new TlsModeOption(ConnectionTlsMode.Required, "Require（強制 TLS，不驗證憑證）"),
+            new TlsModeOption(ConnectionTlsMode.VerifyCertificateAuthority, "VerifyCA（驗證憑證授權單位）"),
+            new TlsModeOption(ConnectionTlsMode.VerifyFull, "VerifyFull（驗證憑證與主機名稱）")
+        },
+        DatabaseProviderKind.SqlServer => new[]
+        {
+            new TlsModeOption(ConnectionTlsMode.Default, "驅動程式預設（Mandatory，驗證憑證與主機）"),
+            new TlsModeOption(ConnectionTlsMode.Optional, "Optional（server 要求時才加密）"),
+            new TlsModeOption(ConnectionTlsMode.Mandatory, "Mandatory（驗證憑證與主機名稱）"),
+            new TlsModeOption(ConnectionTlsMode.Strict, "Strict（TDS 8 嚴格加密）")
+        },
+        DatabaseProviderKind.Sqlite => new[]
+        {
+            new TlsModeOption(ConnectionTlsMode.Disabled, "SQLite 不使用 TLS")
+        },
+        _ => throw new ArgumentOutOfRangeException(nameof(provider))
+    };
 
     private void SetBusy(bool busy)
     {
+        _importUriButton.IsEnabled = !busy;
         _testButton.IsEnabled = !busy;
         _saveButton.IsEnabled = !busy;
+    }
+
+    private sealed record TlsModeOption(ConnectionTlsMode Mode, string Label)
+    {
+        public override string ToString() => Label;
     }
 }
