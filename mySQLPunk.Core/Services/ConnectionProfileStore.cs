@@ -21,6 +21,14 @@ public sealed class ConnectionProfileStore
         "tlsClientKeyPath"
     };
 
+    private static readonly HashSet<string> SshTextFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sshHost",
+        "sshUsername",
+        "sshPrivateKeyPath",
+        "sshHostKeyFingerprint"
+    };
+
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public ConnectionProfileStore(string? filePath = null)
@@ -218,12 +226,31 @@ public sealed class ConnectionProfileStore
                         throw new InvalidDataException("tlsMode 欄位必須是明確的模式名稱。");
                     }
                 }
-                else if (CertificatePathFields.Contains(property.Name))
+                else if (CertificatePathFields.Contains(property.Name) || SshTextFields.Contains(property.Name))
                 {
                     if (property.Value.ValueKind != JsonValueKind.String)
                     {
-                        throw new InvalidDataException($"{property.Name} 欄位必須是字串路徑。");
+                        throw new InvalidDataException($"{property.Name} 欄位必須是字串。");
                     }
+                }
+                else if (property.Name.Equals("sshEnabled", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (property.Value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+                    {
+                        throw new InvalidDataException("sshEnabled 欄位必須是布林值。");
+                    }
+                }
+                else if (property.Name.Equals("sshPort", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (property.Value.ValueKind != JsonValueKind.Number)
+                    {
+                        throw new InvalidDataException("sshPort 欄位必須是整數。");
+                    }
+                }
+                else if (property.Name.Equals("sshPassword", StringComparison.OrdinalIgnoreCase) ||
+                         property.Name.Equals("sshKeyPassphrase", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException("連線設定檔不可包含 SSH 密碼或私鑰密語欄位。");
                 }
             }
 

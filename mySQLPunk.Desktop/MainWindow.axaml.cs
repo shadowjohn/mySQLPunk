@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly ObservableCollection<ConnectionProfile> _profiles = new();
     private readonly Dictionary<Guid, string> _runtimePasswords = new();
+    private readonly Dictionary<Guid, (string Password, string Passphrase)> _runtimeSshSecrets = new();
     private readonly ConnectionProfileStore _profileStore = new();
     private readonly ISecretStore _secretStore = SecretStoreFactory.CreateDefault();
     private readonly CrossPlatformUpdateService _updateService = new();
@@ -468,6 +469,7 @@ public sealed partial class MainWindow : Window
         }
 
         var passwordStatus = await ApplyPasswordPreferenceAsync(original: null, result);
+        RememberSshSecrets(result);
         result.Password = string.Empty;
         _profiles.Add(result);
         _profilesList.SelectedItem = result;
@@ -498,6 +500,7 @@ public sealed partial class MainWindow : Window
 
         var index = _profiles.IndexOf(selected);
         var passwordStatus = await ApplyPasswordPreferenceAsync(selected, result);
+        RememberSshSecrets(result);
         result.Password = string.Empty;
         _profiles[index] = result;
         _profilesList.SelectedIndex = index;
@@ -524,6 +527,7 @@ public sealed partial class MainWindow : Window
 
         var wasConnected = _session?.Profile.Id == selected.Id;
         _runtimePasswords.Remove(selected.Id);
+        _runtimeSshSecrets.Remove(selected.Id);
         var secretWarning = selected.UseSecretStore
             ? await DeleteStoredPasswordAsync(selected.Id)
             : string.Empty;
@@ -551,12 +555,19 @@ public sealed partial class MainWindow : Window
 
         var connectionProfile = selected.Clone();
         var passwordResolution = await ResolvePasswordAsync(selected);
+        var sshSecretsFound = ApplySshSecrets(connectionProfile);
+        var sshNeedsInput = connectionProfile.SshEnabled &&
+                            !sshSecretsFound &&
+                            connectionProfile.SshPrivateKeyPath.Length == 0;
         if (selected.Provider != DatabaseProviderKind.Sqlite &&
-            !passwordResolution.Found)
+            (!passwordResolution.Found || sshNeedsInput))
         {
-            var hint = string.IsNullOrWhiteSpace(passwordResolution.Warning)
-                ? "請輸入密碼後連線；可選擇交由系統密碼庫安全保存。"
-                : $"{passwordResolution.Warning} 請重新輸入密碼後連線。";
+            connectionProfile.Password = passwordResolution.Password;
+            var hint = sshNeedsInput && passwordResolution.Found
+                ? "這組連線透過 SSH Tunnel，請輸入 SSH 密碼或選擇私鑰後連線；SSH 祕密只保留到本次程式關閉。"
+                : string.IsNullOrWhiteSpace(passwordResolution.Warning)
+                    ? "請輸入密碼後連線；可選擇交由系統密碼庫安全保存。"
+                    : $"{passwordResolution.Warning} 請重新輸入密碼後連線。";
             var editor = new ConnectionEditorWindow(connectionProfile, hint, _secretStore);
             var edited = await editor.ShowDialog<ConnectionProfile?>(this);
             if (edited is null)
@@ -566,6 +577,7 @@ public sealed partial class MainWindow : Window
 
             connectionProfile = edited.Clone();
             await ApplyPasswordPreferenceAsync(selected, edited);
+            RememberSshSecrets(edited);
             await UpdateStoredProfileAsync(selected, edited);
         }
         else
@@ -1450,8 +1462,36 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void RememberSshSecrets(ConnectionProfile edited)
+    {
+        if (edited.SshEnabled && (edited.SshPassword.Length > 0 || edited.SshKeyPassphrase.Length > 0))
+        {
+            _runtimeSshSecrets[edited.Id] = (edited.SshPassword, edited.SshKeyPassphrase);
+        }
+        else
+        {
+            _runtimeSshSecrets.Remove(edited.Id);
+        }
+
+        edited.SshPassword = string.Empty;
+        edited.SshKeyPassphrase = string.Empty;
+    }
+
+    private bool ApplySshSecrets(ConnectionProfile profile)
+    {
+        if (!profile.SshEnabled || !_runtimeSshSecrets.TryGetValue(profile.Id, out var secrets))
+        {
+            return false;
+        }
+
+        profile.SshPassword = secrets.Password;
+        profile.SshKeyPassphrase = secrets.Passphrase;
+        return true;
+    }
+
     private void Disconnect(string status)
     {
+        _session?.Dispose();
         _session = null;
         _databaseObjects = Array.Empty<DatabaseObjectInfo>();
         _databaseCombo.ItemsSource = null;

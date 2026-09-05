@@ -82,6 +82,27 @@ public sealed class ConnectionProfile
     /// <summary>PEM private key matching <see cref="TlsClientCertificatePath"/>.</summary>
     public string TlsClientKeyPath { get; set; } = string.Empty;
 
+    /// <summary>Route the database connection through an SSH local port forward.</summary>
+    public bool SshEnabled { get; set; }
+
+    public string SshHost { get; set; } = string.Empty;
+
+    public int SshPort { get; set; } = 22;
+
+    public string SshUsername { get; set; } = string.Empty;
+
+    /// <summary>Optional OpenSSH／PEM private key; the passphrase is never persisted.</summary>
+    public string SshPrivateKeyPath { get; set; } = string.Empty;
+
+    /// <summary>Pinned server host key fingerprint in OpenSSH <c>SHA256:…</c> form; required when SSH is enabled.</summary>
+    public string SshHostKeyFingerprint { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string SshPassword { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string SshKeyPassphrase { get; set; } = string.Empty;
+
     [JsonIgnore]
     public string ProviderDisplayName => Provider switch
     {
@@ -108,7 +129,15 @@ public sealed class ConnectionProfile
         TimeoutSeconds = TimeoutSeconds,
         TlsCaCertificatePath = TlsCaCertificatePath,
         TlsClientCertificatePath = TlsClientCertificatePath,
-        TlsClientKeyPath = TlsClientKeyPath
+        TlsClientKeyPath = TlsClientKeyPath,
+        SshEnabled = SshEnabled,
+        SshHost = SshHost,
+        SshPort = SshPort,
+        SshUsername = SshUsername,
+        SshPrivateKeyPath = SshPrivateKeyPath,
+        SshHostKeyFingerprint = SshHostKeyFingerprint,
+        SshPassword = SshPassword,
+        SshKeyPassphrase = SshKeyPassphrase
     };
 
     public void ApplyProviderDefaults(bool resetPort = false)
@@ -157,6 +186,7 @@ public sealed class ConnectionProfile
         {
             TlsMode = ConnectionTlsMode.Disabled;
             ConnectionTlsCertificateFiles.Validate(this);
+            SshTunnelRules.Validate(this);
             if (string.IsNullOrWhiteSpace(Database))
             {
                 throw new InvalidOperationException("SQLite 必須指定資料庫檔案。");
@@ -183,6 +213,7 @@ public sealed class ConnectionProfile
         }
 
         ConnectionTlsCertificateFiles.Validate(this);
+        SshTunnelRules.Validate(this);
     }
 
     internal void ApplyPersistedCompatibility()

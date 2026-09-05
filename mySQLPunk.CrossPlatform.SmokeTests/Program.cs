@@ -14,6 +14,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("連線 URI 安全匯入", ConnectionUriImportAsync),
     ("TLS 憑證檔案安全套用", TlsCertificateFilesAsync),
+    ("SSH Tunnel 規則與實機轉送", SshTunnelAsync),
     ("查詢結果安全匯出", QueryResultExportFormatsAsync),
     ("查詢結果型別感知排序", QueryResultValueSortingAsync),
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
@@ -585,7 +586,7 @@ static async Task TlsCertificateFilesAsync()
         await File.WriteAllTextAsync(caPath, "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n");
         await File.WriteAllTextAsync(certificatePath, "-----BEGIN CERTIFICATE-----\nMIIC\n-----END CERTIFICATE-----\n");
         await File.WriteAllTextAsync(keyPath, "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n");
-        File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
         ConnectionProfile Network(DatabaseProviderKind provider, ConnectionTlsMode mode) => new()
         {
@@ -700,11 +701,11 @@ static async Task TlsCertificateFilesAsync()
         sharedKey.TlsClientCertificatePath = certificatePath;
         sharedKey.TlsClientKeyPath = Path.Combine(directory, "shared.key");
         await File.WriteAllTextAsync(sharedKey.TlsClientKeyPath, "key");
-        File.SetUnixFileMode(sharedKey.TlsClientKeyPath,
+        SetUnixFileMode(sharedKey.TlsClientKeyPath,
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
         sharedKey.Validate();
         AssertThrows<InvalidOperationException>(() => ConnectionTlsCertificateFiles.EnsureReadable(sharedKey));
-        File.SetUnixFileMode(sharedKey.TlsClientKeyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        SetUnixFileMode(sharedKey.TlsClientKeyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         ConnectionTlsCertificateFiles.EnsureReadable(sharedKey);
 
         var storePath = Path.Combine(directory, "connections.json");
@@ -785,6 +786,389 @@ static async Task TlsCertificateFilesAsync()
     {
         Directory.Delete(directory, recursive: true);
     }
+}
+
+static async Task SshTunnelAsync()
+{
+    Assert(SshTunnelRules.NormalizeFingerprint("SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI") ==
+               "SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI" &&
+           SshTunnelRules.NormalizeFingerprint(" W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI= ") ==
+               "SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI" &&
+           SshTunnelRules.NormalizeFingerprint("sha256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI") ==
+               "SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI",
+        "SSH 指紋應正規化為 OpenSSH SHA256 形式並容許 base64 padding");
+    foreach (var invalidFingerprint in new[]
+             {
+                 "",
+                 "SHA256:",
+                 "MD5:16:27:ac:a5:76:28:2d:36:63:1b:56:4d:eb:df:a6:48",
+                 "SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTty",
+                 "SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyIx",
+                 "SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMT yI",
+                 "SHA256:W4vLK9EBz3ha-8V_d/q/mO8qOvkHl/iRJ4IstKMTtyI"
+             })
+    {
+        AssertThrows<InvalidOperationException>(() => SshTunnelRules.NormalizeFingerprint(invalidFingerprint));
+    }
+
+    ConnectionProfile Network(DatabaseProviderKind provider, ConnectionTlsMode mode) => new()
+    {
+        Name = provider.ToString(),
+        Provider = provider,
+        Host = "db.internal.test",
+        Port = provider == DatabaseProviderKind.SqlServer ? 1433 : 3306,
+        Username = "user",
+        TlsMode = mode,
+        SshEnabled = true,
+        SshHost = " bastion.example.test ",
+        SshPort = 2222,
+        SshUsername = " deploy ",
+        SshHostKeyFingerprint = "W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI="
+    };
+
+    var valid = Network(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyCertificateAuthority);
+    valid.Validate();
+    Assert(valid.SshHost == "bastion.example.test" &&
+           valid.SshUsername == "deploy" &&
+           valid.SshHostKeyFingerprint == "SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI",
+        "SSH 欄位應修剪並正規化指紋");
+    var clone = valid.Clone();
+    clone.SshPassword = "runtime-only";
+    Assert(clone.SshEnabled && clone.SshHost == valid.SshHost && clone.Clone().SshPassword == "runtime-only",
+        "Clone 應保留 SSH 設定與本次執行期間的 SSH 祕密");
+    Network(DatabaseProviderKind.SqlServer, ConnectionTlsMode.Mandatory).Validate();
+    var sqlite = new ConnectionProfile
+    {
+        Name = "SQLite",
+        Provider = DatabaseProviderKind.Sqlite,
+        Database = Path.Combine(Path.GetTempPath(), "ssh-sample.db"),
+        SshEnabled = true,
+        SshPassword = "x"
+    };
+    sqlite.Validate();
+    Assert(!sqlite.SshEnabled && sqlite.SshPassword.Length == 0, "SQLite 不可啟用 SSH Tunnel");
+    var disabled = Network(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull);
+    disabled.SshEnabled = false;
+    disabled.SshHost = string.Empty;
+    disabled.SshHostKeyFingerprint = string.Empty;
+    disabled.Validate();
+
+    var rejected = new List<Action<ConnectionProfile>>
+    {
+        profile => profile.SshHost = string.Empty,
+        profile => profile.SshHost = "bastion example",
+        profile => profile.SshHost = new string('h', SshTunnelRules.MaximumHostCharacters + 1),
+        profile => profile.SshUsername = string.Empty,
+        profile => profile.SshUsername = "deploy\n",
+        profile => profile.SshHostKeyFingerprint = string.Empty,
+        profile => profile.SshHostKeyFingerprint = "MD5:16:27:ac:a5:76:28:2d:36:63:1b:56:4d:eb:df:a6:48",
+        profile => profile.SshPort = 0,
+        profile => profile.SshPort = 65536,
+        profile => profile.SshPrivateKeyPath = "relative/id_ed25519",
+        profile => profile.TlsMode = ConnectionTlsMode.VerifyFull
+    };
+    foreach (var mutate in rejected)
+    {
+        var profile = Network(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyCertificateAuthority);
+        mutate(profile);
+        AssertThrows<InvalidOperationException>(profile.Validate);
+        var postgres = Network(DatabaseProviderKind.PostgreSql, ConnectionTlsMode.VerifyCertificateAuthority);
+        mutate(postgres);
+        AssertThrows<InvalidOperationException>(postgres.Validate);
+    }
+
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var storePath = Path.Combine(directory, "connections.json");
+        var store = new ConnectionProfileStore(storePath);
+        await store.SaveAsync(new[] { clone });
+        var json = await File.ReadAllTextAsync(storePath);
+        Assert(json.Contains("\"sshHostKeyFingerprint\"", StringComparison.Ordinal) &&
+               json.Contains("\"sshEnabled\": true", StringComparison.Ordinal) &&
+               !json.Contains("runtime-only", StringComparison.Ordinal) &&
+               !json.Contains("sshPassword", StringComparison.OrdinalIgnoreCase) &&
+               !json.Contains("sshKeyPassphrase", StringComparison.OrdinalIgnoreCase),
+            "設定檔應保存 SSH 主機／指紋，但絕不保存 SSH 密碼或私鑰密語");
+        var loaded = (await store.LoadAsync()).Single();
+        Assert(loaded.SshEnabled && loaded.SshPort == 2222 && loaded.SshHost == "bastion.example.test" &&
+               loaded.SshHostKeyFingerprint == valid.SshHostKeyFingerprint && loaded.SshPassword.Length == 0,
+            "重新載入應還原 SSH 設定且 SSH 祕密為空");
+
+        var invalidDocuments = new[]
+        {
+            """[{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Preferred","sshEnabled":true,"sshHost":"bastion","sshUsername":"deploy","sshHostKeyFingerprint":"SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI","sshPassword":"leaked"}]""",
+            """[{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Preferred","sshEnabled":"yes","sshHost":"bastion","sshUsername":"deploy","sshHostKeyFingerprint":"SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI"}]""",
+            """[{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Preferred","sshEnabled":true,"sshPort":"22","sshHost":"bastion","sshUsername":"deploy","sshHostKeyFingerprint":"SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI"}]""",
+            """[{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Preferred","sshEnabled":true,"sshHost":"bastion","sshUsername":"deploy"}]""",
+            """[{"name":"Bad","provider":"PostgreSql","host":"localhost","port":5432,"username":"root","tlsMode":"VerifyFull","sshEnabled":true,"sshHost":"bastion","sshUsername":"deploy","sshHostKeyFingerprint":"SHA256:W4vLK9EBz3ha/8V/d/q/mO8qOvkHl/iRJ4IstKMTtyI"}]"""
+        };
+        foreach (var document in invalidDocuments)
+        {
+            var invalidPath = Path.Combine(directory, $"invalid-{Guid.NewGuid():N}.json");
+            await File.WriteAllTextAsync(invalidPath, document);
+            await AssertThrowsAsync<InvalidDataException>(() => new ConnectionProfileStore(invalidPath).LoadAsync());
+        }
+
+        var noAuth = Network(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyCertificateAuthority);
+        await AssertThrowsAsync<InvalidOperationException>(() => SshTunnel.StartAsync(noAuth));
+
+        await SshTunnelLiveAsync(directory);
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+}
+
+static async Task SshTunnelLiveAsync(string directory)
+{
+    var sshdPath = new[] { "/usr/sbin/sshd", "/usr/local/sbin/sshd", "/opt/homebrew/sbin/sshd" }.FirstOrDefault(File.Exists);
+    if (sshdPath is null || !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+    {
+        Console.WriteLine("  （找不到 sshd，略過 SSH Tunnel 實機轉送）");
+        return;
+    }
+
+    var hostKeyPath = Path.Combine(directory, "host_key");
+    var userKeyPath = Path.Combine(directory, "user_key");
+    var encryptedKeyPath = Path.Combine(directory, "user_key_encrypted");
+    const string passphrase = "tunnel-passphrase";
+    await RunProcessAsync("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", hostKeyPath);
+    await RunProcessAsync("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", userKeyPath);
+    await RunProcessAsync("ssh-keygen", "-q", "-t", "ed25519", "-N", passphrase, "-f", encryptedKeyPath);
+    var authorizedKeysPath = Path.Combine(directory, "authorized_keys");
+    await File.WriteAllTextAsync(
+        authorizedKeysPath,
+        await File.ReadAllTextAsync(userKeyPath + ".pub") + await File.ReadAllTextAsync(encryptedKeyPath + ".pub"));
+    foreach (var path in new[] { hostKeyPath, userKeyPath, encryptedKeyPath, authorizedKeysPath })
+    {
+        SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+    }
+
+    var hostKeyBlob = Convert.FromBase64String((await File.ReadAllTextAsync(hostKeyPath + ".pub")).Split(' ')[1]);
+    var expectedFingerprint = SshTunnelRules.ComputeFingerprint(hostKeyBlob);
+    var keygenOutput = await RunProcessAsync("ssh-keygen", "-lf", hostKeyPath + ".pub");
+    Assert(keygenOutput.Contains(expectedFingerprint, StringComparison.Ordinal),
+        "ComputeFingerprint 應與 ssh-keygen -lf 的 SHA256 指紋一致");
+
+    var sshPort = GetFreeLoopbackPort();
+    var sshdConfigPath = Path.Combine(directory, "sshd_config");
+    await File.WriteAllTextAsync(
+        sshdConfigPath,
+        $"""
+         Port {sshPort}
+         ListenAddress 127.0.0.1
+         HostKey {hostKeyPath}
+         AuthorizedKeysFile {authorizedKeysPath}
+         PasswordAuthentication no
+         KbdInteractiveAuthentication no
+         UsePAM no
+         StrictModes no
+         AllowTcpForwarding yes
+         PermitTTY no
+         PidFile none
+         LogLevel ERROR
+
+         """);
+    using var sshd = new System.Diagnostics.Process
+    {
+        StartInfo = new System.Diagnostics.ProcessStartInfo(sshdPath)
+        {
+            ArgumentList = { "-f", sshdConfigPath, "-D", "-e" },
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        }
+    };
+    sshd.Start();
+    var listening = false;
+    for (var attempt = 0; attempt < 50 && !sshd.HasExited; attempt++)
+    {
+        try
+        {
+            using var probe = new System.Net.Sockets.TcpClient();
+            await probe.ConnectAsync(IPAddress.Loopback, sshPort);
+            listening = true;
+            break;
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            await Task.Delay(100);
+        }
+    }
+
+    if (!listening)
+    {
+        var log = sshd.HasExited ? await sshd.StandardError.ReadToEndAsync() : "(timeout)";
+        Console.WriteLine($"  （本機 sshd 無法以目前使用者啟動，略過 SSH Tunnel 實機轉送：{log.Trim()}）");
+        if (!sshd.HasExited)
+        {
+            sshd.Kill();
+        }
+
+        return;
+    }
+
+    var echoListener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+    echoListener.Start();
+    var echoPort = ((IPEndPoint)echoListener.LocalEndpoint).Port;
+    var echoTask = Task.Run(async () =>
+    {
+        while (true)
+        {
+            using var client = await echoListener.AcceptTcpClientAsync();
+            var stream = client.GetStream();
+            var buffer = new byte[64];
+            var read = await stream.ReadAsync(buffer);
+            await stream.WriteAsync(buffer.AsMemory(0, read));
+        }
+    });
+
+    try
+    {
+        ConnectionProfile Tunnelled(string keyPath, string keyPassphrase, string fingerprint) => new()
+        {
+            Name = "SSH live",
+            Provider = DatabaseProviderKind.MySql,
+            Host = "127.0.0.1",
+            Port = echoPort,
+            Username = "user",
+            TlsMode = ConnectionTlsMode.Disabled,
+            TimeoutSeconds = 15,
+            SshEnabled = true,
+            SshHost = "127.0.0.1",
+            SshPort = sshPort,
+            SshUsername = Environment.UserName,
+            SshPrivateKeyPath = keyPath,
+            SshKeyPassphrase = keyPassphrase,
+            SshHostKeyFingerprint = fingerprint
+        };
+
+        async Task<string> RoundTripAsync(int localPort, string payload)
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, localPort);
+            var stream = client.GetStream();
+            var bytes = Encoding.ASCII.GetBytes(payload);
+            await stream.WriteAsync(bytes);
+            var buffer = new byte[64];
+            var read = await stream.ReadAsync(buffer);
+            return Encoding.ASCII.GetString(buffer, 0, read);
+        }
+
+        int forwardedPort;
+        using (var tunnel = await SshTunnel.StartAsync(Tunnelled(userKeyPath, string.Empty, expectedFingerprint)))
+        {
+            forwardedPort = tunnel.LocalPort;
+            Assert(forwardedPort > 0 && tunnel.LocalHost == "127.0.0.1", "Tunnel 應綁定本機動態 port");
+            Assert(await RoundTripAsync(forwardedPort, "ping-through-ssh") == "ping-through-ssh",
+                "透過 SSH 本機轉送應能到達資料庫端點");
+        }
+
+        await AssertThrowsAsync<System.Net.Sockets.SocketException>(async () =>
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, forwardedPort);
+        });
+
+        using (var tunnel = await SshTunnel.StartAsync(Tunnelled(encryptedKeyPath, passphrase, expectedFingerprint)))
+        {
+            Assert(await RoundTripAsync(tunnel.LocalPort, "encrypted-key") == "encrypted-key",
+                "加密私鑰搭配正確密語應可建立 tunnel");
+        }
+
+        var wrongPassphrase = await CaptureExceptionAsync<InvalidOperationException>(() =>
+            SshTunnel.StartAsync(Tunnelled(encryptedKeyPath, "wrong", expectedFingerprint)));
+        Assert(wrongPassphrase.Message.Contains("私鑰", StringComparison.Ordinal) &&
+               !wrongPassphrase.Message.Contains("wrong", StringComparison.Ordinal),
+            "錯誤密語應 fail closed 且不回顯密語");
+
+        var wrongFingerprint = "SHA256:" + Convert.ToBase64String(SHA256.HashData(new byte[] { 1, 2, 3 })).TrimEnd('=');
+        var mismatch = await CaptureExceptionAsync<InvalidOperationException>(() =>
+            SshTunnel.StartAsync(Tunnelled(userKeyPath, string.Empty, wrongFingerprint)));
+        Assert(mismatch.Message.Contains("指紋不符", StringComparison.Ordinal) &&
+               mismatch.Message.Contains(expectedFingerprint, StringComparison.Ordinal),
+            "主機金鑰指紋不符時應中止並回報伺服器實際指紋");
+
+        var sharedKeyPath = Path.Combine(directory, "shared_key");
+        File.Copy(userKeyPath, sharedKeyPath);
+        SetUnixFileMode(sharedKeyPath,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        await AssertThrowsAsync<InvalidOperationException>(() =>
+            SshTunnel.StartAsync(Tunnelled(sharedKeyPath, string.Empty, expectedFingerprint)));
+
+        // The full provider path: the session must dial the forward, never the configured host directly.
+        var sessionProfile = Tunnelled(userKeyPath, string.Empty, expectedFingerprint);
+        sessionProfile.Port = GetFreeLoopbackPort();
+        using var session = DatabaseProviderFactory.Create(sessionProfile);
+        var sessionFailure = await CaptureExceptionAsync<Exception>(() => session.TestConnectionAsync());
+        Assert(sessionFailure is not InvalidOperationException { Message: var message } ||
+               !message.Contains("SSH", StringComparison.Ordinal),
+            "SSH 交握成功後，Provider session 的失敗應來自資料庫端點而不是 SSH 本身");
+        Console.WriteLine("  （SSH Tunnel 實機轉送：本機 sshd 金鑰驗證、加密私鑰、指紋不符與 session 整合皆通過）");
+    }
+    finally
+    {
+        echoListener.Stop();
+        try
+        {
+            await echoTask.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+        catch (Exception)
+        {
+        }
+
+        if (!sshd.HasExited)
+        {
+            sshd.Kill();
+        }
+    }
+}
+
+static void SetUnixFileMode(string path, UnixFileMode mode)
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        File.SetUnixFileMode(path, mode);
+    }
+}
+
+static int GetFreeLoopbackPort()
+{
+    var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+    listener.Stop();
+    return port;
+}
+
+static async Task<string> RunProcessAsync(string fileName, params string[] arguments)
+{
+    using var process = new System.Diagnostics.Process
+    {
+        StartInfo = new System.Diagnostics.ProcessStartInfo(fileName)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        }
+    };
+    foreach (var argument in arguments)
+    {
+        process.StartInfo.ArgumentList.Add(argument);
+    }
+
+    process.Start();
+    var output = await process.StandardOutput.ReadToEndAsync();
+    var error = await process.StandardError.ReadToEndAsync();
+    await process.WaitForExitAsync();
+    if (process.ExitCode != 0)
+    {
+        throw new InvalidOperationException($"{fileName} 失敗：{error}");
+    }
+
+    return output;
 }
 
 static async Task ProfileStoreDoesNotPersistPasswordsAsync()

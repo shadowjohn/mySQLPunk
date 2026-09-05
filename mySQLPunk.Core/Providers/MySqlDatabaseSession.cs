@@ -16,8 +16,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
     {
         var builder = new MySqlConnectionStringBuilder
         {
-            Server = Profile.Host,
-            Port = (uint)Profile.Port,
+            Server = EndpointHost,
+            Port = (uint)EndpointPort,
             UserID = Profile.Username,
             Password = Profile.Password,
             ConnectionTimeout = (uint)Profile.TimeoutSeconds,
@@ -353,7 +353,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var connection = CreateConnection(null);
+        await using var connection = (MySqlConnection)await CreateConnectionAsync(null, cancellationToken).ConfigureAwait(false);
         return await ReadStringsAsync(
             connection,
             "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY SCHEMA_NAME",
@@ -369,7 +369,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             return Array.Empty<DatabaseObjectInfo>();
         }
 
-        await using var connection = CreateConnection(database);
+        await using var connection = (MySqlConnection)await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -397,7 +397,7 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
         DatabaseObjectInfo table,
         CancellationToken cancellationToken)
     {
-        await using var connection = CreateConnection(database);
+        await using var connection = (MySqlConnection)await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """

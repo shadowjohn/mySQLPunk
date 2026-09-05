@@ -2,7 +2,7 @@ using MySqlPunk.Core.Models;
 
 namespace MySqlPunk.Core.Providers;
 
-public interface IDatabaseSession
+public interface IDatabaseSession : IDisposable
 {
     ConnectionProfile Profile { get; }
 

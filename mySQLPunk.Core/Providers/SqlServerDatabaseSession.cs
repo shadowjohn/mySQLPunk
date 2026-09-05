@@ -16,7 +16,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
     {
         var builder = new SqlConnectionStringBuilder
         {
-            DataSource = $"{Profile.Host},{Profile.Port}",
+            DataSource = $"{EndpointHost},{EndpointPort}",
             InitialCatalog = string.IsNullOrWhiteSpace(database) ? "master" : database,
             UserID = Profile.Username,
             Password = Profile.Password,
@@ -27,6 +27,12 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             TrustServerCertificate = false,
             ApplicationName = "mySQLPunk"
         };
+
+        if (IsTunnelled)
+        {
+            // The TLS certificate still belongs to the real server, not to 127.0.0.1.
+            builder.HostNameInCertificate = Profile.Host;
+        }
 
         ConnectionTlsCertificateFiles.EnsureReadable(Profile);
         ConnectionTlsCertificateFiles.ApplyToSqlServer(builder, Profile);
@@ -587,7 +593,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var connection = CreateConnection("master");
+        await using var connection = (SqlConnection)await CreateConnectionAsync("master", cancellationToken).ConfigureAwait(false);
         return await ReadStringsAsync(
             connection,
             "SELECT name FROM sys.databases WHERE state = 0 AND HAS_DBACCESS(name) = 1 ORDER BY name",
@@ -603,7 +609,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             return Array.Empty<DatabaseObjectInfo>();
         }
 
-        await using var connection = CreateConnection(database);
+        await using var connection = (SqlConnection)await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -639,7 +645,7 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
         CancellationToken cancellationToken)
     {
         var schema = string.IsNullOrWhiteSpace(table.Schema) ? "dbo" : table.Schema;
-        await using var connection = CreateConnection(database);
+        await using var connection = (SqlConnection)await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """

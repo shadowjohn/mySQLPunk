@@ -10,6 +10,10 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 {
     private const int MaximumResultRows = 10_000;
 
+    private readonly SemaphoreSlim _tunnelGate = new(1, 1);
+    private SshTunnel? _tunnel;
+    private bool _disposed;
+
     protected AdoDatabaseSession(ConnectionProfile profile)
     {
         Profile = profile;
@@ -17,7 +21,61 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 
     public ConnectionProfile Profile { get; }
 
+    /// <summary>Host the driver should dial: the loopback forward when an SSH tunnel is active.</summary>
+    protected string EndpointHost => _tunnel?.LocalHost ?? Profile.Host;
+
+    protected int EndpointPort => _tunnel?.LocalPort ?? Profile.Port;
+
+    protected bool IsTunnelled => _tunnel is not null;
+
     protected abstract DbConnection CreateConnection(string? database);
+
+    /// <summary>
+    /// Creates a closed connection after making sure the SSH tunnel (if the profile enables one) is up. All
+    /// database work goes through here so a tunnelled profile can never fall back to dialling the host directly.
+    /// </summary>
+    protected async ValueTask<DbConnection> CreateConnectionAsync(string? database, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (Profile.SshEnabled)
+        {
+            await EnsureTunnelAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return CreateConnection(database);
+    }
+
+    private async Task EnsureTunnelAsync(CancellationToken cancellationToken)
+    {
+        if (_tunnel is not null)
+        {
+            return;
+        }
+
+        await _tunnelGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _tunnel ??= await SshTunnel.StartAsync(Profile, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _tunnelGate.Release();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _tunnel?.Dispose();
+        _tunnel = null;
+        _tunnelGate.Dispose();
+    }
 
     protected abstract string QuoteIdentifier(string value);
 
@@ -28,7 +86,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 
     public async Task TestConnectionAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = CreateConnection(Profile.Database);
+        await using var connection = await CreateConnectionAsync(Profile.Database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -50,7 +108,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         }
 
         var stopwatch = Stopwatch.StartNew();
-        await using var connection = CreateConnection(database);
+        await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
@@ -133,7 +191,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             TableDataFilterService.Resolve(Profile.Provider, columns, filter);
         }
 
-        await using var connection = CreateConnection(database);
+        await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         var filterPredicate = BuildTableDataFilterPredicate(command, columns, filter);
@@ -174,7 +232,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         var columns = await GetRequiredTableColumnsAsync(database, table, cancellationToken).ConfigureAwait(false);
         var inputMap = BuildInputMap(values);
 
-        await using var connection = CreateConnection(database);
+        await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
@@ -245,7 +303,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         RequirePrimaryKey(columns);
         var inputMap = BuildInputMap(changes);
 
-        await using var connection = CreateConnection(database);
+        await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
@@ -289,7 +347,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         ValidateOriginalRow(columns, originalRow);
         RequirePrimaryKey(columns);
 
-        await using var connection = CreateConnection(database);
+        await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();

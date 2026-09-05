@@ -43,6 +43,16 @@ public sealed partial class ConnectionEditorWindow : Window
     private readonly TextBox _tlsClientKeyBox;
     private readonly Button _browseTlsClientKeyButton;
     private readonly TextBlock _tlsCertificateHint;
+    private readonly Grid _sshSection;
+    private readonly CheckBox _sshEnabledCheck;
+    private readonly Grid _sshFields;
+    private readonly TextBox _sshHostBox;
+    private readonly TextBox _sshPortBox;
+    private readonly TextBox _sshUsernameBox;
+    private readonly TextBox _sshPasswordBox;
+    private readonly TextBox _sshKeyPathBox;
+    private readonly TextBox _sshPassphraseBox;
+    private readonly TextBox _sshFingerprintBox;
     private readonly CheckBox _rememberPasswordCheck;
     private readonly TextBlock _testStatus;
     private readonly Button _testButton;
@@ -91,6 +101,16 @@ public sealed partial class ConnectionEditorWindow : Window
         _tlsClientKeyBox = this.FindControl<TextBox>("TlsClientKeyBox")!;
         _browseTlsClientKeyButton = this.FindControl<Button>("BrowseTlsClientKeyButton")!;
         _tlsCertificateHint = this.FindControl<TextBlock>("TlsCertificateHint")!;
+        _sshSection = this.FindControl<Grid>("SshSection")!;
+        _sshEnabledCheck = this.FindControl<CheckBox>("SshEnabledCheck")!;
+        _sshFields = this.FindControl<Grid>("SshFields")!;
+        _sshHostBox = this.FindControl<TextBox>("SshHostBox")!;
+        _sshPortBox = this.FindControl<TextBox>("SshPortBox")!;
+        _sshUsernameBox = this.FindControl<TextBox>("SshUsernameBox")!;
+        _sshPasswordBox = this.FindControl<TextBox>("SshPasswordBox")!;
+        _sshKeyPathBox = this.FindControl<TextBox>("SshKeyPathBox")!;
+        _sshPassphraseBox = this.FindControl<TextBox>("SshPassphraseBox")!;
+        _sshFingerprintBox = this.FindControl<TextBox>("SshFingerprintBox")!;
         _rememberPasswordCheck = this.FindControl<CheckBox>("RememberPasswordCheck")!;
         _testStatus = this.FindControl<TextBlock>("TestStatus")!;
         _testButton = this.FindControl<Button>("TestButton")!;
@@ -109,6 +129,15 @@ public sealed partial class ConnectionEditorWindow : Window
         _tlsCaPathBox.Text = _source.TlsCaCertificatePath;
         _tlsClientCertificateBox.Text = _source.TlsClientCertificatePath;
         _tlsClientKeyBox.Text = _source.TlsClientKeyPath;
+        _sshEnabledCheck.IsChecked = _source.SshEnabled;
+        _sshHostBox.Text = _source.SshHost;
+        _sshPortBox.Text = _source.SshPort > 0 ? _source.SshPort.ToString() : "22";
+        _sshUsernameBox.Text = _source.SshUsername;
+        _sshPasswordBox.Text = _source.SshPassword;
+        _sshKeyPathBox.Text = _source.SshPrivateKeyPath;
+        _sshPassphraseBox.Text = _source.SshKeyPassphrase;
+        _sshFingerprintBox.Text = _source.SshHostKeyFingerprint;
+        _sshFields.IsVisible = _source.SshEnabled;
         _rememberPasswordCheck.IsChecked = _source.UseSecretStore;
         _rememberPasswordCheck.IsEnabled = _secretStore.IsAvailable || _source.UseSecretStore;
         _rememberPasswordCheck.Content = _secretStore.IsAvailable
@@ -178,6 +207,19 @@ public sealed partial class ConnectionEditorWindow : Window
         }
     }
 
+    private void SshEnabledCheck_Changed(object? sender, RoutedEventArgs e)
+    {
+        if (_sshFields is null)
+        {
+            return;
+        }
+
+        _sshFields.IsVisible = _sshEnabledCheck.IsChecked == true;
+    }
+
+    private void BrowseSshKey_Click(object? sender, RoutedEventArgs e) =>
+        _ = BrowseCertificateAsync(_sshKeyPathBox, "SSH 私鑰", includeKeyPatterns: true);
+
     private void BrowseTlsCa_Click(object? sender, RoutedEventArgs e) =>
         _ = BrowseCertificateAsync(_tlsCaPathBox, _tlsCaLabel.Text ?? "CA 憑證", includeKeyPatterns: false);
 
@@ -233,7 +275,7 @@ public sealed partial class ConnectionEditorWindow : Window
         _testStatus.Text = "正在測試連線…";
         try
         {
-            var session = DatabaseProviderFactory.Create(profile);
+            using var session = DatabaseProviderFactory.Create(profile);
             await session.TestConnectionAsync();
             _testStatus.Text = "連線成功。";
         }
@@ -282,6 +324,15 @@ public sealed partial class ConnectionEditorWindow : Window
             throw new InvalidOperationException("連接埠必須是整數。");
         }
 
+        var sshPort = 22;
+        if (provider != DatabaseProviderKind.Sqlite &&
+            _sshEnabledCheck.IsChecked == true &&
+            !string.IsNullOrWhiteSpace(_sshPortBox.Text) &&
+            !int.TryParse(_sshPortBox.Text, out sshPort))
+        {
+            throw new InvalidOperationException("SSH 連接埠必須是整數。");
+        }
+
         var profile = new ConnectionProfile
         {
             Id = _source.Id,
@@ -300,12 +351,26 @@ public sealed partial class ConnectionEditorWindow : Window
                       throw new InvalidOperationException("請選擇 TLS 模式。"),
             TlsCaCertificatePath = _tlsCaPathBox.Text ?? string.Empty,
             TlsClientCertificatePath = _tlsClientCertificateBox.Text ?? string.Empty,
-            TlsClientKeyPath = _tlsClientKeyBox.Text ?? string.Empty
+            TlsClientKeyPath = _tlsClientKeyBox.Text ?? string.Empty,
+            SshEnabled = provider != DatabaseProviderKind.Sqlite && _sshEnabledCheck.IsChecked == true,
+            SshHost = _sshHostBox.Text ?? string.Empty,
+            SshPort = sshPort,
+            SshUsername = _sshUsernameBox.Text ?? string.Empty,
+            SshPassword = _sshPasswordBox.Text ?? string.Empty,
+            SshPrivateKeyPath = _sshKeyPathBox.Text ?? string.Empty,
+            SshKeyPassphrase = _sshPassphraseBox.Text ?? string.Empty,
+            SshHostKeyFingerprint = _sshFingerprintBox.Text ?? string.Empty
         };
         profile.Validate();
         // Fail closed before saving or testing: a missing or over-shared certificate file must not be
         // persisted as if it were usable.
         ConnectionTlsCertificateFiles.EnsureReadable(profile);
+        SshTunnelRules.EnsureReadable(profile);
+        if (profile.SshEnabled && profile.SshPassword.Length == 0 && profile.SshPrivateKeyPath.Length == 0)
+        {
+            throw new InvalidOperationException("SSH Tunnel 至少需要 SSH 密碼或 SSH 私鑰其中一種驗證方式。");
+        }
+
         return profile;
     }
 
@@ -321,6 +386,7 @@ public sealed partial class ConnectionEditorWindow : Window
         _tlsModeCombo.IsVisible = !sqlite;
         _rememberPasswordCheck.IsVisible = !sqlite;
         _tlsCertificateFields.IsVisible = !sqlite;
+        _sshSection.IsVisible = !sqlite;
         var clientCertificateSupported = ConnectionTlsCertificateFiles.SupportsClientCertificate(provider);
         _tlsClientCertificateLabel.IsVisible = clientCertificateSupported;
         _tlsClientCertificateBox.IsVisible = clientCertificateSupported;

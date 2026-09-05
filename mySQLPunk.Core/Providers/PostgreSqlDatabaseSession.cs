@@ -18,8 +18,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     {
         var builder = new NpgsqlConnectionStringBuilder
         {
-            Host = Profile.Host,
-            Port = Profile.Port,
+            Host = EndpointHost,
+            Port = EndpointPort,
             Username = Profile.Username,
             Password = Profile.Password,
             Database = string.IsNullOrWhiteSpace(database) ? "postgres" : database,
@@ -349,7 +349,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
     public override async Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var connection = CreateConnection(Profile.Database);
+        await using var connection = (NpgsqlConnection)await CreateConnectionAsync(Profile.Database, cancellationToken).ConfigureAwait(false);
         return await ReadStringsAsync(
             connection,
             "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY datname",
@@ -360,7 +360,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         string database,
         CancellationToken cancellationToken = default)
     {
-        await using var connection = CreateConnection(database);
+        await using var connection = (NpgsqlConnection)await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -388,7 +388,7 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
         CancellationToken cancellationToken)
     {
         var schema = string.IsNullOrWhiteSpace(table.Schema) ? "public" : table.Schema;
-        await using var connection = CreateConnection(database);
+        await using var connection = (NpgsqlConnection)await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """

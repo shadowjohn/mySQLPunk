@@ -83,6 +83,21 @@ TLS 模式下方可指定憑證檔案，路徑必須是本機絕對路徑、不�
 
 規則一律 fail closed，避免「有填憑證但驅動程式其實忽略」的假安全：CA 憑證搭配不驗證憑證的模式（Preferred、Required、Allow、Optional、Disabled）會拒絕儲存；客戶端憑證與私鑰缺一、指向同一檔案、或搭配可能退回未加密的模式也會拒絕；合併的 PFX／PKCS#12 與加密私鑰目前不支援。儲存、測試連線與實際連線前都會確認每個檔案存在且不是目錄，Unix 上的私鑰檔若可被群組或其他使用者讀取（例如 `0644`）會被拒絕，請改為 `chmod 600`。載入 `connections.json` 時只驗證格式與相容性，不要求檔案當下存在，因此放在外接媒體上的憑證不會讓整份設定檔無法載入。切換資料庫類型時，若新 provider 不支援客戶端憑證，欄位會清空並隱藏；SQLite 不使用任何憑證欄位。
 
+#### 跨平台版 SSH Tunnel
+
+連線設定頁勾選「透過 SSH Tunnel 連線」後，填入 SSH 主機、連接埠（預設 22）、使用者名稱、SSH 密碼或私鑰（OpenSSH／PEM，已加密者再填密語）以及必填的主機金鑰 SHA256 指紋。指紋可請管理員提供，或在可信任的管道核對：
+
+```bash
+ssh-keyscan -p 22 ssh.example.com | ssh-keygen -lf -
+```
+
+行為與 Windows 版一致：SSH 交握時把伺服器主機金鑰的 SHA256 與設定完全比對，不符即中止並在錯誤訊息回報伺服器實際指紋，不會提示「是否信任」；轉送只綁定本機 `127.0.0.1` 的動態連接埠，資料庫驅動程式改連該端點，session 中斷、重新連線或關閉程式時一併關閉。差異與限制：
+
+- 指紋只接受 OpenSSH `SHA256:…`（43 個 base64 字元，可省略 `SHA256:` 前綴或保留 `=`），MD5 冒號格式拒絕。
+- SSH 密碼與私鑰密語只保留到本次程式關閉，不寫入 `connections.json`，也不交給系統密碼庫；設定檔若含 `sshPassword`／`sshKeyPassphrase` 欄位會拒絕載入。建議使用私鑰登入，私鑰路徑必須是絕對路徑，Unix 上權限須為只有自己可讀（`chmod 600`）。
+- MySQL／MariaDB 與 PostgreSQL 不可搭配 VerifyFull（端點變成 127.0.0.1，主機名稱必定不符），請改用 VerifyCA；SQL Server 會自動以原始主機名稱驗證憑證，Mandatory／Strict 仍可使用。
+- 每個資料庫 session 只建立一條 SSH 連線並重用轉送；SQLite 不適用。
+
 #### 跨平台版連線 URI
 
 連線設定頁最上方可貼上 `mysql://`／`mariadb://`、`postgres://`／`postgresql://`、`mssql://`／`sqlserver://` 或 `sqlite:///絕對路徑` URI，按「安全套用」後會填入 provider、主機、port、使用者、密碼、資料庫、逾時與 TLS 模式，不會自動連線或儲存。支援的查詢參數：

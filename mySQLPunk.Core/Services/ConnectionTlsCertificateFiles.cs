@@ -176,7 +176,7 @@ public static class ConnectionTlsCertificateFiles
         }
     }
 
-    private static string NormalizePath(string? value, string label)
+    internal static string NormalizePath(string? value, string label)
     {
         // Only plain spaces are trimmed; tabs, newlines and other control characters are rejected below so
         // a pasted path can never be silently rewritten into a different one.
@@ -224,7 +224,7 @@ public static class ConnectionTlsCertificateFiles
         }
     }
 
-    private static void EnsureRegularFile(string path, string label)
+    internal static void EnsureRegularFile(string path, string label)
     {
         if (path.Length == 0)
         {
@@ -251,7 +251,7 @@ public static class ConnectionTlsCertificateFiles
         }
     }
 
-    private static void EnsurePrivateKeyPermissions(string keyPath)
+    internal static void EnsurePrivateKeyPermissions(string keyPath, string label = "客戶端私鑰")
     {
         if (keyPath.Length == 0 || OperatingSystem.IsWindows())
         {
@@ -273,7 +273,7 @@ public static class ConnectionTlsCertificateFiles
         if ((mode & sharedBits) != 0)
         {
             throw new InvalidOperationException(
-                $"客戶端私鑰檔案權限過寬，請改為只有目前使用者可讀（例如 chmod 600）：{keyPath}");
+                $"{label}檔案權限過寬，請改為只有目前使用者可讀（例如 chmod 600）：{keyPath}");
         }
     }
 }
