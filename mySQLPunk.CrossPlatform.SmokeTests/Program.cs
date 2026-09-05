@@ -555,6 +555,10 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
     tests.Add(("MariaDB 實機連線、metadata 與 SQL", MariaDbLiveRoundTripAsync));
     tests.Add(("PostgreSQL 實機連線、metadata 與 SQL", PostgreSqlLiveRoundTripAsync));
     tests.Add(("SQL Server 實機連線、metadata 與 SQL", SqlServerLiveRoundTripAsync));
+    if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_TLS_PORT")))
+    {
+        tests.Add(("PostgreSQL 實機 TLS 憑證驗證與 SSH Tunnel", PostgreSqlTlsLiveAsync));
+    }
 }
 
 var failures = new List<string>();
@@ -921,13 +925,17 @@ static async Task SshTunnelAsync()
     }
 }
 
-static async Task SshTunnelLiveAsync(string directory)
+/// <summary>
+/// Starts an unprivileged OpenSSH server bound to 127.0.0.1 with freshly generated host／user keys.
+/// Returns null (after printing why) when sshd is unavailable or cannot run as the current user.
+/// </summary>
+static async Task<ThrowawaySshd?> TryStartThrowawaySshdAsync(string directory)
 {
     var sshdPath = new[] { "/usr/sbin/sshd", "/usr/local/sbin/sshd", "/opt/homebrew/sbin/sshd" }.FirstOrDefault(File.Exists);
     if (sshdPath is null || !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
     {
         Console.WriteLine("  （找不到 sshd，略過 SSH Tunnel 實機轉送）");
-        return;
+        return null;
     }
 
     var hostKeyPath = Path.Combine(directory, "host_key");
@@ -971,7 +979,7 @@ static async Task SshTunnelLiveAsync(string directory)
          LogLevel ERROR
 
          """);
-    using var sshd = new System.Diagnostics.Process
+    var sshd = new System.Diagnostics.Process
     {
         StartInfo = new System.Diagnostics.ProcessStartInfo(sshdPath)
         {
@@ -998,17 +1006,48 @@ static async Task SshTunnelLiveAsync(string directory)
         }
     }
 
-    if (!listening)
+    if (listening)
     {
-        var log = sshd.HasExited ? await sshd.StandardError.ReadToEndAsync() : "(timeout)";
-        Console.WriteLine($"  （本機 sshd 無法以目前使用者啟動，略過 SSH Tunnel 實機轉送：{log.Trim()}）");
-        if (!sshd.HasExited)
-        {
-            sshd.Kill();
-        }
+        return new ThrowawaySshd(sshd, sshPort, userKeyPath, encryptedKeyPath, passphrase, expectedFingerprint);
+    }
 
+    var log = sshd.HasExited ? await sshd.StandardError.ReadToEndAsync() : "(timeout)";
+    Console.WriteLine($"  （本機 sshd 無法以目前使用者啟動，略過 SSH Tunnel 實機轉送：{log.Trim()}）");
+    if (!sshd.HasExited)
+    {
+        sshd.Kill();
+    }
+
+    sshd.Dispose();
+    return null;
+}
+
+static ConnectionProfile WithSshTunnel(ConnectionProfile profile, ThrowawaySshd sshd)
+{
+    var tunnelled = profile.Clone();
+    tunnelled.SshEnabled = true;
+    tunnelled.SshHost = "127.0.0.1";
+    tunnelled.SshPort = sshd.Port;
+    tunnelled.SshUsername = Environment.UserName;
+    tunnelled.SshPrivateKeyPath = sshd.UserKeyPath;
+    tunnelled.SshKeyPassphrase = string.Empty;
+    tunnelled.SshHostKeyFingerprint = sshd.Fingerprint;
+    return tunnelled;
+}
+
+static async Task SshTunnelLiveAsync(string directory)
+{
+    using var sshd = await TryStartThrowawaySshdAsync(directory);
+    if (sshd is null)
+    {
         return;
     }
+
+    var userKeyPath = sshd.UserKeyPath;
+    var encryptedKeyPath = sshd.EncryptedKeyPath;
+    var passphrase = sshd.EncryptedKeyPassphrase;
+    var expectedFingerprint = sshd.Fingerprint;
+    var sshPort = sshd.Port;
 
     var echoListener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
     echoListener.Start();
@@ -1117,11 +1156,6 @@ static async Task SshTunnelLiveAsync(string directory)
         }
         catch (Exception)
         {
-        }
-
-        if (!sshd.HasExited)
-        {
-            sshd.Kill();
         }
     }
 }
@@ -4357,6 +4391,9 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             $"{profile.Name} server 宣告支援 TLS 時，Required 連線不應失敗");
     }
 
+    await MySqlTlsCertificateLiveAsync(profile, environmentPrefix);
+    await SshTunnelToMySqlLiveAsync(profile);
+
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
@@ -4701,6 +4738,155 @@ static async Task VerifyMariaDbNativeTypesAsync(
     await session.DeleteTableRowAsync(database, table, concurrent);
     var afterDelete = await session.LoadTableDataAsync(database, table);
     Assert(afterDelete.Rows.All(row => Convert.ToInt64(row.Values[0]) != id), "MariaDB UUID／INET4／INET6 安全刪除失敗");
+}
+
+static async Task MySqlTlsCertificateLiveAsync(ConnectionProfile profile, string environmentPrefix)
+{
+    var caPath = Environment.GetEnvironmentVariable($"{environmentPrefix}_CA_PATH");
+    if (string.IsNullOrEmpty(caPath))
+    {
+        Console.WriteLine($"  （{profile.Name} 未提供 CA 憑證，略過憑證驗證實機案例）");
+        return;
+    }
+
+    var verifyCa = profile.Clone();
+    verifyCa.TlsMode = ConnectionTlsMode.VerifyCertificateAuthority;
+    verifyCa.TlsCaCertificatePath = caPath;
+    using (var verifiedSession = DatabaseProviderFactory.Create(verifyCa))
+    {
+        await verifiedSession.TestConnectionAsync();
+        var cipher = await verifiedSession.ExecuteAsync(string.Empty, "SHOW STATUS LIKE 'Ssl_cipher';");
+        Assert(cipher.Rows.Count == 1 &&
+               !string.IsNullOrEmpty(Convert.ToString(cipher.Rows[0][1], CultureInfo.InvariantCulture)),
+            $"{profile.Name} VerifyCA 搭配 server CA 應建立經驗證的 TLS channel");
+    }
+
+    // The auto-generated server certificate is issued for a synthetic CN, never for 127.0.0.1.
+    var verifyFull = verifyCa.Clone();
+    verifyFull.TlsMode = ConnectionTlsMode.VerifyFull;
+    await AssertThrowsAsync<MySqlException>(async () =>
+    {
+        using var failing = DatabaseProviderFactory.Create(verifyFull);
+        await failing.TestConnectionAsync();
+    });
+
+    var wrongCaPath = Environment.GetEnvironmentVariable("MYSQLPUNK_WRONG_CA_PATH");
+    if (!string.IsNullOrEmpty(wrongCaPath))
+    {
+        var wrongCa = verifyCa.Clone();
+        wrongCa.TlsCaCertificatePath = wrongCaPath;
+        await AssertThrowsAsync<MySqlException>(async () =>
+        {
+            using var failing = DatabaseProviderFactory.Create(wrongCa);
+            await failing.TestConnectionAsync();
+        });
+    }
+
+    Console.WriteLine($"  （{profile.Name} TLS 憑證：VerifyCA 通過、VerifyFull 與錯誤 CA fail closed）");
+}
+
+static async Task SshTunnelToMySqlLiveAsync(ConnectionProfile profile)
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        using var sshd = await TryStartThrowawaySshdAsync(directory);
+        if (sshd is null)
+        {
+            return;
+        }
+
+        var tunnelled = WithSshTunnel(profile, sshd);
+        tunnelled.TlsMode = ConnectionTlsMode.Required;
+        using var session = DatabaseProviderFactory.Create(tunnelled);
+        await session.TestConnectionAsync();
+        var result = await session.ExecuteAsync(string.Empty, "SELECT 40 + 2 AS answer;");
+        Assert(result.Rows.Count == 1 && Convert.ToInt32(result.Rows[0][0], CultureInfo.InvariantCulture) == 42,
+            $"{profile.Name} 透過 SSH Tunnel 的查詢應回傳結果");
+        var databases = await session.GetDatabasesAsync();
+        Assert(databases.Contains("information_schema", StringComparer.OrdinalIgnoreCase),
+            $"{profile.Name} 透過 SSH Tunnel 應能列出資料庫");
+        Console.WriteLine($"  （{profile.Name} SSH Tunnel 實機：TLS Required 查詢與 metadata 皆經由本機轉送）");
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+}
+
+static async Task PostgreSqlTlsLiveAsync()
+{
+    var caPath = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_CA_PATH");
+    var profile = new ConnectionProfile
+    {
+        Name = "PostgreSQL TLS live",
+        Provider = DatabaseProviderKind.PostgreSql,
+        Host = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_HOST"),
+        Port = ReadRequiredIntEnvironment("MYSQLPUNK_POSTGRES_TLS_PORT"),
+        Username = Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_USER") ?? "postgres",
+        Password = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_PASSWORD"),
+        Database = "postgres",
+        TlsMode = ConnectionTlsMode.VerifyFull,
+        TlsCaCertificatePath = caPath,
+        TimeoutSeconds = 20
+    };
+    const string sslProbe = "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();";
+
+    using (var session = DatabaseProviderFactory.Create(profile))
+    {
+        await session.TestConnectionAsync();
+        var ssl = await session.ExecuteAsync("postgres", sslProbe);
+        Assert(ssl.Rows.Count == 1 && Convert.ToBoolean(ssl.Rows[0][0], CultureInfo.InvariantCulture),
+            "PostgreSQL VerifyFull 搭配 SAN=127.0.0.1 的 server 憑證與 CA 應建立經驗證的 TLS channel");
+    }
+
+    var disabled = profile.Clone();
+    disabled.TlsMode = ConnectionTlsMode.Disabled;
+    disabled.TlsCaCertificatePath = string.Empty;
+    using (var session = DatabaseProviderFactory.Create(disabled))
+    {
+        var ssl = await session.ExecuteAsync("postgres", sslProbe);
+        Assert(ssl.Rows.Count == 1 && !Convert.ToBoolean(ssl.Rows[0][0], CultureInfo.InvariantCulture),
+            "PostgreSQL Disabled 不得建立 TLS channel");
+    }
+
+    // A CA that never issued the PostgreSQL server certificate (the MySQL container's own CA).
+    var wrongCaPath = Environment.GetEnvironmentVariable("MYSQLPUNK_MYSQL_CA_PATH");
+    if (!string.IsNullOrEmpty(wrongCaPath))
+    {
+        var wrongCa = profile.Clone();
+        wrongCa.TlsMode = ConnectionTlsMode.VerifyCertificateAuthority;
+        wrongCa.TlsCaCertificatePath = wrongCaPath;
+        await AssertThrowsAsync<NpgsqlException>(async () =>
+        {
+            using var failing = DatabaseProviderFactory.Create(wrongCa);
+            await failing.TestConnectionAsync();
+        });
+    }
+
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        using var sshd = await TryStartThrowawaySshdAsync(directory);
+        if (sshd is not null)
+        {
+            var tunnelled = WithSshTunnel(profile, sshd);
+            tunnelled.TlsMode = ConnectionTlsMode.VerifyCertificateAuthority;
+            using var session = DatabaseProviderFactory.Create(tunnelled);
+            await session.TestConnectionAsync();
+            var ssl = await session.ExecuteAsync("postgres", sslProbe);
+            Assert(ssl.Rows.Count == 1 && Convert.ToBoolean(ssl.Rows[0][0], CultureInfo.InvariantCulture),
+                "PostgreSQL 經 SSH Tunnel 仍應以 VerifyCA 建立 TLS channel");
+            var databases = await session.GetDatabasesAsync();
+            Assert(databases.Contains("postgres", StringComparer.OrdinalIgnoreCase),
+                "PostgreSQL 經 SSH Tunnel 應能列出資料庫");
+            Console.WriteLine("  （PostgreSQL SSH Tunnel 實機：VerifyCA TLS 與 metadata 皆經由本機轉送）");
+        }
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
 }
 
 static async Task PostgreSqlLiveRoundTripAsync()
@@ -9106,5 +9292,24 @@ file sealed class StubHttpMessageHandler : HttpMessageHandler
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(_responseFactory(request));
+    }
+}
+
+sealed record ThrowawaySshd(
+    System.Diagnostics.Process Process,
+    int Port,
+    string UserKeyPath,
+    string EncryptedKeyPath,
+    string EncryptedKeyPassphrase,
+    string Fingerprint) : IDisposable
+{
+    public void Dispose()
+    {
+        if (!Process.HasExited)
+        {
+            Process.Kill();
+        }
+
+        Process.Dispose();
     }
 }

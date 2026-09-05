@@ -65,7 +65,7 @@ dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.
 dotnet run --project mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release
 ```
 
-若已安裝 Docker，可再跑 MySQL 8 / PostgreSQL 16 / SQL Server 2022 實機 round-trip；腳本只會建立並清理 `mysqlpunk-cross-*-test` 測試容器與測試自行建立的暫存 database：
+若已安裝 Docker，可再跑 MySQL 8 / MariaDB 11.4 / PostgreSQL 16 / SQL Server 2022 實機 round-trip；腳本只會建立並清理 `mysqlpunk-cross-*-test` 測試容器與測試自行建立的暫存 database。矩陣同時會匯出 MySQL 容器自動產生的 CA、另起一個以臨時 CA 簽發（SAN 127.0.0.1）伺服器憑證的 PostgreSQL TLS 容器，驗證 VerifyCA／VerifyFull／錯誤 CA 的 fail closed，並在本機以非特權 sshd 建立 SSH Tunnel 實際查詢 MySQL 與 PostgreSQL：
 
 ```bash
 ./tests/Run-CrossPlatformLiveTests.sh
