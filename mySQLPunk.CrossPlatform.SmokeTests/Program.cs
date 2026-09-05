@@ -13,6 +13,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 {
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("連線 URI 安全匯入", ConnectionUriImportAsync),
+    ("TLS 憑證檔案安全套用", TlsCertificateFilesAsync),
     ("查詢結果安全匯出", QueryResultExportFormatsAsync),
     ("查詢結果型別感知排序", QueryResultValueSortingAsync),
     ("資料庫物件搜尋與類型篩選", DatabaseObjectFilteringAsync),
@@ -572,6 +573,219 @@ foreach (var test in tests)
 
 Console.WriteLine($"跨平台 smoke tests：{tests.Count - failures.Count}/{tests.Count} 通過");
 return failures.Count == 0 ? 0 : 1;
+
+static async Task TlsCertificateFilesAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var caPath = Path.Combine(directory, "ca.pem");
+        var certificatePath = Path.Combine(directory, "client.pem");
+        var keyPath = Path.Combine(directory, "client.key");
+        await File.WriteAllTextAsync(caPath, "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n");
+        await File.WriteAllTextAsync(certificatePath, "-----BEGIN CERTIFICATE-----\nMIIC\n-----END CERTIFICATE-----\n");
+        await File.WriteAllTextAsync(keyPath, "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n");
+        File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        ConnectionProfile Network(DatabaseProviderKind provider, ConnectionTlsMode mode) => new()
+        {
+            Name = provider.ToString(),
+            Provider = provider,
+            Host = "db.example.test",
+            Port = provider switch
+            {
+                DatabaseProviderKind.PostgreSql => 5432,
+                DatabaseProviderKind.SqlServer => 1433,
+                _ => 3306
+            },
+            Username = "user",
+            Database = "sample",
+            TlsMode = mode
+        };
+
+        var mysql = Network(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull);
+        mysql.TlsCaCertificatePath = " " + caPath + " ";
+        mysql.TlsClientCertificatePath = certificatePath;
+        mysql.TlsClientKeyPath = keyPath;
+        mysql.Validate();
+        ConnectionTlsCertificateFiles.EnsureReadable(mysql);
+        Assert(mysql.TlsCaCertificatePath == caPath, "憑證路徑應修剪前後空白並正規化為絕對路徑");
+        var mysqlBuilder = new MySqlConnectionStringBuilder { Server = mysql.Host };
+        ConnectionTlsCertificateFiles.ApplyToMySql(mysqlBuilder, mysql);
+        Assert(mysqlBuilder.SslCa == caPath && mysqlBuilder.SslCert == certificatePath && mysqlBuilder.SslKey == keyPath,
+            "MySQL 應把 CA、客戶端憑證與私鑰對應到 MySqlConnector 原生 SslCa／SslCert／SslKey");
+
+        var postgres = Network(DatabaseProviderKind.PostgreSql, ConnectionTlsMode.VerifyCertificateAuthority);
+        postgres.TlsCaCertificatePath = caPath;
+        postgres.TlsClientCertificatePath = certificatePath;
+        postgres.TlsClientKeyPath = keyPath;
+        postgres.Validate();
+        var postgresBuilder = new NpgsqlConnectionStringBuilder { Host = postgres.Host };
+        ConnectionTlsCertificateFiles.ApplyToPostgreSql(postgresBuilder, postgres);
+        Assert(postgresBuilder.RootCertificate == caPath &&
+               postgresBuilder.SslCertificate == certificatePath &&
+               postgresBuilder.SslKey == keyPath,
+            "PostgreSQL 應把憑證檔對應到 Npgsql 原生 RootCertificate／SslCertificate／SslKey");
+
+        var sqlServer = Network(DatabaseProviderKind.SqlServer, ConnectionTlsMode.Strict);
+        sqlServer.TlsCaCertificatePath = caPath;
+        sqlServer.Validate();
+        var sqlServerBuilder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder { DataSource = sqlServer.Host };
+        ConnectionTlsCertificateFiles.ApplyToSqlServer(sqlServerBuilder, sqlServer);
+        Assert(sqlServerBuilder.ServerCertificate == caPath && !sqlServerBuilder.TrustServerCertificate,
+            "SQL Server 應把伺服器憑證檔對應到 SqlClient ServerCertificate，且不可放寬 TrustServerCertificate");
+
+        var untouched = Network(DatabaseProviderKind.MySql, ConnectionTlsMode.Preferred);
+        untouched.Validate();
+        var untouchedBuilder = new MySqlConnectionStringBuilder();
+        ConnectionTlsCertificateFiles.ApplyToMySql(untouchedBuilder, untouched);
+        Assert(string.IsNullOrEmpty(untouchedBuilder.SslCa) && string.IsNullOrEmpty(untouchedBuilder.SslCert),
+            "未指定憑證檔時不可寫入任何憑證連線字串鍵");
+
+        var clone = mysql.Clone();
+        Assert(clone.TlsCaCertificatePath == caPath && clone.TlsClientKeyPath == keyPath,
+            "Clone 應保留憑證檔路徑");
+
+        var sqlite = new ConnectionProfile
+        {
+            Name = "SQLite",
+            Provider = DatabaseProviderKind.Sqlite,
+            Database = Path.Combine(directory, "sample.db"),
+            TlsCaCertificatePath = caPath
+        };
+        sqlite.Validate();
+        Assert(sqlite.TlsCaCertificatePath.Length == 0, "SQLite 不使用 TLS，憑證路徑應清空");
+
+        var rejected = new List<ConnectionProfile>();
+        void Reject(DatabaseProviderKind provider, ConnectionTlsMode mode, string ca = "", string cert = "", string key = "")
+        {
+            var profile = Network(provider, mode);
+            profile.TlsCaCertificatePath = ca;
+            profile.TlsClientCertificatePath = cert;
+            profile.TlsClientKeyPath = key;
+            rejected.Add(profile);
+        }
+
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.Preferred, ca: caPath);
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.Required, ca: caPath);
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.Disabled, ca: caPath);
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.Default, ca: caPath);
+        Reject(DatabaseProviderKind.PostgreSql, ConnectionTlsMode.Allow, ca: caPath);
+        Reject(DatabaseProviderKind.PostgreSql, ConnectionTlsMode.Required, ca: caPath);
+        Reject(DatabaseProviderKind.SqlServer, ConnectionTlsMode.Optional, ca: caPath);
+        Reject(DatabaseProviderKind.SqlServer, ConnectionTlsMode.Mandatory, cert: certificatePath, key: keyPath);
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull, cert: certificatePath);
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull, key: keyPath);
+        Reject(DatabaseProviderKind.PostgreSql, ConnectionTlsMode.Preferred, cert: certificatePath, key: keyPath);
+        Reject(DatabaseProviderKind.PostgreSql, ConnectionTlsMode.Required, cert: certificatePath, key: certificatePath);
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull, ca: "relative/ca.pem");
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull, ca: caPath + "\n");
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull, ca: directory + Path.DirectorySeparatorChar);
+        Reject(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull,
+            ca: Path.Combine(directory, new string('x', ConnectionTlsCertificateFiles.MaximumPathCharacters)));
+        foreach (var profile in rejected)
+        {
+            AssertThrows<InvalidOperationException>(profile.Validate);
+        }
+
+        var missing = Network(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull);
+        missing.TlsCaCertificatePath = Path.Combine(directory, "missing.pem");
+        missing.Validate();
+        AssertThrows<InvalidOperationException>(() => ConnectionTlsCertificateFiles.EnsureReadable(missing));
+        var directoryAsCa = Network(DatabaseProviderKind.MySql, ConnectionTlsMode.VerifyFull);
+        directoryAsCa.TlsCaCertificatePath = directory;
+        directoryAsCa.Validate();
+        AssertThrows<InvalidOperationException>(() => ConnectionTlsCertificateFiles.EnsureReadable(directoryAsCa));
+        var sharedKey = Network(DatabaseProviderKind.PostgreSql, ConnectionTlsMode.Required);
+        sharedKey.TlsClientCertificatePath = certificatePath;
+        sharedKey.TlsClientKeyPath = Path.Combine(directory, "shared.key");
+        await File.WriteAllTextAsync(sharedKey.TlsClientKeyPath, "key");
+        File.SetUnixFileMode(sharedKey.TlsClientKeyPath,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        sharedKey.Validate();
+        AssertThrows<InvalidOperationException>(() => ConnectionTlsCertificateFiles.EnsureReadable(sharedKey));
+        File.SetUnixFileMode(sharedKey.TlsClientKeyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        ConnectionTlsCertificateFiles.EnsureReadable(sharedKey);
+
+        var storePath = Path.Combine(directory, "connections.json");
+        var store = new ConnectionProfileStore(storePath);
+        await store.SaveAsync(new[] { mysql, sqlServer });
+        var json = await File.ReadAllTextAsync(storePath);
+        Assert(json.Contains("\"tlsCaCertificatePath\"", StringComparison.Ordinal) &&
+               json.Contains("\"tlsClientKeyPath\"", StringComparison.Ordinal),
+            "設定檔應以明確欄位保存憑證檔路徑");
+        var loaded = await store.LoadAsync();
+        Assert(loaded.Single(item => item.Provider == DatabaseProviderKind.MySql).TlsClientCertificatePath == certificatePath &&
+               loaded.Single(item => item.Provider == DatabaseProviderKind.SqlServer).TlsCaCertificatePath == caPath,
+            "重新載入設定檔應還原憑證檔路徑");
+
+        var invalidDocuments = new[]
+        {
+            """[{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"VerifyFull","tlsCaCertificatePath":123}]""",
+            """[{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"Preferred","tlsCaCertificatePath":"/etc/ssl/ca.pem"}]""",
+            """[{"name":"Bad","provider":"MySql","host":"localhost","port":3306,"username":"root","tlsMode":"VerifyFull","tlsCaCertificatePath":"relative.pem"}]""",
+            """[{"name":"Bad","provider":"SqlServer","host":"localhost","port":1433,"username":"sa","tlsMode":"Mandatory","tlsClientCertificatePath":"/etc/ssl/client.pem","tlsClientKeyPath":"/etc/ssl/client.key"}]"""
+        };
+        foreach (var document in invalidDocuments)
+        {
+            var invalidPath = Path.Combine(directory, $"invalid-{Guid.NewGuid():N}.json");
+            await File.WriteAllTextAsync(invalidPath, document);
+            await AssertThrowsAsync<InvalidDataException>(() => new ConnectionProfileStore(invalidPath).LoadAsync());
+        }
+
+        static string Encode(string path) => Uri.EscapeDataString(path);
+        var postgresUri = ConnectionUriImportService.Parse(
+            $"postgresql://user:secret@db.example.test/sample?sslmode=verify-full&sslrootcert={Encode(caPath)}&sslcert={Encode(certificatePath)}&sslkey={Encode(keyPath)}");
+        Assert(postgresUri.TlsMode == ConnectionTlsMode.VerifyFull &&
+               postgresUri.TlsCaCertificatePath == caPath &&
+               postgresUri.TlsClientCertificatePath == certificatePath &&
+               postgresUri.TlsClientKeyPath == keyPath,
+            "PostgreSQL URI 應以 libpq 的 sslrootcert／sslcert／sslkey 套用憑證檔");
+        var mysqlUri = ConnectionUriImportService.Parse(
+            $"mysql://user:secret@db.example.test/sample?sslmode=verify-ca&sslca={Encode(caPath)}");
+        Assert(mysqlUri.TlsMode == ConnectionTlsMode.VerifyCertificateAuthority && mysqlUri.TlsCaCertificatePath == caPath,
+            "MySQL URI 應以 sslca 套用 CA 憑證");
+        var sqlServerUri = ConnectionUriImportService.Parse(
+            $"mssql://sa:secret@db.example.test/master?encrypt=strict&servercertificate={Encode(caPath)}");
+        Assert(sqlServerUri.TlsMode == ConnectionTlsMode.Strict && sqlServerUri.TlsCaCertificatePath == caPath,
+            "SQL Server URI 應以 servercertificate 套用伺服器憑證檔");
+
+        var invalidUris = new[]
+        {
+            $"mysql://user:secret@db.example.test/sample?sslca={Encode(caPath)}",
+            $"mysql://user:secret@db.example.test/sample?sslmode=required&sslca={Encode(caPath)}",
+            "mysql://user:secret@db.example.test/sample?sslmode=verify-full&sslca=relative.pem",
+            "mysql://user:secret@db.example.test/sample?sslmode=verify-full&sslca=",
+            $"mysql://user:secret@db.example.test/sample?sslmode=verify-full&sslca={Encode(" " + caPath)}",
+            $"postgresql://user:secret@db.example.test/sample?sslmode=require&sslcert={Encode(certificatePath)}",
+            $"postgresql://user:secret@db.example.test/sample?sslmode=prefer&sslcert={Encode(certificatePath)}&sslkey={Encode(keyPath)}",
+            $"postgresql://user:secret@db.example.test/sample?sslmode=verify-full&sslca={Encode(caPath)}",
+            $"mssql://sa:secret@db.example.test/master?encrypt=optional&servercertificate={Encode(caPath)}",
+            $"mssql://sa:secret@db.example.test/master?sslcert={Encode(certificatePath)}&sslkey={Encode(keyPath)}",
+            $"sqlite:///{Encode(Path.Combine(directory, "x.db")).Replace("%2F", "/", StringComparison.OrdinalIgnoreCase)}?sslca={Encode(caPath)}"
+        };
+        foreach (var invalidUri in invalidUris)
+        {
+            AssertThrows<InvalidDataException>(() => ConnectionUriImportService.Parse(invalidUri));
+        }
+
+        const string hiddenSecret = "cert-secret-must-not-appear";
+        try
+        {
+            ConnectionUriImportService.Parse(
+                $"mysql://user:{hiddenSecret}@db.example.test/sample?sslmode=preferred&sslca={Encode(caPath)}");
+            throw new InvalidOperationException("不相容的憑證檔與 TLS 模式應 fail closed");
+        }
+        catch (InvalidDataException exception)
+        {
+            Assert(!exception.Message.Contains(hiddenSecret, StringComparison.Ordinal), "憑證驗證錯誤不可回顯密碼");
+        }
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+}
 
 static async Task ProfileStoreDoesNotPersistPasswordsAsync()
 {

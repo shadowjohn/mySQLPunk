@@ -28,6 +28,8 @@ internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
             SslMode = ConnectionTlsModeMapper.ToPostgreSql(Profile.TlsMode)
         };
 
+        ConnectionTlsCertificateFiles.EnsureReadable(Profile);
+        ConnectionTlsCertificateFiles.ApplyToPostgreSql(builder, Profile);
         return new NpgsqlConnection(builder.ConnectionString);
     }
 

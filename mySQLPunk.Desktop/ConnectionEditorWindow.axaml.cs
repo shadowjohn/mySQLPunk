@@ -32,6 +32,17 @@ public sealed partial class ConnectionEditorWindow : Window
     private readonly TextBlock _tlsModeLabel;
     private readonly ComboBox _tlsModeCombo;
     private readonly TextBlock _tlsModeDescription;
+    private readonly Grid _tlsCertificateFields;
+    private readonly TextBlock _tlsCaLabel;
+    private readonly TextBox _tlsCaPathBox;
+    private readonly Button _browseTlsCaButton;
+    private readonly TextBlock _tlsClientCertificateLabel;
+    private readonly TextBox _tlsClientCertificateBox;
+    private readonly Button _browseTlsClientCertificateButton;
+    private readonly TextBlock _tlsClientKeyLabel;
+    private readonly TextBox _tlsClientKeyBox;
+    private readonly Button _browseTlsClientKeyButton;
+    private readonly TextBlock _tlsCertificateHint;
     private readonly CheckBox _rememberPasswordCheck;
     private readonly TextBlock _testStatus;
     private readonly Button _testButton;
@@ -69,6 +80,17 @@ public sealed partial class ConnectionEditorWindow : Window
         _tlsModeLabel = this.FindControl<TextBlock>("TlsModeLabel")!;
         _tlsModeCombo = this.FindControl<ComboBox>("TlsModeCombo")!;
         _tlsModeDescription = this.FindControl<TextBlock>("TlsModeDescription")!;
+        _tlsCertificateFields = this.FindControl<Grid>("TlsCertificateFields")!;
+        _tlsCaLabel = this.FindControl<TextBlock>("TlsCaLabel")!;
+        _tlsCaPathBox = this.FindControl<TextBox>("TlsCaPathBox")!;
+        _browseTlsCaButton = this.FindControl<Button>("BrowseTlsCaButton")!;
+        _tlsClientCertificateLabel = this.FindControl<TextBlock>("TlsClientCertificateLabel")!;
+        _tlsClientCertificateBox = this.FindControl<TextBox>("TlsClientCertificateBox")!;
+        _browseTlsClientCertificateButton = this.FindControl<Button>("BrowseTlsClientCertificateButton")!;
+        _tlsClientKeyLabel = this.FindControl<TextBlock>("TlsClientKeyLabel")!;
+        _tlsClientKeyBox = this.FindControl<TextBox>("TlsClientKeyBox")!;
+        _browseTlsClientKeyButton = this.FindControl<Button>("BrowseTlsClientKeyButton")!;
+        _tlsCertificateHint = this.FindControl<TextBlock>("TlsCertificateHint")!;
         _rememberPasswordCheck = this.FindControl<CheckBox>("RememberPasswordCheck")!;
         _testStatus = this.FindControl<TextBlock>("TestStatus")!;
         _testButton = this.FindControl<Button>("TestButton")!;
@@ -84,6 +106,9 @@ public sealed partial class ConnectionEditorWindow : Window
         _passwordBox.Text = _source.Password;
         _databaseBox.Text = _source.Database;
         _timeoutBox.Text = _source.TimeoutSeconds.ToString();
+        _tlsCaPathBox.Text = _source.TlsCaCertificatePath;
+        _tlsClientCertificateBox.Text = _source.TlsClientCertificatePath;
+        _tlsClientKeyBox.Text = _source.TlsClientKeyPath;
         _rememberPasswordCheck.IsChecked = _source.UseSecretStore;
         _rememberPasswordCheck.IsEnabled = _secretStore.IsAvailable || _source.UseSecretStore;
         _rememberPasswordCheck.Content = _secretStore.IsAvailable
@@ -107,6 +132,9 @@ public sealed partial class ConnectionEditorWindow : Window
             _databaseBox.Text = imported.Database;
             _timeoutBox.Text = imported.TimeoutSeconds.ToString();
             SelectTlsMode(imported.Provider, imported.TlsMode);
+            _tlsCaPathBox.Text = imported.TlsCaCertificatePath;
+            _tlsClientCertificateBox.Text = imported.TlsClientCertificatePath;
+            _tlsClientKeyBox.Text = imported.TlsClientKeyPath;
             _rememberPasswordCheck.IsChecked = false;
             _connectionUriBox.Text = string.Empty;
             var tlsLabel = (_tlsModeCombo.SelectedItem as TlsModeOption)?.Label ?? imported.TlsMode.ToString();
@@ -147,6 +175,44 @@ public sealed partial class ConnectionEditorWindow : Window
         if (files.Count == 1 && files[0].TryGetLocalPath() is { } path)
         {
             _databaseBox.Text = path;
+        }
+    }
+
+    private void BrowseTlsCa_Click(object? sender, RoutedEventArgs e) =>
+        _ = BrowseCertificateAsync(_tlsCaPathBox, _tlsCaLabel.Text ?? "CA 憑證", includeKeyPatterns: false);
+
+    private void BrowseTlsClientCertificate_Click(object? sender, RoutedEventArgs e) =>
+        _ = BrowseCertificateAsync(_tlsClientCertificateBox, "客戶端憑證", includeKeyPatterns: false);
+
+    private void BrowseTlsClientKey_Click(object? sender, RoutedEventArgs e) =>
+        _ = BrowseCertificateAsync(_tlsClientKeyBox, "客戶端私鑰", includeKeyPatterns: true);
+
+    private async Task BrowseCertificateAsync(TextBox target, string title, bool includeKeyPatterns)
+    {
+        try
+        {
+            var patterns = includeKeyPatterns
+                ? new[] { "*.key", "*.pem" }
+                : new[] { "*.pem", "*.crt", "*.cer", "*.der" };
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = $"選擇{title}",
+                AllowMultiple = false,
+                FileTypeFilter = new[]
+                {
+                    new FilePickerFileType(includeKeyPatterns ? "PEM 私鑰" : "憑證檔") { Patterns = patterns },
+                    FilePickerFileTypes.All
+                }
+            });
+
+            if (files.Count == 1 && files[0].TryGetLocalPath() is { } path)
+            {
+                target.Text = path;
+            }
+        }
+        catch (Exception exception)
+        {
+            _testStatus.Text = $"無法開啟檔案選擇器：{exception.Message}";
         }
     }
 
@@ -231,9 +297,15 @@ public sealed partial class ConnectionEditorWindow : Window
             Database = _databaseBox.Text ?? string.Empty,
             TimeoutSeconds = timeout,
             TlsMode = (_tlsModeCombo.SelectedItem as TlsModeOption)?.Mode ??
-                      throw new InvalidOperationException("請選擇 TLS 模式。")
+                      throw new InvalidOperationException("請選擇 TLS 模式。"),
+            TlsCaCertificatePath = _tlsCaPathBox.Text ?? string.Empty,
+            TlsClientCertificatePath = _tlsClientCertificateBox.Text ?? string.Empty,
+            TlsClientKeyPath = _tlsClientKeyBox.Text ?? string.Empty
         };
         profile.Validate();
+        // Fail closed before saving or testing: a missing or over-shared certificate file must not be
+        // persisted as if it were usable.
+        ConnectionTlsCertificateFiles.EnsureReadable(profile);
         return profile;
     }
 
@@ -248,6 +320,34 @@ public sealed partial class ConnectionEditorWindow : Window
         _tlsModeLabel.IsVisible = !sqlite;
         _tlsModeCombo.IsVisible = !sqlite;
         _rememberPasswordCheck.IsVisible = !sqlite;
+        _tlsCertificateFields.IsVisible = !sqlite;
+        var clientCertificateSupported = ConnectionTlsCertificateFiles.SupportsClientCertificate(provider);
+        _tlsClientCertificateLabel.IsVisible = clientCertificateSupported;
+        _tlsClientCertificateBox.IsVisible = clientCertificateSupported;
+        _browseTlsClientCertificateButton.IsVisible = clientCertificateSupported;
+        _tlsClientKeyLabel.IsVisible = clientCertificateSupported;
+        _tlsClientKeyBox.IsVisible = clientCertificateSupported;
+        _browseTlsClientKeyButton.IsVisible = clientCertificateSupported;
+        if (resetPort && !clientCertificateSupported)
+        {
+            // The new provider cannot send a client certificate; keep the fields empty instead of silently
+            // carrying a PEM pair into a profile that would then fail validation.
+            _tlsClientCertificateBox.Text = string.Empty;
+            _tlsClientKeyBox.Text = string.Empty;
+        }
+
+        _tlsCaLabel.Text = provider == DatabaseProviderKind.SqlServer ? "伺服器憑證" : "CA 憑證";
+        _tlsCaPathBox.PlaceholderText = provider == DatabaseProviderKind.SqlServer
+            ? "選填：與 SQL Server 憑證精確比對的 PEM／DER／CER 檔絕對路徑"
+            : "選填：PEM／DER CA 憑證檔絕對路徑";
+        _tlsCertificateHint.Text = provider switch
+        {
+            DatabaseProviderKind.SqlServer =>
+                "伺服器憑證檔會與 SQL Server 出示的憑證精確比對，需搭配 Mandatory 或 Strict；SQL Server 跨平台版不支援客戶端憑證。",
+            DatabaseProviderKind.Sqlite => string.Empty,
+            _ =>
+                "CA 憑證需搭配 VerifyCA／VerifyFull 才會生效；客戶端憑證與私鑰須同時指定 PEM 檔，模式至少 Required，私鑰檔權限須為只有自己可讀（600）。"
+        };
         _browseButton.IsVisible = sqlite;
         _databaseLabel.Text = sqlite ? "資料庫檔案" : "預設資料庫";
 

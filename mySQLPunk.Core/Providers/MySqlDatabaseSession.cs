@@ -31,6 +31,8 @@ internal sealed class MySqlDatabaseSession : AdoDatabaseSession
             builder.Database = database;
         }
 
+        ConnectionTlsCertificateFiles.EnsureReadable(Profile);
+        ConnectionTlsCertificateFiles.ApplyToMySql(builder, Profile);
         return new MySqlConnection(builder.ConnectionString);
     }
 

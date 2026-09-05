@@ -72,6 +72,17 @@ Linux 密碼內容直接從 stdin 傳給 `secret-tool`；macOS 密碼先轉為 U
 
 `connections.json` 以 `tlsMode` 字串保存模式；舊檔案的 `useSsl` 會在載入時依 provider 遷移：MySQL／PostgreSQL 的 `true` 對應 Preferred、`false` 對應 Disabled，SQL Server 的 `true` 對應 Mandatory、`false` 對應 Optional。同一筆設定同時包含 `useSsl` 與 `tlsMode`、`tlsMode` 不是明確名稱、模式與 provider 不相容，或檔案含 `password` 欄位時，載入一律 fail closed 並提示修正，不會猜測較弱的模式。切換資料庫類型時，畫面會把目前模式映射到新 provider 最接近且不較弱的選項，並在狀態列提示確認。
 
+#### 跨平台版 TLS 憑證檔案
+
+TLS 模式下方可指定憑證檔案，路徑必須是本機絕對路徑、不含控制字元，並會保存在 `connections.json`（只保存路徑，不保存憑證或私鑰內容）：
+
+| 欄位 | MySQL / MariaDB | PostgreSQL | SQL Server |
+| --- | --- | --- | --- |
+| CA／伺服器憑證 | `SslCa`（PEM／DER），需 VerifyCA 或 VerifyFull | `RootCertificate`（PEM），需 VerifyCA 或 VerifyFull | `ServerCertificate`（PEM／DER／CER，與伺服器憑證精確比對），需 Mandatory 或 Strict |
+| 客戶端憑證＋私鑰 | `SslCert` ＋ `SslKey`（PEM，成對），需 Required 以上 | `SslCertificate` ＋ `SslKey`（PEM，成對），需 Require 以上 | 不支援，欄位會隱藏 |
+
+規則一律 fail closed，避免「有填憑證但驅動程式其實忽略」的假安全：CA 憑證搭配不驗證憑證的模式（Preferred、Required、Allow、Optional、Disabled）會拒絕儲存；客戶端憑證與私鑰缺一、指向同一檔案、或搭配可能退回未加密的模式也會拒絕；合併的 PFX／PKCS#12 與加密私鑰目前不支援。儲存、測試連線與實際連線前都會確認每個檔案存在且不是目錄，Unix 上的私鑰檔若可被群組或其他使用者讀取（例如 `0644`）會被拒絕，請改為 `chmod 600`。載入 `connections.json` 時只驗證格式與相容性，不要求檔案當下存在，因此放在外接媒體上的憑證不會讓整份設定檔無法載入。切換資料庫類型時，若新 provider 不支援客戶端憑證，欄位會清空並隱藏；SQLite 不使用任何憑證欄位。
+
 #### 跨平台版連線 URI
 
 連線設定頁最上方可貼上 `mysql://`／`mariadb://`、`postgres://`／`postgresql://`、`mssql://`／`sqlserver://` 或 `sqlite:///絕對路徑` URI，按「安全套用」後會填入 provider、主機、port、使用者、密碼、資料庫、逾時與 TLS 模式，不會自動連線或儲存。支援的查詢參數：
@@ -80,5 +91,6 @@ Linux 密碼內容直接從 stdin 傳給 `secret-tool`；macOS 密碼先轉為 U
 - MySQL / MariaDB：`sslmode=disabled|preferred|required|verify-ca|verify-full`，或 `ssl=true|false`（分別對應 Required 與 Disabled）；兩者不可同時出現。
 - PostgreSQL：`sslmode=disable|allow|prefer|require|verify-ca|verify-full`。
 - SQL Server：`encrypt=true|false|yes|no|mandatory|optional|strict`。
+- 憑證檔案（值為 percent-encoded 的本機絕對路徑，規則同上）：MySQL / MariaDB `sslca`、`sslcert`、`sslkey`；PostgreSQL `sslrootcert`、`sslcert`、`sslkey`；SQL Server `servercertificate`。
 
 URI 輸入框以遮蔽字元顯示，成功套用後立即清空。未知、重複或空白參數、fragment、多層資料庫路徑、dot-segment、未編碼空白、非法百分比編碼、非 UTF-8 位元組、Unicode 控制／格式／noncharacter 字元、超過 8,192 字元的內容，以及與 provider 不相容的 TLS 值，一律拒絕並只顯示不含密碼的錯誤訊息。

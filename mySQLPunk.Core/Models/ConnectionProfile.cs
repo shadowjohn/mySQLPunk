@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using MySqlPunk.Core.Services;
 
 namespace MySqlPunk.Core.Models;
 
@@ -72,6 +73,15 @@ public sealed class ConnectionProfile
 
     public int TimeoutSeconds { get; set; } = 15;
 
+    /// <summary>CA certificate (MySQL／PostgreSQL) or expected server certificate (SQL Server) file; PEM／DER.</summary>
+    public string TlsCaCertificatePath { get; set; } = string.Empty;
+
+    /// <summary>PEM client certificate for mutual TLS (MySQL／PostgreSQL only).</summary>
+    public string TlsClientCertificatePath { get; set; } = string.Empty;
+
+    /// <summary>PEM private key matching <see cref="TlsClientCertificatePath"/>.</summary>
+    public string TlsClientKeyPath { get; set; } = string.Empty;
+
     [JsonIgnore]
     public string ProviderDisplayName => Provider switch
     {
@@ -95,7 +105,10 @@ public sealed class ConnectionProfile
         PasswordChanged = PasswordChanged,
         Database = Database,
         TlsMode = TlsMode,
-        TimeoutSeconds = TimeoutSeconds
+        TimeoutSeconds = TimeoutSeconds,
+        TlsCaCertificatePath = TlsCaCertificatePath,
+        TlsClientCertificatePath = TlsClientCertificatePath,
+        TlsClientKeyPath = TlsClientKeyPath
     };
 
     public void ApplyProviderDefaults(bool resetPort = false)
@@ -143,6 +156,7 @@ public sealed class ConnectionProfile
         if (Provider == DatabaseProviderKind.Sqlite)
         {
             TlsMode = ConnectionTlsMode.Disabled;
+            ConnectionTlsCertificateFiles.Validate(this);
             if (string.IsNullOrWhiteSpace(Database))
             {
                 throw new InvalidOperationException("SQLite 必須指定資料庫檔案。");
@@ -167,6 +181,8 @@ public sealed class ConnectionProfile
         {
             throw new InvalidOperationException("使用者名稱不可空白。");
         }
+
+        ConnectionTlsCertificateFiles.Validate(this);
     }
 
     internal void ApplyPersistedCompatibility()

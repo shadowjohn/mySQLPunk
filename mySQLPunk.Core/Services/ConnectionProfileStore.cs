@@ -14,6 +14,13 @@ public sealed class ConnectionProfileStore
         Converters = { new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) }
     };
 
+    private static readonly HashSet<string> CertificatePathFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "tlsCaCertificatePath",
+        "tlsClientCertificatePath",
+        "tlsClientKeyPath"
+    };
+
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public ConnectionProfileStore(string? filePath = null)
@@ -209,6 +216,13 @@ public sealed class ConnectionProfileStore
                     if (property.Value.ValueKind != JsonValueKind.String)
                     {
                         throw new InvalidDataException("tlsMode 欄位必須是明確的模式名稱。");
+                    }
+                }
+                else if (CertificatePathFields.Contains(property.Name))
+                {
+                    if (property.Value.ValueKind != JsonValueKind.String)
+                    {
+                        throw new InvalidDataException($"{property.Name} 欄位必須是字串路徑。");
                     }
                 }
             }

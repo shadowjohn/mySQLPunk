@@ -14,6 +14,7 @@ public static class ConnectionUriImportService
     private const int MaximumUsernameCharacters = 256;
     private const int MaximumPasswordCharacters = 4096;
     private const int MaximumDatabaseCharacters = 512;
+    private const int MaximumQueryValueCharacters = ConnectionTlsCertificateFiles.MaximumPathCharacters;
 
     public static ConnectionProfile Parse(string? uriText)
     {
@@ -53,19 +54,19 @@ public static class ConnectionUriImportService
                 query,
                 DatabaseProviderKind.MySql,
                 3306,
-                new[] { "name", "ssl", "sslmode", "timeout" }),
+                new[] { "name", "ssl", "sslmode", "sslca", "sslcert", "sslkey", "timeout" }),
             "postgres" or "postgresql" => ParseNetworkProfile(
                 uri,
                 query,
                 DatabaseProviderKind.PostgreSql,
                 5432,
-                new[] { "name", "sslmode", "timeout" }),
+                new[] { "name", "sslmode", "sslrootcert", "sslcert", "sslkey", "timeout" }),
             "mssql" or "sqlserver" => ParseNetworkProfile(
                 uri,
                 query,
                 DatabaseProviderKind.SqlServer,
                 1433,
-                new[] { "name", "encrypt", "timeout" }),
+                new[] { "name", "encrypt", "servercertificate", "timeout" }),
             "sqlite" => ParseSqliteProfile(uri, query),
             _ => throw new InvalidDataException(
                 "目前只支援 mysql、mariadb、postgres、postgresql、mssql、sqlserver 與 sqlite URI。")
@@ -137,9 +138,23 @@ public static class ConnectionUriImportService
             Database = database,
             TimeoutSeconds = timeout,
             TlsMode = tlsMode,
-            UseSecretStore = false
+            UseSecretStore = false,
+            TlsCaCertificatePath = ParseCertificatePath(
+                query,
+                provider == DatabaseProviderKind.PostgreSql ? "sslrootcert" :
+                provider == DatabaseProviderKind.SqlServer ? "servercertificate" : "sslca"),
+            TlsClientCertificatePath = ParseCertificatePath(query, "sslcert"),
+            TlsClientKeyPath = ParseCertificatePath(query, "sslkey")
         };
-        profile.Validate();
+        try
+        {
+            profile.Validate();
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidDataException(exception.Message, exception);
+        }
+
         return profile;
     }
 
@@ -206,6 +221,24 @@ public static class ConnectionUriImportService
         }
 
         return database;
+    }
+
+    private static string ParseCertificatePath(IReadOnlyDictionary<string, string> query, string key)
+    {
+        if (!query.TryGetValue(key, out var path))
+        {
+            return string.Empty;
+        }
+
+        if (path.Length == 0 ||
+            path.Length > ConnectionTlsCertificateFiles.MaximumPathCharacters ||
+            !string.Equals(path, path.Trim(), StringComparison.Ordinal) ||
+            !Path.IsPathFullyQualified(path))
+        {
+            throw new InvalidDataException($"URI {key} 必須是本機絕對路徑。");
+        }
+
+        return path;
     }
 
     private static int ParseTimeout(IReadOnlyDictionary<string, string> query)
@@ -336,7 +369,7 @@ public static class ConnectionUriImportService
                 64,
                 "查詢參數",
                 rejectBoundaryWhitespace: true).ToLowerInvariant();
-            var value = DecodeComponent(encodedValue, MaximumNameCharacters, "查詢參數值");
+            var value = DecodeComponent(encodedValue, MaximumQueryValueCharacters, "查詢參數值");
             if (key.Length == 0 || !result.TryAdd(key, value))
             {
                 throw new InvalidDataException("連線 URI 不可包含空白或重複的查詢參數。");

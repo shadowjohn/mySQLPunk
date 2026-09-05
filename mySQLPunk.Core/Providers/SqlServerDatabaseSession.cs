@@ -28,6 +28,8 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
             ApplicationName = "mySQLPunk"
         };
 
+        ConnectionTlsCertificateFiles.EnsureReadable(Profile);
+        ConnectionTlsCertificateFiles.ApplyToSqlServer(builder, Profile);
         return new SqlConnection(builder.ConnectionString);
     }
 

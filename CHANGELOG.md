@@ -7,6 +7,7 @@
 - **資料表約束與 SQL Server XML 索引**：Table Designer 新增外鍵與 CHECK 約束分頁，可讀取並預覽 MySQL、PostgreSQL、SQL Server、Oracle、SQLite 的既有約束；新增或修改時會產生各 provider 對應的 DDL。SQL Server 索引頁也可建立 PRIMARY／PATH／VALUE／PROPERTY XML 索引，並正確保留次要 XML 索引的父索引關係。
 - **跨資料庫欄位屬性**：Table Designer 會讀取並呈現 MySQL/MariaDB 的字元集、排序規則與 generated column，PostgreSQL 的 identity、generated、storage、compression 與 collation，SQLite 的 generated column／collation，Oracle 與 Snowflake 的 identity、虛擬欄位及 collation。SQL 預覽會保留可安全重建的屬性；既有資料表不支援直接 ALTER 的進階變更會明確阻擋，避免靜默遺失設定。
 - **Linux／macOS 連線 URI 與完整 TLS 模式**：新增／編輯連線時可貼上 MySQL／MariaDB、PostgreSQL、SQL Server 或 SQLite URI，自動套用 provider、主機、port、認證、資料庫、逾時及 provider 原生的 Prefer／Require／VerifyCA／VerifyFull／Mandatory／Strict 等 TLS 語意；舊 `useSsl` 會依 provider 遷移成等價模式。URI 輸入會遮蔽並在成功後立即清除，未知／重複參數、未編碼空白、dot-segment、Unicode 控制／noncharacter、過長內容與不相容模式一律 fail closed，錯誤訊息不回顯密碼，`connections.json` 仍不保存密碼。
+- **Linux／macOS TLS 憑證檔案**：跨平台連線設定頁新增 CA 憑證（SQL Server 為伺服器憑證）、客戶端憑證與客戶端私鑰路徑，分別對應 MySqlConnector `SslCa`／`SslCert`／`SslKey`、Npgsql `RootCertificate`／`SslCertificate`／`SslKey` 與 SqlClient `ServerCertificate`，URI 也可用 `sslca`、`sslrootcert`、`sslcert`、`sslkey`、`servercertificate` 一併帶入。所有規則 fail closed：CA 憑證只接受 VerifyCA／VerifyFull（SQL Server 為 Mandatory／Strict），客戶端憑證與私鑰須成對、模式至少 Required，SQL Server 與 SQLite 不接受客戶端憑證；路徑必須是絕對路徑且不含控制字元，儲存、測試與連線前會確認檔案存在、不是目錄，且私鑰在 Unix 上不可被其他使用者讀取。切換資料庫類型時不支援的客戶端憑證欄位會清空，`connections.json` 以明確欄位保存路徑、仍不保存密碼或私鑰內容。
 
 ### 🛠️ 問題修正與優化
 

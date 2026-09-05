@@ -3,14 +3,14 @@
         x:Class="MySqlPunk.Desktop.ConnectionEditorWindow"
         Title="連線設定"
         Width="640"
-        Height="720"
+        Height="800"
         MinWidth="560"
         MinHeight="560"
         CanResize="True"
         WindowStartupLocation="CenterOwner">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
   <Border Padding="22">
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="130,*">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="130,*">
       <TextBlock Grid.Row="0" Grid.ColumnSpan="2" x:Name="HintText" Foreground="#475467" Margin="0,0,0,14" TextWrapping="Wrap" />
 
       <TextBlock Grid.Row="1" Grid.Column="0" Text="連線 URI" VerticalAlignment="Center" Margin="0,6" />
@@ -61,11 +61,32 @@
                    Margin="2,2,0,4" />
       </Grid>
 
-      <CheckBox Grid.Row="8" Grid.Column="1" x:Name="RememberPasswordCheck" Margin="0,6,0,2" />
+      <Grid Grid.Row="8" Grid.ColumnSpan="2" x:Name="TlsCertificateFields" RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="130,*,Auto">
+        <TextBlock Grid.Row="0" Grid.Column="0" x:Name="TlsCaLabel" Text="CA 憑證" VerticalAlignment="Center" Margin="0,6" />
+        <TextBox Grid.Row="0" Grid.Column="1" x:Name="TlsCaPathBox" Margin="0,4" PlaceholderText="選填：PEM／DER 憑證檔絕對路徑" />
+        <Button Grid.Row="0" Grid.Column="2" x:Name="BrowseTlsCaButton" Content="選擇…" Click="BrowseTlsCa_Click" Margin="8,4,0,4" />
 
-      <TextBlock Grid.Row="9" Grid.ColumnSpan="2" x:Name="TestStatus" Margin="0,12,0,0" TextWrapping="Wrap" />
+        <TextBlock Grid.Row="1" Grid.Column="0" x:Name="TlsClientCertificateLabel" Text="客戶端憑證" VerticalAlignment="Center" Margin="0,6" />
+        <TextBox Grid.Row="1" Grid.Column="1" x:Name="TlsClientCertificateBox" Margin="0,4" PlaceholderText="選填：PEM 客戶端憑證絕對路徑" />
+        <Button Grid.Row="1" Grid.Column="2" x:Name="BrowseTlsClientCertificateButton" Content="選擇…" Click="BrowseTlsClientCertificate_Click" Margin="8,4,0,4" />
 
-      <Grid Grid.Row="10" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,18,0,0">
+        <TextBlock Grid.Row="2" Grid.Column="0" x:Name="TlsClientKeyLabel" Text="客戶端私鑰" VerticalAlignment="Center" Margin="0,6" />
+        <TextBox Grid.Row="2" Grid.Column="1" x:Name="TlsClientKeyBox" Margin="0,4" PlaceholderText="選填：PEM 私鑰絕對路徑（權限 600）" />
+        <Button Grid.Row="2" Grid.Column="2" x:Name="BrowseTlsClientKeyButton" Content="選擇…" Click="BrowseTlsClientKey_Click" Margin="8,4,0,4" />
+
+        <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
+                   x:Name="TlsCertificateHint"
+                   Foreground="#667085"
+                   FontSize="12"
+                   TextWrapping="Wrap"
+                   Margin="2,2,0,4" />
+      </Grid>
+
+      <CheckBox Grid.Row="9" Grid.Column="1" x:Name="RememberPasswordCheck" Margin="0,6,0,2" />
+
+      <TextBlock Grid.Row="10" Grid.ColumnSpan="2" x:Name="TestStatus" Margin="0,12,0,0" TextWrapping="Wrap" />
+
+      <Grid Grid.Row="11" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,18,0,0">
         <Button Grid.Column="0" x:Name="TestButton" Content="測試連線" Click="TestConnection_Click" Padding="13,7" />
         <Button Grid.Column="2" Content="取消" Click="Cancel_Click" Margin="8,0,0,0" Padding="13,7" />
         <Button Grid.Column="3" x:Name="SaveButton" Content="儲存" Click="Save_Click" Margin="8,0,0,0" Padding="13,7" />
