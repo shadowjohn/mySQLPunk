@@ -141,7 +141,7 @@ public sealed partial class ConnectionEditorWindow : Window
         _rememberPasswordCheck.IsChecked = _source.UseSecretStore;
         _rememberPasswordCheck.IsEnabled = _secretStore.IsAvailable || _source.UseSecretStore;
         _rememberPasswordCheck.Content = _secretStore.IsAvailable
-            ? $"將密碼安全儲存在 {_secretStore.DisplayName}"
+            ? $"將資料庫密碼與 SSH 密碼／私鑰密語安全儲存在 {_secretStore.DisplayName}"
             : _secretStore.UnavailableReason;
         _passwordBox.TextChanged += (_, _) => _passwordChanged = true;
         ApplyProviderVisibility(_source.Provider, resetPort: false);

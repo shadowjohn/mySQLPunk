@@ -94,7 +94,7 @@ ssh-keyscan -p 22 ssh.example.com | ssh-keygen -lf -
 行為與 Windows 版一致：SSH 交握時把伺服器主機金鑰的 SHA256 與設定完全比對，不符即中止並在錯誤訊息回報伺服器實際指紋，不會提示「是否信任」；轉送只綁定本機 `127.0.0.1` 的動態連接埠，資料庫驅動程式改連該端點，session 中斷、重新連線或關閉程式時一併關閉。差異與限制：
 
 - 指紋只接受 OpenSSH `SHA256:…`（43 個 base64 字元，可省略 `SHA256:` 前綴或保留 `=`），MD5 冒號格式拒絕。
-- SSH 密碼與私鑰密語只保留到本次程式關閉，不寫入 `connections.json`，也不交給系統密碼庫；設定檔若含 `sshPassword`／`sshKeyPassphrase` 欄位會拒絕載入。建議使用私鑰登入，私鑰路徑必須是絕對路徑，Unix 上權限須為只有自己可讀（`chmod 600`）。
+- SSH 密碼與私鑰密語不寫入 `connections.json`（設定檔若含 `sshPassword`／`sshKeyPassphrase` 欄位會拒絕載入）。勾選系統密碼庫時，會與資料庫密碼一樣交給 Linux Secret Service 或 macOS Keychain，各自是獨立項目（id 為連線 id 加 `-ssh-password`／`-ssh-key-passphrase`），刪除連線或取消勾選時一併清除；未勾選則只保留到本次程式關閉。建議使用私鑰登入，私鑰路徑必須是絕對路徑，Unix 上權限須為只有自己可讀（`chmod 600`）。
 - MySQL／MariaDB 與 PostgreSQL 不可搭配 VerifyFull（端點變成 127.0.0.1，主機名稱必定不符），請改用 VerifyCA；SQL Server 會自動以原始主機名稱驗證憑證，Mandatory／Strict 仍可使用。
 - 每個資料庫 session 只建立一條 SSH 連線並重用轉送；SQLite 不適用。
 

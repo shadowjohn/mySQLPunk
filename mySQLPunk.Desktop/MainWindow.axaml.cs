@@ -469,6 +469,7 @@ public sealed partial class MainWindow : Window
         }
 
         var passwordStatus = await ApplyPasswordPreferenceAsync(original: null, result);
+        passwordStatus += await ApplySshSecretPreferenceAsync(original: null, result);
         RememberSshSecrets(result);
         result.Password = string.Empty;
         _profiles.Add(result);
@@ -491,6 +492,11 @@ public sealed partial class MainWindow : Window
             editable.Password = passwordResolution.Password;
         }
 
+        if (await ResolveSshSecretsAsync(selected))
+        {
+            ApplySshSecrets(editable);
+        }
+
         var editor = new ConnectionEditorWindow(editable, passwordResolution.Warning, _secretStore);
         var result = await editor.ShowDialog<ConnectionProfile?>(this);
         if (result is null)
@@ -500,6 +506,7 @@ public sealed partial class MainWindow : Window
 
         var index = _profiles.IndexOf(selected);
         var passwordStatus = await ApplyPasswordPreferenceAsync(selected, result);
+        passwordStatus += await ApplySshSecretPreferenceAsync(selected, result);
         RememberSshSecrets(result);
         result.Password = string.Empty;
         _profiles[index] = result;
@@ -555,7 +562,7 @@ public sealed partial class MainWindow : Window
 
         var connectionProfile = selected.Clone();
         var passwordResolution = await ResolvePasswordAsync(selected);
-        var sshSecretsFound = ApplySshSecrets(connectionProfile);
+        var sshSecretsFound = await ResolveSshSecretsAsync(selected) && ApplySshSecrets(connectionProfile);
         var sshNeedsInput = connectionProfile.SshEnabled &&
                             !sshSecretsFound &&
                             connectionProfile.SshPrivateKeyPath.Length == 0;
@@ -577,6 +584,7 @@ public sealed partial class MainWindow : Window
 
             connectionProfile = edited.Clone();
             await ApplyPasswordPreferenceAsync(selected, edited);
+            await ApplySshSecretPreferenceAsync(selected, edited);
             RememberSshSecrets(edited);
             await UpdateStoredProfileAsync(selected, edited);
         }
@@ -1428,7 +1436,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            await _secretStore.DeleteAsync(profileId);
+            await _secretStore.DeleteAllAsync(profileId);
             return string.Empty;
         }
         catch (Exception exception) when (exception is SecretStoreException or IOException)
@@ -1459,6 +1467,95 @@ public sealed partial class MainWindow : Window
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
             return $"但無法清除 Table 欄位偏好：{exception.Message}";
+        }
+    }
+
+    private async Task<bool> ResolveSshSecretsAsync(ConnectionProfile profile)
+    {
+        if (!profile.SshEnabled)
+        {
+            return false;
+        }
+
+        if (_runtimeSshSecrets.ContainsKey(profile.Id))
+        {
+            return true;
+        }
+
+        if (!profile.UseSecretStore || !_secretStore.IsAvailable)
+        {
+            return false;
+        }
+
+        try
+        {
+            var password = await _secretStore.GetAsync(profile.Id, SecretKind.SshPassword) ?? string.Empty;
+            var passphrase = await _secretStore.GetAsync(profile.Id, SecretKind.SshKeyPassphrase) ?? string.Empty;
+            if (password.Length == 0 && passphrase.Length == 0)
+            {
+                return false;
+            }
+
+            _runtimeSshSecrets[profile.Id] = (password, passphrase);
+            return true;
+        }
+        catch (Exception exception) when (exception is SecretStoreException or IOException)
+        {
+            SetStatus($"{exception.Message} SSH 祕密需重新輸入。");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Persists or clears the SSH password／passphrase in the system secret store to mirror the profile's
+    /// secret-store opt-in. Must run before <see cref="RememberSshSecrets"/> clears the in-memory fields.
+    /// </summary>
+    private async Task<string> ApplySshSecretPreferenceAsync(ConnectionProfile? original, ConnectionProfile edited)
+    {
+        var optedIn = edited.SshEnabled && edited.UseSecretStore && edited.Provider != DatabaseProviderKind.Sqlite;
+        if (!_secretStore.IsAvailable)
+        {
+            return optedIn ? " SSH 祕密只保留到本次程式關閉。" : string.Empty;
+        }
+
+        try
+        {
+            if (!optedIn)
+            {
+                if (original?.UseSecretStore == true || original?.SshEnabled == true)
+                {
+                    await _secretStore.DeleteAsync(edited.Id, SecretKind.SshPassword);
+                    await _secretStore.DeleteAsync(edited.Id, SecretKind.SshKeyPassphrase);
+                }
+
+                return edited.SshEnabled ? " SSH 祕密只保留到本次程式關閉。" : string.Empty;
+            }
+
+            var stored = new List<string>();
+            foreach (var (kind, value) in new[]
+                     {
+                         (SecretKind.SshPassword, edited.SshPassword),
+                         (SecretKind.SshKeyPassphrase, edited.SshKeyPassphrase)
+                     })
+            {
+                if (value.Length > 0)
+                {
+                    await _secretStore.StoreAsync(edited.Id, edited.Name, value, kind);
+                    stored.Add(SecretStoreExtensions.DescribeSecretKind(kind));
+                }
+                else
+                {
+                    await _secretStore.DeleteAsync(edited.Id, kind);
+                }
+            }
+
+            return stored.Count == 0
+                ? string.Empty
+                : $" {string.Join("與", stored)}已安全儲存於 {_secretStore.DisplayName}。";
+        }
+        catch (Exception exception) when (exception is SecretStoreException or IOException)
+        {
+            return $" {exception.Message} SSH 祕密只保留到本次程式關閉。";
         }
     }
 

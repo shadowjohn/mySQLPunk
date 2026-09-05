@@ -1352,24 +1352,26 @@ static async Task LinuxSecretServiceRoundTripAsync()
     var directory = CreateTemporaryDirectory();
     try
     {
-        var statePath = Path.Combine(directory, "linux-secret-state");
+        var stateDirectory = Path.Combine(directory, "linux-secret-state");
+        Directory.CreateDirectory(stateDirectory);
         var argumentsPath = Path.Combine(directory, "linux-secret-arguments");
         var executablePath = Path.Combine(directory, "secret-tool");
         var script = $$"""
             #!/usr/bin/env bash
             set -euo pipefail
+            key="${@: -1}"
             case "$1" in
               store)
                 shift
-                printf '%s' "$*" > '{{argumentsPath}}'
-                /bin/cat > '{{statePath}}'
+                printf '%s\n' "$*" >> '{{argumentsPath}}'
+                /bin/cat > '{{stateDirectory}}'/"$key"
                 ;;
               lookup)
-                [[ -f '{{statePath}}' ]] || exit 1
-                /bin/cat '{{statePath}}'
+                [[ -f '{{stateDirectory}}'/"$key" ]] || exit 1
+                /bin/cat '{{stateDirectory}}'/"$key"
                 ;;
               clear)
-                /bin/rm -f '{{statePath}}'
+                /bin/rm -f '{{stateDirectory}}'/"$key"
                 ;;
               *)
                 exit 2
@@ -1391,11 +1393,42 @@ static async Task LinuxSecretServiceRoundTripAsync()
 
         await store.DeleteAsync(profileId);
         Assert(await store.GetAsync(profileId) is null, "Linux 密碼庫刪除後仍讀到內容");
+
+        await AssertSecretKindsAsync(store, argumentsPath);
     }
     finally
     {
         Directory.Delete(directory, true);
     }
+}
+
+static async Task AssertSecretKindsAsync(ISecretStore store, string argumentsPath)
+{
+    var profileId = Guid.NewGuid();
+    await store.StoreAsync(profileId, "多種祕密", "db-secret", SecretKind.DatabasePassword);
+    await store.StoreAsync(profileId, "多種祕密", "ssh-secret", SecretKind.SshPassword);
+    await store.StoreAsync(profileId, "多種祕密", "passphrase-secret", SecretKind.SshKeyPassphrase);
+    Assert(await store.GetAsync(profileId) == "db-secret" &&
+           await store.GetAsync(profileId, SecretKind.DatabasePassword) == "db-secret" &&
+           await store.GetAsync(profileId, SecretKind.SshPassword) == "ssh-secret" &&
+           await store.GetAsync(profileId, SecretKind.SshKeyPassphrase) == "passphrase-secret",
+        "三種祕密應各自獨立保存，資料庫密碼沿用舊的裸 id");
+    var arguments = await File.ReadAllTextAsync(argumentsPath);
+    Assert(arguments.Contains(profileId.ToString("N") + "-ssh-password", StringComparison.Ordinal) &&
+           arguments.Contains(profileId.ToString("N") + "-ssh-key-passphrase", StringComparison.Ordinal) &&
+           !arguments.Contains("ssh-secret", StringComparison.Ordinal) &&
+           !arguments.Contains("passphrase-secret", StringComparison.Ordinal),
+        "SSH 祕密應以獨立 id 保存，且祕密內容不可出現在 process arguments");
+
+    await store.DeleteAsync(profileId, SecretKind.SshPassword);
+    Assert(await store.GetAsync(profileId, SecretKind.SshPassword) is null &&
+           await store.GetAsync(profileId) == "db-secret" &&
+           await store.GetAsync(profileId, SecretKind.SshKeyPassphrase) == "passphrase-secret",
+        "刪除單一種類不可影響其他祕密");
+    await store.DeleteAllAsync(profileId);
+    Assert(await store.GetAsync(profileId) is null &&
+           await store.GetAsync(profileId, SecretKind.SshKeyPassphrase) is null,
+        "DeleteAllAsync 應清除該連線的全部祕密");
 }
 
 static async Task QueryResultExportFormatsAsync()
@@ -1813,7 +1846,8 @@ static async Task MacOsKeychainRoundTripAsync()
     var directory = CreateTemporaryDirectory();
     try
     {
-        var statePath = Path.Combine(directory, "macos-keychain-state");
+        var stateDirectory = Path.Combine(directory, "macos-keychain-state");
+        Directory.CreateDirectory(stateDirectory);
         var commandPath = Path.Combine(directory, "macos-keychain-command");
         var executablePath = Path.Combine(directory, "security");
         var script = $$"""
@@ -1822,15 +1856,16 @@ static async Task MacOsKeychainRoundTripAsync()
             case "$1" in
               -i)
                 IFS= read -r command
-                printf '%s' "$command" > '{{commandPath}}'
-                printf '%s' "${command##* }" > '{{statePath}}'
+                printf '%s\n' "$command" >> '{{commandPath}}'
+                set -- $command
+                printf '%s' "${command##* }" > '{{stateDirectory}}'/"$3"
                 ;;
               find-generic-password)
-                [[ -f '{{statePath}}' ]] || exit 44
-                /bin/cat '{{statePath}}'
+                [[ -f '{{stateDirectory}}'/"$3" ]] || exit 44
+                /bin/cat '{{stateDirectory}}'/"$3"
                 ;;
               delete-generic-password)
-                /bin/rm -f '{{statePath}}'
+                /bin/rm -f '{{stateDirectory}}'/"$3"
                 ;;
               *)
                 exit 2
@@ -1852,6 +1887,8 @@ static async Task MacOsKeychainRoundTripAsync()
 
         await store.DeleteAsync(profileId);
         Assert(await store.GetAsync(profileId) is null, "macOS Keychain 刪除後仍讀到內容");
+
+        await AssertSecretKindsAsync(store, commandPath);
     }
     finally
     {

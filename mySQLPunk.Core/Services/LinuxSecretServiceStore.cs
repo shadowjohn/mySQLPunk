@@ -20,10 +20,13 @@ public sealed class LinuxSecretServiceStore : ISecretStore
         ? string.Empty
         : "找不到 secret-tool；請安裝 libsecret-tools，或維持本次執行期間的記憶體保存。";
 
-    public async Task<string?> GetAsync(Guid profileId, CancellationToken cancellationToken = default)
+    public Task<string?> GetAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+        GetAsync(profileId, SecretKind.DatabasePassword, cancellationToken);
+
+    public async Task<string?> GetAsync(Guid profileId, SecretKind kind, CancellationToken cancellationToken = default)
     {
         var result = await RunAsync(
-            new[] { "lookup", "application", ApplicationAttribute, "profile-id", FormatId(profileId) },
+            new[] { "lookup", "application", ApplicationAttribute, "profile-id", FormatId(profileId, kind) },
             standardInput: null,
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode == 0)
@@ -39,10 +42,18 @@ public sealed class LinuxSecretServiceStore : ISecretStore
         throw CreateOperationException("讀取");
     }
 
+    public Task StoreAsync(
+        Guid profileId,
+        string profileName,
+        string secret,
+        CancellationToken cancellationToken = default) =>
+        StoreAsync(profileId, profileName, secret, SecretKind.DatabasePassword, cancellationToken);
+
     public async Task StoreAsync(
         Guid profileId,
         string profileName,
         string secret,
+        SecretKind kind,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(secret))
@@ -51,15 +62,18 @@ public sealed class LinuxSecretServiceStore : ISecretStore
         }
 
         var label = SanitizeLabel(profileName);
+        var kindLabel = kind == SecretKind.DatabasePassword
+            ? string.Empty
+            : $" · {SecretStoreExtensions.DescribeSecretKind(kind)}";
         var result = await RunAsync(
             new[]
             {
                 "store",
-                $"--label=mySQLPunk · {label}",
+                $"--label=mySQLPunk · {label}{kindLabel}",
                 "application",
                 ApplicationAttribute,
                 "profile-id",
-                FormatId(profileId)
+                FormatId(profileId, kind)
             },
             secret,
             cancellationToken).ConfigureAwait(false);
@@ -68,17 +82,20 @@ public sealed class LinuxSecretServiceStore : ISecretStore
             throw CreateOperationException("儲存");
         }
 
-        var stored = await GetAsync(profileId, cancellationToken).ConfigureAwait(false);
+        var stored = await GetAsync(profileId, kind, cancellationToken).ConfigureAwait(false);
         if (!string.Equals(stored, secret, StringComparison.Ordinal))
         {
             throw new SecretStoreException("系統密碼庫寫入後驗證失敗；密碼未視為已保存。");
         }
     }
 
-    public async Task DeleteAsync(Guid profileId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+        DeleteAsync(profileId, SecretKind.DatabasePassword, cancellationToken);
+
+    public async Task DeleteAsync(Guid profileId, SecretKind kind, CancellationToken cancellationToken = default)
     {
         var result = await RunAsync(
-            new[] { "clear", "application", ApplicationAttribute, "profile-id", FormatId(profileId) },
+            new[] { "clear", "application", ApplicationAttribute, "profile-id", FormatId(profileId, kind) },
             standardInput: null,
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode is not (0 or 1))
@@ -100,7 +117,8 @@ public sealed class LinuxSecretServiceStore : ISecretStore
         return SecretProcessRunner.RunAsync(_executablePath, arguments, standardInput, cancellationToken);
     }
 
-    private static string FormatId(Guid profileId) => profileId.ToString("N");
+    private static string FormatId(Guid profileId, SecretKind kind) =>
+        SecretStoreExtensions.FormatSecretId(profileId, kind);
 
     private static string? FindDefaultExecutable()
     {

@@ -28,6 +28,9 @@ public static class SecretStoreFactory
         public Task<string?> GetAsync(Guid profileId, CancellationToken cancellationToken = default) =>
             Task.FromResult<string?>(null);
 
+        public Task<string?> GetAsync(Guid profileId, SecretKind kind, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
+
         public Task StoreAsync(
             Guid profileId,
             string profileName,
@@ -35,7 +38,18 @@ public static class SecretStoreFactory
             CancellationToken cancellationToken = default) =>
             Task.FromException(new SecretStoreException(UnavailableReason));
 
+        public Task StoreAsync(
+            Guid profileId,
+            string profileName,
+            string secret,
+            SecretKind kind,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException(new SecretStoreException(UnavailableReason));
+
         public Task DeleteAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task DeleteAsync(Guid profileId, SecretKind kind, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }
 }
