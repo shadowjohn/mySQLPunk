@@ -78,7 +78,7 @@ TLS 模式下方可指定憑證檔案，路徑必須是本機絕對路徑、不�
 
 | 欄位 | MySQL / MariaDB | PostgreSQL | SQL Server |
 | --- | --- | --- | --- |
-| CA／伺服器憑證 | `SslCa`（PEM／DER），需 VerifyCA 或 VerifyFull | `RootCertificate`（PEM），需 VerifyCA 或 VerifyFull | `ServerCertificate`（PEM／DER／CER，與伺服器憑證精確比對），需 Mandatory 或 Strict |
+| CA／伺服器憑證 | `SslCa`（PEM／DER），需 VerifyCA 或 VerifyFull | `RootCertificate`（PEM），需 VerifyCA 或 VerifyFull | `ServerCertificate`（PEM／DER／CER，與伺服器憑證精確比對；實機矩陣以 Mandatory 驗證），需 Mandatory 或 Strict |
 | 客戶端憑證＋私鑰 | `SslCert` ＋ `SslKey`（PEM，成對），需 Required 以上 | `SslCertificate` ＋ `SslKey`（PEM，成對），需 Require 以上 | 不支援，欄位會隱藏 |
 
 規則一律 fail closed，避免「有填憑證但驅動程式其實忽略」的假安全：CA 憑證搭配不驗證憑證的模式（Preferred、Required、Allow、Optional、Disabled）會拒絕儲存；客戶端憑證與私鑰缺一、指向同一檔案、或搭配可能退回未加密的模式也會拒絕；合併的 PFX／PKCS#12 與加密私鑰目前不支援。儲存、測試連線與實際連線前都會確認每個檔案存在且不是目錄，Unix 上的私鑰檔若可被群組或其他使用者讀取（例如 `0644`）會被拒絕，請改為 `chmod 600`。載入 `connections.json` 時只驗證格式與相容性，不要求檔案當下存在，因此放在外接媒體上的憑證不會讓整份設定檔無法載入。切換資料庫類型時，若新 provider 不支援客戶端憑證，欄位會清空並隱藏；SQLite 不使用任何憑證欄位。

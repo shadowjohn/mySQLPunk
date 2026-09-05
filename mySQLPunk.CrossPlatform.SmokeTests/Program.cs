@@ -559,6 +559,11 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
     {
         tests.Add(("PostgreSQL 實機 TLS 憑證驗證與 SSH Tunnel", PostgreSqlTlsLiveAsync));
     }
+
+    if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_SQLSERVER_TLS_PORT")))
+    {
+        tests.Add(("SQL Server 實機伺服器憑證驗證與 SSH Tunnel", SqlServerTlsLiveAsync));
+    }
 }
 
 var failures = new List<string>();
@@ -4881,6 +4886,87 @@ static async Task PostgreSqlTlsLiveAsync()
             Assert(databases.Contains("postgres", StringComparer.OrdinalIgnoreCase),
                 "PostgreSQL 經 SSH Tunnel 應能列出資料庫");
             Console.WriteLine("  （PostgreSQL SSH Tunnel 實機：VerifyCA TLS 與 metadata 皆經由本機轉送）");
+        }
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+}
+
+static async Task SqlServerTlsLiveAsync()
+{
+    var certificatePath = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_CERT_PATH");
+    var profile = new ConnectionProfile
+    {
+        Name = "SQL Server TLS live",
+        Provider = DatabaseProviderKind.SqlServer,
+        Host = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_HOST"),
+        Port = ReadRequiredIntEnvironment("MYSQLPUNK_SQLSERVER_TLS_PORT"),
+        Username = Environment.GetEnvironmentVariable("MYSQLPUNK_SQLSERVER_USER") ?? "sa",
+        Password = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_PASSWORD"),
+        Database = "master",
+        TlsMode = ConnectionTlsMode.Mandatory,
+        TlsCaCertificatePath = certificatePath,
+        TimeoutSeconds = 30
+    };
+    const string encryptionProbe = "SELECT encrypt_option FROM sys.dm_exec_connections WHERE session_id = @@SPID;";
+
+    async Task AssertEncryptedAsync(IDatabaseSession session, string label)
+    {
+        var result = await session.ExecuteAsync("master", encryptionProbe);
+        Assert(result.Rows.Count == 1 &&
+               string.Equals(Convert.ToString(result.Rows[0][0], CultureInfo.InvariantCulture), "TRUE",
+                   StringComparison.OrdinalIgnoreCase),
+            $"SQL Server {label} 應建立加密連線");
+    }
+
+    using (var session = DatabaseProviderFactory.Create(profile))
+    {
+        await session.TestConnectionAsync();
+        await AssertEncryptedAsync(session, "Mandatory 搭配精確比對的伺服器憑證");
+    }
+
+    // Strict (TDS 8.0) is not exercised here: the Linux container refuses strict connections (error 17821)
+    // unless the server certificate is provisioned for TDS 8.0, which the throwaway test CA cannot satisfy.
+
+    // Without the pinned certificate the private test CA is untrusted, so validation must fail closed.
+    var untrusted = profile.Clone();
+    untrusted.TlsCaCertificatePath = string.Empty;
+    await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(async () =>
+    {
+        using var failing = DatabaseProviderFactory.Create(untrusted);
+        await failing.TestConnectionAsync();
+    });
+
+    var wrongCertificatePath = Environment.GetEnvironmentVariable("MYSQLPUNK_MYSQL_CA_PATH");
+    if (!string.IsNullOrEmpty(wrongCertificatePath))
+    {
+        var wrong = profile.Clone();
+        wrong.TlsCaCertificatePath = wrongCertificatePath;
+        await AssertThrowsAsync<Microsoft.Data.SqlClient.SqlException>(async () =>
+        {
+            using var failing = DatabaseProviderFactory.Create(wrong);
+            await failing.TestConnectionAsync();
+        });
+    }
+
+    Console.WriteLine("  （SQL Server 伺服器憑證：Mandatory 精確比對通過，未固定與錯誤憑證 fail closed）");
+
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        using var sshd = await TryStartThrowawaySshdAsync(directory);
+        if (sshd is not null)
+        {
+            var tunnelled = WithSshTunnel(profile, sshd);
+            using var session = DatabaseProviderFactory.Create(tunnelled);
+            await session.TestConnectionAsync();
+            await AssertEncryptedAsync(session, "經 SSH Tunnel 的 Mandatory");
+            var databases = await session.GetDatabasesAsync();
+            Assert(databases.Contains("master", StringComparer.OrdinalIgnoreCase),
+                "SQL Server 經 SSH Tunnel 應能列出資料庫");
+            Console.WriteLine("  （SQL Server SSH Tunnel 實機：以原始主機名稱驗證憑證的加密連線與 metadata 皆經由本機轉送）");
         }
     }
     finally

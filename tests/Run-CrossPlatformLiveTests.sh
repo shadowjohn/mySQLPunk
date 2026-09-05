@@ -7,6 +7,7 @@ mariadb_container="mysqlpunk-cross-mariadb-test"
 postgres_container="mysqlpunk-cross-postgres-test"
 sqlserver_container="mysqlpunk-cross-sqlserver-test"
 postgres_tls_container="mysqlpunk-cross-postgres-tls-test"
+sqlserver_tls_container="mysqlpunk-cross-sqlserver-tls-test"
 mysql_image="${MYSQLPUNK_MYSQL_IMAGE:-mysql:8.0}"
 mariadb_image="${MYSQLPUNK_MARIADB_IMAGE:-mariadb:11.4}"
 postgres_image="${MYSQLPUNK_POSTGRES_IMAGE:-postgres:16-alpine}"
@@ -17,6 +18,7 @@ if docker inspect "$mysql_container" >/dev/null 2>&1 ||
    docker inspect "$mariadb_container" >/dev/null 2>&1 ||
    docker inspect "$postgres_container" >/dev/null 2>&1 ||
    docker inspect "$postgres_tls_container" >/dev/null 2>&1 ||
+   docker inspect "$sqlserver_tls_container" >/dev/null 2>&1 ||
    docker inspect "$sqlserver_container" >/dev/null 2>&1; then
     echo "Cross-platform test container name is already in use." >&2
     exit 2
@@ -24,7 +26,7 @@ fi
 
 tls_directory=$(mktemp -d)
 cleanup() {
-    docker rm -f "$mysql_container" "$mariadb_container" "$postgres_container" "$postgres_tls_container" "$sqlserver_container" >/dev/null 2>&1 || true
+    docker rm -f "$mysql_container" "$mariadb_container" "$postgres_container" "$postgres_tls_container" "$sqlserver_container" "$sqlserver_tls_container" >/dev/null 2>&1 || true
     rm -rf "$tls_directory"
 }
 trap cleanup EXIT
@@ -37,6 +39,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 2 -sha256 \
 openssl req -newkey rsa:2048 -nodes -sha256 \
     -subj "/CN=127.0.0.1" \
     -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" \
+    -addext "extendedKeyUsage=serverAuth" \
     -keyout "$tls_directory/pg/server.key" -out "$tls_directory/pg/server.csr" >/dev/null 2>&1
 openssl x509 -req -days 2 -sha256 -CAcreateserial \
     -CA "$tls_directory/ca.crt" -CAkey "$tls_directory/ca.key" \
@@ -55,6 +58,15 @@ ssl_key_file = 'server.key'
 CONF
 INIT
 chmod 755 "$tls_directory/pg-init/10-enable-tls.sh" "$tls_directory" "$tls_directory/pg" "$tls_directory/pg-init"
+# SQL Server reuses the same SAN 127.0.0.1 certificate; forceencryption keeps the harness honest about Optional.
+cat > "$tls_directory/mssql.conf" <<'CONF'
+[network]
+tlscert = /tls/server.crt
+tlskey = /tls/server.key
+tlsprotocols = 1.2
+forceencryption = 1
+CONF
+chmod 644 "$tls_directory/mssql.conf"
 
 docker run -d --rm \
     --name "$mysql_container" \
@@ -91,11 +103,21 @@ docker run -d --rm \
     -p 127.0.0.1::1433 \
     "$sqlserver_image" >/dev/null
 
+docker run -d --rm \
+    --name "$sqlserver_tls_container" \
+    -e ACCEPT_EULA=Y \
+    -e MSSQL_SA_PASSWORD="$test_password" \
+    -v "$tls_directory/pg:/tls:ro" \
+    -v "$tls_directory/mssql.conf:/var/opt/mssql/mssql.conf:ro" \
+    -p 127.0.0.1::1433 \
+    "$sqlserver_image" >/dev/null
+
 mysql_ready=0
 mariadb_ready=0
 postgres_ready=0
 postgres_tls_ready=0
 sqlserver_ready=0
+sqlserver_tls_ready=0
 for _ in $(seq 1 120); do
     if [[ "$mysql_ready" -eq 0 ]] &&
        docker exec --env MYSQL_PWD="$test_password" "$mysql_container" sh -c '
@@ -124,15 +146,21 @@ for _ in $(seq 1 120); do
        docker logs "$sqlserver_container" 2>&1 | grep -F "SQL Server is now ready for client connections" >/dev/null; then
         sqlserver_ready=1
     fi
-    if [[ "$mysql_ready" -eq 1 && "$mariadb_ready" -eq 1 && "$postgres_ready" -eq 1 && "$postgres_tls_ready" -eq 1 && "$sqlserver_ready" -eq 1 ]]; then
+    if [[ "$sqlserver_tls_ready" -eq 0 ]] &&
+       docker logs "$sqlserver_tls_container" 2>&1 | grep -F "SQL Server is now ready for client connections" >/dev/null &&
+       docker logs "$sqlserver_tls_container" 2>&1 | grep -F "was successfully loaded for encryption" >/dev/null; then
+        sqlserver_tls_ready=1
+    fi
+    if [[ "$mysql_ready" -eq 1 && "$mariadb_ready" -eq 1 && "$postgres_ready" -eq 1 && "$postgres_tls_ready" -eq 1 && "$sqlserver_ready" -eq 1 && "$sqlserver_tls_ready" -eq 1 ]]; then
         break
     fi
     sleep 1
 done
 
-if [[ "$mysql_ready" -ne 1 || "$mariadb_ready" -ne 1 || "$postgres_ready" -ne 1 || "$postgres_tls_ready" -ne 1 || "$sqlserver_ready" -ne 1 ]]; then
-    echo "Database containers did not become ready: MySQL=$mysql_ready MariaDB=$mariadb_ready PostgreSQL=$postgres_ready PostgreSQL-TLS=$postgres_tls_ready SQLServer=$sqlserver_ready" >&2
+if [[ "$mysql_ready" -ne 1 || "$mariadb_ready" -ne 1 || "$postgres_ready" -ne 1 || "$postgres_tls_ready" -ne 1 || "$sqlserver_ready" -ne 1 || "$sqlserver_tls_ready" -ne 1 ]]; then
+    echo "Database containers did not become ready: MySQL=$mysql_ready MariaDB=$mariadb_ready PostgreSQL=$postgres_ready PostgreSQL-TLS=$postgres_tls_ready SQLServer=$sqlserver_ready SQLServer-TLS=$sqlserver_tls_ready" >&2
     docker logs "$postgres_tls_container" 2>&1 | tail -n 20 >&2 || true
+    docker logs "$sqlserver_tls_container" 2>&1 | tail -n 20 >&2 || true
     exit 3
 fi
 
@@ -145,6 +173,7 @@ mariadb_port=$(docker port "$mariadb_container" 3306/tcp | sed 's/.*://')
 postgres_port=$(docker port "$postgres_container" 5432/tcp | sed 's/.*://')
 postgres_tls_port=$(docker port "$postgres_tls_container" 5432/tcp | sed 's/.*://')
 sqlserver_port=$(docker port "$sqlserver_container" 1433/tcp | sed 's/.*://')
+sqlserver_tls_port=$(docker port "$sqlserver_tls_container" 1433/tcp | sed 's/.*://')
 
 cd "$repo_root"
 MYSQLPUNK_LIVE_TESTS=1 \
@@ -168,6 +197,8 @@ MYSQLPUNK_SQLSERVER_HOST=127.0.0.1 \
 MYSQLPUNK_SQLSERVER_PORT="$sqlserver_port" \
 MYSQLPUNK_SQLSERVER_USER=sa \
 MYSQLPUNK_SQLSERVER_PASSWORD="$test_password" \
+MYSQLPUNK_SQLSERVER_TLS_PORT="$sqlserver_tls_port" \
+MYSQLPUNK_SQLSERVER_CERT_PATH="$tls_directory/pg/server.crt" \
 dotnet run \
     --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj \
     -c Release
