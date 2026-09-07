@@ -13,6 +13,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using mySQLPunk;
 using mySQLPunk.lib;
@@ -98,6 +99,7 @@ public static class SmokeTests
         Run("Object URI service", TestObjectUriService, ref passed);
         Run("Application about message", TestApplicationAboutMessage, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
+        Run("Application update download", TestApplicationUpdateDownload, ref passed);
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
         Run("Release third-party notices", TestReleaseThirdPartyNotices, ref passed);
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
@@ -10284,6 +10286,118 @@ public static class SmokeTests
         AssertContains(formSource, "Tool.CopyObjectUri", "Tree context menus should expose the copy URI action.");
     }
 
+    private static void TestApplicationUpdateDownload()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "mysqlpunk_update_download_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "source"));
+        Directory.CreateDirectory(Path.Combine(root, "downloads"));
+        string sourcePath = Path.Combine(root, "source", "更新安裝檔.exe");
+        string targetPath = Path.Combine(root, "downloads", "更新安裝檔.exe");
+        File.WriteAllText(sourcePath, "verified update content", Encoding.UTF8);
+        string sourceUrl = new Uri(sourcePath).AbsoluteUri;
+        AppUpdateCheckResult result = new AppUpdateCheckResult
+        {
+            InstallerDownloadUrl = sourceUrl,
+            InstallerSha256 = AppUpdateService.ComputeFileSha256(sourcePath)
+        };
+        try
+        {
+            using (WebClient client = new WebClient())
+            {
+                Action<Action, CancellationToken> download = (onVerifying, token) =>
+                    Task.Run(() => AppUpdateService.DownloadVerifiedUpdateAsync(client, result, sourceUrl,
+                        targetPath, onVerifying, token)).GetAwaiter().GetResult();
+
+                download(null, CancellationToken.None);
+                AssertEquals(File.ReadAllText(sourcePath), File.ReadAllText(targetPath), "Verified downloads should create the requested package.");
+
+                File.WriteAllText(targetPath, "previous verified package");
+                string correctHash = result.InstallerSha256;
+                foreach (string badHash in new[] { "", new string('g', 64), new string('0', 64) })
+                {
+                    result.InstallerSha256 = badHash;
+                    AssertThrows<InvalidDataException>(() => download(null, CancellationToken.None), "Missing, malformed or mismatched checksums must stop the update.");
+                    AssertEquals("previous verified package", File.ReadAllText(targetPath), "Failed verification must preserve an existing download.");
+                    Assert(Directory.GetFiles(Path.GetDirectoryName(targetPath), "*.partial").Length == 0, "Failed verification must remove partial downloads.");
+                }
+
+                result.InstallerSha256 = correctHash;
+                using (CancellationTokenSource cancellation = new CancellationTokenSource())
+                {
+                    AssertThrows<OperationCanceledException>(() => download(cancellation.Cancel, cancellation.Token), "Cancellation after transfer must still prevent package promotion.");
+                    AssertEquals("previous verified package", File.ReadAllText(targetPath), "Cancellation must preserve the previous package.");
+                    Assert(Directory.GetFiles(Path.GetDirectoryName(targetPath), "*.partial").Length == 0, "Cancelled transfers must remove staging files.");
+                }
+
+                string manifestPath = Path.Combine(root, "manifest.json");
+                File.WriteAllText(manifestPath, new JObject
+                {
+                    ["files"] = new JArray(new JObject { ["name"] = Path.GetFileName(targetPath), ["sha256"] = correctHash })
+                }.ToString(), new UTF8Encoding(false));
+                result.InstallerSha256 = "";
+                result.ReleaseManifestDownloadUrl = new Uri(manifestPath).AbsoluteUri;
+                download(null, CancellationToken.None);
+                AssertEquals(File.ReadAllText(sourcePath), File.ReadAllText(targetPath), "UTF-8 legacy manifests should verify and replace an existing package.");
+            }
+
+            // 讓 HTTP 回應停在傳輸中，再取消真正的 WebClient 工作。
+            TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            using (ManualResetEventSlim responseStarted = new ManualResetEventSlim())
+            using (ManualResetEventSlim finishResponse = new ManualResetEventSlim())
+            using (CancellationTokenSource cancellation = new CancellationTokenSource())
+            using (WebClient client = new WebClient { Proxy = null })
+            {
+                Task server = Task.Run(() =>
+                {
+                    using (TcpClient connection = listener.AcceptTcpClient())
+                    using (NetworkStream stream = connection.GetStream())
+                    using (StreamReader reader = new StreamReader(stream, Encoding.ASCII, false, 1024, true))
+                    {
+                        stream.ReadTimeout = 10000;
+                        string line;
+                        while (!string.IsNullOrEmpty(line = reader.ReadLine())) { }
+                        byte[] header = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\nx");
+                        stream.Write(header, 0, header.Length);
+                        stream.Flush();
+                        responseStarted.Set();
+                        finishResponse.Wait(10000);
+                    }
+                });
+                string url = "http://127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port + "/update.exe";
+                result.InstallerDownloadUrl = url;
+                result.InstallerSha256 = new string('a', 64);
+                result.ReleaseManifestDownloadUrl = "";
+                string cancelledTarget = Path.Combine(root, "downloads", "update.exe");
+                Task transfer = Task.Run(() => AppUpdateService.DownloadVerifiedUpdateAsync(client, result, url,
+                    cancelledTarget, null, cancellation.Token));
+                try
+                {
+                    Assert(responseStarted.Wait(10000), "The cancellation test should reach an active HTTP transfer.");
+                    cancellation.Cancel();
+                    Assert(Task.WaitAny(transfer, Task.Delay(10000)) == 0, "Cancellation should finish promptly.");
+                    AssertThrows<OperationCanceledException>(() => transfer.GetAwaiter().GetResult(), "An interrupted WebClient task should report cancellation.");
+                    Assert(!File.Exists(cancelledTarget), "A cancelled HTTP transfer must not create the final package.");
+                    Assert(Directory.GetFiles(Path.GetDirectoryName(cancelledTarget), "*.partial").Length == 0, "A cancelled HTTP transfer must remove partial files.");
+                }
+                finally
+                {
+                    cancellation.Cancel();
+                    finishResponse.Set();
+                    listener.Stop();
+                    Assert(Task.WaitAny(server, Task.Delay(10000)) == 0, "The local HTTP test server should stop.");
+                    server.GetAwaiter().GetResult();
+                }
+            }
+        }
+        finally
+        {
+            string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            Assert(Path.GetFullPath(root).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Test cleanup must stay inside the temporary directory.");
+            Directory.Delete(root, true);
+        }
+    }
+
     private static void TestApplicationUpdateCheckService()
     {
         string releaseJson = @"{
@@ -10347,6 +10461,24 @@ public static class SmokeTests
         AssertEquals(new string('b', 64), portableZip.PortableZipSha256, "Portable updates should read the GitHub asset digest when available.");
         AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", AppUpdateService.GetPortableZipFileName(portableZip), "Portable update filename should keep the release asset name.");
         AssertEquals("mySQLPunk-1.2.5-win-x64-portable.zip", Path.GetFileName(AppUpdateService.BuildPortableZipDownloadPath(portableZip, Path.GetTempPath())), "Portable update download path should keep the zip asset file name.");
+
+        string[] foreignPackages =
+        {
+            "mySQLPunk-1.2.5-osx-arm64.app.zip",
+            "mySQLPunk-1.2.5-osx-x64.app.zip",
+            "mySQLPunk-1.2.5-linux-x64-portable.zip",
+            "mySQLPunk-1.2.5-win-arm64-portable.zip",
+            "mySQLPunk-1.2.5-symbols.zip"
+        };
+        foreach (string foreignPackage in foreignPackages)
+        {
+            string foreignJson = portableZipJson.Replace("mySQLPunk-1.2.5-win-x64-portable.zip", foreignPackage);
+            AppUpdateCheckResult foreign = AppUpdateService.ParseGitHubLatestRelease(foreignJson, "1.0.0.0");
+            AssertEquals("", foreign.PortableZipDownloadUrl, "Windows must not select a foreign or non-runtime ZIP: " + foreignPackage);
+        }
+        string legacyZipJson = portableZipJson.Replace("mySQLPunk-1.2.5-win-x64-portable.zip", "mySQLPunk-1.2.5-win-x64.zip");
+        AssertContains(AppUpdateService.ParseGitHubLatestRelease(legacyZipJson, "1.0.0.0").PortableZipDownloadUrl,
+            "mySQLPunk-1.2.5-win-x64.zip", "Legacy Windows ZIP releases should remain compatible.");
 
         string portableScriptZipPath = Path.Combine(Path.GetTempPath(), "mysqlpunk_portable_update_" + Guid.NewGuid().ToString("N") + ".zip");
         string portableScriptDir = Path.Combine(Path.GetTempPath(), "mysqlpunk_portable_update_script_" + Guid.NewGuid().ToString("N"));

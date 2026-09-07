@@ -4,6 +4,9 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
 namespace mySQLPunk.lib
@@ -154,6 +157,59 @@ namespace mySQLPunk.lib
 
             string fileName = GetPortableZipFileName(result);
             return Path.Combine(directory, fileName);
+        }
+
+        public static async Task DownloadVerifiedUpdateAsync(WebClient client, AppUpdateCheckResult result,
+            string downloadUrl, string targetPath, Action onVerifying, CancellationToken cancellationToken)
+        {
+            if (client == null) throw new ArgumentNullException(nameof(client));
+            if (result == null) throw new ArgumentNullException(nameof(result));
+            if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(targetPath));
+
+            string fileName = Path.GetFileName(targetPath);
+            string stagingPath = targetPath + "." + Guid.NewGuid().ToString("N") + ".partial";
+            using (cancellationToken.Register(client.CancelAsync))
+            {
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string expectedSha256 = GetExpectedAssetSha256(result, fileName);
+                    if (string.IsNullOrEmpty(expectedSha256) && !string.IsNullOrWhiteSpace(result.ReleaseManifestDownloadUrl))
+                    {
+                        client.Encoding = Encoding.UTF8;
+                        string manifestJson = await client.DownloadStringTaskAsync(new Uri(result.ReleaseManifestDownloadUrl));
+                        expectedSha256 = FindExpectedSha256InReleaseManifest(manifestJson, fileName);
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (string.IsNullOrEmpty(expectedSha256))
+                        throw new InvalidDataException(Localization.Format("Update.HashMissing", fileName));
+
+                    await client.DownloadFileTaskAsync(new Uri(downloadUrl), stagingPath);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (onVerifying != null) onVerifying();
+                    string actualSha256 = await Task.Run(() => ComputeFileSha256(stagingPath), cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!string.Equals(expectedSha256, actualSha256, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidDataException(Localization.Format("Update.HashMismatch", fileName,
+                            expectedSha256.Substring(0, 12), actualSha256.Substring(0, 12)));
+                    }
+
+                    // 校驗完成才取代既有下載，取消或下載失敗不留下可執行的半成品。
+                    if (File.Exists(targetPath)) File.Replace(stagingPath, targetPath, null);
+                    else File.Move(stagingPath, targetPath);
+                }
+                catch (Exception) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+                finally
+                {
+                    try { if (File.Exists(stagingPath)) File.Delete(stagingPath); }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+            }
         }
 
         public static string WritePortableUpdateApplyScript(string portableZipPath, string applicationDirectory, string executablePath, int processId, string scriptDirectory)
@@ -341,7 +397,8 @@ namespace mySQLPunk.lib
                 string name = ((string)asset["name"] ?? "").ToLowerInvariant();
                 string url = (string)asset["browser_download_url"] ?? "";
                 if (string.IsNullOrWhiteSpace(url)) continue;
-                if (!name.EndsWith(".zip")) continue;
+                // Linux/macOS 也會發布 ZIP；只接受 Windows x64 的可攜包與舊版檔名。
+                if (!Regex.IsMatch(name, @"\Amysqlpunk-(?:\d+\.){2,3}\d+-win-x64(?:-portable)?\.zip\z")) continue;
 
                 if (name.Contains("portable") && name.Contains("mysqlpunk"))
                 {
@@ -446,12 +503,12 @@ namespace mySQLPunk.lib
 
         private static string NormalizeSha256(string value)
         {
-            string normalized = (value ?? "").Trim().Replace("-", "").ToLowerInvariant();
+            string normalized = (value ?? "").Trim().ToLowerInvariant();
             if (normalized.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
             {
                 normalized = normalized.Substring("sha256:".Length);
             }
-            return normalized.Length == 64 ? normalized : "";
+            return Regex.IsMatch(normalized, @"\A[0-9a-f]{64}\z") ? normalized : "";
         }
 
         private static string GetFileNameFromUrl(string url)

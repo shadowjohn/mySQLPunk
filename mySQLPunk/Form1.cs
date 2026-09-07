@@ -1804,6 +1804,7 @@ namespace mySQLPunk
             UpdateMainStatus(Localization.Format("Update.Downloading", fileName));
 
             using (System.Net.WebClient client = new System.Net.WebClient())
+            using (System.Threading.CancellationTokenSource cancellation = new System.Threading.CancellationTokenSource())
             using (UpdateDownloadProgressDialog progress = new UpdateDownloadProgressDialog(fileName))
             {
                 client.Headers[System.Net.HttpRequestHeader.UserAgent] = "mySQLPunk-update-download";
@@ -1811,17 +1812,20 @@ namespace mySQLPunk
                 if (proxy != null) client.Proxy = proxy;
 
                 client.DownloadProgressChanged += (s, e) => progress.ReportProgress(e.BytesReceived, e.TotalBytesToReceive);
-                progress.CancelRequested += (s, e) => client.CancelAsync();
+                progress.CancelRequested += (s, e) => cancellation.Cancel();
                 progress.Show(this);
                 try
                 {
-                    await client.DownloadFileTaskAsync(new Uri(downloadUrl), targetPath);
-                    progress.SetStatus(Localization.Format("Update.Verifying", fileName));
-                    await VerifyDownloadedUpdatePackageAsync(client, result, targetPath);
+                    await AppUpdateService.DownloadVerifiedUpdateAsync(client, result, downloadUrl, targetPath, () =>
+                    {
+                        string status = Localization.Format("Update.Verifying", fileName);
+                        progress.SetStatus(status);
+                        UpdateMainStatus(status);
+                    }, cancellation.Token);
+                    UpdateMainStatus(Localization.Format("Update.Verified", fileName));
                 }
-                catch (System.Net.WebException ex) when (ex.Status == System.Net.WebExceptionStatus.RequestCanceled || progress.IsCancelRequested)
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                 {
-                    try { if (File.Exists(targetPath)) File.Delete(targetPath); } catch { }
                     UpdateMainStatus(Localization.T("Update.Cancelled"));
                     return false;
                 }
@@ -1831,40 +1835,6 @@ namespace mySQLPunk
                 }
             }
             return true;
-        }
-
-        private async Task VerifyDownloadedUpdatePackageAsync(System.Net.WebClient client, AppUpdateCheckResult result, string targetPath)
-        {
-            if (client == null || result == null) return;
-            if (string.IsNullOrWhiteSpace(targetPath) || !File.Exists(targetPath)) return;
-
-            string fileName = Path.GetFileName(targetPath);
-            UpdateMainStatus(Localization.Format("Update.Verifying", fileName));
-            string expectedSha256 = AppUpdateService.GetExpectedAssetSha256(result, fileName);
-            if (string.IsNullOrWhiteSpace(expectedSha256) && !string.IsNullOrWhiteSpace(result.ReleaseManifestDownloadUrl))
-            {
-                string manifestJson = await client.DownloadStringTaskAsync(new Uri(result.ReleaseManifestDownloadUrl));
-                expectedSha256 = AppUpdateService.FindExpectedSha256InReleaseManifest(manifestJson, fileName);
-            }
-            if (string.IsNullOrWhiteSpace(expectedSha256)) return;
-
-            string actualSha256;
-            if (!AppUpdateService.VerifyFileSha256(targetPath, expectedSha256, out actualSha256))
-            {
-                throw new InvalidDataException(Localization.Format(
-                    "Update.HashMismatch",
-                    fileName,
-                    ShortHash(expectedSha256),
-                    ShortHash(actualSha256)));
-            }
-
-            UpdateMainStatus(Localization.Format("Update.Verified", fileName));
-        }
-
-        private static string ShortHash(string hash)
-        {
-            string value = (hash ?? string.Empty).Trim();
-            return value.Length <= 12 ? value : value.Substring(0, 12);
         }
 
         private static string BuildSpatiaLiteReadyStatusText()
