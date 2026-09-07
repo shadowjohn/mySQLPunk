@@ -4,6 +4,11 @@
 
 ## 未完成功能與已知限制
 
+- **Windows 更新流程**
+  - 下載只接受 Windows x64 可攜包或安裝檔；SHA-256 可來自 GitHub asset digest 或舊版 manifest，缺少有效校驗碼就停止。檔案先下載到獨立暫存檔，驗證通過才取代既有下載；取消、網路錯誤與校驗失敗都會清理暫存檔。
+  - 靜默安裝明確指定目前程式目錄與使用者層級，支援空白、中文及單引號路徑。兩種更新腳本都等待目前程式結束，兩分鐘逾時後直接停止；安裝成功或失敗都嘗試重新啟動現有程式，並傳回安裝結果。
+  - 驗證涵蓋實際 HTTP 下載取消、校驗碼缺漏／格式錯誤／不符、既有下載保留，以及產生的 PowerShell 腳本之逾時、路徑與失敗代碼。腳本測試以替身接收安裝與啟動要求；實際安裝套用仍需在隔離 Windows 環境驗收。
+
 - **Linux / macOS 跨平台預覽 🟡 第二階段進行中**
   - PostgreSQL array no-equality concurrency：array 原值 predicate 不再直接呼叫 element type 的等號運算子，改為比對載入時 canonical text 的 UTF-8 bytes；這讓 `json[]`、`xml[]` 等沒有原生等號的元素陣列也能參與 optimistic concurrency。PostgreSQL 16 實機矩陣先固定舊版 `42883 could not identify an equality operator for type json`，再驗證保持 array 不變時可修改同列、外部改動 array 會阻擋 stale marker，重新整理後可儲存新陣列。Linux X11 另從真實 Table 編輯器完成上述三階段，並以 `psql` 直接核對 array 與 marker。
   - PostgreSQL json byte-exact concurrency：`json` 會保留原始空白與 key 順序，原值 predicate 不再轉成 `jsonb` 後做語意等號，而是將欄位與參數轉成 UTF-8 `bytea` 比對；`jsonb` 維持原生 canonical 結構等號。PostgreSQL 16 實機矩陣先證明外部把 `{"a":1,"b":2}` 改為 `{ "b": 2, "a": 1 }` 時舊版會提交 stale marker，再確認修正版攔截衝突、保留原始 JSON bytes／marker，刷新後可無損修改。Linux X11 另從真實 Table 編輯器完成同一衝突與刷新後合法寫入，並以 `psql` 直接核對完整 JSON 文字。

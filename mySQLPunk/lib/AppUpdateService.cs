@@ -235,14 +235,10 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(executablePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(executablePath));
 
             StringBuilder script = new StringBuilder();
-            script.AppendLine("$ErrorActionPreference = 'Stop'");
+            AppendUpdateProcessWaitScript(script, processId);
             script.AppendLine("$zipPath = '" + EscapePowerShellSingleQuotedString(portableZipPath) + "'");
             script.AppendLine("$appDir = '" + EscapePowerShellSingleQuotedString(applicationDirectory) + "'");
             script.AppendLine("$exePath = '" + EscapePowerShellSingleQuotedString(executablePath) + "'");
-            script.AppendLine("$processIdToWait = " + Math.Max(0, processId));
-            script.AppendLine("if ($processIdToWait -gt 0) {");
-            script.AppendLine("    try { Wait-Process -Id $processIdToWait -Timeout 120 -ErrorAction SilentlyContinue } catch { }");
-            script.AppendLine("}");
             script.AppendLine("$staging = Join-Path ([System.IO.Path]::GetTempPath()) ('mysqlpunk-update-' + [System.Guid]::NewGuid().ToString('N'))");
             script.AppendLine("New-Item -ItemType Directory -Path $staging -Force | Out-Null");
             script.AppendLine("try {");
@@ -294,7 +290,7 @@ namespace mySQLPunk.lib
 
         /// <summary>
         /// 安裝版靜默更新：等 mySQLPunk 結束 → 以 /VERYSILENT 執行 Inno Setup 安裝檔（per-user、免 UAC）→
-        /// 無論安裝成功與否都重新啟動原路徑的 mySQLPunk（失敗時舊版仍在原位，使用者不會被留在沒程式可開的狀態）。
+        /// 安裝至目前程式目錄；失敗時嘗試重新啟動現有程式，並保留失敗代碼。
         /// </summary>
         public static string BuildInstallerUpdateApplyScript(string installerPath, string executablePath, int processId)
         {
@@ -302,21 +298,40 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(executablePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(executablePath));
 
             StringBuilder script = new StringBuilder();
-            script.AppendLine("$ErrorActionPreference = 'Continue'");
+            AppendUpdateProcessWaitScript(script, processId);
             script.AppendLine("$installerPath = '" + EscapePowerShellSingleQuotedString(installerPath) + "'");
             script.AppendLine("$exePath = '" + EscapePowerShellSingleQuotedString(executablePath) + "'");
+            script.AppendLine("$appDir = [System.IO.Path]::GetDirectoryName($exePath)");
+            script.AppendLine("$updateExitCode = 0");
+            script.AppendLine("try {");
+            script.AppendLine("    $installerArguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',('/DIR=\"' + $appDir + '\"'))");
+            script.AppendLine("    $install = Start-Process -FilePath $installerPath -ArgumentList $installerArguments -WindowStyle Hidden -Wait -PassThru");
+            script.AppendLine("    $updateExitCode = $install.ExitCode");
+            script.AppendLine("}");
+            script.AppendLine("catch { $updateExitCode = 1 }");
+            script.AppendLine("finally {");
+            script.AppendLine("    if (Test-Path -LiteralPath $exePath) {");
+            script.AppendLine("        Start-Process -FilePath $exePath");
+            script.AppendLine("    }");
+            script.AppendLine("}");
+            script.AppendLine("exit $updateExitCode");
+            return script.ToString();
+        }
+
+        private static void AppendUpdateProcessWaitScript(StringBuilder script, int processId)
+        {
+            script.AppendLine("param([ValidateRange(1, 120)][int]$WaitTimeoutSeconds = 120)");
+            script.AppendLine("$ErrorActionPreference = 'Stop'");
             script.AppendLine("$processIdToWait = " + Math.Max(0, processId));
             script.AppendLine("if ($processIdToWait -gt 0) {");
-            script.AppendLine("    try { Wait-Process -Id $processIdToWait -Timeout 120 -ErrorAction SilentlyContinue } catch { }");
+            script.AppendLine("    $runningProcess = Get-Process -Id $processIdToWait -ErrorAction SilentlyContinue");
+            script.AppendLine("    if ($null -ne $runningProcess) {");
+            script.AppendLine("        try {");
+            script.AppendLine("            if (-not $runningProcess.WaitForExit($WaitTimeoutSeconds * 1000)) { exit 1 }");
+            script.AppendLine("        }");
+            script.AppendLine("        finally { $runningProcess.Dispose() }");
+            script.AppendLine("    }");
             script.AppendLine("}");
-            script.AppendLine("try {");
-            script.AppendLine("    Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait");
-            script.AppendLine("}");
-            script.AppendLine("catch { }");
-            script.AppendLine("if (Test-Path -LiteralPath $exePath) {");
-            script.AppendLine("    Start-Process -FilePath $exePath");
-            script.AppendLine("}");
-            return script.ToString();
         }
 
         public static string GetInstallerFileName(AppUpdateCheckResult result)

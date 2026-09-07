@@ -100,6 +100,7 @@ public static class SmokeTests
         Run("Application about message", TestApplicationAboutMessage, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
         Run("Application update download", TestApplicationUpdateDownload, ref passed);
+        Run("Application update apply", TestApplicationUpdateApply, ref passed);
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
         Run("Release third-party notices", TestReleaseThirdPartyNotices, ref passed);
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
@@ -10286,6 +10287,92 @@ public static class SmokeTests
         AssertContains(formSource, "Tool.CopyObjectUri", "Tree context menus should expose the copy URI action.");
     }
 
+    private static void TestApplicationUpdateApply()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "mysqlpunk_update_apply_" + Guid.NewGuid().ToString("N"));
+        string appDirectory = Path.Combine(root, "自訂 ' 安裝目錄");
+        Directory.CreateDirectory(appDirectory);
+        string executable = Path.Combine(appDirectory, "mySQLPunk.exe");
+        string installer = Path.Combine(root, "setup.exe");
+        string argumentsPath = Path.Combine(root, "arguments.txt");
+        string restartedPath = Path.Combine(root, "restarted.txt");
+        File.WriteAllText(executable, "existing application");
+        File.WriteAllText(installer, "installer placeholder");
+        try
+        {
+            foreach (int installerExitCode in new[] { 0, 7 })
+            {
+                string script = AppUpdateService.BuildInstallerUpdateApplyScript(installer, executable, 0);
+                int exitCode = RunUpdateApplyScriptForTest(root, script, argumentsPath, restartedPath, installerExitCode);
+                Assert(exitCode == installerExitCode, "The updater must preserve the installer's success or failure exit code.");
+                string[] arguments = File.ReadAllLines(argumentsPath);
+                Assert(arguments.Contains("/DIR=\"" + appDirectory + "\""), "Silent installation must target the current application directory, including spaces, Chinese and apostrophes.");
+                Assert(arguments.Contains("/CURRENTUSER"), "Silent installation should keep the per-user installation mode.");
+                AssertEquals(executable, File.ReadAllText(restartedPath), "Both successful and failed installs should attempt to reopen the current application.");
+            }
+
+            File.Delete(argumentsPath);
+            File.Delete(restartedPath);
+            int activeProcessId = System.Diagnostics.Process.GetCurrentProcess().Id;
+            string[] waitingScripts =
+            {
+                AppUpdateService.BuildInstallerUpdateApplyScript(installer, executable, activeProcessId),
+                AppUpdateService.BuildPortableUpdateApplyScript(Path.Combine(root, "unused.zip"), appDirectory, executable, activeProcessId)
+            };
+            foreach (string script in waitingScripts)
+            {
+                Assert(RunUpdateApplyScriptForTest(root, script, argumentsPath, restartedPath, 0) != 0,
+                    "An updater must stop when the current application does not exit before the timeout.");
+                Assert(!File.Exists(argumentsPath), "A timed-out updater must not launch an installer.");
+                Assert(!File.Exists(restartedPath), "A timed-out updater must not start a duplicate application.");
+                AssertEquals("existing application", File.ReadAllText(executable), "A timed-out updater must not change application files.");
+            }
+        }
+        finally
+        {
+            string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            Assert(Path.GetFullPath(root).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Updater test cleanup must stay in the temporary directory.");
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static int RunUpdateApplyScriptForTest(string root, string script, string argumentsPath, string restartedPath, int installerExitCode)
+    {
+        string scriptPath = Path.Combine(root, "apply.ps1");
+        string wrapperPath = Path.Combine(root, "test-apply.ps1");
+        File.WriteAllText(scriptPath, script, new UTF8Encoding(true));
+        // 執行實際產生的 PowerShell 腳本，只替換外部啟動動作，避免安裝或開啟使用者的程式。
+        string wrapper =
+            "$ErrorActionPreference = 'Stop'\r\n" +
+            "function Start-Process {\r\n" +
+            "  param([string]$FilePath, [string[]]$ArgumentList, [string]$WindowStyle, [switch]$Wait, [switch]$PassThru)\r\n" +
+            "  if ($Wait) {\r\n" +
+            "    [System.IO.File]::WriteAllLines('" + argumentsPath.Replace("'", "''") + "', $ArgumentList)\r\n" +
+            "    return [pscustomobject]@{ ExitCode = " + installerExitCode + " }\r\n" +
+            "  }\r\n" +
+            "  [System.IO.File]::WriteAllText('" + restartedPath.Replace("'", "''") + "', $FilePath)\r\n" +
+            "}\r\n" +
+            "& '" + scriptPath.Replace("'", "''") + "' -WaitTimeoutSeconds 1\r\n" +
+            "exit $LASTEXITCODE\r\n";
+        File.WriteAllText(wrapperPath, wrapper, new UTF8Encoding(true));
+        System.Diagnostics.ProcessStartInfo startInfo = AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(wrapperPath);
+        startInfo.UseShellExecute = false;
+        startInfo.CreateNoWindow = true;
+        startInfo.RedirectStandardError = true;
+        using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
+        {
+            if (!process.WaitForExit(15000))
+            {
+                process.Kill();
+                process.WaitForExit();
+                throw new Exception("The updater script test did not finish within 15 seconds.");
+            }
+            string error = process.StandardError.ReadToEnd();
+            AssertEquals("", error, "The generated updater script should run without PowerShell errors.");
+            return process.ExitCode;
+        }
+    }
+
     private static void TestApplicationUpdateDownload()
     {
         string root = Path.Combine(Path.GetTempPath(), "mysqlpunk_update_download_" + Guid.NewGuid().ToString("N"));
@@ -10494,7 +10581,7 @@ public static class SmokeTests
             Assert(File.Exists(scriptPath), "Portable updater should write an apply script.");
 
             string script = File.ReadAllText(scriptPath, Encoding.UTF8);
-            AssertContains(script, "Wait-Process -Id $processIdToWait", "Portable updater should wait for the current process before copying files.");
+            AssertContains(script, "WaitForExit($WaitTimeoutSeconds * 1000)", "Portable updater should wait for the current process before copying files.");
             AssertContains(script, "Expand-Archive -LiteralPath $zipPath", "Portable updater should extract the downloaded zip.");
             AssertContains(script, "Copy-Item -LiteralPath $_.FullName -Destination $appDir", "Portable updater should copy extracted files into the app directory.");
             AssertContains(script, "Start-Process -FilePath $exePath", "Portable updater should relaunch the application after copying.");
@@ -10523,7 +10610,7 @@ public static class SmokeTests
             Assert(File.Exists(installerApplyScriptPath), "Installer updater should write an apply script.");
 
             string installerApplyScript = File.ReadAllText(installerApplyScriptPath, Encoding.UTF8);
-            AssertContains(installerApplyScript, "Wait-Process -Id $processIdToWait", "Installer updater should wait for the current process before installing.");
+            AssertContains(installerApplyScript, "WaitForExit($WaitTimeoutSeconds * 1000)", "Installer updater should wait for the current process before installing.");
             AssertContains(installerApplyScript, "'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'", "Installer updater should run the Inno Setup installer silently.");
             AssertContains(installerApplyScript, "Start-Process -FilePath $exePath", "Installer updater should relaunch the application after installing.");
 
