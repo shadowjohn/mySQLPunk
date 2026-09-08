@@ -99,6 +99,7 @@ public static class SmokeTests
         Run("Object URI service", TestObjectUriService, ref passed);
         Run("Application about message", TestApplicationAboutMessage, ref passed);
         Run("Application update check service", TestApplicationUpdateCheckService, ref passed);
+        Run("Application update concurrency", TestApplicationUpdateConcurrency, ref passed);
         Run("Application update download", TestApplicationUpdateDownload, ref passed);
         Run("Application update apply", TestApplicationUpdateApply, ref passed);
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
@@ -10287,6 +10288,37 @@ public static class SmokeTests
         AssertContains(formSource, "Tool.CopyObjectUri", "Tree context menus should expose the copy URI action.");
     }
 
+    private static void TestApplicationUpdateConcurrency()
+    {
+        Task.Run(async () =>
+        {
+            object form = FormatterServices.GetUninitializedObject(typeof(Form1));
+            MethodInfo runUpdate = typeof(Form1).GetMethod("RunUpdateCheckOnceAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Func<Func<Task>, Task> run = operation => (Task)runUpdate.Invoke(form, new object[] { operation });
+            int started = 0;
+            foreach (string outcome in new[] { "success", "failure", "cancelled" })
+            {
+                TaskCompletionSource<bool> finish = new TaskCompletionSource<bool>();
+                Task active = run(() => { started++; return finish.Task; });
+                int expectedStarts = started;
+                await run(() => { started++; return Task.FromResult(true); });
+                await run(() => { started++; return Task.FromResult(true); });
+                Assert(started == expectedStarts, "Overlapping automatic or manual checks must not start another update flow.");
+                Assert(!active.IsCompleted, "The original update must remain active until its operation completes.");
+
+                if (outcome == "failure") finish.SetException(new InvalidOperationException("test failure"));
+                else if (outcome == "cancelled") finish.SetCanceled();
+                else finish.SetResult(true);
+                try { await active; }
+                catch (InvalidOperationException) { Assert(outcome == "failure", "Only the failed update should report an exception."); }
+                catch (OperationCanceledException) { Assert(outcome == "cancelled", "Only the cancelled update should report cancellation."); }
+
+                await run(() => { started++; return Task.FromResult(true); });
+                Assert(started == expectedStarts + 1, "A completed, failed or cancelled update must allow a later retry.");
+            }
+        }).GetAwaiter().GetResult();
+    }
+
     private static void TestApplicationUpdateApply()
     {
         string root = Path.Combine(Path.GetTempPath(), "mysqlpunk_update_apply_" + Guid.NewGuid().ToString("N"));
@@ -10294,14 +10326,19 @@ public static class SmokeTests
         Directory.CreateDirectory(appDirectory);
         string executable = Path.Combine(appDirectory, "mySQLPunk.exe");
         string installer = Path.Combine(root, "setup.exe");
+        string resultPath = AppUpdateService.GetInstallerUpdateResultPath(executable);
         string argumentsPath = Path.Combine(root, "arguments.txt");
         string restartedPath = Path.Combine(root, "restarted.txt");
         File.WriteAllText(executable, "existing application");
         File.WriteAllText(installer, "installer placeholder");
         try
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(resultPath));
+            AssertEquals(resultPath, AppUpdateService.GetInstallerUpdateResultPath(executable.ToUpperInvariant()),
+                "Result files should use the same identity for case-insensitive Windows paths.");
             foreach (int installerExitCode in new[] { 0, 7 })
             {
+                if (installerExitCode == 0) File.WriteAllText(resultPath, "9");
                 string script = AppUpdateService.BuildInstallerUpdateApplyScript(installer, executable, 0);
                 int exitCode = RunUpdateApplyScriptForTest(root, script, argumentsPath, restartedPath, installerExitCode);
                 Assert(exitCode == installerExitCode, "The updater must preserve the installer's success or failure exit code.");
@@ -10309,7 +10346,35 @@ public static class SmokeTests
                 Assert(arguments.Contains("/DIR=\"" + appDirectory + "\""), "Silent installation must target the current application directory, including spaces, Chinese and apostrophes.");
                 Assert(arguments.Contains("/CURRENTUSER"), "Silent installation should keep the per-user installation mode.");
                 AssertEquals(executable, File.ReadAllText(restartedPath), "Both successful and failed installs should attempt to reopen the current application.");
+                if (installerExitCode == 0)
+                {
+                    Assert(!File.Exists(resultPath), "Successful installation must clear a previous failure and avoid a success popup.");
+                }
+                else
+                {
+                    AssertEquals("7", File.ReadAllText(resultPath), "Persistent failure results must contain only the exit code.");
+                    Assert(!AppUpdateService.TakeInstallerUpdateFailure(Path.Combine(root, "another", "mySQLPunk.exe")).HasValue,
+                        "A failure from another application directory must not be shown by this installation.");
+                    Assert(AppUpdateService.TakeInstallerUpdateFailure(executable) == 7, "Restarted applications should receive the installer failure code.");
+                    Assert(!AppUpdateService.TakeInstallerUpdateFailure(executable).HasValue, "An installer failure must be shown only once.");
+                }
             }
+
+            string failedStartScript = AppUpdateService.BuildInstallerUpdateApplyScript(installer, executable, 0);
+            Assert(RunUpdateApplyScriptForTest(root, failedStartScript, argumentsPath, restartedPath, 0, true) == 1,
+                "Failure to launch the installer must return a failure code.");
+            AssertEquals("1", File.ReadAllText(resultPath), "Installer launch failures must persist a generic code without exception details.");
+            Assert(AppUpdateService.TakeInstallerUpdateFailure(executable) == 1, "The next startup should report installer launch failures.");
+            foreach (string invalidResult in new[] { "not-an-exit-code", new string('1', 1024), "0" })
+            {
+                File.WriteAllText(resultPath, invalidResult);
+                Assert(!AppUpdateService.TakeInstallerUpdateFailure(executable).HasValue, "Invalid or successful results must not produce a failure popup.");
+                Assert(!File.Exists(resultPath), "Invalid results should be discarded after reading.");
+            }
+            File.WriteAllText(resultPath, "7");
+            int?[] claimedResults = Task.WhenAll(Enumerable.Range(0, 4).Select(_ =>
+                Task.Run(() => AppUpdateService.TakeInstallerUpdateFailure(executable)))).GetAwaiter().GetResult();
+            Assert(claimedResults.Count(code => code == 7) == 1, "Concurrent application startups must consume an installer failure only once.");
 
             File.Delete(argumentsPath);
             File.Delete(restartedPath);
@@ -10330,13 +10395,14 @@ public static class SmokeTests
         }
         finally
         {
+            if (File.Exists(resultPath)) File.Delete(resultPath);
             string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             Assert(Path.GetFullPath(root).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Updater test cleanup must stay in the temporary directory.");
             Directory.Delete(root, true);
         }
     }
 
-    private static int RunUpdateApplyScriptForTest(string root, string script, string argumentsPath, string restartedPath, int installerExitCode)
+    private static int RunUpdateApplyScriptForTest(string root, string script, string argumentsPath, string restartedPath, int installerExitCode, bool failInstallerStart = false)
     {
         string scriptPath = Path.Combine(root, "apply.ps1");
         string wrapperPath = Path.Combine(root, "test-apply.ps1");
@@ -10347,6 +10413,7 @@ public static class SmokeTests
             "function Start-Process {\r\n" +
             "  param([string]$FilePath, [string[]]$ArgumentList, [string]$WindowStyle, [switch]$Wait, [switch]$PassThru)\r\n" +
             "  if ($Wait) {\r\n" +
+            (failInstallerStart ? "    throw 'test installer launch failure'\r\n" : "") +
             "    [System.IO.File]::WriteAllLines('" + argumentsPath.Replace("'", "''") + "', $ArgumentList)\r\n" +
             "    return [pscustomobject]@{ ExitCode = " + installerExitCode + " }\r\n" +
             "  }\r\n" +

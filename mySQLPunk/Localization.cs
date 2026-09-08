@@ -1195,6 +1195,8 @@ namespace mySQLPunk
             Add("Update.Cancelled", "更新下載已取消。", "Update download cancelled.");
             Add("Update.InstallApplyPrompt", "更新已下載並完成校驗。\n\n是否關閉 mySQLPunk 並在背景自動安裝？安裝完成後會自動重新啟動。\n選擇「否」會改為開啟安裝精靈，讓你手動安裝。", "The update has been downloaded and verified.\n\nClose mySQLPunk and install it silently in the background? The app restarts automatically when done.\nChoose No to open the setup wizard and install manually.");
             Add("Update.SilentInstallStarted", "更新將在背景安裝，完成後會自動重新啟動 mySQLPunk。", "The update is installing in the background; mySQLPunk will restart automatically when done.");
+            Add("Update.InstallFailed", "上次更新未完成（安裝程式代碼：{0}）。\n\n請重新檢查更新；若再次失敗，可在下載完成後選擇「否」，開啟安裝精靈查看原因。", "The last update did not complete (installer code: {0}).\n\nCheck for updates again. If it fails again, choose No after the download to open the setup wizard and review the error.");
+            Add("Update.ApplyNotStarted", "更新程序已結束，但 mySQLPunk 尚未關閉。請先儲存變更，再重新檢查更新。", "The updater has exited while mySQLPunk is still open. Save your changes, then check for updates again.");
             Add("Update.NotAvailable", "目前已是最新版本。", "You are already on the latest version.");
             Add("Update.CheckFailed", "檢查更新失敗：{0}", "Check for updates failed: {0}");
             Add("Connection.MarkedColor", "已標記連線色彩：{0}", "Connection color marked: {0}");

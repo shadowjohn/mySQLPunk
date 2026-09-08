@@ -147,6 +147,7 @@ namespace mySQLPunk
 	        private readonly HashSet<string> _loadingDatabaseMetadataKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Timer _backupIntegrityTimer = new Timer();
         private bool _backupIntegrityScanRunning;
+        private int _updateCheckRunning;
 
         // 群組功能：快速查詢連線節點（key = 連線索引）
         private TreeNode[] _connectionTreeNodes = new TreeNode[0];
@@ -1656,6 +1657,25 @@ namespace mySQLPunk
 
         private async void CheckForUpdatesAsync(bool silent)
         {
+            await RunUpdateCheckOnceAsync(() => CheckAndApplyUpdateAsync(silent));
+        }
+
+        private async Task RunUpdateCheckOnceAsync(Func<Task> checkAndApplyUpdate)
+        {
+            // 下載視窗不會鎖住主視窗；自動檢查、選單和連點共用同一個入口。
+            if (System.Threading.Interlocked.CompareExchange(ref _updateCheckRunning, 1, 0) != 0) return;
+            try
+            {
+                await checkAndApplyUpdate();
+            }
+            finally
+            {
+                System.Threading.Interlocked.Exchange(ref _updateCheckRunning, 0);
+            }
+        }
+
+        private async Task CheckAndApplyUpdateAsync(bool silent)
+        {
             if (!silent) UpdateMainStatus(Localization.T("Update.Checking"));
 
             // 使用者一旦在提示框按了「立即更新」，後續下載/驗證失敗就一定要跳訊息，
@@ -1731,6 +1751,17 @@ namespace mySQLPunk
             }
         }
 
+        private bool ShowInstallerUpdateFailure()
+        {
+            int? exitCode = AppUpdateService.TakeInstallerUpdateFailure(Application.ExecutablePath);
+            if (!exitCode.HasValue) return false;
+
+            string message = Localization.Format("Update.InstallFailed", exitCode.Value);
+            UpdateMainStatus(message.Replace("\n", " "));
+            MessageBox.Show(this, message, Localization.T("Menu.CheckUpdates"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return true;
+        }
+
         private async Task DownloadAndLaunchUpdateInstallerAsync(AppUpdateCheckResult result)
         {
             string downloadDirectory = Path.Combine(Path.GetTempPath(), "mySQLPunk", "updates");
@@ -1753,9 +1784,7 @@ namespace mySQLPunk
                     Application.ExecutablePath,
                     Process.GetCurrentProcess().Id,
                     downloadDirectory);
-                Process.Start(AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(scriptPath));
-                UpdateMainStatus(Localization.T("Update.SilentInstallStarted"));
-                BeginInvoke(new Action(Application.Exit));
+                await LaunchUpdateApplyAndExitAsync(scriptPath, Localization.T("Update.SilentInstallStarted"));
             }
             else
             {
@@ -1784,13 +1813,24 @@ namespace mySQLPunk
                     Application.ExecutablePath,
                     Process.GetCurrentProcess().Id,
                     downloadDirectory);
-                Process.Start(AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(scriptPath));
-                UpdateMainStatus(Localization.Format("Update.PortableApplyStarted", scriptPath));
-                BeginInvoke(new Action(Application.Exit));
+                await LaunchUpdateApplyAndExitAsync(scriptPath, Localization.Format("Update.PortableApplyStarted", scriptPath));
             }
             else
             {
                 Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
+            }
+        }
+
+        private async Task LaunchUpdateApplyAndExitAsync(string scriptPath, string startedStatus)
+        {
+            using (Process updater = Process.Start(AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(scriptPath)))
+            {
+                UpdateMainStatus(startedStatus);
+                BeginInvoke(new Action(Application.Exit));
+                // 關閉可能被未存檔提示取消；腳本仍在等候時，不可再啟動另一個更新。
+                await Task.Run(() => updater.WaitForExit());
+                if (!IsDisposed && !Disposing)
+                    throw new InvalidOperationException(Localization.T("Update.ApplyNotStarted"));
             }
         }
 
@@ -8626,10 +8666,11 @@ namespace mySQLPunk
                 BeginInvoke(new Action(BeginNavigateStartupObjectUri));
             }
             StartBackupIntegritySchedule();
-            if (ApplicationOptionSettings.GetBool("AutoCheckUpdates"))
+            BeginInvoke(new Action(() =>
             {
-                BeginInvoke(new Action(() => CheckForUpdatesAsync(true)));
-            }
+                if (!ShowInstallerUpdateFailure() && ApplicationOptionSettings.GetBool("AutoCheckUpdates"))
+                    CheckForUpdatesAsync(true);
+            }));
         }
 
         private async void BeginNavigateStartupObjectUri()

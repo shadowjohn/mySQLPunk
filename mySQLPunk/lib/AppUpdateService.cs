@@ -282,7 +282,8 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(scriptDirectory)) throw new ArgumentException(Localization.T("Common.DownloadDirectoryRequired"), nameof(scriptDirectory));
 
             Directory.CreateDirectory(scriptDirectory);
-            string scriptPath = Path.Combine(scriptDirectory, "apply-installer-update-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".ps1");
+            Directory.CreateDirectory(Path.GetDirectoryName(GetInstallerUpdateResultPath(executablePath)));
+            string scriptPath = Path.Combine(scriptDirectory, "apply-installer-update-" + Guid.NewGuid().ToString("N") + ".ps1");
             // 同 portable 腳本：無 BOM 的 .ps1 會被 Windows PowerShell 5.1 用 ANSI 解碼，中文路徑必亂
             File.WriteAllText(scriptPath, BuildInstallerUpdateApplyScript(installerPath, executablePath, processId), new UTF8Encoding(true));
             return scriptPath;
@@ -301,6 +302,7 @@ namespace mySQLPunk.lib
             AppendUpdateProcessWaitScript(script, processId);
             script.AppendLine("$installerPath = '" + EscapePowerShellSingleQuotedString(installerPath) + "'");
             script.AppendLine("$exePath = '" + EscapePowerShellSingleQuotedString(executablePath) + "'");
+            script.AppendLine("$resultPath = '" + EscapePowerShellSingleQuotedString(GetInstallerUpdateResultPath(executablePath)) + "'");
             script.AppendLine("$appDir = [System.IO.Path]::GetDirectoryName($exePath)");
             script.AppendLine("$updateExitCode = 0");
             script.AppendLine("try {");
@@ -310,12 +312,58 @@ namespace mySQLPunk.lib
             script.AppendLine("}");
             script.AppendLine("catch { $updateExitCode = 1 }");
             script.AppendLine("finally {");
+            // 只留下退出碼，下一次啟動讀取一次；不記安裝路徑、命令列或例外內容。
+            script.AppendLine("    try {");
+            script.AppendLine("        if ($updateExitCode -ne 0) {");
+            script.AppendLine("            [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($resultPath)) | Out-Null");
+            script.AppendLine("            [System.IO.File]::WriteAllText($resultPath, $updateExitCode.ToString([System.Globalization.CultureInfo]::InvariantCulture))");
+            script.AppendLine("        } elseif (Test-Path -LiteralPath $resultPath) {");
+            script.AppendLine("            Remove-Item -LiteralPath $resultPath -Force");
+            script.AppendLine("        }");
+            script.AppendLine("    } catch { }");
             script.AppendLine("    if (Test-Path -LiteralPath $exePath) {");
             script.AppendLine("        Start-Process -FilePath $exePath");
             script.AppendLine("    }");
             script.AppendLine("}");
             script.AppendLine("exit $updateExitCode");
             return script.ToString();
+        }
+
+        public static string GetInstallerUpdateResultPath(string executablePath)
+        {
+            if (string.IsNullOrWhiteSpace(executablePath)) throw new ArgumentException(Localization.T("Common.FilePathRequired"), nameof(executablePath));
+
+            // 同一台電腦可有多份安裝；以路徑雜湊區分，不把路徑寫入結果檔名。
+            string identity = Path.GetFullPath(executablePath).ToUpperInvariant();
+            string hash;
+            using (SHA256 sha256 = SHA256.Create())
+                hash = BitConverter.ToString(sha256.ComputeHash(Encoding.UTF8.GetBytes(identity))).Replace("-", "").ToLowerInvariant();
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "mySQLPunk", "updates", "install-result-" + hash + ".txt");
+        }
+
+        public static int? TakeInstallerUpdateFailure(string executablePath)
+        {
+            string resultPath = GetInstallerUpdateResultPath(executablePath);
+            string claimedPath = resultPath + "." + Guid.NewGuid().ToString("N") + ".consumed";
+            try
+            {
+                if (!File.Exists(resultPath)) return null;
+                // 多個主視窗同時啟動時，只有成功取走結果的那一個顯示通知。
+                File.Move(resultPath, claimedPath);
+                string result = new FileInfo(claimedPath).Length <= 16 ? File.ReadAllText(claimedPath, Encoding.UTF8) : "";
+                int exitCode;
+                return int.TryParse(result, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out exitCode) && exitCode != 0 ? (int?)exitCode : null;
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+            finally
+            {
+                try { if (File.Exists(claimedPath)) File.Delete(claimedPath); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
 
         private static void AppendUpdateProcessWaitScript(StringBuilder script, int processId)
