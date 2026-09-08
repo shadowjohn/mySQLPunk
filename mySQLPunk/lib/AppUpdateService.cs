@@ -221,7 +221,7 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(scriptDirectory)) throw new ArgumentException(Localization.T("Common.DownloadDirectoryRequired"), nameof(scriptDirectory));
 
             Directory.CreateDirectory(scriptDirectory);
-            string scriptPath = Path.Combine(scriptDirectory, "apply-portable-update-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".ps1");
+            string scriptPath = Path.Combine(scriptDirectory, "apply-portable-update-" + Guid.NewGuid().ToString("N") + ".ps1");
             // Windows PowerShell 5.1 對「無 BOM」的 .ps1 用系統 ANSI 解碼，
             // 使用者名稱或安裝路徑含中文時腳本裡的路徑會變亂碼、更新必失敗
             File.WriteAllText(scriptPath, BuildPortableUpdateApplyScript(portableZipPath, applicationDirectory, executablePath, processId), new UTF8Encoding(true));
@@ -239,25 +239,41 @@ namespace mySQLPunk.lib
             script.AppendLine("$zipPath = '" + EscapePowerShellSingleQuotedString(portableZipPath) + "'");
             script.AppendLine("$appDir = '" + EscapePowerShellSingleQuotedString(applicationDirectory) + "'");
             script.AppendLine("$exePath = '" + EscapePowerShellSingleQuotedString(executablePath) + "'");
-            script.AppendLine("$staging = Join-Path ([System.IO.Path]::GetTempPath()) ('mysqlpunk-update-' + [System.Guid]::NewGuid().ToString('N'))");
-            script.AppendLine("New-Item -ItemType Directory -Path $staging -Force | Out-Null");
+            script.AppendLine("$tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\\') + '\\'");
+            script.AppendLine("$staging = [System.IO.Path]::GetFullPath((Join-Path $tempRoot ('mysqlpunk-update-' + [System.Guid]::NewGuid().ToString('N'))))");
+            script.AppendLine("if (-not $staging.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) { exit 1 }");
+            script.AppendLine("New-Item -ItemType Directory -Path $staging | Out-Null");
+            script.AppendLine("$updateExitCode = 0");
             script.AppendLine("try {");
             script.AppendLine("    Expand-Archive -LiteralPath $zipPath -DestinationPath $staging -Force");
+            // 解壓完成後才辨識內容；缺主程式或同時夾帶多份程式，都不可覆寫舊安裝。
+            script.AppendLine("    $entries = @(Get-ChildItem -LiteralPath $staging -Force)");
+            script.AppendLine("    $executables = @(Get-ChildItem -LiteralPath $staging -Filter 'mySQLPunk.exe' -File -Recurse -Force)");
+            script.AppendLine("    if ($executables.Count -ne 1) { throw 'The portable package must contain exactly one mySQLPunk.exe.' }");
             script.AppendLine("    $source = $staging");
-            script.AppendLine("    $children = @(Get-ChildItem -LiteralPath $staging -Directory)");
-            script.AppendLine("    if ($children.Count -eq 1 -and (Test-Path -LiteralPath (Join-Path $children[0].FullName 'mySQLPunk.exe'))) {");
-            script.AppendLine("        $source = $children[0].FullName");
+            script.AppendLine("    if (-not (Test-Path -LiteralPath (Join-Path $staging 'mySQLPunk.exe') -PathType Leaf)) {");
+            script.AppendLine("        if ($entries.Count -ne 1 -or -not $entries[0].PSIsContainer -or -not (Test-Path -LiteralPath (Join-Path $entries[0].FullName 'mySQLPunk.exe') -PathType Leaf)) {");
+            script.AppendLine("            throw 'The portable package must use its root or a single wrapper directory.'");
+            script.AppendLine("        }");
+            script.AppendLine("        $source = $entries[0].FullName");
             script.AppendLine("    }");
             script.AppendLine("    Get-ChildItem -LiteralPath $source -Force | ForEach-Object {");
             script.AppendLine("        Copy-Item -LiteralPath $_.FullName -Destination $appDir -Recurse -Force");
             script.AppendLine("    }");
             script.AppendLine("}");
+            script.AppendLine("catch { $updateExitCode = 1 }");
             script.AppendLine("finally {");
-            script.AppendLine("    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue");
+            script.AppendLine("    $resolvedStaging = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $staging).ProviderPath)");
+            script.AppendLine("    if (-not $resolvedStaging.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -or ((Get-Item -LiteralPath $resolvedStaging).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {");
+            script.AppendLine("        throw 'Refusing to clean a staging directory outside the temporary directory.'");
+            script.AppendLine("    }");
+            script.AppendLine("    Remove-Item -LiteralPath $resolvedStaging -Recurse -Force");
             script.AppendLine("}");
-            script.AppendLine("if (Test-Path -LiteralPath $exePath) {");
-            script.AppendLine("    Start-Process -FilePath $exePath");
+            script.AppendLine("if ($updateExitCode -eq 0) {");
+            script.AppendLine("    if (Test-Path -LiteralPath $exePath -PathType Leaf) { Start-Process -FilePath $exePath }");
+            script.AppendLine("    else { $updateExitCode = 1 }");
             script.AppendLine("}");
+            script.AppendLine("exit $updateExitCode");
             return script.ToString();
         }
 

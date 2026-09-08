@@ -1945,30 +1945,42 @@ namespace mySQLPunk
 
     public static class ApplicationOptionSettings
     {
+        private static readonly object SettingsSync = new object();
         private static readonly Dictionary<string, bool> BoolValues = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> IntValues = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, string> StringValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private static bool loaded;
+        private static string loadErrorMessage;
+        internal static Func<string> SettingsFilePathProvider { get; set; }
 
         public static bool GetBool(string key)
         {
-            EnsureLoaded();
-            bool value;
-            return BoolValues.TryGetValue(key, out value) ? value : GetDefaultBool(key);
+            lock (SettingsSync)
+            {
+                EnsureLoaded();
+                bool value;
+                return BoolValues.TryGetValue(key, out value) ? value : GetDefaultBool(key);
+            }
         }
 
         public static int GetInt(string key)
         {
-            EnsureLoaded();
-            int value;
-            return IntValues.TryGetValue(key, out value) ? value : GetDefaultInt(key);
+            lock (SettingsSync)
+            {
+                EnsureLoaded();
+                int value;
+                return IntValues.TryGetValue(key, out value) ? value : GetDefaultInt(key);
+            }
         }
 
         public static string GetString(string key)
         {
-            EnsureLoaded();
-            string value;
-            return StringValues.TryGetValue(key, out value) ? value : GetDefaultString(key);
+            lock (SettingsSync)
+            {
+                EnsureLoaded();
+                string value;
+                return StringValues.TryGetValue(key, out value) ? value : GetDefaultString(key);
+            }
         }
 
         public static bool GetAiPanelStartupVisibility()
@@ -1991,42 +2003,60 @@ namespace mySQLPunk
 
         public static void SetBool(string key, bool value)
         {
-            EnsureLoaded();
-            BoolValues[key] = value;
+            lock (SettingsSync)
+            {
+                EnsureLoaded();
+                BoolValues[key] = value;
+            }
         }
 
         public static void SetInt(string key, int value)
         {
-            EnsureLoaded();
-            IntValues[key] = value;
+            lock (SettingsSync)
+            {
+                EnsureLoaded();
+                IntValues[key] = value;
+            }
         }
 
         public static void SetString(string key, string value)
         {
-            EnsureLoaded();
-            StringValues[key] = (value ?? string.Empty).Trim();
+            lock (SettingsSync)
+            {
+                EnsureLoaded();
+                StringValues[key] = (value ?? string.Empty).Trim();
+            }
         }
 
         public static string LastSaveErrorMessage;
 
         public static void Save()
         {
-            EnsureLoaded();
-            LastSaveErrorMessage = null;
-            try
+            lock (SettingsSync)
             {
-                string path = GetSettingsFilePath();
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.WriteAllText(path, JsonConvert.SerializeObject(new SettingsData
+                EnsureLoaded();
+                LastSaveErrorMessage = null;
+                if (loadErrorMessage != null)
                 {
-                    BoolValues = BoolValues,
-                    IntValues = IntValues,
-                    StringValues = StringValues
-                }, Formatting.Indented));
-            }
-            catch (Exception ex)
-            {
-                LastSaveErrorMessage = ex.Message;
+                    // 舊設定讀取／移轉失敗時，不讓自動存檔用預設值擋住下次重試。
+                    LastSaveErrorMessage = loadErrorMessage;
+                    return;
+                }
+                try
+                {
+                    string path = GetSettingsFilePath();
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    File.WriteAllText(path, JsonConvert.SerializeObject(new SettingsData
+                    {
+                        BoolValues = BoolValues,
+                        IntValues = IntValues,
+                        StringValues = StringValues
+                    }, Formatting.Indented));
+                }
+                catch (Exception ex)
+                {
+                    LastSaveErrorMessage = ex.Message;
+                }
             }
         }
 
@@ -2044,28 +2074,34 @@ namespace mySQLPunk
 
         private static void EnsureLoaded()
         {
+            // 所有呼叫端都持有 SettingsSync；Save 必須等舊版設定載入、合併後才能寫入。
             if (loaded) return;
-            loaded = true;
             SeedDefaults();
 
             try
             {
                 string path = GetSettingsFilePath();
+                lib.ApplicationOptionsMigrationService.TryMigratePreviousVersion(path);
                 if (!File.Exists(path)) return;
 
                 SettingsData data = JsonConvert.DeserializeObject<SettingsData>(File.ReadAllText(path));
-                if (data == null) return;
+                if (data == null) throw new InvalidDataException("The application options file contains no settings.");
 
                 Merge(data.BoolValues, BoolValues);
                 Merge(data.IntValues, IntValues);
                 Merge(data.StringValues, StringValues);
             }
-            catch
+            catch (Exception ex)
             {
+                loadErrorMessage = ex is JsonException ? "The application options file is not valid JSON." : ex.Message;
                 BoolValues.Clear();
                 IntValues.Clear();
                 StringValues.Clear();
                 SeedDefaults();
+            }
+            finally
+            {
+                loaded = true;
             }
         }
 
@@ -2178,6 +2214,7 @@ namespace mySQLPunk
 
         private static string GetSettingsFilePath()
         {
+            if (SettingsFilePathProvider != null) return SettingsFilePathProvider();
             return Path.Combine(Application.UserAppDataPath, "application-options.json");
         }
 

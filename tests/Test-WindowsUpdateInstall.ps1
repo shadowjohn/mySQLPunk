@@ -3,8 +3,8 @@
 Runs the real Inno Setup update on a disposable GitHub-hosted Windows runner.
 The update script comes from the current .NET Framework application assembly.
 This does not click the application's update button or test its download dialog.
-Application.UserAppDataPath is versioned: both profiles are seeded explicitly;
-this test does not claim that settings migrate between application versions.
+Only the baseline application-options.json is seeded. The updated application
+must migrate its options while preserving the previous version's settings file.
 #>
 [CmdletBinding()]
 param(
@@ -76,7 +76,7 @@ $evidence = [ordered]@{
     installerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash
     limitations = @(
         'Invokes the real generated update script; does not operate the UI update button or download dialog.',
-        'Both versioned Application.UserAppDataPath profiles are seeded; cross-version settings migration is not asserted.',
+        'Cross-version migration is asserted for application-options.json only.',
         'Synthetic application profiles outside WorkRoot are left for the disposable runner to destroy.'
     )
     cleanupErrors = @()
@@ -164,7 +164,7 @@ function Invoke-FrameworkHelper([string]$Mode, [string]$AssemblyPath, [string]$O
     return Get-Content -LiteralPath $OutputPath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
-function Initialize-SettingsFixture($Metadata) {
+function Initialize-SettingsFixture($Metadata, [bool]$Seed = $true) {
     # WinForms falls back to the entry-point namespace when AssemblyCompany is empty.
     $company = [string]$Metadata.company
     if ([string]::IsNullOrWhiteSpace($company)) { $company = [string]$Metadata.entryNamespace }
@@ -180,20 +180,24 @@ function Initialize-SettingsFixture($Metadata) {
     $settingsPath = Join-Path $profilePath 'application-options.json'
     if (@($script:settingsFixtures | Where-Object { $_.path -eq $settingsPath }).Count -gt 0) { return }
     if (Test-Path -LiteralPath $profilePath) { throw "Application profile already exists: $profilePath" }
+    if (-not $Seed) {
+        $script:settingsFixtures.Add(@{ path = $settingsPath; version = $productVersion; seeded = $false; autoCheckUpdates = $false })
+        return
+    }
     $null = New-Item -ItemType Directory -Path $profilePath
     $fixture = [ordered]@{
         BoolValues = @{ AutoCheckUpdates = $false; AdvancedRegisterSqlFileOpen = $false; AdvancedRegisterUrlProtocol = $false; AiAssistantEnabled = $false }
-        IntValues = @{}
+        IntValues = @{ RecordLimit = 321 }
         StringValues = @{ ViewAiPanelVisibilityPreference = 'closed'; FileQueryDirectory = (Join-Path $WorkRoot 'queries'); FileLogDirectory = (Join-Path $WorkRoot 'logs'); FileExportDirectory = (Join-Path $WorkRoot 'exports'); AcceptanceFixture = 'synthetic-settings-preserved' }
     }
     [IO.File]::WriteAllText($settingsPath, ($fixture | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($true)))
-    $script:settingsFixtures.Add(@{ path = $settingsPath; version = $productVersion; autoCheckUpdates = $false })
+    $script:settingsFixtures.Add(@{ path = $settingsPath; version = $productVersion; seeded = $true; autoCheckUpdates = $false })
 }
 
 function Assert-SettingsPreserved {
     foreach ($fixture in $script:settingsFixtures) {
         $settings = Get-Content -LiteralPath $fixture.path -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($settings.BoolValues.AutoCheckUpdates -ne $false -or $settings.StringValues.AcceptanceFixture -ne 'synthetic-settings-preserved') {
+        if ($settings.BoolValues.AutoCheckUpdates -ne $false -or $settings.IntValues.RecordLimit -ne 321 -or $settings.StringValues.AcceptanceFixture -ne 'synthetic-settings-preserved') {
             throw 'Synthetic settings changed or automatic update checks became enabled.'
         }
     }
@@ -232,7 +236,25 @@ function Invoke-TestUninstall {
     $process = Start-OwnedProcess $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG=' + (Quote-NativeArgument (Join-Path $WorkRoot 'uninstall.log')))) 'uninstall'
     $exitCode = Wait-ProcessExit $process 180 'Uninstaller'
     if ($exitCode -ne 0 -or (Test-Path -LiteralPath $installedExe)) { throw "Uninstall did not remove the test executable; exit code $exitCode." }
-    $evidence.uninstall = @{ exitCode = $exitCode; executableRemoved = $true }
+    # Inno Setup may still be removing its temporary uninstaller after the
+    # registered executable exits. Let those children finish before leak checks.
+    # https://jrsoftware.org/ishelp/topic_uninstexitcodes.htm
+    $cleanupStarted = [DateTime]::UtcNow
+    do {
+        $remaining = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath.StartsWith($WorkRoot + '\', [StringComparison]::OrdinalIgnoreCase)
+        })
+        foreach ($candidate in $remaining) {
+            $null = Assert-TestPath $candidate.ExecutablePath
+            if ($candidate.CreationDate.ToUniversalTime() -lt [DateTime]::Parse($evidence.startedUtc).ToUniversalTime()) {
+                throw 'Unexpected process predating the test was found during uninstall cleanup.'
+            }
+        }
+        if ($remaining.Count -eq 0) { break }
+        if (([DateTime]::UtcNow - $cleanupStarted).TotalSeconds -ge 30) { throw 'Test processes did not finish naturally after uninstall.' }
+        Start-Sleep -Milliseconds 500
+    } while ($true)
+    $evidence.uninstall = @{ exitCode = $exitCode; executableRemoved = $true; childCleanupCompleted = $true; childCleanupWaitSeconds = ([DateTime]::UtcNow - $cleanupStarted).TotalSeconds }
 }
 
 try {
@@ -311,8 +333,13 @@ public static class UpdateAcceptanceWindows {
     $baselineHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash
     $evidence.baselineInstallation = @{ exitCode = $installExitCode; fileVersion = $actualBaselineVersion.ToString(); applicationSha256 = $baselineHash; log = $installLog }
     Initialize-SettingsFixture (Invoke-FrameworkHelper 'metadata' $installedExe (Join-Path $WorkRoot 'baseline-metadata.json'))
-    Initialize-SettingsFixture (Invoke-FrameworkHelper 'metadata' $ApplicationPath (Join-Path $WorkRoot 'current-metadata.json'))
+    Initialize-SettingsFixture (Invoke-FrameworkHelper 'metadata' $ApplicationPath (Join-Path $WorkRoot 'current-metadata.json')) $false
     $evidence.settingsFixtures = @($script:settingsFixtures.ToArray())
+    $baselineSettings = @($script:settingsFixtures | Where-Object { $_.seeded })
+    $currentSettings = @($script:settingsFixtures | Where-Object { -not $_.seeded })
+    if ($baselineSettings.Count -ne 1 -or $currentSettings.Count -ne 1 -or (Test-Path -LiteralPath $currentSettings[0].path)) {
+        throw 'Settings migration requires one baseline fixture and an absent current settings file.'
+    }
     $syntheticFile = Join-Path $installDirectory '驗收使用者查詢.sql'
     [IO.File]::WriteAllText($syntheticFile, "-- Synthetic acceptance data only.`r`nSELECT '設定保留 O''Brien';`r`n", (New-Object Text.UTF8Encoding($true)))
     $syntheticHash = (Get-FileHash -LiteralPath $syntheticFile -Algorithm SHA256).Hash
@@ -333,6 +360,7 @@ public static class UpdateAcceptanceWindows {
     $evidence.waitForOldApplication = @{ observedSeconds = ([DateTime]::UtcNow - $waitStarted).TotalSeconds; updaterStillRunning = $true; baselineExecutableUnchanged = $true }
     Close-TestApplication $oldApplication $oldWindow
     $evidence.oldApplication.normalClose = $true
+    $baselineSettingsHash = (Get-FileHash -LiteralPath $baselineSettings[0].path -Algorithm SHA256).Hash
     $applyExitCode = Wait-ProcessExit $applyProcess 240 'Generated installer update'
     $evidence.update = @{ exitCode = $applyExitCode; scriptPath = $applyScript; scriptSha256 = (Get-FileHash -LiteralPath $applyScript -Algorithm SHA256).Hash; generatorFramework = $generated.frameworkVersion; generatorEdition = $generated.edition }
     if ($applyExitCode -ne 0) { throw "Generated update script failed with exit code $applyExitCode." }
@@ -356,6 +384,10 @@ public static class UpdateAcceptanceWindows {
     Close-TestApplication $newApplication $newWindow
     $evidence.newApplication.normalClose = $true
     Assert-SettingsPreserved
+    if ((Get-FileHash -LiteralPath $baselineSettings[0].path -Algorithm SHA256).Hash -ne $baselineSettingsHash) {
+        throw 'Settings migration modified the previous version settings file.'
+    }
+    $evidence.settingsMigration = @{ fileName = 'application-options.json'; fromVersion = $baselineSettings[0].version; toVersion = $currentSettings[0].version; targetAbsentBeforeUpdate = $true; optionsPreserved = $true; sourceSha256 = $baselineSettingsHash; sourceUnchanged = $true }
     $evidence.syntheticData = @{ path = $syntheticFile; sha256 = $syntheticHash; preservedAfterUpdate = $true; settingsPreserved = $true }
     Invoke-TestUninstall
     $uninstallCompleted = $true

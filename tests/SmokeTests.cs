@@ -54,6 +54,7 @@ public static class SmokeTests
         Run("Query execution plan service", TestQueryExecutionPlanService, ref passed);
         Run("SQL editor completion and snippets", TestSqlEditorCompletionAndSnippets, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
+        Run("Application option version migration", TestApplicationOptionVersionMigration, ref passed);
         Run("Query editor AI actions", TestQueryEditorAiActions, ref passed);
         Run("Query AI SQL tools", TestQueryAiSqlTools, ref passed);
         Run("Query AI custom actions", TestQueryAiCustomActions, ref passed);
@@ -102,6 +103,7 @@ public static class SmokeTests
         Run("Application update concurrency", TestApplicationUpdateConcurrency, ref passed);
         Run("Application update download", TestApplicationUpdateDownload, ref passed);
         Run("Application update apply", TestApplicationUpdateApply, ref passed);
+        Run("Application update portable apply", TestApplicationPortableUpdateApply, ref passed);
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
         Run("Release third-party notices", TestReleaseThirdPartyNotices, ref passed);
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
@@ -6125,6 +6127,233 @@ public static class SmokeTests
         }
     }
 
+    private static void TestApplicationOptionVersionMigration()
+    {
+        // These paths are synthetic. Never point this test at Application.UserAppDataPath.
+        string root = Path.Combine(Path.GetTempPath(), "mysqlpunk-options-migration-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string fileName = "application-options.json";
+        string options = "{\"BoolValues\":{\"AutoCheckUpdates\":false},\"IntValues\":{\"RecordLimit\":321},\"StringValues\":{\"AcceptanceFixture\":\"設定保留 O'Brien\",\"UnknownFutureKey\":\"retained\"}}";
+        try
+        {
+            string product = Path.Combine(root, "product");
+            Action<string, string> writeVersion = (version, content) =>
+            {
+                string directory = Path.Combine(product, version);
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, fileName), content, new UTF8Encoding(true));
+            };
+            writeVersion("1.0.0.9", options.Replace("321", "9"));
+            writeVersion("1.0.0.21", options);
+            writeVersion("1.0.0.23", options.Replace("321", "23"));
+            writeVersion("not-a-version", options.Replace("321", "999"));
+            string source = Path.Combine(product, "1.0.0.21", fileName);
+            byte[] original = File.ReadAllBytes(source);
+            string destination = Path.Combine(product, "1.0.0.22", fileName);
+            Assert(ApplicationOptionsMigrationService.TryMigratePreviousVersion(destination), "A missing current file should inherit the nearest earlier version.");
+            Assert(original.SequenceEqual(File.ReadAllBytes(destination)), "Migration must preserve the original bytes, including BOM, Unicode and unknown keys.");
+            Assert(original.SequenceEqual(File.ReadAllBytes(source)), "The previous version remains an unchanged recovery source.");
+            JObject migrated = JObject.Parse(File.ReadAllText(destination));
+            Assert((int)migrated["IntValues"]["RecordLimit"] == 321, "Version ordering must be numeric and ignore newer versions.");
+            Assert(!(bool)migrated["BoolValues"]["AutoCheckUpdates"], "The disabled automatic update preference must survive migration.");
+            Assert(!ApplicationOptionsMigrationService.TryMigratePreviousVersion(destination), "A second run must leave an existing current file alone.");
+            Assert(original.SequenceEqual(File.ReadAllBytes(destination)), "Repeated migration must not rewrite a current file.");
+            Assert(Directory.GetFiles(Path.GetDirectoryName(destination), "*.tmp").Length == 0, "Migration staging files must be removed.");
+
+            File.WriteAllText(destination, "not valid current JSON", Encoding.UTF8);
+            byte[] existingInvalid = File.ReadAllBytes(destination);
+            Assert(!ApplicationOptionsMigrationService.TryMigratePreviousVersion(destination), "Even an invalid existing current file must not be replaced automatically.");
+            Assert(existingInvalid.SequenceEqual(File.ReadAllBytes(destination)), "Invalid current settings must remain byte-for-byte intact.");
+
+            string[] invalidFiles =
+            {
+                "not-json", "[]", "{}", "{\"BoolValues\":[]}",
+                "{\"BoolValues\":{\"AutoCheckUpdates\":\"false\"}}",
+                "{\"IntValues\":{\"RecordLimit\":2147483648}}",
+                "{\"StringValues\":{\"EditorFontName\":{\"value\":\"Consolas\"}}}",
+                "{\"BoolValues\":{},\"BoolValues\":{}}",
+                "{\"BoolValues\":{},\"boolValues\":{}}",
+                "{\"StringValues\":{}} {}"
+            };
+            for (int index = 0; index < invalidFiles.Length; index++)
+            {
+                string invalidProduct = Path.Combine(root, "invalid-" + index);
+                string invalidSource = Path.Combine(invalidProduct, "1.0.0.21", fileName);
+                string invalidTarget = Path.Combine(invalidProduct, "1.0.0.22", fileName);
+                Directory.CreateDirectory(Path.GetDirectoryName(invalidSource));
+                File.WriteAllText(invalidSource, invalidFiles[index], Encoding.UTF8);
+                string olderValid = Path.Combine(invalidProduct, "1.0.0.9", fileName);
+                Directory.CreateDirectory(Path.GetDirectoryName(olderValid));
+                File.WriteAllText(olderValid, options, Encoding.UTF8);
+                byte[] invalidOriginal = File.ReadAllBytes(invalidSource);
+                bool rejected = false;
+                try { ApplicationOptionsMigrationService.TryMigratePreviousVersion(invalidTarget); }
+                catch (InvalidDataException) { rejected = true; }
+                Assert(rejected, "Malformed option case " + index + " must be rejected instead of silently falling back to an older preference set.");
+                Assert(!File.Exists(invalidTarget), "Rejected options must not create a current settings file.");
+                Assert(invalidOriginal.SequenceEqual(File.ReadAllBytes(invalidSource)), "Rejected old settings must remain untouched.");
+            }
+
+            string oversizedSource = Path.Combine(root, "oversized", "1.0.0.21", fileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(oversizedSource));
+            using (FileStream oversized = File.Create(oversizedSource)) oversized.SetLength(ApplicationOptionsMigrationService.MaximumFileBytes + 1L);
+            string oversizedTarget = Path.Combine(root, "oversized", "1.0.0.22", fileName);
+            bool sizeRejected = false;
+            try { ApplicationOptionsMigrationService.TryMigratePreviousVersion(oversizedTarget); }
+            catch (InvalidDataException) { sizeRejected = true; }
+            Assert(sizeRejected && !File.Exists(oversizedTarget), "Oversized previous settings must be rejected before copying.");
+
+            string futureOnly = Path.Combine(root, "future-only", "1.0.0.23", fileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(futureOnly));
+            File.WriteAllText(futureOnly, options, Encoding.UTF8);
+            Assert(!ApplicationOptionsMigrationService.TryMigratePreviousVersion(Path.Combine(root, "future-only", "1.0.0.22", fileName)), "Downgrades must not import settings from a newer version.");
+            string equivalent = Path.Combine(root, "equivalent", "1.0", fileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(equivalent));
+            File.WriteAllText(equivalent, options, Encoding.UTF8);
+            Assert(!ApplicationOptionsMigrationService.TryMigratePreviousVersion(Path.Combine(root, "equivalent", "1.0.0.0", fileName)), "An equivalent normalized version is not an older version.");
+
+            string concurrentSource = Path.Combine(root, "concurrent", "1.0.0.21", fileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(concurrentSource));
+            File.WriteAllText(concurrentSource, options, Encoding.UTF8);
+            string concurrentTarget = Path.Combine(root, "concurrent", "1.0.0.22", fileName);
+            Task<bool>[] attempts = Enumerable.Range(0, 4).Select(_ => Task.Run(() => ApplicationOptionsMigrationService.TryMigratePreviousVersion(concurrentTarget))).ToArray();
+            Task.WaitAll(attempts);
+            Assert(attempts.Count(attempt => attempt.Result) == 1, "Only one concurrently started application may publish the migrated settings.");
+            Assert(File.ReadAllBytes(concurrentSource).SequenceEqual(File.ReadAllBytes(concurrentTarget)), "Concurrent migration must publish a complete unchanged settings file.");
+            Assert(Directory.GetFiles(Path.GetDirectoryName(concurrentTarget), "*.tmp").Length == 0, "Concurrent migration must clean every staging file.");
+            TestApplicationOptionLoadAndSave(root, options);
+        }
+        finally
+        {
+            string resolvedRoot = Path.GetFullPath(root);
+            string resolvedTemp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            Assert(resolvedRoot.StartsWith(resolvedTemp, StringComparison.OrdinalIgnoreCase)
+                && Path.GetFileName(resolvedRoot).StartsWith("mysqlpunk-options-migration-", StringComparison.Ordinal), "Cleanup must remain inside the synthetic temporary test directory.");
+            if (Directory.Exists(resolvedRoot)) Directory.Delete(resolvedRoot, true);
+        }
+    }
+
+    private static void TestApplicationOptionLoadAndSave(string root, string validOptions)
+    {
+        Type settingsType = typeof(ApplicationOptionSettings);
+        BindingFlags fields = BindingFlags.Static | BindingFlags.NonPublic;
+        object settingsSync = settingsType.GetField("SettingsSync", fields).GetValue(null);
+        PropertyInfo pathProvider = settingsType.GetProperty("SettingsFilePathProvider", fields);
+        FieldInfo loadedField = settingsType.GetField("loaded", fields);
+        FieldInfo loadErrorField = settingsType.GetField("loadErrorMessage", fields);
+        FieldInfo[] dictionaryFields = new[] { "BoolValues", "IntValues", "StringValues" }.Select(name => settingsType.GetField(name, fields)).ToArray();
+        Hashtable[] snapshots;
+        object previousProvider;
+        object previousLoaded;
+        object previousLoadError;
+        string previousSaveError;
+        lock (settingsSync)
+        {
+            snapshots = dictionaryFields.Select(field => new Hashtable((IDictionary)field.GetValue(null))).ToArray();
+            previousProvider = pathProvider.GetValue(null, null);
+            previousLoaded = loadedField.GetValue(null);
+            previousLoadError = loadErrorField.GetValue(null);
+            previousSaveError = ApplicationOptionSettings.LastSaveErrorMessage;
+        }
+        Action<Func<string>> reset = provider =>
+        {
+            lock (settingsSync)
+            {
+                pathProvider.SetValue(null, provider, null);
+                loadedField.SetValue(null, false);
+                loadErrorField.SetValue(null, null);
+                ApplicationOptionSettings.LastSaveErrorMessage = null;
+                foreach (FieldInfo field in dictionaryFields) ((IDictionary)field.GetValue(null)).Clear();
+            }
+        };
+        try
+        {
+            string failedSource = Path.Combine(root, "load-failure", "1.0.0.21", "application-options.json");
+            string failedTarget = Path.Combine(root, "load-failure", "1.0.0.22", "application-options.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(failedSource));
+            File.WriteAllText(failedSource, "invalid synthetic JSON", Encoding.UTF8);
+            byte[] failedSourceBytes = File.ReadAllBytes(failedSource);
+            reset(() => failedTarget);
+            ApplicationOptionSettings.GetBool("AutoCheckUpdates");
+            ApplicationOptionSettings.SetBool("AutoCheckUpdates", false);
+            ApplicationOptionSettings.Save();
+            Assert(!File.Exists(failedTarget), "A failed migration must not let a later automatic Save occupy the new path with defaults.");
+            Assert(failedSourceBytes.SequenceEqual(File.ReadAllBytes(failedSource)), "Load failure followed by Save must preserve the recovery source.");
+            Assert(!string.IsNullOrWhiteSpace(ApplicationOptionSettings.LastSaveErrorMessage), "Save must report that loading failed.");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(failedTarget));
+            foreach (string invalidCurrent in new[] { "null", "not-json" })
+            {
+                File.WriteAllText(failedTarget, invalidCurrent, Encoding.UTF8);
+                byte[] targetBytes = File.ReadAllBytes(failedTarget);
+                reset(() => failedTarget);
+                ApplicationOptionSettings.GetInt("RecordLimit");
+                ApplicationOptionSettings.SetInt("RecordLimit", 99);
+                ApplicationOptionSettings.Save();
+                Assert(targetBytes.SequenceEqual(File.ReadAllBytes(failedTarget)), "A failed or null current options file must not be overwritten by automatic Save.");
+                Assert(!string.IsNullOrWhiteSpace(ApplicationOptionSettings.LastSaveErrorMessage), "Invalid current settings must keep a visible save error.");
+            }
+
+            string source = Path.Combine(root, "load-save-race", "1.0.0.21", "application-options.json");
+            string target = Path.Combine(root, "load-save-race", "1.0.0.22", "application-options.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(source));
+            File.WriteAllText(source, validOptions, new UTF8Encoding(true));
+            byte[] original = File.ReadAllBytes(source);
+            using (ManualResetEventSlim loadStarted = new ManualResetEventSlim(false))
+            using (ManualResetEventSlim releaseLoad = new ManualResetEventSlim(false))
+            using (ManualResetEventSlim saveStarted = new ManualResetEventSlim(false))
+            {
+                int pathCalls = 0;
+                reset(() =>
+                {
+                    if (Interlocked.Increment(ref pathCalls) == 1)
+                    {
+                        loadStarted.Set();
+                        if (!releaseLoad.Wait(10000)) throw new TimeoutException("Synthetic settings load was not released.");
+                    }
+                    return target;
+                });
+                Task<bool> load = Task.Run(() => ApplicationOptionSettings.GetBool("AutoCheckUpdates"));
+                Task save = null;
+                try
+                {
+                    Assert(loadStarted.Wait(5000), "The synthetic initial load must reach the controlled overlap point.");
+                    save = Task.Run(() => { saveStarted.Set(); ApplicationOptionSettings.Save(); });
+                    Assert(saveStarted.Wait(5000), "The competing Save must start while initial load is blocked.");
+                    Assert(!save.Wait(300) && !File.Exists(target), "Save must wait for initial migration instead of creating default settings.");
+                    releaseLoad.Set();
+                    Assert(Task.WaitAll(new Task[] { load, save }, 10000), "Initial load and its waiting Save must both finish.");
+                    Assert(!load.Result, "The first getter must return the migrated disabled-update preference.");
+                    JObject saved = JObject.Parse(File.ReadAllText(target));
+                    Assert(!(bool)saved["BoolValues"]["AutoCheckUpdates"] && (int)saved["IntValues"]["RecordLimit"] == 321, "The waiting Save must contain the migrated values.");
+                    Assert(original.SequenceEqual(File.ReadAllBytes(source)), "Concurrent Load and Save must not modify the old recovery source.");
+                }
+                finally
+                {
+                    releaseLoad.Set();
+                    Task[] pending = new Task[] { load, save }.Where(task => task != null).ToArray();
+                    Assert(Task.WaitAll(pending, 10000), "Synthetic settings workers must finish before restoring static test state.");
+                }
+            }
+        }
+        finally
+        {
+            lock (settingsSync)
+            {
+                pathProvider.SetValue(null, previousProvider, null);
+                loadedField.SetValue(null, previousLoaded);
+                loadErrorField.SetValue(null, previousLoadError);
+                ApplicationOptionSettings.LastSaveErrorMessage = previousSaveError;
+                for (int index = 0; index < dictionaryFields.Length; index++)
+                {
+                    IDictionary values = (IDictionary)dictionaryFields[index].GetValue(null);
+                    values.Clear();
+                    foreach (DictionaryEntry pair in snapshots[index]) values[pair.Key] = pair.Value;
+                }
+            }
+        }
+    }
+
     private static void TestQueryFormOptionSettings()
     {
         bool oldRecordLimitEnabled = ApplicationOptionSettings.GetBool("RecordLimitEnabled");
@@ -10402,8 +10631,101 @@ public static class SmokeTests
         }
     }
 
+    private static void TestApplicationPortableUpdateApply()
+    {
+        string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string root = Path.GetFullPath(Path.Combine(tempRoot, "mysqlpunk_portable_apply_" + Guid.NewGuid().ToString("N")));
+        Assert(root.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Portable test fixtures must stay in the temporary directory.");
+        Assert(!Directory.Exists(root), "Portable update tests must create a fresh directory.");
+        Directory.CreateDirectory(root);
+        try
+        {
+            Action<string, bool, Dictionary<string, string>> runCase = (name, shouldSucceed, entries) =>
+            {
+                string caseRoot = Path.Combine(root, name);
+                string appDirectory = Path.Combine(caseRoot, "舊版 O'Brien");
+                Directory.CreateDirectory(Path.Combine(appDirectory, "runtimes"));
+                Directory.CreateDirectory(Path.Combine(appDirectory, "queries"));
+                string executable = Path.Combine(appDirectory, "mySQLPunk.exe");
+                File.WriteAllText(executable, "old application bytes");
+                File.WriteAllText(Path.Combine(appDirectory, "core.dll"), "old library bytes");
+                File.WriteAllText(Path.Combine(appDirectory, "runtimes", "native.dll"), "old native bytes");
+                File.WriteAllText(Path.Combine(appDirectory, "queries", "keep.sql"), "SELECT 'keep user query';");
+                Dictionary<string, string> before = Directory.GetFiles(appDirectory, "*", SearchOption.AllDirectories)
+                    .ToDictionary(path => path.Substring(appDirectory.Length + 1), AppUpdateService.ComputeFileSha256);
+                string[] directoriesBefore = Directory.GetDirectories(appDirectory, "*", SearchOption.AllDirectories)
+                    .Select(path => path.Substring(appDirectory.Length + 1)).OrderBy(path => path).ToArray();
+                string zipPath = Path.Combine(caseRoot, "更新套件.zip");
+                if (entries == null) File.WriteAllText(zipPath, "not a zip archive");
+                else
+                {
+                    using (ZipArchive archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+                    {
+                        foreach (KeyValuePair<string, string> entry in entries)
+                        {
+                            using (StreamWriter writer = new StreamWriter(archive.CreateEntry(entry.Key).Open(), Encoding.UTF8))
+                                writer.Write(entry.Value);
+                        }
+                    }
+                }
+                string restartedPath = Path.Combine(caseRoot, "restarted.txt");
+                string script = AppUpdateService.BuildPortableUpdateApplyScript(zipPath, appDirectory, executable, 0);
+                int exitCode = RunUpdateApplyScriptForTest(caseRoot, script, Path.Combine(caseRoot, "arguments.txt"), restartedPath, 0);
+                Assert((exitCode == 0) == shouldSucceed, "Portable payload validation returned an unexpected result: " + name);
+                if (shouldSucceed)
+                {
+                    AssertEquals("new application bytes", File.ReadAllText(executable), "Valid portable packages must replace the application: " + name);
+                    AssertEquals("new library bytes", File.ReadAllText(Path.Combine(appDirectory, "core.dll")), "Valid portable packages must replace bundled libraries: " + name);
+                    AssertEquals("new native bytes", File.ReadAllText(Path.Combine(appDirectory, "runtimes", "native.dll")), "Valid portable packages must copy nested runtime files: " + name);
+                    AssertEquals(executable, File.ReadAllText(restartedPath), "Successful portable updates must restart the installed executable: " + name);
+                    AssertEquals(before[Path.Combine("queries", "keep.sql")], AppUpdateService.ComputeFileSha256(Path.Combine(appDirectory, "queries", "keep.sql")),
+                        "A valid portable update must preserve an unrelated user query.");
+                    Assert(!Directory.Exists(Path.Combine(appDirectory, "payload")), "A wrapper directory must not be copied into the installation.");
+                }
+                else
+                {
+                    Dictionary<string, string> after = Directory.GetFiles(appDirectory, "*", SearchOption.AllDirectories)
+                        .ToDictionary(path => path.Substring(appDirectory.Length + 1), AppUpdateService.ComputeFileSha256);
+                    Assert(before.Count == after.Count && before.All(pair => after.ContainsKey(pair.Key) && after[pair.Key] == pair.Value),
+                        "Rejected packages must preserve every installed file without adding files: " + name);
+                    string[] directoriesAfter = Directory.GetDirectories(appDirectory, "*", SearchOption.AllDirectories)
+                        .Select(path => path.Substring(appDirectory.Length + 1)).OrderBy(path => path).ToArray();
+                    Assert(directoriesBefore.SequenceEqual(directoriesAfter), "Rejected packages must not create application subdirectories: " + name);
+                    Assert(!File.Exists(restartedPath), "Rejected packages must not report a successful update by restarting: " + name);
+                }
+                Assert(Directory.GetDirectories(Path.Combine(caseRoot, "process-temp"), "mysqlpunk-update-*").Length == 0,
+                    "Portable updater staging directories must be removed after success or rejection: " + name);
+            };
+
+            Dictionary<string, string> payload = new Dictionary<string, string>
+            {
+                { "mySQLPunk.exe", "new application bytes" },
+                { "core.dll", "new library bytes" },
+                { "runtimes/native.dll", "new native bytes" }
+            };
+            runCase("root", true, payload);
+            runCase("wrapper", true, payload.ToDictionary(pair => "payload/" + pair.Key, pair => pair.Value));
+            runCase("missing-executable", false, new Dictionary<string, string> { { "core.dll", "must not replace old library" }, { "extra/new.txt", "must not appear" } });
+            runCase("multiple-payloads", false, new Dictionary<string, string> { { "first/mySQLPunk.exe", "first application" }, { "second/mySQLPunk.exe", "second application" } });
+            runCase("root-and-wrapper", false, new Dictionary<string, string> { { "mySQLPunk.exe", "root application" }, { "payload/mySQLPunk.exe", "wrapped application" } });
+            runCase("mixed-directories", false, new Dictionary<string, string> { { "payload/mySQLPunk.exe", "application" }, { "other/core.dll", "ambiguous sibling" } });
+            runCase("nested-wrapper", false, new Dictionary<string, string> { { "outer/inner/mySQLPunk.exe", "nested application" } });
+            runCase("invalid-zip", false, null);
+        }
+        finally
+        {
+            string resolvedRoot = Path.GetFullPath(root);
+            Assert(resolvedRoot.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Portable update test cleanup must remain below the expected temporary directory.");
+            Directory.Delete(resolvedRoot, true);
+        }
+    }
+
     private static int RunUpdateApplyScriptForTest(string root, string script, string argumentsPath, string restartedPath, int installerExitCode, bool failInstallerStart = false)
     {
+        string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        Assert(Path.GetFullPath(root).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Updater script fixtures must stay inside the temporary directory.");
+        string processTemp = Path.Combine(root, "process-temp");
+        Directory.CreateDirectory(processTemp);
         string scriptPath = Path.Combine(root, "apply.ps1");
         string wrapperPath = Path.Combine(root, "test-apply.ps1");
         File.WriteAllText(scriptPath, script, new UTF8Encoding(true));
@@ -10426,6 +10748,8 @@ public static class SmokeTests
         startInfo.UseShellExecute = false;
         startInfo.CreateNoWindow = true;
         startInfo.RedirectStandardError = true;
+        startInfo.EnvironmentVariables["TEMP"] = processTemp;
+        startInfo.EnvironmentVariables["TMP"] = processTemp;
         using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
         {
             if (!process.WaitForExit(15000))
