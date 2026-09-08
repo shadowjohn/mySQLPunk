@@ -278,7 +278,14 @@ function Get-SafeTree([string]$Root) {
     }
     return $items.ToArray()
 }
-function Get-UpdateHash([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
+function Get-UpdateHash([string]$Path) {
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try { return [System.BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '') }
+        finally { $stream.Dispose() }
+    } finally { $algorithm.Dispose() }
+}
 function Write-UpdateFile([string]$Source, [string]$Target, [bool]$Replace, [string]$ExpectedHash) {
     $null = Get-ChildPath $Source $staging
     $null = Get-ChildPath $Target $appDir
