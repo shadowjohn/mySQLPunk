@@ -193,9 +193,11 @@ Smoke test harness：
 .\tests\Run-SmokeTests.ps1
 ```
 
-目前 83 項 smoke test 會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 的主要 DDL、外鍵／CHECK 約束、SQL Server XML 索引與跨資料庫欄位屬性 builder、連線 URI 匯入、MongoDB provider 基礎與文件樹／安全編輯規則、Redis RESP／URI／provider 瀏覽與 WATCH/MULTI/EXEC string／集合安全編輯的 loopback 連線流程、Snowflake SQL REST API 的 loopback HTTP 流程（bearer 驗證、202 輪詢、partition 合併、唯讀結果入口與 DML 寫入）、連線星號／色彩／批次屬性、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
+smoke test 腳本會先建置 `mySQLPunk.sln`，再編譯並執行 `tests/SmokeTests.cs`，覆蓋 `DatabaseCopyService` 的 View SQL 跨 provider 轉換（TOP / LIMIT / ROWNUM、日期、字串聚合、JSON、CTE/window 與 unsupported reason）、`GeometryWktConverter` 的 WKB/WKT 基本轉換與錯誤案例、SQLite FTS/RTree/SpatiaLite 專用 SQL builder、Table Designer 的主要 DDL、外鍵／CHECK 約束、SQL Server XML 索引與跨資料庫欄位屬性 builder、連線 URI 匯入、MongoDB provider 基礎與文件樹／安全編輯規則、Redis RESP／URI／provider 瀏覽與 WATCH/MULTI/EXEC string／集合安全編輯的 loopback 連線流程、Snowflake SQL REST API 的 loopback HTTP 流程（bearer 驗證、202 輪詢、partition 合併、唯讀結果入口與 DML 寫入）、連線星號／色彩／批次屬性、SSL/TLS 與 SSH 安全設定、自動執行作業、管理畫面與 Windows 工作排程規格，以及 `DatabaseDumpService` / `QueryResultExportService` / `ConnectionOpenService` / `MetadataLoadService` 的非 UI service 測試。
 
 需要只重跑單一測試群組時，可在執行測試程式前設定 `MYSQLPUNK_SMOKE_FILTER`（不分大小寫比對測試名稱）；沒有任何項目符合時會以錯誤碼結束，避免空跑誤判成功。
+
+Windows CI 也會在一次性的 GitHub runner 安裝公開的 v1.0.0.21，再用本次建置的更新腳本實際安裝新版、確認自動重開與程式雜湊，最後解除安裝。每次的 JSON 和 log 保留在 `windows-update-install-<commit>` artifact；此驗收不操作更新按鈕，也不代表跨版本使用者設定已完成遷移。
 
 MySQL / MariaDB 使用者管理實機矩陣（需先啟動 Docker）：
 

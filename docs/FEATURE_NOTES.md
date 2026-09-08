@@ -7,7 +7,9 @@
 - **Windows 更新流程**
   - 下載只接受 Windows x64 可攜包或安裝檔；SHA-256 可來自 GitHub asset digest 或舊版 manifest，缺少有效校驗碼就停止。檔案先下載到獨立暫存檔，驗證通過才取代既有下載；取消、網路錯誤與校驗失敗都會清理暫存檔。
   - 靜默安裝明確指定目前程式目錄與使用者層級，支援空白、中文及單引號路徑。兩種更新腳本都等待目前程式結束，兩分鐘逾時後直接停止；安裝成功或失敗都嘗試重新啟動現有程式，並傳回安裝結果。
-  - 驗證涵蓋實際 HTTP 下載取消、校驗碼缺漏／格式錯誤／不符、既有下載保留，以及產生的 PowerShell 腳本之逾時、路徑與失敗代碼。腳本測試以替身接收安裝與啟動要求；實際安裝套用仍需在隔離 Windows 環境驗收。
+  - 同一主視窗的自動與手動更新共用執行中旗標，檢查、提示、下載及安裝確認未結束前不再啟動第二份工作；取消或失敗後可重新檢查。靜默安裝失敗只留下最小結果，依程式路徑區分，重新開啟對應程式時提示一次。
+  - smoke tests 涵蓋實際 HTTP 下載取消、校驗碼缺漏／格式錯誤／不符、既有下載保留，以及產生的 PowerShell 腳本之逾時、路徑與失敗代碼。
+  - Windows CI 另以 `Test-WindowsUpdateInstall.ps1` 在 GitHub 一次性 runner 下載並驗證公開 v1.0.0.21 安裝檔，安裝到含空白、中文與單引號的測試目錄，再由目前產生的更新腳本執行真正的安裝與重新啟動，核對版本、程式 SHA-256、測試資料保留及解除安裝結果。測試不替換 installer 或 `Start-Process`，JSON 與 log 會保留為 CI artifact；這是更新服務／安裝腳本的驗收，不包含點擊 UI 更新按鈕。腳本只接受 GitHub hosted Windows runner，不會在開發者電腦安裝程式。
 
 - **Linux / macOS 跨平台預覽 🟡 第二階段進行中**
   - PostgreSQL array no-equality concurrency：array 原值 predicate 不再直接呼叫 element type 的等號運算子，改為比對載入時 canonical text 的 UTF-8 bytes；這讓 `json[]`、`xml[]` 等沒有原生等號的元素陣列也能參與 optimistic concurrency。PostgreSQL 16 實機矩陣先固定舊版 `42883 could not identify an equality operator for type json`，再驗證保持 array 不變時可修改同列、外部改動 array 會阻擋 stale marker，重新整理後可儲存新陣列。Linux X11 另從真實 Table 編輯器完成上述三階段，並以 `psql` 直接核對 array 與 marker。

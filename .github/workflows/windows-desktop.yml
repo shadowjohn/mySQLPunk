@@ -18,6 +18,7 @@ jobs:
   build-and-smoke:
     name: Release build and smoke tests
     runs-on: windows-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -40,3 +41,57 @@ jobs:
       - name: Run Windows desktop smoke tests
         shell: pwsh
         run: .\tests\Run-SmokeTests.ps1
+
+      - name: Setup Inno Setup for installation acceptance
+        shell: pwsh
+        run: .\scripts\Install-InnoSetupForCI.ps1
+
+      - name: Package current Windows application
+        shell: pwsh
+        run: .\scripts\package-release.ps1 -Configuration Release -SkipBuild -OutputRoot "$env:RUNNER_TEMP\mysqlpunk-upgrade-package"
+
+      - name: Download and verify published upgrade baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'mysqlpunk-upgrade-baseline'
+          New-Item -ItemType Directory -Path $root | Out-Null
+          $name = 'mySQLPunk-1.0.0.21-win-x64-setup.exe'
+          $expectedHash = '7ac0730b6b0f907bb9ab93ebcff8b4216209c1dda1270e7c5a62c2f57b59c981'
+          $releaseJson = gh release view v1.0.0.21 -R shadowjohn/mySQLPunk --json tagName,targetCommitish,url,assets
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read the published baseline release.' }
+          $releaseJson | Set-Content -LiteralPath (Join-Path $root 'release.json') -Encoding utf8
+          $release = $releaseJson | ConvertFrom-Json
+          $assets = @($release.assets | Where-Object name -eq $name)
+          if ($assets.Count -ne 1 -or $assets[0].digest -ne "sha256:$expectedHash") {
+            throw 'The published baseline no longer matches the pinned Windows installer.'
+          }
+          gh release download v1.0.0.21 -R shadowjohn/mySQLPunk --pattern $name --dir $root
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download the published baseline installer.' }
+          $actualHash = (Get-FileHash -LiteralPath (Join-Path $root $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) { throw 'Published baseline SHA-256 mismatch.' }
+
+      - name: Verify actual Windows installation, update and restart
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\mysqlpunk-upgrade-package" -Filter '*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw 'Exactly one current Windows installer is required.' }
+          .\tests\Test-WindowsUpdateInstall.ps1 `
+            -BaselineInstaller "$env:RUNNER_TEMP\mysqlpunk-upgrade-baseline\mySQLPunk-1.0.0.21-win-x64-setup.exe" `
+            -BaselineVersion '1.0.0.21' `
+            -InstallerPath $installers[0].FullName `
+            -ApplicationPath "$env:GITHUB_WORKSPACE\mySQLPunk\bin\Release\mySQLPunk.exe" `
+            -WorkRoot "$env:RUNNER_TEMP\mysqlpunk-update-install"
+
+      - name: Upload Windows installation acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-update-install-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mysqlpunk-update-install/*.json
+            ${{ runner.temp }}/mysqlpunk-update-install/*.log
+            ${{ runner.temp }}/mysqlpunk-upgrade-baseline/release.json
+          if-no-files-found: ignore
+          retention-days: 14
