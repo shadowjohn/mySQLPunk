@@ -10705,7 +10705,9 @@ public static partial class SmokeTests
                 string restartedPath = Path.Combine(caseRoot, "restarted.txt");
                 string script = AppUpdateService.BuildPortableUpdateApplyScript(zipPath, appDirectory, executable, 0);
                 int exitCode = RunUpdateApplyScriptForTest(caseRoot, script, Path.Combine(caseRoot, "arguments.txt"), restartedPath, 0);
-                Assert((exitCode == 0) == shouldSucceed, "Portable payload validation returned an unexpected result: " + name);
+                string diagnosticsPath = Path.Combine(caseRoot, "arguments.txt.diagnostics");
+                Assert((exitCode == 0) == shouldSucceed, "Portable payload validation returned an unexpected result: " + name + " (exit " + exitCode + "). "
+                    + (File.Exists(diagnosticsPath) ? File.ReadAllText(diagnosticsPath) : ""));
                 if (shouldSucceed)
                 {
                     AssertEquals("new application bytes", File.ReadAllText(executable), "Valid portable packages must replace the application: " + name);
@@ -10965,7 +10967,9 @@ public static partial class SmokeTests
             "  [System.IO.File]::WriteAllText('" + restartedPath.Replace("'", "''") + "', $FilePath)\r\n" +
             "}\r\n" +
             "& '" + scriptPath.Replace("'", "''") + "' -WaitTimeoutSeconds 1\r\n" +
-            "exit $LASTEXITCODE\r\n";
+            "$updateCode = $LASTEXITCODE\r\n" +
+            "if ($updateCode -ne 0) { [System.IO.File]::WriteAllText('" + (argumentsPath + ".diagnostics").Replace("'", "''") + "', (($Error | Select-Object -First 12 | ForEach-Object { $_.Exception.Message + ' at ' + $_.InvocationInfo.Line }) -join [Environment]::NewLine)) }\r\n" +
+            "exit $updateCode\r\n";
         File.WriteAllText(wrapperPath, wrapper, new UTF8Encoding(true));
         System.Diagnostics.ProcessStartInfo startInfo = AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(wrapperPath);
         startInfo.UseShellExecute = false;
