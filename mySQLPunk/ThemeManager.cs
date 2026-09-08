@@ -17,6 +17,9 @@ namespace mySQLPunk
         public const string Dark = "dark";
 
         private static string _theme = Light;
+        private static readonly object PreferenceSync = new object();
+        private static bool _loadFailed;
+        internal static Func<string> SettingsFilePathProvider { get; set; }
 
         public static string CurrentTheme
         {
@@ -79,38 +82,43 @@ namespace mySQLPunk
 
         public static void Load()
         {
-            try
+            lock (PreferenceSync)
             {
-                string path = GetThemeFilePath();
-                if (File.Exists(path))
+                _loadFailed = false;
+                try
                 {
-                    SetTheme(File.ReadAllText(path).Trim(), false);
+                    string path = GetThemeFilePath();
+                    lib.VersionedSettingsMigrationService.MigrateTextPreference(path, "theme.txt", Light, Dark);
+                    if (File.Exists(path)) _theme = lib.VersionedSettingsMigrationService.ReadTextPreference(path, Light, Dark);
                 }
-            }
-            catch
-            {
-                _theme = Light;
+                catch
+                {
+                    _theme = Light;
+                    _loadFailed = true;
+                }
             }
         }
 
         public static void SetTheme(string theme, bool save)
         {
-            _theme = theme == Dark ? Dark : Light;
-            if (!save) return;
-
-            try
+            lock (PreferenceSync)
             {
-                string path = GetThemeFilePath();
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.WriteAllText(path, _theme);
-            }
-            catch
-            {
+                _theme = theme == Dark ? Dark : Light;
+                // 載入失敗後不讓自動保存用預設值覆蓋原檔，或占住待移轉的新路徑。
+                if (!save || _loadFailed) return;
+                try
+                {
+                    string path = GetThemeFilePath();
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    File.WriteAllText(path, _theme);
+                }
+                catch { }
             }
         }
 
         private static string GetThemeFilePath()
         {
+            if (SettingsFilePathProvider != null) return SettingsFilePathProvider();
             return Path.Combine(Application.UserAppDataPath, "theme.txt");
         }
 

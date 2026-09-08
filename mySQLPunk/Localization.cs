@@ -11,6 +11,9 @@ namespace mySQLPunk
         public const string English = "en-US";
 
         private static string _language = TraditionalChinese;
+        private static readonly object PreferenceSync = new object();
+        private static bool _loadFailed;
+        internal static Func<string> SettingsFilePathProvider { get; set; }
         private static readonly Dictionary<string, string[]> Texts = new Dictionary<string, string[]>();
         private static readonly Dictionary<string, string> CommonZhToEn = new Dictionary<string, string>();
         private static readonly Dictionary<string, string> CommonEnToZh = new Dictionary<string, string>();
@@ -2229,33 +2232,37 @@ namespace mySQLPunk
 
         public static void Load()
         {
-            try
+            lock (PreferenceSync)
             {
-                string path = GetLanguageFilePath();
-                if (File.Exists(path))
+                _loadFailed = false;
+                try
                 {
-                    SetLanguage(File.ReadAllText(path).Trim(), false);
+                    string path = GetLanguageFilePath();
+                    lib.VersionedSettingsMigrationService.MigrateTextPreference(path, "language.txt", TraditionalChinese, English);
+                    if (File.Exists(path)) _language = lib.VersionedSettingsMigrationService.ReadTextPreference(path, TraditionalChinese, English);
                 }
-            }
-            catch
-            {
-                _language = TraditionalChinese;
+                catch
+                {
+                    _language = TraditionalChinese;
+                    _loadFailed = true;
+                }
             }
         }
 
         public static void SetLanguage(string language, bool save)
         {
-            _language = language == English ? English : TraditionalChinese;
-            if (!save) return;
-
-            try
+            lock (PreferenceSync)
             {
-                string path = GetLanguageFilePath();
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.WriteAllText(path, _language);
-            }
-            catch
-            {
+                _language = language == English ? English : TraditionalChinese;
+                // 載入失敗後不讓自動保存蓋掉原檔，保留修復後重新載入的機會。
+                if (!save || _loadFailed) return;
+                try
+                {
+                    string path = GetLanguageFilePath();
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    File.WriteAllText(path, _language);
+                }
+                catch { }
             }
         }
 
@@ -2356,6 +2363,7 @@ namespace mySQLPunk
 
         private static string GetLanguageFilePath()
         {
+            if (SettingsFilePathProvider != null) return SettingsFilePathProvider();
             return Path.Combine(Application.UserAppDataPath, "language.txt");
         }
     }

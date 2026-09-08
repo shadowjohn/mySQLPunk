@@ -119,6 +119,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $testExe = Join-Path $outputDir "mySQLPunk.SmokeTests.exe"
 $source = Join-Path $PSScriptRoot "SmokeTests.cs"
+$preferencesSource = Join-Path $PSScriptRoot "SmokeTests.Preferences.cs"
 $appExe = Join-Path $outputDir "mySQLPunk.exe"
 $newtonsoft = Join-Path $outputDir "Newtonsoft.Json.dll"
 $mysqlConnector = Join-Path $outputDir "MySqlConnector.dll"
@@ -136,7 +137,7 @@ if (!(Test-Path -LiteralPath $mysqlConnector)) {
     /r:System.Core.dll `
     /r:System.IO.Compression.dll `
     /r:System.IO.Compression.FileSystem.dll `
-    $source
+    $source $preferencesSource
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

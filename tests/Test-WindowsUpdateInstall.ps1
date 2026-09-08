@@ -3,8 +3,8 @@
 Runs the real Inno Setup update on a disposable GitHub-hosted Windows runner.
 The update script comes from the current .NET Framework application assembly.
 This does not click the application's update button or test its download dialog.
-Only the baseline application-options.json is seeded. The updated application
-must migrate its options while preserving the previous version's settings file.
+Only the baseline options, theme and language files are seeded. The updated
+application must migrate them while preserving the previous version's files.
 #>
 [CmdletBinding()]
 param(
@@ -76,7 +76,7 @@ $evidence = [ordered]@{
     installerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash
     limitations = @(
         'Invokes the real generated update script; does not operate the UI update button or download dialog.',
-        'Cross-version migration is asserted for application-options.json only.',
+        'Cross-version migration is asserted for application options, theme and language only.',
         'Synthetic application profiles outside WorkRoot are left for the disposable runner to destroy.'
     )
     cleanupErrors = @()
@@ -178,10 +178,12 @@ function Initialize-SettingsFixture($Metadata, [bool]$Seed = $true) {
     if ($product -ne 'mySQLPunk' -or $company -ne 'mySQLPunk') { throw 'Unexpected application profile identity.' }
     $profilePath = Join-Path ([Environment]::GetFolderPath('ApplicationData')) "$company\$product\$productVersion"
     $settingsPath = Join-Path $profilePath 'application-options.json'
+    $themePath = Join-Path $profilePath 'theme.txt'
+    $languagePath = Join-Path $profilePath 'language.txt'
     if (@($script:settingsFixtures | Where-Object { $_.path -eq $settingsPath }).Count -gt 0) { return }
     if (Test-Path -LiteralPath $profilePath) { throw "Application profile already exists: $profilePath" }
     if (-not $Seed) {
-        $script:settingsFixtures.Add(@{ path = $settingsPath; version = $productVersion; seeded = $false; autoCheckUpdates = $false })
+        $script:settingsFixtures.Add(@{ path = $settingsPath; themePath = $themePath; languagePath = $languagePath; version = $productVersion; seeded = $false; autoCheckUpdates = $false })
         return
     }
     $null = New-Item -ItemType Directory -Path $profilePath
@@ -191,7 +193,9 @@ function Initialize-SettingsFixture($Metadata, [bool]$Seed = $true) {
         StringValues = @{ ViewAiPanelVisibilityPreference = 'closed'; FileQueryDirectory = (Join-Path $WorkRoot 'queries'); FileLogDirectory = (Join-Path $WorkRoot 'logs'); FileExportDirectory = (Join-Path $WorkRoot 'exports'); AcceptanceFixture = 'synthetic-settings-preserved' }
     }
     [IO.File]::WriteAllText($settingsPath, ($fixture | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($true)))
-    $script:settingsFixtures.Add(@{ path = $settingsPath; version = $productVersion; seeded = $true; autoCheckUpdates = $false })
+    [IO.File]::WriteAllText($themePath, 'dark', (New-Object Text.UTF8Encoding($true)))
+    [IO.File]::WriteAllText($languagePath, 'en-US', (New-Object Text.UTF8Encoding($true)))
+    $script:settingsFixtures.Add(@{ path = $settingsPath; themePath = $themePath; languagePath = $languagePath; version = $productVersion; seeded = $true; autoCheckUpdates = $false })
 }
 
 function Assert-SettingsPreserved {
@@ -199,6 +203,9 @@ function Assert-SettingsPreserved {
         $settings = Get-Content -LiteralPath $fixture.path -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($settings.BoolValues.AutoCheckUpdates -ne $false -or $settings.IntValues.RecordLimit -ne 321 -or $settings.StringValues.AcceptanceFixture -ne 'synthetic-settings-preserved') {
             throw 'Synthetic settings changed or automatic update checks became enabled.'
+        }
+        if (([IO.File]::ReadAllText($fixture.themePath)).Trim() -cne 'dark' -or ([IO.File]::ReadAllText($fixture.languagePath)).Trim() -cne 'en-US') {
+            throw 'The dark theme or English language preference was not preserved.'
         }
     }
 }
@@ -340,11 +347,15 @@ public static class UpdateAcceptanceWindows {
     if ($baselineSettings.Count -ne 1 -or $currentSettings.Count -ne 1 -or (Test-Path -LiteralPath $currentSettings[0].path)) {
         throw 'Settings migration requires one baseline fixture and an absent current settings file.'
     }
+    foreach ($preferencePath in @($currentSettings[0].themePath, $currentSettings[0].languagePath)) {
+        if (Test-Path -LiteralPath $preferencePath) { throw 'Current theme and language files must not be seeded.' }
+    }
     $syntheticFile = Join-Path $installDirectory '驗收使用者查詢.sql'
     [IO.File]::WriteAllText($syntheticFile, "-- Synthetic acceptance data only.`r`nSELECT '設定保留 O''Brien';`r`n", (New-Object Text.UTF8Encoding($true)))
     $syntheticHash = (Get-FileHash -LiteralPath $syntheticFile -Algorithm SHA256).Hash
     $oldApplication = Start-OwnedProcess $installedExe @() 'baseline-application'
     $oldWindow = Wait-ApplicationWindow $oldApplication
+    if ($oldWindow.Title -cne 'mySQLPunk') { throw 'The baseline application did not load the English language fixture.' }
     $evidence.oldApplication = @{ processId = $oldApplication.Id; executablePath = $installedExe; windowTitle = $oldWindow.Title; responsive = $true }
     $generated = Invoke-FrameworkHelper 'generate' $ApplicationPath (Join-Path $WorkRoot 'generated-script.json') $oldApplication.Id
     $applyScript = Assert-TestPath $generated.scriptPath
@@ -361,6 +372,8 @@ public static class UpdateAcceptanceWindows {
     Close-TestApplication $oldApplication $oldWindow
     $evidence.oldApplication.normalClose = $true
     $baselineSettingsHash = (Get-FileHash -LiteralPath $baselineSettings[0].path -Algorithm SHA256).Hash
+    $baselineThemeHash = (Get-FileHash -LiteralPath $baselineSettings[0].themePath -Algorithm SHA256).Hash
+    $baselineLanguageHash = (Get-FileHash -LiteralPath $baselineSettings[0].languagePath -Algorithm SHA256).Hash
     $applyExitCode = Wait-ProcessExit $applyProcess 240 'Generated installer update'
     $evidence.update = @{ exitCode = $applyExitCode; scriptPath = $applyScript; scriptSha256 = (Get-FileHash -LiteralPath $applyScript -Algorithm SHA256).Hash; generatorFramework = $generated.frameworkVersion; generatorEdition = $generated.edition }
     if ($applyExitCode -ne 0) { throw "Generated update script failed with exit code $applyExitCode." }
@@ -375,6 +388,7 @@ public static class UpdateAcceptanceWindows {
     $newApplication = $restarted[0]
     $script:ownedProcesses.Add(@{ Process = $newApplication; Executable = $installedExe; StartedTicks = $newApplication.StartTime.ToUniversalTime().Ticks; ScriptPath = '' })
     $newWindow = Wait-ApplicationWindow $newApplication
+    if ($newWindow.Title -cne $oldWindow.Title) { throw 'The updated application did not retain the English window title.' }
     $actualVersion = [version][Diagnostics.FileVersionInfo]::GetVersionInfo($installedExe).FileVersion
     $actualHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash
     if ($actualVersion -ne $expectedVersion -or $actualHash -ne $evidence.expectedApplicationSha256) { throw 'Updated installed executable does not match the current build.' }
@@ -387,7 +401,11 @@ public static class UpdateAcceptanceWindows {
     if ((Get-FileHash -LiteralPath $baselineSettings[0].path -Algorithm SHA256).Hash -ne $baselineSettingsHash) {
         throw 'Settings migration modified the previous version settings file.'
     }
+    if ((Get-FileHash -LiteralPath $baselineSettings[0].themePath -Algorithm SHA256).Hash -ne $baselineThemeHash -or (Get-FileHash -LiteralPath $baselineSettings[0].languagePath -Algorithm SHA256).Hash -ne $baselineLanguageHash) {
+        throw 'Preference migration modified the previous version theme or language file.'
+    }
     $evidence.settingsMigration = @{ fileName = 'application-options.json'; fromVersion = $baselineSettings[0].version; toVersion = $currentSettings[0].version; targetAbsentBeforeUpdate = $true; optionsPreserved = $true; sourceSha256 = $baselineSettingsHash; sourceUnchanged = $true }
+    $evidence.preferenceMigration = @{ files = @('theme.txt', 'language.txt'); targetAbsentBeforeUpdate = $true; darkThemeFilePreserved = $true; englishWindowTitlePreserved = $true; sourcesUnchanged = $true; sourceThemeSha256 = $baselineThemeHash; sourceLanguageSha256 = $baselineLanguageHash }
     $evidence.syntheticData = @{ path = $syntheticFile; sha256 = $syntheticHash; preservedAfterUpdate = $true; settingsPreserved = $true }
     Invoke-TestUninstall
     $uninstallCompleted = $true

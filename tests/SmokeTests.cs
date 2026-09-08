@@ -20,7 +20,7 @@ using mySQLPunk.lib;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-public static class SmokeTests
+public static partial class SmokeTests
 {
     private static readonly string SmokeFilter = (Environment.GetEnvironmentVariable("MYSQLPUNK_SMOKE_FILTER") ?? string.Empty).Trim();
 
@@ -55,6 +55,7 @@ public static class SmokeTests
         Run("SQL editor completion and snippets", TestSqlEditorCompletionAndSnippets, ref passed);
         Run("Query form option settings", TestQueryFormOptionSettings, ref passed);
         Run("Application option version migration", TestApplicationOptionVersionMigration, ref passed);
+        Run("Versioned theme and language preferences", TestVersionedThemeAndLanguagePreferences, ref passed);
         Run("Query editor AI actions", TestQueryEditorAiActions, ref passed);
         Run("Query AI SQL tools", TestQueryAiSqlTools, ref passed);
         Run("Query AI custom actions", TestQueryAiCustomActions, ref passed);
@@ -104,6 +105,7 @@ public static class SmokeTests
         Run("Application update download", TestApplicationUpdateDownload, ref passed);
         Run("Application update apply", TestApplicationUpdateApply, ref passed);
         Run("Application update portable apply", TestApplicationPortableUpdateApply, ref passed);
+        Run("Application update portable rollback", TestApplicationPortableUpdateRollback, ref passed);
         Run("Release packaging script", TestReleasePackagingScript, ref passed);
         Run("Release third-party notices", TestReleaseThirdPartyNotices, ref passed);
         Run("GitHub release workflow", TestGitHubReleaseWorkflow, ref passed);
@@ -10601,6 +10603,30 @@ public static class SmokeTests
                 Assert(!File.Exists(resultPath), "Invalid results should be discarded after reading.");
             }
             File.WriteAllText(resultPath, "7");
+            using (FileStream heldResult = new FileStream(resultPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Assert(!AppUpdateService.TakeInstallerUpdateFailure(executable).HasValue,
+                    "A persistently locked notification must stop after bounded retries.");
+                Assert(File.Exists(resultPath), "An unread notification must remain available for the next startup.");
+            }
+            Assert(AppUpdateService.TakeInstallerUpdateFailure(executable) == 7,
+                "A notification must remain readable after its file lock is released.");
+
+            File.WriteAllText(resultPath, "7");
+            using (ManualResetEventSlim reading = new ManualResetEventSlim())
+            {
+                Task<int?> pendingRead;
+                using (FileStream heldResult = new FileStream(resultPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    pendingRead = Task.Run(() => { reading.Set(); return AppUpdateService.TakeInstallerUpdateFailure(executable); });
+                    Assert(reading.Wait(5000), "The notification reader must start while the fixture is locked.");
+                    Thread.Sleep(80);
+                }
+                Assert(pendingRead.GetAwaiter().GetResult() == 7,
+                    "A briefly locked notification must be retried and reported.");
+            }
+
+            File.WriteAllText(resultPath, "7");
             int?[] claimedResults = Task.WhenAll(Enumerable.Range(0, 4).Select(_ =>
                 Task.Run(() => AppUpdateService.TakeInstallerUpdateFailure(executable)))).GetAwaiter().GetResult();
             Assert(claimedResults.Count(code => code == 7) == 1, "Concurrent application startups must consume an installer failure only once.");
@@ -10627,7 +10653,15 @@ public static class SmokeTests
             if (File.Exists(resultPath)) File.Delete(resultPath);
             string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             Assert(Path.GetFullPath(root).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Updater test cleanup must stay in the temporary directory.");
-            Directory.Delete(root, true);
+            for (int attempt = 0; ; attempt++)
+            {
+                try { Directory.Delete(root, true); break; }
+                catch (IOException)
+                {
+                    if (attempt == 9) throw;
+                    Thread.Sleep(100);
+                }
+            }
         }
     }
 
@@ -10680,6 +10714,12 @@ public static class SmokeTests
                     AssertEquals(executable, File.ReadAllText(restartedPath), "Successful portable updates must restart the installed executable: " + name);
                     AssertEquals(before[Path.Combine("queries", "keep.sql")], AppUpdateService.ComputeFileSha256(Path.Combine(appDirectory, "queries", "keep.sql")),
                         "A valid portable update must preserve an unrelated user query.");
+                    foreach (KeyValuePair<string, string> entry in entries)
+                    {
+                        string relativePath = entry.Key.StartsWith("payload/", StringComparison.Ordinal) ? entry.Key.Substring("payload/".Length) : entry.Key;
+                        AssertEquals(entry.Value, File.ReadAllText(Path.Combine(appDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar))),
+                            "Valid portable packages must also copy their accompanying files: " + name + "/" + relativePath);
+                    }
                     Assert(!Directory.Exists(Path.Combine(appDirectory, "payload")), "A wrapper directory must not be copied into the installation.");
                 }
                 else
@@ -10705,6 +10745,22 @@ public static class SmokeTests
             };
             runCase("root", true, payload);
             runCase("wrapper", true, payload.ToDictionary(pair => "payload/" + pair.Key, pair => pair.Value));
+            Dictionary<string, string> withDocuments = new Dictionary<string, string>(payload)
+            {
+                { "LICENSE", "Redistribution terms" },
+                { "docs/README.md", "Application documentation" },
+                { "docs/example.sql", "SELECT 1;" }
+            };
+            runCase("accompanying-files", true, withDocuments);
+            foreach (string protectedPath in new[] { "setting.ini", "CONNECTION-PROFILE.TXT", "connection_profiles/profile.json", "autocomplete-cache.json", "application.log", "setting.ini.corrupt-old" })
+            {
+                Dictionary<string, string> unsafePayload = new Dictionary<string, string>(payload) { { protectedPath, "must not overwrite user data" } };
+                runCase("protected-" + protectedPath.Replace('/', '-'), false, unsafePayload);
+            }
+            runCase("file-over-directory", false, new Dictionary<string, string>(payload) { { "queries", "must not replace a directory" } });
+            Dictionary<string, string> directoryOverFile = payload.Where(pair => pair.Key != "core.dll").ToDictionary(pair => pair.Key, pair => pair.Value);
+            directoryOverFile.Add("core.dll/nested.dll", "must not replace a file");
+            runCase("directory-over-file", false, directoryOverFile);
             runCase("missing-executable", false, new Dictionary<string, string> { { "core.dll", "must not replace old library" }, { "extra/new.txt", "must not appear" } });
             runCase("multiple-payloads", false, new Dictionary<string, string> { { "first/mySQLPunk.exe", "first application" }, { "second/mySQLPunk.exe", "second application" } });
             runCase("root-and-wrapper", false, new Dictionary<string, string> { { "mySQLPunk.exe", "root application" }, { "payload/mySQLPunk.exe", "wrapped application" } });
@@ -10720,14 +10776,181 @@ public static class SmokeTests
         }
     }
 
+    private static void TestApplicationPortableUpdateRollback()
+    {
+        string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string root = Path.GetFullPath(Path.Combine(tempRoot, "mysqlpunk_portable_rollback_" + Guid.NewGuid().ToString("N")));
+        Assert(root.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Rollback test fixtures must stay in the temporary directory.");
+        Assert(!Directory.Exists(root), "Rollback tests must create a fresh directory.");
+        Directory.CreateDirectory(root);
+        try
+        {
+            Action<string, FileShare, bool> runLockedCase = (name, sharing, expectApply) =>
+            {
+                string caseRoot = Path.Combine(root, name);
+                string appDirectory = Path.Combine(caseRoot, "app");
+                Directory.CreateDirectory(Path.Combine(appDirectory, "queries"));
+                Directory.CreateDirectory(Path.Combine(appDirectory, "empty-user-directory"));
+                string executable = Path.Combine(appDirectory, "mySQLPunk.exe");
+                string firstExistingPath = Path.Combine(appDirectory, "00-existing.dll");
+                string addedPath = Path.Combine(appDirectory, "01-new", "added.dll");
+                string lockedPath = Path.Combine(appDirectory, "zz-locked.dll");
+                File.WriteAllText(firstExistingPath, "original first library");
+                File.WriteAllText(executable, "original application");
+                File.WriteAllText(lockedPath, "original last library");
+                File.WriteAllText(Path.Combine(appDirectory, "queries", "keep.sql"), "SELECT 'keep user query';");
+                Dictionary<string, string> before = Directory.GetFiles(appDirectory, "*", SearchOption.AllDirectories)
+                    .ToDictionary(path => path.Substring(appDirectory.Length + 1), AppUpdateService.ComputeFileSha256);
+                string[] directoriesBefore = Directory.GetDirectories(appDirectory, "*", SearchOption.AllDirectories)
+                    .Select(path => path.Substring(appDirectory.Length + 1)).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+                string zipPath = Path.Combine(caseRoot, "update.zip");
+                // 插入順序故意與檔名相反，確認套用順序由 manifest 決定。
+                using (ZipArchive archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+                {
+                    foreach (KeyValuePair<string, string> entry in new Dictionary<string, string>
+                    {
+                        { "zz-locked.dll", "new last library" },
+                        { "mySQLPunk.exe", "new application" },
+                        { "01-new/added.dll", "new file that rollback must remove" },
+                        { "00-existing.dll", "new first library" }
+                    })
+                    {
+                        using (StreamWriter writer = new StreamWriter(archive.CreateEntry(entry.Key).Open(), Encoding.UTF8))
+                            writer.Write(entry.Value);
+                    }
+                }
+                string restartedPath = Path.Combine(caseRoot, "restarted.txt");
+                TaskCompletionSource<bool> addedDuringApply = new TaskCompletionSource<bool>();
+                TaskCompletionSource<bool> watcherFailed = new TaskCompletionSource<bool>();
+                using (FileSystemWatcher watcher = new FileSystemWatcher(appDirectory))
+                {
+                    watcher.IncludeSubdirectories = true;
+                    watcher.NotifyFilter = NotifyFilters.FileName;
+                    watcher.InternalBufferSize = 16384;
+                    // 備份不會碰此新增目標；即使回呼晚於復原，事件仍能證明前段已實際套用。
+                    FileSystemEventHandler onCreated = (sender, args) =>
+                    {
+                        if (string.Equals(args.FullPath, addedPath, StringComparison.OrdinalIgnoreCase)) addedDuringApply.TrySetResult(true);
+                    };
+                    RenamedEventHandler onRenamed = (sender, args) =>
+                    {
+                        if (string.Equals(args.FullPath, addedPath, StringComparison.OrdinalIgnoreCase)) addedDuringApply.TrySetResult(true);
+                    };
+                    watcher.Created += onCreated;
+                    watcher.Renamed += onRenamed;
+                    watcher.Error += (sender, args) => watcherFailed.TrySetResult(true);
+                    watcher.EnableRaisingEvents = true;
+                    using (FileStream lockedFile = new FileStream(lockedPath, FileMode.Open, FileAccess.Read, sharing))
+                    {
+                        string script = AppUpdateService.BuildPortableUpdateApplyScript(zipPath, appDirectory, executable, 0);
+                        Assert(RunUpdateApplyScriptForTest(caseRoot, script, Path.Combine(caseRoot, "arguments.txt"), restartedPath, 0) == 1,
+                            "A file I/O failure followed by complete rollback must return exit code 1: " + name);
+                    }
+                    if (expectApply)
+                        Assert(addedDuringApply.Task.Wait(5000), "The lock test must reach an actual earlier file addition before the later replacement fails.");
+                    Assert(!watcherFailed.Task.IsCompleted, "The rollback observation must not lose filesystem events.");
+                    watcher.EnableRaisingEvents = false;
+                }
+                Dictionary<string, string> after = Directory.GetFiles(appDirectory, "*", SearchOption.AllDirectories)
+                    .ToDictionary(path => path.Substring(appDirectory.Length + 1), AppUpdateService.ComputeFileSha256);
+                Assert(before.Count == after.Count && before.All(pair => after.ContainsKey(pair.Key) && after[pair.Key] == pair.Value),
+                    "Rollback must restore every original file and remove new files, including beside-file temporary copies: " + name);
+                string[] directoriesAfter = Directory.GetDirectories(appDirectory, "*", SearchOption.AllDirectories)
+                    .Select(path => path.Substring(appDirectory.Length + 1)).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+                Assert(directoriesBefore.SequenceEqual(directoriesAfter), "Rollback must remove only its new directories and preserve existing empty user directories: " + name);
+                Assert(!File.Exists(restartedPath), "A failed portable update must not restart the application: " + name);
+                Assert(Directory.GetDirectories(Path.Combine(caseRoot, "process-temp"), "mysqlpunk-update-*").Length == 0,
+                    "Complete rollback and backup rejection must clean their staging directories: " + name);
+            };
+            // FileShare.Read 允許備份與雜湊讀取，但不允許後段 File.Replace 刪除原檔。
+            runLockedCase("later-replacement-locked", FileShare.Read, true);
+            runLockedCase("backup-source-unreadable", FileShare.None, false);
+
+            string junctionCaseRoot = Path.Combine(root, "target-junction");
+            string junctionAppDirectory = Path.Combine(junctionCaseRoot, "app");
+            string outsideDirectory = Path.Combine(junctionCaseRoot, "user-data");
+            Directory.CreateDirectory(junctionAppDirectory);
+            Directory.CreateDirectory(outsideDirectory);
+            string junctionPath = Path.Combine(junctionAppDirectory, "linked");
+            string junctionExecutable = Path.Combine(junctionAppDirectory, "mySQLPunk.exe");
+            string outsideFile = Path.Combine(outsideDirectory, "keep.sql");
+            File.WriteAllText(junctionExecutable, "original application");
+            File.WriteAllText(outsideFile, "SELECT 'outside installation';");
+            string executableHashBefore = AppUpdateService.ComputeFileSha256(junctionExecutable);
+            string outsideHashBefore = AppUpdateService.ComputeFileSha256(outsideFile);
+            try
+            {
+                System.Diagnostics.ProcessStartInfo junctionStartInfo = new System.Diagnostics.ProcessStartInfo("cmd.exe",
+                    "/d /c mklink /J \"" + junctionPath + "\" \"" + outsideDirectory + "\"")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (System.Diagnostics.Process junctionProcess = System.Diagnostics.Process.Start(junctionStartInfo))
+                {
+                    if (!junctionProcess.WaitForExit(10000))
+                    {
+                        junctionProcess.Kill();
+                        junctionProcess.WaitForExit();
+                        throw new Exception("The isolated junction fixture was not created within 10 seconds.");
+                    }
+                    Assert(junctionProcess.ExitCode == 0, "The isolated target junction must be created for its boundary test.");
+                }
+                Assert((File.GetAttributes(junctionPath) & FileAttributes.ReparsePoint) != 0, "The boundary fixture must be a real directory junction.");
+                string zipPath = Path.Combine(junctionCaseRoot, "update.zip");
+                using (ZipArchive archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+                {
+                    foreach (KeyValuePair<string, string> entry in new Dictionary<string, string>
+                    {
+                        { "mySQLPunk.exe", "must not replace the application" },
+                        { "linked/keep.sql", "must not change the junction destination" },
+                        { "linked/new.txt", "must not escape the installation" }
+                    })
+                    {
+                        using (StreamWriter writer = new StreamWriter(archive.CreateEntry(entry.Key).Open(), Encoding.UTF8))
+                            writer.Write(entry.Value);
+                    }
+                }
+                string restartedPath = Path.Combine(junctionCaseRoot, "restarted.txt");
+                string script = AppUpdateService.BuildPortableUpdateApplyScript(zipPath, junctionAppDirectory, junctionExecutable, 0);
+                Assert(RunUpdateApplyScriptForTest(junctionCaseRoot, script, Path.Combine(junctionCaseRoot, "arguments.txt"), restartedPath, 0) == 1,
+                    "Portable updates must reject target paths beneath a junction before writing files.");
+                AssertEquals(executableHashBefore, AppUpdateService.ComputeFileSha256(junctionExecutable), "Junction rejection must preserve the original application.");
+                AssertEquals(outsideHashBefore, AppUpdateService.ComputeFileSha256(outsideFile), "Junction rejection must preserve files outside the installation.");
+                Assert(Directory.GetFiles(outsideDirectory, "*", SearchOption.AllDirectories).Length == 1 && Directory.GetDirectories(outsideDirectory).Length == 0,
+                    "Junction rejection must not add files or directories outside the installation.");
+                Assert(Directory.GetFiles(junctionAppDirectory).Length == 1 && Directory.GetDirectories(junctionAppDirectory).SequenceEqual(new[] { junctionPath }),
+                    "Junction rejection must leave the installation's immediate entries unchanged.");
+                Assert(!File.Exists(restartedPath), "Junction rejection must not restart the application.");
+                Assert(Directory.GetDirectories(Path.Combine(junctionCaseRoot, "process-temp"), "mysqlpunk-update-*").Length == 0,
+                    "Junction rejection must remove its staging directory.");
+            }
+            finally
+            {
+                string resolvedJunctionPath = Path.GetFullPath(junctionPath);
+                Assert(resolvedJunctionPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "Junction cleanup must target the isolated fixture.");
+                if (Directory.Exists(resolvedJunctionPath)) Directory.Delete(resolvedJunctionPath, false);
+            }
+        }
+        finally
+        {
+            string resolvedRoot = Path.GetFullPath(root);
+            Assert(resolvedRoot.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Rollback test cleanup must remain below the expected temporary directory.");
+            Directory.Delete(resolvedRoot, true);
+        }
+    }
+
     private static int RunUpdateApplyScriptForTest(string root, string script, string argumentsPath, string restartedPath, int installerExitCode, bool failInstallerStart = false)
     {
         string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         Assert(Path.GetFullPath(root).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase), "Updater script fixtures must stay inside the temporary directory.");
         string processTemp = Path.Combine(root, "process-temp");
         Directory.CreateDirectory(processTemp);
-        string scriptPath = Path.Combine(root, "apply.ps1");
-        string wrapperPath = Path.Combine(root, "test-apply.ps1");
+        string invocationId = Guid.NewGuid().ToString("N");
+        string scriptPath = Path.Combine(root, "apply-" + invocationId + ".ps1");
+        string wrapperPath = Path.Combine(root, "test-apply-" + invocationId + ".ps1");
         File.WriteAllText(scriptPath, script, new UTF8Encoding(true));
         // 執行實際產生的 PowerShell 腳本，只替換外部啟動動作，避免安裝或開啟使用者的程式。
         string wrapper =
@@ -10974,7 +11197,6 @@ public static class SmokeTests
             string script = File.ReadAllText(scriptPath, Encoding.UTF8);
             AssertContains(script, "WaitForExit($WaitTimeoutSeconds * 1000)", "Portable updater should wait for the current process before copying files.");
             AssertContains(script, "Expand-Archive -LiteralPath $zipPath", "Portable updater should extract the downloaded zip.");
-            AssertContains(script, "Copy-Item -LiteralPath $_.FullName -Destination $appDir", "Portable updater should copy extracted files into the app directory.");
             AssertContains(script, "Start-Process -FilePath $exePath", "Portable updater should relaunch the application after copying.");
 
             System.Diagnostics.ProcessStartInfo startInfo = AppUpdateService.BuildPortableUpdateApplyProcessStartInfo(scriptPath);

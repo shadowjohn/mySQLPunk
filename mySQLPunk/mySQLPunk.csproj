@@ -289,6 +289,7 @@
     <Compile Include="lib\AppIconService.cs" />
     <Compile Include="lib\AppUpdateService.cs" />
     <Compile Include="lib\ApplicationOptionsMigrationService.cs" />
+    <Compile Include="lib\VersionedSettingsMigrationService.cs" />
     <Compile Include="lib\AutoRecoveryDraftService.cs" />
     <Compile Include="lib\ConnectionDialogMessageService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />

@@ -239,42 +239,212 @@ namespace mySQLPunk.lib
             script.AppendLine("$zipPath = '" + EscapePowerShellSingleQuotedString(portableZipPath) + "'");
             script.AppendLine("$appDir = '" + EscapePowerShellSingleQuotedString(applicationDirectory) + "'");
             script.AppendLine("$exePath = '" + EscapePowerShellSingleQuotedString(executablePath) + "'");
-            script.AppendLine("$tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\\') + '\\'");
-            script.AppendLine("$staging = [System.IO.Path]::GetFullPath((Join-Path $tempRoot ('mysqlpunk-update-' + [System.Guid]::NewGuid().ToString('N'))))");
-            script.AppendLine("if (-not $staging.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) { exit 1 }");
-            script.AppendLine("New-Item -ItemType Directory -Path $staging | Out-Null");
-            script.AppendLine("$updateExitCode = 0");
-            script.AppendLine("try {");
-            script.AppendLine("    Expand-Archive -LiteralPath $zipPath -DestinationPath $staging -Force");
-            // 解壓完成後才辨識內容；缺主程式或同時夾帶多份程式，都不可覆寫舊安裝。
-            script.AppendLine("    $entries = @(Get-ChildItem -LiteralPath $staging -Force)");
-            script.AppendLine("    $executables = @(Get-ChildItem -LiteralPath $staging -Filter 'mySQLPunk.exe' -File -Recurse -Force)");
-            script.AppendLine("    if ($executables.Count -ne 1) { throw 'The portable package must contain exactly one mySQLPunk.exe.' }");
-            script.AppendLine("    $source = $staging");
-            script.AppendLine("    if (-not (Test-Path -LiteralPath (Join-Path $staging 'mySQLPunk.exe') -PathType Leaf)) {");
-            script.AppendLine("        if ($entries.Count -ne 1 -or -not $entries[0].PSIsContainer -or -not (Test-Path -LiteralPath (Join-Path $entries[0].FullName 'mySQLPunk.exe') -PathType Leaf)) {");
-            script.AppendLine("            throw 'The portable package must use its root or a single wrapper directory.'");
-            script.AppendLine("        }");
-            script.AppendLine("        $source = $entries[0].FullName");
-            script.AppendLine("    }");
-            script.AppendLine("    Get-ChildItem -LiteralPath $source -Force | ForEach-Object {");
-            script.AppendLine("        Copy-Item -LiteralPath $_.FullName -Destination $appDir -Recurse -Force");
-            script.AppendLine("    }");
-            script.AppendLine("}");
-            script.AppendLine("catch { $updateExitCode = 1 }");
-            script.AppendLine("finally {");
-            script.AppendLine("    $resolvedStaging = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $staging).ProviderPath)");
-            script.AppendLine("    if (-not $resolvedStaging.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -or ((Get-Item -LiteralPath $resolvedStaging).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {");
-            script.AppendLine("        throw 'Refusing to clean a staging directory outside the temporary directory.'");
-            script.AppendLine("    }");
-            script.AppendLine("    Remove-Item -LiteralPath $resolvedStaging -Recurse -Force");
-            script.AppendLine("}");
-            script.AppendLine("if ($updateExitCode -eq 0) {");
-            script.AppendLine("    if (Test-Path -LiteralPath $exePath -PathType Leaf) { Start-Process -FilePath $exePath }");
-            script.AppendLine("    else { $updateExitCode = 1 }");
-            script.AppendLine("}");
-            script.AppendLine("exit $updateExitCode");
+            AppendPortableUpdateApplyScriptBody(script);
             return script.ToString();
+        }
+
+        private static void AppendPortableUpdateApplyScriptBody(StringBuilder script)
+        {
+            // 備份僅包含這次套件會覆寫的檔案；不整份搬動程式目錄或使用者資料。
+            // journal 供復原失敗時查核，不提供斷電或強制中止後的自動續跑。
+            script.AppendLine(@"
+function Assert-NoReparse([string]$Path) {
+    $current = [System.IO.Path]::GetFullPath($Path)
+    while ($current) {
+        try {
+            if (([System.IO.File]::GetAttributes($current) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse points are not supported by the portable updater.' }
+        } catch [System.IO.FileNotFoundException] { } catch [System.IO.DirectoryNotFoundException] { }
+        $current = [System.IO.Path]::GetDirectoryName($current)
+    }
+}
+function Get-ChildPath([string]$Path, [string]$Root) {
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $prefix = [System.IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    if (-not $fullPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Update path is outside its expected directory.' }
+    Assert-NoReparse $fullPath
+    return $fullPath
+}
+function Get-SafeTree([string]$Root) {
+    Assert-NoReparse $Root
+    $pending = New-Object 'System.Collections.Generic.Queue[string]'
+    $items = New-Object 'System.Collections.Generic.List[object]'
+    $pending.Enqueue($Root)
+    while ($pending.Count -gt 0) {
+        foreach ($item in @(Get-ChildItem -LiteralPath $pending.Dequeue() -Force)) {
+            $null = Get-ChildPath $item.FullName $Root
+            $items.Add($item)
+            if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
+        }
+    }
+    return $items.ToArray()
+}
+function Get-UpdateHash([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
+function Write-UpdateFile([string]$Source, [string]$Target, [bool]$Replace, [string]$ExpectedHash) {
+    $null = Get-ChildPath $Source $staging
+    $null = Get-ChildPath $Target $appDir
+    $temporary = Get-ChildPath ($Target + '.update-' + [System.Guid]::NewGuid().ToString('N') + '.tmp') $appDir
+    $temporaryFiles.Add($temporary)
+    try {
+        [System.IO.File]::Copy($Source, $temporary, $false)
+        if ((Get-UpdateHash $temporary) -ne $ExpectedHash) { throw 'The staged update file is incomplete.' }
+        $null = Get-ChildPath $Target $appDir
+        if ($Replace) { [System.IO.File]::Replace($temporary, $Target, [NullString]::Value) }
+        else { [System.IO.File]::Move($temporary, $Target) }
+    } finally {
+        $null = Get-ChildPath $temporary $appDir
+        if ([System.IO.File]::Exists($temporary)) { [System.IO.File]::Delete($temporary) }
+    }
+}
+function Save-RecoveryJournal([string]$Status) {
+    $journalPath = Get-ChildPath (Join-Path $staging 'journal.json') $staging
+    $journal = @{ schemaVersion = 1; status = $Status; files = @($files | Select-Object Relative, Existed, OldHash, NewHash, Attempted); createdDirectories = @($createdDirectories | ForEach-Object { $_.Substring($appPrefix.Length) }) }
+    [System.IO.File]::WriteAllText($journalPath, ($journal | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+}
+function Restore-PortableUpdate {
+    $complete = $true
+    for ($index = $files.Count - 1; $index -ge 0; $index--) {
+        $file = $files[$index]
+        if (-not $file.Attempted) { continue }
+        try {
+            $null = Get-ChildPath $file.Target $appDir
+            if ([System.IO.Directory]::Exists($file.Target)) { throw 'A directory replaced an update target.' }
+            $exists = [System.IO.File]::Exists($file.Target)
+            $currentHash = if ($exists) { Get-UpdateHash $file.Target } else { '' }
+            if ($file.Existed) {
+                if ($currentHash -ne $file.OldHash) {
+                    if ($exists -and $currentHash -ne $file.NewHash) { throw 'An update target changed outside the updater.' }
+                    Write-UpdateFile $file.Backup $file.Target $exists $file.OldHash
+                }
+                if ([System.IO.File]::GetLastWriteTimeUtc($file.Target).Ticks -ne $file.LastWriteTicks) {
+                    [System.IO.File]::SetLastWriteTimeUtc($file.Target, (New-Object System.DateTime($file.LastWriteTicks, [System.DateTimeKind]::Utc)))
+                }
+                if ([System.IO.File]::GetAttributes($file.Target) -ne $file.Attributes) { [System.IO.File]::SetAttributes($file.Target, $file.Attributes) }
+                if ((Get-UpdateHash $file.Target) -ne $file.OldHash) { throw 'Restored file checksum mismatch.' }
+            } elseif ($exists) {
+                if ($currentHash -ne $file.NewHash) { throw 'A newly created update target changed outside the updater.' }
+                [System.IO.File]::Delete($file.Target)
+            }
+        } catch { $complete = $false }
+    }
+    for ($index = $createdDirectories.Count - 1; $index -ge 0; $index--) {
+        try {
+            $directory = Get-ChildPath $createdDirectories[$index] $appDir
+            if ([System.IO.Directory]::Exists($directory)) { [System.IO.Directory]::Delete($directory, $false) }
+        } catch { $complete = $false }
+    }
+    foreach ($file in $files) {
+        try {
+            $null = Get-ChildPath $file.Target $appDir
+            if ($file.Existed) {
+                if ((Get-UpdateHash $file.Target) -ne $file.OldHash) { $complete = $false }
+            } elseif ([System.IO.File]::Exists($file.Target) -or [System.IO.Directory]::Exists($file.Target)) { $complete = $false }
+        } catch { $complete = $false }
+    }
+    return $complete
+}
+$tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+$appDir = [System.IO.Path]::GetFullPath($appDir).TrimEnd('\')
+$appPrefix = $appDir + '\'
+$staging = Get-ChildPath (Join-Path $tempRoot ('mysqlpunk-update-' + [System.Guid]::NewGuid().ToString('N'))) $tempRoot
+New-Item -ItemType Directory -Path $staging | Out-Null
+$payload = Join-Path $staging 'payload'
+$backupRoot = Join-Path $staging 'backup'
+$files = New-Object 'System.Collections.Generic.List[object]'
+$directories = New-Object 'System.Collections.Generic.List[string]'
+$createdDirectories = New-Object 'System.Collections.Generic.List[string]'
+$temporaryFiles = New-Object 'System.Collections.Generic.List[string]'
+$updateExitCode = 0
+$mutating = $false
+$keepRecovery = $false
+try {
+    Assert-NoReparse $appDir
+    Assert-NoReparse $zipPath
+    if (-not [System.IO.Directory]::Exists($appDir)) { throw 'The application directory is missing.' }
+    $null = Get-ChildPath $exePath $appDir
+    if (-not [string]::Equals([System.IO.Path]::GetFullPath($exePath), (Join-Path $appDir 'mySQLPunk.exe'), [System.StringComparison]::OrdinalIgnoreCase)) { throw 'The application executable must be at the package root.' }
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $payload -Force
+    $tree = @(Get-SafeTree $payload)
+    $executables = @($tree | Where-Object { -not $_.PSIsContainer -and $_.Name -ieq 'mySQLPunk.exe' })
+    if ($executables.Count -ne 1) { throw 'The portable package must contain exactly one mySQLPunk.exe.' }
+    $source = $payload
+    if (-not [System.IO.File]::Exists((Join-Path $payload 'mySQLPunk.exe'))) {
+        $entries = @(Get-ChildItem -LiteralPath $payload -Force)
+        if ($entries.Count -ne 1 -or -not $entries[0].PSIsContainer -or -not [System.IO.File]::Exists((Join-Path $entries[0].FullName 'mySQLPunk.exe'))) { throw 'The portable package must use its root or a single wrapper directory.' }
+        $source = $entries[0].FullName
+    }
+    $sourcePrefix = $source.TrimEnd('\') + '\'
+    $sourceItems = @(Get-SafeTree $source)
+    $relativeFiles = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($item in $sourceItems) {
+        $relative = $item.FullName.Substring($sourcePrefix.Length)
+        $top = $relative.Split('\')[0].ToLowerInvariant()
+        if ($top -in @('setting.ini', 'connection-profile.txt', 'connection_profiles', 'autocomplete-cache.json') -or $top.EndsWith('.log') -or $top.Contains('.corrupt-')) { throw 'The package contains user settings or runtime data.' }
+        $target = Get-ChildPath (Join-Path $appDir $relative) $appDir
+        if ($item.PSIsContainer) {
+            if ([System.IO.File]::Exists($target)) { throw 'A payload directory conflicts with an installed file.' }
+            $directories.Add($target)
+        } else {
+            if ([System.IO.Directory]::Exists($target)) { throw 'A payload file conflicts with an installed directory.' }
+            $relativeFiles.Add($relative)
+        }
+    }
+    $relativeFiles.Sort([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($relative in $relativeFiles) {
+        $target = Get-ChildPath (Join-Path $appDir $relative) $appDir
+        $sourceFile = Get-ChildPath (Join-Path $source $relative) $source
+        $files.Add([pscustomobject]@{ Relative = $relative; Source = $sourceFile; Target = $target; Existed = [System.IO.File]::Exists($target); Backup = (Join-Path $backupRoot $relative); OldHash = ''; NewHash = (Get-UpdateHash $sourceFile); Attributes = 0; LastWriteTicks = 0; Attempted = $false })
+    }
+    foreach ($file in $files) {
+        if (-not $file.Existed) { continue }
+        $null = Get-ChildPath $file.Target $appDir
+        $null = Get-ChildPath $file.Backup $staging
+        $null = [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($file.Backup))
+        $file.Attributes = [System.IO.File]::GetAttributes($file.Target)
+        $file.LastWriteTicks = [System.IO.File]::GetLastWriteTimeUtc($file.Target).Ticks
+        [System.IO.File]::Copy($file.Target, $file.Backup, $false)
+        $file.OldHash = Get-UpdateHash $file.Backup
+        if ((Get-UpdateHash $file.Target) -ne $file.OldHash) { throw 'An installed file changed while being backed up.' }
+    }
+    Save-RecoveryJournal 'prepared'
+    $mutating = $true
+    foreach ($directory in @($directories | Sort-Object Length)) {
+        $null = Get-ChildPath $directory $appDir
+        if (-not [System.IO.Directory]::Exists($directory)) {
+            $null = [System.IO.Directory]::CreateDirectory($directory)
+            $createdDirectories.Add($directory)
+        }
+    }
+    foreach ($file in $files) {
+        $null = Get-ChildPath $file.Target $appDir
+        if ($file.Existed) {
+            if ((Get-UpdateHash $file.Target) -ne $file.OldHash) { throw 'An installed file changed before replacement.' }
+        } elseif ([System.IO.File]::Exists($file.Target) -or [System.IO.Directory]::Exists($file.Target)) { throw 'An update target was created by another process.' }
+        $file.Attempted = $true
+        Write-UpdateFile $file.Source $file.Target $file.Existed $file.NewHash
+        if ((Get-UpdateHash $file.Target) -ne $file.NewHash) { throw 'Installed file checksum mismatch.' }
+    }
+} catch {
+    $updateExitCode = 1
+    if ($mutating -and -not (Restore-PortableUpdate)) { $keepRecovery = $true; $updateExitCode = 2 }
+} finally {
+    foreach ($temporary in $temporaryFiles) {
+        try {
+            $null = Get-ChildPath $temporary $appDir
+            if ([System.IO.File]::Exists($temporary)) { [System.IO.File]::Delete($temporary) }
+        } catch { $keepRecovery = $true; $updateExitCode = 2 }
+    }
+    if (-not $keepRecovery) {
+        try {
+            $resolvedStaging = Get-ChildPath (Resolve-Path -LiteralPath $staging).ProviderPath $tempRoot
+            $null = @(Get-SafeTree $resolvedStaging)
+            Remove-Item -LiteralPath $resolvedStaging -Recurse -Force
+        } catch { $keepRecovery = $true; $updateExitCode = 2 }
+    }
+    if ($keepRecovery) { try { Save-RecoveryJournal 'recovery-required' } catch { } }
+}
+if ($updateExitCode -eq 0) { Start-Process -FilePath $exePath }
+exit $updateExitCode
+");
         }
 
         public static ProcessStartInfo BuildPortableUpdateApplyProcessStartInfo(string scriptPath)
@@ -362,21 +532,47 @@ namespace mySQLPunk.lib
         {
             string resultPath = GetInstallerUpdateResultPath(executablePath);
             string claimedPath = resultPath + "." + Guid.NewGuid().ToString("N") + ".consumed";
+            bool claimed = false;
+            bool consumed = false;
             try
             {
-                if (!File.Exists(resultPath)) return null;
-                // 多個主視窗同時啟動時，只有成功取走結果的那一個顯示通知。
-                File.Move(resultPath, claimedPath);
-                string result = new FileInfo(claimedPath).Length <= 16 ? File.ReadAllText(claimedPath, Encoding.UTF8) : "";
-                int exitCode;
-                return int.TryParse(result, System.Globalization.NumberStyles.Integer,
-                    System.Globalization.CultureInfo.InvariantCulture, out exitCode) && exitCode != 0 ? (int?)exitCode : null;
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    try
+                    {
+                        if (!claimed)
+                        {
+                            if (!File.Exists(resultPath)) return null;
+                            // 只有成功取走結果的實例顯示通知；短暫檔案鎖稍後再試。
+                            File.Move(resultPath, claimedPath);
+                            claimed = true;
+                        }
+                        string result = new FileInfo(claimedPath).Length <= 16 ? File.ReadAllText(claimedPath, Encoding.UTF8) : "";
+                        int exitCode;
+                        consumed = true;
+                        return int.TryParse(result, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out exitCode) && exitCode != 0 ? (int?)exitCode : null;
+                    }
+                    catch (IOException)
+                    {
+                        if (attempt == 4) return null;
+                        System.Threading.Thread.Sleep(50);
+                    }
+                }
+                return null;
             }
-            catch (IOException) { return null; }
             catch (UnauthorizedAccessException) { return null; }
             finally
             {
-                try { if (File.Exists(claimedPath)) File.Delete(claimedPath); }
+                try
+                {
+                    if (claimed && File.Exists(claimedPath))
+                    {
+                        if (consumed) File.Delete(claimedPath);
+                        // 讀取失敗保留通知，且不覆寫另一個更新剛寫入的結果。
+                        else File.Move(claimedPath, resultPath);
+                    }
+                }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
             }
