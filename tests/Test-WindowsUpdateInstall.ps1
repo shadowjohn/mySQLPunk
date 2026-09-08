@@ -216,16 +216,22 @@ function Get-TestApplicationProcesses {
     })
 }
 
-function Wait-ApplicationWindow($Process, [int]$TimeoutSeconds = 90) {
+function Wait-ApplicationWindow($Process, [int]$TimeoutSeconds = 90, [string]$ExpectedTitle = '') {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastTitle = ''
     do {
         Assert-ProcessIdentity $Process $installedExe
         $windows = @([UpdateAcceptanceWindows]::ForProcess($Process.Id))
         $mainWindow = @($windows | Where-Object { $_.ClassName.StartsWith('WindowsForms10.Window.') -and $_.Title -match 'mySQLPunk' -and $_.Enabled })
-        if ($mainWindow.Count -eq 1 -and [UpdateAcceptanceWindows]::Responds($mainWindow[0].Handle)) { return $mainWindow[0] }
+        if ($mainWindow.Count -eq 1) {
+            $lastTitle = $mainWindow[0].Title
+            # WinForms creates its handle with the Designer title before Load
+            # finishes applying the saved language to the main toolbar/window.
+            if ((-not $ExpectedTitle -or $lastTitle -ceq $ExpectedTitle) -and [UpdateAcceptanceWindows]::Responds($mainWindow[0].Handle)) { return $mainWindow[0] }
+        }
         Start-Sleep -Milliseconds 500
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Application $($Process.Id) did not expose a responsive main window."
+    throw "Application $($Process.Id) did not expose the expected responsive main window; last title: $lastTitle"
 }
 
 function Close-TestApplication($Process, $Window) {
@@ -354,8 +360,7 @@ public static class UpdateAcceptanceWindows {
     [IO.File]::WriteAllText($syntheticFile, "-- Synthetic acceptance data only.`r`nSELECT '設定保留 O''Brien';`r`n", (New-Object Text.UTF8Encoding($true)))
     $syntheticHash = (Get-FileHash -LiteralPath $syntheticFile -Algorithm SHA256).Hash
     $oldApplication = Start-OwnedProcess $installedExe @() 'baseline-application'
-    $oldWindow = Wait-ApplicationWindow $oldApplication
-    if ($oldWindow.Title -cne 'mySQLPunk') { throw 'The baseline application did not load the English language fixture.' }
+    $oldWindow = Wait-ApplicationWindow $oldApplication -ExpectedTitle 'mySQLPunk'
     $evidence.oldApplication = @{ processId = $oldApplication.Id; executablePath = $installedExe; windowTitle = $oldWindow.Title; responsive = $true }
     $generated = Invoke-FrameworkHelper 'generate' $ApplicationPath (Join-Path $WorkRoot 'generated-script.json') $oldApplication.Id
     $applyScript = Assert-TestPath $generated.scriptPath
@@ -387,8 +392,7 @@ public static class UpdateAcceptanceWindows {
     if ($restarted.Count -ne 1) { throw 'Updater did not automatically restart the installed application.' }
     $newApplication = $restarted[0]
     $script:ownedProcesses.Add(@{ Process = $newApplication; Executable = $installedExe; StartedTicks = $newApplication.StartTime.ToUniversalTime().Ticks; ScriptPath = '' })
-    $newWindow = Wait-ApplicationWindow $newApplication
-    if ($newWindow.Title -cne $oldWindow.Title) { throw 'The updated application did not retain the English window title.' }
+    $newWindow = Wait-ApplicationWindow $newApplication -ExpectedTitle $oldWindow.Title
     $actualVersion = [version][Diagnostics.FileVersionInfo]::GetVersionInfo($installedExe).FileVersion
     $actualHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash
     if ($actualVersion -ne $expectedVersion -or $actualHash -ne $evidence.expectedApplicationSha256) { throw 'Updated installed executable does not match the current build.' }
