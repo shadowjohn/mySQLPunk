@@ -132,6 +132,9 @@ function Start-OwnedProcess([string]$Executable, [string[]]$Arguments, [string]$
 function Assert-ProcessIdentity($Process, [string]$ExpectedPath, [long]$StartedTicks = 0) {
     $Process.Refresh()
     if ($Process.HasExited) { throw "Process $($Process.Id) has already exited." }
+    # Get-Process does not retain a handle by default. Keep one while the process
+    # is alive so ExitCode remains available after the updater-started app exits.
+    $null = $Process.Handle
     $actualPath = $Process.MainModule.FileName
     if (-not [string]::Equals($actualPath, $ExpectedPath, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Process $($Process.Id) does not have the expected executable path."
@@ -147,6 +150,7 @@ function Wait-ProcessExit($Process, [int]$TimeoutSeconds, [string]$Label) {
         if ([DateTime]::UtcNow -ge $deadline) { throw "$Label did not finish within $TimeoutSeconds seconds." }
     }
     $Process.Refresh()
+    if ($null -eq $Process.ExitCode) { throw "$Label exited, but its exit code could not be read." }
     return $Process.ExitCode
 }
 
@@ -217,7 +221,8 @@ function Close-TestApplication($Process, $Window) {
     $null = Assert-TestPath $installedExe
     Assert-ProcessIdentity $Process $installedExe
     if (-not [UpdateAcceptanceWindows]::Close($Window.Handle, $Process.Id)) { throw 'Could not request normal WM_CLOSE on the verified application window.' }
-    if ((Wait-ProcessExit $Process 45 'Application close') -ne 0) { throw 'Application returned a failure exit code during normal close.' }
+    $exitCode = Wait-ProcessExit $Process 45 'Application close'
+    if ($exitCode -ne 0) { throw "Application returned exit code $exitCode during normal close." }
 }
 
 function Invoke-TestUninstall {
