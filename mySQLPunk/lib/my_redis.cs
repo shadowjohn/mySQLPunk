@@ -477,6 +477,28 @@ namespace mySQLPunk.lib
                 () => client.Execute("RPUSH", key, newValue ?? string.Empty));
         }
 
+        /// <summary>
+        /// 刪除 list 指定索引的元素；先比對載入值，再於同一交易以唯一標記取代並移除，
+        /// 避免 LREM 直接依值刪除時誤傷內容相同的其他元素。
+        /// </summary>
+        public void DeleteListElement(string databaseName, string key, long index, string expectedValue)
+        {
+            if (index < 0) throw new ArgumentOutOfRangeException("index");
+            RejectBinary(expectedValue);
+            string marker = "\0mysqlpunk:list-delete:" + Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+            RunWatchedWrite(databaseName, key, "list",
+                () =>
+                {
+                    string current = client.Execute("LINDEX", key, index.ToString(CultureInfo.InvariantCulture)) as string;
+                    ValidateEntryExpectation(current, expectedValue, true);
+                },
+                () =>
+                {
+                    client.Execute("LSET", key, index.ToString(CultureInfo.InvariantCulture), marker);
+                    client.Execute("LREM", key, "1", marker);
+                });
+        }
+
         /// <summary>加入 set 成員（SADD；已存在時為 no-op）。</summary>
         public void AddSetMember(string databaseName, string key, string member)
         {

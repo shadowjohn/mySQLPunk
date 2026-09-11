@@ -272,8 +272,7 @@ namespace mySQLPunk
                     _entryNameBox.ReadOnly = true;
                     _entryValueBox.Visible = _entryValueLabel.Visible = true;
                     _addUpdateButton.Text = Localization.T("Redis.UpdateEntry");
-                    _addUpdateButton.Visible = true;
-                    _deleteEntryButton.Visible = false;
+                    _addUpdateButton.Visible = _deleteEntryButton.Visible = true;
                     break;
                 case "set":
                     _entryNameLabel.Text = Localization.T("Redis.EntryMemberColon");
@@ -499,6 +498,13 @@ namespace mySQLPunk
                             string field = Convert.ToString(view.Row["field"], CultureInfo.InvariantCulture);
                             string expected = Convert.ToString(view.Row["value"], CultureInfo.InvariantCulture);
                             await Task.Run(() => _db.DeleteHashField(_databaseName, _key, field, expected));
+                            break;
+                        }
+                    case "list":
+                        {
+                            long index = Convert.ToInt64(view.Row["index"], CultureInfo.InvariantCulture);
+                            string expected = Convert.ToString(view.Row["value"], CultureInfo.InvariantCulture);
+                            await Task.Run(() => _db.DeleteListElement(_databaseName, _key, index, expected));
                             break;
                         }
                     case "set":

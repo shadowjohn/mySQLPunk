@@ -862,7 +862,7 @@ namespace mySQLPunk
             Add("Redis.EntryNotSelected", "請先在清單中選取要操作的項目。", "Select an entry in the list first.");
             Add("Redis.EntrySaved", "項目已儲存。", "The entry was saved.");
             Add("Redis.EntryDeleted", "項目已刪除。", "The entry was deleted.");
-            Add("Redis.ListEditNote", "list 支援編輯既有元素與尾端新增；元素刪除因 Redis 無單一索引刪除命令，留待後續。", "Lists support editing existing elements and appending; element deletion is deferred because Redis has no delete-by-index command.");
+            Add("Redis.ListEditNote", "list 支援編輯、刪除既有元素與尾端新增；內容已變更時會要求重新載入。", "Lists support editing or deleting existing elements and appending; reload if the content has changed.");
             Add("Snowflake.ConnectionStringRequired", "Snowflake 連線字串不可為空。", "The Snowflake connection string is required.");
             Add("Snowflake.ConnectionStringInvalid", "Snowflake 連線字串必須是 snowflake:// URI。", "The Snowflake connection string must be a snowflake:// URI.");
             Add("Snowflake.AccountRequired", "請輸入 Snowflake 帳戶識別碼。", "Enter the Snowflake account identifier.");

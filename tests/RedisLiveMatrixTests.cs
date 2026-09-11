@@ -150,6 +150,22 @@ internal static class RedisLiveMatrixTests
             Check(listConflict, "stale list elements raise an edit conflict");
             provider.AppendListElement("db0", "mtx:list", "d");
             Check(Convert.ToInt64(raw.Execute("LLEN", "mtx:list"), CultureInfo.InvariantCulture) == 4, "list append RPUSHes to the end");
+            raw.Execute("LSET", "mtx:list", "0", "same");
+            raw.Execute("LSET", "mtx:list", "1", "same");
+            provider.DeleteListElement("db0", "mtx:list", 1, "same");
+            Check(Convert.ToInt64(raw.Execute("LLEN", "mtx:list"), CultureInfo.InvariantCulture) == 3
+                && Convert.ToString(raw.Execute("LINDEX", "mtx:list", "0")) == "same"
+                && Convert.ToString(raw.Execute("LINDEX", "mtx:list", "1")) == "c",
+                "list deletion removes the selected index without removing an equal value");
+            raw.Execute("LSET", "mtx:list", "1", "external");
+            listConflict = false;
+            try { provider.DeleteListElement("db0", "mtx:list", 1, "c"); }
+            catch (RedisEditConflictException) { listConflict = true; }
+            Check(listConflict && Convert.ToString(raw.Execute("LINDEX", "mtx:list", "1")) == "external",
+                "stale list deletion preserves the externally changed element");
+            provider.DeleteListElement("db0", "mtx:list", 1, "external");
+            Check(Convert.ToInt64(raw.Execute("LLEN", "mtx:list"), CultureInfo.InvariantCulture) == 2,
+                "list element deletion shortens the list");
 
             provider.AddSetMember("db0", "mtx:set", "m3");
             Check(Convert.ToInt64(raw.Execute("SISMEMBER", "mtx:set", "m3"), CultureInfo.InvariantCulture) == 1, "set member add SADDs");

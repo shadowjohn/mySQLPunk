@@ -9159,6 +9159,7 @@ public static partial class SmokeTests
         {
             server.SeedHash("h1", "f1", "v1");
             server.SeedList("l1", "a", "b");
+            server.SeedList("l2", "same", "same", "tail");
             server.SeedSet("s1", "m1");
             server.SeedZSet("z1", "m1", 1.5);
             provider.SetConn(my_redis.BuildConnectionString("127.0.0.1", server.Port, "", "", false, 0));
@@ -9199,6 +9200,25 @@ public static partial class SmokeTests
             provider.AppendListElement("db0", "l1", "c");
             Assert(server.ListLength("l1") == 3 && server.ListAt("l1", 2) == "c",
                 "Appending should RPUSH to the end of the list.");
+            conflict = false;
+            try { provider.DeleteListElement("db0", "l1", 1, "stale"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict && server.ListLength("l1") == 3 && server.ListAt("l1", 1) == "b2",
+                "Deleting a stale list element must preserve the list.");
+            server.AbortNextExec = true;
+            conflict = false;
+            try { provider.DeleteListElement("db0", "l1", 1, "b2"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict && server.ListLength("l1") == 3 && server.ListAt("l1", 1) == "b2",
+                "An aborted list deletion must preserve the selected element.");
+            provider.DeleteListElement("db0", "l2", 1, "same");
+            Assert(server.ListLength("l2") == 2 && server.ListAt("l2", 0) == "same" && server.ListAt("l2", 1) == "tail",
+                "Deleting by index must preserve an equal value at another position.");
+            conflict = false;
+            try { provider.DeleteListElement("db0", "l2", 8, "tail"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict && server.ListLength("l2") == 2,
+                "Deleting a missing list index must raise a conflict without changing the list.");
 
             provider.AddSetMember("db0", "s1", "m2");
             Assert(server.SetHas("s1", "m2"), "Adding a set member should SADD it.");
@@ -9255,6 +9275,7 @@ public static partial class SmokeTests
         AssertContains(editorSource, "GetKeyDetailForEdit", "The key editor should load collection entries.");
         AssertContains(editorSource, "SaveHashField", "The key editor should save hash fields.");
         AssertContains(editorSource, "AppendListElement", "The key editor should append list elements.");
+        AssertContains(editorSource, "DeleteListElement", "The key editor should delete selected list elements.");
     }
 
     private static void TestSnowflakeProviderFoundation()
@@ -13684,6 +13705,31 @@ public static partial class SmokeTests
                             if (!lists.TryGetValue(args[1], out list)) lists[args[1]] = list = new List<string>();
                             for (int i = 2; i < args.Length; i++) list.Add(args[i]);
                             WriteInteger(stream, list.Count);
+                            return;
+                        }
+                    case "LREM":
+                        {
+                            List<string> list;
+                            int count = int.Parse(args[2]);
+                            int removed = 0;
+                            if (count > 0 && lists.TryGetValue(args[1], out list))
+                            {
+                                for (int i = 0; i < list.Count && removed < count;)
+                                {
+                                    if (string.Equals(list[i], args[3], StringComparison.Ordinal))
+                                    {
+                                        list.RemoveAt(i);
+                                        removed++;
+                                    }
+                                    else i++;
+                                }
+                                if (list.Count == 0)
+                                {
+                                    lists.Remove(args[1]);
+                                    ttls.Remove(args[1]);
+                                }
+                            }
+                            WriteInteger(stream, removed);
                             return;
                         }
                     case "SADD":
