@@ -163,6 +163,11 @@ namespace mySQLPunk.lib
 
         public static RedisRespClient Connect(string host, int port, bool useTls, int timeoutMs)
         {
+            return Connect(host, port, useTls, timeoutMs, timeoutMs);
+        }
+
+        public static RedisRespClient Connect(string host, int port, bool useTls, int timeoutMs, int receiveTimeoutMs)
+        {
             TcpClient tcp = new TcpClient();
             try
             {
@@ -178,7 +183,7 @@ namespace mySQLPunk.lib
                     waitHandle.Close();
                 }
                 tcp.EndConnect(connect);
-                tcp.ReceiveTimeout = timeoutMs;
+                tcp.ReceiveTimeout = Math.Max(0, receiveTimeoutMs);
                 tcp.SendTimeout = timeoutMs;
 
                 Stream stream = tcp.GetStream();
@@ -203,6 +208,16 @@ namespace mySQLPunk.lib
             _stream.Write(command, 0, command.Length);
             _stream.Flush();
             return RedisRespProtocol.ReadReply(_stream);
+        }
+
+        public object ReadReply()
+        {
+            return RedisRespProtocol.ReadReply(_stream);
+        }
+
+        public void SetReceiveTimeout(int timeoutMs)
+        {
+            _tcp.ReceiveTimeout = Math.Max(0, timeoutMs);
         }
 
         public void Dispose()

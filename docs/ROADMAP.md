@@ -30,7 +30,7 @@
 | MongoDB Aggregation Pipeline 視覺設計 | 📋 | MongoDB provider 後續階段：拖放 stage、逐步預覽與結果驗證。 |
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 🟡 | 第二期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視、SELECT／SHOW，以及查詢編輯器單一 DML／DDL；待補實機驗收、key-pair JWT、參數綁定、資料網格寫回、模型與 BI 能力。 |
-| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 第三期完成：瀏覽、受限查詢，加上 key 編輯器的 string 與 hash／list／set／zset 安全編輯（WATCH/MULTI/EXEC）、TTL 與刪除；list 可依索引安全刪除，INFO 監控頁可定時查看伺服器與命令快照。待補 Cluster、Sentinel 與 Pub/Sub。 |
+| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 已具備瀏覽、受限查詢、五種 key 型別安全編輯、TTL／刪除、list 依索引安全刪除、INFO 監控，以及使用接收專線的 channel／pattern Pub/Sub 工作區。待補 Cluster 與 Sentinel。 |
 | Linux ARM | ✅ | 已建立 .NET 8 Core 與 Avalonia 桌面預覽版；CI／Release 會在 `ubuntu-24.04` x64 與 `ubuntu-24.04-arm` ARM64 原生 runner 分別建立 self-contained 安裝壓縮檔，並完成安裝、Xvfb UI 啟動、安全更新、rollback 與解除安裝。跨平台 SQL Server 的 provider 實機 round-trip 保留在支援其容器映像的 Linux x64 runner。 |
 
 ## Navicat Premium 功能頁對照
@@ -60,7 +60,7 @@
 | 備份／還原與原生工具介面 | 🟡 | 已有邏輯 SQL 備份、隔離還原、差異與完整性排程；待補 MongoDump、Oracle Data Pump、SQL Server native backup 介面。 |
 | 自動執行：查詢、匯入／匯出、傳輸、通知郵件 | 🟡 | 已有可攜式查詢／匯出／備份作業、立即執行、每日 Windows 工作排程與 JSON 紀錄；待補匯入、跨庫傳輸、郵件／Webhook、重試及更多觸發條件。 |
 | MongoDB 結構描述分析器 | 🟡 | 第一期會抽樣前 100 筆文件推斷欄位型別、NULL 與 `_id`；待補巢狀路徑統計、異常與極端值檢視。 |
-| Redis Pub/Sub | 📋 | 隨 Redis／Garnet provider 實作。 |
+| Redis Pub/Sub | 🆕 | 停靠式訊息工作區可用 channel 或 pattern 訂閱、查看最近 1,000 筆訊息，並以明確動作發布；接收使用專線，關閉頁籤不影響一般 provider 連線。 |
 | 協同合作：同步連線、查詢、pipeline、片段、模型、BI、群組 | 📋 | 先做本機可匯出／匯入的工作區格式與 Git 版控，再補可自架同步服務與權限。 |
 | SSH tunnel、SSL/TLS | ✅ | 四種網路 provider 已有共用安全設定 UI、憑證驗證、SSH SHA256 主機金鑰固定與隧道生命週期；Linux／macOS 預覽版也具備 provider 原生 TLS 模式、憑證檔案與指紋固定的 SSH Tunnel。SQLite 為本機檔案，不適用網路層設定。 |
 | PAM／LDAP／Kerberos／MFA／SSO | 📋 | 依 provider 驗證能力分階段加入，不保存明文祕密。 |
@@ -80,7 +80,7 @@
 | MySQL／MariaDB | ✅ | 共用 MySQL provider，已有實機版本矩陣。 |
 | PostgreSQL、SQL Server、Oracle、SQLite | 🟡 | 核心 metadata／查詢／編輯／DDL／備份可用，進階功能持續對等化。 |
 | MongoDB | 🟡 | 第三期完成：連線、metadata、JSON find 查詢、文件樹、安全編輯與文件新增／刪除都已具備；standalone 4.4／7.0／8.0 實機矩陣通過。待補 Atlas／SRV 驗證環境矩陣與 Aggregation Pipeline。 |
-| Redis／Garnet | 🟡 | 第三期完成：URI、ACL／密碼、TLS、logical db、key 瀏覽、受限查詢、五種型別的安全編輯／TTL／刪除、list 依索引刪除與 INFO 即時監控。Redis 6.2、Redis 7 與 Garnet standalone 既有各 39 項實機矩陣通過，新增案例待重跑；Cluster／Sentinel 與 Pub/Sub 待補。 |
+| Redis／Garnet | 🟡 | standalone 已具備 URI、ACL／密碼、TLS、logical db、key 瀏覽、受限查詢、五種型別安全編輯／TTL／刪除、list 依索引刪除、INFO 監控與 Pub/Sub 訊息工作區。Redis 6.2、Redis 7 與 Garnet 既有各 39 項實機矩陣通過，新增案例待重跑；Cluster／Sentinel 待補。 |
 | Snowflake | 🟡 | 第二期 provider 完成（SQL REST API、PAT／OAuth、metadata、分頁瀏覽、SELECT／SHOW 與查詢編輯器單一 DML／DDL）；真實帳戶實機矩陣、key-pair JWT、參數綁定、網格寫回與 bulk load 待補。 |
 | AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS、MongoDB 與 Redis 可先用標準主機連線；待補各家 IAM／SSO／MFA 與雲端專用驗證。 |
 | OceanBase、PingCAP／TiDB、Dameng、Fujitsu、Kingbase、HighGo | 📋 | 建立實機相容矩陣；能沿用 MySQL／PostgreSQL 協定者先驗證差異，其餘再建立專用 provider。 |
@@ -92,5 +92,5 @@
 3. ✅ SSH tunnel＋SSL/TLS 選項 UI、憑證驗證與排程共用連線流程已完成。
 4. ✅ RDBMS、MongoDB 與 Redis 的連線 URI 匯入及設定頁確認流程已完成。
 5. ✅ 連線星號、持久化色彩與批次屬性操作已完成。
-6. 🟡 MongoDB 第一～三期、Redis／Garnet 第三期（string＋集合型別安全編輯，含實機矩陣）、Snowflake 第二期（SQL REST API 查詢＋查詢編輯器 DML／DDL）已完成。下一步候選：Snowflake 實機驗收、key-pair JWT、參數綁定與網格寫回，MongoDB Atlas／SRV 驗證矩陣與 Aggregation Pipeline，Redis Cluster／Sentinel／Pub/Sub，或回頭補模型／BI 路線。
+6. 🟡 MongoDB 第一～三期、Redis／Garnet standalone（安全編輯、監控與 Pub/Sub）、Snowflake 第二期（SQL REST API 查詢＋查詢編輯器 DML／DDL）已完成。下一步候選：Snowflake 實機驗收、key-pair JWT、參數綁定與網格寫回，MongoDB Atlas／SRV 驗證矩陣與 Aggregation Pipeline，Redis Cluster／Sentinel，或回頭補模型／BI 路線。
 7. 🟡 Linux / macOS 跨平台第二階段進行中：獨立 Core、Avalonia UI、四種 RDBMS workflow、系統密碼庫、結果安全匯出、Table optimistic concurrency 編輯、provider-aware integer range、SQLite NUMERIC／temporal／UUID／GUID、single／double IEEE 754 無聲失真防護、MySQL／MariaDB mutation warning rollback、MySQL／MariaDB／SQL Server 固定長度 binary 防護與 SQL Server collation-aware 字串無損寫入、MySQL／MariaDB BIT／ENUM／SET／完整範圍 TIME／YEAR／DATE／DATETIME／TIMESTAMP／8 種 OGC spatial、MariaDB UUID／INET4／INET6、三種 provider 的無損高精度 DECIMAL／NUMERIC、PostgreSQL scalar temporal／bit string／timetz／interval／pg_lsn／oid／xid／cid／xid8／tsvector／tsquery／range／multirange／array／geometric／jsonpath／snapshot／hstore／ltree／reg*／enum／composite／extension UDT／domain、SQL Server geometry／geography／hierarchyid／alias type／sql_variant／scalar temporal、1 MiB 內 binary hex／JSON／XML、PostgreSQL 網路位址、SQL Server legacy LOB 編輯與 200 列穩定分頁、四架構 self-contained CI／Release 資產、連線 URI 安全匯入、provider 原生 TLS 模式＋CA／客戶端憑證檔案與指紋固定的 SSH Tunnel，以及依 RID 與 sidecar 完成串流 SHA-256 的安全更新下載已完成；Linux x64／ARM64 安裝、Xvfb 啟動、安全更新、rollback 與解除安裝都在同架構原生 runner 驗證，macOS Intel／Apple Silicon 也各自驗證 ZIP 安全界限、plist、架構、codesign、交易式更新與實際 app 啟動。下一步是其餘可由實機矩陣驗證的進階型別；macOS Developer ID/notarization 仍等待發版環境提供 Apple 憑證。

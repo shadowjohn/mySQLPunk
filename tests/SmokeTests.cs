@@ -81,6 +81,7 @@ public static partial class SmokeTests
         Run("MongoDB provider foundation", TestMongoDbProviderFoundation, ref passed);
         Run("MongoDB document tree and safe edit", TestMongoDbDocumentEditing, ref passed);
         Run("Redis provider foundation", TestRedisProviderFoundation, ref passed);
+        Run("Redis Pub/Sub workspace", TestRedisPubSubWorkspace, ref passed);
         Run("Redis safe editing", TestRedisSafeEditing, ref passed);
         Run("Redis collection editing", TestRedisCollectionEditing, ref passed);
         Run("Snowflake provider foundation", TestSnowflakeProviderFoundation, ref passed);
@@ -9093,6 +9094,68 @@ public static partial class SmokeTests
         AssertContains(redisProject, "RedisMonitorForm.cs", "The Redis monitoring workspace should be included in the project.");
     }
 
+    private static void TestRedisPubSubWorkspace()
+    {
+        using (FakeRedisPubSubServer server = new FakeRedisPubSubServer())
+        using (my_redis provider = new my_redis())
+        {
+            provider.SetConn(my_redis.BuildConnectionString("127.0.0.1", server.Port, "acl", "secret", false, 2));
+            provider.Open();
+
+            RedisPubSubMessageEventArgs exactMessage = null;
+            using (ManualResetEvent received = new ManualResetEvent(false))
+            using (RedisPubSubSubscription subscription = provider.CreatePubSubSubscription("db2", "news", false))
+            {
+                subscription.MessageReceived += (sender, args) =>
+                {
+                    exactMessage = args;
+                    received.Set();
+                };
+                subscription.Start();
+                Assert(provider.Publish("news", "hello") == 1,
+                    "Publishing should report the active channel subscriber.");
+                Assert(received.WaitOne(2000), "Channel subscriptions should receive published messages.");
+                AssertEquals("news", exactMessage.Channel, "Channel messages should retain the source channel.");
+                AssertEquals("hello", exactMessage.Message, "Channel messages should retain the payload.");
+                AssertEquals(string.Empty, exactMessage.Pattern, "Channel messages should not invent a pattern.");
+            }
+
+            Assert(provider.GetDatabases().Contains("db2"),
+                "Stopping a subscription should leave the provider connection usable.");
+
+            RedisPubSubMessageEventArgs patternMessage = null;
+            using (ManualResetEvent received = new ManualResetEvent(false))
+            using (RedisPubSubSubscription subscription = provider.CreatePubSubSubscription("db2", "events:*", true))
+            {
+                subscription.MessageReceived += (sender, args) =>
+                {
+                    patternMessage = args;
+                    received.Set();
+                };
+                subscription.Start();
+                Assert(provider.Publish("events:created", "42") >= 1,
+                    "Publishing should reach a matching pattern subscriber.");
+                Assert(received.WaitOne(2000), "Pattern subscriptions should receive matching messages.");
+                AssertEquals("events:*", patternMessage.Pattern, "Pattern messages should retain the matched pattern.");
+                AssertEquals("events:created", patternMessage.Channel, "Pattern messages should retain the actual channel.");
+                AssertEquals("42", patternMessage.Message, "Pattern messages should retain the payload.");
+            }
+
+            using (RedisPubSubForm form = new RedisPubSubForm(provider, "db2"))
+                AssertContains(form.Text, "db2", "The Pub/Sub workspace should identify its logical database.");
+
+            provider.Close();
+            server.AssertHealthy();
+        }
+
+        string root = FindRepositoryRootForTest();
+        string form1Source = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
+        AssertContains(form1Source, "OpenRedisPubSub", "Redis database menus should open the Pub/Sub workspace.");
+        string projectSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "mySQLPunk.csproj"), Encoding.UTF8);
+        AssertContains(projectSource, "RedisPubSubForm.cs", "The Pub/Sub workspace should be included in the project.");
+        AssertContains(projectSource, "RedisPubSubSubscription.cs", "The dedicated subscription transport should be included in the project.");
+    }
+
     private static void TestRedisSafeEditing()
     {
         using (FakeRedisEditServer server = new FakeRedisEditServer())
@@ -13851,6 +13914,251 @@ public static partial class SmokeTests
             try { listener.Stop(); } catch { }
             worker.Join(1000);
             if (failure != null) throw new Exception("Fake Redis edit server failed.", failure);
+        }
+    }
+
+    private sealed class FakeRedisPubSubServer : IDisposable
+    {
+        private sealed class ClientConnection
+        {
+            public TcpClient Tcp;
+            public NetworkStream Stream;
+            public readonly object WriteSync = new object();
+            public string Topic;
+            public bool Pattern;
+        }
+
+        private readonly TcpListener listener;
+        private readonly Thread worker;
+        private readonly object sync = new object();
+        private readonly List<ClientConnection> clients = new List<ClientConnection>();
+        private readonly List<Thread> handlers = new List<Thread>();
+        private Exception failure;
+        private volatile bool stopping;
+
+        public FakeRedisPubSubServer()
+        {
+            listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            worker = new Thread(AcceptLoop) { IsBackground = true, Name = "mySQLPunk fake Redis PubSub" };
+            worker.Start();
+        }
+
+        public int Port { get; private set; }
+
+        public void AssertHealthy()
+        {
+            if (failure != null) throw new Exception("Fake Redis Pub/Sub server failed.", failure);
+        }
+
+        private void AcceptLoop()
+        {
+            try
+            {
+                while (!stopping)
+                {
+                    TcpClient tcp;
+                    try { tcp = listener.AcceptTcpClient(); }
+                    catch (SocketException) { break; }
+                    catch (ObjectDisposedException) { break; }
+                    ClientConnection connection = new ClientConnection
+                    {
+                        Tcp = tcp,
+                        Stream = tcp.GetStream()
+                    };
+                    Thread handler = new Thread(() => HandleClient(connection))
+                    {
+                        IsBackground = true,
+                        Name = "mySQLPunk fake Redis PubSub client"
+                    };
+                    lock (sync)
+                    {
+                        clients.Add(connection);
+                        handlers.Add(handler);
+                    }
+                    handler.Start();
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!stopping) failure = ex;
+            }
+        }
+
+        private void HandleClient(ClientConnection connection)
+        {
+            try
+            {
+                while (!stopping)
+                {
+                    object[] raw;
+                    try { raw = RedisRespProtocol.ReadReply(connection.Stream) as object[]; }
+                    catch (EndOfStreamException) { break; }
+                    if (raw == null || raw.Length == 0) throw new FormatException("Expected a RESP command array.");
+                    string[] args = raw.Select(value => Convert.ToString(value)).ToArray();
+                    Dispatch(connection, args);
+                }
+            }
+            catch (IOException) { }
+            catch (SocketException) { }
+            catch (ObjectDisposedException) { }
+            catch (Exception ex)
+            {
+                if (!stopping) failure = ex;
+            }
+            finally
+            {
+                lock (sync) clients.Remove(connection);
+                try { connection.Tcp.Close(); } catch { }
+            }
+        }
+
+        private void Dispatch(ClientConnection connection, string[] args)
+        {
+            string command = args[0].ToUpperInvariant();
+            switch (command)
+            {
+                case "AUTH":
+                    bool authenticated = args.Length == 3 && args[1] == "acl" && args[2] == "secret";
+                    WriteSimple(connection, authenticated ? "OK" : "ERR invalid credentials", authenticated);
+                    return;
+                case "PING": WriteSimple(connection, "PONG", true); return;
+                case "SELECT": WriteSimple(connection, "OK", true); return;
+                case "CONFIG": WriteBulkArray(connection, new[] { "databases", "4" }); return;
+                case "SUBSCRIBE":
+                case "PSUBSCRIBE":
+                    connection.Topic = args[1];
+                    connection.Pattern = command == "PSUBSCRIBE";
+                    WriteSubscriptionAcknowledgement(connection, command.ToLowerInvariant(), args[1]);
+                    return;
+                case "PUBLISH":
+                    Publish(connection, args[1], args.Length > 2 ? args[2] : string.Empty);
+                    return;
+                default:
+                    WriteSimple(connection, "ERR unsupported fake Pub/Sub command " + command, false);
+                    return;
+            }
+        }
+
+        private void Publish(ClientConnection publisher, string channel, string payload)
+        {
+            List<ClientConnection> subscribers;
+            lock (sync)
+            {
+                subscribers = clients.Where(item => !string.IsNullOrEmpty(item.Topic) && Matches(item, channel)).ToList();
+            }
+            foreach (ClientConnection subscriber in subscribers)
+            {
+                try { WriteMessage(subscriber, channel, payload); }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+            }
+            WriteInteger(publisher, subscribers.Count);
+        }
+
+        private static bool Matches(ClientConnection connection, string channel)
+        {
+            if (!connection.Pattern) return string.Equals(connection.Topic, channel, StringComparison.Ordinal);
+            if (connection.Topic == "*") return true;
+            if (connection.Topic.EndsWith("*", StringComparison.Ordinal))
+                return channel.StartsWith(connection.Topic.Substring(0, connection.Topic.Length - 1), StringComparison.Ordinal);
+            return string.Equals(connection.Topic, channel, StringComparison.Ordinal);
+        }
+
+        private static void WriteMessage(ClientConnection connection, string channel, string payload)
+        {
+            lock (connection.WriteSync)
+            {
+                if (connection.Pattern)
+                {
+                    WriteAscii(connection.Stream, "*4\r\n");
+                    WriteBulk(connection.Stream, "pmessage");
+                    WriteBulk(connection.Stream, connection.Topic);
+                    WriteBulk(connection.Stream, channel);
+                    WriteBulk(connection.Stream, payload);
+                }
+                else
+                {
+                    WriteAscii(connection.Stream, "*3\r\n");
+                    WriteBulk(connection.Stream, "message");
+                    WriteBulk(connection.Stream, channel);
+                    WriteBulk(connection.Stream, payload);
+                }
+                connection.Stream.Flush();
+            }
+        }
+
+        private static void WriteSubscriptionAcknowledgement(ClientConnection connection, string kind, string topic)
+        {
+            lock (connection.WriteSync)
+            {
+                WriteAscii(connection.Stream, "*3\r\n");
+                WriteBulk(connection.Stream, kind);
+                WriteBulk(connection.Stream, topic);
+                WriteAscii(connection.Stream, ":1\r\n");
+                connection.Stream.Flush();
+            }
+        }
+
+        private static void WriteSimple(ClientConnection connection, string value, bool success)
+        {
+            lock (connection.WriteSync)
+            {
+                WriteAscii(connection.Stream, (success ? "+" : "-") + value + "\r\n");
+                connection.Stream.Flush();
+            }
+        }
+
+        private static void WriteInteger(ClientConnection connection, long value)
+        {
+            lock (connection.WriteSync)
+            {
+                WriteAscii(connection.Stream, ":" + value + "\r\n");
+                connection.Stream.Flush();
+            }
+        }
+
+        private static void WriteBulkArray(ClientConnection connection, string[] values)
+        {
+            lock (connection.WriteSync)
+            {
+                WriteAscii(connection.Stream, "*" + values.Length + "\r\n");
+                foreach (string value in values) WriteBulk(connection.Stream, value);
+                connection.Stream.Flush();
+            }
+        }
+
+        private static void WriteBulk(NetworkStream stream, string value)
+        {
+            byte[] payload = Encoding.UTF8.GetBytes(value ?? string.Empty);
+            WriteAscii(stream, "$" + payload.Length + "\r\n");
+            stream.Write(payload, 0, payload.Length);
+            WriteAscii(stream, "\r\n");
+        }
+
+        private static void WriteAscii(NetworkStream stream, string value)
+        {
+            byte[] payload = Encoding.ASCII.GetBytes(value);
+            stream.Write(payload, 0, payload.Length);
+        }
+
+        public void Dispose()
+        {
+            stopping = true;
+            try { listener.Stop(); } catch { }
+            List<ClientConnection> connections;
+            List<Thread> clientThreads;
+            lock (sync)
+            {
+                connections = clients.ToList();
+                clientThreads = handlers.ToList();
+            }
+            foreach (ClientConnection connection in connections)
+                try { connection.Tcp.Close(); } catch { }
+            worker.Join(1000);
+            foreach (Thread handler in clientThreads) handler.Join(1000);
+            if (failure != null) throw new Exception("Fake Redis Pub/Sub server failed.", failure);
         }
     }
 

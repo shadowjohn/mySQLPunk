@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **Redis／Garnet Pub/Sub 訊息工作區**：Redis 資料庫節點可開啟停靠式 Pub/Sub 頁籤，以獨立連線訂閱單一 channel 或 pattern，不會卡住一般查詢連線；收到的時間、pattern、實際 channel 與訊息會保留在記憶體中，最多 1,000 筆。頁面也提供明確的發布按鈕並顯示伺服器回報的接收端數量，停止訂閱或關閉頁籤就會釋放接收連線。
 - **Redis／Garnet 即時監控**：Redis 資料庫節點新增停靠式監控頁，可手動或每 1／5／10／30 秒讀取 INFO；摘要涵蓋連線、記憶體、活動、命中率、網路、CPU、持久化與複寫，命令統計依呼叫次數排序並列出平均耗時及失敗／拒絕次數。不支援或受 ACL 限制的 INFO 區段會個別略過，不會讓整頁失效。
 - **Redis list 元素安全刪除**：key 編輯器可依選取索引刪除 list 元素；刪除前會比對載入時的值，並在同一筆 WATCH／MULTI／EXEC 交易中以唯一標記定位，內容相同的其他元素不會被誤刪，外部修改或交易中止時也會保留原清單。
 - **資料表約束與 SQL Server XML 索引**：Table Designer 新增外鍵與 CHECK 約束分頁，可讀取並預覽 MySQL、PostgreSQL、SQL Server、Oracle、SQLite 的既有約束；新增或修改時會產生各 provider 對應的 DDL。SQL Server 索引頁也可建立 PRIMARY／PATH／VALUE／PROPERTY XML 索引，並正確保留次要 XML 索引的父索引關係。

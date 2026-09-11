@@ -370,6 +370,45 @@ namespace mySQLPunk.lib
             }
         }
 
+        /// <summary>以專用連線訂閱 channel 或 pattern；呼叫端掛上事件後需呼叫 Start。</summary>
+        public RedisPubSubSubscription CreatePubSubSubscription(string databaseName, string topic, bool pattern)
+        {
+            if (string.IsNullOrWhiteSpace(topic))
+                throw new ArgumentException(Localization.T("Redis.PubSubTopicRequired"), "topic");
+
+            lock (_sync)
+            {
+                EnsureOpen();
+                int databaseIndex = string.IsNullOrWhiteSpace(databaseName)
+                    ? initialDatabaseIndex
+                    : ParseDatabaseIndex(databaseName);
+                RedisRespClient subscriptionClient = OpenAuthenticatedClient(databaseIndex);
+                try
+                {
+                    RedisPubSubSubscription subscription = RedisPubSubSubscription.Create(subscriptionClient, topic, pattern);
+                    subscriptionClient.SetReceiveTimeout(0);
+                    return subscription;
+                }
+                catch
+                {
+                    subscriptionClient.Dispose();
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>在一般 provider 連線發布訊息，不會占用訂閱連線。</summary>
+        public long Publish(string channel, string message)
+        {
+            if (string.IsNullOrWhiteSpace(channel))
+                throw new ArgumentException(Localization.T("Redis.PubSubChannelRequired"), "channel");
+            lock (_sync)
+            {
+                EnsureOpen();
+                return Convert.ToInt64(client.Execute("PUBLISH", channel, message ?? string.Empty), CultureInfo.InvariantCulture);
+            }
+        }
+
         public string GetTableCreateStatement(string databaseName, string tableName)
         {
             return string.Empty;
@@ -1135,6 +1174,28 @@ namespace mySQLPunk.lib
         private void EnsureOpen()
         {
             if (!open || client == null) throw new InvalidOperationException(Localization.T("Redis.ConnectionNotOpen"));
+        }
+
+        private RedisRespClient OpenAuthenticatedClient(int databaseIndex)
+        {
+            RedisRespClient candidate = RedisRespClient.Connect(
+                host,
+                port,
+                useTls,
+                ConnectTimeoutMs);
+            try
+            {
+                if (!string.IsNullOrEmpty(username)) candidate.Execute("AUTH", username, password ?? string.Empty);
+                else if (!string.IsNullOrEmpty(password)) candidate.Execute("AUTH", password);
+                candidate.Execute("PING");
+                if (databaseIndex > 0) candidate.Execute("SELECT", databaseIndex.ToString(CultureInfo.InvariantCulture));
+                return candidate;
+            }
+            catch
+            {
+                candidate.Dispose();
+                throw;
+            }
         }
 
         private static Exception UnsupportedWrite()

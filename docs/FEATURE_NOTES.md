@@ -73,6 +73,11 @@
   - 命令統計解析 `INFO commandstats`，依呼叫次數排序並顯示平均微秒與失敗／拒絕次數。每次更新先讀一筆預設 INFO，缺少的區段才個別補讀；不支援或被 ACL 拒絕的區段會略過，監控只保留當次快照，不持久化伺服器資訊。
   - loopback RESP 測試涵蓋 INFO 欄位、命中率、命令排序與錯誤計數；Redis 6.2／7 及 Garnet 實機矩陣已加入快照案例，待 Docker 環境重跑。
 
+- **Redis／Garnet Pub/Sub 訊息工作區**
+  - Redis 資料庫節點可開啟停靠式 Pub/Sub 頁籤，以 channel 或 glob-style pattern 訂閱訊息；接收使用另外建立且完成相同 AUTH／SELECT 流程的 RESP2 連線，不會占住 provider 的一般查詢連線。
+  - 訊息表保留收到時間、matched pattern、實際 channel 與 payload，僅存在目前頁籤記憶體且上限 1,000 筆。發布必須由使用者按下按鈕，完成後顯示 Redis 回報的接收端數量；停止訂閱或關閉頁籤會直接釋放專線。
+  - loopback TCP 測試實際驗證 channel、pattern、PUBLISH、專線關閉後 provider 仍可使用；Redis 6.2／7 與 Garnet standalone 實機矩陣已加入相同案例，待 Docker 環境重跑。Redis Pub/Sub 本身是 at-most-once，這版不保存、補送訊息或自動重連。
+
 - **Redis／Microsoft Garnet provider 🟡 第三期完成（集合型別編輯）**
   - key 編輯器依型別切換：hash／list／set／zset 以項目網格＋輸入列操作——hash 欄位新增／更新／刪除、list 既有元素編輯／刪除與尾端新增（RPUSH）、set 成員新增／移除、zset 成員分數新增／更新／移除；TTL 與刪除 key 對所有型別可用。
   - 並行安全：所有集合寫入共用 WATCH＋MULTI／EXEC 交易——型別被改變、項目被其他連線建立／刪除／改值、或 EXEC 落空都會回報衝突且不寫入；zset 分數以數值比較避免字串表示差異誤判，list 刪除則以交易內唯一標記鎖定索引，避免重複值誤刪。

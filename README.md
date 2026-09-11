@@ -238,7 +238,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`dbo` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作。 |
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
 | MongoDB | 第三期可用 | 支援一般與 SRV 連線、URI 匯入、database／collection／view metadata、抽樣 schema 推斷、索引與統計資訊、分頁文件瀏覽與 JSON find 查詢；文件檢視器提供可展開文件樹、單一文件安全編輯（`_id` 鎖定＋樂觀並行比對）、文件新增與安全刪除。standalone 4.4／7.0／8.0 已通過實機矩陣；Atlas／SRV 驗證環境與 Aggregation Pipeline 仍在後續階段。 |
-| Redis / Microsoft Garnet | 第三期可用 | 支援 `redis://`／`rediss://`、ACL／密碼驗證、logical db、TLS 直連、key 型別／TTL／摘要瀏覽與 pattern／type／單一 key 受限查詢；key 編輯器依型別切換，string 值、hash 欄位、list 元素（含依索引安全刪除與尾端新增）、set 成員與 zset 分數都以 WATCH/MULTI/EXEC 並行保護寫入，另有 TTL 設定／移除與刪除 key。資料庫節點可開啟 INFO 即時監控，查看連線、記憶體、流量、CPU、持久化、複寫及命令統計。Redis 6.2、Redis 7 與 Garnet standalone 既有各 39 項實機矩陣通過，新增案例待重跑；Cluster／Sentinel 與 Pub/Sub 仍待補。 |
+| Redis / Microsoft Garnet | 第三期可用 | 支援 `redis://`／`rediss://`、ACL／密碼驗證、logical db、TLS 直連、key 型別／TTL／摘要瀏覽與 pattern／type／單一 key 受限查詢；key 編輯器依型別切換，string 值、hash 欄位、list 元素（含依索引安全刪除與尾端新增）、set 成員與 zset 分數都以 WATCH/MULTI/EXEC 並行保護寫入，另有 TTL 設定／移除與刪除 key。資料庫節點可開啟 INFO 即時監控及 Pub/Sub 訊息工作區，支援 channel／pattern 訂閱與明確發布。Redis 6.2、Redis 7 與 Garnet standalone 既有各 39 項實機矩陣通過，新增案例待重跑；Cluster／Sentinel 仍待補。 |
 | Snowflake | 第二期可用 | 以 SQL REST API v2 直連（Programmatic Access Token 或 OAuth token），支援 SHOW DATABASES、INFORMATION_SCHEMA metadata、schema.table／view 瀏覽、欄位與列數、分頁資料檢視、SELECT／SHOW，以及查詢編輯器的單一 DML／DDL；URI 匯入與設定保存沿用既有流程。所有值以字串呈現；真實帳戶實機驗收、key-pair JWT、參數綁定、資料網格寫回與 bulk load 仍待補。 |
 | SQL 查詢 | 可用 | 支援 SELECT/SHOW/EXPLAIN/DESC/WITH 類結果顯示、多格式匯出、語法格式化、查詢歷史；MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 都可產生唯讀原生執行計畫，以樹狀、原始資料、文字與可用成本統計檢視。 |
 | SQL 編輯輔助 | 可用 | 自動完成會解析目前 statement 的資料表與 alias，提供欄位、`alias.column`、資料表、關鍵字與片段捷徑；metadata 依 provider/database 快取。`Ctrl+Shift+P` 可搜尋、插入、新增、刪除自訂 SQL 片段，並以 JSON 匯入／匯出。 |
@@ -278,7 +278,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - 資料分析預設使用前 10,000 筆樣本；切換成全表會執行 COUNT／DISTINCT／GROUP BY，對大型資料表可能耗時。BLOB、JSON、geometry 等型別會略過資料庫不支援的極值或分佈統計。
 - ER 圖與結構差異報告目前都只讀取 metadata，不會回寫資料庫；ER 圖每張卡片先顯示前 16 個欄位，還沒有拖曳位置保存、關聯篩選或從模型回寫資料庫，結構差異也還不會產生同步 DDL。
 - MongoDB 查詢分頁維持唯讀，寫入只能走文件檢視器的安全編輯、新增與刪除；schema 由前 100 筆文件推斷。尚未提供 Aggregation Pipeline 視覺設計、SSH Tunnel 或 Atlas 專用驗證；standalone 4.4／7.0／8.0 實機矩陣已通過，Atlas／SRV 與帳號驗證環境仍待驗收。
-- Redis / Garnet 目前只支援 standalone 直連；寫入僅限 key 編輯器（string 值、hash 欄位、list 元素編輯／刪除與尾端新增、set 成員、zset 分數、TTL 與刪除 key），值含非 UTF-8 位元組時不開放編輯。SCAN 的 `COUNT` 只是提示，程式會在單次 traversal 內去重，但資料同時變更時跨頁仍可能變動。監控頁只讀取伺服器提供且 ACL 允許的 INFO 欄位，不保留歷史趨勢。Cluster、Sentinel 與 Pub/Sub 尚未提供；Redis 6.2／7 與 Garnet standalone 實機矩陣可用 `tests/Run-RedisLiveMatrixTests.ps1` 重跑。
+- Redis / Garnet 目前只支援 standalone 直連；寫入僅限 key 編輯器（string 值、hash 欄位、list 元素編輯／刪除與尾端新增、set 成員、zset 分數、TTL 與刪除 key）及 Pub/Sub 明確發布，值含非 UTF-8 位元組時不開放編輯。SCAN 的 `COUNT` 只是提示，程式會在單次 traversal 內去重，但資料同時變更時跨頁仍可能變動。監控頁只讀取伺服器提供且 ACL 允許的 INFO 欄位，不保留歷史趨勢；Pub/Sub 採 at-most-once 傳遞、不自動重連，訊息只存在目前頁籤記憶體並保留最近 1,000 筆。Cluster、Sentinel 尚未提供；Redis 6.2／7 與 Garnet standalone 實機矩陣可用 `tests/Run-RedisLiveMatrixTests.ps1` 重跑。
 - Snowflake 結果集入口僅接受 SELECT／SHOW／DESC／EXPLAIN／WITH，DML／DDL 必須從查詢編輯器執行；以 SQL API JSON 讀取時所有欄位值以字串顯示，物件名稱採 schema.table 拆解（名稱內含點號者不支援）。查詢會使用連線設定的 database／warehouse／role；尚未對真實 Snowflake 帳戶實機驗收，key-pair JWT、參數綁定、資料網格寫回、暫存區與 bulk load 未提供。
 
 各功能做完的細節紀錄在 [`docs/FEATURE_NOTES.md`](docs/FEATURE_NOTES.md)。
@@ -300,6 +300,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 - `mySQLPunk/lib/RedisRespClient.cs`: Redis RESP2 編碼、解析、TCP／TLS 往返與回覆大小防護。
 - `mySQLPunk/lib/my_redis.cs`: Redis / Garnet provider、logical db、SCAN key 瀏覽、受限查詢與 WATCH/MULTI/EXEC 安全編輯。
 - `mySQLPunk/RedisKeyEditorForm.cs`: Redis key 編輯器（string 值、TTL 與刪除）。
+- `mySQLPunk/RedisPubSubForm.cs`: Redis / Garnet channel／pattern 訂閱與訊息發布工作區。
 - `mySQLPunk/template/redis_add_edit.cs`: Redis / Garnet 連線設定與測試畫面。
 - `mySQLPunk/lib/my_snowflake.cs`: Snowflake provider、metadata、分頁查詢與查詢編輯器 DML／DDL（SQL REST API）。
 - `mySQLPunk/lib/SnowflakeRestClient.cs`: Snowflake SQL API v2 client：bearer 驗證、202 輪詢與 partition 讀取。

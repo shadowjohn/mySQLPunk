@@ -4,6 +4,7 @@ using System.Data;
 using System.Globalization;
 using System.Linq;
 using System.Net.Sockets;
+using System.Threading;
 using mySQLPunk;
 using mySQLPunk.lib;
 
@@ -64,6 +65,45 @@ internal static class RedisLiveMatrixTests
             Check(monitor.Metrics.Any(metric => metric.Name == "keys" && metric.Value == "6")
                 && monitor.Metrics.Any(metric => metric.Name == "redis_version" || metric.Name == "garnet_version"),
                 "monitor snapshot combines database size and INFO metrics");
+
+            RedisPubSubMessageEventArgs channelMessage = null;
+            using (ManualResetEvent received = new ManualResetEvent(false))
+            using (RedisPubSubSubscription subscription = provider.CreatePubSubSubscription("db0", "mtx:channel", false))
+            {
+                subscription.MessageReceived += (sender, eventArgs) =>
+                {
+                    channelMessage = eventArgs;
+                    received.Set();
+                };
+                subscription.Start();
+                Check(provider.Publish("mtx:channel", label + " channel") >= 1,
+                    "PUBLISH reaches a dedicated channel subscription");
+                Check(received.WaitOne(3000), "channel subscription receives within three seconds");
+                Check(channelMessage != null && channelMessage.Channel == "mtx:channel"
+                    && channelMessage.Message == label + " channel" && channelMessage.Pattern == string.Empty,
+                    "channel message preserves channel and payload");
+            }
+
+            RedisPubSubMessageEventArgs patternMessage = null;
+            using (ManualResetEvent received = new ManualResetEvent(false))
+            using (RedisPubSubSubscription subscription = provider.CreatePubSubSubscription("db0", "mtx:event:*", true))
+            {
+                subscription.MessageReceived += (sender, eventArgs) =>
+                {
+                    patternMessage = eventArgs;
+                    received.Set();
+                };
+                subscription.Start();
+                Check(provider.Publish("mtx:event:created", label + " pattern") >= 1,
+                    "PUBLISH reaches a dedicated pattern subscription");
+                Check(received.WaitOne(3000), "pattern subscription receives within three seconds");
+                Check(patternMessage != null && patternMessage.Pattern == "mtx:event:*"
+                    && patternMessage.Channel == "mtx:event:created"
+                    && patternMessage.Message == label + " pattern",
+                    "pattern message preserves pattern, channel and payload");
+            }
+            Check(provider.CountRows("db0", "keys") >= 6,
+                "closing subscriptions leaves the provider connection usable");
             Check(provider.CountRows("db0", "keys") >= 6, "DBSIZE counts the seeded keys");
 
             DataTable page = provider.SelectJsonQuery("db0", "{ \"pattern\": \"mtx:*\", \"limit\": 100 }");
