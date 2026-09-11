@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **Redis／Garnet 即時監控**：Redis 資料庫節點新增停靠式監控頁，可手動或每 1／5／10／30 秒讀取 INFO；摘要涵蓋連線、記憶體、活動、命中率、網路、CPU、持久化與複寫，命令統計依呼叫次數排序並列出平均耗時及失敗／拒絕次數。不支援或受 ACL 限制的 INFO 區段會個別略過，不會讓整頁失效。
 - **Redis list 元素安全刪除**：key 編輯器可依選取索引刪除 list 元素；刪除前會比對載入時的值，並在同一筆 WATCH／MULTI／EXEC 交易中以唯一標記定位，內容相同的其他元素不會被誤刪，外部修改或交易中止時也會保留原清單。
 - **資料表約束與 SQL Server XML 索引**：Table Designer 新增外鍵與 CHECK 約束分頁，可讀取並預覽 MySQL、PostgreSQL、SQL Server、Oracle、SQLite 的既有約束；新增或修改時會產生各 provider 對應的 DDL。SQL Server 索引頁也可建立 PRIMARY／PATH／VALUE／PROPERTY XML 索引，並正確保留次要 XML 索引的父索引關係。
 - **跨資料庫欄位屬性**：Table Designer 會讀取並呈現 MySQL/MariaDB 的字元集、排序規則與 generated column，PostgreSQL 的 identity、generated、storage、compression 與 collation，SQLite 的 generated column／collation，Oracle 與 Snowflake 的 identity、虛擬欄位及 collation。SQL 預覽會保留可安全重建的屬性；既有資料表不支援直接 ALTER 的進階變更會明確阻擋，避免靜默遺失設定。

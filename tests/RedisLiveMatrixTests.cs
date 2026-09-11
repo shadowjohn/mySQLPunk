@@ -60,6 +60,10 @@ internal static class RedisLiveMatrixTests
             Dictionary<string, string> info = provider.GetDatabaseInfo("db0");
             Check(info.ContainsKey("redis_version") || info.ContainsKey("garnet_version"),
                 "INFO server exposes a version");
+            RedisMonitorSnapshot monitor = provider.GetMonitorSnapshot("db0");
+            Check(monitor.Metrics.Any(metric => metric.Name == "keys" && metric.Value == "6")
+                && monitor.Metrics.Any(metric => metric.Name == "redis_version" || metric.Name == "garnet_version"),
+                "monitor snapshot combines database size and INFO metrics");
             Check(provider.CountRows("db0", "keys") >= 6, "DBSIZE counts the seeded keys");
 
             DataTable page = provider.SelectJsonQuery("db0", "{ \"pattern\": \"mtx:*\", \"limit\": 100 }");

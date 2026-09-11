@@ -6077,6 +6077,16 @@ namespace mySQLPunk
             UpdateMainStatus(Localization.Format("DataProfile.OpenedStatus", selection.ObjectName));
         }
 
+        private void OpenRedisMonitor(TreeNode databaseNode)
+        {
+            TreeDatabaseTarget target = BuildTargetFromNode(databaseNode);
+            if (!IsRedisTarget(target) || !(target.Database is my_redis)) return;
+
+            RedisMonitorForm monitor = new RedisMonitorForm((my_redis)target.Database, target.DatabaseName);
+            DockDockableForm(monitor);
+            UpdateMainStatus(Localization.Format("Redis.MonitorOpened", target.DatabaseName));
+        }
+
         private void OpenSelectedViewInQuery()
         {
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
@@ -13455,11 +13465,19 @@ namespace mySQLPunk
 
             menu.Items.Add(new ToolStripSeparator());
 
-            if (IsNonRelationalTarget(BuildTargetFromNode(node)))
+            TreeDatabaseTarget nonRelationalTarget = BuildTargetFromNode(node);
+            if (IsNonRelationalTarget(nonRelationalTarget))
             {
                 ToolStripMenuItem mongoQueryItem = new ToolStripMenuItem(Localization.T("Toolbar.NewQuery"));
                 mongoQueryItem.Click += (s, ev) => Query_btn_Click(s, ev);
                 menu.Items.Add(mongoQueryItem);
+
+                if (IsRedisTarget(nonRelationalTarget))
+                {
+                    ToolStripMenuItem redisMonitorItem = new ToolStripMenuItem(Localization.T("Redis.MonitorMenu"));
+                    redisMonitorItem.Click += (s, ev) => OpenRedisMonitor(node);
+                    menu.Items.Add(redisMonitorItem);
+                }
 
                 ToolStripMenuItem mongoDictionaryItem = new ToolStripMenuItem(Localization.T("Dict.MenuItem"));
                 mongoDictionaryItem.Click += (s, ev) => GenerateDataDictionaryForNode(node);

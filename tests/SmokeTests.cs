@@ -9062,6 +9062,19 @@ public static partial class SmokeTests
             DataTable keyDetail = liveProvider.SelectJsonQuery("db2", "{ \"key\": \"string:key\" }");
             AssertEquals("string value", Convert.ToString(keyDetail.Rows[0]["value"]), "Single-key queries should return string values.");
             AssertEquals("7.2-test", liveProvider.GetDatabaseInfo("db2")["redis_version"], "INFO server metadata should be parsed.");
+            RedisMonitorSnapshot monitor = liveProvider.GetMonitorSnapshot("db2");
+            Assert(monitor.Metrics.Any(item => item.Name == "connected_clients" && item.Value == "3"),
+                "Redis monitoring should parse client metrics from INFO sections.");
+            Assert(monitor.Metrics.Any(item => item.Name == "keyspace_hit_rate" && item.Value == "80.0 %"),
+                "Redis monitoring should calculate the keyspace hit rate.");
+            Assert(monitor.Commands.Count == 2 && monitor.Commands[0].Command == "get" && monitor.Commands[0].Calls == 12,
+                "Redis command statistics should be parsed and sorted by call count.");
+            Assert(monitor.Commands[0].FailedCalls == 1 && monitor.Commands[0].RejectedCalls == 2,
+                "Redis command statistics should retain failed and rejected call counts.");
+            using (RedisMonitorForm monitorForm = new RedisMonitorForm(liveProvider, "db2"))
+            {
+                AssertContains(monitorForm.Text, "db2", "The Redis monitoring workspace should identify its logical database.");
+            }
             liveProvider.Close();
             server.AssertHealthy();
         }
@@ -9073,6 +9086,11 @@ public static partial class SmokeTests
         string form1Source = File.ReadAllText(Path.Combine(root, "mySQLPunk", "Form1.cs"), Encoding.UTF8);
         AssertContains(form1Source, "OpenRedisConnectionAsync", "The main window should open Redis connections.");
         AssertContains(form1Source, "IsNonRelationalTarget", "Redis objects should share the read-only tree menus.");
+        AssertContains(form1Source, "OpenRedisMonitor", "Redis database menus should open the monitoring workspace.");
+        string redisMonitorSource = File.ReadAllText(Path.Combine(root, "mySQLPunk", "RedisMonitorForm.cs"), Encoding.UTF8);
+        AssertContains(redisMonitorSource, "GetMonitorSnapshot", "The Redis monitoring workspace should refresh provider snapshots.");
+        string redisProject = File.ReadAllText(Path.Combine(root, "mySQLPunk", "mySQLPunk.csproj"), Encoding.UTF8);
+        AssertContains(redisProject, "RedisMonitorForm.cs", "The Redis monitoring workspace should be included in the project.");
     }
 
     private static void TestRedisSafeEditing()
@@ -13297,9 +13315,37 @@ public static partial class SmokeTests
                 case "GET": WriteBulk(stream, ValueFor(args[1])); return;
                 case "HLEN": WriteInteger(stream, 2); return;
                 case "INFO":
-                    WriteBulk(stream, args.Length > 1 && args[1] == "memory"
-                        ? "# Memory\r\nused_memory_human:1.25M\r\n"
-                        : "# Server\r\nredis_version:7.2-test\r\nredis_mode:standalone\r\ntcp_port:" + Port + "\r\n");
+                    string section = args.Length > 1 ? args[1].ToLowerInvariant() : "server";
+                    string info;
+                    switch (section)
+                    {
+                        case "clients":
+                            info = "# Clients\r\nconnected_clients:3\r\nblocked_clients:1\r\n";
+                            break;
+                        case "memory":
+                            info = "# Memory\r\nused_memory:1310720\r\nused_memory_human:1.25M\r\nused_memory_peak_human:2.00M\r\nmem_fragmentation_ratio:1.05\r\n";
+                            break;
+                        case "stats":
+                            info = "# Stats\r\ninstantaneous_ops_per_sec:8\r\ntotal_commands_processed:42\r\nkeyspace_hits:80\r\nkeyspace_misses:20\r\n";
+                            break;
+                        case "cpu":
+                            info = "# CPU\r\nused_cpu_sys:1.5\r\nused_cpu_user:2.5\r\n";
+                            break;
+                        case "replication":
+                            info = "# Replication\r\nrole:master\r\nconnected_slaves:0\r\n";
+                            break;
+                        case "persistence":
+                            info = "# Persistence\r\nrdb_last_bgsave_status:ok\r\naof_enabled:0\r\n";
+                            break;
+                        case "commandstats":
+                            info = "# Commandstats\r\ncmdstat_set:calls=4,usec=12,usec_per_call=3.00,failed_calls=0,rejected_calls=0\r\n"
+                                + "cmdstat_get:calls=12,usec=18,usec_per_call=1.50,failed_calls=1,rejected_calls=2\r\n";
+                            break;
+                        default:
+                            info = "# Server\r\nredis_version:7.2-test\r\nredis_mode:standalone\r\nuptime_in_seconds:600\r\ntcp_port:" + Port + "\r\n";
+                            break;
+                    }
+                    WriteBulk(stream, info);
                     return;
                 default:
                     WriteSimple(stream, "ERR unsupported fake command " + command, false);

@@ -14,6 +14,29 @@ namespace mySQLPunk.lib
         public RedisEditConflictException(string message) : base(message) { }
     }
 
+    public sealed class RedisMonitorMetric
+    {
+        public string Section = string.Empty;
+        public string Name = string.Empty;
+        public string Value = string.Empty;
+    }
+
+    public sealed class RedisCommandMetric
+    {
+        public string Command = string.Empty;
+        public long Calls;
+        public double MicrosecondsPerCall;
+        public long FailedCalls;
+        public long RejectedCalls;
+    }
+
+    public sealed class RedisMonitorSnapshot
+    {
+        public DateTime CapturedAtUtc;
+        public readonly List<RedisMonitorMetric> Metrics = new List<RedisMonitorMetric>();
+        public readonly List<RedisCommandMetric> Commands = new List<RedisCommandMetric>();
+    }
+
     /// <summary>
     /// Redis／Garnet 第一階段 provider：連線、db 清單、keys 瀏覽與受限唯讀查詢。
     /// 與 my_mongodb 相同原則：不假裝相容關聯式 DDL／寫入，避免 RDBMS UI 誤送命令。
@@ -259,6 +282,91 @@ namespace mySQLPunk.lib
                 }
                 catch (RedisServerException) { }
                 return result;
+            }
+        }
+
+        /// <summary>
+        /// 讀取 Redis／Garnet 即時監控快照。優先合併預設 INFO，缺少的區段才個別補讀；
+        /// 伺服器不支援其中一段時只略過該段，避免版本或 Garnet 欄位差異讓整頁失效。
+        /// </summary>
+        public RedisMonitorSnapshot GetMonitorSnapshot(string databaseName)
+        {
+            lock (_sync)
+            {
+                EnsureOpen();
+                SelectDatabase(databaseName);
+
+                RedisMonitorSnapshot snapshot = new RedisMonitorSnapshot { CapturedAtUtc = DateTime.UtcNow };
+                Dictionary<string, string> fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    MergeInfoFields(fields, client.Execute("INFO") as string);
+                }
+                catch (RedisServerException) { }
+
+                ReadInfoSectionWhenMissing(fields, "server", "redis_version", "garnet_version");
+                ReadInfoSectionWhenMissing(fields, "clients", "connected_clients");
+                ReadInfoSectionWhenMissing(fields, "memory", "used_memory", "used_memory_human");
+                ReadInfoSectionWhenMissing(fields, "persistence", "rdb_last_bgsave_status", "aof_enabled");
+                ReadInfoSectionWhenMissing(fields, "stats", "total_commands_processed", "instantaneous_ops_per_sec");
+                ReadInfoSectionWhenMissing(fields, "replication", "role");
+                ReadInfoSectionWhenMissing(fields, "cpu", "used_cpu_sys", "used_cpu_user");
+                ReadInfoSectionWhenMissing(fields, "commandstats", "cmdstat_");
+
+                AddMonitorMetric(snapshot, "database", "database", databaseName ?? string.Empty);
+                AddMonitorMetric(snapshot, "database", "keys", Convert.ToString(client.Execute("DBSIZE"), CultureInfo.InvariantCulture));
+                AddMonitorMetric(snapshot, fields, "server", "redis_version");
+                AddMonitorMetric(snapshot, fields, "server", "garnet_version");
+                AddMonitorMetric(snapshot, fields, "server", "redis_mode");
+                AddMonitorMetric(snapshot, fields, "server", "uptime_in_seconds");
+                AddMonitorMetric(snapshot, fields, "clients", "connected_clients");
+                AddMonitorMetric(snapshot, fields, "clients", "blocked_clients");
+                AddMonitorMetric(snapshot, fields, "memory", "used_memory_human", "used_memory");
+                AddMonitorMetric(snapshot, fields, "memory", "used_memory_peak_human", "used_memory_peak");
+                AddMonitorMetric(snapshot, fields, "memory", "used_memory_rss_human", "used_memory_rss");
+                AddMonitorMetric(snapshot, fields, "memory", "mem_fragmentation_ratio");
+                AddMonitorMetric(snapshot, fields, "activity", "instantaneous_ops_per_sec");
+                AddMonitorMetric(snapshot, fields, "activity", "total_commands_processed");
+                AddMonitorMetric(snapshot, fields, "activity", "keyspace_hits");
+                AddMonitorMetric(snapshot, fields, "activity", "keyspace_misses");
+                AddMonitorMetric(snapshot, fields, "activity", "evicted_keys");
+                AddMonitorMetric(snapshot, fields, "activity", "rejected_connections");
+                AddMonitorMetric(snapshot, fields, "network", "instantaneous_input_kbps");
+                AddMonitorMetric(snapshot, fields, "network", "instantaneous_output_kbps");
+                AddMonitorMetric(snapshot, fields, "network", "total_net_input_bytes");
+                AddMonitorMetric(snapshot, fields, "network", "total_net_output_bytes");
+                AddMonitorMetric(snapshot, fields, "cpu", "used_cpu_sys");
+                AddMonitorMetric(snapshot, fields, "cpu", "used_cpu_user");
+                AddMonitorMetric(snapshot, fields, "persistence", "rdb_last_bgsave_status");
+                AddMonitorMetric(snapshot, fields, "persistence", "aof_enabled");
+                AddMonitorMetric(snapshot, fields, "persistence", "aof_last_bgrewrite_status");
+                AddMonitorMetric(snapshot, fields, "replication", "role");
+                AddMonitorMetric(snapshot, fields, "replication", "connected_slaves");
+                AddMonitorMetric(snapshot, fields, "replication", "master_link_status");
+
+                long hits, misses;
+                if (TryReadLong(fields, "keyspace_hits", out hits) && TryReadLong(fields, "keyspace_misses", out misses))
+                {
+                    double total = (double)hits + misses;
+                    if (total > 0d)
+                    {
+                        double rate = hits / total;
+                        AddMonitorMetric(snapshot, "activity", "keyspace_hit_rate", rate.ToString("P1", CultureInfo.InvariantCulture));
+                    }
+                }
+
+                foreach (KeyValuePair<string, string> pair in fields)
+                {
+                    if (!pair.Key.StartsWith("cmdstat_", StringComparison.OrdinalIgnoreCase)) continue;
+                    RedisCommandMetric command = ParseCommandMetric(pair.Key.Substring("cmdstat_".Length), pair.Value);
+                    if (command != null) snapshot.Commands.Add(command);
+                }
+                snapshot.Commands.Sort((left, right) =>
+                {
+                    int byCalls = right.Calls.CompareTo(left.Calls);
+                    return byCalls != 0 ? byCalls : string.Compare(left.Command, right.Command, StringComparison.OrdinalIgnoreCase);
+                });
+                return snapshot;
             }
         }
 
@@ -905,13 +1013,110 @@ namespace mySQLPunk.lib
 
         private static string ParseInfoValue(string info, string name)
         {
+            string value;
+            return ParseInfoFields(info).TryGetValue(name, out value) ? value : string.Empty;
+        }
+
+        private static Dictionary<string, string> ParseInfoFields(string info)
+        {
+            Dictionary<string, string> result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (string line in (info ?? string.Empty).Split('\n'))
             {
-                string trimmed = line.Trim();
-                if (trimmed.StartsWith(name + ":", StringComparison.OrdinalIgnoreCase))
-                    return trimmed.Substring(name.Length + 1).Trim();
+                string trimmed = line.TrimEnd('\r').Trim();
+                if (trimmed.Length == 0 || trimmed[0] == '#') continue;
+                int separator = trimmed.IndexOf(':');
+                if (separator <= 0) continue;
+                string key = trimmed.Substring(0, separator).Trim();
+                if (key.Length == 0) continue;
+                result[key] = trimmed.Substring(separator + 1).Trim();
             }
-            return string.Empty;
+            return result;
+        }
+
+        private void ReadInfoSectionWhenMissing(Dictionary<string, string> fields, string section, params string[] expectedNames)
+        {
+            foreach (string expectedName in expectedNames ?? new string[0])
+            {
+                if (expectedName.EndsWith("_", StringComparison.Ordinal))
+                {
+                    foreach (string name in fields.Keys)
+                        if (name.StartsWith(expectedName, StringComparison.OrdinalIgnoreCase)) return;
+                }
+                else if (fields.ContainsKey(expectedName)) return;
+            }
+
+            try { MergeInfoFields(fields, client.Execute("INFO", section) as string); }
+            catch (RedisServerException) { }
+        }
+
+        private static void MergeInfoFields(Dictionary<string, string> target, string info)
+        {
+            if (target == null) return;
+            foreach (KeyValuePair<string, string> pair in ParseInfoFields(info)) target[pair.Key] = pair.Value;
+        }
+
+        private static void AddMonitorMetric(RedisMonitorSnapshot snapshot, string section, string name, string value)
+        {
+            if (snapshot == null || string.IsNullOrWhiteSpace(value)) return;
+            snapshot.Metrics.Add(new RedisMonitorMetric { Section = section, Name = name, Value = value });
+        }
+
+        private static void AddMonitorMetric(
+            RedisMonitorSnapshot snapshot,
+            Dictionary<string, string> fields,
+            string section,
+            string name,
+            string fallbackName = null)
+        {
+            string value;
+            if (fields != null && fields.TryGetValue(name, out value) && !string.IsNullOrWhiteSpace(value))
+            {
+                AddMonitorMetric(snapshot, section, name, value);
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(fallbackName) && fields != null && fields.TryGetValue(fallbackName, out value))
+                AddMonitorMetric(snapshot, section, fallbackName, value);
+        }
+
+        private static bool TryReadLong(Dictionary<string, string> fields, string name, out long value)
+        {
+            value = 0;
+            string raw;
+            return fields != null && fields.TryGetValue(name, out raw) &&
+                long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static RedisCommandMetric ParseCommandMetric(string commandName, string value)
+        {
+            if (string.IsNullOrWhiteSpace(commandName)) return null;
+            Dictionary<string, string> parts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string item in (value ?? string.Empty).Split(','))
+            {
+                int separator = item.IndexOf('=');
+                if (separator <= 0) continue;
+                parts[item.Substring(0, separator).Trim()] = item.Substring(separator + 1).Trim();
+            }
+
+            long calls;
+            if (!parts.TryGetValue("calls", out value) || !long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out calls))
+                return null;
+            double average = 0d;
+            long failed = 0;
+            long rejected = 0;
+            if (parts.TryGetValue("usec_per_call", out value))
+                double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out average);
+            if (parts.TryGetValue("failed_calls", out value))
+                long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out failed);
+            if (parts.TryGetValue("rejected_calls", out value))
+                long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out rejected);
+            return new RedisCommandMetric
+            {
+                Command = commandName.Replace('|', ' '),
+                Calls = calls,
+                MicrosecondsPerCall = average,
+                FailedCalls = failed,
+                RejectedCalls = rejected
+            };
         }
 
         private static void AddColumnRow(DataTable table, string field, string type, string key, string comment)
