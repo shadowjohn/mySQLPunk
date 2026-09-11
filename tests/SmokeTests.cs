@@ -9213,8 +9213,23 @@ public static partial class SmokeTests
             Assert(server.ZScore("z1", "m1") == 2.5, "Updating a zset member should change its score.");
             provider.SaveZSetMember("db0", "z1", "m2", null, false, "7");
             Assert(server.ZScore("z1", "m2") == 7, "Adding a zset member should set its score.");
-            provider.RemoveZSetMember("db0", "z1", "m2");
+            conflict = false;
+            try { provider.RemoveZSetMember("db0", "z1", "m1", "1.5"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict && server.ZScore("z1", "m1") == 2.5,
+                "Deleting with a stale score must preserve the externally changed member.");
+            server.AbortNextExec = true;
+            conflict = false;
+            try { provider.RemoveZSetMember("db0", "z1", "m2", "7"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict && server.ZScore("z1", "m2") == 7,
+                "An aborted deletion must preserve the member.");
+            provider.RemoveZSetMember("db0", "z1", "m2", "7.0");
             Assert(server.ZScore("z1", "m2") == null, "Removing a zset member should ZREM it.");
+            conflict = false;
+            try { provider.RemoveZSetMember("db0", "z1", "m2", "7"); }
+            catch (RedisEditConflictException) { conflict = true; }
+            Assert(conflict, "Deleting a missing zset member must raise a conflict.");
             bool badScore = false;
             try { provider.SaveZSetMember("db0", "z1", "m1", "2.5", true, "abc"); }
             catch (ArgumentException) { badScore = true; }

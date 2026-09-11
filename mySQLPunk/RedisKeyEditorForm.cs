@@ -510,7 +510,8 @@ namespace mySQLPunk
                     case "zset":
                         {
                             string member = Convert.ToString(view.Row["member"], CultureInfo.InvariantCulture);
-                            await Task.Run(() => _db.RemoveZSetMember(_databaseName, _key, member));
+                            string expectedScore = Convert.ToString(view.Row["score"], CultureInfo.InvariantCulture);
+                            await Task.Run(() => _db.RemoveZSetMember(_databaseName, _key, member, expectedScore));
                             break;
                         }
                     default:

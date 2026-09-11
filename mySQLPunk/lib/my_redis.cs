@@ -516,15 +516,15 @@ namespace mySQLPunk.lib
                 () => client.Execute("ZADD", key, parsedScore.ToString("R", CultureInfo.InvariantCulture), member));
         }
 
-        /// <summary>移除 zset 成員；成員已不存在時回報衝突。</summary>
-        public void RemoveZSetMember(string databaseName, string key, string member)
+        /// <summary>移除 zset 成員；分數已被改過或成員已消失時回報衝突。</summary>
+        public void RemoveZSetMember(string databaseName, string key, string member, string expectedScore)
         {
             if (string.IsNullOrEmpty(member)) throw new ArgumentException(Localization.T("Redis.EntryRequired"), "member");
             RunWatchedWrite(databaseName, key, "zset",
                 () =>
                 {
-                    if (client.Execute("ZSCORE", key, member) == null)
-                        throw new RedisEditConflictException(Localization.T("Redis.EditEntryMissing"));
+                    string current = client.Execute("ZSCORE", key, member) as string;
+                    ValidateEntryExpectation(current, expectedScore, true, ScoresEqual);
                 },
                 () => client.Execute("ZREM", key, member));
         }

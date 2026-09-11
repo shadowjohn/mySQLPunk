@@ -158,7 +158,21 @@ internal static class RedisLiveMatrixTests
 
             provider.SaveZSetMember("db0", "mtx:zset", "z1", "1.5", true, "9.5");
             Check(Convert.ToString(raw.Execute("ZSCORE", "mtx:zset", "z1")) == "9.5", "zset score update ZADDs");
-            provider.RemoveZSetMember("db0", "mtx:zset", "z2");
+            raw.Execute("ZADD", "mtx:zset", "10.5", "z1");
+            bool scoreConflict = false;
+            try { provider.RemoveZSetMember("db0", "mtx:zset", "z1", "9.5"); }
+            catch (RedisEditConflictException) { scoreConflict = true; }
+            Check(scoreConflict && Convert.ToString(raw.Execute("ZSCORE", "mtx:zset", "z1")) == "10.5",
+                "stale zset deletion preserves the externally changed score");
+            provider.RemoveZSetMember("db0", "mtx:zset", "z1", "10.50");
+            Check(raw.Execute("ZSCORE", "mtx:zset", "z1") == null, "equivalent score text permits deletion");
+            bool missingScoreConflict = false;
+            try { provider.RemoveZSetMember("db0", "mtx:zset", "z1", "10.5"); }
+            catch (RedisEditConflictException) { missingScoreConflict = true; }
+            Check(missingScoreConflict, "missing zset members raise a deletion conflict");
+            raw.Execute("ZADD", "mtx:zset", "10.5", "z1");
+            string z2Score = Convert.ToString(raw.Execute("ZSCORE", "mtx:zset", "z2"), CultureInfo.InvariantCulture);
+            provider.RemoveZSetMember("db0", "mtx:zset", "z2", z2Score);
             Check(raw.Execute("ZSCORE", "mtx:zset", "z2") == null, "zset member remove ZREMs");
 
             bool typeConflict = false;
