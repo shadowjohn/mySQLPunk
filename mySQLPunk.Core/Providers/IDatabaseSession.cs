@@ -19,6 +19,12 @@ public interface IDatabaseSession : IDisposable
         string sql,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Read-only catalog structure (columns, indexes, foreign keys, definition) of a table or view.</summary>
+    Task<TableStructureInfo> GetTableStructureAsync(
+        string database,
+        DatabaseObjectInfo table,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Produces the provider's execution plan for a single statement without executing it.</summary>
     Task<QueryPlanDocument> ExplainAsync(
         string database,

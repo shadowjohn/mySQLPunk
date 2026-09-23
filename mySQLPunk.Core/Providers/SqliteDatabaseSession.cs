@@ -3,7 +3,7 @@ using MySqlPunk.Core.Models;
 
 namespace MySqlPunk.Core.Providers;
 
-internal sealed class SqliteDatabaseSession : AdoDatabaseSession
+internal sealed partial class SqliteDatabaseSession : AdoDatabaseSession
 {
     public SqliteDatabaseSession(ConnectionProfile profile)
         : base(profile)

@@ -104,6 +104,33 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
     public abstract Task<IReadOnlyList<string>> GetDatabasesAsync(
         CancellationToken cancellationToken = default);
 
+    public abstract Task<TableStructureInfo> GetTableStructureAsync(
+        string database,
+        DatabaseObjectInfo table,
+        CancellationToken cancellationToken = default);
+
+    protected static string ReadText(DbDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? string.Empty : Convert.ToString(reader.GetValue(ordinal), System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+
+    protected static bool ReadFlag(DbDataReader reader, int ordinal)
+    {
+        if (reader.IsDBNull(ordinal))
+        {
+            return false;
+        }
+
+        return reader.GetValue(ordinal) switch
+        {
+            bool flag => flag,
+            string text => text.Equals("YES", StringComparison.OrdinalIgnoreCase) ||
+                           text.Equals("Y", StringComparison.OrdinalIgnoreCase) ||
+                           text.Equals("1", StringComparison.Ordinal) ||
+                           text.Equals("true", StringComparison.OrdinalIgnoreCase),
+            IConvertible convertible => Convert.ToInt64(convertible, System.Globalization.CultureInfo.InvariantCulture) != 0,
+            _ => false
+        };
+    }
+
     public abstract Task<IReadOnlyList<DatabaseObjectInfo>> GetObjectsAsync(
         string database,
         CancellationToken cancellationToken = default);

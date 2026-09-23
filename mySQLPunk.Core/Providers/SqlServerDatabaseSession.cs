@@ -5,7 +5,7 @@ using MySqlPunk.Core.Services;
 
 namespace MySqlPunk.Core.Providers;
 
-internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
+internal sealed partial class SqlServerDatabaseSession : AdoDatabaseSession
 {
     public SqlServerDatabaseSession(ConnectionProfile profile)
         : base(profile)

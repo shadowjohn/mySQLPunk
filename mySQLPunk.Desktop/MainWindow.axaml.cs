@@ -58,6 +58,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _executeButton;
     private readonly Button _executeDocumentButton;
     private readonly Button _explainButton;
+    private readonly Button _dataDictionaryButton;
     private readonly Button _copyResultButton;
     private readonly Button _exportButton;
     private readonly Button _cancelButton;
@@ -94,6 +95,7 @@ public sealed partial class MainWindow : Window
         _executeButton = this.FindControl<Button>("ExecuteButton")!;
         _executeDocumentButton = this.FindControl<Button>("ExecuteDocumentButton")!;
         _explainButton = this.FindControl<Button>("ExplainButton")!;
+        _dataDictionaryButton = this.FindControl<Button>("DataDictionaryButton")!;
         _copyResultButton = this.FindControl<Button>("CopyResultButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
@@ -713,6 +715,78 @@ public sealed partial class MainWindow : Window
     private async void ExplainSql_Click(object? sender, RoutedEventArgs e)
     {
         await ExplainCurrentSqlAsync();
+    }
+
+    private async void ExportDataDictionary_Click(object? sender, RoutedEventArgs e)
+    {
+        await ExportDataDictionaryAsync();
+    }
+
+    private async Task ExportDataDictionaryAsync()
+    {
+        if (_session is null || _databaseCombo.SelectedItem is not string database)
+        {
+            await MessageDialog.ShowAsync(this, "尚未連線", "請先選擇連線設定並連線。", showCancel: false);
+            return;
+        }
+
+        if (!StorageProvider.CanSave)
+        {
+            await MessageDialog.ShowAsync(this, "無法匯出資料字典", "目前桌面環境未提供儲存檔案對話框。", showCancel: false);
+            return;
+        }
+
+        IStorageFile? file;
+        try
+        {
+            var safeDatabase = new string(Path.GetFileName(database).Where(character => !Path.GetInvalidFileNameChars().Contains(character)).ToArray());
+            file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "匯出資料字典",
+                SuggestedFileName = $"mysqlpunk-dictionary-{safeDatabase}-{DateTime.Now:yyyyMMdd-HHmmss}.html",
+                DefaultExtension = "html",
+                FileTypeChoices = new[]
+                {
+                    new FilePickerFileType("HTML 資料字典") { Patterns = new[] { "*.html", "*.htm" }, MimeTypes = new[] { "text/html" } }
+                }
+            });
+        }
+        catch (Exception exception)
+        {
+            await ShowErrorAsync("無法開啟儲存檔案對話框", exception);
+            return;
+        }
+
+        if (file is null)
+        {
+            return;
+        }
+
+        if (file.TryGetLocalPath() is not { } path)
+        {
+            await MessageDialog.ShowAsync(this, "無法匯出資料字典", "目前只能匯出到本機檔案。", showCancel: false);
+            return;
+        }
+
+        var session = _session;
+        var version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "0.0.0.0";
+        await RunOperationAsync("正在讀取資料庫結構…", async cancellationToken =>
+        {
+            var objects = await session.GetObjectsAsync(database, cancellationToken);
+            var progress = new Progress<DataDictionaryProgress>(report =>
+                SetStatus($"正在讀取結構 {report.Completed + 1}/{report.Total}：{report.Current.DisplayName}"));
+            var entries = await DataDictionaryService.CollectAsync(session, database, objects, progress, cancellationToken);
+            var html = DataDictionaryService.BuildHtml(session.Profile, database, entries, version);
+            var summary = await DataDictionaryService.WriteFileAsync(
+                html,
+                path,
+                entries.Count(entry => entry.Object.Kind == DatabaseObjectKind.Table),
+                entries.Count(entry => entry.Object.Kind == DatabaseObjectKind.View),
+                entries.Count(entry => entry.Error is not null),
+                cancellationToken);
+            var failureNote = summary.Failed > 0 ? $"，{summary.Failed} 個物件無法讀取（已在文件內註明）" : string.Empty;
+            SetStatus($"已匯出資料字典：{summary.Tables} 個資料表、{summary.Views} 個檢視表{failureNote}（{summary.Bytes / 1024d:N1} KB）：{summary.Path}");
+        });
     }
 
     private async Task ExplainCurrentSqlAsync()
@@ -1656,6 +1730,7 @@ public sealed partial class MainWindow : Window
         _executeButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _executeDocumentButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _explainButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _dataDictionaryButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _copyResultButton.IsEnabled = !busy &&
                                       _lastResult is not null &&
                                       _resultsGrid.SelectedItems.OfType<ResultRow>().Any();

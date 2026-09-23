@@ -7,7 +7,7 @@ using NpgsqlTypes;
 
 namespace MySqlPunk.Core.Providers;
 
-internal sealed class PostgreSqlDatabaseSession : AdoDatabaseSession
+internal sealed partial class PostgreSqlDatabaseSession : AdoDatabaseSession
 {
     public PostgreSqlDatabaseSession(ConnectionProfile profile)
         : base(profile)

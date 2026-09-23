@@ -26,6 +26,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
     ("執行計畫解析與安全規則", QueryPlanParsingAsync),
+    ("資料字典結構與 HTML 匯出", DataDictionaryAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
@@ -2269,6 +2270,141 @@ static Task QueryPlanParsingAsync()
     AssertThrows<InvalidOperationException>(() =>
         QueryPlanService.Parse(DatabaseProviderKind.SqlServer, new QueryResult(), ""));
     return Task.CompletedTask;
+}
+
+static async Task DataDictionaryAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var profile = CreateSqliteProfile(Path.Combine(directory, "dictionary.db"));
+        using var session = DatabaseProviderFactory.Create(profile);
+        await session.ExecuteAsync(profile.Database, """
+            CREATE TABLE customers (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                display_name TEXT DEFAULT 'anonymous',
+                upper_name TEXT GENERATED ALWAYS AS (upper(display_name)) VIRTUAL
+            );
+            CREATE TABLE orders (
+                id INTEGER PRIMARY KEY,
+                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE ON UPDATE RESTRICT,
+                amount REAL NOT NULL DEFAULT 0
+            );
+            CREATE INDEX ix_orders_customer ON orders(customer_id, amount);
+            CREATE VIEW "big <orders>" AS SELECT id, amount FROM orders WHERE amount > 100 -- <script>alert(1)</script>
+            ;
+            """);
+
+        var objects = await session.GetObjectsAsync(profile.Database);
+        var customers = await session.GetTableStructureAsync(profile.Database, objects.Single(item => item.Name == "customers"));
+        Assert(customers.Columns.Select(column => column.Name).SequenceEqual(new[] { "id", "email", "display_name", "upper_name" }) &&
+               customers.Columns[0].IsPrimaryKey &&
+               customers.Columns[1].DataType == "TEXT" && !customers.Columns[1].IsNullable &&
+               customers.Columns[2].DefaultValue == "'anonymous'" && customers.Columns[2].IsNullable &&
+               customers.Columns[3].Extra.StartsWith("GENERATED", StringComparison.Ordinal),
+            "SQLite 結構應回報欄位型別、NULL、PK、預設值與 generated 標記");
+        Assert(customers.Indexes.Any(index => index.IsPrimaryKey && index.Columns.SequenceEqual(new[] { "id" })) &&
+               customers.Indexes.Any(index => index.IsUnique && !index.IsPrimaryKey && index.Columns.SequenceEqual(new[] { "email" })),
+            "SQLite 結構應列出 rowid 主鍵與 UNIQUE 自動索引");
+        Assert(customers.Definition.Contains("CREATE TABLE customers", StringComparison.Ordinal),
+            "SQLite 結構應附上建立語法");
+
+        var orders = await session.GetTableStructureAsync(profile.Database, objects.Single(item => item.Name == "orders"));
+        var foreignKey = orders.ForeignKeys.Single();
+        Assert(foreignKey.Columns.SequenceEqual(new[] { "customer_id" }) &&
+               foreignKey.ReferencedTable == "customers" &&
+               foreignKey.ReferencedColumns.SequenceEqual(new[] { "id" }) &&
+               foreignKey.OnDelete == "CASCADE" && foreignKey.OnUpdate == "RESTRICT",
+            "SQLite 結構應解析外鍵欄位、參照與 ON UPDATE／DELETE 規則");
+        var compositeIndex = orders.Indexes.Single(index => index.Name == "ix_orders_customer");
+        Assert(compositeIndex.Columns.SequenceEqual(new[] { "customer_id", "amount" }) && !compositeIndex.IsUnique &&
+               compositeIndex.Definition.Contains("CREATE INDEX", StringComparison.Ordinal),
+            "SQLite 結構應保留複合索引欄位順序與定義");
+
+        var view = objects.Single(item => item.Kind == DatabaseObjectKind.View);
+        var viewStructure = await session.GetTableStructureAsync(profile.Database, view);
+        Assert(viewStructure.Columns.Select(column => column.Name).SequenceEqual(new[] { "id", "amount" }) &&
+               viewStructure.Indexes.Count == 0 && viewStructure.ForeignKeys.Count == 0 &&
+               viewStructure.Definition.Contains("<script>", StringComparison.Ordinal),
+            "檢視表結構應只含欄位與定義");
+
+        var entries = await DataDictionaryService.CollectAsync(session, profile.Database, objects);
+        Assert(entries.Count == 3 && entries.All(entry => entry.Error is null), "所有物件都應成功收集");
+        var html = DataDictionaryService.BuildHtml(profile, "dictionary.db", entries, "9.9.9.9", new DateTimeOffset(2026, 9, 23, 10, 0, 0, TimeSpan.FromHours(8)));
+        Assert(html.Contains("&lt;script&gt;alert(1)&lt;/script&gt;", StringComparison.Ordinal) &&
+               !html.Contains("<script>", StringComparison.Ordinal) &&
+               html.Contains("big &lt;orders&gt;", StringComparison.Ordinal) &&
+               html.Contains("Content-Security-Policy", StringComparison.Ordinal),
+            "HTML 必須把物件名稱與定義裡的標記逃逸，並帶 CSP 禁止腳本");
+        Assert(html.Contains("ix_orders_customer", StringComparison.Ordinal) &&
+               html.Contains("customers (id)", StringComparison.Ordinal) &&
+               html.Contains("CASCADE", StringComparison.Ordinal) &&
+               html.Contains("2026-09-23 10:00:00 +08:00", StringComparison.Ordinal) &&
+               html.Contains("mySQLPunk 9.9.9.9", StringComparison.Ordinal) &&
+               html.Contains("資料表：2，檢視表：1", StringComparison.Ordinal),
+            "HTML 應包含索引、外鍵、產生時間與統計");
+        var anchors = entries.Select(entry => entry.Anchor).ToList();
+        Assert(anchors.Distinct().Count() == 3 && anchors.All(anchor => System.Text.RegularExpressions.Regex.IsMatch(anchor, "^o-[0-9a-f]{20}$")),
+            "錨點應為雜湊，不可把識別字原文放進屬性");
+
+        var failing = new List<DataDictionaryEntry>(entries)
+        {
+            new(new DatabaseObjectInfo(string.Empty, "secret_table", DatabaseObjectKind.Table), null, "permission denied <b>")
+        };
+        var failingHtml = DataDictionaryService.BuildHtml(profile, "dictionary.db", failing, "9.9.9.9");
+        Assert(failingHtml.Contains("無法讀取：1", StringComparison.Ordinal) &&
+               failingHtml.Contains("permission denied &lt;b&gt;", StringComparison.Ordinal),
+            "無法讀取的物件應在文件內註明並逃逸錯誤訊息");
+
+        var outputPath = Path.Combine(directory, "dictionary.html");
+        var summary = await DataDictionaryService.WriteFileAsync(html, outputPath, 2, 1, 0);
+        Assert(File.Exists(outputPath) && summary.Bytes == new FileInfo(outputPath).Length && summary.Tables == 2 && summary.Views == 1,
+            "資料字典應寫入目標檔案並回報大小");
+        Assert(!Directory.EnumerateFiles(directory, ".*.tmp").Any(), "原子寫入不可留下暫存檔");
+        Assert((await File.ReadAllTextAsync(outputPath)) == html, "寫入內容應與產生的 HTML 一致");
+        await AssertThrowsAsync<DirectoryNotFoundException>(() =>
+            DataDictionaryService.WriteFileAsync(html, Path.Combine(directory, "missing", "x.html"), 0, 0, 0));
+        await AssertThrowsAsync<InvalidOperationException>(() =>
+            DataDictionaryService.WriteFileAsync(html, directory, 0, 0, 0));
+        AssertThrows<InvalidOperationException>(() =>
+            DataDictionaryService.BuildHtml(profile, "dictionary.db", new[]
+            {
+                new DataDictionaryEntry(
+                    new DatabaseObjectInfo(string.Empty, "huge", DatabaseObjectKind.Table),
+                    new TableStructureInfo(
+                        new DatabaseObjectInfo(string.Empty, "huge", DatabaseObjectKind.Table),
+                        Array.Empty<StructureColumnInfo>(),
+                        Array.Empty<StructureIndexInfo>(),
+                        Array.Empty<StructureForeignKeyInfo>(),
+                        string.Empty,
+                        new string('x', (int)DataDictionaryService.MaximumHtmlBytes + 1)),
+                    null)
+            }, "9.9.9.9"));
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
+
+static async Task AssertLiveStructureAsync(IDatabaseSession session, string database, string schema, string generatorLabel)
+{
+    var objects = await session.GetObjectsAsync(database);
+    var sample = objects.Single(item => item.Name == "sample" && item.Kind == DatabaseObjectKind.Table);
+    var structure = await session.GetTableStructureAsync(database, sample);
+    Assert(structure.Columns.Count > 3 &&
+           structure.Columns[0].Name == "id" && structure.Columns[0].IsPrimaryKey && !structure.Columns[0].IsNullable &&
+           structure.Columns.Any(column => column.Name == "name" && !column.IsNullable) &&
+           structure.Columns.Any(column => column.Name == "quantity" && column.IsNullable) &&
+           structure.Indexes.Any(index => index.IsPrimaryKey && index.Columns.Count > 0 && index.Columns[0].StartsWith("id", StringComparison.Ordinal)),
+        $"{generatorLabel} 結構應回報主鍵欄位、NULL 與主鍵索引");
+    var entries = await DataDictionaryService.CollectAsync(session, database, objects);
+    Assert(entries.All(entry => entry.Error is null), $"{generatorLabel} 所有物件的結構都應可讀取：" +
+        string.Join("；", entries.Where(entry => entry.Error is not null).Select(entry => $"{entry.Object.DisplayName}: {entry.Error}")));
+    var html = DataDictionaryService.BuildHtml(session.Profile, database, entries, "live");
+    Assert(html.Contains(">sample<", StringComparison.Ordinal) || html.Contains($"{schema}.sample<", StringComparison.Ordinal),
+        $"{generatorLabel} 資料字典 HTML 應包含 sample 資料表");
 }
 
 static async Task SqliteLoadsMetadataAsync()
@@ -4724,6 +4860,22 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             "INSERT INTO collation_sample VALUES (1, 'Alpha', 'resume', 'before');");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
         await AssertExplainDoesNotExecuteAsync(session, database, "sample", "SELECT id, name FROM sample WHERE id = 1;");
+        await session.ExecuteAsync(database, "CREATE TABLE sample_child (id INT PRIMARY KEY, sample_id BIGINT UNSIGNED NOT NULL COMMENT 'parent <ref>', INDEX ix_child_sample (sample_id, id), CONSTRAINT fk_child_sample FOREIGN KEY (sample_id) REFERENCES sample(id) ON DELETE CASCADE ON UPDATE RESTRICT) COMMENT = 'child <table>';");
+        await session.ExecuteAsync(database, "CREATE VIEW sample_view AS SELECT id, name FROM sample WHERE quantity IS NULL;");
+        await AssertLiveStructureAsync(session, database, database, profile.Name);
+        var mysqlChild = await session.GetTableStructureAsync(database, new DatabaseObjectInfo(database, "sample_child", DatabaseObjectKind.Table));
+        Assert(mysqlChild.Comment == "child <table>" &&
+               mysqlChild.Columns.Single(column => column.Name == "sample_id").Comment == "parent <ref>" &&
+               mysqlChild.Indexes.Single(index => index.Name == "ix_child_sample").Columns.SequenceEqual(new[] { "sample_id", "id" }) &&
+               mysqlChild.ForeignKeys.Single().Name == "fk_child_sample" &&
+               mysqlChild.ForeignKeys.Single().ReferencedTable == "sample" &&
+               mysqlChild.ForeignKeys.Single().OnDelete == "CASCADE" && mysqlChild.ForeignKeys.Single().OnUpdate == "RESTRICT" &&
+               mysqlChild.Definition.Contains("CREATE TABLE", StringComparison.Ordinal),
+            $"{profile.Name} 結構應回報註解、複合索引順序、外鍵規則與 SHOW CREATE TABLE");
+        var mysqlView = await session.GetTableStructureAsync(database, new DatabaseObjectInfo(database, "sample_view", DatabaseObjectKind.View));
+        Assert(mysqlView.Columns.Select(column => column.Name).SequenceEqual(new[] { "id", "name" }) &&
+               mysqlView.Definition.Contains("quantity", StringComparison.OrdinalIgnoreCase),
+            $"{profile.Name} 檢視表結構應含欄位與定義");
         var mysqlPlan = await session.ExplainAsync(database, "SELECT id, name FROM sample WHERE id = 1");
         Assert(mysqlPlan.RawFormat == "JSON" &&
                mysqlPlan.Roots.Single().NodeType == "Query Block" &&
@@ -5442,6 +5594,29 @@ static async Task PostgreSqlLiveRoundTripAsync()
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
         await AssertExplainDoesNotExecuteAsync(session, database, "sample", "SELECT id, name FROM sample WHERE id = 1;");
+        await session.ExecuteAsync(database, "CREATE TABLE sample_child (id INTEGER PRIMARY KEY, sample_id INTEGER NOT NULL, label TEXT COLLATE \"C\", CONSTRAINT fk_child_sample FOREIGN KEY (sample_id) REFERENCES sample(id) ON DELETE CASCADE ON UPDATE RESTRICT); CREATE INDEX ix_child_sample ON sample_child (sample_id DESC, id); COMMENT ON TABLE sample_child IS 'child <table>'; COMMENT ON COLUMN sample_child.sample_id IS 'parent <ref>'; CREATE VIEW sample_view AS SELECT id, name FROM sample WHERE quantity IS NULL;");
+        await AssertLiveStructureAsync(session, database, "public", "PostgreSQL");
+        var postgresChild = await session.GetTableStructureAsync(database, new DatabaseObjectInfo("public", "sample_child", DatabaseObjectKind.Table));
+        Assert(postgresChild.Comment == "child <table>", $"PostgreSQL 資料表註解不正確：{postgresChild.Comment}");
+        Assert(postgresChild.Columns.Single(column => column.Name == "sample_id").Comment == "parent <ref>", "PostgreSQL 欄位註解不正確");
+        Assert(postgresChild.Columns.Single(column => column.Name == "label").Collation == "C",
+            $"PostgreSQL 欄位定序不正確：{postgresChild.Columns.Single(column => column.Name == "label").Collation}");
+        var postgresIndex = postgresChild.Indexes.Single(index => index.Name == "ix_child_sample");
+        Assert(postgresIndex.Columns.SequenceEqual(new[] { "sample_id DESC", "id" }),
+            $"PostgreSQL 索引欄位不正確：{string.Join("|", postgresIndex.Columns)}");
+        Assert(postgresIndex.IndexType == "btree", $"PostgreSQL 索引存取方法不正確：{postgresIndex.IndexType}");
+        var postgresForeignKey = postgresChild.ForeignKeys.Single();
+        Assert(postgresForeignKey.Name == "fk_child_sample" && postgresForeignKey.ReferencedTable == "sample" &&
+               postgresForeignKey.Columns.SequenceEqual(new[] { "sample_id" }) && postgresForeignKey.ReferencedColumns.SequenceEqual(new[] { "id" }) &&
+               postgresForeignKey.OnDelete == "CASCADE" && postgresForeignKey.OnUpdate == "RESTRICT",
+            $"PostgreSQL 外鍵不正確：{postgresForeignKey}");
+        var postgresSample = await session.GetTableStructureAsync(database, new DatabaseObjectInfo("public", "sample", DatabaseObjectKind.Table));
+        Assert(postgresSample.Columns[0].Extra.Contains("IDENTITY", StringComparison.Ordinal),
+            "PostgreSQL identity 欄位應標示在額外資訊");
+        var postgresView = await session.GetTableStructureAsync(database, new DatabaseObjectInfo("public", "sample_view", DatabaseObjectKind.View));
+        Assert(postgresView.Columns.Select(column => column.Name).SequenceEqual(new[] { "id", "name" }) &&
+               postgresView.Definition.Contains("quantity IS NULL", StringComparison.OrdinalIgnoreCase),
+            "PostgreSQL 檢視表結構應含欄位與 pg_get_viewdef 定義");
         var postgresPlan = await session.ExplainAsync(database, "SELECT id, name FROM sample WHERE id = 1");
         Assert(postgresPlan.RawFormat == "JSON" &&
                postgresPlan.Roots.Single().RelationName == "sample" &&
@@ -6248,6 +6423,28 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, fixed_payload BINARY(3) NULL, alias_fixed_payload dbo.fixed_token NULL, document XML NULL, legacy_text TEXT COLLATE SQL_Latin1_General_CP1_CI_AS NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, tiny_value TINYINT NULL, small_value SMALLINT NULL, integer_value INT NULL, big_value BIGINT NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL, ansi_text VARCHAR(8) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, ansi_fixed CHAR(4) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, utf8_text VARCHAR(8) COLLATE Latin1_General_100_CI_AS_SC_UTF8 NULL, unicode_text NVARCHAR(4) COLLATE Latin1_General_100_CI_AS_SC NULL, alias_ansi dbo.ansi_code NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
         await AssertExplainDoesNotExecuteAsync(session, database, "dbo.sample", "SELECT id, name FROM dbo.sample WHERE id = 1;");
+        await session.ExecuteAsync(database, "CREATE TABLE dbo.sample_child (id INT PRIMARY KEY, sample_id INT NOT NULL, label NVARCHAR(20) COLLATE Latin1_General_100_CI_AS NULL, amount DECIMAL(12,3) NULL, computed_label AS (label + N'!'), CONSTRAINT fk_child_sample FOREIGN KEY (sample_id) REFERENCES dbo.sample(id) ON DELETE CASCADE ON UPDATE NO ACTION); CREATE INDEX ix_child_sample ON dbo.sample_child (sample_id DESC, id) INCLUDE (amount); EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'child <table>', @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sample_child'; EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'parent <ref>', @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sample_child', @level2type = N'COLUMN', @level2name = N'sample_id';");
+        await session.ExecuteAsync(database, "CREATE VIEW dbo.sample_view AS SELECT id, name FROM dbo.sample WHERE quantity IS NULL;");
+        await AssertLiveStructureAsync(session, database, "dbo", "SQL Server");
+        var sqlServerChild = await session.GetTableStructureAsync(database, new DatabaseObjectInfo("dbo", "sample_child", DatabaseObjectKind.Table));
+        Assert(sqlServerChild.Comment == "child <table>" &&
+               sqlServerChild.Columns.Single(column => column.Name == "sample_id").Comment == "parent <ref>" &&
+               sqlServerChild.Columns.Single(column => column.Name == "label").DataType == "nvarchar(20)" &&
+               sqlServerChild.Columns.Single(column => column.Name == "label").Collation == "Latin1_General_100_CI_AS" &&
+               sqlServerChild.Columns.Single(column => column.Name == "amount").DataType == "decimal(12,3)" &&
+               sqlServerChild.Columns.Single(column => column.Name == "computed_label").Extra.StartsWith("COMPUTED AS", StringComparison.Ordinal) &&
+               sqlServerChild.Indexes.Single(index => index.Name == "ix_child_sample").Columns.SequenceEqual(new[] { "sample_id DESC", "id" }) &&
+               sqlServerChild.Indexes.Single(index => index.Name == "ix_child_sample").Definition == "INCLUDE (amount)" &&
+               sqlServerChild.ForeignKeys.Single().Name == "fk_child_sample" &&
+               sqlServerChild.ForeignKeys.Single().ReferencedTable == "sample" &&
+               sqlServerChild.ForeignKeys.Single().OnDelete == "CASCADE" && sqlServerChild.ForeignKeys.Single().OnUpdate == "NO ACTION",
+            "SQL Server 結構應回報擴充屬性註解、型別長度、定序、計算欄位、索引方向與 INCLUDE、外鍵規則");
+        var sqlServerSample = await session.GetTableStructureAsync(database, new DatabaseObjectInfo("dbo", "sample", DatabaseObjectKind.Table));
+        Assert(sqlServerSample.Columns[0].Extra == "IDENTITY", "SQL Server identity 欄位應標示在額外資訊");
+        var sqlServerView = await session.GetTableStructureAsync(database, new DatabaseObjectInfo("dbo", "sample_view", DatabaseObjectKind.View));
+        Assert(sqlServerView.Columns.Select(column => column.Name).SequenceEqual(new[] { "id", "name" }) &&
+               sqlServerView.Definition.Contains("CREATE VIEW", StringComparison.OrdinalIgnoreCase),
+            "SQL Server 檢視表結構應含欄位與 sql_modules 定義");
         var sqlServerPlan = await session.ExplainAsync(database, "SELECT id, name FROM dbo.sample WHERE id = 1");
         Assert(sqlServerPlan.RawFormat == "SHOWPLAN_ALL" &&
                sqlServerPlan.Roots.Count == 1 &&
