@@ -28,6 +28,9 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 
     protected bool IsTunnelled => _tunnel is not null;
 
+    /// <summary>Loopback port of the active SSH forward, for tests; null when no tunnel is up.</summary>
+    internal int? TunnelLocalPort => _tunnel?.LocalPort;
+
     protected abstract DbConnection CreateConnection(string? database);
 
     /// <summary>
@@ -47,7 +50,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 
     private async Task EnsureTunnelAsync(CancellationToken cancellationToken)
     {
-        if (_tunnel is not null)
+        if (_tunnel is { IsAlive: true })
         {
             return;
         }
@@ -56,6 +59,14 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_tunnel is { IsAlive: false } deadTunnel)
+            {
+                // The bastion closed the SSH session (idle timeout, restart, network drop). Tear the stale
+                // forward down and re-establish it with the same pinned host key rules.
+                _tunnel = null;
+                deadTunnel.Dispose();
+            }
+
             _tunnel ??= await SshTunnel.StartAsync(Profile, cancellationToken).ConfigureAwait(false);
         }
         finally

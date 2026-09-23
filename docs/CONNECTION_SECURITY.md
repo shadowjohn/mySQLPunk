@@ -96,7 +96,7 @@ ssh-keyscan -p 22 ssh.example.com | ssh-keygen -lf -
 - 指紋只接受 OpenSSH `SHA256:…`（43 個 base64 字元，可省略 `SHA256:` 前綴或保留 `=`），MD5 冒號格式拒絕。
 - SSH 密碼與私鑰密語不寫入 `connections.json`（設定檔若含 `sshPassword`／`sshKeyPassphrase` 欄位會拒絕載入）。勾選系統密碼庫時，會與資料庫密碼一樣交給 Linux Secret Service 或 macOS Keychain，各自是獨立項目（id 為連線 id 加 `-ssh-password`／`-ssh-key-passphrase`），刪除連線或取消勾選時一併清除；未勾選則只保留到本次程式關閉。建議使用私鑰登入，私鑰路徑必須是絕對路徑，Unix 上權限須為只有自己可讀（`chmod 600`）。
 - MySQL／MariaDB 與 PostgreSQL 不可搭配 VerifyFull（端點變成 127.0.0.1，主機名稱必定不符），請改用 VerifyCA；SQL Server 會自動以原始主機名稱驗證憑證，Mandatory／Strict 仍可使用。
-- 每個資料庫 session 只建立一條 SSH 連線並重用轉送；SQLite 不適用。
+- 每個資料庫 session 只建立一條 SSH 連線並重用轉送；若 SSH 連線被跳板機中斷，下一次操作會依同樣的指紋規則自動重建，主機金鑰若已變更仍會中止。SQLite 不適用。
 
 #### 跨平台版連線 URI
 

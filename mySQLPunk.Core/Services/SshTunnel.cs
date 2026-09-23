@@ -147,6 +147,13 @@ public sealed class SshTunnel : IDisposable
 
     public int LocalPort { get; private set; }
 
+    /// <summary>
+    /// True while the SSH session is connected and the loopback forward is listening. Once the bastion drops
+    /// the connection the forward is useless, and the owning session must start a fresh tunnel instead of
+    /// handing the driver a dead endpoint.
+    /// </summary>
+    public bool IsAlive => _client is { IsConnected: true } && _forwardedPort is { IsStarted: true };
+
     public static async Task<SshTunnel> StartAsync(ConnectionProfile profile, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(profile);

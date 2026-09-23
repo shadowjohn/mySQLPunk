@@ -1027,6 +1027,91 @@ static async Task<ThrowawaySshd?> TryStartThrowawaySshdAsync(string directory)
     return null;
 }
 
+static async Task<List<int>> ListDescendantsAsync(int processId)
+{
+    var descendants = new List<int>();
+    var pending = new Queue<int>();
+    pending.Enqueue(processId);
+    while (pending.Count > 0)
+    {
+        var parent = pending.Dequeue();
+        string output;
+        try
+        {
+            output = await RunProcessAsync("pgrep", "-P", parent.ToString(CultureInfo.InvariantCulture));
+        }
+        catch (InvalidOperationException)
+        {
+            continue; // pgrep exits 1 when there are no children.
+        }
+
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var child = int.Parse(line.Trim(), CultureInfo.InvariantCulture);
+            descendants.Add(child);
+            pending.Enqueue(child);
+        }
+    }
+
+    return descendants;
+}
+
+static async Task KillProcessTreeAsync(System.Diagnostics.Process process)
+{
+    // sshd -D forks a [priv] monitor and an unprivileged [net] child per session; all of them must die
+    // for the SSH connection to actually drop.
+    var children = await ListDescendantsAsync(process.Id);
+    process.Kill();
+    await process.WaitForExitAsync();
+    foreach (var child in children)
+    {
+        try
+        {
+            using var childProcess = System.Diagnostics.Process.GetProcessById(child);
+            childProcess.Kill();
+            await childProcess.WaitForExitAsync();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+        }
+    }
+}
+
+/// <summary>Starts a new sshd with the previous instance's config so the port and host key are unchanged.</summary>
+static async Task<ThrowawaySshd> RestartThrowawaySshdAsync(ThrowawaySshd previous)
+{
+    var process = new System.Diagnostics.Process
+    {
+        StartInfo = new System.Diagnostics.ProcessStartInfo(previous.Process.StartInfo.FileName)
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        }
+    };
+    foreach (var argument in previous.Process.StartInfo.ArgumentList)
+    {
+        process.StartInfo.ArgumentList.Add(argument);
+    }
+
+    process.Start();
+    for (var attempt = 0; attempt < 100 && !process.HasExited; attempt++)
+    {
+        try
+        {
+            using var probe = new System.Net.Sockets.TcpClient();
+            await probe.ConnectAsync(IPAddress.Loopback, previous.Port);
+            return previous with { Process = process };
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            await Task.Delay(100);
+        }
+    }
+
+    throw new InvalidOperationException("無法在相同 port 重新啟動臨時 sshd。");
+}
+
 static ConnectionProfile WithSshTunnel(ConnectionProfile profile, ThrowawaySshd sshd)
 {
     var tunnelled = profile.Clone();
@@ -1150,7 +1235,29 @@ static async Task SshTunnelLiveAsync(string directory)
         Assert(sessionFailure is not InvalidOperationException { Message: var message } ||
                !message.Contains("SSH", StringComparison.Ordinal),
             "SSH 交握成功後，Provider session 的失敗應來自資料庫端點而不是 SSH 本身");
-        Console.WriteLine("  （SSH Tunnel 實機轉送：本機 sshd 金鑰驗證、加密私鑰、指紋不符與 session 整合皆通過）");
+        var adoSession = (MySqlPunk.Core.Providers.AdoDatabaseSession)session;
+        var firstForwardPort = adoSession.TunnelLocalPort;
+        Assert(firstForwardPort is > 0, "Provider session 應保有存活的 SSH 轉送");
+
+        // Simulate the bastion dropping the connection: kill the listener and the per-connection child
+        // processes (sshd -D forks one per session), then restart sshd with the same host key and port.
+        await KillProcessTreeAsync(sshd.Process);
+        using var restarted = await RestartThrowawaySshdAsync(sshd);
+        for (var attempt = 0; attempt < 50 && adoSession.TunnelLocalPort == firstForwardPort; attempt++)
+        {
+            var failure = await CaptureExceptionAsync<Exception>(() => session.TestConnectionAsync());
+            Assert(failure is not InvalidOperationException { Message: var reconnectMessage } ||
+                   !reconnectMessage.Contains("指紋", StringComparison.Ordinal),
+                "sshd 以相同主機金鑰重啟後，重建 tunnel 不應被指紋比對擋下");
+            if (adoSession.TunnelLocalPort == firstForwardPort)
+            {
+                await Task.Delay(100);
+            }
+        }
+
+        Assert(adoSession.TunnelLocalPort is > 0 && adoSession.TunnelLocalPort != firstForwardPort,
+            "SSH 連線中斷後，下一次資料庫操作應自動重建新的 tunnel 而不是沿用死掉的轉送");
+        Console.WriteLine("  （SSH Tunnel 實機轉送：本機 sshd 金鑰驗證、加密私鑰、指紋不符、session 整合與斷線重建皆通過）");
     }
     finally
     {
