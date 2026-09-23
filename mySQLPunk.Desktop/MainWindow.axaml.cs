@@ -57,6 +57,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _refreshButton;
     private readonly Button _executeButton;
     private readonly Button _executeDocumentButton;
+    private readonly Button _explainButton;
     private readonly Button _copyResultButton;
     private readonly Button _exportButton;
     private readonly Button _cancelButton;
@@ -92,6 +93,7 @@ public sealed partial class MainWindow : Window
         _refreshButton = this.FindControl<Button>("RefreshButton")!;
         _executeButton = this.FindControl<Button>("ExecuteButton")!;
         _executeDocumentButton = this.FindControl<Button>("ExecuteDocumentButton")!;
+        _explainButton = this.FindControl<Button>("ExplainButton")!;
         _copyResultButton = this.FindControl<Button>("CopyResultButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
@@ -706,6 +708,51 @@ public sealed partial class MainWindow : Window
     private async void ExecuteDocument_Click(object? sender, RoutedEventArgs e)
     {
         await ExecuteCurrentSqlAsync(executeDocument: true);
+    }
+
+    private async void ExplainSql_Click(object? sender, RoutedEventArgs e)
+    {
+        await ExplainCurrentSqlAsync();
+    }
+
+    private async Task ExplainCurrentSqlAsync()
+    {
+        if (_session is null || _databaseCombo.SelectedItem is not string database)
+        {
+            await MessageDialog.ShowAsync(this, "尚未連線", "請先選擇連線設定並連線。", showCancel: false);
+            return;
+        }
+
+        // Same scope rules as execution: an explicit selection wins, otherwise the statement under the cursor.
+        var execution = SqlExecutionSelectionService.Resolve(
+            _sqlEditor.Text,
+            _sqlEditor.SelectionStart,
+            _sqlEditor.SelectionEnd,
+            _session.Profile.Provider,
+            executeDocument: false);
+        if (string.IsNullOrWhiteSpace(execution.Sql))
+        {
+            await MessageDialog.ShowAsync(
+                this,
+                "沒有可解釋的 SQL",
+                "請把游標移到要解釋的 statement，或反白單一 SELECT／INSERT／UPDATE／DELETE。",
+                showCancel: false);
+            return;
+        }
+
+        var session = _session;
+        var connectionName = session.Profile.Name;
+        QueryPlanDocument? plan = null;
+        await RunOperationAsync("正在取得執行計畫…", async cancellationToken =>
+        {
+            plan = await session.ExplainAsync(database, execution.Sql, cancellationToken);
+            SetStatus($"執行計畫：{plan.Summary}（statement 未執行）");
+        });
+
+        if (plan is not null)
+        {
+            await new QueryPlanWindow(plan, connectionName).ShowDialog(this);
+        }
     }
 
     private void QueryHistory_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -1608,6 +1655,7 @@ public sealed partial class MainWindow : Window
         _refreshButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _executeButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _executeDocumentButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _explainButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _copyResultButton.IsEnabled = !busy &&
                                       _lastResult is not null &&
                                       _resultsGrid.SelectedItems.OfType<ResultRow>().Any();

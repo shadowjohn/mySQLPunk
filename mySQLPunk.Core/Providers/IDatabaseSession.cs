@@ -19,6 +19,12 @@ public interface IDatabaseSession : IDisposable
         string sql,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Produces the provider's execution plan for a single statement without executing it.</summary>
+    Task<QueryPlanDocument> ExplainAsync(
+        string database,
+        string sql,
+        CancellationToken cancellationToken = default);
+
     Task<TableDataSnapshot> LoadTableDataAsync(
         string database,
         DatabaseObjectInfo table,

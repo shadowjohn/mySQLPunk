@@ -25,6 +25,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
+    ("執行計畫解析與安全規則", QueryPlanParsingAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
@@ -2065,11 +2066,209 @@ static async Task SqliteExecutesQueriesAsync()
             "WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 10001) SELECT n FROM numbers;");
         Assert(truncated.Rows.Count == 10_000, "大型結果應限制為 10,000 列");
         Assert(truncated.WasTruncated, "大型結果應標示已截斷");
+
+        await AssertExplainDoesNotExecuteAsync(session, profile.Database, "sample", "SELECT id, name FROM sample WHERE id = 1;");
+        var plan = await session.ExplainAsync(profile.Database, "SELECT id, name FROM sample WHERE id = 1;");
+        Assert(plan.Provider == DatabaseProviderKind.Sqlite &&
+               plan.RawFormat == "EXPLAIN QUERY PLAN" &&
+               plan.Roots.Count >= 1 &&
+               plan.Roots[0].NodeType == "Search" &&
+               plan.Roots[0].RelationName == "sample" &&
+               plan.TextPlan.Contains("Search sample", StringComparison.Ordinal),
+            "SQLite 執行計畫應解析 SEARCH 節點與資料表名稱");
     }
     finally
     {
         Directory.Delete(directory, true);
     }
+}
+
+/// <summary>
+/// Explains a SELECT, an INSERT and a DELETE against <paramref name="table"/> and proves none of them changed the
+/// row count, then confirms the connection still returns data afterwards (SQL Server SHOWPLAN must be off).
+/// </summary>
+static async Task AssertExplainDoesNotExecuteAsync(IDatabaseSession session, string database, string table, string selectSql)
+{
+    async Task<long> CountAsync()
+    {
+        var count = await session.ExecuteAsync(database, $"SELECT COUNT(*) FROM {table};");
+        return Convert.ToInt64(count.Rows[0][0], CultureInfo.InvariantCulture);
+    }
+
+    var before = await CountAsync();
+    var select = await session.ExplainAsync(database, selectSql);
+    Assert(select.NodeCount > 0 && select.Roots.Count > 0 && select.TextPlan.Length > 0 && select.RawPlan.Length > 0,
+        $"{session.Profile.Provider} SELECT 執行計畫應至少有一個節點與文字／原始內容");
+    var insert = await session.ExplainAsync(database, $"INSERT INTO {table} (name) VALUES ('explain-only');");
+    Assert(insert.NodeCount > 0, $"{session.Profile.Provider} INSERT 執行計畫應可取得");
+    var delete = await session.ExplainAsync(database, $"DELETE FROM {table}");
+    Assert(delete.NodeCount > 0, $"{session.Profile.Provider} DELETE 執行計畫應可取得");
+    Assert(await CountAsync() == before,
+        $"{session.Profile.Provider} 解釋 INSERT／DELETE 不可真的修改資料");
+
+    await AssertThrowsAsync<InvalidOperationException>(() =>
+        session.ExplainAsync(database, $"SELECT 1; DELETE FROM {table};"));
+    await AssertThrowsAsync<InvalidOperationException>(() =>
+        session.ExplainAsync(database, $"DROP TABLE {table};"));
+    Assert(await CountAsync() == before,
+        $"{session.Profile.Provider} 被拒絕的執行計畫請求不可執行任何 statement，且連線之後仍應回傳資料");
+}
+
+static Task QueryPlanParsingAsync()
+{
+    Assert(QueryPlanService.BuildExplainSql(DatabaseProviderKind.MySql, "  SELECT 1 ; ") == "EXPLAIN FORMAT=JSON SELECT 1" &&
+           QueryPlanService.BuildExplainSql(DatabaseProviderKind.PostgreSql, "/* note */ WITH x AS (SELECT 1) SELECT * FROM x")
+               .StartsWith("EXPLAIN (FORMAT JSON, ANALYZE FALSE", StringComparison.Ordinal) &&
+           QueryPlanService.BuildExplainSql(DatabaseProviderKind.Sqlite, "-- c\nDELETE FROM t WHERE id = 1; -- tail")
+               == "EXPLAIN QUERY PLAN DELETE FROM t WHERE id = 1" &&
+           QueryPlanService.BuildExplainSql(DatabaseProviderKind.SqlServer, "UPDATE t SET a = 1")
+               .Contains("SET SHOWPLAN_ALL ON", StringComparison.Ordinal) &&
+           QueryPlanService.BuildExplainSql(DatabaseProviderKind.MySql, "/* hint */ SELECT /*+ MAX_EXECUTION_TIME(1) */ 1")
+               == "EXPLAIN FORMAT=JSON SELECT /*+ MAX_EXECUTION_TIME(1) */ 1",
+        "EXPLAIN 前綴應依 provider 產生，移除前導註解與尾端分隔／註解，但保留 statement 內的 optimizer hint");
+    foreach (var rejected in new[]
+             {
+                 "",
+                 "   ",
+                 "SELECT 1; SELECT 2",
+                 "SELECT 1;; ",
+                 "CREATE TABLE t (id INT)",
+                 "DROP TABLE t",
+                 "TRUNCATE TABLE t",
+                 "SET SHOWPLAN_ALL OFF",
+                 "EXPLAIN SELECT 1",
+                 "CALL p()"
+             })
+    {
+        AssertThrows<InvalidOperationException>(() => QueryPlanService.BuildExplainSql(DatabaseProviderKind.MySql, rejected));
+    }
+
+    Assert(QueryPlanService.NormalizeSingleStatement("SELECT ';' AS a; -- trailing") == "SELECT ';' AS a" &&
+           QueryPlanService.NormalizeSingleStatement("SELECT \"x;y\" FROM `t;u` /* ; */") == "SELECT \"x;y\" FROM `t;u` /* ; */",
+        "分隔符判斷不可被字串、識別字或註解裡的分號誤導");
+    AssertThrows<InvalidOperationException>(() =>
+        QueryPlanService.NormalizeSingleStatement("SELECT 1; /* c */ SELECT 2"));
+
+    const string mysqlJson = """
+        {"query_block":{"select_id":1,"cost_info":{"query_cost":"10.00"},
+         "nested_loop":[
+           {"table":{"table_name":"orders","access_type":"ALL","rows_examined_per_scan":1000,"rows_produced_per_join":1000,
+                     "cost_info":{"read_cost":"7.00","eval_cost":"1.00","prefix_cost":"8.00"}}},
+           {"table":{"table_name":"customers","access_type":"eq_ref","key":"PRIMARY","rows_produced_per_join":1000,
+                     "cost_info":{"read_cost":"1.50","eval_cost":"0.50","prefix_cost":"2.00"}}}]}}
+        """;
+    var mysql = QueryPlanService.ParseJson(DatabaseProviderKind.MySql, mysqlJson, "EXPLAIN FORMAT=JSON SELECT …");
+    var loop = mysql.Roots.Single().Children.Single();
+    Assert(mysql.Provider == DatabaseProviderKind.MySql &&
+           mysql.TotalCost == 10d &&
+           mysql.Roots.Single().NodeType == "Query Block" &&
+           loop.NodeType == "Nested Loop" &&
+           loop.Children.Count == 2 &&
+           loop.Children[0].RelationName == "orders" &&
+           loop.Children[0].AccessType == "ALL" &&
+           loop.Children[0].TotalCost == 8d &&
+           loop.Children[0].Severity == QueryPlanSeverity.High &&
+           loop.Children[1].AccessType == "eq_ref" &&
+           loop.Children[1].Severity == QueryPlanSeverity.Medium &&
+           loop.Children[1].Details["key"] == "PRIMARY" &&
+           mysql.NodeCount == 4 &&
+           mysql.TextPlan.Contains("[HIGH] Table Access orders [ALL]", StringComparison.Ordinal),
+        "MySQL JSON 計畫應解析 query_block／nested_loop／table 與相對成本標示");
+
+    const string mysqlConstJson = """
+        {"query_block":{"select_id":1,"cost_info":{"query_cost":"1.00"},
+         "table":{"table_name":"sample","access_type":"const","key":"PRIMARY","rows_produced_per_join":1,
+                  "cost_info":{"read_cost":"0.00","eval_cost":"0.10","prefix_cost":"0.00"}}}}
+        """;
+    var mysqlConst = QueryPlanService.ParseJson(DatabaseProviderKind.MySql, mysqlConstJson);
+    Assert(mysqlConst.Roots.Single().NodeType == "Query Block" &&
+           mysqlConst.Roots.Single().Children.Single().NodeType == "Table Access" &&
+           mysqlConst.Roots.Single().Children.Single().RelationName == "sample" &&
+           mysqlConst.Roots.Single().Children.Single().AccessType == "const" &&
+           mysqlConst.TotalCost == 1d && mysqlConst.NodeCount == 2,
+        "MySQL 單表 query_block 直接帶 table 時，根節點仍應是 Query Block，table 為子節點");
+
+    const string postgresJson = """
+        [{"Plan":{"Node Type":"Hash Join","Join Type":"Inner","Startup Cost":1.5,"Total Cost":40.0,"Plan Rows":100,
+                  "Plans":[{"Node Type":"Seq Scan","Relation Name":"orders","Alias":"o","Startup Cost":0.0,"Total Cost":30.0,"Plan Rows":1000,"Filter":"(amount > 10)"},
+                           {"Node Type":"Hash","Total Cost":5.0,"Plan Rows":10,
+                            "Plans":[{"Node Type":"Index Scan","Relation Name":"customers","Scan Direction":"Forward","Total Cost":4.0,"Plan Rows":10}]}]},
+          "Planning Time":0.25}]
+        """;
+    var postgres = QueryPlanService.ParseJson(DatabaseProviderKind.PostgreSql, postgresJson);
+    var join = postgres.Roots.Single();
+    Assert(postgres.TotalCost == 40d &&
+           postgres.PlanningTimeMs == 0.25 &&
+           join.NodeType == "Hash Join" && join.JoinType == "Inner" &&
+           join.Children[0].RelationName == "orders" && join.Children[0].Alias == "o" &&
+           join.Children[0].Severity == QueryPlanSeverity.High &&
+           join.Children[0].Details["Filter"] == "(amount > 10)" &&
+           join.Children[1].Children[0].AccessType == "Forward" &&
+           join.Children[1].Children[0].Severity == QueryPlanSeverity.Normal &&
+           postgres.NodeCount == 4,
+        "PostgreSQL JSON 計畫應解析巢狀 Plans、Join Type、Scan Direction 與相對成本");
+
+    AssertThrows<InvalidOperationException>(() => QueryPlanService.ParseJson(DatabaseProviderKind.PostgreSql, "not json"));
+    AssertThrows<InvalidOperationException>(() => QueryPlanService.ParseJson(DatabaseProviderKind.PostgreSql, "[{\"foo\":1}]"));
+    AssertThrows<InvalidOperationException>(() => QueryPlanService.ParseJson(DatabaseProviderKind.MySql, "[]"));
+    AssertThrows<InvalidOperationException>(() => QueryPlanService.ParseJson(DatabaseProviderKind.MySql, ""));
+    AssertThrows<NotSupportedException>(() => QueryPlanService.ParseJson(DatabaseProviderKind.Sqlite, "{}"));
+    var deep = string.Concat(Enumerable.Repeat("{\"Plan\":{\"Node Type\":\"Nested Loop\",\"Plans\":[", 300)) +
+               "{\"Node Type\":\"Seq Scan\"}" + string.Concat(Enumerable.Repeat("]}}", 300));
+    AssertThrows<InvalidOperationException>(() => QueryPlanService.ParseJson(DatabaseProviderKind.PostgreSql, deep));
+
+    var sqlServerRows = new QueryResult
+    {
+        Columns = new[] { "StmtText", "NodeId", "Parent", "PhysicalOp", "LogicalOp", "Argument", "EstimateRows", "EstimateIO", "EstimateCPU", "TotalSubtreeCost" },
+        Rows = new IReadOnlyList<object?>[]
+        {
+            new object?[] { "SELECT * FROM dbo.sample WHERE id = 1", 1, 0, null, null, null, 1d, null, null, 0.0033d },
+            new object?[] { "  |--Clustered Index Seek(OBJECT:([db].[dbo].[sample].[PK_sample]), SEEK:([id]=(1)))", 2, 1, "Clustered Index Seek", "Clustered Index Seek", "OBJECT:([db].[dbo].[sample].[PK_sample]), SEEK:([id]=(1))", 1d, 0.003125d, 0.0001581d, 0.0032831d }
+        }
+    };
+    var sqlServer = QueryPlanService.Parse(DatabaseProviderKind.SqlServer, sqlServerRows, "SET SHOWPLAN_ALL ON;");
+    Assert(sqlServer.RawFormat == "SHOWPLAN_ALL" &&
+           sqlServer.Roots.Single().NodeType == "Statement" &&
+           sqlServer.Roots.Single().Children.Single().NodeType == "Clustered Index Seek" &&
+           sqlServer.Roots.Single().Children.Single().RelationName == "db.dbo.sample.PK_sample" &&
+           Math.Abs(sqlServer.Roots.Single().Children.Single().StartupCost!.Value - 0.0032831d) < 1e-9 &&
+           sqlServer.Roots.Single().Children.Single().Severity == QueryPlanSeverity.High &&
+           sqlServer.RawPlan.Contains("TotalSubtreeCost", StringComparison.Ordinal),
+        "SQL Server SHOWPLAN_ALL 列應依 NodeId／Parent 建立階層並擷取物件名稱");
+
+    var sqliteRows = new QueryResult
+    {
+        Columns = new[] { "id", "parent", "notused", "detail" },
+        Rows = new IReadOnlyList<object?>[]
+        {
+            new object?[] { 2L, 0L, 0L, "SEARCH sample USING INTEGER PRIMARY KEY (rowid=?)" },
+            new object?[] { 5L, 2L, 0L, "USE TEMP B-TREE FOR ORDER BY" }
+        }
+    };
+    var trivialSqlite = QueryPlanService.Parse(
+        DatabaseProviderKind.Sqlite,
+        new QueryResult { Columns = new[] { "id", "parent", "notused", "detail" } },
+        "EXPLAIN QUERY PLAN INSERT …");
+    Assert(trivialSqlite.NodeCount == 1 && trivialSqlite.Roots.Single().NodeType == "No Plan Steps",
+        "SQLite 對簡單 INSERT 回傳零列時，應以「無計畫步驟」節點呈現而不是報錯");
+    var sqlite = QueryPlanService.Parse(DatabaseProviderKind.Sqlite, sqliteRows, "EXPLAIN QUERY PLAN …");
+    Assert(sqlite.Roots.Single().NodeType == "Search" &&
+           sqlite.Roots.Single().RelationName == "sample" &&
+           sqlite.Roots.Single().AccessType == "USING INTEGER PRIMARY KEY (rowid=?)" &&
+           sqlite.Roots.Single().Children.Single().NodeType == "Temporary B-Tree" &&
+           sqlite.NodeCount == 2,
+        "SQLite EXPLAIN QUERY PLAN 列應解析操作、資料表與索引用法");
+
+    var selfParent = new QueryResult
+    {
+        Columns = new[] { "id", "parent", "detail" },
+        Rows = new IReadOnlyList<object?>[] { new object?[] { 1L, 1L, "SCAN t" } }
+    };
+    Assert(QueryPlanService.Parse(DatabaseProviderKind.Sqlite, selfParent, "").Roots.Count == 1,
+        "自我參照的 parent 不可造成循環，應視為根節點");
+    AssertThrows<InvalidOperationException>(() =>
+        QueryPlanService.Parse(DatabaseProviderKind.SqlServer, new QueryResult(), ""));
+    return Task.CompletedTask;
 }
 
 static async Task SqliteLoadsMetadataAsync()
@@ -4524,6 +4723,12 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             database,
             "INSERT INTO collation_sample VALUES (1, 'Alpha', 'resume', 'before');");
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
+        await AssertExplainDoesNotExecuteAsync(session, database, "sample", "SELECT id, name FROM sample WHERE id = 1;");
+        var mysqlPlan = await session.ExplainAsync(database, "SELECT id, name FROM sample WHERE id = 1");
+        Assert(mysqlPlan.RawFormat == "JSON" &&
+               mysqlPlan.Roots.Single().NodeType == "Query Block" &&
+               mysqlPlan.TextPlan.Contains("Table Access sample", StringComparison.Ordinal),
+            $"{profile.Name} 執行計畫應解析 EXPLAIN FORMAT=JSON 的 table 節點");
         Assert(insert.RowsAffected == 2, "MySQL INSERT 影響列數應為 2");
 
         var result = await session.ExecuteAsync(database, "SELECT id, name FROM sample ORDER BY id;");
@@ -5236,6 +5441,12 @@ static async Task PostgreSqlLiveRoundTripAsync()
             );
             """);
         var insert = await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('macOS');");
+        await AssertExplainDoesNotExecuteAsync(session, database, "sample", "SELECT id, name FROM sample WHERE id = 1;");
+        var postgresPlan = await session.ExplainAsync(database, "SELECT id, name FROM sample WHERE id = 1");
+        Assert(postgresPlan.RawFormat == "JSON" &&
+               postgresPlan.Roots.Single().RelationName == "sample" &&
+               postgresPlan.Roots.Single().TotalCost > 0,
+            "PostgreSQL 執行計畫應解析 Plan 節點的 Relation Name 與成本");
         await session.ExecuteAsync(
             database,
             "CREATE TABLE collation_sample (" +
@@ -6036,6 +6247,16 @@ static async Task SqlServerLiveRoundTripAsync()
         await session.ExecuteAsync(database, "CREATE TYPE dbo.ansi_code FROM varchar(6) NULL;");
         await session.ExecuteAsync(database, "CREATE TABLE dbo.sample (id INT IDENTITY PRIMARY KEY, name NVARCHAR(40) NOT NULL, quantity INT NULL, note NVARCHAR(80) NULL, payload VARBINARY(MAX) NULL, fixed_payload BINARY(3) NULL, alias_fixed_payload dbo.fixed_token NULL, document XML NULL, legacy_text TEXT COLLATE SQL_Latin1_General_CP1_CI_AS NULL, legacy_ntext NTEXT NULL, legacy_image IMAGE NULL, high_precision DECIMAL(38,20) NULL, alias_label dbo.short_label NULL, alias_count dbo.positive_count NULL, alias_amount dbo.precise_amount NULL, system_name sysname NULL, account_balance MONEY NULL, petty_cash SMALLMONEY NULL, tiny_value TINYINT NULL, small_value SMALLINT NULL, integer_value INT NULL, big_value BIGINT NULL, single_value REAL NULL, compact_float FLOAT(10) NULL, double_value FLOAT(53) NULL, event_date DATE NULL, legacy_time DATETIME NULL, minute_time SMALLDATETIME NULL, millisecond_time DATETIME2(3) NULL, precise_time DATETIME2(7) NULL, offset_time DATETIMEOFFSET(3) NULL, clock_time TIME(4) NULL, node_path hierarchyid NULL, variant_value sql_variant NULL, variant_text sql_variant NULL, variant_temporal sql_variant NULL, shape geometry NULL, location geography NULL, ansi_text VARCHAR(8) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, ansi_fixed CHAR(4) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, utf8_text VARCHAR(8) COLLATE Latin1_General_100_CI_AS_SC_UTF8 NULL, unicode_text NVARCHAR(4) COLLATE Latin1_General_100_CI_AS_SC NULL, alias_ansi dbo.ansi_code NULL);");
         var insert = await session.ExecuteAsync(database, "INSERT INTO dbo.sample (name) VALUES (N'Punky'), (N'Linux/macOS');");
+        await AssertExplainDoesNotExecuteAsync(session, database, "dbo.sample", "SELECT id, name FROM dbo.sample WHERE id = 1;");
+        var sqlServerPlan = await session.ExplainAsync(database, "SELECT id, name FROM dbo.sample WHERE id = 1");
+        Assert(sqlServerPlan.RawFormat == "SHOWPLAN_ALL" &&
+               sqlServerPlan.Roots.Count == 1 &&
+               sqlServerPlan.Roots[0].Children.Any(node => node.NodeType.Contains("Seek", StringComparison.Ordinal) ||
+                                                           node.NodeType.Contains("Scan", StringComparison.Ordinal)),
+            "SQL Server 執行計畫應以 SHOWPLAN_ALL 取得 statement 與存取節點");
+        var afterPlan = await session.ExecuteAsync(database, "SELECT COUNT(*) FROM dbo.sample;");
+        Assert(afterPlan.Columns.Count == 1 && Convert.ToInt64(afterPlan.Rows[0][0], CultureInfo.InvariantCulture) == 2,
+            "SHOWPLAN 關閉後，同一 session 的查詢必須回傳資料而不是計畫");
         Assert(insert.RowsAffected == 2, "SQL Server INSERT 影響列數應為 2");
         await session.ExecuteAsync(
             database,

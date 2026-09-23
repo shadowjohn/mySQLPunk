@@ -41,6 +41,32 @@ internal sealed class SqlServerDatabaseSession : AdoDatabaseSession
 
     protected override string QuoteIdentifier(string value) => $"[{value.Replace("]", "]]", StringComparison.Ordinal)}]";
 
+    protected override async Task<QueryResult> ReadPlanRowsAsync(
+        System.Data.Common.DbConnection connection,
+        string statement,
+        string explainSql,
+        CancellationToken cancellationToken)
+    {
+        await using (var enable = connection.CreateCommand())
+        {
+            enable.CommandText = "SET SHOWPLAN_ALL ON";
+            await enable.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            return await ReadResultAsync(connection, statement, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // SHOWPLAN is session state: leaving it on would make later queries on a pooled connection
+            // return plans instead of data, so it is switched off even when the statement failed.
+            await using var disable = connection.CreateCommand();
+            disable.CommandText = "SET SHOWPLAN_ALL OFF";
+            await disable.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
     protected override void ConfigureParameter(
         System.Data.Common.DbParameter parameter,
         TableColumnInfo column)

@@ -118,9 +118,38 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
             throw new InvalidOperationException("請先輸入要執行的 SQL。");
         }
 
-        var stopwatch = Stopwatch.StartNew();
         await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadResultAsync(connection, sql, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<QueryPlanDocument> ExplainAsync(
+        string database,
+        string sql,
+        CancellationToken cancellationToken = default)
+    {
+        var explainSql = QueryPlanService.BuildExplainSql(Profile.Provider, sql);
+        var statement = QueryPlanService.NormalizeSingleStatement(sql);
+        await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var result = await ReadPlanRowsAsync(connection, statement, explainSql, cancellationToken).ConfigureAwait(false);
+        return QueryPlanService.Parse(Profile.Provider, result, explainSql);
+    }
+
+    /// <summary>Runs the EXPLAIN form on an open connection; SQL Server overrides this with SHOWPLAN session state.</summary>
+    protected virtual Task<QueryResult> ReadPlanRowsAsync(
+        DbConnection connection,
+        string statement,
+        string explainSql,
+        CancellationToken cancellationToken) =>
+        ReadResultAsync(connection, explainSql, cancellationToken);
+
+    protected async Task<QueryResult> ReadResultAsync(
+        DbConnection connection,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 4);

@@ -1,0 +1,98 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MySqlPunk.Desktop.QueryPlanWindow"
+        Title="執行計畫"
+        Width="960"
+        Height="680"
+        MinWidth="640"
+        MinHeight="420"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Border Grid.Row="0" Background="#1B2B4B" Padding="18,12">
+      <StackPanel Spacing="4">
+        <TextBlock x:Name="TitleText" Foreground="White" FontSize="17" FontWeight="SemiBold" />
+        <TextBlock x:Name="SummaryText" Foreground="#B9C7E8" FontSize="12" />
+        <TextBlock x:Name="ExplainSqlText"
+                   Foreground="#DDE4F3"
+                   FontSize="12"
+                   FontFamily="Cascadia Mono, JetBrains Mono, Menlo, monospace"
+                   TextWrapping="Wrap"
+                   MaxLines="3"
+                   TextTrimming="CharacterEllipsis" />
+      </StackPanel>
+    </Border>
+
+    <TabControl Grid.Row="1" Margin="10,8,10,0">
+      <TabControl.Styles>
+        <Style Selector="TabItem">
+          <Setter Property="FontSize" Value="14" />
+          <Setter Property="Padding" Value="12,6" />
+          <Setter Property="MinHeight" Value="34" />
+        </Style>
+      </TabControl.Styles>
+      <TabItem Header="樹狀">
+        <Grid ColumnDefinitions="*,5,340">
+          <TreeView x:Name="PlanTree"
+                    Grid.Column="0"
+                    SelectionChanged="PlanTree_SelectionChanged">
+            <TreeView.ItemTemplate>
+              <TreeDataTemplate ItemsSource="{Binding Children}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Border Width="10" Height="10" CornerRadius="5" Background="{Binding SeverityBrush}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Text}" />
+                </StackPanel>
+              </TreeDataTemplate>
+            </TreeView.ItemTemplate>
+          </TreeView>
+          <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="#E4E7EC" />
+          <Grid Grid.Column="2" RowDefinitions="Auto,*" Margin="8,0,0,0">
+            <TextBlock Grid.Row="0" x:Name="DetailTitleText" Text="節點屬性" FontWeight="SemiBold" Margin="0,4,0,6" />
+            <DataGrid Grid.Row="1"
+                      x:Name="DetailGrid"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      CanUserResizeColumns="True">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="屬性" Binding="{Binding Key}" Width="140" />
+                <DataGridTextColumn Header="值" Binding="{Binding Value}" Width="*" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </Grid>
+        </Grid>
+      </TabItem>
+      <TabItem Header="文字">
+        <TextBox x:Name="TextPlanBox"
+                 IsReadOnly="True"
+                 AcceptsReturn="True"
+                 TextWrapping="NoWrap"
+                 FontFamily="Cascadia Mono, JetBrains Mono, Menlo, monospace"
+                 FontSize="13"
+                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto" />
+      </TabItem>
+      <TabItem x:Name="RawTab" Header="原始資料">
+        <TextBox x:Name="RawPlanBox"
+                 IsReadOnly="True"
+                 AcceptsReturn="True"
+                 TextWrapping="NoWrap"
+                 FontFamily="Cascadia Mono, JetBrains Mono, Menlo, monospace"
+                 FontSize="13"
+                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto" />
+      </TabItem>
+    </TabControl>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="10,10,10,10">
+      <TextBlock Grid.Column="0"
+                 x:Name="LegendText"
+                 Text="● 紅：相對成本 ≥ 50%　● 橘：≥ 20%　計畫未執行 statement，不會修改資料。"
+                 Foreground="#667085"
+                 FontSize="12"
+                 VerticalAlignment="Center" />
+      <Button Grid.Column="1" x:Name="CopyTextButton" Content="複製文字計畫" Click="CopyText_Click" Margin="0,0,8,0" />
+      <Button Grid.Column="2" Content="關閉" Click="Close_Click" Padding="14,6" />
+    </Grid>
+  </Grid>
+</Window>
