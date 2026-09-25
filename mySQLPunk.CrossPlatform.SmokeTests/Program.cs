@@ -2715,7 +2715,7 @@ static async Task SchemaSyncLiveAsync(LiveSyncTarget target)
             drop = name => $"DROP DATABASE IF EXISTS `{name}`";
             sourceSql = new[]
             {
-                "CREATE TABLE parent (id INT PRIMARY KEY, code VARCHAR(20) NOT NULL, note VARCHAR(50) NULL)",
+                "CREATE TABLE parent (id INT PRIMARY KEY, code VARCHAR(20) NOT NULL, note VARCHAR(50) NULL, KEY ix_parent_code (code(8), id DESC))",
                 "CREATE TABLE child (id INT PRIMARY KEY, parent_id INT NOT NULL, amount DECIMAL(10,2) NOT NULL DEFAULT 0, KEY ix_child_parent (parent_id), CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parent(id) ON DELETE CASCADE)",
                 "CREATE TABLE extra_table (id INT PRIMARY KEY AUTO_INCREMENT, label VARCHAR(30) COLLATE utf8mb4_bin NULL, parent_id INT NULL, KEY ix_extra_label (label), CONSTRAINT fk_extra_parent FOREIGN KEY (parent_id) REFERENCES parent(id))",
                 "INSERT INTO extra_table (label) VALUES ('seed')",
@@ -2823,6 +2823,14 @@ static async Task SchemaSyncLiveAsync(LiveSyncTarget target)
             Assert(objects.Single(item => item.Name == "v_child").Kind == DatabaseObjectKind.View &&
                    objects.Single(item => item.Name == "child").Kind == DatabaseObjectKind.Table,
                 $"{profile.Name} 物件清單應把檢視表歸類為 View，資料表歸類為 Table");
+        }
+
+        if (profile.Provider == DatabaseProviderKind.MySql)
+        {
+            var parent = await session.GetTableStructureAsync(sourceDatabase, new DatabaseObjectInfo(sourceDatabase, "parent", DatabaseObjectKind.Table));
+            var prefixIndex = parent.Indexes.Single(index => index.Name == "ix_parent_code");
+            Assert(prefixIndex.Columns.SequenceEqual(new[] { "code(8)", "id DESC" }),
+                $"{profile.Name} 索引應保留前綴長度與降冪：{string.Join("|", prefixIndex.Columns)}");
         }
 
         await AssertSyncRoundTripAsync(session, sourceDatabase, session, targetDatabase, profile.Name);

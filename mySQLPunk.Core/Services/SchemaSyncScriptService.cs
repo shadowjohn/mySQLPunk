@@ -488,6 +488,12 @@ public static class SchemaSyncScriptService
                 return;
             }
 
+            if (_provider == DatabaseProviderKind.MySql && index.Columns.Any(column => column.StartsWith("(expression)", StringComparison.Ordinal)))
+            {
+                AddManual($"{table.DisplayName}.{index.Name}：函式索引的運算式無法從 information_schema 取得，請手動建立。");
+                return;
+            }
+
             switch (_provider)
             {
                 case DatabaseProviderKind.PostgreSql or DatabaseProviderKind.Sqlite
@@ -613,7 +619,11 @@ public static class SchemaSyncScriptService
             var trimmed = column.Trim();
             var descending = trimmed.EndsWith(" DESC", StringComparison.OrdinalIgnoreCase);
             var name = descending ? trimmed[..^5] : trimmed;
-            return (IsPlainIdentifier(name) ? Q(name) : name) + (descending ? " DESC" : string.Empty);
+            var prefix = Regex.Match(name, @"^(?<name>.+)\((?<length>\d+)\)$");
+            var quoted = prefix.Success
+                ? $"{Q(prefix.Groups["name"].Value)}({prefix.Groups["length"].Value})"
+                : IsPlainIdentifier(name) ? Q(name) : name;
+            return quoted + (descending ? " DESC" : string.Empty);
         }
 
         private static bool IsPlainIdentifier(string value) => Regex.IsMatch(value, "^[A-Za-z_][A-Za-z0-9_$]*$");

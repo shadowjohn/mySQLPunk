@@ -86,7 +86,7 @@ internal sealed partial class MySqlDatabaseSession
             await using (var command = connection.CreateCommand())
             {
                 command.CommandText = """
-                    SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, INDEX_TYPE
+                    SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, INDEX_TYPE, SUB_PART, COLLATION
                     FROM information_schema.STATISTICS
                     WHERE TABLE_SCHEMA = @database AND TABLE_NAME = @table
                     ORDER BY INDEX_NAME, SEQ_IN_INDEX
@@ -96,11 +96,25 @@ internal sealed partial class MySqlDatabaseSession
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
+                    // Prefix length (SUB_PART) and direction (COLLATION = 'D') are part of the index definition;
+                    // dropping them would make a prefix index look like a full-column one.
+                    var column = reader.IsDBNull(3) ? "(expression)" : reader.GetString(3);
+                    var prefix = ReadText(reader, 5);
+                    if (prefix.Length > 0 && !reader.IsDBNull(3))
+                    {
+                        column += $"({prefix})";
+                    }
+
+                    if (ReadText(reader, 6).Equals("D", StringComparison.OrdinalIgnoreCase))
+                    {
+                        column += " DESC";
+                    }
+
                     rows.Add((
                         reader.GetString(0),
                         ReadFlag(reader, 1),
                         Convert.ToInt64(reader.GetValue(2), System.Globalization.CultureInfo.InvariantCulture),
-                        reader.IsDBNull(3) ? "(expression)" : reader.GetString(3),
+                        column,
                         ReadText(reader, 4),
                         string.Empty));
                 }
