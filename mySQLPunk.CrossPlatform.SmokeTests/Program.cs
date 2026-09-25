@@ -27,6 +27,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
     ("執行計畫解析與安全規則", QueryPlanParsingAsync),
     ("資料字典結構與 HTML 匯出", DataDictionaryAsync),
+    ("結構比較差異與報告", SchemaComparisonAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
@@ -2405,6 +2406,137 @@ static async Task AssertLiveStructureAsync(IDatabaseSession session, string data
     var html = DataDictionaryService.BuildHtml(session.Profile, database, entries, "live");
     Assert(html.Contains(">sample<", StringComparison.Ordinal) || html.Contains($"{schema}.sample<", StringComparison.Ordinal),
         $"{generatorLabel} 資料字典 HTML 應包含 sample 資料表");
+}
+
+static async Task SchemaComparisonAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var sourceProfile = CreateSqliteProfile(Path.Combine(directory, "source.db"));
+        var targetProfile = CreateSqliteProfile(Path.Combine(directory, "target.db"));
+        using var sourceSession = DatabaseProviderFactory.Create(sourceProfile);
+        using var targetSession = DatabaseProviderFactory.Create(targetProfile);
+        await sourceSession.ExecuteAsync(sourceProfile.Database, """
+            CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT NOT NULL, name TEXT, legacy_code TEXT);
+            CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE, amount REAL NOT NULL DEFAULT 0);
+            CREATE INDEX ix_orders_customer ON orders(customer_id);
+            CREATE TABLE audit_log (id INTEGER PRIMARY KEY, message TEXT);
+            CREATE TABLE same_table (id INTEGER PRIMARY KEY, label TEXT);
+            CREATE VIEW order_totals AS SELECT customer_id, SUM(amount) AS total FROM orders GROUP BY customer_id;
+            """);
+        await targetSession.ExecuteAsync(targetProfile.Database, """
+            CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT, name VARCHAR(80), created_at TEXT);
+            CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER REFERENCES customers(id) ON DELETE RESTRICT, amount REAL NOT NULL DEFAULT 0);
+            CREATE UNIQUE INDEX ix_orders_customer ON orders(customer_id, amount);
+            CREATE TABLE same_table (id INTEGER PRIMARY KEY, label TEXT);
+            CREATE TABLE archive (id INTEGER PRIMARY KEY);
+            CREATE VIEW order_totals AS SELECT customer_id, SUM(amount) AS total FROM orders GROUP BY customer_id;
+            """);
+
+        var source = await DataDictionaryService.CollectAsync(sourceSession, sourceProfile.Database,
+            await sourceSession.GetObjectsAsync(sourceProfile.Database));
+        var target = await DataDictionaryService.CollectAsync(targetSession, targetProfile.Database,
+            await targetSession.GetObjectsAsync(targetProfile.Database));
+        var result = SchemaComparisonService.Compare(
+            new SchemaComparisonSide("來源", "SQLite", "source.db"), source,
+            new SchemaComparisonSide("目標", "SQLite", "target.db"), target);
+
+        SchemaDifference Find(string objectName, SchemaDifferenceArea area, string item) =>
+            result.Differences.Single(difference => difference.ObjectName == objectName && difference.Area == area && difference.ItemName == item);
+
+        Assert(Find("audit_log", SchemaDifferenceArea.Object, "audit_log").Kind == SchemaDifferenceKind.OnlyInSource &&
+               Find("archive", SchemaDifferenceArea.Object, "archive").Kind == SchemaDifferenceKind.OnlyInTarget,
+            "只在單邊的資料表應標示只在來源／目標");
+        var email = Find("customers", SchemaDifferenceArea.Column, "email");
+        Assert(email.Kind == SchemaDifferenceKind.Changed && email.SourceValue == "text NOT NULL" && email.TargetValue == "text NULL",
+            $"NULL 變更應被偵測：{email}");
+        var name = Find("customers", SchemaDifferenceArea.Column, "name");
+        Assert(name.SourceValue == "text NULL" && name.TargetValue == "varchar(80) NULL", $"型別變更應被偵測：{name}");
+        Assert(Find("customers", SchemaDifferenceArea.Column, "legacy_code").Kind == SchemaDifferenceKind.OnlyInSource &&
+               Find("customers", SchemaDifferenceArea.Column, "created_at").Kind == SchemaDifferenceKind.OnlyInTarget,
+            "單邊欄位應標示只在來源／目標");
+        var index = Find("orders", SchemaDifferenceArea.Index, "ix_orders_customer");
+        Assert(index.SourceValue == "INDEX (customer_id)" && index.TargetValue == "UNIQUE (customer_id, amount)",
+            $"索引唯一性與欄位變更應被偵測：{index}");
+        var foreignKey = Find("orders", SchemaDifferenceArea.ForeignKey, "(customer_id)");
+        Assert(foreignKey.SourceValue.Contains("ON DELETE CASCADE", StringComparison.Ordinal) &&
+               foreignKey.TargetValue.Contains("ON DELETE RESTRICT", StringComparison.Ordinal),
+            $"外鍵規則變更應被偵測：{foreignKey}");
+        Assert(result.Differences.All(difference => difference.ObjectName != "same_table" && difference.ObjectName != "order_totals") &&
+               result.IdenticalObjects == 2 &&
+               !result.Differences.Any(difference => difference.Area == SchemaDifferenceArea.Index && difference.ItemName == "PRIMARY KEY"),
+            "完全相同的資料表與檢視表不可列入差異，rowid 主鍵也不可誤報");
+        Assert(result.OnlyInSourceObjects == 1 && result.OnlyInTargetObjects == 1 && result.ChangedObjects == 2 &&
+               result.Summary.Contains("一致 2 個", StringComparison.Ordinal),
+            $"摘要統計不正確：{result.Summary}");
+
+        var html = SchemaComparisonService.BuildHtml(result, "9.9.9.9", new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.FromHours(8)));
+        Assert(html.Contains("Content-Security-Policy", StringComparison.Ordinal) &&
+               html.Contains("varchar(80) NULL", StringComparison.Ordinal) &&
+               html.Contains("class=\"src\"", StringComparison.Ordinal) &&
+               html.Contains("class=\"dst\"", StringComparison.Ordinal) &&
+               html.Contains("class=\"chg\"", StringComparison.Ordinal) &&
+               html.Contains("2026-09-25 09:00:00 +08:00", StringComparison.Ordinal),
+            "報告應包含 CSP、差異列樣式與產生時間");
+        var reportPath = Path.Combine(directory, "compare.html");
+        var (bytes, written) = await HtmlReportFile.WriteAsync(html, reportPath);
+        Assert(bytes > 0 && written == reportPath && await File.ReadAllTextAsync(reportPath) == html &&
+               !Directory.EnumerateFiles(directory, ".*.tmp").Any(),
+            "報告應原子寫入且不留暫存檔");
+
+        var identical = SchemaComparisonService.Compare(
+            new SchemaComparisonSide("a", "SQLite", "a"), target,
+            new SchemaComparisonSide("b", "SQLite", "b"), target);
+        Assert(identical.Differences.Count == 0 && identical.IdenticalObjects == target.Count &&
+               identical.Summary.StartsWith("結構一致", StringComparison.Ordinal),
+            "同一份結構比較應完全一致");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+
+    // Cross-provider matching and normalisation with synthetic snapshots.
+    static DataDictionaryEntry Entry(string schema, string name, params StructureColumnInfo[] columns)
+    {
+        var info = new DatabaseObjectInfo(schema, name, DatabaseObjectKind.Table);
+        var primary = columns.Where(column => column.IsPrimaryKey).Select(column => column.Name).ToList();
+        var indexes = primary.Count == 0
+            ? Array.Empty<StructureIndexInfo>()
+            : new[] { new StructureIndexInfo(schema == "dbo" ? "PK__orders__3213E83F" : "orders_pkey", true, true, "", primary, "") };
+        return new DataDictionaryEntry(info, new TableStructureInfo(info, columns, indexes, Array.Empty<StructureForeignKeyInfo>(), "", ""), null);
+    }
+
+    static StructureColumnInfo Column(string name, string type, bool nullable, bool pk, string defaultValue) =>
+        new(0, name, type, nullable, pk, defaultValue, "", "", "");
+
+    var mssql = new[]
+    {
+        Entry("dbo", "Orders", Column("id", "INT", false, true, ""), Column("status", "int", false, false, "((0))"), Column("note", "nvarchar(20)", true, false, "('x')"))
+    };
+    var postgres = new[]
+    {
+        Entry("public", "orders", Column("id", "int", false, true, ""), Column("status", "int", false, false, "0"), Column("note", "nvarchar(20)", true, false, "'x'")),
+        Entry("public", "Orders2", Column("id", "int", false, true, ""))
+    };
+    var cross = SchemaComparisonService.Compare(
+        new SchemaComparisonSide("mssql", "SQL Server", "db"), mssql,
+        new SchemaComparisonSide("pg", "PostgreSQL", "db"), postgres);
+    Assert(cross.Differences.Count == 1 &&
+           cross.Differences[0].ObjectName == "public.Orders2" &&
+           cross.Differences[0].Kind == SchemaDifferenceKind.OnlyInTarget &&
+           cross.IdenticalObjects == 1,
+        "跨 provider 比較應以唯一名稱對上 dbo.Orders／public.orders、主鍵以角色比對、型別大小寫與 SQL Server 預設值括號視為一致：" +
+        string.Join("；", cross.Differences));
+
+    var unreadable = SchemaComparisonService.Compare(
+        new SchemaComparisonSide("a", "x", "a"),
+        new[] { new DataDictionaryEntry(new DatabaseObjectInfo("", "secret", DatabaseObjectKind.Table), null, "permission denied") },
+        new SchemaComparisonSide("b", "x", "b"),
+        new[] { Entry("", "secret", Column("id", "int", false, true, "")) });
+    Assert(unreadable.Differences.Count == 0 && unreadable.IdenticalObjects == 0 && unreadable.Warnings.Single().Contains("permission denied", StringComparison.Ordinal),
+        "無法讀取的物件應列為警告，不可宣稱一致");
 }
 
 static async Task SqliteLoadsMetadataAsync()

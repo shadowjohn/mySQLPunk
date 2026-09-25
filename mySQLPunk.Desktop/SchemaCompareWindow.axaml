@@ -1,0 +1,63 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MySqlPunk.Desktop.SchemaCompareWindow"
+        Title="結構比較"
+        Width="1080"
+        Height="720"
+        MinWidth="720"
+        MinHeight="460"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+    <Border Grid.Row="0" Background="#1B2B4B" Padding="18,12">
+      <StackPanel Spacing="4">
+        <TextBlock Text="結構比較（唯讀）" Foreground="White" FontSize="17" FontWeight="SemiBold" />
+        <TextBlock x:Name="SourceText" Foreground="#B9C7E8" FontSize="12" />
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,260,Auto,240,Auto,*,Auto" Margin="14,12,14,6">
+      <TextBlock Grid.Column="0" Text="目標連線" VerticalAlignment="Center" Margin="0,0,8,0" />
+      <ComboBox Grid.Column="1" x:Name="TargetProfileCombo" HorizontalAlignment="Stretch" SelectionChanged="TargetProfile_SelectionChanged" />
+      <TextBlock Grid.Column="2" Text="目標資料庫" VerticalAlignment="Center" Margin="14,0,8,0" />
+      <ComboBox Grid.Column="3" x:Name="TargetDatabaseCombo" HorizontalAlignment="Stretch" IsEnabled="False" SelectionChanged="TargetDatabase_SelectionChanged" />
+      <Button Grid.Column="4" x:Name="LoadDatabasesButton" Content="載入資料庫" Click="LoadDatabases_Click" Margin="8,0,0,0" />
+      <Button Grid.Column="6" x:Name="CompareButton" Content="開始比較" Click="Compare_Click" IsEnabled="False" Padding="14,6" />
+    </Grid>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto,120" Margin="14,4,14,6">
+      <TextBlock Grid.Column="0" x:Name="SummaryText" Text="選擇目標連線與資料庫後按「開始比較」。只讀取結構 metadata，不讀資料列、不產生或執行任何 SQL。" TextWrapping="Wrap" VerticalAlignment="Center" />
+      <TextBlock Grid.Column="1" Text="顯示" VerticalAlignment="Center" Margin="12,0,8,0" />
+      <ComboBox Grid.Column="2" x:Name="FilterCombo" SelectedIndex="0" SelectionChanged="Filter_SelectionChanged" HorizontalAlignment="Stretch">
+        <ComboBoxItem Content="全部差異" />
+        <ComboBoxItem Content="只在來源" />
+        <ComboBoxItem Content="只在目標" />
+        <ComboBoxItem Content="內容不同" />
+      </ComboBox>
+    </Grid>
+
+    <DataGrid Grid.Row="3"
+              x:Name="DifferenceGrid"
+              Margin="14,0,14,0"
+              AutoGenerateColumns="False"
+              IsReadOnly="True"
+              CanUserResizeColumns="True"
+              CanUserSortColumns="True"
+              GridLinesVisibility="All"
+              HeadersVisibility="Column">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="物件" Binding="{Binding ObjectName}" Width="180" />
+        <DataGridTextColumn Header="範圍" Binding="{Binding AreaText}" Width="70" />
+        <DataGridTextColumn Header="項目" Binding="{Binding ItemName}" Width="150" />
+        <DataGridTextColumn Header="狀態" Binding="{Binding KindText}" Width="80" />
+        <DataGridTextColumn Header="來源" Binding="{Binding SourceValue}" Width="*" />
+        <DataGridTextColumn Header="目標" Binding="{Binding TargetValue}" Width="*" />
+      </DataGrid.Columns>
+    </DataGrid>
+
+    <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto" Margin="14,10,14,12">
+      <TextBlock Grid.Column="0" x:Name="StatusText" Foreground="#667085" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+      <Button Grid.Column="1" x:Name="ExportButton" Content="匯出 HTML 報告…" Click="Export_Click" IsEnabled="False" Margin="0,0,8,0" />
+      <Button Grid.Column="2" x:Name="CloseButton" Content="關閉" Click="Close_Click" Padding="14,6" />
+    </Grid>
+  </Grid>
+</Window>

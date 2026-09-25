@@ -59,6 +59,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _executeDocumentButton;
     private readonly Button _explainButton;
     private readonly Button _dataDictionaryButton;
+    private readonly Button _schemaCompareButton;
     private readonly Button _copyResultButton;
     private readonly Button _exportButton;
     private readonly Button _cancelButton;
@@ -96,6 +97,7 @@ public sealed partial class MainWindow : Window
         _executeDocumentButton = this.FindControl<Button>("ExecuteDocumentButton")!;
         _explainButton = this.FindControl<Button>("ExplainButton")!;
         _dataDictionaryButton = this.FindControl<Button>("DataDictionaryButton")!;
+        _schemaCompareButton = this.FindControl<Button>("SchemaCompareButton")!;
         _copyResultButton = this.FindControl<Button>("CopyResultButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
@@ -557,13 +559,12 @@ public sealed partial class MainWindow : Window
         UpdateActionState();
     }
 
-    private async void ConnectProfile_Click(object? sender, RoutedEventArgs e)
+    /// <summary>
+    /// Returns a clone of <paramref name="selected"/> with its runtime secrets filled in, asking for missing
+    /// passwords through the connection editor (owned by <paramref name="owner"/>). Null when the user cancels.
+    /// </summary>
+    private async Task<ConnectionProfile?> PrepareConnectionProfileAsync(ConnectionProfile selected, Window owner)
     {
-        if (_profilesList.SelectedItem is not ConnectionProfile selected)
-        {
-            return;
-        }
-
         var connectionProfile = selected.Clone();
         var passwordResolution = await ResolvePasswordAsync(selected);
         var sshSecretsFound = await ResolveSshSecretsAsync(selected) && ApplySshSecrets(connectionProfile);
@@ -580,10 +581,10 @@ public sealed partial class MainWindow : Window
                     ? "請輸入密碼後連線；可選擇交由系統密碼庫安全保存。"
                     : $"{passwordResolution.Warning} 請重新輸入密碼後連線。";
             var editor = new ConnectionEditorWindow(connectionProfile, hint, _secretStore);
-            var edited = await editor.ShowDialog<ConnectionProfile?>(this);
+            var edited = await editor.ShowDialog<ConnectionProfile?>(owner);
             if (edited is null)
             {
-                return;
+                return null;
             }
 
             connectionProfile = edited.Clone();
@@ -595,6 +596,22 @@ public sealed partial class MainWindow : Window
         else
         {
             connectionProfile.Password = passwordResolution.Password;
+        }
+
+        return connectionProfile;
+    }
+
+    private async void ConnectProfile_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_profilesList.SelectedItem is not ConnectionProfile selected)
+        {
+            return;
+        }
+
+        var connectionProfile = await PrepareConnectionProfileAsync(selected, this);
+        if (connectionProfile is null)
+        {
+            return;
         }
 
         Disconnect($"準備連線至 {connectionProfile.Name}…");
@@ -717,6 +734,19 @@ public sealed partial class MainWindow : Window
         await ExplainCurrentSqlAsync();
     }
 
+    private async void SchemaCompare_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_session is null || _databaseCombo.SelectedItem is not string database)
+        {
+            await MessageDialog.ShowAsync(this, "尚未連線", "請先選擇連線設定並連線。", showCancel: false);
+            return;
+        }
+
+        var version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "0.0.0.0";
+        var window = new SchemaCompareWindow(_session, database, _profiles.ToList(), PrepareConnectionProfileAsync, version);
+        await window.ShowDialog(this);
+    }
+
     private async void ExportDataDictionary_Click(object? sender, RoutedEventArgs e)
     {
         await ExportDataDictionaryAsync();
@@ -773,8 +803,14 @@ public sealed partial class MainWindow : Window
         await RunOperationAsync("正在讀取資料庫結構…", async cancellationToken =>
         {
             var objects = await session.GetObjectsAsync(database, cancellationToken);
+            var finished = false;
             var progress = new Progress<DataDictionaryProgress>(report =>
-                SetStatus($"正在讀取結構 {report.Completed + 1}/{report.Total}：{report.Current.DisplayName}"));
+            {
+                if (!finished)
+                {
+                    SetStatus($"正在讀取結構 {report.Completed + 1}/{report.Total}：{report.Current.DisplayName}");
+                }
+            });
             var entries = await DataDictionaryService.CollectAsync(session, database, objects, progress, cancellationToken);
             var html = DataDictionaryService.BuildHtml(session.Profile, database, entries, version);
             var summary = await DataDictionaryService.WriteFileAsync(
@@ -784,6 +820,7 @@ public sealed partial class MainWindow : Window
                 entries.Count(entry => entry.Object.Kind == DatabaseObjectKind.View),
                 entries.Count(entry => entry.Error is not null),
                 cancellationToken);
+            finished = true;
             var failureNote = summary.Failed > 0 ? $"，{summary.Failed} 個物件無法讀取（已在文件內註明）" : string.Empty;
             SetStatus($"已匯出資料字典：{summary.Tables} 個資料表、{summary.Views} 個檢視表{failureNote}（{summary.Bytes / 1024d:N1} KB）：{summary.Path}");
         });
@@ -1731,6 +1768,7 @@ public sealed partial class MainWindow : Window
         _executeDocumentButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _explainButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _dataDictionaryButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _schemaCompareButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _copyResultButton.IsEnabled = !busy &&
                                       _lastResult is not null &&
                                       _resultsGrid.SelectedItems.OfType<ResultRow>().Any();
