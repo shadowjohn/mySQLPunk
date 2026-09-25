@@ -1188,6 +1188,17 @@ namespace mySQLPunk
             Add("MongoPipeline.Error.ImportShape", "Pipeline 必須是 stage 陣列。", "A pipeline must be an array of stages.");
             Add("MongoPipeline.Error.ImportJson", "無法解析 pipeline JSON：{0}", "Cannot parse the pipeline JSON: {0}");
             Add("MongoPipeline.Error.StageShape", "第 {0} 個 stage 必須是只有一個欄位的文件，例如 { \"$match\": { } }。", "Stage {0} must be a document with exactly one field, such as { \"$match\": { } }.");
+            Add("Automation.EnableSchedule", "啟用排程", "Enable schedule");
+            Add("Automation.ScheduleDaily", "每天", "Daily");
+            Add("Automation.ScheduleWeekly", "每週", "Weekly");
+            Add("Automation.ScheduleHourly", "每 N 小時", "Every N hours");
+            Add("Automation.ScheduleLogon", "登入 Windows 時", "At Windows sign-in");
+            Add("Automation.DescribeDaily", "每天 {0}", "Daily {0}");
+            Add("Automation.DescribeWeekly", "每週 {0} {1}", "Weekly {0} {1}");
+            Add("Automation.DescribeHourly", "每 {0} 小時（自 {1}）", "Every {0} h (from {1})");
+            Add("Automation.InvalidScheduleKind", "不支援的排程方式。", "Unsupported schedule kind.");
+            Add("Automation.WeekDaysRequired", "每週排程至少要勾選一天。", "Weekly schedules need at least one day.");
+            Add("Automation.InvalidIntervalHours", "每 N 小時的 N 必須介於 1 與 24。", "The hour interval must be between 1 and 24.");
             Add("Automation.EmailTo", "通知信收件人", "Email recipients");
             Add("Automation.SmtpSettings", "郵件設定", "Email settings");
             Add("Automation.SmtpHost", "SMTP 主機", "SMTP host");

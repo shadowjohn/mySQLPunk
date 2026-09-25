@@ -13,11 +13,19 @@ namespace mySQLPunk.lib
         public string Arguments { get; set; }
         public string WorkingDirectory { get; set; }
         public DateTime StartBoundary { get; set; }
+        public ScheduledJobScheduleKind Kind { get; set; }
+        /// <summary>Task Scheduler 的星期位元（1=週日、2=週一…64=週六）。</summary>
+        public int DaysOfWeekMask { get; set; }
+        /// <summary>每 N 小時重複的 ISO 8601 間隔（例如 PT2H）。</summary>
+        public string RepetitionInterval { get; set; }
     }
 
     public static class WindowsScheduledTaskService
     {
+        private const int TaskTriggerTime = 1;
         private const int TaskTriggerDaily = 2;
+        private const int TaskTriggerWeekly = 3;
+        private const int TaskTriggerLogon = 9;
         private const int TaskActionExecute = 0;
         private const int TaskCreateOrUpdate = 6;
         private const int TaskLogonInteractiveToken = 3;
@@ -46,7 +54,26 @@ namespace mySQLPunk.lib
             string fullJobPath = Path.GetFullPath(jobPath);
             TimeSpan dailyTime = TimeSpan.ParseExact(job.DailyTime, "hh\\:mm", CultureInfo.InvariantCulture);
             DateTime start = now.Date.Add(dailyTime);
-            if (start <= now) start = start.AddDays(1);
+            int mask = 0;
+            string interval = null;
+            switch (job.ScheduleKind)
+            {
+                case ScheduledJobScheduleKind.Weekly:
+                    foreach (DayOfWeek day in job.WeekDays) mask |= 1 << (int)day;
+                    // 從今天起找第一個「勾選的星期且時間未過」的日期當起點。
+                    while (start <= now || (mask & (1 << (int)start.DayOfWeek)) == 0) start = start.AddDays(1);
+                    break;
+                case ScheduledJobScheduleKind.Hourly:
+                    interval = "PT" + job.IntervalHours.ToString(CultureInfo.InvariantCulture) + "H";
+                    while (start <= now) start = start.AddHours(job.IntervalHours);
+                    break;
+                case ScheduledJobScheduleKind.Logon:
+                    start = now;
+                    break;
+                default:
+                    if (start <= now) start = start.AddDays(1);
+                    break;
+            }
 
             return new ScheduledTaskRegistrationSpec
             {
@@ -55,7 +82,10 @@ namespace mySQLPunk.lib
                 ExecutablePath = fullExecutablePath,
                 Arguments = ScheduledJobCliService.RunJobCommand + " " + QuoteArgument(fullJobPath),
                 WorkingDirectory = Path.GetDirectoryName(fullExecutablePath),
-                StartBoundary = start
+                StartBoundary = start,
+                Kind = job.ScheduleKind,
+                DaysOfWeekMask = mask,
+                RepetitionInterval = interval
             };
         }
 
@@ -86,9 +116,29 @@ namespace mySQLPunk.lib
                 ((dynamic)task).Principal.LogonType = TaskLogonInteractiveToken;
                 ((dynamic)task).Principal.RunLevel = TaskRunLevelLeastPrivilege;
 
-                trigger = ((dynamic)task).Triggers.Create(TaskTriggerDaily);
+                switch (spec.Kind)
+                {
+                    case ScheduledJobScheduleKind.Weekly:
+                        trigger = ((dynamic)task).Triggers.Create(TaskTriggerWeekly);
+                        ((dynamic)trigger).DaysOfWeek = (short)spec.DaysOfWeekMask;
+                        ((dynamic)trigger).WeeksInterval = (short)1;
+                        break;
+                    case ScheduledJobScheduleKind.Hourly:
+                        trigger = ((dynamic)task).Triggers.Create(TaskTriggerTime);
+                        ((dynamic)trigger).Repetition.Interval = spec.RepetitionInterval;
+                        ((dynamic)trigger).Repetition.Duration = string.Empty;
+                        break;
+                    case ScheduledJobScheduleKind.Logon:
+                        trigger = ((dynamic)task).Triggers.Create(TaskTriggerLogon);
+                        ((dynamic)trigger).UserId = Environment.UserDomainName + "\\" + Environment.UserName;
+                        ((dynamic)trigger).Delay = "PT1M";
+                        break;
+                    default:
+                        trigger = ((dynamic)task).Triggers.Create(TaskTriggerDaily);
+                        ((dynamic)trigger).DaysInterval = (short)1;
+                        break;
+                }
                 ((dynamic)trigger).StartBoundary = spec.StartBoundary.ToString("s", CultureInfo.InvariantCulture);
-                ((dynamic)trigger).DaysInterval = 1;
                 ((dynamic)trigger).Enabled = true;
 
                 action = ((dynamic)task).Actions.Create(TaskActionExecute);

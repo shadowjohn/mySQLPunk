@@ -235,7 +235,7 @@ namespace mySQLPunk
                     job.ProfileName,
                     job.ConnectionName,
                     job.DatabaseName,
-                    job.DailyTime,
+                    DescribeSchedule(job),
                     job.ScheduleEnabled ? Localization.T("Common.Yes") : Localization.T("Common.No"),
                     registered);
                 jobsGrid.Rows[index].Tag = job;
@@ -364,7 +364,7 @@ namespace mySQLPunk
                 string path = store.SaveJob(job);
                 WindowsScheduledTaskService.Register(job, Application.ExecutablePath, path);
                 ReloadJobs(job.Id);
-                statusLabel.Text = Localization.Format("Automation.ScheduleRegistered", job.Name, job.DailyTime);
+                statusLabel.Text = Localization.Format("Automation.ScheduleRegistered", job.Name, DescribeSchedule(job));
             }
             catch (Exception ex)
             {
@@ -444,6 +444,23 @@ namespace mySQLPunk
             return new DataGridViewTextBoxColumn { Name = name, HeaderText = header, FillWeight = weight, SortMode = DataGridViewColumnSortMode.Automatic };
         }
 
+        public static string DescribeSchedule(ScheduledJobDefinition job)
+        {
+            switch (job.ScheduleKind)
+            {
+                case ScheduledJobScheduleKind.Weekly:
+                    return Localization.Format("Automation.DescribeWeekly",
+                        string.Join(" ", (job.WeekDays ?? new List<DayOfWeek>()).OrderBy(day => ((int)day + 6) % 7)
+                            .Select(day => CultureInfo.CurrentUICulture.DateTimeFormat.GetAbbreviatedDayName(day))), job.DailyTime);
+                case ScheduledJobScheduleKind.Hourly:
+                    return Localization.Format("Automation.DescribeHourly", job.IntervalHours, job.DailyTime);
+                case ScheduledJobScheduleKind.Logon:
+                    return Localization.T("Automation.ScheduleLogon");
+                default:
+                    return Localization.Format("Automation.DescribeDaily", job.DailyTime);
+            }
+        }
+
         private static string GetJobTypeText(ScheduledJobType type)
         {
             if (type == ScheduledJobType.Export) return Localization.T("Automation.TypeExport");
@@ -499,6 +516,10 @@ namespace mySQLPunk
         private readonly TextBox webhookBox;
         private readonly CheckBox failureOnlyBox;
         private readonly TextBox emailBox;
+        private readonly ComboBox scheduleKindBox;
+        private readonly NumericUpDown intervalBox;
+        private readonly CheckBox[] weekDayBoxes;
+        private static readonly DayOfWeek[] WeekOrder = { DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday };
         private static readonly string[] Delimiters = { ",", ";", "\\t", "|" };
         private bool loading;
 
@@ -553,14 +574,31 @@ namespace mySQLPunk
             databaseBox = AddTextBox(root, 4, Localization.T("Automation.Database"));
 
             AddLabel(root, 5, Localization.T("Automation.Schedule"));
-            FlowLayoutPanel schedulePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false, Margin = FieldMargin() };
-            scheduleBox = new CheckBox { AutoSize = true, Text = Localization.T("Automation.EnableDailySchedule"), Margin = new Padding(0, 4, 14, 0) };
+            FlowLayoutPanel schedulePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Margin = FieldMargin() };
+            scheduleBox = new CheckBox { AutoSize = true, Text = Localization.T("Automation.EnableSchedule"), Margin = new Padding(0, 4, 14, 0) };
+            scheduleKindBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130, Margin = new Padding(0, 1, 10, 0) };
+            scheduleKindBox.Items.AddRange(new object[]
+            {
+                Localization.T("Automation.ScheduleDaily"), Localization.T("Automation.ScheduleWeekly"),
+                Localization.T("Automation.ScheduleHourly"), Localization.T("Automation.ScheduleLogon")
+            });
+            intervalBox = new NumericUpDown { Minimum = 1, Maximum = 24, Width = 55, Margin = new Padding(10, 1, 0, 0) };
+            weekDayBoxes = WeekOrder.Select(day => new CheckBox
+            {
+                AutoSize = true,
+                Text = CultureInfo.CurrentUICulture.DateTimeFormat.GetAbbreviatedDayName(day),
+                Tag = day,
+                Margin = new Padding(0, 4, 4, 0)
+            }).ToArray();
             dailyTimePicker = new DateTimePicker { Width = 90, Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
             schedulePanel.Controls.Add(scheduleBox);
+            schedulePanel.Controls.Add(scheduleKindBox);
             Control timeField = UiField.Wrap(dailyTimePicker);
             timeField.Width = 90;
             timeField.Margin = new Padding(0, 1, 0, 0);
             schedulePanel.Controls.Add(timeField);
+            schedulePanel.Controls.Add(intervalBox);
+            foreach (CheckBox day in weekDayBoxes) schedulePanel.Controls.Add(day);
             root.Controls.Add(schedulePanel, 1, 5);
             root.SetColumnSpan(schedulePanel, 2);
 
@@ -684,7 +722,8 @@ namespace mySQLPunk
             typeBox.SelectedIndexChanged += (sender, args) => UpdateTypeState(true);
             profileBox.SelectedIndexChanged += (sender, args) => { LoadConnections(null); LoadTargetConnections(null); };
             connectionBox.SelectedIndexChanged += (sender, args) => ApplyInitialDatabase();
-            scheduleBox.CheckedChanged += (sender, args) => dailyTimePicker.Enabled = scheduleBox.Checked;
+            scheduleBox.CheckedChanged += (sender, args) => UpdateScheduleState();
+            scheduleKindBox.SelectedIndexChanged += (sender, args) => UpdateScheduleState();
 
             LoadValues(job, initialProfileName);
             ThemeManager.ApplyTo(this);
@@ -716,6 +755,9 @@ namespace mySQLPunk
                 LoadConnections(value.ConnectionName);
                 databaseBox.Text = value.DatabaseName ?? string.Empty;
                 scheduleBox.Checked = value.ScheduleEnabled;
+                scheduleKindBox.SelectedIndex = (int)value.ScheduleKind;
+                intervalBox.Value = Math.Max(1, Math.Min(24, value.IntervalHours));
+                foreach (CheckBox day in weekDayBoxes) day.Checked = (value.WeekDays ?? new List<DayOfWeek>()).Contains((DayOfWeek)day.Tag);
                 DateTime parsed;
                 dailyTimePicker.Value = DateTime.TryParseExact(value.DailyTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed)
                     ? DateTime.Today.Add(parsed.TimeOfDay)
@@ -742,7 +784,7 @@ namespace mySQLPunk
                 loading = false;
             }
             UpdateTypeState(false);
-            dailyTimePicker.Enabled = scheduleBox.Checked;
+            UpdateScheduleState();
         }
 
         private void LoadConnections(string selectedName)
@@ -766,6 +808,20 @@ namespace mySQLPunk
             catch (Exception ex)
             {
                 hintLabel.Text = Localization.Format("Automation.ProfileLoadFailed", ExceptionMessageService.GetReason(ex));
+            }
+        }
+
+        private void UpdateScheduleState()
+        {
+            ScheduledJobScheduleKind kind = (ScheduledJobScheduleKind)Math.Max(0, scheduleKindBox.SelectedIndex);
+            scheduleKindBox.Enabled = scheduleBox.Checked;
+            dailyTimePicker.Enabled = scheduleBox.Checked && kind != ScheduledJobScheduleKind.Logon;
+            intervalBox.Visible = kind == ScheduledJobScheduleKind.Hourly;
+            intervalBox.Enabled = scheduleBox.Checked;
+            foreach (CheckBox day in weekDayBoxes)
+            {
+                day.Visible = kind == ScheduledJobScheduleKind.Weekly;
+                day.Enabled = scheduleBox.Checked;
             }
         }
 
@@ -861,6 +917,9 @@ namespace mySQLPunk
                 value.ConnectionName = connection == null ? string.Empty : connection.Name;
                 value.DatabaseName = databaseBox.Text;
                 value.ScheduleEnabled = scheduleBox.Checked;
+                value.ScheduleKind = (ScheduledJobScheduleKind)Math.Max(0, scheduleKindBox.SelectedIndex);
+                value.IntervalHours = (int)intervalBox.Value;
+                value.WeekDays = weekDayBoxes.Where(day => day.Checked).Select(day => (DayOfWeek)day.Tag).ToList();
                 value.DailyTime = dailyTimePicker.Value.ToString("HH:mm", CultureInfo.InvariantCulture);
                 value.ExportFormat = formatBox.SelectedItem is QueryResultExportFormat
                     ? (QueryResultExportFormat)formatBox.SelectedItem
@@ -917,6 +976,9 @@ namespace mySQLPunk
                 ExportFormat = value.ExportFormat,
                 DailyTime = value.DailyTime,
                 ScheduleEnabled = value.ScheduleEnabled,
+                ScheduleKind = value.ScheduleKind,
+                WeekDays = new List<DayOfWeek>(value.WeekDays ?? new List<DayOfWeek>()),
+                IntervalHours = value.IntervalHours,
                 CreatedUtc = value.CreatedUtc,
                 UpdatedUtc = value.UpdatedUtc,
                 InputPath = value.InputPath,

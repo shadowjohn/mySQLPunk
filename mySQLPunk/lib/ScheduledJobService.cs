@@ -22,6 +22,22 @@ namespace mySQLPunk.lib
         Transfer
     }
 
+    [JsonConverter(typeof(StringEnumConverter))]
+    public enum ScheduledJobScheduleKind
+    {
+        /// <summary>每天 DailyTime。</summary>
+        Daily,
+
+        /// <summary>每週 WeekDays 的 DailyTime。</summary>
+        Weekly,
+
+        /// <summary>從 DailyTime 開始每 IntervalHours 小時。</summary>
+        Hourly,
+
+        /// <summary>目前使用者登入 Windows 時（延遲一分鐘）。</summary>
+        Logon
+    }
+
     /// <summary>傳輸作業的一張表；Mode 為 create／append／replace。</summary>
     public sealed class ScheduledTransferTable
     {
@@ -92,6 +108,10 @@ namespace mySQLPunk.lib
 
         public string DailyTime { get; set; } = "02:00";
         public bool ScheduleEnabled { get; set; }
+        public ScheduledJobScheduleKind ScheduleKind { get; set; }
+        /// <summary>每週排程的星期（依 DayOfWeek 名稱，例如 Monday）。</summary>
+        public List<DayOfWeek> WeekDays { get; set; } = new List<DayOfWeek>();
+        public int IntervalHours { get; set; } = 1;
         public string CreatedUtc { get; set; }
         public string UpdatedUtc { get; set; }
 
@@ -272,6 +292,14 @@ namespace mySQLPunk.lib
                 {
                     throw new InvalidOperationException(Localization.T("Automation.ReplaceNeedsConfirmation"));
                 }
+            }
+
+            if (!Enum.IsDefined(typeof(ScheduledJobScheduleKind), job.ScheduleKind)) throw new InvalidOperationException(Localization.T("Automation.InvalidScheduleKind"));
+            job.WeekDays = (job.WeekDays ?? new List<DayOfWeek>()).Where(day => Enum.IsDefined(typeof(DayOfWeek), day)).Distinct().OrderBy(day => day).ToList();
+            if (job.ScheduleKind == ScheduledJobScheduleKind.Weekly && job.WeekDays.Count == 0) throw new InvalidOperationException(Localization.T("Automation.WeekDaysRequired"));
+            if (job.ScheduleKind == ScheduledJobScheduleKind.Hourly && (job.IntervalHours < 1 || job.IntervalHours > 24))
+            {
+                throw new InvalidOperationException(Localization.T("Automation.InvalidIntervalHours"));
             }
 
             if (job.RetryCount < 0 || job.RetryCount > 5) throw new InvalidOperationException(Localization.T("Automation.InvalidRetryCount"));

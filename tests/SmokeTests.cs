@@ -10482,6 +10482,25 @@ public static partial class SmokeTests
             AssertEquals(ScheduledJobCliService.RunJobCommand + " \"" + Path.GetFullPath(jobPath) + "\"", spec.Arguments, "The job path should be passed as one quoted CLI argument without changing backslashes.");
             AssertEquals(Path.GetDirectoryName(executablePath), spec.WorkingDirectory, "The task should start in the application directory.");
 
+            loaded.ScheduleKind = ScheduledJobScheduleKind.Weekly;
+            loaded.WeekDays = new List<DayOfWeek> { DayOfWeek.Friday, DayOfWeek.Monday };
+            ScheduledTaskRegistrationSpec weekly = WindowsScheduledTaskService.BuildRegistration(loaded, executablePath, jobPath, now);
+            Assert(weekly.StartBoundary == new DateTime(2026, 8, 28, 14, 30, 0, DateTimeKind.Local) && weekly.DaysOfWeekMask == ((1 << 1) | (1 << 5)),
+                "Weekly schedules should start on the next selected weekday and set the day mask.");
+            loaded.ScheduleKind = ScheduledJobScheduleKind.Hourly;
+            loaded.IntervalHours = 4;
+            ScheduledTaskRegistrationSpec hourly = WindowsScheduledTaskService.BuildRegistration(loaded, executablePath, jobPath, now);
+            Assert(hourly.RepetitionInterval == "PT4H" && hourly.StartBoundary == new DateTime(2026, 8, 26, 18, 30, 0, DateTimeKind.Local),
+                "Hourly schedules should repeat every N hours from the next slot.");
+            loaded.ScheduleKind = ScheduledJobScheduleKind.Weekly;
+            loaded.WeekDays.Clear();
+            AssertThrows<InvalidOperationException>(() => ScheduledJobValidator.Validate(loaded), "Weekly schedules need at least one day.");
+            loaded.ScheduleKind = ScheduledJobScheduleKind.Hourly;
+            loaded.IntervalHours = 30;
+            AssertThrows<InvalidOperationException>(() => ScheduledJobValidator.Validate(loaded), "Hour intervals above 24 must be rejected.");
+            loaded.ScheduleKind = ScheduledJobScheduleKind.Daily;
+            loaded.IntervalHours = 1;
+
             Dictionary<string, object> postgresql = new Dictionary<string, object>
             {
                 { "db_kind", "postgresql" },
