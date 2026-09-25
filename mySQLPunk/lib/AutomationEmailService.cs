@@ -99,7 +99,9 @@ namespace mySQLPunk.lib
             return recipients;
         }
 
-        public static void Send(AutomationSmtpSettings settings, string password, IList<MailAddress> recipients, string subject, string body)
+        public const long MaximumAttachmentBytes = 10L * 1024 * 1024;
+
+        public static void Send(AutomationSmtpSettings settings, string password, IList<MailAddress> recipients, string subject, string body, string attachmentPath = null)
         {
             Validate(settings);
             if (recipients == null || recipients.Count == 0) throw new InvalidOperationException(Localization.T("Automation.RecipientsRequired"));
@@ -113,6 +115,7 @@ namespace mySQLPunk.lib
                 message.Body = body;
                 message.BodyEncoding = Encoding.UTF8;
                 message.IsBodyHtml = false;
+                if (!string.IsNullOrEmpty(attachmentPath)) message.Attachments.Add(new Attachment(attachmentPath));
                 client.EnableSsl = settings.UseTls;
                 client.Timeout = 15000;
                 client.DeliveryMethod = SmtpDeliveryMethod.Network;
@@ -143,8 +146,15 @@ namespace mySQLPunk.lib
                     else WindowsCredentialService.TryReadPassword(CredentialTarget, out password);
                 }
                 List<MailAddress> recipients = ParseRecipients(job.EmailTo);
-                Send(settings, password, recipients, BuildSubject(record), BuildBody(record));
-                return Localization.Format("Automation.EmailSent", recipients.Count);
+                string attachment = null;
+                string body = BuildBody(record);
+                if (job.EmailAttachOutput && success && !string.IsNullOrWhiteSpace(record.OutputPath) && File.Exists(record.OutputPath))
+                {
+                    if (new FileInfo(record.OutputPath).Length <= MaximumAttachmentBytes) attachment = record.OutputPath;
+                    else body += Environment.NewLine + Localization.Format("Automation.Email.TooLarge", MaximumAttachmentBytes / (1024 * 1024));
+                }
+                Send(settings, password, recipients, BuildSubject(record), body, attachment);
+                return Localization.Format(attachment == null ? "Automation.EmailSent" : "Automation.EmailSentWithAttachment", recipients.Count);
             }
             catch (Exception exception)
             {

@@ -236,6 +236,9 @@
     <Compile Include="DataTransferForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="DataDictionaryOptionsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ScheduledJobsForm.cs">
       <SubType>Form</SubType>
     </Compile>

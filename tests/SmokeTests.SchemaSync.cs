@@ -312,46 +312,8 @@ public static partial class SmokeTests
     public static void AssertAutomationEmailSemantics(string directory)
     {
         ScheduledJobStore store = new ScheduledJobStore(Path.Combine(directory, "automation-mail"));
-        System.Net.Sockets.TcpListener listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
-        List<string> commands = new List<string>();
-        System.Text.StringBuilder data = new System.Text.StringBuilder();
-        System.Threading.Thread server = new System.Threading.Thread(() =>
-        {
-            using (System.Net.Sockets.TcpClient client = listener.AcceptTcpClient())
-            using (System.Net.Sockets.NetworkStream stream = client.GetStream())
-            using (StreamReader reader = new StreamReader(stream, System.Text.Encoding.ASCII))
-            using (StreamWriter writer = new StreamWriter(stream, System.Text.Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true })
-            {
-                writer.WriteLine("220 localhost ESMTP test");
-                bool inData = false;
-                string line;
-                while ((line = reader.ReadLine()) != null)
-                {
-                    if (inData)
-                    {
-                        if (line == ".")
-                        {
-                            inData = false;
-                            writer.WriteLine("250 queued");
-                            continue;
-                        }
-                        data.AppendLine(line);
-                        continue;
-                    }
-                    commands.Add(line);
-                    string verb = line.Split(' ')[0].ToUpperInvariant();
-                    if (verb == "EHLO" || verb == "HELO") writer.WriteLine("250 localhost");
-                    else if (verb == "DATA") { inData = true; writer.WriteLine("354 go ahead"); }
-                    else if (verb == "QUIT") { writer.WriteLine("221 bye"); break; }
-                    else writer.WriteLine("250 ok");
-                }
-            }
-        });
-        server.IsBackground = true;
-        server.Start();
-
+        FakeSmtpServer smtp = new FakeSmtpServer();
+        int port = smtp.Port;
         AutomationEmailService.Save(store, new AutomationSmtpSettings { Host = "127.0.0.1", Port = port, UseTls = false, From = "bot@example.com" }, null);
         AutomationSmtpSettings loaded = AutomationEmailService.Load(store);
         Assert(loaded.Port == port && !loaded.UseTls && loaded.From == "bot@example.com", "SMTP settings should round-trip.");
@@ -360,15 +322,25 @@ public static partial class SmokeTests
         ScheduledJobDefinition job = new ScheduledJobDefinition { Name = "nightly", Type = ScheduledJobType.Query, EmailTo = "ops@example.com; dev@example.com" };
         ScheduledJobRunRecord record = new ScheduledJobRunRecord { JobName = "nightly", JobType = ScheduledJobType.Query, Status = "Failed", Attempts = 3, Rows = -1, Message = "boom", StartedUtc = "s", FinishedUtc = "f" };
         string outcome = AutomationEmailService.Notify(store, job, record);
-        server.Join(10000);
-        listener.Stop();
         Assert(outcome != null && outcome.Contains("2"), "The notification should report both recipients: " + outcome);
-        Assert(commands.Any(line => line.StartsWith("RCPT TO:<ops@example.com>", StringComparison.OrdinalIgnoreCase)) &&
-               commands.Any(line => line.StartsWith("RCPT TO:<dev@example.com>", StringComparison.OrdinalIgnoreCase)), "Every recipient should be addressed: " + string.Join(" | ", commands));
-        string message = DecodeMailBody(data.ToString());
+        FakeSmtpServer.Session first = smtp.WaitForSession(0);
+        Assert(first.Commands.Any(line => line.StartsWith("RCPT TO:<ops@example.com>", StringComparison.OrdinalIgnoreCase)) &&
+               first.Commands.Any(line => line.StartsWith("RCPT TO:<dev@example.com>", StringComparison.OrdinalIgnoreCase)), "Every recipient should be addressed: " + string.Join(" | ", first.Commands));
+        string message = DecodeMailBody(first.Data);
         Assert(message.Contains("nightly") && message.IndexOf("Failed", StringComparison.Ordinal) >= 0 && message.Contains("boom"),
             "The email should carry the job, status and message: " + message);
 
+        string report = Path.Combine(directory, "report.html");
+        File.WriteAllText(report, "<html>dictionary</html>");
+        job.EmailAttachOutput = true;
+        ScheduledJobRunRecord withFile = new ScheduledJobRunRecord { JobName = "nightly", JobType = ScheduledJobType.DataDictionary, Status = "Success", Attempts = 1, Rows = -1, OutputPath = report, StartedUtc = "s", FinishedUtc = "f" };
+        string attached = AutomationEmailService.Notify(store, job, withFile);
+        FakeSmtpServer.Session second = smtp.WaitForSession(1);
+        Assert(attached != null && second.Data.Contains("report.html") && second.Data.IndexOf("multipart/mixed", StringComparison.OrdinalIgnoreCase) >= 0,
+            "A successful run should attach its output file: " + attached);
+        smtp.Stop();
+
+        job.EmailAttachOutput = false;
         job.NotifyOnlyOnFailure = true;
         record.Status = "Success";
         Assert(AutomationEmailService.Notify(store, job, record) != null && !AutomationEmailService.Notify(store, job, record).Contains("@"), "Successful runs are skipped when only failures notify.");
@@ -964,5 +936,173 @@ public static partial class SmokeTests
     {
         Assert(script.Statements.Contains(expected),
             "Expected statement not generated: " + expected + Environment.NewLine + "Script:" + Environment.NewLine + script.Text);
+    }
+
+    /// <summary>只回應必要指令的本機 SMTP 伺服器，可連續服務多個連線，每個連線記錄指令與 DATA 內容。</summary>
+    private sealed class FakeSmtpServer
+    {
+        private readonly System.Net.Sockets.TcpListener listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        private readonly List<Session> sessions = new List<Session>();
+        private readonly System.Threading.Thread thread;
+
+        public FakeSmtpServer()
+        {
+            listener.Start();
+            Port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+            thread = new System.Threading.Thread(Serve) { IsBackground = true };
+            thread.Start();
+        }
+
+        public int Port { get; private set; }
+
+        public sealed class Session
+        {
+            public readonly List<string> Commands = new List<string>();
+            public string Data = string.Empty;
+        }
+
+        public Session WaitForSession(int index)
+        {
+            for (int attempt = 0; attempt < 200; attempt++)
+            {
+                lock (sessions)
+                {
+                    if (sessions.Count > index) return sessions[index];
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+            throw new Exception("No SMTP session " + index);
+        }
+
+        public void Stop()
+        {
+            listener.Stop();
+        }
+
+        private void Serve()
+        {
+            while (true)
+            {
+                System.Net.Sockets.TcpClient client;
+                try { client = listener.AcceptTcpClient(); }
+                catch (Exception) { return; }
+                Session session = new Session();
+                System.Text.StringBuilder data = new System.Text.StringBuilder();
+                using (client)
+                using (System.Net.Sockets.NetworkStream stream = client.GetStream())
+                using (StreamReader reader = new StreamReader(stream, System.Text.Encoding.ASCII))
+                using (StreamWriter writer = new StreamWriter(stream, System.Text.Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true })
+                {
+                    writer.WriteLine("220 localhost ESMTP test");
+                    bool inData = false;
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        if (inData)
+                        {
+                            if (line == ".")
+                            {
+                                inData = false;
+                                writer.WriteLine("250 queued");
+                                continue;
+                            }
+                            data.AppendLine(line);
+                            continue;
+                        }
+                        session.Commands.Add(line);
+                        string verb = line.Split(' ')[0].ToUpperInvariant();
+                        if (verb == "EHLO" || verb == "HELO") writer.WriteLine("250 localhost");
+                        else if (verb == "DATA") { inData = true; writer.WriteLine("354 go ahead"); }
+                        else if (verb == "QUIT") { writer.WriteLine("221 bye"); break; }
+                        else writer.WriteLine("250 ok");
+                    }
+                }
+                session.Data = data.ToString();
+                lock (sessions) sessions.Add(session);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Data dictionary templates on SQLite: full output keeps CREATE statements behind a CSP, the compact template
+    /// normalizes column details, the column list gathers every table, filters limit the objects, personal text is
+    /// escaped, and invalid colors are rejected. A data dictionary automation job writes the file.
+    /// </summary>
+    public static void AssertDataDictionarySemantics(IDatabase database, string directory)
+    {
+        Action<string> exec = sql => AssertEquals("OK", database.ExecSQL(sql)["status"], "Dictionary fixture: " + sql);
+        exec("CREATE TABLE sales_orders (id INTEGER PRIMARY KEY, total NUMERIC NOT NULL DEFAULT 0)");
+        exec("CREATE TABLE sales_items (id INTEGER PRIMARY KEY, order_id INTEGER, sku TEXT)");
+        exec("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)");
+        exec("CREATE INDEX idx_items_order ON sales_items(order_id)");
+
+        string full = DataDictionaryService.BuildHtml(database, "main", "sqlite", "", "test", new DataDictionaryOptions { Title = "<b>Catalog</b>", Author = "Data & Ops", AccentColor = "#aa3300" });
+        Assert(full.Contains("Content-Security-Policy") && full.Contains("CREATE TABLE") && full.Contains("--accent: #aa3300"), "The full template should keep DDL, CSP and the accent color.");
+        Assert(full.Contains("&lt;b&gt;Catalog&lt;/b&gt;") && full.Contains("Data &amp; Ops") && !full.Contains("<b>Catalog"), "Personal text must be escaped.");
+
+        string compact = DataDictionaryService.BuildHtml(database, "main", "sqlite", "", "test", new DataDictionaryOptions { Template = DataDictionaryTemplate.Compact });
+        Assert(!compact.Contains("<details") && compact.Contains(">PRI<") && compact.Contains(">NO<"), "The compact template should normalize keys and nullability without DDL.");
+
+        string columns = DataDictionaryService.BuildHtml(database, "main", "sqlite", "", "test", new DataDictionaryOptions { Template = DataDictionaryTemplate.ColumnsOnly, TableFilter = "sales_*" });
+        Assert(columns.Contains("sales_orders") && columns.Contains("sales_items") && !columns.Contains("customers") && !columns.Contains("<h2"),
+            "The column list should gather only the filtered tables into one table.");
+
+        string noIndexes = DataDictionaryService.BuildHtml(database, "main", "sqlite", "", "test", new DataDictionaryOptions { IncludeIndexes = false, IncludeDdl = false, IncludeToc = false });
+        Assert(!noIndexes.Contains("idx_items_order") && !noIndexes.Contains("class=\"toc\""), "Sections can be switched off.");
+        AssertThrows<InvalidOperationException>(() => new DataDictionaryOptions { AccentColor = "red; background:url(x)" }.Validate(), "Colors must be #RRGGBB.");
+
+        ScheduledJobStore store = new ScheduledJobStore(Path.Combine(directory, "dictionary-automation"));
+        string output = Path.Combine(directory, "dict-{yyyyMMdd}.html");
+        ScheduledJobDefinition job = new ScheduledJobDefinition
+        {
+            Name = "dictionary",
+            Type = ScheduledJobType.DataDictionary,
+            ConnectionName = "local",
+            DatabaseName = "main",
+            OutputPath = output,
+            DictionaryOptions = new DataDictionaryOptions { Template = DataDictionaryTemplate.Compact, Title = "Nightly catalog" }
+        };
+        ScheduledJobRunRecord record = ScheduledJobExecutionService.Execute(job, store, () => new NonDisposingDatabase(database));
+        Assert(record.Status == "Success" && File.Exists(record.OutputPath) && File.ReadAllText(record.OutputPath).Contains("Nightly catalog"),
+            "The dictionary job should write the configured document: " + record.Message);
+    }
+
+    /// <summary>讓作業執行結束時不關閉測試共用的連線。</summary>
+    private sealed class NonDisposingDatabase : IDatabase
+    {
+        private readonly IDatabase inner;
+        public NonDisposingDatabase(IDatabase inner) { this.inner = inner; }
+        public void SetConn(string connectionString) { inner.SetConn(connectionString); }
+        public void Open() { }
+        public void Close() { }
+        public System.Data.ConnectionState State { get { return inner.State; } }
+        public string ProviderName { get { return inner.ProviderName; } }
+        public System.Data.DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null) { return inner.SelectSQL(sql, parameters); }
+        public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null) { return inner.ExecSQL(sql, parameters); }
+        public System.Threading.Tasks.Task<System.Data.DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null) { return inner.SelectSQLAsync(sql, parameters); }
+        public System.Threading.Tasks.Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) { return inner.ExecSQLAsync(sql, parameters); }
+        public List<string> GetDatabases() { return inner.GetDatabases(); }
+        public List<string> GetTables(string databaseName) { return inner.GetTables(databaseName); }
+        public List<string> GetViews(string databaseName) { return inner.GetViews(databaseName); }
+        public System.Data.DataTable GetColumns(string databaseName, string tableName) { return inner.GetColumns(databaseName, tableName); }
+        public System.Data.DataTable GetIndexes(string databaseName, string tableName) { return inner.GetIndexes(databaseName, tableName); }
+        public System.Data.DataTable GetTableStatus(string databaseName) { return inner.GetTableStatus(databaseName); }
+        public Dictionary<string, string> GetDatabaseInfo(string databaseName) { return inner.GetDatabaseInfo(databaseName); }
+        public string GetTableCreateStatement(string databaseName, string tableName) { return inner.GetTableCreateStatement(databaseName, tableName); }
+        public bool TableExists(string databaseName, string tableName) { return inner.TableExists(databaseName, tableName); }
+        public bool ViewExists(string databaseName, string viewName) { return inner.ViewExists(databaseName, viewName); }
+        public void RenameTable(string databaseName, string oldTableName, string newTableName) { inner.RenameTable(databaseName, oldTableName, newTableName); }
+        public void RenameView(string databaseName, string oldViewName, string newViewName) { inner.RenameView(databaseName, oldViewName, newViewName); }
+        public long CountRows(string databaseName, string tableName) { return inner.CountRows(databaseName, tableName); }
+        public System.Data.DataTable GetCopyColumns(string databaseName, string tableName) { return inner.GetCopyColumns(databaseName, tableName); }
+        public System.Data.DataTable GetCopyIndexes(string databaseName, string tableName) { return inner.GetCopyIndexes(databaseName, tableName); }
+        public void CreateTableForCopy(string databaseName, string tableName, System.Data.DataTable sourceColumns, string sourceProvider) { inner.CreateTableForCopy(databaseName, tableName, sourceColumns, sourceProvider); }
+        public void DropTableForCopy(string databaseName, string tableName) { inner.DropTableForCopy(databaseName, tableName); }
+        public void CreateIndexesForCopy(string databaseName, string tableName, System.Data.DataTable sourceIndexes, string sourceProvider) { inner.CreateIndexesForCopy(databaseName, tableName, sourceIndexes, sourceProvider); }
+        public System.Data.DataTable SelectTablePage(string databaseName, string tableName, long offset, int limit) { return inner.SelectTablePage(databaseName, tableName, offset, limit); }
+        public void InsertTableBatch(string databaseName, string tableName, System.Data.DataTable rows) { inner.InsertTableBatch(databaseName, tableName, rows); }
+        public string GetViewCreateStatement(string databaseName, string viewName) { return inner.GetViewCreateStatement(databaseName, viewName); }
+        public void CreateViewFromStatement(string databaseName, string viewName, string sourceViewSql) { inner.CreateViewFromStatement(databaseName, viewName, sourceViewSql); }
+        public void Dispose() { }
     }
 }

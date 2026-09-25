@@ -13196,6 +13196,8 @@ namespace mySQLPunk
             }
         }
 
+        private DataDictionaryOptions lastDataDictionaryOptions = new DataDictionaryOptions();
+
         /// <summary>產生資料字典：整個資料庫的結構文件（HTML，可用瀏覽器另存 PDF）。</summary>
         private void GenerateDataDictionaryForNode(TreeNode node)
         {
@@ -13218,6 +13220,14 @@ namespace mySQLPunk
             string engine = GetConnectionValue(connInfo, "db_kind");
             string host = GetConnectionValue(connInfo, "host");
 
+            DataDictionaryOptions options;
+            using (DataDictionaryOptionsForm optionsForm = new DataDictionaryOptionsForm(lastDataDictionaryOptions))
+            {
+                if (optionsForm.ShowDialog(this) != DialogResult.OK) return;
+                options = optionsForm.Options;
+                lastDataDictionaryOptions = options;
+            }
+
             using (SaveFileDialog dlg = new SaveFileDialog
             {
                 Filter = "HTML|*.html",
@@ -13232,7 +13242,7 @@ namespace mySQLPunk
                 try
                 {
                     // 同一條連線不能兩個執行緒搶用，metadata 又都是輕量查詢，直接同步跑
-                    string html = DataDictionaryService.BuildHtml(db, dbName, engine, host, Application.ProductVersion);
+                    string html = DataDictionaryService.BuildHtml(db, dbName, engine, host, Application.ProductVersion, options);
                     File.WriteAllText(dlg.FileName, html, new UTF8Encoding(true));
                     UpdateMainStatus(Localization.Format("Dict.Generated", dlg.FileName));
                     if (MessageBox.Show(Localization.T("Dict.OpenNow"), Localization.T("Dict.MenuItem"),

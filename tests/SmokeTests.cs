@@ -82,6 +82,7 @@ public static partial class SmokeTests
         Run("Visual query builder", TestQueryBuilder, ref passed);
         Run("Data transfer with checkpoints and verification", TestDataTransfer, ref passed);
         Run("Automation import, transfer, retries and webhook", TestAutomationJobs, ref passed);
+        Run("Data dictionary templates and automation", TestDataDictionaryTemplates, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12924,6 +12925,26 @@ public static partial class SmokeTests
                 return db;
             }, dir);
             AssertAutomationEmailSemantics(dir);
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void TestDataDictionaryTemplates()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-dictionary-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            using (my_sqlite db = new my_sqlite())
+            {
+                db.SetConn("Data Source=" + Path.Combine(dir, "dictionary.sqlite") + ";Version=3;");
+                db.Open();
+                AssertDataDictionarySemantics(db, dir);
+            }
         }
         finally
         {

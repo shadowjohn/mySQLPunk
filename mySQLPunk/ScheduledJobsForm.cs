@@ -467,6 +467,7 @@ namespace mySQLPunk
             if (type == ScheduledJobType.Backup) return Localization.T("Automation.TypeBackup");
             if (type == ScheduledJobType.Import) return Localization.T("Automation.TypeImport");
             if (type == ScheduledJobType.Transfer) return Localization.T("Automation.TypeTransfer");
+            if (type == ScheduledJobType.DataDictionary) return Localization.T("Automation.TypeDictionary");
             return Localization.T("Automation.TypeQuery");
         }
 
@@ -516,6 +517,9 @@ namespace mySQLPunk
         private readonly TextBox webhookBox;
         private readonly CheckBox failureOnlyBox;
         private readonly TextBox emailBox;
+        private readonly CheckBox attachBox;
+        private readonly Button dictionaryButton;
+        private DataDictionaryOptions dictionaryOptions;
         private readonly ComboBox scheduleKindBox;
         private readonly NumericUpDown intervalBox;
         private readonly CheckBox[] weekDayBoxes;
@@ -550,7 +554,7 @@ namespace mySQLPunk
             nameBox = AddTextBox(root, 0, Localization.T("Automation.Name"));
             AddLabel(root, 1, Localization.T("Automation.Type"));
             typeBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = FieldMargin() };
-            typeBox.Items.AddRange(new object[] { ScheduledJobType.Query, ScheduledJobType.Export, ScheduledJobType.Backup, ScheduledJobType.Import, ScheduledJobType.Transfer });
+            typeBox.Items.AddRange(new object[] { ScheduledJobType.Query, ScheduledJobType.Export, ScheduledJobType.Backup, ScheduledJobType.Import, ScheduledJobType.Transfer, ScheduledJobType.DataDictionary });
             Control typeField = UiField.Wrap(typeBox);
             typeField.Dock = DockStyle.Fill;
             typeField.Margin = FieldMargin();
@@ -618,7 +622,18 @@ namespace mySQLPunk
             outputField.Dock = DockStyle.Fill;
             outputField.Margin = FieldMargin();
             root.Controls.Add(outputField, 1, 7);
-            root.Controls.Add(browseButton, 2, 7);
+            FlowLayoutPanel outputButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            dictionaryButton = new Button { AutoSize = true, Text = Localization.T("Automation.DictionaryOptions"), Margin = new Padding(6, 3, 0, 5) };
+            outputButtons.Controls.Add(browseButton);
+            outputButtons.Controls.Add(dictionaryButton);
+            root.Controls.Add(outputButtons, 2, 7);
+            dictionaryButton.Click += (sender, args) =>
+            {
+                using (DataDictionaryOptionsForm form = new DataDictionaryOptionsForm(dictionaryOptions))
+                {
+                    if (form.ShowDialog(this) == DialogResult.OK) dictionaryOptions = form.Options;
+                }
+            };
 
             sqlBox = new TextBox
             {
@@ -667,7 +682,7 @@ namespace mySQLPunk
             transferPage = new TabPage(Localization.T("Automation.Section.Transfer"));
             transferPage.Controls.Add(transferPanel);
 
-            TableLayoutPanel reliabilityPanel = DetailPanel(4);
+            TableLayoutPanel reliabilityPanel = DetailPanel(5);
             AddLabel(reliabilityPanel, 0, Localization.T("Automation.RetryCount"));
             FlowLayoutPanel retryFlow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = FieldMargin() };
             retryCountBox = new NumericUpDown { Minimum = 0, Maximum = 5, Width = 60 };
@@ -680,6 +695,8 @@ namespace mySQLPunk
             failureOnlyBox = new CheckBox { AutoSize = true, Text = Localization.T("Automation.NotifyOnlyOnFailure"), Margin = FieldMargin() };
             emailBox = AddDetailText(reliabilityPanel, 2, Localization.T("Automation.EmailTo"));
             reliabilityPanel.Controls.Add(failureOnlyBox, 1, 3);
+            attachBox = new CheckBox { AutoSize = true, Text = Localization.T("Automation.EmailAttachOutput"), Margin = FieldMargin() };
+            reliabilityPanel.Controls.Add(attachBox, 1, 4);
             TabPage reliabilityPage = new TabPage(Localization.T("Automation.Section.Reliability"));
             reliabilityPage.Controls.Add(reliabilityPanel);
 
@@ -778,6 +795,8 @@ namespace mySQLPunk
                 webhookBox.Text = value.WebhookUrl ?? string.Empty;
                 failureOnlyBox.Checked = value.NotifyOnlyOnFailure;
                 emailBox.Text = value.EmailTo ?? string.Empty;
+                attachBox.Checked = value.EmailAttachOutput;
+                dictionaryOptions = value.DictionaryOptions ?? new DataDictionaryOptions();
             }
             finally
             {
@@ -866,7 +885,9 @@ namespace mySQLPunk
         {
             ScheduledJobType type = typeBox.SelectedItem is ScheduledJobType ? (ScheduledJobType)typeBox.SelectedItem : ScheduledJobType.Query;
             bool export = type == ScheduledJobType.Export;
-            bool output = export || type == ScheduledJobType.Backup;
+            bool dictionary = type == ScheduledJobType.DataDictionary;
+            bool output = export || type == ScheduledJobType.Backup || dictionary;
+            dictionaryButton.Visible = dictionary;
             bool sql = type == ScheduledJobType.Query || type == ScheduledJobType.Export;
             formatBox.Enabled = export;
             outputBox.Enabled = output;
@@ -879,6 +900,7 @@ namespace mySQLPunk
             {
                 outputBox.Text = type == ScheduledJobType.Backup
                     ? "backups\\{job}-{yyyyMMdd_HHmmss}.sql"
+                    : dictionary ? "dictionaries\\{job}-{yyyyMMdd}.html"
                     : "exports\\{job}-{yyyyMMdd_HHmmss}.csv";
             }
         }
@@ -939,6 +961,8 @@ namespace mySQLPunk
                 value.WebhookUrl = webhookBox.Text.Trim();
                 value.NotifyOnlyOnFailure = failureOnlyBox.Checked;
                 value.EmailTo = emailBox.Text.Trim();
+                value.EmailAttachOutput = attachBox.Checked;
+                value.DictionaryOptions = value.Type == ScheduledJobType.DataDictionary ? dictionaryOptions : null;
                 List<ScheduledTransferTable> replaced = value.TransferTables.Where(table => table.Mode == TransferMode.ReplaceData).ToList();
                 if (value.Type == ScheduledJobType.Transfer && replaced.Count > 0 &&
                     !string.Equals(value.ConfirmedTargetDatabase, value.TargetDatabaseName, StringComparison.Ordinal))
@@ -994,8 +1018,15 @@ namespace mySQLPunk
                 RetryDelaySeconds = value.RetryDelaySeconds,
                 WebhookUrl = value.WebhookUrl,
                 NotifyOnlyOnFailure = value.NotifyOnlyOnFailure,
-                EmailTo = value.EmailTo
+                EmailTo = value.EmailTo,
+                EmailAttachOutput = value.EmailAttachOutput,
+                DictionaryOptions = value.DictionaryOptions == null ? null : JsonConvertClone(value.DictionaryOptions)
             };
+        }
+
+        private static DataDictionaryOptions JsonConvertClone(DataDictionaryOptions value)
+        {
+            return Newtonsoft.Json.JsonConvert.DeserializeObject<DataDictionaryOptions>(Newtonsoft.Json.JsonConvert.SerializeObject(value));
         }
 
         private string PromptConfirmation(string message)

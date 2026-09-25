@@ -19,7 +19,8 @@ namespace mySQLPunk.lib
         Export,
         Backup,
         Import,
-        Transfer
+        Transfer,
+        DataDictionary
     }
 
     [JsonConverter(typeof(StringEnumConverter))]
@@ -138,6 +139,11 @@ namespace mySQLPunk.lib
 
         /// <summary>通知信收件人（逗號分隔，最多 10 位）；SMTP 設定由所有作業共用。</summary>
         public string EmailTo { get; set; }
+        /// <summary>成功時把輸出檔（10 MB 以內）附加在通知信。</summary>
+        public bool EmailAttachOutput { get; set; }
+
+        /// <summary>資料字典作業的範本與個人化設定。</summary>
+        public DataDictionaryOptions DictionaryOptions { get; set; }
     }
 
     public sealed class ScheduledJobConnectionOption
@@ -246,7 +252,13 @@ namespace mySQLPunk.lib
                 }
             }
 
-            if ((job.Type == ScheduledJobType.Export || job.Type == ScheduledJobType.Backup) &&
+            if (job.Type == ScheduledJobType.DataDictionary)
+            {
+                job.DictionaryOptions = job.DictionaryOptions ?? new DataDictionaryOptions();
+                job.DictionaryOptions.Validate();
+            }
+
+            if ((job.Type == ScheduledJobType.Export || job.Type == ScheduledJobType.Backup || job.Type == ScheduledJobType.DataDictionary) &&
                 string.IsNullOrWhiteSpace(job.OutputPath))
             {
                 throw new InvalidOperationException(Localization.T("Automation.OutputPathRequired"));
@@ -991,6 +1003,18 @@ namespace mySQLPunk.lib
             if (job.Type == ScheduledJobType.Backup)
             {
                 DatabaseDumpService.WriteDatabaseDump(database, job.DatabaseName, outputPath);
+                record.Rows = -1;
+                return;
+            }
+
+            if (job.Type == ScheduledJobType.DataDictionary)
+            {
+                string html = DataDictionaryService.BuildHtml(database, job.DatabaseName, database.ProviderName, string.Empty,
+                    typeof(ScheduledJobExecutionService).Assembly.GetName().Version.ToString(), job.DictionaryOptions);
+                string temporary = outputPath + ".tmp";
+                File.WriteAllText(temporary, html, new UTF8Encoding(true));
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+                File.Move(temporary, outputPath);
                 record.Rows = -1;
                 return;
             }
