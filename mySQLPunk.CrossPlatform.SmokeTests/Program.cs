@@ -3006,6 +3006,17 @@ static async Task DataSyncAsync()
             "INSERT INTO parent (name) VALUES ('after sync')",
             "UPDATE parent SET name = 'changed behind' WHERE id = 2");
 
+        await sourceSession.ExecuteAsync(sourceProfile.Database, "CREATE TABLE tags (code TEXT PRIMARY KEY, label TEXT);");
+        await targetSession.ExecuteAsync(targetProfile.Database,
+            "CREATE TABLE tags (code TEXT PRIMARY KEY, label TEXT); INSERT INTO tags VALUES ('x' || char(10) || 'DELETE FROM parent;', 'hostile');");
+        var tags = await DataComparisonService.CompareTableAsync(
+            sourceSession, sourceProfile.Database, new DatabaseObjectInfo(string.Empty, "tags", DatabaseObjectKind.Table),
+            targetSession, targetProfile.Database, new DatabaseObjectInfo(string.Empty, "tags", DatabaseObjectKind.Table));
+        var hostilePreview = DataComparisonService.BuildPreviewSql(DatabaseProviderKind.Sqlite, tags, includeDeletes: false);
+        Assert(tags.Deletes == 1 &&
+               hostilePreview.Split('\n').Where(line => line.Length > 0).All(line => line.StartsWith("--", StringComparison.Ordinal)),
+            "主鍵含換行時，未勾選刪除的預覽不可出現可執行的語句：\n" + hostilePreview);
+
         var mismatchedKeys = CreateSqliteProfile(Path.Combine(directory, "data-keys.db"));
         using var keySession = DatabaseProviderFactory.Create(mismatchedKeys);
         await keySession.ExecuteAsync(mismatchedKeys.Database, "CREATE TABLE parent (code TEXT PRIMARY KEY, name TEXT);");

@@ -242,7 +242,8 @@ public static class DataComparisonService
                     break;
                 default:
                     var delete = $"DELETE FROM {table} WHERE {KeyPredicate(provider, comparison, change)};";
-                    text.AppendLine(includeDeletes ? delete : "-- " + delete);
+                    // A commented line must stay single-line or a newline inside a key literal would escape the comment.
+                    text.AppendLine(includeDeletes ? delete : "-- " + OneLine(delete));
                     break;
             }
         }
