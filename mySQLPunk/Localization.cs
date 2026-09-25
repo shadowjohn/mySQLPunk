@@ -1100,6 +1100,13 @@ namespace mySQLPunk
             Add("Bi.AddWidget", "新增圖表...", "Add Chart...");
             Add("Bi.Refresh", "重新整理 (F5)", "Refresh (F5)");
             Add("Bi.ExportPng", "匯出 PNG...", "Export PNG...");
+            Add("Bi.ExportHtml", "匯出 HTML...", "Export HTML...");
+            Add("Bi.Report.Generated", "資料庫 {0} · 產生於 {1}", "Database {0} · generated {1}");
+            Add("Automation.TypeDashboard", "BI 儀表板", "BI dashboard");
+            Add("Automation.SelectDashboard", "選擇儀表板...", "Choose Dashboard...");
+            Add("Automation.DashboardSelected", "儀表板：{0}", "Dashboard: {0}");
+            Add("Automation.DashboardRequired", "請選擇 .punkbi 儀表板檔案。", "Choose a .punkbi dashboard file.");
+            Add("Automation.DashboardDatasetsFailed", "{0} 個資料集載入失敗（報表已輸出並標示錯誤）：{1}", "{0} dataset(s) failed to load (the report was written with the errors shown): {1}");
             Add("Bi.Datasets", "資料集", "Datasets");
             Add("Bi.Edit", "編輯", "Edit");
             Add("Bi.Remove", "移除", "Remove");

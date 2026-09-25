@@ -53,7 +53,7 @@
 | 資料同步 | 🟡 | Windows 與 Linux／macOS 皆可逐列比較同類型資料庫（MySQL／MariaDB、PostgreSQL、SQL Server、SQLite）的同名資料表、預覽 SQL，並在目標以單一交易受控同步（相依排序、並行衝突回滾、刪除需確認）；待補大表串流比較與跨類型資料庫。 |
 | 結構同步 | 🟡 | 兩庫唯讀結構差異報告已完成，可跨 provider 比對 Table、Column、PK 與 FK 並匯出 HTML；Linux／macOS 預覽版另含索引與 FK 規則比對，並可為同類型資料庫產生同步 DDL 預覽（破壞性變更預設註解）；Windows 版也能依欄位／主鍵／外鍵快照產生同步 SQL 預覽；Windows 與 Linux／macOS 都可逐項勾選並在目標受控執行（交易回滾、破壞性變更輸入名稱確認、完成後自動重比）。 |
 | 模型 | 🟡 | Windows ER 模型工作區：拖曳編排、自動排列、群組上色／隱藏／鎖定、多張圖表存成 .punkmodel、PNG／SVG 匯出，並可把結構存進模型離線編輯後與資料庫雙向比較／同步；待補 Function／Procedure 物件、連接線重導、維度／Data Vault 模型與 Linux／macOS 版。 |
-| BI | 🟡 | Windows 版 BI 儀表板已完成：唯讀查詢資料集、計算欄位、長條／折線／圓餅／數字卡／表格、本機彙總、跨圖表篩選、.punkbi 存讀與 PNG 匯出；待補 Linux／macOS 版、排程輸出與分享。 |
+| BI | 🟡 | Windows 版 BI 儀表板已完成：唯讀查詢資料集、計算欄位、長條／折線／圓餅／數字卡／表格、本機彙總、跨圖表篩選、.punkbi 存讀、PNG／HTML（內嵌 SVG）匯出，並可由自動執行作業排程輸出 HTML 報表、以郵件寄出；待補 Linux／macOS 版。 |
 | 匯入／匯出（Excel、Access、CSV、ODBC 等） | 🟡 | MySQL SQL 匯入／匯出完整，查詢結果有常用格式；待補五種 provider 精靈對等化、Access／ODBC。 |
 | 資料字典 | 🟡 | HTML 核心已完成（Windows 五種 provider，含三種範本、個人化、篩選、排程輸出與郵件附件；Linux／macOS 預覽版四種 provider 含索引／外鍵／註解），直接 PDF 待補。 |
 | 資料產生器（規則、約束、參照完整性、大量資料） | 🟡 | Windows 與 Linux／macOS 皆已完成多表規則編輯（自動、預設、NULL、固定、序列、範圍、清單、樣式、字典、NULL 比例、seed）、依外鍵順序挑選真實父列、主鍵／唯一值不重複，並以單一交易寫入（每表 10 萬、每次 20 萬列）；自訂字典支援權重、內建字典（姓氏、名字、縣市、英文姓名、訂單狀態）與 CSV 匯入，兩個平台共用檔案格式。待補跨欄位條件與 CHECK 約束推論。 |

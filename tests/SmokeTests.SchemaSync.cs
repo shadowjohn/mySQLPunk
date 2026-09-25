@@ -1303,6 +1303,25 @@ public static partial class SmokeTests
         AssertThrows<InvalidOperationException>(() => BiDashboardService.Deserialize("{\"Version\": 1, \"Datasets\": [{\"Name\": \"a\", \"Query\": \"SELECT 1\"}, {\"Name\": \"A\", \"Query\": \"SELECT 2\"}]}"), "BI rejects duplicate dataset names.");
         AssertThrows<InvalidOperationException>(() => BiDashboardService.Deserialize("{\"Version\": 1, \"Datasets\": [{\"Name\": \"a\", \"Query\": \"SELECT 1\", \"CalculatedFields\": [{\"Name\": \"x\", \"Expression\": \"1 +\"}]}]}"), "BI rejects a broken calculated field.");
 
+        string report = BiReportService.BuildHtml(dashboard, new Dictionary<string, BiDatasetData> { { "sales", data } }, new Dictionary<string, string>(), null, "shop", new DateTime(2025, 1, 2, 3, 4, 0));
+        Assert(report.Contains("Content-Security-Policy") && !report.Contains("<script") && report.Contains("2025-01-02 03:04"), "BI HTML report has a CSP, no scripts and the generation time.");
+        Assert(report.Split(new[] { "<svg" }, StringSplitOptions.None).Length - 1 == 3 && report.Contains("<polyline") && report.Contains("<path") && report.Contains("class=\"number\""),
+            "BI HTML report draws bar, line and pie SVGs plus the number card.");
+        BiDataset hostile = new BiDataset { Name = "hostile", Query = "SELECT 1" };
+        System.Data.DataTable hostileTable = new System.Data.DataTable();
+        hostileTable.Columns.Add("label", typeof(string));
+        hostileTable.Rows.Add("<script>alert(1)</script>");
+        BiDashboard hostileDashboard = new BiDashboard { Title = "<img src=x>" };
+        hostileDashboard.Datasets.Add(hostile);
+        hostileDashboard.Widgets.Add(new BiWidget { Title = "t", Dataset = "hostile", Kind = BiChartKind.Bar, Category = "label", Aggregate = BiAggregate.Count });
+        hostileDashboard.Widgets.Add(new BiWidget { Title = "missing", Dataset = "hostile", Kind = BiChartKind.Number, Aggregate = BiAggregate.Count });
+        string hostileHtml = BiReportService.BuildHtml(hostileDashboard, new Dictionary<string, BiDatasetData> { { "hostile", BiDashboardService.Prepare(hostileTable, hostile) } }, null, null, "x", DateTime.Now);
+        Assert(!hostileHtml.Contains("<script>") && !hostileHtml.Contains("<img src") && hostileHtml.Contains("&lt;script&gt;"), "BI HTML report escapes labels and titles.");
+        string failedHtml = BiReportService.BuildHtml(hostileDashboard, new Dictionary<string, BiDatasetData>(), new Dictionary<string, string> { { "hostile", "boom <x>" } }, null, "x", DateTime.Now);
+        Assert(failedHtml.Contains("boom &lt;x&gt;") && failedHtml.Contains("class=\"error\""), "BI HTML report shows dataset errors on the cards.");
+        string filteredHtml = BiReportService.BuildHtml(dashboard, new Dictionary<string, BiDatasetData> { { "sales", data } }, null, BiDashboardService.Toggle(null, 0, byRegion, "North"), "shop", DateTime.Now);
+        Assert(filteredHtml.Contains("region = North"), "BI HTML report lists active filters.");
+
         string reason;
         Assert(!ScheduledJobValidator.IsReadOnlySql("DELETE FROM sales", out reason), "BI dataset query must be read-only.");
         AssertThrows<InvalidOperationException>(() => BiDashboardService.Query(null, "db", dataset), "BI query without connection fails.");
@@ -1419,6 +1438,37 @@ public static partial class SmokeTests
         ScheduledJobRunRecord record = ScheduledJobExecutionService.Execute(job, store, () => new NonDisposingDatabase(database));
         Assert(record.Status == "Success" && File.Exists(record.OutputPath) && File.ReadAllText(record.OutputPath).Contains("Nightly catalog"),
             "The dictionary job should write the configured document: " + record.Message);
+
+        BiDashboard dashboard = new BiDashboard { Title = "Nightly <objects>" };
+        dashboard.Datasets.Add(new BiDataset { Name = "objects", Query = "SELECT type, name FROM sqlite_master" });
+        dashboard.Widgets.Add(new BiWidget { Title = "Objects", Dataset = "objects", Kind = BiChartKind.Number, Aggregate = BiAggregate.Count });
+        dashboard.Widgets.Add(new BiWidget { Title = "By type", Dataset = "objects", Kind = BiChartKind.Pie, Category = "type", Aggregate = BiAggregate.Count });
+        string dashboardPath = Path.Combine(directory, "nightly" + BiDashboardService.FileExtension);
+        BiDashboardService.Save(dashboardPath, dashboard);
+        ScheduledJobDefinition biJob = new ScheduledJobDefinition
+        {
+            Name = "bi",
+            Type = ScheduledJobType.BiDashboard,
+            ConnectionName = "local",
+            DatabaseName = "main",
+            InputPath = dashboardPath,
+            OutputPath = Path.Combine(directory, "bi-{yyyyMMdd}.html")
+        };
+        ScheduledJobRunRecord biRecord = ScheduledJobExecutionService.Execute(biJob, store, () => new NonDisposingDatabase(database));
+        string biHtml = biRecord.OutputPath == null || !File.Exists(biRecord.OutputPath) ? string.Empty : File.ReadAllText(biRecord.OutputPath);
+        Assert(biRecord.Status == "Success" && biRecord.Rows > 0 && biHtml.Contains("Nightly &lt;objects&gt;") && biHtml.Contains("<svg") && biHtml.Contains("<path") &&
+               !biHtml.Contains("<script") && biHtml.Contains("Content-Security-Policy"), "The BI job should write an HTML report with SVG charts: " + biRecord.Message);
+
+        dashboard.Datasets.Add(new BiDataset { Name = "unsafe", Query = "DELETE FROM customers" });
+        dashboard.Widgets.Add(new BiWidget { Title = "Unsafe", Dataset = "unsafe", Kind = BiChartKind.Number, Aggregate = BiAggregate.Count });
+        BiDashboardService.Save(dashboardPath, dashboard);
+        long customersBefore = Convert.ToInt64(database.SelectSQL("SELECT COUNT(*) FROM customers").Rows[0][0]);
+        ScheduledJobRunRecord failed = ScheduledJobExecutionService.Execute(biJob, store, () => new NonDisposingDatabase(database));
+        Assert(failed.Status != "Success" && File.Exists(failed.OutputPath) && File.ReadAllText(failed.OutputPath).Contains("DELETE") &&
+               Convert.ToInt64(database.SelectSQL("SELECT COUNT(*) FROM customers").Rows[0][0]) == customersBefore,
+            "A dataset that is not read-only fails the job, is reported in the HTML and never runs.");
+        AssertThrows<InvalidOperationException>(() => ScheduledJobValidator.Validate(new ScheduledJobDefinition { Name = "x", Type = ScheduledJobType.BiDashboard, ConnectionName = "c", DatabaseName = "d", InputPath = "a.txt", OutputPath = "o.html" }),
+            "BI jobs need a .punkbi file.");
     }
 
     /// <summary>讓作業執行結束時不關閉測試共用的連線。</summary>

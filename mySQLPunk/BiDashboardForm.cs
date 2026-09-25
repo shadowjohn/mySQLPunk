@@ -58,12 +58,13 @@ namespace mySQLPunk
             addWidgetButton = new ToolStripButton(Localization.T("Bi.AddWidget"));
             refreshButton = new ToolStripButton(Localization.T("Bi.Refresh"));
             ToolStripButton exportButton = new ToolStripButton(Localization.T("Bi.ExportPng"));
+            ToolStripButton exportHtmlButton = new ToolStripButton(Localization.T("Bi.ExportHtml"));
             titleBox = new ToolStripTextBox { Width = 220, ToolTipText = Localization.T("Bi.TitleHint") };
             toolbar.Items.AddRange(new ToolStripItem[]
             {
                 newButton, openButton, saveButton, saveAsButton, new ToolStripSeparator(),
                 new ToolStripLabel(Localization.T("Bi.Title")), titleBox, new ToolStripSeparator(),
-                addDatasetButton, addWidgetButton, new ToolStripSeparator(), refreshButton, exportButton
+                addDatasetButton, addWidgetButton, new ToolStripSeparator(), refreshButton, exportButton, exportHtmlButton
             });
 
             datasetList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
@@ -110,6 +111,7 @@ namespace mySQLPunk
             addWidgetButton.Click += (sender, args) => EditWidget(-1);
             refreshButton.Click += async (sender, args) => await RefreshDataAsync();
             exportButton.Click += (sender, args) => ExportPngWithDialog();
+            exportHtmlButton.Click += (sender, args) => ExportHtmlWithDialog();
             titleBox.TextChanged += (sender, args) =>
             {
                 if (dashboard.Title == titleBox.Text) return;
@@ -769,6 +771,31 @@ namespace mySQLPunk
                 Guard(() =>
                 {
                     using (Bitmap bitmap = RenderSnapshot()) bitmap.Save(dialog.FileName, ImageFormat.Png);
+                    statusLabel.Text = Localization.Format("Bi.Exported", dialog.FileName);
+                });
+            }
+        }
+
+        /// <summary>目前資料與篩選輸出成 HTML 報表（內嵌 SVG 圖表）；也供測試直接呼叫。</summary>
+        public string BuildHtml()
+        {
+            return BiReportService.BuildHtml(dashboard, data, datasetErrors, filters, databaseName, DateTime.Now);
+        }
+
+        private void ExportHtmlWithDialog()
+        {
+            if (cards.Count == 0) return;
+            using (SaveFileDialog dialog = new SaveFileDialog
+            {
+                Filter = "HTML (*.html)|*.html",
+                DefaultExt = ".html",
+                FileName = MakeFileName(string.IsNullOrWhiteSpace(dashboard.Title) ? databaseName : dashboard.Title) + ".html"
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                Guard(() =>
+                {
+                    File.WriteAllText(dialog.FileName, BuildHtml(), new System.Text.UTF8Encoding(true));
                     statusLabel.Text = Localization.Format("Bi.Exported", dialog.FileName);
                 });
             }

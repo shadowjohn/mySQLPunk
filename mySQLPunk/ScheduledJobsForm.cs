@@ -468,6 +468,7 @@ namespace mySQLPunk
             if (type == ScheduledJobType.Import) return Localization.T("Automation.TypeImport");
             if (type == ScheduledJobType.Transfer) return Localization.T("Automation.TypeTransfer");
             if (type == ScheduledJobType.DataDictionary) return Localization.T("Automation.TypeDictionary");
+            if (type == ScheduledJobType.BiDashboard) return Localization.T("Automation.TypeDashboard");
             return Localization.T("Automation.TypeQuery");
         }
 
@@ -520,6 +521,8 @@ namespace mySQLPunk
         private readonly CheckBox attachBox;
         private readonly Button dictionaryButton;
         private DataDictionaryOptions dictionaryOptions;
+        private readonly Button dashboardButton;
+        private string dashboardPath = string.Empty;
         private readonly ComboBox scheduleKindBox;
         private readonly NumericUpDown intervalBox;
         private readonly CheckBox[] weekDayBoxes;
@@ -554,7 +557,7 @@ namespace mySQLPunk
             nameBox = AddTextBox(root, 0, Localization.T("Automation.Name"));
             AddLabel(root, 1, Localization.T("Automation.Type"));
             typeBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = FieldMargin() };
-            typeBox.Items.AddRange(new object[] { ScheduledJobType.Query, ScheduledJobType.Export, ScheduledJobType.Backup, ScheduledJobType.Import, ScheduledJobType.Transfer, ScheduledJobType.DataDictionary });
+            typeBox.Items.AddRange(new object[] { ScheduledJobType.Query, ScheduledJobType.Export, ScheduledJobType.Backup, ScheduledJobType.Import, ScheduledJobType.Transfer, ScheduledJobType.DataDictionary, ScheduledJobType.BiDashboard });
             Control typeField = UiField.Wrap(typeBox);
             typeField.Dock = DockStyle.Fill;
             typeField.Margin = FieldMargin();
@@ -626,6 +629,17 @@ namespace mySQLPunk
             dictionaryButton = new Button { AutoSize = true, Text = Localization.T("Automation.DictionaryOptions"), Margin = new Padding(6, 3, 0, 5) };
             outputButtons.Controls.Add(browseButton);
             outputButtons.Controls.Add(dictionaryButton);
+            dashboardButton = new Button { AutoSize = true, Text = Localization.T("Automation.SelectDashboard"), Margin = new Padding(6, 3, 0, 5) };
+            outputButtons.Controls.Add(dashboardButton);
+            dashboardButton.Click += (sender, args) =>
+            {
+                using (OpenFileDialog dialog = new OpenFileDialog { Filter = Localization.T("Bi.FileFilter"), Title = Localization.T("Automation.SelectDashboard") })
+                {
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    dashboardPath = dialog.FileName;
+                    UpdateDashboardButton();
+                }
+            };
             root.Controls.Add(outputButtons, 2, 7);
             dictionaryButton.Click += (sender, args) =>
             {
@@ -797,6 +811,9 @@ namespace mySQLPunk
                 emailBox.Text = value.EmailTo ?? string.Empty;
                 attachBox.Checked = value.EmailAttachOutput;
                 dictionaryOptions = value.DictionaryOptions ?? new DataDictionaryOptions();
+                dashboardPath = value.Type == ScheduledJobType.BiDashboard ? value.InputPath ?? string.Empty : string.Empty;
+                if (value.Type == ScheduledJobType.BiDashboard) inputBox.Text = string.Empty;
+                UpdateDashboardButton();
             }
             finally
             {
@@ -888,6 +905,9 @@ namespace mySQLPunk
             bool dictionary = type == ScheduledJobType.DataDictionary;
             bool output = export || type == ScheduledJobType.Backup || dictionary;
             dictionaryButton.Visible = dictionary;
+            bool dashboard = type == ScheduledJobType.BiDashboard;
+            dashboardButton.Visible = dashboard;
+            output = output || dashboard;
             bool sql = type == ScheduledJobType.Query || type == ScheduledJobType.Export;
             formatBox.Enabled = export;
             outputBox.Enabled = output;
@@ -901,8 +921,16 @@ namespace mySQLPunk
                 outputBox.Text = type == ScheduledJobType.Backup
                     ? "backups\\{job}-{yyyyMMdd_HHmmss}.sql"
                     : dictionary ? "dictionaries\\{job}-{yyyyMMdd}.html"
+                    : dashboard ? "dashboards\\{job}-{yyyyMMdd_HHmm}.html"
                     : "exports\\{job}-{yyyyMMdd_HHmmss}.csv";
             }
+        }
+
+        private void UpdateDashboardButton()
+        {
+            dashboardButton.Text = string.IsNullOrWhiteSpace(dashboardPath)
+                ? Localization.T("Automation.SelectDashboard")
+                : Localization.Format("Automation.DashboardSelected", System.IO.Path.GetFileName(dashboardPath));
         }
 
         private void BrowseOutputPath()
@@ -948,7 +976,7 @@ namespace mySQLPunk
                     : QueryResultExportFormat.Csv;
                 value.OutputPath = outputBox.Text;
                 value.Sql = value.Type == ScheduledJobType.Query || value.Type == ScheduledJobType.Export ? sqlBox.Text : string.Empty;
-                value.InputPath = inputBox.Text.Trim();
+                value.InputPath = value.Type == ScheduledJobType.BiDashboard ? dashboardPath : inputBox.Text.Trim();
                 value.TargetTable = targetTableBox.Text.Trim();
                 value.CsvDelimiter = Delimiters[Math.Max(0, delimiterBox.SelectedIndex)];
                 value.CsvHasHeader = headerBox.Checked;

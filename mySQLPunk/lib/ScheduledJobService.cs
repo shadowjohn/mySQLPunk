@@ -20,7 +20,9 @@ namespace mySQLPunk.lib
         Backup,
         Import,
         Transfer,
-        DataDictionary
+        DataDictionary,
+        /// <summary>執行 .punkbi 儀表板（InputPath）的唯讀資料集，輸出含 SVG 圖表的 HTML 報表。</summary>
+        BiDashboard
     }
 
     [JsonConverter(typeof(StringEnumConverter))]
@@ -258,7 +260,16 @@ namespace mySQLPunk.lib
                 job.DictionaryOptions.Validate();
             }
 
-            if ((job.Type == ScheduledJobType.Export || job.Type == ScheduledJobType.Backup || job.Type == ScheduledJobType.DataDictionary) &&
+            if (job.Type == ScheduledJobType.BiDashboard)
+            {
+                job.InputPath = (job.InputPath ?? string.Empty).Trim();
+                if (job.InputPath.Length == 0 || !job.InputPath.EndsWith(BiDashboardService.FileExtension, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(Localization.T("Automation.DashboardRequired"));
+                }
+            }
+
+            if ((job.Type == ScheduledJobType.Export || job.Type == ScheduledJobType.Backup || job.Type == ScheduledJobType.DataDictionary || job.Type == ScheduledJobType.BiDashboard) &&
                 string.IsNullOrWhiteSpace(job.OutputPath))
             {
                 throw new InvalidOperationException(Localization.T("Automation.OutputPathRequired"));
@@ -1004,6 +1015,24 @@ namespace mySQLPunk.lib
             {
                 DatabaseDumpService.WriteDatabaseDump(database, job.DatabaseName, outputPath);
                 record.Rows = -1;
+                return;
+            }
+
+            if (job.Type == ScheduledJobType.BiDashboard)
+            {
+                BiDashboard dashboard = BiDashboardService.Load(ExpandPath(job, job.InputPath, "dashboards", DateTime.Now));
+                BiReport report = BiReportService.Run(database, job.DatabaseName, dashboard, DateTime.Now);
+                string temporary = outputPath + ".tmp";
+                File.WriteAllText(temporary, report.Html, new UTF8Encoding(true));
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+                File.Move(temporary, outputPath);
+                record.Rows = report.Rows;
+                if (report.Errors.Count > 0)
+                {
+                    // 報表仍會寫出（失敗的資料集顯示錯誤），但作業標為失敗以便重試與通知。
+                    throw new InvalidOperationException(Localization.Format("Automation.DashboardDatasetsFailed", report.Errors.Count,
+                        string.Join("; ", report.Errors.Select(pair => pair.Key + ": " + pair.Value))));
+                }
                 return;
             }
 
