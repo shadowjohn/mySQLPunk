@@ -440,6 +440,7 @@ internal sealed partial class MySqlDatabaseSession : AdoDatabaseSession
                 !reader.IsDBNull(7),
                 valueKind)
             {
+                IsIdentity = extra.Contains("auto_increment", StringComparison.OrdinalIgnoreCase),
                 IntegerMinimum = integerBounds?.Minimum,
                 IntegerMaximum = integerBounds?.Maximum,
                 RequiredBinaryLength = requiredBinaryLength,

@@ -50,7 +50,7 @@
 | Procedure／Function 偵錯器（中斷點、逐步、變數、呼叫堆疊） | 📋 | 依 provider 能力分階段實作，優先 PostgreSQL／SQL Server。 |
 | AI 助理／詢問 AI | 🟡 | 核心聊天與 schema 上下文已完成，進階動作見上表。 |
 | 資料傳輸／遷移（跨 DBMS） | 🟡 | 已有 Table／View 跨 provider 複製；待補整庫精靈、mapping、續傳與驗證報告。 |
-| 資料同步 | 📋 | 先做唯讀資料差異、方向選擇與 SQL 預覽，再開放同步執行。 |
+| 資料同步 | 🟡 | Linux／macOS 預覽版已可逐列比較同類型資料庫的同名資料表、預覽 SQL，並在目標以單一交易受控同步（相依排序、並行衝突回滾、刪除需確認）；待補 Windows 版、大表串流比較與跨類型資料庫。 |
 | 結構同步 | 🟡 | 兩庫唯讀結構差異報告已完成，可跨 provider 比對 Table、Column、PK 與 FK 並匯出 HTML；Linux／macOS 預覽版另含索引與 FK 規則比對，並可為同類型資料庫產生同步 DDL 預覽（破壞性變更預設註解）；Windows 版也能依欄位／主鍵／外鍵快照產生同步 SQL 預覽；Windows 與 Linux／macOS 都可逐項勾選並在目標受控執行（交易回滾、破壞性變更輸入名稱確認、完成後自動重比）。 |
 | 模型 | 🟡 | 已有五種 provider 共用的唯讀 ER 圖與兩庫結構差異報告；拖曳編排、多模型與雙向同步仍在後續排程。 |
 | BI | 📋 | 見 Navicat 17 BI 路線。 |

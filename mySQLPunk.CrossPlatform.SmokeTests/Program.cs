@@ -29,6 +29,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("資料字典結構與 HTML 匯出", DataDictionaryAsync),
     ("結構比較差異與報告", SchemaComparisonAsync),
     ("同步 SQL 預覽產生與套用", SchemaSyncScriptAsync),
+    ("資料比較與同步", DataSyncAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
@@ -563,6 +564,10 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
     tests.Add(("MariaDB 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.MariaDb)));
     tests.Add(("PostgreSQL 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.PostgreSql)));
     tests.Add(("SQL Server 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.SqlServer)));
+    tests.Add(("MySQL 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.MySql)));
+    tests.Add(("MariaDB 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.MariaDb)));
+    tests.Add(("PostgreSQL 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.PostgreSql)));
+    tests.Add(("SQL Server 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.SqlServer)));
     if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_TLS_PORT")))
     {
         tests.Add(("PostgreSQL 實機 TLS 憑證驗證與 SSH Tunnel", PostgreSqlTlsLiveAsync));
@@ -2123,6 +2128,15 @@ static async Task AssertExplainDoesNotExecuteAsync(IDatabaseSession session, str
 
 static Task QueryPlanParsingAsync()
 {
+    var sqlServerDate = new TableColumnInfo(0, "created", "date", true, false, false, false, TableColumnValueKind.SqlServerTemporal)
+    {
+        StorageDataTypeName = "date"
+    };
+    var formattedDate = TableCellValueConverter.Format(sqlServerDate, new DateTime(2026, 9, 26));
+    Assert(formattedDate == "2026-09-26" &&
+           (DateTime)TableCellValueConverter.Parse(sqlServerDate, new TableCellInput("created", TableCellInputMode.Value, formattedDate))! == new DateTime(2026, 9, 26),
+        $"SQL Server date 的編輯文字必須能原樣存回：{formattedDate}");
+
     Assert(QueryPlanService.BuildExplainSql(DatabaseProviderKind.MySql, "  SELECT 1 ; ") == "EXPLAIN FORMAT=JSON SELECT 1" &&
            QueryPlanService.BuildExplainSql(DatabaseProviderKind.PostgreSql, "/* note */ WITH x AS (SELECT 1) SELECT * FROM x")
                .StartsWith("EXPLAIN (FORMAT JSON, ANALYZE FALSE", StringComparison.Ordinal) &&
@@ -2876,6 +2890,309 @@ static async Task SchemaSyncLiveAsync(LiveSyncTarget target)
             try
             {
                 await session.ExecuteAsync(adminDatabase, drop(name));
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"  （無法清除 {name}：{exception.Message}）");
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Compares parent／child in both databases, applies every change (deletes included) in one transaction, then
+/// requires a clean re-comparison, a collision-free default insert on the identity table, and a full rollback
+/// when the target is modified between comparison and apply.
+/// </summary>
+static async Task AssertDataSyncRoundTripAsync(
+    IDatabaseSession sourceSession,
+    string sourceDatabase,
+    IDatabaseSession targetSession,
+    string targetDatabase,
+    string label,
+    string defaultParentInsert,
+    string concurrentTargetUpdate)
+{
+    async Task<(IReadOnlyList<DatabaseObjectInfo> Order, List<DataTableComparison> Comparisons)> CompareAsync()
+    {
+        var sourceObjects = await sourceSession.GetObjectsAsync(sourceDatabase);
+        var targetObjects = await targetSession.GetObjectsAsync(targetDatabase);
+        var tables = new[] { "parent", "child" }
+            .Select(name => targetObjects.Single(item => item.Name == name && item.Kind == DatabaseObjectKind.Table))
+            .ToList();
+        var structures = new List<TableStructureInfo>();
+        foreach (var table in tables)
+        {
+            structures.Add(await targetSession.GetTableStructureAsync(targetDatabase, table));
+        }
+
+        var order = DataComparisonService.OrderByDependencies(tables.AsEnumerable().Reverse().ToList(), structures);
+        var comparisons = new List<DataTableComparison>();
+        foreach (var table in order)
+        {
+            var sourceTable = sourceObjects.Single(item => item.Name == table.Name && item.Kind == DatabaseObjectKind.Table);
+            comparisons.Add(await DataComparisonService.CompareTableAsync(
+                sourceSession, sourceDatabase, sourceTable, targetSession, targetDatabase, table));
+        }
+
+        return (order, comparisons);
+    }
+
+    var (order, comparisons) = await CompareAsync();
+    Assert(order.Select(table => table.Name).SequenceEqual(new[] { "parent", "child" }),
+        $"{label} 相依排序應讓被參照的 parent 排在 child 前：{string.Join(",", order.Select(table => table.Name))}");
+    var parent = comparisons.Single(item => item.TargetTable.Name == "parent");
+    var child = comparisons.Single(item => item.TargetTable.Name == "child");
+    Assert(!parent.IsSkipped && parent.Inserts == 1 && parent.Updates == 1 && parent.Deletes == 1 && parent.IdenticalRows == 1,
+        $"{label} parent 差異應為新增 1、修改 1、刪除 1、一致 1：{parent.StatusText}；{string.Join("；", parent.Warnings)}");
+    Assert(parent.Changes.Single(change => change.Kind == DataRowChangeKind.Update).ChangedColumns.SequenceEqual(new[] { "name" }),
+        $"{label} 只應修改實際不同的欄位");
+    Assert(!child.IsSkipped && child.Inserts == 2 && child.Deletes == 1 && child.Updates == 0,
+        $"{label} child 差異應為新增 2、刪除 1：{child.StatusText}；{string.Join("；", child.Warnings)}");
+    var preview = DataComparisonService.BuildPreviewSql(targetSession.Profile.Provider, parent, includeDeletes: false);
+    Assert(preview.Contains("INSERT INTO", StringComparison.Ordinal) && preview.Contains("UPDATE", StringComparison.Ordinal) &&
+           preview.Split('\n').Where(line => line.Contains("DELETE FROM", StringComparison.Ordinal)).All(line => line.StartsWith("-- ", StringComparison.Ordinal)),
+        $"{label} 預覽 SQL 未勾選刪除時，DELETE 必須是註解：\n{preview}");
+
+    // Concurrency: change a target row after comparing; the whole batch (including inserts) must roll back.
+    await targetSession.ExecuteAsync(targetDatabase, concurrentTargetUpdate);
+    var stale = await targetSession.ApplyDataSyncAsync(targetDatabase,
+        comparisons.Select(item => new DataSyncTableRequest(item.TargetTable, item.Changes)).ToList());
+    Assert(!stale.Succeeded && stale.Message.Contains("重新比較", StringComparison.Ordinal),
+        $"{label} 比對後目標被修改，套用必須失敗並要求重新比較：{stale.Summary}");
+    var afterStale = await CompareAsync();
+    Assert(afterStale.Comparisons.Single(item => item.TargetTable.Name == "parent").Inserts == 1 &&
+           afterStale.Comparisons.Single(item => item.TargetTable.Name == "child").Inserts == 2,
+        $"{label} 失敗的同步不可留下任何已新增的資料列");
+
+    var result = await targetSession.ApplyDataSyncAsync(targetDatabase,
+        afterStale.Comparisons.Select(item => new DataSyncTableRequest(item.TargetTable, item.Changes)).ToList());
+    Assert(result.Succeeded && result.Inserted == 3 && result.Updated == 1 && result.Deleted == 2,
+        $"{label} 資料同步應成功：{result.Summary}");
+
+    var (_, after) = await CompareAsync();
+    Assert(after.All(item => item.Changes.Count == 0 && !item.IsSkipped),
+        $"{label} 同步後重新比較應完全一致：{string.Join("；", after.Select(item => item.TargetTable.Name + " " + item.StatusText))}");
+
+    // Identity sequences must have moved past the synchronized keys.
+    await targetSession.ExecuteAsync(targetDatabase, defaultParentInsert);
+}
+
+static async Task DataSyncAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var sourceProfile = CreateSqliteProfile(Path.Combine(directory, "data-source.db"));
+        var targetProfile = CreateSqliteProfile(Path.Combine(directory, "data-target.db"));
+        using var sourceSession = DatabaseProviderFactory.Create(sourceProfile);
+        using var targetSession = DatabaseProviderFactory.Create(targetProfile);
+        const string schema = """
+            CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT NOT NULL, score NUMERIC NULL, payload BLOB NULL);
+            CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id), note TEXT NULL);
+            """;
+        await sourceSession.ExecuteAsync(sourceProfile.Database, schema);
+        await targetSession.ExecuteAsync(targetProfile.Database, schema);
+        await sourceSession.ExecuteAsync(sourceProfile.Database, """
+            INSERT INTO parent VALUES (1, 'same', 1.5, X'00FF'), (2, 'renamed ''quote''', NULL, NULL), (3, '新資料
+            多行', 3, X'01');
+            INSERT INTO child VALUES (10, 1, 'a'), (11, 3, NULL);
+            """);
+        await targetSession.ExecuteAsync(targetProfile.Database, """
+            INSERT INTO parent VALUES (1, 'same', 1.5, X'00FF'), (2, 'old name', NULL, NULL), (4, 'target only', NULL, NULL);
+            INSERT INTO child VALUES (12, 4, 'orphan');
+            """);
+        await AssertDataSyncRoundTripAsync(sourceSession, sourceProfile.Database, targetSession, targetProfile.Database, "SQLite",
+            "INSERT INTO parent (name) VALUES ('after sync')",
+            "UPDATE parent SET name = 'changed behind' WHERE id = 2");
+
+        var mismatchedKeys = CreateSqliteProfile(Path.Combine(directory, "data-keys.db"));
+        using var keySession = DatabaseProviderFactory.Create(mismatchedKeys);
+        await keySession.ExecuteAsync(mismatchedKeys.Database, "CREATE TABLE parent (code TEXT PRIMARY KEY, name TEXT);");
+        var skipped = await DataComparisonService.CompareTableAsync(
+            sourceSession, sourceProfile.Database, new DatabaseObjectInfo(string.Empty, "parent", DatabaseObjectKind.Table),
+            keySession, mismatchedKeys.Database, new DatabaseObjectInfo(string.Empty, "parent", DatabaseObjectKind.Table));
+        Assert(skipped.IsSkipped && skipped.SkippedReason!.Contains("Primary Key", StringComparison.Ordinal),
+            "Primary Key 不同的資料表必須略過，不可猜測對應");
+
+        var limited = await DataComparisonService.CompareTableAsync(
+            sourceSession, sourceProfile.Database, new DatabaseObjectInfo(string.Empty, "parent", DatabaseObjectKind.Table),
+            targetSession, targetProfile.Database, new DatabaseObjectInfo(string.Empty, "parent", DatabaseObjectKind.Table),
+            maximumRows: 1);
+        Assert(limited.IsSkipped && limited.SkippedReason!.Contains("上限", StringComparison.Ordinal),
+            "超過列數上限時必須略過，不可只比較部分資料");
+
+        var order = DataComparisonService.OrderByDependencies(
+            new[]
+            {
+                new DatabaseObjectInfo("", "c", DatabaseObjectKind.Table),
+                new DatabaseObjectInfo("", "b", DatabaseObjectKind.Table),
+                new DatabaseObjectInfo("", "a", DatabaseObjectKind.Table)
+            },
+            new[]
+            {
+                new TableStructureInfo(new DatabaseObjectInfo("", "c", DatabaseObjectKind.Table), Array.Empty<StructureColumnInfo>(), Array.Empty<StructureIndexInfo>(),
+                    new[] { new StructureForeignKeyInfo("fk", new[] { "b_id" }, "b", new[] { "id" }, "", "") }, "", ""),
+                new TableStructureInfo(new DatabaseObjectInfo("", "b", DatabaseObjectKind.Table), Array.Empty<StructureColumnInfo>(), Array.Empty<StructureIndexInfo>(),
+                    new[] { new StructureForeignKeyInfo("fk", new[] { "a_id" }, "public.a", new[] { "id" }, "", "") }, "", "")
+            });
+        Assert(order.Select(item => item.Name).SequenceEqual(new[] { "a", "b", "c" }), "相依排序應為 a、b、c");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
+
+static async Task DataSyncLiveAsync(LiveSyncTarget target)
+{
+    var suffix = Guid.NewGuid().ToString("N")[..8];
+    var sourceDatabase = $"mysqlpunk_data_src_{suffix}";
+    var targetDatabase = $"mysqlpunk_data_dst_{suffix}";
+    ConnectionProfile profile;
+    string adminDatabase;
+    string createDatabase, dropDatabase;
+    string[] schema, sourceRows, targetRows;
+    string defaultInsert, concurrentUpdate;
+    switch (target)
+    {
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb:
+        {
+            var prefix = target == LiveSyncTarget.MySql ? "MYSQLPUNK_MYSQL" : "MYSQLPUNK_MARIADB";
+            profile = new ConnectionProfile
+            {
+                Name = target.ToString(),
+                Provider = DatabaseProviderKind.MySql,
+                Host = ReadRequiredEnvironment($"{prefix}_HOST"),
+                Port = ReadRequiredIntEnvironment($"{prefix}_PORT"),
+                Username = Environment.GetEnvironmentVariable($"{prefix}_USER") ?? "root",
+                Password = ReadRequiredEnvironment($"{prefix}_PASSWORD"),
+                TlsMode = ConnectionTlsMode.Disabled,
+                TimeoutSeconds = 20
+            };
+            adminDatabase = string.Empty;
+            createDatabase = "CREATE DATABASE `{0}` CHARACTER SET utf8mb4";
+            dropDatabase = "DROP DATABASE IF EXISTS `{0}`";
+            schema = new[]
+            {
+                "CREATE TABLE parent (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(40) NOT NULL, score DECIMAL(10,2) NULL, created DATE NULL, payload VARBINARY(8) NULL) ENGINE=InnoDB",
+                "CREATE TABLE child (id INT PRIMARY KEY, parent_id INT NOT NULL, note VARCHAR(40) NULL, CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parent(id)) ENGINE=InnoDB"
+            };
+            sourceRows = new[]
+            {
+                "INSERT INTO parent (id, name, score, created, payload) VALUES (1, 'same', 1.50, '2026-01-02', 0x00FF), (2, 'renamed \\\\ ''quote''', NULL, NULL, NULL), (3, '新資料', 3.00, '2026-09-26', 0x01)",
+                "INSERT INTO child VALUES (10, 1, 'a'), (11, 3, NULL)"
+            };
+            targetRows = new[]
+            {
+                "INSERT INTO parent (id, name, score, created, payload) VALUES (1, 'same', 1.50, '2026-01-02', 0x00FF), (2, 'old name', NULL, NULL, NULL), (4, 'target only', NULL, NULL, NULL)",
+                "INSERT INTO child VALUES (12, 4, 'orphan')"
+            };
+            defaultInsert = "INSERT INTO parent (name) VALUES ('after sync')";
+            concurrentUpdate = "UPDATE parent SET name = 'changed behind' WHERE id = 2";
+            break;
+        }
+
+        case LiveSyncTarget.PostgreSql:
+            profile = new ConnectionProfile
+            {
+                Name = "PostgreSQL",
+                Provider = DatabaseProviderKind.PostgreSql,
+                Host = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_HOST"),
+                Port = ReadRequiredIntEnvironment("MYSQLPUNK_POSTGRES_PORT"),
+                Username = Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_USER") ?? "postgres",
+                Password = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_PASSWORD"),
+                Database = "postgres",
+                TlsMode = ConnectionTlsMode.Disabled,
+                TimeoutSeconds = 20
+            };
+            adminDatabase = "postgres";
+            createDatabase = "CREATE DATABASE \"{0}\"";
+            dropDatabase = "DROP DATABASE IF EXISTS \"{0}\" WITH (FORCE)";
+            schema = new[]
+            {
+                "CREATE TABLE parent (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR(40) NOT NULL, score NUMERIC(10,2) NULL, created DATE NULL, payload BYTEA NULL)",
+                "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id), note VARCHAR(40) NULL)"
+            };
+            sourceRows = new[]
+            {
+                "INSERT INTO parent (id, name, score, created, payload) OVERRIDING SYSTEM VALUE VALUES (1, 'same', 1.50, '2026-01-02', '\\x00ff'), (2, 'renamed \\ ''quote''', NULL, NULL, NULL), (3, '新資料', 3.00, '2026-09-26', '\\x01')",
+                "INSERT INTO child VALUES (10, 1, 'a'), (11, 3, NULL)"
+            };
+            targetRows = new[]
+            {
+                "INSERT INTO parent (id, name, score, created, payload) OVERRIDING SYSTEM VALUE VALUES (1, 'same', 1.50, '2026-01-02', '\\x00ff'), (2, 'old name', NULL, NULL, NULL), (4, 'target only', NULL, NULL, NULL)",
+                "INSERT INTO child VALUES (12, 4, 'orphan')"
+            };
+            defaultInsert = "INSERT INTO parent (name) VALUES ('after sync')";
+            concurrentUpdate = "UPDATE parent SET name = 'changed behind' WHERE id = 2";
+            break;
+        default:
+            profile = new ConnectionProfile
+            {
+                Name = "SQL Server",
+                Provider = DatabaseProviderKind.SqlServer,
+                Host = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_HOST"),
+                Port = ReadRequiredIntEnvironment("MYSQLPUNK_SQLSERVER_PORT"),
+                Username = Environment.GetEnvironmentVariable("MYSQLPUNK_SQLSERVER_USER") ?? "sa",
+                Password = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_PASSWORD"),
+                Database = "master",
+                TlsMode = ConnectionTlsMode.Optional,
+                TimeoutSeconds = 30
+            };
+            adminDatabase = "master";
+            createDatabase = "CREATE DATABASE [{0}]";
+            dropDatabase = "IF DB_ID(N'{0}') IS NOT NULL BEGIN ALTER DATABASE [{0}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{0}]; END";
+            schema = new[]
+            {
+                "CREATE TABLE dbo.parent (id INT IDENTITY(1,1) PRIMARY KEY, name NVARCHAR(40) NOT NULL, score DECIMAL(10,2) NULL, created DATE NULL, payload VARBINARY(8) NULL)",
+                "CREATE TABLE dbo.child (id INT PRIMARY KEY, parent_id INT NOT NULL REFERENCES dbo.parent(id), note NVARCHAR(40) NULL)"
+            };
+            sourceRows = new[]
+            {
+                "SET IDENTITY_INSERT dbo.parent ON; INSERT INTO dbo.parent (id, name, score, created, payload) VALUES (1, N'same', 1.50, '2026-01-02', 0x00FF), (2, N'renamed \\ ''quote''', NULL, NULL, NULL), (3, N'新資料', 3.00, '2026-09-26', 0x01); SET IDENTITY_INSERT dbo.parent OFF;",
+                "INSERT INTO dbo.child VALUES (10, 1, N'a'), (11, 3, NULL)"
+            };
+            targetRows = new[]
+            {
+                "SET IDENTITY_INSERT dbo.parent ON; INSERT INTO dbo.parent (id, name, score, created, payload) VALUES (1, N'same', 1.50, '2026-01-02', 0x00FF), (2, N'old name', NULL, NULL, NULL), (4, N'target only', NULL, NULL, NULL); SET IDENTITY_INSERT dbo.parent OFF;",
+                "INSERT INTO dbo.child VALUES (12, 4, N'orphan')"
+            };
+            defaultInsert = "INSERT INTO dbo.parent (name) VALUES (N'after sync')";
+            concurrentUpdate = "UPDATE dbo.parent SET name = N'changed behind' WHERE id = 2";
+            break;
+    }
+
+    using var session = DatabaseProviderFactory.Create(profile);
+    try
+    {
+        await session.ExecuteAsync(adminDatabase, string.Format(CultureInfo.InvariantCulture, createDatabase, sourceDatabase));
+        await session.ExecuteAsync(adminDatabase, string.Format(CultureInfo.InvariantCulture, createDatabase, targetDatabase));
+        foreach (var statement in schema)
+        {
+            await session.ExecuteAsync(sourceDatabase, statement);
+            await session.ExecuteAsync(targetDatabase, statement);
+        }
+
+        foreach (var statement in sourceRows)
+        {
+            await session.ExecuteAsync(sourceDatabase, statement);
+        }
+
+        foreach (var statement in targetRows)
+        {
+            await session.ExecuteAsync(targetDatabase, statement);
+        }
+
+        await AssertDataSyncRoundTripAsync(session, sourceDatabase, session, targetDatabase, profile.Name, defaultInsert, concurrentUpdate);
+    }
+    finally
+    {
+        foreach (var name in new[] { sourceDatabase, targetDatabase })
+        {
+            try
+            {
+                await session.ExecuteAsync(adminDatabase, string.Format(CultureInfo.InvariantCulture, dropDatabase, name));
             }
             catch (Exception exception)
             {

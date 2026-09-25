@@ -163,7 +163,10 @@ internal sealed partial class SqliteDatabaseSession : AdoDatabaseSession
                 isPrimaryKey,
                 entry.IsHidden || isRowIdAlias,
                 entry.HasDefault,
-                MapValueKind(entry.DataType));
+                MapValueKind(entry.DataType))
+            {
+                IsIdentity = isRowIdAlias
+            };
         }).ToList();
     }
 

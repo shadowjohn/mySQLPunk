@@ -19,6 +19,21 @@ public static class TableCellValueConverter
         return ParseCore(column, input, requireEditable: true);
     }
 
+    /// <summary>
+    /// Data synchronization writes explicit identity values so keys match; computed columns and unsupported types
+    /// are still rejected exactly like the editor path.
+    /// </summary>
+    public static object? ParseForDataSync(TableColumnInfo column, TableCellInput input)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        if (!column.IsEditable && !(column.IsIdentity && column.ValueKind != TableColumnValueKind.Unsupported))
+        {
+            throw new InvalidOperationException($"「{column.Name}」是計算欄位或不支援的型別，無法同步。");
+        }
+
+        return ParseCore(column, input, requireEditable: false);
+    }
+
     public static object? ParseFilterValue(TableColumnInfo column, string text)
     {
         ArgumentNullException.ThrowIfNull(column);
@@ -188,8 +203,11 @@ public static class TableCellValueConverter
             }
         }
 
-        if (column.ValueKind == TableColumnValueKind.Date)
+        if (column.ValueKind == TableColumnValueKind.Date ||
+            column.ValueKind == TableColumnValueKind.SqlServerTemporal &&
+            GetSqlServerTemporalBaseType(column) == "date")
         {
+            // SQL Server date parses only yyyy-MM-dd, so the editor text must round-trip in that form.
             return value switch
             {
                 DateTime dateTime => dateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),

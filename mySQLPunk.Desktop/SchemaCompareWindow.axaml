@@ -54,11 +54,12 @@
       </DataGrid.Columns>
     </DataGrid>
 
-    <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto,Auto" Margin="14,10,14,12">
+    <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto,Auto,Auto" Margin="14,10,14,12">
       <TextBlock Grid.Column="0" x:Name="StatusText" Foreground="#667085" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-      <Button Grid.Column="1" x:Name="SyncScriptButton" Content="同步 SQL 預覽…" Click="SyncScript_Click" IsEnabled="False" Margin="0,0,8,0" />
-      <Button Grid.Column="2" x:Name="ExportButton" Content="匯出 HTML 報告…" Click="Export_Click" IsEnabled="False" Margin="0,0,8,0" />
-      <Button Grid.Column="3" x:Name="CloseButton" Content="關閉" Click="Close_Click" Padding="14,6" />
+      <Button Grid.Column="1" x:Name="DataCompareButton" Content="比較資料…" Click="DataCompare_Click" IsEnabled="False" Margin="0,0,8,0" />
+      <Button Grid.Column="2" x:Name="SyncScriptButton" Content="同步 SQL 預覽…" Click="SyncScript_Click" IsEnabled="False" Margin="0,0,8,0" />
+      <Button Grid.Column="3" x:Name="ExportButton" Content="匯出 HTML 報告…" Click="Export_Click" IsEnabled="False" Margin="0,0,8,0" />
+      <Button Grid.Column="4" x:Name="CloseButton" Content="關閉" Click="Close_Click" Padding="14,6" />
     </Grid>
   </Grid>
 </Window>

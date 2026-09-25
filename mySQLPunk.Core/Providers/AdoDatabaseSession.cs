@@ -150,6 +150,217 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         return await ReadResultAsync(connection, sql, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<DataSyncResult> ApplyDataSyncAsync(
+        string database,
+        IReadOnlyList<DataSyncTableRequest> tables,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        var columnsByTable = new Dictionary<DatabaseObjectInfo, IReadOnlyList<TableColumnInfo>>();
+        foreach (var request in tables)
+        {
+            ValidateTable(request.Table);
+            var columns = await GetRequiredTableColumnsAsync(database, request.Table, cancellationToken).ConfigureAwait(false);
+            RequirePrimaryKey(columns);
+            columnsByTable[request.Table] = columns;
+        }
+
+        int inserted = 0, updated = 0, deleted = 0;
+        await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        DataSyncTableRequest? currentTable = null;
+        DataRowChange? currentChange = null;
+        try
+        {
+            foreach (var request in tables.Reverse())
+            {
+                currentTable = request;
+                foreach (var change in request.Changes.Where(change => change.Kind == DataRowChangeKind.Delete))
+                {
+                    currentChange = change;
+                    await ApplyRowChangeAsync(connection, transaction, request.Table, columnsByTable[request.Table], change, cancellationToken).ConfigureAwait(false);
+                    deleted++;
+                }
+            }
+
+            foreach (var request in tables)
+            {
+                currentTable = request;
+                var columns = columnsByTable[request.Table];
+                foreach (var change in request.Changes.Where(change => change.Kind == DataRowChangeKind.Update))
+                {
+                    currentChange = change;
+                    await ApplyRowChangeAsync(connection, transaction, request.Table, columns, change, cancellationToken).ConfigureAwait(false);
+                    updated++;
+                }
+
+                var inserts = request.Changes.Where(change => change.Kind == DataRowChangeKind.Insert).ToList();
+                if (inserts.Count == 0)
+                {
+                    continue;
+                }
+
+                var identityColumns = columns
+                    .Where(column => column.IsIdentity && inserts[0].Values.Any(value =>
+                        value.ColumnName.Equals(column.Name, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+                if (identityColumns.Count > 0)
+                {
+                    await ExecuteInTransactionAsync(connection, transaction, BeginExplicitIdentityInsertSql(request.Table), cancellationToken).ConfigureAwait(false);
+                }
+
+                foreach (var change in inserts)
+                {
+                    currentChange = change;
+                    await ApplyRowChangeAsync(connection, transaction, request.Table, columns, change, cancellationToken, identityColumns.Count > 0).ConfigureAwait(false);
+                    inserted++;
+                }
+
+                if (identityColumns.Count > 0)
+                {
+                    await ExecuteInTransactionAsync(connection, transaction, EndExplicitIdentityInsertSql(request.Table), cancellationToken).ConfigureAwait(false);
+                    await AfterExplicitIdentityInsertAsync(connection, transaction, request.Table, identityColumns, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new DataSyncResult(true, inserted, updated, deleted, null, null, string.Empty);
+        }
+        catch (Exception exception) when (exception is DbException or InvalidOperationException or FormatException or OverflowException or ArgumentException)
+        {
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (DbException)
+            {
+                // Disposing the uncommitted transaction is the final rollback safeguard.
+            }
+
+            return new DataSyncResult(
+                false,
+                0,
+                0,
+                0,
+                currentTable?.Table.DisplayName,
+                currentChange?.KeyText.Replace('\u0001', ','),
+                exception.Message);
+        }
+    }
+
+    private async Task ApplyRowChangeAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        DatabaseObjectInfo table,
+        IReadOnlyList<TableColumnInfo> columns,
+        DataRowChange change,
+        CancellationToken cancellationToken,
+        bool explicitIdentity = false)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 2);
+        var operation = change.Kind switch
+        {
+            DataRowChangeKind.Insert => "新增",
+            DataRowChangeKind.Update => "修改",
+            _ => "刪除"
+        };
+        if (change.Kind == DataRowChangeKind.Insert)
+        {
+            var names = new List<string>();
+            var values = new List<string>();
+            for (var index = 0; index < change.Values.Count; index++)
+            {
+                var input = change.Values[index];
+                var column = FindColumn(columns, input.ColumnName);
+                if (!column.IsEditable && !column.IsIdentity)
+                {
+                    throw new InvalidOperationException($"「{column.Name}」是計算欄位，無法寫入。");
+                }
+
+                var parameterName = $"@value{index}";
+                var parsedValue = TableCellValueConverter.ParseForDataSync(column, input);
+                AddParameter(command, parameterName, parsedValue, column);
+                names.Add(QuoteIdentifier(column.Name));
+                values.Add(BuildParameterValueExpression(column, parameterName, parsedValue));
+            }
+
+            var overriding = explicitIdentity ? ExplicitIdentityInsertClause : string.Empty;
+            command.CommandText =
+                $"INSERT INTO {BuildQualifiedName(table)} ({string.Join(", ", names)}){overriding} VALUES ({string.Join(", ", values)});";
+        }
+        else
+        {
+            var original = change.TargetOriginal ?? throw new InvalidOperationException("缺少目標原始資料列。");
+            ValidateOriginalRow(columns, original);
+            if (change.Kind == DataRowChangeKind.Update)
+            {
+                var assignments = new List<string>();
+                for (var index = 0; index < change.Values.Count; index++)
+                {
+                    var input = change.Values[index];
+                    var column = FindColumn(columns, input.ColumnName);
+                    if (column.IsPrimaryKey || !column.IsEditable)
+                    {
+                        throw new InvalidOperationException($"「{column.Name}」不可在既有資料列中直接修改。");
+                    }
+
+                    var parameterName = $"@value{index}";
+                    var parsedValue = TableCellValueConverter.Parse(column, input);
+                    AddParameter(command, parameterName, parsedValue, column);
+                    assignments.Add($"{QuoteIdentifier(column.Name)} = {BuildParameterValueExpression(column, parameterName, parsedValue)}");
+                }
+
+                command.CommandText =
+                    $"UPDATE {BuildQualifiedName(table)} SET {string.Join(", ", assignments)} WHERE {BuildOptimisticPredicate(command, columns, original)};";
+            }
+            else
+            {
+                command.CommandText = $"DELETE FROM {BuildQualifiedName(table)} WHERE {BuildOptimisticPredicate(command, columns, original)};";
+            }
+        }
+
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (affected != 1)
+        {
+            throw new InvalidOperationException(affected == 0
+                ? $"{operation}時找不到比對當下的資料列，目標可能已被修改，請重新比較。"
+                : $"{operation}影響了 {affected} 列，為避免誤改已中止。");
+        }
+
+        await ValidateMutationDiagnosticsAsync(connection, transaction, operation, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task ExecuteInTransactionAsync(DbConnection connection, DbTransaction transaction, string? sql, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(sql))
+        {
+            return;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Clause placed between the column list and VALUES when identity values are written explicitly.</summary>
+    protected virtual string ExplicitIdentityInsertClause => string.Empty;
+
+    protected virtual string? BeginExplicitIdentityInsertSql(DatabaseObjectInfo table) => null;
+
+    protected virtual string? EndExplicitIdentityInsertSql(DatabaseObjectInfo table) => null;
+
+    /// <summary>Lets providers move identity sequences past explicitly inserted values.</summary>
+    protected virtual Task AfterExplicitIdentityInsertAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        DatabaseObjectInfo table,
+        IReadOnlyList<TableColumnInfo> identityColumns,
+        CancellationToken cancellationToken) => Task.CompletedTask;
+
     public async Task<StatementBatchResult> ExecuteBatchAsync(
         string database,
         IReadOnlyList<string> statements,

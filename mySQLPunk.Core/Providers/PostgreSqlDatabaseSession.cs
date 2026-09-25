@@ -35,6 +35,37 @@ internal sealed partial class PostgreSqlDatabaseSession : AdoDatabaseSession
 
     protected override string QuoteIdentifier(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
 
+    protected override string ExplicitIdentityInsertClause => " OVERRIDING SYSTEM VALUE";
+
+    protected override async Task AfterExplicitIdentityInsertAsync(
+        System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        DatabaseObjectInfo table,
+        IReadOnlyList<TableColumnInfo> identityColumns,
+        CancellationToken cancellationToken)
+    {
+        // Explicit identity values do not advance the sequence; move it past the highest key so later default
+        // inserts on the target cannot collide with synchronized rows.
+        foreach (var column in identityColumns)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText =
+                $"SELECT pg_catalog.setval(pg_catalog.pg_get_serial_sequence(@table, @column), " +
+                $"COALESCE(MAX({QuoteIdentifier(column.Name)}), 1), MAX({QuoteIdentifier(column.Name)}) IS NOT NULL) " +
+                $"FROM {BuildQualifiedName(table)}";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@table";
+            parameter.Value = BuildQualifiedName(table);
+            command.Parameters.Add(parameter);
+            var columnParameter = command.CreateParameter();
+            columnParameter.ParameterName = "@column";
+            columnParameter.Value = column.Name;
+            command.Parameters.Add(columnParameter);
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     protected override void ConfigureParameter(
         System.Data.Common.DbParameter parameter,
         TableColumnInfo column)
@@ -478,6 +509,7 @@ internal sealed partial class PostgreSqlDatabaseSession : AdoDatabaseSession
                 !reader.IsDBNull(8),
                 valueKind)
             {
+                IsIdentity = string.Equals(reader.GetString(6), "YES", StringComparison.OrdinalIgnoreCase),
                 StorageDataTypeName = storageType,
                 MonetaryScale = valueKind == TableColumnValueKind.PostgreSqlMoney
                     ? reader.GetInt32(14)

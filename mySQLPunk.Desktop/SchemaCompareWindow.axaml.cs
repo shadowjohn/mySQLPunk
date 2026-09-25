@@ -27,6 +27,7 @@ public sealed partial class SchemaCompareWindow : Window
     private readonly Button _compareButton;
     private readonly Button _exportButton;
     private readonly Button _syncScriptButton;
+    private readonly Button _dataCompareButton;
     private readonly DataGrid _differenceGrid;
     private readonly TextBlock _summaryText;
     private readonly TextBlock _statusText;
@@ -62,6 +63,7 @@ public sealed partial class SchemaCompareWindow : Window
         _compareButton = this.FindControl<Button>("CompareButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _syncScriptButton = this.FindControl<Button>("SyncScriptButton")!;
+        _dataCompareButton = this.FindControl<Button>("DataCompareButton")!;
         _differenceGrid = this.FindControl<DataGrid>("DifferenceGrid")!;
         _summaryText = this.FindControl<TextBlock>("SummaryText")!;
         _statusText = this.FindControl<TextBlock>("StatusText")!;
@@ -347,6 +349,35 @@ public sealed partial class SchemaCompareWindow : Window
         }
     }
 
+    private async void DataCompare_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_targetProfileCombo.SelectedItem is not ProfileOption option ||
+            _targetDatabaseCombo.SelectedItem is not string targetDatabase)
+        {
+            return;
+        }
+
+        IDatabaseSession? targetSession = null;
+        await RunAsync($"正在連線至 {option.Profile.Name}…", async cancellationToken =>
+        {
+            targetSession = await GetTargetSessionAsync(option.Profile, cancellationToken);
+        });
+        if (targetSession is null)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(targetSession, _sourceSession) &&
+            string.Equals(targetDatabase, _sourceDatabase, StringComparison.Ordinal))
+        {
+            SetStatus("來源與目標是同一個資料庫，請選擇其他資料庫。");
+            return;
+        }
+
+        await new DataCompareWindow(_sourceSession, _sourceDatabase, targetSession, targetDatabase).ShowDialog(this);
+        SetStatus("資料比較視窗已關閉；若已同步資料，結構不受影響。");
+    }
+
     private void Close_Click(object? sender, RoutedEventArgs e) => Close();
 
     private async Task RunAsync(string status, Func<CancellationToken, Task> operation)
@@ -390,6 +421,7 @@ public sealed partial class SchemaCompareWindow : Window
         _compareButton.IsEnabled = !_busy && _targetDatabaseCombo.SelectedItem is not null;
         _exportButton.IsEnabled = !_busy && _result is not null;
         _syncScriptButton.IsEnabled = !_busy && _result is not null;
+        _dataCompareButton.IsEnabled = !_busy && _targetDatabaseCombo.SelectedItem is not null;
     }
 
     private void SetStatus(string text) => _statusText.Text = text;

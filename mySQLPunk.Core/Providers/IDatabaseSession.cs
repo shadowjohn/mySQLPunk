@@ -26,6 +26,16 @@ public interface IDatabaseSession : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Applies data-sync row changes to several tables in ONE transaction. Tables are expected in dependency order
+    /// (referenced tables first): deletes run in reverse order, then updates and inserts in order. Every update and
+    /// delete matches the full target row read during comparison, so any concurrent change rolls everything back.
+    /// </summary>
+    Task<DataSyncResult> ApplyDataSyncAsync(
+        string database,
+        IReadOnlyList<DataSyncTableRequest> tables,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Runs statements in order and stops at the first failure. Providers with transactional DDL (PostgreSQL,
     /// SQL Server, SQLite) wrap the batch in one transaction and roll everything back on failure; MySQL／MariaDB
     /// commit DDL implicitly, so earlier statements stay applied and the result says so.

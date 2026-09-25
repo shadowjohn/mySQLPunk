@@ -41,6 +41,12 @@ internal sealed partial class SqlServerDatabaseSession : AdoDatabaseSession
 
     protected override string QuoteIdentifier(string value) => $"[{value.Replace("]", "]]", StringComparison.Ordinal)}]";
 
+    protected override string? BeginExplicitIdentityInsertSql(DatabaseObjectInfo table) =>
+        $"SET IDENTITY_INSERT {BuildQualifiedName(table)} ON;";
+
+    protected override string? EndExplicitIdentityInsertSql(DatabaseObjectInfo table) =>
+        $"SET IDENTITY_INSERT {BuildQualifiedName(table)} OFF;";
+
     protected override async Task<QueryResult> ReadPlanRowsAsync(
         System.Data.Common.DbConnection connection,
         string statement,
@@ -752,6 +758,7 @@ internal sealed partial class SqlServerDatabaseSession : AdoDatabaseSession
                 reader.GetInt32(9) != 0,
                 valueKind)
             {
+                IsIdentity = reader.GetBoolean(7),
                 StorageDataTypeName = storageType,
                 IntegerMinimum = integerBounds?.Minimum,
                 IntegerMaximum = integerBounds?.Maximum,

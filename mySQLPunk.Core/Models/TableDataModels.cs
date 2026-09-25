@@ -77,6 +77,12 @@ public sealed record TableColumnInfo(
 
     public bool TrailingSpacesAreNotRoundTrippable { get; init; }
 
+    /// <summary>
+    /// Server-numbered key column (auto_increment／identity／rowid alias). It is marked generated for the row
+    /// editor, but data synchronization may still write an explicit value so keys match across databases.
+    /// </summary>
+    public bool IsIdentity { get; init; }
+
     public bool IsEditable => !IsGenerated && ValueKind is not TableColumnValueKind.Unsupported;
 
     public string DisplayName => IsPrimaryKey ? $"{Name} · PK" : Name;
