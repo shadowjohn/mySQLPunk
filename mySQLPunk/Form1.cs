@@ -12991,6 +12991,10 @@ namespace mySQLPunk
             dataTransferItem.Click += (s, ev) => OpenDataTransfer(GetTargetFromCurrentSelection());
             menu.Items.Add(dataTransferItem);
 
+            ToolStripMenuItem biDashboardItem = new ToolStripMenuItem(Localization.T("Tool.BiDashboard"));
+            biDashboardItem.Click += (s, ev) => ShowBiDashboard(GetTargetFromCurrentSelection());
+            menu.Items.Add(biDashboardItem);
+
             TreeDatabaseTarget nativeTarget = BuildTargetFromNode(node);
             if (nativeTarget != null && NativeBackupService.Supports(nativeTarget.ProviderName))
             {
@@ -13118,6 +13122,24 @@ namespace mySQLPunk
 
             using (QueryBuilderForm form = new QueryBuilderForm(target.Database, target.DatabaseName,
                        sql => OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), sql, true)))
+            {
+                form.ShowDialog(this);
+            }
+        }
+
+        private void ShowBiDashboard(TreeDatabaseTarget target)
+        {
+            if (target == null || target.Database == null)
+            {
+                MessageBox.Show(Localization.T("Status.SelectExpandedDatabase"), Localization.T("Tool.BiDashboard"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (!BiDashboardService.SupportsProvider(target.Database.ProviderName))
+            {
+                MessageBox.Show(Localization.Format("Bi.Error.Provider", target.Database.ProviderName), Localization.T("Tool.BiDashboard"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            using (BiDashboardForm form = new BiDashboardForm(target.Database, target.DatabaseName))
             {
                 form.ShowDialog(this);
             }
@@ -13351,6 +13373,10 @@ namespace mySQLPunk
 
                 if (IsMongoDbTarget(nonRelationalTarget))
                 {
+                    ToolStripMenuItem mongoBiItem = new ToolStripMenuItem(Localization.T("Tool.BiDashboard"));
+                    mongoBiItem.Click += (s, ev) => ShowBiDashboard(nonRelationalTarget);
+                    menu.Items.Add(mongoBiItem);
+
                     ToolStripMenuItem mongoNativeBackupItem = new ToolStripMenuItem(Localization.T("Tool.NativeBackup"));
                     mongoNativeBackupItem.Click += (s, ev) => OpenNativeBackup(nonRelationalTarget);
                     menu.Items.Add(mongoNativeBackupItem);

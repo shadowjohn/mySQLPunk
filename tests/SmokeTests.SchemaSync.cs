@@ -1073,6 +1073,123 @@ public static partial class SmokeTests
         NativeBackupService.ValidateNewDatabaseName("shop_copy-2");
     }
 
+    /// <summary>BI 運算式、計算欄位、彙總、跨圖表篩選與 .punkbi 往返（不需要資料庫）。</summary>
+    public static void AssertBiSemantics()
+    {
+        Func<string, object> row = name =>
+        {
+            switch (name.ToLowerInvariant())
+            {
+                case "price": return 12.5m;
+                case "qty": return 4m;
+                case "name": return "Widget";
+                case "shipped": return new DateTime(2025, 3, 14);
+                case "note": return null;
+                default: throw new FormatException("unknown " + name);
+            }
+        };
+        Func<string, object> eval = text => BiExpression.Parse(text).Evaluate(row);
+        AssertEquals("50", BiExpression.ToText(eval("[price] * [qty]")), "BI multiplication.");
+        AssertEquals("14", BiExpression.ToText(eval("2 + 3 * 4")), "BI precedence.");
+        AssertEquals("20", BiExpression.ToText(eval("(2 + 3) * 4")), "BI parentheses.");
+        AssertEquals("-3", BiExpression.ToText(eval("-(1 + 2)")), "BI unary minus.");
+        AssertEquals("big", BiExpression.ToText(eval("IF([price] * [qty] >= 50, 'big', 'small')")), "BI IF.");
+        AssertEquals("3.14", BiExpression.ToText(eval("ROUND(3.14159, 2)")), "BI ROUND.");
+        AssertEquals("WIDGET-2025-3", BiExpression.ToText(eval("CONCAT(UPPER([name]), '-', YEAR([shipped]), '-', MONTH([shipped]))")), "BI CONCAT with dates.");
+        AssertEquals("Widget x4", BiExpression.ToText(eval("[name] + ' x' + [qty]")), "BI string concatenation.");
+        AssertEquals("n/a", BiExpression.ToText(eval("COALESCE([note], 'n/a')")), "BI COALESCE.");
+        Assert(eval("[note] + 1") == null, "BI NULL propagation.");
+        Assert(eval("[qty] / 0") == null, "BI division by zero yields NULL.");
+        Assert((bool)eval("[qty] > 3 AND NOT [name] = 'x' OR FALSE"), "BI boolean logic.");
+        Assert((bool)eval("[shipped] >= '2025-01-01'"), "BI date comparison against a literal.");
+        AssertEquals("it's", BiExpression.ToText(eval("'it''s'")), "BI escaped quote.");
+        AssertEquals("Wid", BiExpression.ToText(eval("left([name], 3)")), "BI function names are case-insensitive.");
+        CollectionEquals(new[] { "price", "qty" }, BiExpression.Parse("[price] * [qty] + [PRICE]").Fields, "BI field references are de-duplicated.");
+        foreach (string bad in new[] { "", "1 +", "[unclosed", "'open", "NOPE(1)", "IF(1, 2)", "1 ; DROP TABLE x", "(1 + 2", "[]" })
+        {
+            AssertThrows<FormatException>(() => BiExpression.Parse(bad), "BI rejects malformed expression: " + bad);
+        }
+        AssertThrows<FormatException>(() => BiExpression.Parse("[name] * 2").Evaluate(row), "BI arithmetic on text fails with a readable error.");
+
+        System.Data.DataTable source = new System.Data.DataTable();
+        source.Columns.Add("region", typeof(string));
+        source.Columns.Add("product", typeof(string));
+        source.Columns.Add("amount", typeof(double));
+        source.Columns.Add("ordered", typeof(DateTime));
+        source.Rows.Add("North", "Tea", 10.0, new DateTime(2025, 1, 5));
+        source.Rows.Add("North", "Coffee", 30.0, new DateTime(2025, 1, 20));
+        source.Rows.Add("South", "Tea", 5.0, new DateTime(2025, 2, 2));
+        source.Rows.Add("South", "Tea", 7.5, new DateTime(2025, 2, 9));
+        source.Rows.Add(DBNull.Value, "Coffee", 1.0, new DateTime(2025, 3, 1));
+
+        BiDataset dataset = new BiDataset { Name = "sales", Query = "SELECT * FROM sales" };
+        dataset.CalculatedFields.Add(new BiCalculatedField { Name = "taxed", Expression = "ROUND([amount] * 1.05, 2)" });
+        dataset.CalculatedFields.Add(new BiCalculatedField { Name = "size", Expression = "IF([taxed] >= 10, 'large', 'small')" });
+        BiDatasetData data = BiDashboardService.Prepare(source, dataset);
+        AssertEquals("region,product,amount,ordered,taxed,size", string.Join(",", data.Columns), "BI calculated fields are appended.");
+        AssertEquals("31.5", BiExpression.ToText(data.Rows[1][4]), "BI calculated field value.");
+        AssertEquals("large", BiExpression.ToText(data.Rows[1][5]), "BI calculated field can reference an earlier one.");
+
+        BiDataset backwards = new BiDataset { Name = "bad", Query = "SELECT 1" };
+        backwards.CalculatedFields.Add(new BiCalculatedField { Name = "a", Expression = "[b] + 1" });
+        backwards.CalculatedFields.Add(new BiCalculatedField { Name = "b", Expression = "1" });
+        AssertThrows<InvalidOperationException>(() => BiDashboardService.Prepare(source, backwards), "BI calculated field cannot reference a later one.");
+        BiDataset collides = new BiDataset { Name = "bad", Query = "SELECT 1" };
+        collides.CalculatedFields.Add(new BiCalculatedField { Name = "Amount", Expression = "1" });
+        AssertThrows<InvalidOperationException>(() => BiDashboardService.Prepare(source, collides), "BI calculated field name cannot shadow a column.");
+
+        BiWidget byRegion = new BiWidget { Title = "By region", Dataset = "sales", Kind = BiChartKind.Bar, Category = "region", Value = "amount", Aggregate = BiAggregate.Sum };
+        BiWidget byMonth = new BiWidget { Title = "By month", Dataset = "sales", Kind = BiChartKind.Line, Category = "ordered", DateGrain = BiDateGrain.Month, Aggregate = BiAggregate.Count, SortByValue = false };
+        BiWidget total = new BiWidget { Title = "Total", Dataset = "sales", Kind = BiChartKind.Number, Value = "taxed", Aggregate = BiAggregate.Sum };
+        BiWidget teaOnly = new BiWidget { Title = "Tea", Dataset = "sales", Kind = BiChartKind.Pie, Category = "region", Value = "product", Aggregate = BiAggregate.DistinctCount, Filter = "[product] = 'Tea'", CrossFilter = false };
+
+        BiWidgetResult regions = BiDashboardService.Compute(byRegion, 0, data, null);
+        AssertEquals("North=40;South=12.5;(NULL)=1", string.Join(";", regions.Points.Select(p => (p.Key.StartsWith("\u0000", StringComparison.Ordinal) ? "(NULL)" : p.Label) + "=" + BiExpression.ToText(p.Value))), "BI sum by category sorted by value.");
+        BiWidgetResult months = BiDashboardService.Compute(byMonth, 1, data, null);
+        AssertEquals("2025-01=2;2025-02=2;2025-03=1", string.Join(";", months.Points.Select(p => p.Key + "=" + BiExpression.ToText(p.Value))), "BI date grain groups by month in order.");
+        AssertEquals("56.18", BiExpression.ToText(Math.Round(BiDashboardService.Compute(total, 2, data, null).Total.Value, 2)), "BI number card total.");
+        AssertEquals("2", BiExpression.ToText(BiDashboardService.Compute(teaOnly, 3, data, null).Points.Count), "BI widget filter expression.");
+
+        List<BiFilter> filters = BiDashboardService.Toggle(null, 0, byRegion, "North");
+        AssertEquals("2025-01=2", string.Join(";", BiDashboardService.Compute(byMonth, 1, data, filters).Points.Select(p => p.Key + "=" + BiExpression.ToText(p.Value))), "BI cross-filter narrows other widgets.");
+        AssertEquals("3", BiExpression.ToText(BiDashboardService.Compute(byRegion, 0, data, filters).Points.Count), "BI cross-filter source keeps all categories.");
+        AssertEquals("2", BiExpression.ToText(BiDashboardService.Compute(teaOnly, 3, data, filters).Points.Count), "BI widget with cross-filter off ignores filters.");
+        filters = BiDashboardService.Toggle(filters, 1, byMonth, "2025-01");
+        AssertEquals("2", BiExpression.ToText(filters.Count), "BI filters from two widgets combine.");
+        AssertEquals("North=40", string.Join(";", BiDashboardService.Compute(byRegion, 0, data, filters).Points.Select(p => p.Key + "=" + BiExpression.ToText(p.Value))), "BI month filter reaches the region chart.");
+        AssertEquals("1", BiExpression.ToText(BiDashboardService.Toggle(filters, 0, byRegion, "North").Count), "BI clicking the selected category clears it.");
+        AssertEquals("South", BiDashboardService.Toggle(filters, 0, byRegion, "South").Single(f => f.SourceWidget == 0).Key, "BI clicking another category replaces the filter.");
+        List<BiFilter> shifted = BiDashboardService.RemoveWidget(filters, 0);
+        Assert(shifted.Count == 1 && shifted[0].SourceWidget == 0 && shifted[0].Field == "ordered", "BI removing a widget renumbers filter sources.");
+
+        BiWidgetResult broken = BiDashboardService.Compute(new BiWidget { Title = "x", Dataset = "sales", Kind = BiChartKind.Bar, Category = "missing", Aggregate = BiAggregate.Count }, 4, data, null);
+        Assert(!string.IsNullOrEmpty(broken.Error), "BI missing column is reported on the widget.");
+        BiWidgetResult notNumeric = BiDashboardService.Compute(new BiWidget { Title = "x", Dataset = "sales", Kind = BiChartKind.Bar, Category = "region", Value = "product", Aggregate = BiAggregate.Sum }, 4, data, null);
+        Assert(!string.IsNullOrEmpty(notNumeric.Error), "BI sum over text is reported on the widget.");
+
+        BiDashboard dashboard = new BiDashboard { Title = "Sales" };
+        dashboard.Datasets.Add(dataset);
+        dashboard.Widgets.AddRange(new[] { byRegion, byMonth, total, teaOnly });
+        string json = BiDashboardService.Serialize(dashboard);
+        AssertContains(json, "\"Kind\": \"Line\"", "BI enums are saved by name.");
+        BiDashboard loaded = BiDashboardService.Deserialize(json);
+        Assert(loaded.Widgets.Count == 4 && loaded.Datasets[0].CalculatedFields.Count == 2 && loaded.Widgets[1].DateGrain == BiDateGrain.Month && !loaded.Widgets[3].CrossFilter, "BI dashboard round trip.");
+        AssertThrows<InvalidOperationException>(() => BiDashboardService.Deserialize(json.Replace("\"Dataset\": \"sales\"", "\"Dataset\": \"gone\"")), "BI rejects widget with unknown dataset.");
+        AssertThrows<InvalidOperationException>(() => BiDashboardService.Deserialize("{\"Version\": 9}"), "BI rejects unknown version.");
+        AssertThrows<InvalidOperationException>(() => BiDashboardService.Deserialize("{\"Version\": 1, \"Datasets\": [{\"Name\": \"a\", \"Query\": \"SELECT 1\"}, {\"Name\": \"A\", \"Query\": \"SELECT 2\"}]}"), "BI rejects duplicate dataset names.");
+        AssertThrows<InvalidOperationException>(() => BiDashboardService.Deserialize("{\"Version\": 1, \"Datasets\": [{\"Name\": \"a\", \"Query\": \"SELECT 1\", \"CalculatedFields\": [{\"Name\": \"x\", \"Expression\": \"1 +\"}]}]}"), "BI rejects a broken calculated field.");
+
+        string reason;
+        Assert(!ScheduledJobValidator.IsReadOnlySql("DELETE FROM sales", out reason), "BI dataset query must be read-only.");
+        AssertThrows<InvalidOperationException>(() => BiDashboardService.Query(null, "db", dataset), "BI query without connection fails.");
+        Assert(!BiDashboardService.SupportsProvider("Redis") && BiDashboardService.SupportsProvider("MongoDB") && BiDashboardService.SupportsProvider("Snowflake"), "BI provider support.");
+    }
+
+    private static void CollectionEquals(IEnumerable<string> expected, IEnumerable<string> actual, string message)
+    {
+        AssertEquals(string.Join(",", expected), string.Join(",", actual), message);
+    }
+
     /// <summary>
     /// ER model service: foreign-key layered layout (parents left, isolated tables last, cycles terminate), model
     /// validation, save／load round trip with coordinate clamping, and SVG output that escapes names and hides

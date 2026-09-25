@@ -159,6 +159,7 @@
   - 資料傳輸精靈：資料庫右鍵「資料傳輸...」選擇目標資料庫後逐表設定建立新表／附加／取代資料與欄位對應；每批寫入後記錄檢查點可續傳（有主鍵接續、無主鍵重來或拒絕附加續傳），完成後以列數驗證並匯出 HTML 報告，取代資料需輸入資料庫名稱。
   - ER 模型工作區：ER 圖可拖曳編排、依外鍵分層自動排列，以群組上色／隱藏／鎖定，多張圖表存成 .punkmodel（只存版面），並可匯出 PNG／SVG。
   - 原生備份／還原：SQL Server 伺服器端 BACKUP／RESTORE（COPY_ONLY、CHECKSUM、驗證、還原為新資料庫），PostgreSQL pg_dump／pg_restore 與 MongoDB mongodump／mongorestore；密碼不經命令列，還原一律建立新資料庫。
+  - BI 儀表板：資料集為唯讀 SQL 或 MongoDB JSON find／pipeline，加上計算欄位；長條／折線／圓餅／數字卡／表格在本機彙總，點選分類跨圖表篩選（同名欄位、可跨資料集），存成 .punkbi 並可匯出 PNG。限制：每個資料集最多 200,000 列、一次載入到記憶體；MongoDB 巢狀文件以 JSON 文字呈現，要分組的巢狀欄位請先在 pipeline 用 `$project`／`$addFields` 攤平；Snowflake 尚未以真實帳戶驗收；Linux／macOS 版尚未提供。
   - 資料產生器：資料庫右鍵「資料產生...」改為多表產生器，可勾選資料表與筆數、逐欄設定規則（自動、資料庫預設、NULL、固定值、序列、範圍、清單、樣式、NULL 比例）與 seed。自動規則依型別、欄位名稱、長度、精度與 MySQL ENUM／SET 產生；外鍵挑選現有或同批產生的父列（含自我參照），主鍵與唯一索引（MySQL、PostgreSQL、SQL Server、SQLite 皆讀取）不重複，被參照的自動編號改寫明確值並推進序列；規則值在寫入前先依型別檢查。預覽只在記憶體產生，寫入需確認並以單一交易執行，失敗整批回滾。smoke test 以 SQLite 驗證外鍵完整性、唯一性、規則、seed 重現與錯誤案例。
   - 資料比較與同步：結構比較視窗的「比較資料…」以 Primary Key 逐列比對同類型資料庫的同名資料表（每表上限 50,000 列、無主鍵或主鍵重複則略過），可預覽 SQL 並在目標以單一交易同步；依外鍵相依排序（先刪子表），每列寫入前在交易內重讀目標原值，比對後被修改即整批回滾；刪除只在目標的資料列預設不同步，勾選時需輸入資料庫名稱；計算欄位不寫入，SQL Server identity 以 IDENTITY_INSERT、PostgreSQL 以 OVERRIDING SYSTEM VALUE 保留來源值並重設序列。smoke test 以兩個 SQLite 資料庫驗證比較、不含刪除與含刪除的同步、並行修改回滾與註解注入。
 

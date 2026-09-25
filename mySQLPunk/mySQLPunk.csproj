@@ -239,6 +239,12 @@
     <Compile Include="DataDictionaryOptionsForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="BiDashboardForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="BiChartControl.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="NativeBackupForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -382,6 +388,8 @@
     <Compile Include="lib\AutomationEmailService.cs" />
     <Compile Include="lib\ErModelService.cs" />
     <Compile Include="lib\NativeBackupService.cs" />
+    <Compile Include="lib\BiExpression.cs" />
+    <Compile Include="lib\BiDashboardService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />

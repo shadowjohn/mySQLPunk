@@ -24,9 +24,9 @@
 | 物件 URI 分享與直接定位 | ✅ | database 與支援物件可複製 `mysqlpunk://object` URI；啟動時會嚴格驗證參數、沿用目前設定檔的同名連線、載入 metadata 並定位物件，URI 不包含主機或帳密。 |
 | 連線精靈、進階篩選／搜尋、URI 連線 | ✅ | 連線精靈支援引擎搜尋、名稱／群組即時搜尋，以及 MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、MongoDB 與 Redis URI 匯入；解析後先開啟原生設定頁供確認。 |
 | 集中管理多連線、批次操作、星號、顏色、群組 | ✅ | 支援多設定檔、多層群組、拖曳、持久化星號與色彩；可從工具選單或連線右鍵勾選多筆，一次加／移星號、移動群組或套用色彩。 |
-| BI 圖表互連 | 📋 | 現有 BI 只有物件分佈／列數排名資料表；需新增儀表板與同來源聯動篩選。 |
-| BI 自訂運算式 | 📋 | 納入 BI 運算式引擎。 |
-| BI 連接 MongoDB／Snowflake | 📋 | 等對應 provider 與 BI 基礎儀表板完成。 |
+| BI 圖表互連 | ✅ | Windows 版資料庫右鍵「BI 儀表板...」：點選長條、折線點、圓餅扇形或表格列即篩選所有含同名欄位的其他圖表（可跨資料集），多個篩選以 AND 組合、再點一次取消，每張圖可關閉跨篩選。 |
+| BI 自訂運算式 | ✅ | 資料集計算欄位與圖表篩選運算式：`[欄位]` 參照、四則與比較、AND／OR／NOT、NULL 傳遞，以及 IF、ROUND、COALESCE、CONCAT、LEFT、YEAR、MONTH 等 19 個函式；解析錯誤指出位置，逐列失敗指出列號。 |
+| BI 連接 MongoDB／Snowflake | 🟡 | MongoDB 資料集使用唯讀 JSON find 或 aggregation pipeline（拒絕 $out／$merge），已在 MongoDB 7 實機驗證；Snowflake 走同一條唯讀 SQL 路徑，待真實帳戶實機驗收。 |
 | MongoDB Aggregation Pipeline 視覺設計 | ✅ | collection 右鍵「Aggregation Pipeline...」可從 16 種唯讀 stage 範本新增、調整順序、停用、逐 stage 編輯 JSON 並即時檢查語法，預覽「到此 stage 為止」的前 20／100／500 筆輸出；$out／$merge（含巢狀）一律拒絕。可匯入既有 pipeline、複製 mongosh 語法或送到查詢視窗，查詢視窗也支援含 `pipeline` 陣列的 aggregation JSON。 |
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 🟡 | 第二期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視、SELECT／SHOW，以及查詢編輯器單一 DML／DDL；待補實機驗收、key-pair JWT、參數綁定、資料網格寫回、模型與 BI 能力。 |
@@ -53,7 +53,7 @@
 | 資料同步 | 🟡 | Windows 與 Linux／macOS 皆可逐列比較同類型資料庫（MySQL／MariaDB、PostgreSQL、SQL Server、SQLite）的同名資料表、預覽 SQL，並在目標以單一交易受控同步（相依排序、並行衝突回滾、刪除需確認）；待補大表串流比較與跨類型資料庫。 |
 | 結構同步 | 🟡 | 兩庫唯讀結構差異報告已完成，可跨 provider 比對 Table、Column、PK 與 FK 並匯出 HTML；Linux／macOS 預覽版另含索引與 FK 規則比對，並可為同類型資料庫產生同步 DDL 預覽（破壞性變更預設註解）；Windows 版也能依欄位／主鍵／外鍵快照產生同步 SQL 預覽；Windows 與 Linux／macOS 都可逐項勾選並在目標受控執行（交易回滾、破壞性變更輸入名稱確認、完成後自動重比）。 |
 | 模型 | 🟡 | 五種 provider 共用的 ER 圖已可拖曳編排、自動排列、以群組上色／隱藏／鎖定，並把多張圖表存成 .punkmodel、匯出 PNG／SVG；另有兩庫結構差異報告。模型與資料庫雙向同步仍在後續排程。 |
-| BI | 📋 | 見 Navicat 17 BI 路線。 |
+| BI | 🟡 | Windows 版 BI 儀表板已完成：唯讀查詢資料集、計算欄位、長條／折線／圓餅／數字卡／表格、本機彙總、跨圖表篩選、.punkbi 存讀與 PNG 匯出；待補 Linux／macOS 版、排程輸出與分享。 |
 | 匯入／匯出（Excel、Access、CSV、ODBC 等） | 🟡 | MySQL SQL 匯入／匯出完整，查詢結果有常用格式；待補五種 provider 精靈對等化、Access／ODBC。 |
 | 資料字典 | 🟡 | HTML 核心已完成（Windows 五種 provider，含三種範本、個人化、篩選、排程輸出與郵件附件；Linux／macOS 預覽版四種 provider 含索引／外鍵／註解），直接 PDF 待補。 |
 | 資料產生器（規則、約束、參照完整性、大量資料） | 🟡 | Windows 與 Linux／macOS 皆已完成多表規則編輯（自動、預設、NULL、固定、序列、範圍、清單、樣式、NULL 比例、seed）、依外鍵順序挑選真實父列、主鍵／唯一值不重複，並以單一交易寫入（每表 10 萬、每次 20 萬列）；待補自訂字典、跨欄位條件與 CHECK 約束推論。 |

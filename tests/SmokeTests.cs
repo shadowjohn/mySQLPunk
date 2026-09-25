@@ -84,6 +84,7 @@ public static partial class SmokeTests
         Run("Automation import, transfer, retries and webhook", TestAutomationJobs, ref passed);
         Run("Data dictionary templates and automation", TestDataDictionaryTemplates, ref passed);
         Run("Native backup SQL and tool arguments", AssertNativeBackupSemantics, ref passed);
+        Run("BI dashboard with calculated fields and cross-filtering", TestBiDashboard, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12856,6 +12857,96 @@ public static partial class SmokeTests
         finally
         {
             System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void TestBiDashboard()
+    {
+        AssertBiSemantics();
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-bi-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            using (my_sqlite db = new my_sqlite())
+            {
+                db.SetConn("Data Source=" + Path.Combine(dir, "bi.sqlite") + ";Version=3;New=True;");
+                db.Open();
+                foreach (string sql in new[]
+                         {
+                             "CREATE TABLE orders (id INTEGER PRIMARY KEY, region TEXT, product TEXT, amount NUMERIC, ordered TEXT);",
+                             "INSERT INTO orders VALUES (1, 'North', 'Tea', 10, '2025-01-05'), (2, 'North', 'Coffee', 30, '2025-01-20'), (3, 'South', 'Tea', 5, '2025-02-02'), (4, 'South', 'Tea', 7.5, '2025-02-09');",
+                             "CREATE TABLE targets (region TEXT, target NUMERIC);",
+                             "INSERT INTO targets VALUES ('North', 35), ('South', 20);"
+                         })
+                {
+                    AssertEquals("OK", db.ExecSQL(sql)["status"], "BI fixture should be created.");
+                }
+
+                BiDashboard dashboard = new BiDashboard { Title = "Sales" };
+                BiDataset orders = new BiDataset { Name = "orders", Query = "SELECT region, product, amount, ordered FROM orders" };
+                orders.CalculatedFields.Add(new BiCalculatedField { Name = "month", Expression = "LEFT([ordered], 7)" });
+                dashboard.Datasets.Add(orders);
+                dashboard.Datasets.Add(new BiDataset { Name = "targets", Query = "SELECT region, target FROM targets" });
+                dashboard.Datasets.Add(new BiDataset { Name = "unsafe", Query = "DELETE FROM orders" });
+                dashboard.Widgets.Add(new BiWidget { Title = "Sales by region", Dataset = "orders", Kind = BiChartKind.Bar, Category = "region", Value = "amount", Aggregate = BiAggregate.Sum });
+                dashboard.Widgets.Add(new BiWidget { Title = "By month", Dataset = "orders", Kind = BiChartKind.Line, Category = "month", Aggregate = BiAggregate.Count, SortByValue = false });
+                dashboard.Widgets.Add(new BiWidget { Title = "Target", Dataset = "targets", Kind = BiChartKind.Number, Value = "target", Aggregate = BiAggregate.Sum });
+                dashboard.Widgets.Add(new BiWidget { Title = "Products", Dataset = "orders", Kind = BiChartKind.Pie, Category = "product", Aggregate = BiAggregate.Count });
+                dashboard.Widgets.Add(new BiWidget { Title = "Table", Dataset = "orders", Kind = BiChartKind.Table, Category = "product", Value = "amount", Aggregate = BiAggregate.Average });
+                dashboard.Widgets.Add(new BiWidget { Title = "Blocked", Dataset = "unsafe", Kind = BiChartKind.Number, Aggregate = BiAggregate.Count });
+
+                using (BiDashboardForm form = new BiDashboardForm(db, "main"))
+                {
+                    form.Size = new System.Drawing.Size(1200, 900);
+                    form.CreateControl();
+                    form.LoadDashboard(dashboard, null);
+                    form.RefreshData();
+                    AssertContains(form.DatasetError("unsafe"), "DELETE", "A mutating dataset query must be refused before it runs.");
+                    Assert(!string.IsNullOrEmpty(form.ResultOf(5).Error), "A widget on a refused dataset shows the error.");
+                    AssertEquals("4", db.SelectSQL("SELECT COUNT(*) FROM orders").Rows[0][0].ToString(), "The refused DELETE must not have run.");
+                    AssertEquals("North", form.ResultOf(0).Points[0].Key, "The bar chart sums by region.");
+                    AssertEquals("40", BiExpression.ToText(form.ResultOf(0).Points[0].Value), "The bar chart sum.");
+                    AssertEquals("55", BiExpression.ToText(form.ResultOf(2).Total), "The number card reads another dataset.");
+                    AssertEquals("2025-01,2025-02", string.Join(",", form.ResultOf(1).Points.Select(p => p.Key)), "The calculated month field drives the line chart.");
+
+                    BiChartControl bars = form.ChartOf(0);
+                    bars.Size = new System.Drawing.Size(400, 240);
+                    using (System.Drawing.Bitmap bitmap = new System.Drawing.Bitmap(400, 240))
+                    {
+                        bars.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, 400, 240));
+                    }
+                    Assert(bars.HitKeys.Contains("North") && bars.HitKeys.Contains("South"), "Painting the bar chart registers clickable categories.");
+                    string hit = bars.HitTest(new System.Drawing.Point(200, 12));
+                    AssertEquals("North", hit, "The first bar is hit-testable.");
+
+                    form.ClickCategory(0, hit);
+                    AssertEquals("1", form.Filters.Count.ToString(), "Clicking a bar adds a cross-filter.");
+                    AssertEquals("2025-01", string.Join(",", form.ResultOf(1).Points.Select(p => p.Key)), "The line chart follows the region filter.");
+                    AssertEquals("35", BiExpression.ToText(form.ResultOf(2).Total), "The filter reaches another dataset that has the same column.");
+                    Assert(form.ResultOf(4).Table.Rows.Count == 2, "The table widget is filtered too.");
+                    form.ClickCategory(3, "Tea");
+                    AssertEquals("1", BiExpression.ToText(form.ResultOf(1).Points.Single().Value), "Two filters combine.");
+                    form.ClickCategory(0, "North");
+                    AssertEquals("1", form.Filters.Count.ToString(), "Clicking the selected bar again removes its filter.");
+                    form.ClearFilters();
+                    AssertEquals("0", form.Filters.Count.ToString(), "Clearing filters.");
+
+                    using (System.Drawing.Bitmap snapshot = form.RenderSnapshot())
+                    {
+                        Assert(snapshot.Width > 200 && snapshot.Height > 200, "The dashboard renders to a PNG snapshot.");
+                    }
+
+                    string path = Path.Combine(dir, "sales" + BiDashboardService.FileExtension);
+                    form.SaveTo(path);
+                    Assert(!form.IsDirty, "Saving clears the dirty flag.");
+                    BiDashboard reloaded = BiDashboardService.Load(path);
+                    Assert(reloaded.Widgets.Count == 6 && reloaded.Datasets[0].CalculatedFields.Single().Name == "month", "The saved dashboard reloads.");
+                }
+            }
+        }
+        finally
+        {
             try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }

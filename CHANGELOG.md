@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **BI 儀表板（Windows）**：資料庫右鍵（MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、Snowflake 與 MongoDB）新增「BI 儀表板...」。資料集是一段單一唯讀 SQL（沿用自動執行作業的唯讀檢查，DELETE 等會在執行前拒絕），MongoDB 則是唯讀 JSON find 或 aggregation pipeline（`$out`／`$merge` 一律拒絕）；每個資料集最多保留 200,000 列並可加上計算欄位，運算式以 `[欄位]` 參照，支援四則、比較、AND／OR／NOT、NULL 傳遞與 IF、ROUND、ABS、FLOOR、CEILING、COALESCE、CONCAT、UPPER、LOWER、TRIM、LEN、LEFT、RIGHT、YEAR、MONTH、DAY、DATE、NUMBER、TEXT，後面的欄位可以參照前面的，解析錯誤指出字元位置、計算失敗指出列號。圖表有長條、折線、圓餅、數字卡與表格，彙總可選筆數、加總、平均、最小、最大、相異數，分類可依年／月／日分組，另可加篩選運算式、前 N 名與雙欄寬度；彙總全部在本機完成，不再查詢資料庫。點選長條、折線點、圓餅扇形或表格列會篩選所有含同名欄位的其他圖表（可跨資料集），多個篩選以 AND 組合並顯示在篩選列，再點一次或按「移除」取消，每張圖也可以不參與跨篩選。儀表板存成 `.punkbi`（JSON，只有查詢與版面，不含連線或密碼，讀取時完整驗證），可匯出含目前篩選的 PNG。smoke test 驗證運算式、計算欄位順序與同名防護、各彙總、日期分組、跨篩選組合／取消／刪圖重編號、存讀與拒絕案例，並在 SQLite 上驗證 DELETE 資料集未被執行、圖表點選命中與篩選；MongoDB 7 實機驗證 find／pipeline 資料集、日期分組與 `$out` 被拒且未建立 collection。
 - **Redis／Garnet Pub/Sub 訊息工作區**：Redis 資料庫節點可開啟停靠式 Pub/Sub 頁籤，以獨立連線訂閱單一 channel 或 pattern，不會卡住一般查詢連線；收到的時間、pattern、實際 channel 與訊息會保留在記憶體中，最多 1,000 筆。頁面也提供明確的發布按鈕並顯示伺服器回報的接收端數量，停止訂閱或關閉頁籤就會釋放接收連線。
 - **Redis／Garnet 即時監控**：Redis 資料庫節點新增停靠式監控頁，可手動或每 1／5／10／30 秒讀取 INFO；摘要涵蓋連線、記憶體、活動、命中率、網路、CPU、持久化與複寫，命令統計依呼叫次數排序並列出平均耗時及失敗／拒絕次數。不支援或受 ACL 限制的 INFO 區段會個別略過，不會讓整頁失效。
 - **Redis list 元素安全刪除**：key 編輯器可依選取索引刪除 list 元素；刪除前會比對載入時的值，並在同一筆 WATCH／MULTI／EXEC 交易中以唯一標記定位，內容相同的其他元素不會被誤刪，外部修改或交易中止時也會保留原清單。
