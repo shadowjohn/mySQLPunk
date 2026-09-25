@@ -3166,6 +3166,34 @@ static async Task AssertDataGenerationAsync(
     var provider = session.Profile.Provider;
     Assert(DataGeneratorService.BuildPreviewSql(provider, again) == DataGeneratorService.BuildPreviewSql(provider, first),
         $"{label} 相同 seed 應產生相同資料");
+    var dictionaryDirectory = CreateTemporaryDirectory();
+    try
+    {
+        DataGeneratorDictionaryStore.Save(dictionaryDirectory, "城市 測試", "# weighted\nTaipei\t4\nTainan\n");
+        var cityDictionary = DataGeneratorDictionaryStore.Load(dictionaryDirectory, "城市 測試");
+        var dictionaryPlan = new DataGeneratorTablePlan(Table("customers"), 40, new Dictionary<string, DataGeneratorRule>
+        {
+            ["city"] = new(DataGeneratorRuleKind.Dictionary, "城市 測試") { Dictionary = cityDictionary }
+        });
+        var fromDictionary = await DataGeneratorService.GenerateAsync(session, database, new[] { dictionaryPlan }, seed: 5);
+        var cities = fromDictionary.Tables.Single().Rows.Select(row => row.Values.Single(value => value.ColumnName == "city").Text).ToList();
+        Assert(fromDictionary.Succeeded && cities.All(city => city is "Taipei" or "Tainan") && cities.Count(city => city == "Taipei") > cities.Count(city => city == "Tainan"),
+            $"{label} 字典規則應依權重挑選字典值：{fromDictionary.Error} {string.Join(",", cities)}");
+        var missing = await DataGeneratorService.GenerateAsync(session, database, new[]
+        {
+            new DataGeneratorTablePlan(Table("customers"), 1, new Dictionary<string, DataGeneratorRule> { ["city"] = new(DataGeneratorRuleKind.Dictionary, "不存在") })
+        }, seed: 5);
+        Assert(!missing.Succeeded && missing.Error!.Contains("不存在", StringComparison.Ordinal), $"{label} 找不到字典時應在寫入前失敗");
+        Assert(DataGeneratorDictionaryStore.Load(dictionaryDirectory, "../escape") is null &&
+               DataGeneratorDictionaryStore.List(dictionaryDirectory).Contains("zh-TW 姓氏"), $"{label} 字典名稱不可跳出資料夾，內建字典應可列出");
+        AssertThrows<InvalidOperationException>(() => DataGeneratorDictionaryStore.Save(dictionaryDirectory, "order status", "x"));
+        AssertThrows<InvalidOperationException>(() => DataGeneratorDictionaryStore.Parse("bad", "a\tzero"));
+    }
+    finally
+    {
+        Directory.Delete(dictionaryDirectory, recursive: true);
+    }
+
     var preview = DataGeneratorService.BuildPreviewSql(provider, first, maximumRowsPerTable: 5);
     Assert(preview.Contains("INSERT INTO", StringComparison.Ordinal) && preview.Contains("以下只列出前 5 列", StringComparison.Ordinal),
         $"{label} 預覽應列出 INSERT 並註明只顯示部分列：\n{preview}");

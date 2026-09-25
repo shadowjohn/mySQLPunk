@@ -20,12 +20,18 @@ public enum DataGeneratorRuleKind
     List,
 
     /// <summary>Template with {n}, {int:a-b}, {digits:k}, {letters:k}, {uuid}.</summary>
-    Pattern
+    Pattern,
+
+    /// <summary>Text is a dictionary name; values are picked by weight from <see cref="DataGeneratorRule.Dictionary"/>.</summary>
+    Dictionary
 }
 
 public sealed record DataGeneratorRule(DataGeneratorRuleKind Kind, string Text = "", int NullPercent = 0)
 {
     public static DataGeneratorRule Auto { get; } = new(DataGeneratorRuleKind.Auto);
+
+    /// <summary>Dictionary 規則在產生前解析好的字典；null 代表找不到。</summary>
+    public Services.DataGeneratorDictionary? Dictionary { get; init; }
 }
 
 public sealed record DataGeneratorTablePlan(

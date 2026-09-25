@@ -25,7 +25,8 @@ internal sealed class DataGeneratorWindow : Window
         (DataGeneratorRuleKind.Sequence, "序列", "起始值[,間隔]，例：1000,10 或 2024-01-01,1"),
         (DataGeneratorRuleKind.Range, "範圍", "最小..最大，例：1..100 或 2024-01-01..2024-12-31"),
         (DataGeneratorRuleKind.List, "清單", "以 | 分隔，例：new|paid|shipped"),
-        (DataGeneratorRuleKind.Pattern, "樣式", "例：SKU-{n}-{digits:4}；可用 {n} {int:1-9} {letters:3} {uuid}")
+        (DataGeneratorRuleKind.Pattern, "樣式", "例：SKU-{n}-{digits:4}；可用 {n} {int:1-9} {letters:3} {uuid}"),
+        (DataGeneratorRuleKind.Dictionary, "字典", "字典名稱，例：zh-TW 姓氏；按下方「字典…」管理")
     };
 
     private readonly IDatabaseSession _session;
@@ -116,7 +117,10 @@ internal sealed class DataGeneratorWindow : Window
         _writeButton.Click += async (_, _) => await WriteAsync();
         var close = new Button { Content = "關閉", Padding = new Thickness(14, 6), Margin = new Thickness(8, 0, 0, 0) };
         close.Click += (_, _) => Close();
+        var dictionaries = new Button { Content = "字典…", Margin = new Thickness(0, 0, 12, 0) };
+        dictionaries.Click += async (_, _) => await new DataGeneratorDictionaryWindow(DictionaryDirectory).ShowDialog(this);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom };
+        actions.Children.Add(dictionaries);
         actions.Children.Add(new TextBlock { Text = "Seed", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
         actions.Children.Add(_seed);
         actions.Children.Add(new Border { Width = 12 });
@@ -315,6 +319,18 @@ internal sealed class DataGeneratorWindow : Window
         };
     }
 
+    /// <summary>使用者字典的資料夾（與 Windows 版格式相同）。</summary>
+    public string DictionaryDirectory { get; init; } = DataGeneratorDictionaryStore.DefaultDirectory;
+
+    /// <summary>字典規則在產生前才讀取字典內容，編輯字典後不必重設規則。</summary>
+    private Dictionary<string, DataGeneratorRule> ResolveDictionaries(Dictionary<string, DataGeneratorRule> rules) =>
+        rules.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.Kind == DataGeneratorRuleKind.Dictionary
+                ? pair.Value with { Dictionary = DataGeneratorDictionaryStore.Load(DictionaryDirectory, pair.Value.Text) }
+                : pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+
     private async Task<DataGenerationResult?> GenerateAsync(CancellationToken cancellationToken)
     {
         var selected = _rows.Where(row => row.Check.IsChecked == true).ToList();
@@ -339,7 +355,7 @@ internal sealed class DataGeneratorWindow : Window
         var plans = selected.Select(row => new DataGeneratorTablePlan(
                 row.Table,
                 row.RowCount,
-                _rules.TryGetValue(row.Table, out var rules) ? new Dictionary<string, DataGeneratorRule>(rules) : new Dictionary<string, DataGeneratorRule>()))
+                _rules.TryGetValue(row.Table, out var rules) ? ResolveDictionaries(rules) : new Dictionary<string, DataGeneratorRule>()))
             .ToList();
         var result = await DataGeneratorService.GenerateAsync(_session, _database, plans, seed, cancellationToken);
         if (!result.Succeeded)

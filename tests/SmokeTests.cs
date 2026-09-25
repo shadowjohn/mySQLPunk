@@ -85,6 +85,12 @@ public static partial class SmokeTests
         Run("Data dictionary templates and automation", TestDataDictionaryTemplates, ref passed);
         Run("Native backup SQL and tool arguments", AssertNativeBackupSemantics, ref passed);
         Run("BI dashboard with calculated fields and cross-filtering", TestBiDashboard, ref passed);
+        Run("Data generator dictionaries", () =>
+        {
+            string dictionaryDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk-dict-" + Guid.NewGuid().ToString("N"));
+            try { AssertDataGeneratorDictionarySemantics(dictionaryDirectory); }
+            finally { if (Directory.Exists(dictionaryDirectory)) Directory.Delete(dictionaryDirectory, true); }
+        }, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12816,6 +12822,20 @@ public static partial class SmokeTests
                     Assert(scalar("SELECT COUNT(*) FROM orders WHERE status NOT IN ('open', 'closed')") == 0, "The list rule should be applied.");
                     AssertEquals("OK", db.ExecSQL("INSERT INTO customers (email, name, created) VALUES ('after@example.com', 'after', '2024-01-01 00:00:00');")["status"],
                         "A default insert after generating must not collide with generated keys.");
+
+                    form.DictionaryDirectory = Path.Combine(dir, "dictionaries");
+                    DataGeneratorDictionaryStore.Save(form.DictionaryDirectory, "statuses", "open\t1\narchived\t3\n");
+                    form.SetTable("customers", false, 0);
+                    form.SetRule("orders", "status", new DataGeneratorRule(DataGeneratorRuleKind.Dictionary, "statuses"));
+                    DataGenerationResult fromDictionary = form.Generate(9);
+                    Assert(fromDictionary.Succeeded && fromDictionary.Tables.Single().Changes.All(change => new[] { "open", "archived" }.Contains((string)change.Values["status"])),
+                        "The form should resolve dictionary rules from its dictionary folder: " + fromDictionary.Error);
+                    DataGeneratorDictionaryStore.Save(form.DictionaryDirectory, "statuses", "closed\n");
+                    Assert(form.Generate(9).Tables.Single().Changes.All(change => (string)change.Values["status"] == "closed"), "Editing a dictionary takes effect without resetting the rule.");
+                    form.SetRule("orders", "status", new DataGeneratorRule(DataGeneratorRuleKind.Dictionary, "gone"));
+                    AssertContains(form.Generate(9).Error, "gone", "A missing dictionary must be reported before writing.");
+                    form.SetRule("orders", "status", DataGeneratorRule.Auto);
+                    form.SetTable("customers", true, 10);
 
                     form.SetRule("customers", "name", new DataGeneratorRule(DataGeneratorRuleKind.Null));
                     DataGenerationResult rejected = form.Generate(5);

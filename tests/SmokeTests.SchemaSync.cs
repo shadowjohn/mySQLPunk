@@ -837,6 +837,16 @@ public static partial class SmokeTests
         AssertContains(single("birth", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, "not a date")).Error, "not a date", "Values that do not fit the type must fail before writing.");
         AssertContains(single("name", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, new string('x', 41))).Error, "40", "Values longer than the column must fail before writing.");
         Assert(single("missing", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, "x")).Error != null, "Rules for unknown columns must be rejected.");
+        DataGeneratorDictionary cityDictionary = DataGeneratorDictionaryStore.Parse("cities", "# weighted\nTaipei\t9\nTainan\t1\n");
+        DataGenerationResult fromDictionary = DataGeneratorCore.Generate(new List<DataGeneratorPlan>
+        {
+            new DataGeneratorPlan("customers", 300, new Dictionary<string, DataGeneratorRule> { { "city", new DataGeneratorRule(DataGeneratorRuleKind.Dictionary, "cities", 0, cityDictionary) } })
+        }, load, 3);
+        Assert(fromDictionary.Succeeded, "Dictionary rule should generate: " + fromDictionary.Error);
+        List<string> generatedCities = fromDictionary.Tables.Single().Changes.Select(change => (string)change.Values["city"]).ToList();
+        Assert(generatedCities.All(city => city == "Taipei" || city == "Tainan") && generatedCities.Count(city => city == "Taipei") > 3 * generatedCities.Count(city => city == "Tainan") &&
+               generatedCities.Contains("Tainan"), "Dictionary values follow their weights.");
+        AssertContains(single("city", new DataGeneratorRule(DataGeneratorRuleKind.Dictionary, "no-such-dictionary")).Error, "no-such-dictionary", "A missing dictionary must fail before writing.");
         DataGenerationResult exhausted = DataGeneratorCore.Generate(new List<DataGeneratorPlan>
         {
             new DataGeneratorPlan("customers", 3, new Dictionary<string, DataGeneratorRule> { { "email", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, "same@example.com") } })
@@ -1071,6 +1081,50 @@ public static partial class SmokeTests
         Assert(!NativeBackupService.RunTool(null, new List<string>(), null, null, null, "x").Succeeded, "Running without a tool should fail clearly.");
         AssertThrows<InvalidOperationException>(() => NativeBackupService.ValidateNewDatabaseName("shop copy"), "Spaces are not allowed in new database names.");
         NativeBackupService.ValidateNewDatabaseName("shop_copy-2");
+    }
+
+    /// <summary>資料產生器字典：解析、權重、內建字典保護、儲存／列出／刪除與 CSV 匯入。</summary>
+    public static void AssertDataGeneratorDictionarySemantics(string directory)
+    {
+        DataGeneratorDictionary parsed = DataGeneratorDictionaryStore.Parse("demo", "# header\r\n  alpha \t 3\r\n\r\nbeta\ngamma\t1\n");
+        AssertEquals("alpha,beta,gamma", string.Join(",", parsed.Values), "Dictionary values are trimmed and comments skipped.");
+        AssertEquals("3,1,1", string.Join(",", parsed.Weights), "Weights default to 1.");
+        Random random = new Random(11);
+        int alpha = Enumerable.Range(0, 5000).Count(_ => parsed.Pick(random) == "alpha");
+        Assert(alpha > 2700 && alpha < 3300, "Weighted picks follow the weights (expected about 60%): " + alpha);
+        AssertThrows<InvalidOperationException>(() => DataGeneratorDictionaryStore.Parse("bad", "a\nb\tzero\n"), "Non-numeric weights are rejected.");
+        try
+        {
+            DataGeneratorDictionaryStore.Parse("bad", "a\nb\t0\n");
+            throw new Exception("Zero weight accepted.");
+        }
+        catch (InvalidOperationException exception)
+        {
+            AssertContains(exception.Message, "2", "Weight errors name the line.");
+        }
+        AssertThrows<InvalidOperationException>(() => DataGeneratorDictionaryStore.Parse("bad", "a\u0007b"), "Control characters are rejected.");
+        AssertThrows<InvalidOperationException>(() => DataGeneratorDictionaryStore.Parse("empty", "# only comments\n"), "Empty dictionaries are rejected.");
+
+        Assert(DataGeneratorDictionaryStore.List(directory).Contains("zh-TW 姓氏") && DataGeneratorDictionaryStore.Load(directory, "zh-TW 姓氏").Values.Contains("陳"), "Built-in dictionaries are listed and loadable.");
+        AssertThrows<InvalidOperationException>(() => DataGeneratorDictionaryStore.Save(directory, "zh-TW 姓氏", "x"), "Built-in dictionaries are read-only.");
+        AssertThrows<InvalidOperationException>(() => DataGeneratorDictionaryStore.Delete(directory, "order status"), "Built-in dictionaries cannot be deleted.");
+        foreach (string badName in new[] { "../escape", "a/b", "", "name.txt", new string('x', 61) })
+        {
+            AssertThrows<InvalidOperationException>(() => DataGeneratorDictionaryStore.Save(directory, badName, "x"), "Invalid dictionary name should be rejected: " + badName);
+        }
+        Assert(DataGeneratorDictionaryStore.Load(directory, "../escape") == null, "Loading an invalid name never touches other paths.");
+
+        DataGeneratorDictionaryStore.Save(directory, "產品 類別", "書籍\t5\n文具\n");
+        Assert(DataGeneratorDictionaryStore.List(directory).Contains("產品 類別"), "Saved dictionaries are listed.");
+        DataGeneratorDictionary product = DataGeneratorDictionaryStore.Load(directory, "產品 類別");
+        Assert(product.Values.Count == 2 && product.TotalWeight == 6 && !product.BuiltIn, "Saved dictionaries round trip.");
+        DataGeneratorDictionaryStore.Delete(directory, "產品 類別");
+        Assert(DataGeneratorDictionaryStore.Load(directory, "產品 類別") == null, "Deleted dictionaries are gone.");
+
+        string imported = DataGeneratorDictionaryStore.ImportText("name,weight\n\"Lee, Jr.\",4\nKim,x\n\n\"Say \"\"hi\"\"\"\n", true);
+        DataGeneratorDictionary fromCsv = DataGeneratorDictionaryStore.Parse("csv", imported);
+        AssertEquals("Lee, Jr.|Kim|Say \"hi\"", string.Join("|", fromCsv.Values), "CSV import keeps quoted commas and quotes.");
+        AssertEquals("4,1,1", string.Join(",", fromCsv.Weights), "A numeric second column becomes the weight.");
     }
 
     /// <summary>模型內結構：型別白名單、驗證、擷取／轉快照往返、改名與刪表連帶更新外鍵及圖表。</summary>

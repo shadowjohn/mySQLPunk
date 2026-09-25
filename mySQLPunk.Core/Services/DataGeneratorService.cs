@@ -1004,6 +1004,12 @@ public static class DataGeneratorService
                 return _ => null;
             case DataGeneratorRuleKind.Fixed:
                 return _ => text;
+            case DataGeneratorRuleKind.Dictionary:
+            {
+                var dictionary = rule.Dictionary ?? throw new GenerationException($"欄位 {column.Name} 使用的字典「{text}」不存在或無法讀取。");
+                return random => dictionary.Pick(random);
+            }
+
             case DataGeneratorRuleKind.List:
             {
                 var values = text.Split('|').Select(value => value.Trim()).Where(value => value.Length > 0).ToArray();

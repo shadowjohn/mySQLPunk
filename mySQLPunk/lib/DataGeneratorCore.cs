@@ -16,16 +16,19 @@ namespace mySQLPunk.lib
         Sequence,
         Range,
         List,
-        Pattern
+        Pattern,
+        /// <summary>依權重從字典挑選；Text 為字典名稱。</summary>
+        Dictionary
     }
 
     public sealed class DataGeneratorRule
     {
-        public DataGeneratorRule(DataGeneratorRuleKind kind, string text = "", int nullPercent = 0)
+        public DataGeneratorRule(DataGeneratorRuleKind kind, string text = "", int nullPercent = 0, DataGeneratorDictionary dictionary = null)
         {
             Kind = kind;
             Text = text ?? string.Empty;
             NullPercent = nullPercent;
+            Dictionary = dictionary;
         }
 
         public static DataGeneratorRule Auto { get { return new DataGeneratorRule(DataGeneratorRuleKind.Auto); } }
@@ -33,6 +36,8 @@ namespace mySQLPunk.lib
         public DataGeneratorRuleKind Kind { get; private set; }
         public string Text { get; private set; }
         public int NullPercent { get; private set; }
+        /// <summary>Dictionary 規則在產生前解析好的字典內容；null 代表找不到。</summary>
+        public DataGeneratorDictionary Dictionary { get; private set; }
 
         public bool IsDefault { get { return Kind == DataGeneratorRuleKind.Auto && Text.Length == 0 && NullPercent == 0; } }
     }
@@ -769,6 +774,13 @@ namespace mySQLPunk.lib
                     return _ => null;
                 case DataGeneratorRuleKind.Fixed:
                     return _ => Convert(column, text);
+                case DataGeneratorRuleKind.Dictionary:
+                {
+                    DataGeneratorDictionary dictionary = rule.Dictionary;
+                    if (dictionary == null) throw new GenerationException(Localization.Format("DataGen.Error.DictionaryMissing", column.Name, text));
+                    return r => Convert(column, dictionary.Pick(r));
+                }
+
                 case DataGeneratorRuleKind.List:
                 {
                     string[] values = text.Split('|').Select(value => value.Trim()).Where(value => value.Length > 0).ToArray();

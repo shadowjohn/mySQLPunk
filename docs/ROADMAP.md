@@ -56,7 +56,7 @@
 | BI | 🟡 | Windows 版 BI 儀表板已完成：唯讀查詢資料集、計算欄位、長條／折線／圓餅／數字卡／表格、本機彙總、跨圖表篩選、.punkbi 存讀與 PNG 匯出；待補 Linux／macOS 版、排程輸出與分享。 |
 | 匯入／匯出（Excel、Access、CSV、ODBC 等） | 🟡 | MySQL SQL 匯入／匯出完整，查詢結果有常用格式；待補五種 provider 精靈對等化、Access／ODBC。 |
 | 資料字典 | 🟡 | HTML 核心已完成（Windows 五種 provider，含三種範本、個人化、篩選、排程輸出與郵件附件；Linux／macOS 預覽版四種 provider 含索引／外鍵／註解），直接 PDF 待補。 |
-| 資料產生器（規則、約束、參照完整性、大量資料） | 🟡 | Windows 與 Linux／macOS 皆已完成多表規則編輯（自動、預設、NULL、固定、序列、範圍、清單、樣式、NULL 比例、seed）、依外鍵順序挑選真實父列、主鍵／唯一值不重複，並以單一交易寫入（每表 10 萬、每次 20 萬列）；待補自訂字典、跨欄位條件與 CHECK 約束推論。 |
+| 資料產生器（規則、約束、參照完整性、大量資料） | 🟡 | Windows 與 Linux／macOS 皆已完成多表規則編輯（自動、預設、NULL、固定、序列、範圍、清單、樣式、字典、NULL 比例、seed）、依外鍵順序挑選真實父列、主鍵／唯一值不重複，並以單一交易寫入（每表 10 萬、每次 20 萬列）；自訂字典支援權重、內建字典（姓氏、名字、縣市、英文姓名、訂單狀態）與 CSV 匯入，兩個平台共用檔案格式。待補跨欄位條件與 CHECK 約束推論。 |
 | 備份／還原與原生工具介面 | 🟡 | 已有邏輯 SQL 備份、隔離還原、差異與完整性排程；Windows 版另有原生備份／還原：SQL Server BACKUP／RESTORE（COPY_ONLY、CHECKSUM、驗證、還原為新資料庫）、PostgreSQL pg_dump／pg_restore 與 MongoDB mongodump／mongorestore。Oracle Data Pump 待補（需 Oracle 實機環境）。 |
 | 自動執行：查詢、匯入／匯出、傳輸、通知郵件 | ✅ | Windows 版支援查詢、匯出、備份、CSV 匯入與跨庫傳輸（檢查點續傳）作業，失敗重試（匯入寫入部分資料後不重試）、Webhook 與郵件通知（SMTP 密碼存 Windows 認證管理員）、立即執行、每天／每週指定星期／每 N 小時／登入時的 Windows 工作排程與 JSON 紀錄。 |
 | MongoDB 結構描述分析器 | ✅ | collection 右鍵「結構描述分析...」可抽樣 100～100,000 筆（前 N 筆或 `$sample` 隨機），展開巢狀文件與陣列路徑，統計出現率、型別分佈、NULL、數值／字串長度／日期／陣列長度範圍、常見值與 1.5×IQR 極端值（附 `_id`），並標出混合型別、數字存成字串、稀疏欄位、只差大小寫的欄位名稱、空字串與全為 NULL 等異常。 |

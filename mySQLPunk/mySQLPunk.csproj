@@ -248,6 +248,9 @@
     <Compile Include="ErModelTableEditorForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="DataGeneratorDictionaryForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="NativeBackupForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -392,6 +395,7 @@
     <Compile Include="lib\ErModelService.cs" />
     <Compile Include="lib\NativeBackupService.cs" />
     <Compile Include="lib\BiExpression.cs" />
+    <Compile Include="lib\DataGeneratorDictionary.cs" />
     <Compile Include="lib\BiDashboardService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />

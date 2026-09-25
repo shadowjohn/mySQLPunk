@@ -23,7 +23,8 @@ namespace mySQLPunk
             DataGeneratorRuleKind.Sequence,
             DataGeneratorRuleKind.Range,
             DataGeneratorRuleKind.List,
-            DataGeneratorRuleKind.Pattern
+            DataGeneratorRuleKind.Pattern,
+            DataGeneratorRuleKind.Dictionary
         };
 
         private readonly IDatabase database;
@@ -127,8 +128,9 @@ namespace mySQLPunk
             previewButton = new Button { Text = Localization.T("DataGen.Preview"), AutoSize = true };
             writeButton = new Button { Text = Localization.T("DataGen.Write"), AutoSize = true };
             Button closeButton = new Button { Text = Localization.T("Common.Close"), AutoSize = true };
+            Button dictionariesButton = new Button { Text = Localization.T("DataGen.Dictionary.Button"), AutoSize = true };
             FlowLayoutPanel actions = new FlowLayoutPanel { Dock = DockStyle.Right, FlowDirection = FlowDirection.RightToLeft, AutoSize = true };
-            actions.Controls.AddRange(new Control[] { closeButton, writeButton, previewButton, seedBox, new Label { Text = Localization.T("DataGen.Seed"), AutoSize = true, Padding = new Padding(0, 6, 0, 0) } });
+            actions.Controls.AddRange(new Control[] { closeButton, writeButton, previewButton, dictionariesButton, seedBox, new Label { Text = Localization.T("DataGen.Seed"), AutoSize = true, Padding = new Padding(0, 6, 0, 0) } });
             Panel bottom = new Panel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(8, 6, 8, 6) };
             bottom.Controls.Add(actions);
 
@@ -159,12 +161,45 @@ namespace mySQLPunk
             previewButton.Click += (sender, args) => ShowPreview();
             writeButton.Click += (sender, args) => ConfirmAndWrite();
             closeButton.Click += (sender, args) => Close();
+            dictionariesButton.Click += (sender, args) => ManageDictionaries();
             FormClosing += (sender, args) => { if (busy) args.Cancel = true; };
             Shown += (sender, args) => RunGuarded(LoadTables);
             ThemeManager.ApplyTo(this);
         }
 
         public int TableCount { get { return tableGrid.Rows.Count; } }
+
+        /// <summary>使用者字典的資料夾；測試可改成暫存資料夾。</summary>
+        public string DictionaryDirectory { get; set; } = DataGeneratorDictionaryStore.DefaultDirectory;
+
+        private void ManageDictionaries()
+        {
+            DataGridViewRow row = columnGrid.CurrentRow;
+            string currentColumn = row == null || row.ReadOnly ? null : row.Tag as string;
+            using (DataGeneratorDictionaryForm form = new DataGeneratorDictionaryForm(DictionaryDirectory, currentColumn))
+            {
+                if (form.ShowDialog(this) == DialogResult.OK && form.AppliedDictionary != null && row != null && currentColumn != null)
+                {
+                    row.Cells["Rule"].Value = RuleLabel(DataGeneratorRuleKind.Dictionary);
+                    row.Cells["Parameter"].Value = form.AppliedDictionary;
+                    SaveRule(row);
+                }
+            }
+        }
+
+        /// <summary>字典規則在產生前才讀取字典內容，編輯字典後不必重設規則。</summary>
+        private Dictionary<string, DataGeneratorRule> ResolveDictionaries(Dictionary<string, DataGeneratorRule> tableRules)
+        {
+            Dictionary<string, DataGeneratorRule> resolved = new Dictionary<string, DataGeneratorRule>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, DataGeneratorRule> pair in tableRules)
+            {
+                DataGeneratorRule rule = pair.Value;
+                resolved[pair.Key] = rule.Kind == DataGeneratorRuleKind.Dictionary
+                    ? new DataGeneratorRule(rule.Kind, rule.Text, rule.NullPercent, DataGeneratorDictionaryStore.Load(DictionaryDirectory, rule.Text))
+                    : rule;
+            }
+            return resolved;
+        }
 
         /// <summary>讀取資料表清單；也供測試直接呼叫。</summary>
         public void LoadTables()
@@ -265,7 +300,7 @@ namespace mySQLPunk
                 string tableName = Convert.ToString(row.Cells["Table"].Value);
                 int count;
                 if (!int.TryParse(Convert.ToString(row.Cells["Rows"].Value), NumberStyles.Integer, CultureInfo.InvariantCulture, out count)) count = 0;
-                plans.Add(new DataGeneratorPlan(tableName, count, RulesFor(tableName)));
+                plans.Add(new DataGeneratorPlan(tableName, count, ResolveDictionaries(RulesFor(tableName))));
             }
             return DataGeneratorService.Generate(database, databaseName, snapshot, plans, seed);
         }
