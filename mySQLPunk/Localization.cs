@@ -1770,6 +1770,9 @@ namespace mySQLPunk
             Add("DataGen.Rule.List", "清單", "List");
             Add("DataGen.Rule.Pattern", "樣式", "Pattern");
             Add("DataGen.Rule.Dictionary", "字典", "Dictionary");
+            Add("DataGen.Rule.Expression", "運算式", "Expression");
+            Add("DataGen.Error.Expression", "欄位 {0} 的運算式錯誤：{1}", "The expression for {0} is invalid: {1}");
+            Add("DataGen.Error.ExpressionField", "欄位 {0} 的運算式參照了 [{1}]，但它不存在、不會寫入，或在這個欄位之後才計算。", "The expression for {0} references [{1}], which does not exist, is not written, or is computed later.");
             Add("DataGen.Error.DictionaryMissing", "欄位 {0} 使用的字典「{1}」不存在或無法讀取。", "The dictionary \"{1}\" used by {0} does not exist or cannot be read.");
             Add("DataGen.Dictionary.Button", "字典...", "Dictionaries...");
             Add("DataGen.Dictionary.Title", "資料產生器字典", "Data Generator Dictionaries");
@@ -1801,7 +1804,7 @@ namespace mySQLPunk
             Add("DataGen.Dictionary.Error.Name", "字典名稱只能包含文字、數字、空白、底線與連字號（最多 60 字，前後不可有空白）。", "Dictionary names may contain letters, digits, spaces, underscores and hyphens (up to 60 characters, no leading or trailing spaces).");
             Add("DataGen.Dictionary.Error.BuiltIn", "「{0}」是內建字典，不能修改或刪除。", "\"{0}\" is a built-in dictionary and cannot be changed or deleted.");
             Add("DataGen.Dictionary.Error.Exists", "已經有名為「{0}」的字典。", "A dictionary named \"{0}\" already exists.");
-            Add("DataGen.RuleHelp", "序列：起始[,間隔]（1000,10 或 2024-01-01,1）；範圍：最小..最大（1..100 或 2024-01-01..2024-12-31）；清單：以 | 分隔；樣式：{n} {int:1-9} {digits:4} {letters:3} {uuid}；字典：字典名稱（按「字典...」管理）。", "Sequence: start[,step] (1000,10 or 2024-01-01,1); Range: min..max (1..100 or 2024-01-01..2024-12-31); List: values separated by |; Pattern: {n} {int:1-9} {digits:4} {letters:3} {uuid}; Dictionary: a dictionary name (manage them with Dictionaries...).");
+            Add("DataGen.RuleHelp", "序列：起始[,間隔]（1000,10 或 2024-01-01,1）；範圍：最小..最大（1..100 或 2024-01-01..2024-12-31）；清單：以 | 分隔；樣式：{n} {int:1-9} {digits:4} {letters:3} {uuid}；字典：字典名稱（按「字典...」管理）；運算式：以 [欄位] 參照同一列其他欄位，例如 IF([status] = 'paid', [amount], NULL)。", "Sequence: start[,step] (1000,10 or 2024-01-01,1); Range: min..max (1..100 or 2024-01-01..2024-12-31); List: values separated by |; Pattern: {n} {int:1-9} {digits:4} {letters:3} {uuid}; Dictionary: a dictionary name (manage them with Dictionaries...); Expression: reference other columns of the same row as [column], e.g. IF([status] = 'paid', [amount], NULL).");
             Add("DataGen.Seed", "Seed：", "Seed:");
             Add("DataGen.Preview", "產生並預覽 SQL", "Generate && Preview SQL");
             Add("DataGen.Write", "產生並寫入", "Generate && Write");

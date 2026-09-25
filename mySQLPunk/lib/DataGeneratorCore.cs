@@ -18,7 +18,9 @@ namespace mySQLPunk.lib
         List,
         Pattern,
         /// <summary>依權重從字典挑選；Text 為字典名稱。</summary>
-        Dictionary
+        Dictionary,
+        /// <summary>以同一列其他欄位計算（BI 運算式語法，例如 IF([status] = 'paid', [amount], NULL)）。</summary>
+        Expression
     }
 
     public sealed class DataGeneratorRule
@@ -321,6 +323,7 @@ namespace mySQLPunk.lib
                 }
 
                 if (linkedColumns.Contains(column.Name)) continue;
+                if (rule.Kind == DataGeneratorRuleKind.Expression) continue;
                 if (rule.Kind == DataGeneratorRuleKind.DatabaseDefault ||
                     rule.Kind == DataGeneratorRuleKind.Auto && column.IsAutoNumber && !referenced.Contains(state.Table.Name + "\u0001" + column.Name))
                 {
@@ -354,6 +357,17 @@ namespace mySQLPunk.lib
 
                 int nullPercent = column.IsNullable && !unique && !column.IsPrimaryKey ? rule.NullPercent : 0;
                 generators.Add(new ColumnGenerator(column, next, nullPercent));
+            }
+
+            // 運算式欄位排在最後，依欄位順序計算，只能參照已產生的欄位。
+            List<string> available = generators.Select(item => item.Column.Name).Concat(linkedColumns).ToList();
+            foreach (DataGeneratorColumn column in state.Table.Columns.OrderBy(item => item.Ordinal))
+            {
+                DataGeneratorRule rule = ruleFor(column);
+                if (rule.Kind != DataGeneratorRuleKind.Expression || column.IsComputed || linkedColumns.Contains(column.Name)) continue;
+                int nullPercent = column.IsNullable && !uniqueSingles.Contains(column.Name) && !column.IsPrimaryKey ? rule.NullPercent : 0;
+                generators.Add(new ColumnGenerator(column, BuildExpressionGenerator(column, rule, available), nullPercent));
+                available.Add(column.Name);
             }
 
             foreach (Link link in activeLinks)
@@ -411,7 +425,9 @@ namespace mySQLPunk.lib
 
                     foreach (ColumnGenerator generator in generators)
                     {
-                        object value = generator.NullPercent > 0 && random.Next(100) < generator.NullPercent ? null : generator.Next(random);
+                        object value = generator.NullPercent > 0 && random.Next(100) < generator.NullPercent
+                            ? null
+                            : generator.FromRow != null ? generator.FromRow(values) : generator.Next(random);
                         if (value == null && !generator.Column.IsNullable)
                         {
                             throw new GenerationException(Localization.Format("DataGen.Error.NotNull", generator.Column.Name));
@@ -1100,9 +1116,60 @@ namespace mySQLPunk.lib
                 NullPercent = nullPercent;
             }
 
+            public ColumnGenerator(DataGeneratorColumn column, Func<Dictionary<string, object>, object> fromRow, int nullPercent)
+            {
+                Column = column;
+                FromRow = fromRow;
+                NullPercent = nullPercent;
+            }
+
             public DataGeneratorColumn Column { get; private set; }
             public Func<Random, object> Next { get; private set; }
+            /// <summary>運算式欄位：以同一列已產生的值計算。</summary>
+            public Func<Dictionary<string, object>, object> FromRow { get; private set; }
             public int NullPercent { get; private set; }
+        }
+
+        /// <summary>
+        /// 運算式規則：參照的欄位必須是本次會寫入、且在它之前產生的欄位（一般規則欄位、外鍵欄位或先前的運算式欄位）；
+        /// 結果依欄位型別轉換，NULL 只允許寫進可為 NULL 的欄位。
+        /// </summary>
+        private static Func<Dictionary<string, object>, object> BuildExpressionGenerator(DataGeneratorColumn column, DataGeneratorRule rule, ICollection<string> available)
+        {
+            BiExpression expression;
+            try
+            {
+                expression = BiExpression.Parse(rule.Text);
+            }
+            catch (FormatException exception)
+            {
+                throw new GenerationException(Localization.Format("DataGen.Error.Expression", column.Name, exception.Message));
+            }
+            foreach (string name in expression.Fields)
+            {
+                if (!available.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    throw new GenerationException(Localization.Format("DataGen.Error.ExpressionField", column.Name, name));
+                }
+            }
+            return values =>
+            {
+                object result;
+                try
+                {
+                    result = expression.Evaluate(name =>
+                    {
+                        object value;
+                        values.TryGetValue(name, out value);
+                        return value is DBNull ? null : value;
+                    });
+                }
+                catch (FormatException exception)
+                {
+                    throw new GenerationException(Localization.Format("DataGen.Error.Expression", column.Name, exception.Message));
+                }
+                return result == null ? null : Convert(column, BiExpression.ToText(result));
+            };
         }
 
         private sealed class Link

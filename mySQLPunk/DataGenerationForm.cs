@@ -24,7 +24,8 @@ namespace mySQLPunk
             DataGeneratorRuleKind.Range,
             DataGeneratorRuleKind.List,
             DataGeneratorRuleKind.Pattern,
-            DataGeneratorRuleKind.Dictionary
+            DataGeneratorRuleKind.Dictionary,
+            DataGeneratorRuleKind.Expression
         };
 
         private readonly IDatabase database;

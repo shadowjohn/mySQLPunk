@@ -847,6 +847,20 @@ public static partial class SmokeTests
         Assert(generatedCities.All(city => city == "Taipei" || city == "Tainan") && generatedCities.Count(city => city == "Taipei") > 3 * generatedCities.Count(city => city == "Tainan") &&
                generatedCities.Contains("Tainan"), "Dictionary values follow their weights.");
         AssertContains(single("city", new DataGeneratorRule(DataGeneratorRuleKind.Dictionary, "no-such-dictionary")).Error, "no-such-dictionary", "A missing dictionary must fail before writing.");
+        DataGenerationResult derived = DataGeneratorCore.Generate(new List<DataGeneratorPlan>
+        {
+            new DataGeneratorPlan("customers", 25, new Dictionary<string, DataGeneratorRule>
+            {
+                { "city", new DataGeneratorRule(DataGeneratorRuleKind.Expression, "CONCAT(UPPER(LEFT([name], 3)), '-', LEN([email]))") }
+            })
+        }, load, 4);
+        Assert(derived.Succeeded && derived.Tables.Single().Changes.All(change =>
+                (string)change.Values["city"] == ((string)change.Values["name"]).Substring(0, 3).ToUpperInvariant() + "-" + ((string)change.Values["email"]).Length),
+            "Expression rules compute from other columns in the same row: " + derived.Error);
+        AssertContains(single("city", new DataGeneratorRule(DataGeneratorRuleKind.Expression, "[nope] + 1")).Error, "nope", "Expressions may only use generated columns.");
+        AssertContains(single("city", new DataGeneratorRule(DataGeneratorRuleKind.Expression, "[id]")).Error, "[id]", "Columns left to the database cannot be referenced.");
+        AssertContains(single("city", new DataGeneratorRule(DataGeneratorRuleKind.Expression, "UPPER(")).Error, "city", "Broken expressions fail before writing.");
+        AssertContains(single("name", new DataGeneratorRule(DataGeneratorRuleKind.Expression, "IF(LEN([email]) > 0, NULL, 'x')")).Error, "NOT NULL", "Expression NULLs cannot go into NOT NULL columns.");
         DataGenerationResult exhausted = DataGeneratorCore.Generate(new List<DataGeneratorPlan>
         {
             new DataGeneratorPlan("customers", 3, new Dictionary<string, DataGeneratorRule> { { "email", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, "same@example.com") } })
