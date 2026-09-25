@@ -147,8 +147,9 @@
   - 操作：從 Models 下的 Schema Comparison 或資料庫右鍵「比較資料庫結構」選擇另一個已開啟的資料庫；比較結果以可停靠分頁呈現，可重新比較、交換來源／目標並匯出 HTML。
   - 比較範圍：沿用 provider-neutral schema 快照，比對資料表、欄位、資料型別、可空值、Primary Key 與外鍵；外鍵以來源欄位及參照目標的語意比對，不因兩邊 constraint 名稱不同而誤報。
   - 跨 provider：常見等價型別別名會先正規化，例如 `INT`／`INTEGER`、`BOOLEAN`／`BOOL`，但長度或精度不同仍會列為差異；單邊 metadata 讀取警告會保留在報告內，避免把不完整資料誤當成完全一致。
-  - 安全：目前只讀取 metadata、顯示及匯出報告，不產生也不執行同步 DDL；下一階段才會加入 DDL 預覽與逐項審核。
+  - 安全：目前只讀取 metadata、顯示及匯出報告，可產生同步 SQL 預覽但從不自動執行；逐項勾選與受控執行仍在後續排程。
   - 驗證：smoke test 覆蓋來源／目標獨有資料表與欄位、型別、NULL、PK、FK、metadata 警告、固定排序、HTML 編碼，以及唯讀 dockable workspace 行為。
+  - 同步 SQL 預覽：結構差異頁的「同步 SQL 預覽」可為同類型資料庫（MySQL／MariaDB、PostgreSQL、SQL Server、SQLite）產生讓目標跟上來源的腳本，涵蓋建表、加欄位、PostgreSQL／SQL Server 型別與 NULL 變更、補外鍵；刪除類變更一律註解，MySQL MODIFY 與主鍵、SQLite 限制列為手動項目。只能複製或另存，不自動執行；腳本實際在 MySQL 8、PostgreSQL 16、SQL Server 2022、SQLite 套用驗證。
 
 - **Navicat 對齊：物件 URI 分享與直接定位 ✅ 已完成**
   - 操作：database 與 Table、View、Function、User、Event、Model、BI、內建工具、Report 可從左側樹或物件清單右鍵複製 `mysqlpunk://object` URI；接收方開啟 URI 後會清除暫時的連線搜尋條件、找到目前設定檔的同名連線並定位物件。

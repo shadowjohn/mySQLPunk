@@ -73,6 +73,7 @@ public static partial class SmokeTests
         Run("Data profiling service", TestDataProfilingService, ref passed);
         Run("Schema model and ER diagram", TestSchemaModelAndErDiagram, ref passed);
         Run("Database schema comparison", TestSchemaComparison, ref passed);
+        Run("Schema sync SQL preview", TestSchemaSyncScript, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12510,6 +12511,15 @@ public static partial class SmokeTests
             Assert(form.UsesDatabase(sourceDatabase) && form.UsesDatabase(targetDatabase),
                 "Schema comparison workspace should close when either database connection closes.");
             Assert(!form.HasUnsavedChanges(), "Read-only schema comparisons should never block tab closing as unsaved.");
+            Assert(form.CreateSyncScriptForm() == null, "No sync preview should be offered before a comparison has run.");
+        }
+
+        SchemaSyncScript syncScript = SchemaSyncScriptService.Generate(BuildSchemaSyncFixture("postgresql"));
+        using (SchemaSyncScriptForm syncForm = new SchemaSyncScriptForm(syncScript, "Target connection / sync_target"))
+        {
+            syncForm.CreateControl();
+            Assert(ReferenceEquals(syncForm.Script, syncScript), "The sync preview form should show the generated script.");
+            AssertContains(syncForm.Text, Localization.T("SchemaSync.WindowTitle"), "The sync preview form should say it never executes automatically.");
         }
     }
 

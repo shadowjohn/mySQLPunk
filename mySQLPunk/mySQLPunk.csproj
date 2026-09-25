@@ -215,6 +215,9 @@
     <Compile Include="SchemaComparisonForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="SchemaSyncScriptForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ScheduledJobsForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -340,6 +343,7 @@
     <Compile Include="lib\QueryResultExportService.cs" />
     <Compile Include="lib\SchemaModelService.cs" />
     <Compile Include="lib\SchemaComparisonService.cs" />
+    <Compile Include="lib\SchemaSyncScriptService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />

@@ -136,6 +136,7 @@ namespace mySQLPunk
         private readonly ToolStripButton refreshButton;
         private readonly ToolStripButton swapButton;
         private readonly ToolStripButton exportButton;
+        private readonly ToolStripButton syncScriptButton;
         private readonly ToolStripButton floatButton;
         private readonly ToolStripButton dockButton;
         private readonly Label directionLabel;
@@ -162,6 +163,7 @@ namespace mySQLPunk
             refreshButton = new ToolStripButton(Localization.T("SchemaComparison.Refresh"));
             swapButton = new ToolStripButton(Localization.T("SchemaComparison.Swap"));
             exportButton = new ToolStripButton(Localization.T("SchemaComparison.ExportHtml"));
+            syncScriptButton = new ToolStripButton(Localization.T("SchemaSync.Button")) { Enabled = false };
             floatButton = new ToolStripButton(Localization.T("Query.Float"));
             dockButton = new ToolStripButton(Localization.T("Query.Dock")) { Visible = false };
             toolStrip.Items.AddRange(new ToolStripItem[]
@@ -170,6 +172,7 @@ namespace mySQLPunk
                 swapButton,
                 new ToolStripSeparator(),
                 exportButton,
+                syncScriptButton,
                 new ToolStripSeparator(),
                 floatButton,
                 dockButton
@@ -222,6 +225,7 @@ namespace mySQLPunk
             refreshButton.Click += (sender, args) => RefreshComparison();
             swapButton.Click += (sender, args) => SwapEndpoints();
             exportButton.Click += (sender, args) => ExportHtml();
+            syncScriptButton.Click += (sender, args) => ShowSyncScript();
             floatButton.Click += (sender, args) => { if (mainHost != null) mainHost.FloatDockableForm(this); };
             dockButton.Click += (sender, args) => { if (mainHost != null) mainHost.DockDockableForm(this); };
             Shown += (sender, args) =>
@@ -306,6 +310,7 @@ namespace mySQLPunk
             refreshButton.Enabled = false;
             swapButton.Enabled = false;
             exportButton.Enabled = false;
+            syncScriptButton.Enabled = false;
             statusLabel.Text = Localization.T("SchemaComparison.LoadingSource");
             Cursor = Cursors.WaitCursor;
             try
@@ -328,6 +333,44 @@ namespace mySQLPunk
                 refreshButton.Enabled = true;
                 swapButton.Enabled = true;
                 exportButton.Enabled = ComparisonResult != null;
+                syncScriptButton.Enabled = ComparisonResult != null;
+            }
+        }
+
+        /// <summary>產生讓目標跟上來源的同步 SQL 預覽；不會執行任何語句。</summary>
+        public SchemaSyncScriptForm CreateSyncScriptForm()
+        {
+            if (ComparisonResult == null) return null;
+            string reason;
+            if (!SchemaSyncScriptService.CanGenerate(ComparisonResult, out reason))
+            {
+                statusLabel.Text = reason;
+                return null;
+            }
+
+            SchemaSyncScript script = SchemaSyncScriptService.Generate(ComparisonResult);
+            statusLabel.Text = script.Summary;
+            return new SchemaSyncScriptForm(script, target.DisplayName);
+        }
+
+        private void ShowSyncScript()
+        {
+            try
+            {
+                using (SchemaSyncScriptForm form = CreateSyncScriptForm())
+                {
+                    if (form == null)
+                    {
+                        MessageBox.Show(statusLabel.Text, Localization.T("SchemaSync.Button"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    form.ShowDialog(this);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ExceptionMessageService.GetReason(ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
