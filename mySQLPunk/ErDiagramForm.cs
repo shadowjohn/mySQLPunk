@@ -25,12 +25,16 @@ namespace mySQLPunk
         private readonly ToolStripComboBox diagramBox;
         private readonly ToolStripButton floatButton;
         private readonly ToolStripButton dockButton;
+        private readonly ToolStripMenuItem addModelTableItem;
+        private readonly ToolStripMenuItem syncModelItem;
+        private readonly ToolStripMenuItem detachModelItem;
         private readonly ToolStripLabel zoomLabel;
         private readonly ToolStripStatusLabel statusLabel;
         private Form1 mainHost;
         private bool loaded;
         private bool switchingDiagram;
         private SchemaModelSnapshot snapshot;
+        private SchemaModelSnapshot liveSnapshot;
         private ErModelDocument document;
         private ErModelDiagram diagram;
         private string modelPath;
@@ -64,6 +68,12 @@ namespace mySQLPunk
             ToolStripButton groupsButton = new ToolStripButton(Localization.T("ErModel.Groups"));
             ToolStripButton openButton = new ToolStripButton(Localization.T("ErModel.Open"));
             ToolStripButton saveButton = new ToolStripButton(Localization.T("ErModel.Save"));
+            ToolStripDropDownButton modelMenu = new ToolStripDropDownButton(Localization.T("ErModel.SchemaMenu"));
+            ToolStripMenuItem captureItem = new ToolStripMenuItem(Localization.T("ErModel.CaptureSchema"));
+            addModelTableItem = new ToolStripMenuItem(Localization.T("ErModel.AddTable"));
+            syncModelItem = new ToolStripMenuItem(Localization.T("ErModel.SyncToDatabase"));
+            detachModelItem = new ToolStripMenuItem(Localization.T("ErModel.DetachSchema"));
+            modelMenu.DropDownItems.AddRange(new ToolStripItem[] { captureItem, addModelTableItem, syncModelItem, new ToolStripSeparator(), detachModelItem });
             floatButton = new ToolStripButton(Localization.T("Query.Float"));
             dockButton = new ToolStripButton(Localization.T("Query.Dock")) { Visible = false };
 
@@ -78,6 +88,7 @@ namespace mySQLPunk
                 tablesButton,
                 arrangeButton,
                 groupsButton,
+                modelMenu,
                 new ToolStripSeparator(),
                 openButton,
                 saveButton,
@@ -116,6 +127,10 @@ namespace mySQLPunk
             groupsButton.Click += (sender, args) => EditGroups();
             openButton.Click += (sender, args) => OpenModel();
             saveButton.Click += (sender, args) => SaveModel();
+            captureItem.Click += (sender, args) => GuardModel(() => CaptureFromDatabase(true));
+            addModelTableItem.Click += (sender, args) => EditModelTable(null);
+            syncModelItem.Click += (sender, args) => GuardModel(ShowModelSync);
+            detachModelItem.Click += (sender, args) => GuardModel(DetachSchema);
             diagramBox.SelectedIndexChanged += (sender, args) =>
             {
                 if (switchingDiagram || document == null || diagramBox.SelectedIndex < 0) return;
@@ -202,12 +217,13 @@ namespace mySQLPunk
             Cursor = Cursors.WaitCursor;
             try
             {
-                snapshot = SchemaModelService.Load(database, databaseName);
+                liveSnapshot = SchemaModelService.Load(database, databaseName);
                 if (document == null)
                 {
-                    document = ErModelService.CreateDefault(snapshot, Localization.T("ErModel.DefaultDiagram"));
+                    document = ErModelService.CreateDefault(liveSnapshot, Localization.T("ErModel.DefaultDiagram"));
                     diagram = document.Diagrams[0];
                 }
+                snapshot = CurrentSnapshot();
                 ShowDocument();
                 int missing = document.Diagrams.SelectMany(item => item.Tables)
                     .Count(item => !snapshot.Tables.Any(table => string.Equals(table.Name, item.Table, StringComparison.OrdinalIgnoreCase)));
@@ -215,7 +231,7 @@ namespace mySQLPunk
                     snapshot.Warnings.Count == 0 ? "ErDiagram.Status" : "ErDiagram.StatusWithWarnings",
                     snapshot.Tables.Count,
                     snapshot.Relationships.Count,
-                    snapshot.Warnings.Count) + (missing > 0 ? " " + Localization.Format("ErModel.MissingTables", missing) : string.Empty);
+                    snapshot.Warnings.Count) + (missing > 0 ? " " + Localization.Format("ErModel.MissingTables", missing) : string.Empty) + ModeSuffix();
                 FitWhenReady();
             }
             catch (Exception ex)
@@ -255,6 +271,7 @@ namespace mySQLPunk
             document = ErModelService.Load(path);
             diagram = document.Diagrams[0];
             modelPath = path;
+            snapshot = CurrentSnapshot();
             if (snapshot != null) ShowDocument();
             dirty = false;
             UpdateTitle();
@@ -306,7 +323,10 @@ namespace mySQLPunk
         private void UpdateTitle()
         {
             string name = modelPath == null ? string.Empty : " · " + Path.GetFileNameWithoutExtension(modelPath);
-            Text = Localization.Format("ErDiagram.Title", databaseName) + name + (dirty ? " *" : string.Empty);
+            Text = Localization.Format("ErDiagram.Title", databaseName) + name + (IsModelFirst ? " · " + Localization.T("ErModel.ModelMode") : string.Empty) + (dirty ? " *" : string.Empty);
+            addModelTableItem.Enabled = IsModelFirst;
+            syncModelItem.Enabled = IsModelFirst;
+            detachModelItem.Enabled = IsModelFirst;
         }
 
         private void ShowTableMenu(string table, Point screen)
@@ -343,6 +363,20 @@ namespace mySQLPunk
                 MarkDirty();
             };
             menu.Items.Add(remove);
+            if (IsModelFirst)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                ToolStripMenuItem editTable = new ToolStripMenuItem(Localization.T("ErModel.EditTable"));
+                editTable.Click += (sender, args) => EditModelTable(table);
+                menu.Items.Add(editTable);
+                ToolStripMenuItem dropTable = new ToolStripMenuItem(Localization.T("ErModel.DropTable"));
+                dropTable.Click += (sender, args) =>
+                {
+                    if (MessageBox.Show(this, Localization.Format("ErModel.ConfirmDropTable", table), Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                    GuardModel(() => DropModelTable(table));
+                };
+                menu.Items.Add(dropTable);
+            }
             menu.Closed += (sender, args) => BeginInvoke(new Action(menu.Dispose));
             ThemeManager.ApplyTo(menu);
             menu.Show(screen);
@@ -423,6 +457,191 @@ namespace mySQLPunk
             }
             canvas.ReloadLayout();
             MarkDirty();
+        }
+
+        /// <summary>模型內有結構時（模型優先），圖表畫的是模型而不是資料庫。</summary>
+        public bool IsModelFirst { get { return document != null && document.Schema != null; } }
+
+        private SchemaModelSnapshot CurrentSnapshot()
+        {
+            if (IsModelFirst) return ErModelService.ToSnapshot(document.Schema, databaseName);
+            return liveSnapshot;
+        }
+
+        private string ModeSuffix()
+        {
+            return IsModelFirst ? " " + Localization.T("ErModel.ModelModeStatus") : string.Empty;
+        }
+
+        private void RefreshModelView()
+        {
+            snapshot = CurrentSnapshot();
+            if (snapshot == null) return;
+            canvas.SetModel(snapshot, document, diagram);
+            UpdateTitle();
+        }
+
+        private void GuardModel(Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = ExceptionMessageService.GetReason(ex);
+                MessageBox.Show(this, statusLabel.Text, Localization.T("ErModel.SchemaMenu"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>
+        /// 資料庫 → 模型：以資料庫目前結構取代模型結構。模型已有結構時先列出差異並確認（confirm 為 false 時直接套用，供測試）。
+        /// 資料庫新出現的資料表會加到目前圖表。回傳差異（第一次擷取時為 null）。
+        /// </summary>
+        public SchemaComparisonResult CaptureFromDatabase(bool confirm)
+        {
+            SchemaModelSnapshot live = SchemaModelService.Load(database, databaseName);
+            SchemaComparisonResult differences = null;
+            if (IsModelFirst)
+            {
+                differences = SchemaComparisonService.Compare(live, ErModelService.ToSnapshot(document.Schema, databaseName));
+                int count = differences.Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning);
+                if (count == 0)
+                {
+                    statusLabel.Text = Localization.T("ErModel.CaptureNoChanges");
+                    return differences;
+                }
+                if (confirm && MessageBox.Show(this, Localization.Format("ErModel.ConfirmCapture", count, DescribeDifferences(differences)), Text,
+                        MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+                {
+                    return differences;
+                }
+            }
+            ErModelSchema captured = ErModelService.CaptureSchema(live);
+            ErModelService.ValidateSchema(captured);
+            if (document == null)
+            {
+                document = ErModelService.CreateDefault(live, Localization.T("ErModel.DefaultDiagram"));
+                diagram = document.Diagrams[0];
+            }
+            // 第一次擷取時圖表本來就依資料庫排好（使用者移除的表不再加回）；之後只把模型沒有的新表加到目前圖表。
+            HashSet<string> known = new HashSet<string>(IsModelFirst ? document.Schema.Tables.Select(table => table.Name) : captured.Tables.Select(table => table.Name), StringComparer.OrdinalIgnoreCase);
+            document.Schema = captured;
+            liveSnapshot = live;
+            List<string> added = captured.Tables.Select(table => table.Name).Where(name => !known.Contains(name)).ToList();
+            snapshot = CurrentSnapshot();
+            if (added.Count > 0) SetDiagramTables(diagram.Tables.Select(item => item.Table).Concat(added).ToList());
+            ShowDocument();
+            MarkDirty();
+            UpdateTitle();
+            statusLabel.Text = Localization.Format("ErModel.Captured", captured.Tables.Count, captured.Relationships.Count) + ModeSuffix();
+            return differences;
+        }
+
+        /// <summary>模型 → 資料庫：以模型為來源、資料庫為目標比較結構。</summary>
+        public SchemaComparisonResult CompareModelToDatabase()
+        {
+            if (!IsModelFirst) throw new InvalidOperationException(Localization.T("ErModel.Error.NoSchema"));
+            liveSnapshot = SchemaModelService.Load(database, databaseName);
+            return SchemaComparisonService.Compare(ErModelService.ToSnapshot(document.Schema, databaseName), liveSnapshot);
+        }
+
+        /// <summary>產生讓資料庫跟上模型的同步視窗（逐句審核、破壞性變更需確認後才執行）；沒有差異時回傳 null。</summary>
+        public SchemaSyncScriptForm CreateModelSyncForm()
+        {
+            SchemaComparisonResult result = CompareModelToDatabase();
+            string reason;
+            if (!SchemaSyncScriptService.CanGenerate(result, out reason))
+            {
+                statusLabel.Text = reason;
+                return null;
+            }
+            SchemaSyncScript script = SchemaSyncScriptService.Generate(result);
+            statusLabel.Text = script.Summary;
+            return new SchemaSyncScriptForm(script, Localization.Format("ErModel.SyncTarget", databaseName, database.ProviderName), databaseName,
+                statements => SchemaSyncExecutionService.Execute(database, databaseName, statements));
+        }
+
+        private void ShowModelSync()
+        {
+            using (SchemaSyncScriptForm form = CreateModelSyncForm())
+            {
+                if (form == null)
+                {
+                    MessageBox.Show(this, statusLabel.Text, Localization.T("ErModel.SyncToDatabase"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                form.ShowDialog(this);
+                if (form.ExecutedOnTarget)
+                {
+                    SchemaComparisonResult after = CompareModelToDatabase();
+                    int remaining = after.Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning);
+                    statusLabel.Text = remaining == 0 ? Localization.T("ErModel.InSync") : Localization.Format("ErModel.RemainingDifferences", remaining);
+                }
+            }
+        }
+
+        private void DetachSchema()
+        {
+            if (!IsModelFirst) return;
+            if (MessageBox.Show(this, Localization.T("ErModel.ConfirmDetach"), Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            document.Schema = null;
+            if (liveSnapshot == null) liveSnapshot = SchemaModelService.Load(database, databaseName);
+            RefreshModelView();
+            MarkDirty();
+            statusLabel.Text = Localization.T("ErModel.Detached");
+        }
+
+        private static string DescribeDifferences(SchemaComparisonResult result)
+        {
+            List<string> lines = result.Differences
+                .Where(item => item.Kind != SchemaDifferenceKind.MetadataWarning)
+                .Take(15)
+                .Select(item => "• " + SchemaComparisonService.GetKindDisplayName(item.Kind) + ": " + item.ObjectName +
+                                (string.IsNullOrEmpty(item.DetailName) ? string.Empty : "." + item.DetailName))
+                .ToList();
+            int more = result.Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning) - lines.Count;
+            if (more > 0) lines.Add(Localization.Format("ErModel.MoreDifferences", more));
+            return string.Join(Environment.NewLine, lines);
+        }
+
+        /// <summary>新增（original 為 null）或修改模型中的資料表；也供測試直接呼叫。回傳被移除的外鍵數。</summary>
+        public int ApplyModelTable(string original, ErModelTable table, IList<ErModelRelationship> outgoing)
+        {
+            int dropped = ErModelService.ReplaceTable(document, original, table, outgoing);
+            if (original == null && diagram.Find(table.Name) == null)
+            {
+                snapshot = CurrentSnapshot();
+                SetDiagramTables(diagram.Tables.Select(item => item.Table).Concat(new[] { table.Name }).ToList());
+            }
+            RefreshModelView();
+            MarkDirty();
+            statusLabel.Text = Localization.Format(original == null ? "ErModel.TableAdded" : "ErModel.TableUpdated", table.Name) +
+                (dropped > 0 ? " " + Localization.Format("ErModel.RelationshipsDropped", dropped) : string.Empty);
+            return dropped;
+        }
+
+        public void DropModelTable(string table)
+        {
+            ErModelService.DropTable(document, table);
+            RefreshModelView();
+            MarkDirty();
+            statusLabel.Text = Localization.Format("ErModel.TableDropped", table);
+        }
+
+        private void EditModelTable(string tableName)
+        {
+            if (!IsModelFirst) return;
+            ErModelTable existing = tableName == null ? null : document.Schema.Find(tableName);
+            if (tableName != null && existing == null) return;
+            List<ErModelRelationship> outgoing = existing == null
+                ? new List<ErModelRelationship>()
+                : document.Schema.Relationships.Where(item => string.Equals(item.FromTable, existing.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+            using (ErModelTableEditorForm editor = new ErModelTableEditorForm(existing, outgoing, document.Schema.Tables.Select(item => item.Name).ToList(),
+                       (table, relationships) => ApplyModelTable(existing == null ? null : existing.Name, table, relationships)))
+            {
+                editor.ShowDialog(this);
+            }
         }
 
         private void EditGroups()

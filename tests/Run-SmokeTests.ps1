@@ -121,6 +121,7 @@ $testExe = Join-Path $outputDir "mySQLPunk.SmokeTests.exe"
 $source = Join-Path $PSScriptRoot "SmokeTests.cs"
 $preferencesSource = Join-Path $PSScriptRoot "SmokeTests.Preferences.cs"
 $schemaSyncSource = Join-Path $PSScriptRoot "SmokeTests.SchemaSync.cs"
+$erModelSource = Join-Path $PSScriptRoot "SmokeTests.ErModel.cs"
 $appExe = Join-Path $outputDir "mySQLPunk.exe"
 $newtonsoft = Join-Path $outputDir "Newtonsoft.Json.dll"
 $systemDataSqlite = Join-Path $outputDir "System.Data.SQLite.dll"
@@ -142,7 +143,7 @@ if (!(Test-Path -LiteralPath $mysqlConnector)) {
     /r:System.Core.dll `
     /r:System.IO.Compression.dll `
     /r:System.IO.Compression.FileSystem.dll `
-    $source $preferencesSource $schemaSyncSource
+    $source $preferencesSource $schemaSyncSource $erModelSource
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

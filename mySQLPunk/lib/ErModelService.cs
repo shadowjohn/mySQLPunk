@@ -45,6 +45,56 @@ namespace mySQLPunk.lib
         }
     }
 
+    public sealed class ErModelColumn
+    {
+        public string Name { get; set; }
+        public string DataType { get; set; }
+        public bool Nullable { get; set; } = true;
+        public bool PrimaryKey { get; set; }
+    }
+
+    public sealed class ErModelTable
+    {
+        public ErModelTable()
+        {
+            Columns = new List<ErModelColumn>();
+        }
+
+        public string Name { get; set; }
+        public List<ErModelColumn> Columns { get; set; }
+    }
+
+    public sealed class ErModelRelationship
+    {
+        public string Name { get; set; }
+        public string FromTable { get; set; }
+        public string FromColumn { get; set; }
+        public string ToTable { get; set; }
+        public string ToColumn { get; set; }
+    }
+
+    /// <summary>
+    /// 模型內保存的結構（模型優先模式）：可以離線編輯，再與資料庫雙向比較／同步。
+    /// 型別只接受一般型別語法，避免模型檔夾帶額外 SQL。
+    /// </summary>
+    public sealed class ErModelSchema
+    {
+        public ErModelSchema()
+        {
+            Tables = new List<ErModelTable>();
+            Relationships = new List<ErModelRelationship>();
+        }
+
+        public string Provider { get; set; }
+        public List<ErModelTable> Tables { get; set; }
+        public List<ErModelRelationship> Relationships { get; set; }
+
+        public ErModelTable Find(string name)
+        {
+            return Tables.FirstOrDefault(table => string.Equals(table.Name, name, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
     /// <summary>
     /// 模型檔（.punkmodel）：保存同一個資料庫的多張圖表、每張表的位置與群組（顏色、顯示、鎖定）。
     /// 欄位與關聯一律從資料庫即時讀取，模型檔只保存版面，不含資料或連線資訊以外的祕密。
@@ -62,6 +112,8 @@ namespace mySQLPunk.lib
         public string Database { get; set; }
         public List<ErModelGroup> Groups { get; set; }
         public List<ErModelDiagram> Diagrams { get; set; }
+        /// <summary>模型內的結構；null 代表圖表直接顯示資料庫目前的結構。</summary>
+        public ErModelSchema Schema { get; set; }
 
         public ErModelGroup FindGroup(string name)
         {
@@ -204,6 +256,238 @@ namespace mySQLPunk.lib
             {
                 throw new InvalidOperationException(Localization.T("ErModel.Error.DuplicateDiagram"));
             }
+            if (document.Schema != null) ValidateSchema(document.Schema);
+        }
+
+        public const int MaximumSchemaTables = 2000;
+        public const int MaximumSchemaColumns = 1000;
+        private static readonly Regex DataTypePattern = new Regex(
+            @"^[A-Za-z_][A-Za-z0-9_]*( [A-Za-z_][A-Za-z0-9_]*)*( ?\( *(\d+( [A-Za-z]+)?|[A-Za-z_][A-Za-z0-9_]*|'([^';\\]|''){0,64}') *(, *(\d+( [A-Za-z]+)?|[A-Za-z_][A-Za-z0-9_]*|'([^';\\]|''){0,64}') *)*\))?( [A-Za-z_][A-Za-z0-9_]*)*(\[\])?\z",
+            RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 型別只允許「名稱 (參數) 修飾字」的一般語法，例如 varchar(20)、numeric(10, 2)、int unsigned、enum('a','b')、text[]；
+        /// 空白代表未指定（SQLite 允許），產生 DDL 時使用 provider 預設型別。
+        /// </summary>
+        public static bool IsSafeDataType(string dataType)
+        {
+            string value = (dataType ?? string.Empty).Trim();
+            if (value.Length == 0) return true;
+            return value.Length <= 200 && value.IndexOf("--", StringComparison.Ordinal) < 0 && DataTypePattern.IsMatch(value);
+        }
+
+        public static void ValidateSchema(ErModelSchema schema)
+        {
+            schema.Provider = (schema.Provider ?? string.Empty).Trim();
+            if (schema.Provider.Length == 0) throw new InvalidOperationException(Localization.T("ErModel.Error.SchemaProvider"));
+            schema.Tables = schema.Tables ?? new List<ErModelTable>();
+            schema.Relationships = schema.Relationships ?? new List<ErModelRelationship>();
+            if (schema.Tables.Count > MaximumSchemaTables) throw new InvalidOperationException(Localization.Format("ErModel.Error.TooManyTables", MaximumSchemaTables));
+            HashSet<string> tableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ErModelTable table in schema.Tables)
+            {
+                if (table == null) throw new InvalidOperationException(Localization.T("ErModel.Error.TableName"));
+                table.Name = ValidateName(table.Name, "ErModel.Error.TableName");
+                if (!tableNames.Add(table.Name)) throw new InvalidOperationException(Localization.Format("ErModel.Error.DuplicateTable", table.Name));
+                table.Columns = table.Columns ?? new List<ErModelColumn>();
+                if (table.Columns.Count == 0) throw new InvalidOperationException(Localization.Format("ErModel.Error.NoColumns", table.Name));
+                if (table.Columns.Count > MaximumSchemaColumns) throw new InvalidOperationException(Localization.Format("ErModel.Error.TooManyColumns", table.Name, MaximumSchemaColumns));
+                HashSet<string> columnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (ErModelColumn column in table.Columns)
+                {
+                    if (column == null) throw new InvalidOperationException(Localization.Format("ErModel.Error.ColumnName", table.Name));
+                    column.Name = ValidateName(column.Name, "ErModel.Error.ColumnName", table.Name);
+                    if (!columnNames.Add(column.Name)) throw new InvalidOperationException(Localization.Format("ErModel.Error.DuplicateColumn", table.Name, column.Name));
+                    column.DataType = (column.DataType ?? string.Empty).Trim();
+                    if (!IsSafeDataType(column.DataType)) throw new InvalidOperationException(Localization.Format("ErModel.Error.DataType", table.Name, column.Name, column.DataType));
+                }
+            }
+            foreach (ErModelRelationship relationship in schema.Relationships)
+            {
+                if (relationship == null) throw new InvalidOperationException(Localization.T("ErModel.Error.Relationship"));
+                relationship.Name = string.IsNullOrWhiteSpace(relationship.Name) ? null : ValidateName(relationship.Name, "ErModel.Error.Relationship");
+                ErModelTable from = schema.Find(relationship.FromTable);
+                ErModelTable to = schema.Find(relationship.ToTable);
+                ErModelColumn fromColumn = from == null ? null : from.Columns.FirstOrDefault(column => string.Equals(column.Name, relationship.FromColumn, StringComparison.OrdinalIgnoreCase));
+                ErModelColumn toColumn = to == null ? null : to.Columns.FirstOrDefault(column => string.Equals(column.Name, relationship.ToColumn, StringComparison.OrdinalIgnoreCase));
+                if (fromColumn == null || toColumn == null)
+                {
+                    throw new InvalidOperationException(Localization.Format("ErModel.Error.RelationshipTarget",
+                        relationship.FromTable + "." + relationship.FromColumn, relationship.ToTable + "." + relationship.ToColumn));
+                }
+                relationship.FromTable = from.Name;
+                relationship.FromColumn = fromColumn.Name;
+                relationship.ToTable = to.Name;
+                relationship.ToColumn = toColumn.Name;
+            }
+        }
+
+        private static string ValidateName(string name, string errorKey, params object[] context)
+        {
+            string value = (name ?? string.Empty).Trim();
+            if (value.Length == 0 || value.Length > 128 || value.Any(char.IsControl))
+            {
+                throw new InvalidOperationException(context.Length == 0 ? Localization.T(errorKey) : Localization.Format(errorKey, context));
+            }
+            return value;
+        }
+
+        /// <summary>把資料庫結構快照轉成模型內的結構。</summary>
+        public static ErModelSchema CaptureSchema(SchemaModelSnapshot snapshot)
+        {
+            ErModelSchema schema = new ErModelSchema { Provider = snapshot.ProviderName };
+            foreach (SchemaTableModel table in snapshot.Tables)
+            {
+                ErModelTable copy = new ErModelTable { Name = table.Name };
+                copy.Columns.AddRange(table.Columns.OrderBy(column => column.Ordinal).Select(column => new ErModelColumn
+                {
+                    Name = column.Name,
+                    DataType = column.DataType,
+                    Nullable = column.IsNullable,
+                    PrimaryKey = column.IsPrimaryKey
+                }));
+                schema.Tables.Add(copy);
+            }
+            schema.Relationships.AddRange(snapshot.Relationships.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ThenBy(item => item.Ordinal).Select(item => new ErModelRelationship
+            {
+                Name = item.Name,
+                FromTable = item.FromTable,
+                FromColumn = item.FromColumn,
+                ToTable = item.ToTable,
+                ToColumn = item.ToColumn
+            }));
+            return schema;
+        }
+
+        /// <summary>模型結構轉成比較／繪圖用的快照；同名外鍵的多個欄位依順序編號成複合外鍵。</summary>
+        public static SchemaModelSnapshot ToSnapshot(ErModelSchema schema, string databaseName)
+        {
+            SchemaModelSnapshot snapshot = new SchemaModelSnapshot { DatabaseName = databaseName, ProviderName = schema.Provider };
+            foreach (ErModelTable table in schema.Tables)
+            {
+                SchemaTableModel copy = new SchemaTableModel { Name = table.Name };
+                int ordinal = 0;
+                foreach (ErModelColumn column in table.Columns)
+                {
+                    copy.Columns.Add(new SchemaColumnModel
+                    {
+                        Name = column.Name,
+                        DataType = column.DataType,
+                        IsNullable = column.Nullable,
+                        IsPrimaryKey = column.PrimaryKey,
+                        Ordinal = ++ordinal
+                    });
+                }
+                snapshot.Tables.Add(copy);
+            }
+            Dictionary<string, int> ordinals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            int unnamed = 0;
+            foreach (ErModelRelationship relationship in schema.Relationships)
+            {
+                string name = relationship.Name ?? DefaultRelationshipName(relationship, ++unnamed);
+                int next;
+                ordinals.TryGetValue(name, out next);
+                ordinals[name] = ++next;
+                snapshot.Relationships.Add(new SchemaRelationshipModel
+                {
+                    Name = name,
+                    FromTable = relationship.FromTable,
+                    FromColumn = relationship.FromColumn,
+                    ToTable = relationship.ToTable,
+                    ToColumn = relationship.ToColumn,
+                    Ordinal = next
+                });
+            }
+            return snapshot;
+        }
+
+        private static string DefaultRelationshipName(ErModelRelationship relationship, int index)
+        {
+            string name = "fk_" + relationship.FromTable + "_" + relationship.ToTable;
+            name = new string(name.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray());
+            if (name.Length > 60) name = name.Substring(0, 60);
+            return name + (index > 1 ? "_" + index.ToString(CultureInfo.InvariantCulture) : string.Empty);
+        }
+
+        /// <summary>
+        /// 新增或取代模型中的資料表（originalName 為 null 代表新增）。改名時同步更新外鍵與所有圖表的位置；
+        /// 移除的欄位連帶移除相關外鍵。回傳被移除的外鍵數。
+        /// </summary>
+        public static int ReplaceTable(ErModelDocument document, string originalName, ErModelTable table, IList<ErModelRelationship> outgoing)
+        {
+            ErModelSchema schema = document.Schema;
+            if (schema == null) throw new InvalidOperationException(Localization.T("ErModel.Error.NoSchema"));
+            ErModelSchema candidate = new ErModelSchema
+            {
+                Provider = schema.Provider,
+                Tables = schema.Tables.Select(item => item).ToList(),
+                Relationships = new List<ErModelRelationship>()
+            };
+            int index = originalName == null ? -1 : candidate.Tables.FindIndex(item => string.Equals(item.Name, originalName, StringComparison.OrdinalIgnoreCase));
+            if (originalName != null && index < 0) throw new InvalidOperationException(Localization.Format("ErModel.Error.UnknownTable", originalName));
+            if (index >= 0) candidate.Tables[index] = table;
+            else candidate.Tables.Add(table);
+
+            string oldName = originalName ?? table.Name;
+            int dropped = 0;
+            foreach (ErModelRelationship relationship in schema.Relationships)
+            {
+                if (string.Equals(relationship.FromTable, oldName, StringComparison.OrdinalIgnoreCase) && originalName != null) continue;
+                ErModelRelationship copy = new ErModelRelationship
+                {
+                    Name = relationship.Name,
+                    FromTable = relationship.FromTable,
+                    FromColumn = relationship.FromColumn,
+                    ToTable = string.Equals(relationship.ToTable, oldName, StringComparison.OrdinalIgnoreCase) && originalName != null ? table.Name : relationship.ToTable,
+                    ToColumn = relationship.ToColumn
+                };
+                if (!ColumnExists(candidate, copy.ToTable, copy.ToColumn))
+                {
+                    dropped++;
+                    continue;
+                }
+                candidate.Relationships.Add(copy);
+            }
+            foreach (ErModelRelationship relationship in outgoing ?? new List<ErModelRelationship>())
+            {
+                relationship.FromTable = table.Name;
+                candidate.Relationships.Add(relationship);
+            }
+            ValidateSchema(candidate);
+            document.Schema = candidate;
+            if (originalName != null && !string.Equals(originalName, table.Name, StringComparison.Ordinal))
+            {
+                foreach (ErModelDiagram diagram in document.Diagrams)
+                {
+                    foreach (ErModelTablePlacement placement in diagram.Tables.Where(item => string.Equals(item.Table, originalName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        placement.Table = table.Name;
+                    }
+                }
+            }
+            return dropped;
+        }
+
+        /// <summary>從模型刪除資料表，連帶刪除相關外鍵與所有圖表中的位置。</summary>
+        public static void DropTable(ErModelDocument document, string name)
+        {
+            ErModelSchema schema = document.Schema;
+            if (schema == null) throw new InvalidOperationException(Localization.T("ErModel.Error.NoSchema"));
+            if (schema.Tables.RemoveAll(table => string.Equals(table.Name, name, StringComparison.OrdinalIgnoreCase)) == 0)
+            {
+                throw new InvalidOperationException(Localization.Format("ErModel.Error.UnknownTable", name));
+            }
+            schema.Relationships.RemoveAll(item => string.Equals(item.FromTable, name, StringComparison.OrdinalIgnoreCase) || string.Equals(item.ToTable, name, StringComparison.OrdinalIgnoreCase));
+            foreach (ErModelDiagram diagram in document.Diagrams)
+            {
+                diagram.Tables.RemoveAll(item => string.Equals(item.Table, name, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        private static bool ColumnExists(ErModelSchema schema, string table, string column)
+        {
+            ErModelTable match = schema.Find(table);
+            return match != null && match.Columns.Any(item => string.Equals(item.Name, column, StringComparison.OrdinalIgnoreCase));
         }
 
         public static void Save(ErModelDocument document, string path)

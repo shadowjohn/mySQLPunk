@@ -1,0 +1,74 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using mySQLPunk;
+using mySQLPunk.lib;
+
+/// <summary>需要 ER 模型視窗的共用測試；Windows smoke test 與 mono 驗證程式都會編譯這個檔案。</summary>
+public static partial class SmokeTests
+{    /// <summary>資料庫 → 模型 → 編輯 → 模型 → 資料庫 → 資料庫外部變更 → 模型的完整往返（SQLite）。</summary>
+    public static void AssertErModelSchemaFlow(ErDiagramForm form, IDatabase db, string modelPath)
+    {
+        Func<string, bool> tableExists = name => db.SelectSQL("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '" + name + "'").Rows.Count == 1;
+        Func<string, string, bool> columnExists = (table, column) => db.SelectSQL("PRAGMA table_info('" + table + "')").Rows.Cast<System.Data.DataRow>().Any(row => Convert.ToString(row["name"]) == column);
+        Func<int> remaining = () => form.CompareModelToDatabase().Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning);
+
+        Assert(!form.IsModelFirst, "A new ER diagram shows the database schema.");
+        Assert(form.CaptureFromDatabase(false) == null && form.IsModelFirst && form.Model.Schema.Find("orders") != null, "Capturing stores the database schema in the model.");
+        AssertEquals("0", remaining().ToString(), "A fresh capture matches the database.");
+        ErModelTable original = form.Model.Schema.Find("customers");
+        using (ErModelTableEditorForm editor = new ErModelTableEditorForm(original, new List<ErModelRelationship>(), form.Model.Schema.Tables.Select(table => table.Name).ToList(), (table, keys) => 0))
+        {
+            editor.CreateControl();
+            ErModelTable unchanged = editor.BuildTable();
+            AssertEquals(string.Join("|", original.Columns.Select(column => column.Name + ":" + column.DataType + ":" + column.Nullable + ":" + column.PrimaryKey)),
+                string.Join("|", unchanged.Columns.Select(column => column.Name + ":" + column.DataType + ":" + column.Nullable + ":" + column.PrimaryKey)),
+                "Opening the table editor without changes keeps every column as it was.");
+        }
+
+        ErModelTable products = new ErModelTable { Name = "products" };
+        products.Columns.Add(new ErModelColumn { Name = "id", DataType = "INTEGER", PrimaryKey = true, Nullable = false });
+        products.Columns.Add(new ErModelColumn { Name = "title", DataType = "TEXT", Nullable = false });
+        form.ApplyModelTable(null, products, null);
+        ErModelTable notes = new ErModelTable { Name = "notes" };
+        foreach (ErModelColumn column in form.Model.Schema.Find("notes").Columns) notes.Columns.Add(new ErModelColumn { Name = column.Name, DataType = column.DataType, Nullable = column.Nullable, PrimaryKey = column.PrimaryKey });
+        notes.Columns.Add(new ErModelColumn { Name = "author", DataType = "TEXT" });
+        form.ApplyModelTable("notes", notes, null);
+        Assert(form.CurrentDiagram.Find("products") != null && form.HasUnsavedChanges(), "New model tables are placed on the diagram.");
+        Assert(!tableExists("products") && !columnExists("notes", "author"), "Editing the model must not touch the database.");
+        AssertEquals("2", remaining().ToString(), "The model differs from the database by one table and one column.");
+
+        using (SchemaSyncScriptForm sync = form.CreateModelSyncForm())
+        {
+            Assert(sync != null, "Model changes produce a sync script.");
+            sync.CreateControl();
+            SchemaSyncBatchResult result = sync.RunSelected();
+            Assert(result.Succeeded, "Syncing the model to the database succeeds: " + result.Summary);
+        }
+        Assert(tableExists("products") && columnExists("notes", "author"), "Syncing creates the new table and column.");
+        AssertEquals("0", remaining().ToString(), "After syncing, the database matches the model.");
+        Assert(form.CreateModelSyncForm() == null, "No sync script when nothing differs.");
+
+        db.ExecSQL("ALTER TABLE customers ADD COLUMN phone TEXT;");
+        db.ExecSQL("CREATE TABLE audit (id INTEGER PRIMARY KEY);");
+        SchemaComparisonResult changes = form.CaptureFromDatabase(false);
+        Assert(changes.Differences.Any(item => item.Kind == SchemaDifferenceKind.ColumnMissingInTarget && item.DetailName == "phone") &&
+               changes.Differences.Any(item => item.Kind == SchemaDifferenceKind.TableMissingInTarget && item.ObjectName == "audit"), "Capturing again lists database-side changes.");
+        Assert(form.Model.Schema.Find("customers").Columns.Any(column => column.Name == "phone") && form.CurrentDiagram.Find("audit") != null, "Database changes flow into the model and diagram.");
+
+        form.SaveModelTo(modelPath);
+        ErModelDocument reloaded = ErModelService.Load(modelPath);
+        Assert(reloaded.Schema != null && reloaded.Schema.Find("products") != null && reloaded.Schema.Find("audit") != null, "The model file keeps the schema.");
+        form.DropModelTable("audit");
+        Assert(form.Model.Schema.Find("audit") == null && form.CurrentDiagram.Find("audit") == null && tableExists("audit"), "Dropping from the model leaves the database alone.");
+        using (SchemaSyncScriptForm sync = form.CreateModelSyncForm())
+        {
+            Assert(sync != null && sync.Script.DestructiveStatements.Any(statement => statement.IndexOf("DROP TABLE", StringComparison.OrdinalIgnoreCase) >= 0), "Dropping a model table proposes a DROP for review.");
+            AssertEquals("0", sync.Script.Statements.Count.ToString(), "A model-only drop has no statement that runs by default.");
+        }
+        Assert(tableExists("audit"), "Proposing a DROP does not run it.");
+        form.LoadModel(modelPath);
+        Assert(form.IsModelFirst && form.Model.Schema.Find("audit") != null, "Reloading the model restores its schema.");
+    }
+}

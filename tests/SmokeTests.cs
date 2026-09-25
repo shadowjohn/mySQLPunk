@@ -12441,6 +12441,7 @@ public static partial class SmokeTests
         try
         {
             AssertErModelSemantics(modelDir);
+            AssertErModelSchemaSemantics();
             using (my_sqlite sqlite = new my_sqlite())
             {
                 sqlite.SetConn("Data Source=" + Path.Combine(modelDir, "er.sqlite") + ";Version=3;");
@@ -12466,6 +12467,12 @@ public static partial class SmokeTests
                     form.LoadModel(modelPath);
                     Assert(form.CurrentDiagram.Find("notes") != null && form.CurrentDiagram.Find("notes").Y == 520 && form.Model.FindGroup("Core").Locked,
                         "Loading a model should restore tables, positions and groups.");
+                }
+                using (ErDiagramForm form = new ErDiagramForm(sqlite, "main"))
+                {
+                    form.CreateControl();
+                    form.RefreshDiagram();
+                    AssertErModelSchemaFlow(form, sqlite, Path.Combine(modelDir, "schema.punkmodel"));
                 }
             }
         }

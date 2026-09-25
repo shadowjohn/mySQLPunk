@@ -1073,6 +1073,76 @@ public static partial class SmokeTests
         NativeBackupService.ValidateNewDatabaseName("shop_copy-2");
     }
 
+    /// <summary>模型內結構：型別白名單、驗證、擷取／轉快照往返、改名與刪表連帶更新外鍵及圖表。</summary>
+    public static void AssertErModelSchemaSemantics()
+    {
+        foreach (string type in new[] { "", "int", "INTEGER", "varchar(20)", "numeric(10, 2)", "int unsigned", "decimal(10,2) unsigned zerofill", "enum('a','in progress')", "enum('it''s')", "text[]", "character varying(50)", "timestamp(6) with time zone", "nvarchar(max)", "VARCHAR2(20 BYTE)", "VARCHAR (20)", "double precision" })
+        {
+            Assert(ErModelService.IsSafeDataType(type), "Model data type should be accepted: " + type);
+        }
+        foreach (string type in new[] { "int; DROP TABLE x", "int -- x", "varchar(20)) ; x", "int /* x */", "enum('a';'b')", "text\nNULL", "int, name text", "'x'" })
+        {
+            Assert(!ErModelService.IsSafeDataType(type), "Model data type should be rejected: " + type);
+        }
+
+        SchemaModelSnapshot live = new SchemaModelSnapshot { DatabaseName = "shop", ProviderName = "sqlite" };
+        SchemaTableModel customers = new SchemaTableModel { Name = "customers" };
+        customers.Columns.Add(new SchemaColumnModel { Name = "id", DataType = "INTEGER", IsNullable = true, IsPrimaryKey = true, Ordinal = 1 });
+        customers.Columns.Add(new SchemaColumnModel { Name = "name", DataType = "TEXT", IsNullable = false, Ordinal = 2 });
+        SchemaTableModel orders = new SchemaTableModel { Name = "orders" };
+        orders.Columns.Add(new SchemaColumnModel { Name = "id", DataType = "INTEGER", IsNullable = true, IsPrimaryKey = true, Ordinal = 1 });
+        orders.Columns.Add(new SchemaColumnModel { Name = "customer_id", DataType = "INTEGER", IsNullable = true, Ordinal = 2 });
+        live.Tables.Add(customers);
+        live.Tables.Add(orders);
+        live.Relationships.Add(new SchemaRelationshipModel { Name = "fk_orders_0", FromTable = "orders", FromColumn = "customer_id", ToTable = "customers", ToColumn = "id", Ordinal = 1 });
+
+        ErModelSchema schema = ErModelService.CaptureSchema(live);
+        ErModelService.ValidateSchema(schema);
+        SchemaComparisonResult same = SchemaComparisonService.Compare(live, ErModelService.ToSnapshot(schema, "shop"));
+        Assert(same.Differences.All(item => item.Kind == SchemaDifferenceKind.MetadataWarning), "A captured model should compare equal to its database.");
+
+        ErModelDocument document = ErModelService.CreateDefault(live, "Main");
+        document.Schema = schema;
+        ErModelTable renamed = new ErModelTable { Name = "clients" };
+        renamed.Columns.Add(new ErModelColumn { Name = "id", DataType = "INTEGER", PrimaryKey = true });
+        renamed.Columns.Add(new ErModelColumn { Name = "full_name", DataType = "varchar(80)", Nullable = false });
+        AssertEquals("0", ErModelService.ReplaceTable(document, "customers", renamed, null).ToString(), "Renaming keeps the incoming key when its column survives.");
+        Assert(document.Schema.Relationships.Single().ToTable == "clients" && document.Diagrams[0].Find("clients") != null && document.Diagrams[0].Find("customers") == null,
+            "Renaming a model table updates foreign keys and diagram placements.");
+
+        ErModelTable withoutId = new ErModelTable { Name = "clients" };
+        withoutId.Columns.Add(new ErModelColumn { Name = "code", DataType = "TEXT", PrimaryKey = true });
+        AssertEquals("1", ErModelService.ReplaceTable(document, "clients", withoutId, null).ToString(), "Removing a referenced column drops the incoming key.");
+        Assert(document.Schema.Relationships.Count == 0, "The dangling key is gone.");
+
+        ErModelTable lines = new ErModelTable { Name = "order_lines" };
+        lines.Columns.Add(new ErModelColumn { Name = "order_id", DataType = "INTEGER", Nullable = false });
+        lines.Columns.Add(new ErModelColumn { Name = "sku", DataType = "TEXT" });
+        ErModelService.ReplaceTable(document, null, lines, new List<ErModelRelationship> { new ErModelRelationship { FromColumn = "order_id", ToTable = "orders", ToColumn = "id" } });
+        SchemaModelSnapshot modelSnapshot = ErModelService.ToSnapshot(document.Schema, "shop");
+        Assert(modelSnapshot.Relationships.Single().Name == "fk_order_lines_orders" && modelSnapshot.Relationships.Single().FromTable == "order_lines", "Unnamed model keys get a stable name.");
+
+        AssertThrows<InvalidOperationException>(() => ErModelService.ReplaceTable(document, null, lines, null), "Duplicate model tables are rejected.");
+        ErModelTable badType = new ErModelTable { Name = "bad" };
+        badType.Columns.Add(new ErModelColumn { Name = "x", DataType = "int); DROP TABLE orders; --" });
+        AssertThrows<InvalidOperationException>(() => ErModelService.ReplaceTable(document, null, badType, null), "Unsafe model types are rejected.");
+        Assert(document.Schema.Find("bad") == null, "A rejected edit leaves the model unchanged.");
+        ErModelTable badKey = new ErModelTable { Name = "bad" };
+        badKey.Columns.Add(new ErModelColumn { Name = "x", DataType = "INTEGER" });
+        AssertThrows<InvalidOperationException>(() => ErModelService.ReplaceTable(document, null, badKey, new List<ErModelRelationship> { new ErModelRelationship { FromColumn = "x", ToTable = "missing", ToColumn = "id" } }), "Keys to missing tables are rejected.");
+        AssertThrows<InvalidOperationException>(() => ErModelService.ReplaceTable(document, null, new ErModelTable { Name = "empty" }, null), "Tables need columns.");
+
+        ErModelService.DropTable(document, "orders");
+        Assert(document.Schema.Find("orders") == null && document.Schema.Relationships.Count == 0 && document.Diagrams[0].Find("orders") == null, "Dropping a model table removes its keys and placements.");
+
+        string json = Newtonsoft.Json.JsonConvert.SerializeObject(document);
+        ErModelDocument reloaded = Newtonsoft.Json.JsonConvert.DeserializeObject<ErModelDocument>(json);
+        ErModelService.Validate(reloaded);
+        Assert(reloaded.Schema.Find("order_lines") != null && reloaded.Schema.Provider == "sqlite", "The model schema survives a save round trip.");
+        reloaded.Schema.Tables[0].Columns[0].DataType = "int; drop table x";
+        AssertThrows<InvalidOperationException>(() => ErModelService.Validate(reloaded), "Loading a model with an unsafe type fails.");
+    }
+
     /// <summary>BI 運算式、計算欄位、彙總、跨圖表篩選與 .punkbi 往返（不需要資料庫）。</summary>
     public static void AssertBiSemantics()
     {

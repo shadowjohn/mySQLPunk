@@ -158,6 +158,7 @@
   - Redis Cluster／Sentinel：Redis 連線可選 Cluster（CRC16 slot 路由、MOVED／ASK 重導、逐 master 掃描、交易固定節點、只有 db0）或 Sentinel（從 Sentinel 取得 master 並以 ROLE 確認）；連線 URI 以 mode／seeds／master 參數表示，未知參數拒絕。
   - 資料傳輸精靈：資料庫右鍵「資料傳輸...」選擇目標資料庫後逐表設定建立新表／附加／取代資料與欄位對應；每批寫入後記錄檢查點可續傳（有主鍵接續、無主鍵重來或拒絕附加續傳），完成後以列數驗證並匯出 HTML 報告，取代資料需輸入資料庫名稱。
   - ER 模型工作區：ER 圖可拖曳編排、依外鍵分層自動排列，以群組上色／隱藏／鎖定，多張圖表存成 .punkmodel（只存版面），並可匯出 PNG／SVG。
+  - 模型與資料庫雙向同步：模型可保存結構並離線編輯資料表／欄位／外鍵，與資料庫雙向比較；模型 → 資料庫沿用結構同步的逐句審核與破壞性確認。限制：模型只保存資料表、欄位型別、NULL、主鍵與外鍵，不含索引、預設值、CHECK、檢視與程序；SQLite 無法以 ALTER 新增外鍵，同步時只列為需手動處理的項目。
   - 原生備份／還原：SQL Server 伺服器端 BACKUP／RESTORE（COPY_ONLY、CHECKSUM、驗證、還原為新資料庫），PostgreSQL pg_dump／pg_restore 與 MongoDB mongodump／mongorestore；密碼不經命令列，還原一律建立新資料庫。
   - BI 儀表板：資料集為唯讀 SQL 或 MongoDB JSON find／pipeline，加上計算欄位；長條／折線／圓餅／數字卡／表格在本機彙總，點選分類跨圖表篩選（同名欄位、可跨資料集），存成 .punkbi 並可匯出 PNG。限制：每個資料集最多 200,000 列、一次載入到記憶體；MongoDB 巢狀文件以 JSON 文字呈現，要分組的巢狀欄位請先在 pipeline 用 `$project`／`$addFields` 攤平；Snowflake 尚未以真實帳戶驗收；Linux／macOS 版尚未提供。
   - 資料產生器：資料庫右鍵「資料產生...」改為多表產生器，可勾選資料表與筆數、逐欄設定規則（自動、資料庫預設、NULL、固定值、序列、範圍、清單、樣式、NULL 比例）與 seed。自動規則依型別、欄位名稱、長度、精度與 MySQL ENUM／SET 產生；外鍵挑選現有或同批產生的父列（含自我參照），主鍵與唯一索引（MySQL、PostgreSQL、SQL Server、SQLite 皆讀取）不重複，被參照的自動編號改寫明確值並推進序列；規則值在寫入前先依型別檢查。預覽只在記憶體產生，寫入需確認並以單一交易執行，失敗整批回滾。smoke test 以 SQLite 驗證外鍵完整性、唯一性、規則、seed 重現與錯誤案例。
