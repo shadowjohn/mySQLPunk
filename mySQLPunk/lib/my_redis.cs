@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -56,7 +57,29 @@ namespace mySQLPunk.lib
         private string password = string.Empty;
         private bool useTls;
         private int initialDatabaseIndex;
-        private RedisRespClient client;
+        private string mode = ModeStandalone;
+        private List<string> seeds = new List<string>();
+        private string masterName = string.Empty;
+        private bool sentinelAuth;
+        private string connectedHost = string.Empty;
+        private int connectedPort;
+        private RedisCommandRouter client;
+
+        public const string ModeStandalone = "standalone";
+        public const string ModeCluster = "cluster";
+        public const string ModeSentinel = "sentinel";
+
+        /// <summary>Redis Cluster key slot（CRC16，支援 {hash tag}）。</summary>
+        public static int KeySlot(string key)
+        {
+            return RedisCommandRouter.KeySlot(key);
+        }
+
+        /// <summary>standalone、cluster 或 sentinel。</summary>
+        public string Mode { get { return mode; } }
+
+        /// <summary>實際連上的節點（Sentinel 為解析出的 master；Cluster 為種子節點）。</summary>
+        public string ConnectedAddress { get { return open ? RedisCommandRouter.FormatAddress(connectedHost, connectedPort) : string.Empty; } }
         private int selectedDatabase = -1;
         private bool open;
 
@@ -91,6 +114,7 @@ namespace mySQLPunk.lib
                     password = Uri.UnescapeDataString(uri.UserInfo);
                 }
             }
+            ParseTopology(uri.Query);
             string path = (uri.AbsolutePath ?? string.Empty).Trim('/');
             initialDatabaseIndex = 0;
             if (!string.IsNullOrWhiteSpace(path))
@@ -100,6 +124,69 @@ namespace mySQLPunk.lib
                     throw new ArgumentException(Localization.T("Redis.InvalidDatabaseIndex"), "value");
                 initialDatabaseIndex = parsed;
             }
+            if (mode == ModeCluster && initialDatabaseIndex != 0) throw new ArgumentException(Localization.T("Redis.ClusterDatabaseZero"), "value");
+        }
+
+        /// <summary>
+        /// 解析 ?mode=cluster|sentinel&amp;seeds=host:port,…&amp;master=名稱&amp;sentinelAuth=1。未知參數一律拒絕，
+        /// 避免打錯字時默默退回獨立模式。
+        /// </summary>
+        private void ParseTopology(string query)
+        {
+            mode = ModeStandalone;
+            seeds = new List<string>();
+            masterName = string.Empty;
+            sentinelAuth = false;
+            string text = (query ?? string.Empty).TrimStart('?');
+            if (text.Length == 0) return;
+            foreach (string pair in text.Split('&'))
+            {
+                if (pair.Length == 0) continue;
+                int equals = pair.IndexOf('=');
+                string name = Uri.UnescapeDataString(equals < 0 ? pair : pair.Substring(0, equals));
+                string value = equals < 0 ? string.Empty : Uri.UnescapeDataString(pair.Substring(equals + 1).Replace('+', ' '));
+                switch (name)
+                {
+                    case "mode":
+                        if (value != ModeStandalone && value != ModeCluster && value != ModeSentinel)
+                            throw new ArgumentException(Localization.Format("Redis.InvalidMode", value), "value");
+                        mode = value;
+                        break;
+                    case "seeds":
+                        foreach (string item in value.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            KeyValuePair<string, int> endpoint = RedisCommandRouter.SplitAddress(item.Trim());
+                            seeds.Add(RedisCommandRouter.FormatAddress(endpoint.Key, endpoint.Value));
+                        }
+                        break;
+                    case "master":
+                        masterName = value.Trim();
+                        break;
+                    case "sentinelAuth":
+                        sentinelAuth = value == "1" || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+                        break;
+                    default:
+                        throw new ArgumentException(Localization.Format("Redis.UnknownConnectionOption", name), "value");
+                }
+            }
+            if (mode == ModeSentinel && string.IsNullOrWhiteSpace(masterName)) throw new ArgumentException(Localization.T("Redis.SentinelMasterRequired"), "value");
+        }
+
+        public static string BuildConnectionString(string host, int port, string username, string password, bool useTls, int databaseIndex,
+            string mode, IEnumerable<string> seeds, string masterName, bool sentinelAuth)
+        {
+            string baseText = BuildConnectionString(host, port, username, password, useTls, databaseIndex);
+            string normalized = string.IsNullOrWhiteSpace(mode) ? ModeStandalone : mode.Trim().ToLowerInvariant();
+            if (normalized == ModeStandalone) return baseText;
+            List<string> query = new List<string> { "mode=" + Uri.EscapeDataString(normalized) };
+            List<string> seedList = (seeds ?? Enumerable.Empty<string>()).Select(item => item.Trim()).Where(item => item.Length > 0).ToList();
+            if (seedList.Count > 0) query.Add("seeds=" + Uri.EscapeDataString(string.Join(",", seedList)));
+            if (normalized == ModeSentinel)
+            {
+                query.Add("master=" + Uri.EscapeDataString(masterName ?? string.Empty));
+                if (sentinelAuth) query.Add("sentinelAuth=1");
+            }
+            return baseText + "?" + string.Join("&", query);
         }
 
         public static string BuildConnectionString(string host, int port, string username, string password, bool useTls, int databaseIndex)
@@ -124,22 +211,122 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(host)) throw new InvalidOperationException(Localization.T("Redis.ConnectionStringRequired"));
             lock (_sync)
             {
-                RedisRespClient candidate = RedisRespClient.Connect(host, port, useTls, ConnectTimeoutMs);
+                if (mode == ModeCluster)
+                {
+                    OpenCluster();
+                }
+                else
+                {
+                    KeyValuePair<string, int> target = mode == ModeSentinel ? ResolveSentinelMaster() : new KeyValuePair<string, int>(host, port);
+                    RedisRespClient candidate = ConnectNode(target.Key, target.Value, initialDatabaseIndex);
+                    try
+                    {
+                        if (mode == ModeSentinel) EnsureMasterRole(candidate, target);
+                        client = RedisCommandRouter.ForStandalone(candidate);
+                        connectedHost = target.Key;
+                        connectedPort = target.Value;
+                    }
+                    catch
+                    {
+                        candidate.Dispose();
+                        throw;
+                    }
+                }
+                selectedDatabase = initialDatabaseIndex;
+                open = true;
+            }
+        }
+
+        private void OpenCluster()
+        {
+            List<string> candidates = new List<string> { RedisCommandRouter.FormatAddress(host, port) };
+            candidates.AddRange(seeds.Where(item => !candidates.Contains(item, StringComparer.OrdinalIgnoreCase)));
+            List<string> failures = new List<string>();
+            foreach (string address in candidates)
+            {
+                KeyValuePair<string, int> endpoint = RedisCommandRouter.SplitAddress(address);
+                RedisRespClient seed = null;
                 try
                 {
-                    if (!string.IsNullOrEmpty(username)) candidate.Execute("AUTH", username, password ?? string.Empty);
-                    else if (!string.IsNullOrEmpty(password)) candidate.Execute("AUTH", password);
-                    candidate.Execute("PING");
-                    if (initialDatabaseIndex > 0) candidate.Execute("SELECT", initialDatabaseIndex.ToString(CultureInfo.InvariantCulture));
-                    client = candidate;
-                    selectedDatabase = initialDatabaseIndex;
-                    open = true;
+                    seed = ConnectNode(endpoint.Key, endpoint.Value, 0);
+                    client = RedisCommandRouter.ForCluster(endpoint.Key, endpoint.Value, seed, (nodeHost, nodePort) => ConnectNode(nodeHost, nodePort, 0));
+                    connectedHost = endpoint.Key;
+                    connectedPort = endpoint.Value;
+                    return;
                 }
-                catch
+                catch (Exception exception) when (exception is RedisServerException || exception is System.IO.IOException ||
+                                                  exception is System.Net.Sockets.SocketException || exception is TimeoutException)
                 {
-                    candidate.Dispose();
-                    throw;
+                    if (seed != null) seed.Dispose();
+                    failures.Add(address + ": " + exception.Message);
                 }
+            }
+            throw new InvalidOperationException(Localization.Format("Redis.ClusterUnreachable", string.Join("; ", failures)));
+        }
+
+        /// <summary>依序詢問每個 Sentinel 目前的 master 位址；Sentinel 本身的驗證可選擇沿用資料節點帳密。</summary>
+        private KeyValuePair<string, int> ResolveSentinelMaster()
+        {
+            List<string> sentinels = new List<string> { RedisCommandRouter.FormatAddress(host, port) };
+            sentinels.AddRange(seeds.Where(item => !sentinels.Contains(item, StringComparer.OrdinalIgnoreCase)));
+            List<string> failures = new List<string>();
+            foreach (string address in sentinels)
+            {
+                KeyValuePair<string, int> endpoint = RedisCommandRouter.SplitAddress(address);
+                try
+                {
+                    using (RedisRespClient sentinel = RedisRespClient.Connect(endpoint.Key, endpoint.Value, useTls, ConnectTimeoutMs))
+                    {
+                        if (sentinelAuth)
+                        {
+                            if (!string.IsNullOrEmpty(username)) sentinel.Execute("AUTH", username, password ?? string.Empty);
+                            else if (!string.IsNullOrEmpty(password)) sentinel.Execute("AUTH", password);
+                        }
+                        object[] reply = sentinel.Execute("SENTINEL", "get-master-addr-by-name", masterName) as object[];
+                        int masterPort;
+                        if (reply != null && reply.Length == 2 &&
+                            int.TryParse(Convert.ToString(reply[1], CultureInfo.InvariantCulture), NumberStyles.None, CultureInfo.InvariantCulture, out masterPort))
+                        {
+                            return new KeyValuePair<string, int>(Convert.ToString(reply[0], CultureInfo.InvariantCulture), masterPort);
+                        }
+                        failures.Add(address + ": " + Localization.Format("Redis.SentinelMasterUnknown", masterName));
+                    }
+                }
+                catch (Exception exception) when (exception is RedisServerException || exception is System.IO.IOException ||
+                                                  exception is System.Net.Sockets.SocketException || exception is TimeoutException)
+                {
+                    failures.Add(address + ": " + exception.Message);
+                }
+            }
+            throw new InvalidOperationException(Localization.Format("Redis.SentinelUnreachable", masterName, string.Join("; ", failures)));
+        }
+
+        /// <summary>Sentinel 回報的位址可能落後於實際切換；連上後以 ROLE 確認真的是 master。</summary>
+        private static void EnsureMasterRole(RedisRespClient candidate, KeyValuePair<string, int> target)
+        {
+            object[] role = candidate.Execute("ROLE") as object[];
+            string name = role != null && role.Length > 0 ? Convert.ToString(role[0], CultureInfo.InvariantCulture) : string.Empty;
+            if (!string.Equals(name, "master", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(Localization.Format("Redis.SentinelNotMaster", RedisCommandRouter.FormatAddress(target.Key, target.Value), name));
+            }
+        }
+
+        private RedisRespClient ConnectNode(string nodeHost, int nodePort, int databaseIndex)
+        {
+            RedisRespClient candidate = RedisRespClient.Connect(nodeHost, nodePort, useTls, ConnectTimeoutMs);
+            try
+            {
+                if (!string.IsNullOrEmpty(username)) candidate.Execute("AUTH", username, password ?? string.Empty);
+                else if (!string.IsNullOrEmpty(password)) candidate.Execute("AUTH", password);
+                candidate.Execute("PING");
+                if (databaseIndex > 0) candidate.Execute("SELECT", databaseIndex.ToString(CultureInfo.InvariantCulture));
+                return candidate;
+            }
+            catch
+            {
+                candidate.Dispose();
+                throw;
             }
         }
 
@@ -164,6 +351,7 @@ namespace mySQLPunk.lib
             lock (_sync)
             {
                 EnsureOpen();
+                if (client.IsCluster) return new List<string> { "db0" };
                 int count = 16;
                 try
                 {
@@ -264,6 +452,8 @@ namespace mySQLPunk.lib
                 {
                     { "Provider", "Redis" },
                     { "Database", databaseName ?? string.Empty },
+                    { "topology", mode },
+                    { "node", ConnectedAddress },
                     { "keys", Convert.ToString(client.Execute("DBSIZE"), CultureInfo.InvariantCulture) }
                 };
                 string info = string.Empty;
@@ -343,6 +533,23 @@ namespace mySQLPunk.lib
                 AddMonitorMetric(snapshot, fields, "replication", "role");
                 AddMonitorMetric(snapshot, fields, "replication", "connected_slaves");
                 AddMonitorMetric(snapshot, fields, "replication", "master_link_status");
+                AddMonitorMetric(snapshot, "topology", "mode", mode);
+                AddMonitorMetric(snapshot, "topology", "node", ConnectedAddress);
+                if (client.IsCluster)
+                {
+                    AddMonitorMetric(snapshot, "topology", "masters", client.Masters.Count.ToString(CultureInfo.InvariantCulture));
+                    AddMonitorMetric(snapshot, "topology", "slots_covered", client.CoveredSlots.ToString(CultureInfo.InvariantCulture) + "/" + RedisCommandRouter.SlotCount.ToString(CultureInfo.InvariantCulture));
+                    try
+                    {
+                        Dictionary<string, string> cluster = ParseInfoFields(client.Execute("CLUSTER", "INFO") as string ?? string.Empty);
+                        foreach (string name in new[] { "cluster_state", "cluster_known_nodes", "cluster_size", "cluster_slots_fail" })
+                        {
+                            string value;
+                            if (cluster.TryGetValue(name, out value)) AddMonitorMetric(snapshot, "topology", name, value);
+                        }
+                    }
+                    catch (RedisServerException) { }
+                }
 
                 long hits, misses;
                 if (TryReadLong(fields, "keyspace_hits", out hits) && TryReadLong(fields, "keyspace_misses", out misses))
@@ -868,25 +1075,30 @@ namespace mySQLPunk.lib
             HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
             long skipped = 0;
             string cursor = "0";
-            do
+            // Cluster 的 SCAN 只涵蓋單一節點，必須逐一掃描每個 master。
+            foreach (Func<string[], object> target in client.ScanTargets())
             {
-                object[] reply = client.Execute("SCAN", cursor, "MATCH", pattern, "COUNT",
-                    ScanBatchSize.ToString(CultureInfo.InvariantCulture)) as object[];
-                if (reply == null || reply.Length != 2) break;
-                cursor = Convert.ToString(reply[0], CultureInfo.InvariantCulture);
-                object[] batch = reply[1] as object[] ?? new object[0];
-                foreach (object item in batch)
+                cursor = "0";
+                do
                 {
-                    string key = Convert.ToString(item, CultureInfo.InvariantCulture);
-                    if (!seen.Add(key)) continue;
-                    if (!string.IsNullOrEmpty(typeFilter) &&
-                        !string.Equals(GetKeyType(key), typeFilter, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    if (skipped < offset) { skipped++; continue; }
-                    if (keys.Count >= limit) return keys;
-                    keys.Add(key);
-                }
-            } while (cursor != "0");
+                    object[] reply = target(new[] { "SCAN", cursor, "MATCH", pattern, "COUNT",
+                        ScanBatchSize.ToString(CultureInfo.InvariantCulture) }) as object[];
+                    if (reply == null || reply.Length != 2) break;
+                    cursor = Convert.ToString(reply[0], CultureInfo.InvariantCulture);
+                    object[] batch = reply[1] as object[] ?? new object[0];
+                    foreach (object item in batch)
+                    {
+                        string key = Convert.ToString(item, CultureInfo.InvariantCulture);
+                        if (!seen.Add(key)) continue;
+                        if (!string.IsNullOrEmpty(typeFilter) &&
+                            !string.Equals(GetKeyType(key), typeFilter, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (skipped < offset) { skipped++; continue; }
+                        if (keys.Count >= limit) return keys;
+                        keys.Add(key);
+                    }
+                } while (cursor != "0");
+            }
             return keys;
         }
 
@@ -1176,26 +1388,10 @@ namespace mySQLPunk.lib
             if (!open || client == null) throw new InvalidOperationException(Localization.T("Redis.ConnectionNotOpen"));
         }
 
+        /// <summary>額外的專用連線（Pub/Sub）連到實際使用中的節點：Sentinel 為解析出的 master。</summary>
         private RedisRespClient OpenAuthenticatedClient(int databaseIndex)
         {
-            RedisRespClient candidate = RedisRespClient.Connect(
-                host,
-                port,
-                useTls,
-                ConnectTimeoutMs);
-            try
-            {
-                if (!string.IsNullOrEmpty(username)) candidate.Execute("AUTH", username, password ?? string.Empty);
-                else if (!string.IsNullOrEmpty(password)) candidate.Execute("AUTH", password);
-                candidate.Execute("PING");
-                if (databaseIndex > 0) candidate.Execute("SELECT", databaseIndex.ToString(CultureInfo.InvariantCulture));
-                return candidate;
-            }
-            catch
-            {
-                candidate.Dispose();
-                throw;
-            }
+            return ConnectNode(connectedHost, connectedPort, databaseIndex);
         }
 
         private static Exception UnsupportedWrite()

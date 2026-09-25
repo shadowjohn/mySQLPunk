@@ -200,7 +200,11 @@ namespace mySQLPunk.lib
                 GetValue(connection, "username").Trim(),
                 GetValue(connection, "pwd"),
                 IsTrue(connection, "redis_tls"),
-                databaseIndex);
+                databaseIndex,
+                GetValue(connection, "redis_mode").Trim(),
+                GetValue(connection, "redis_seeds").Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries),
+                GetValue(connection, "redis_master").Trim(),
+                IsTrue(connection, "redis_sentinel_auth"));
         }
 
         public static string BuildSnowflakeConnectionString(Dictionary<string, object> connection)

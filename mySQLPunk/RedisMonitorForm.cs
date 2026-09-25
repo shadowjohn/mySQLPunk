@@ -294,6 +294,7 @@ namespace mySQLPunk
                 case "cpu": return Localization.T("Redis.MonitorSectionCpu");
                 case "persistence": return Localization.T("Redis.MonitorSectionPersistence");
                 case "replication": return Localization.T("Redis.MonitorSectionReplication");
+                case "topology": return Localization.T("Redis.MonitorSectionTopology");
                 default: return section ?? string.Empty;
             }
         }

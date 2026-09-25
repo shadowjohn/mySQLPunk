@@ -30,7 +30,7 @@
 | MongoDB Aggregation Pipeline 視覺設計 | ✅ | collection 右鍵「Aggregation Pipeline...」可從 16 種唯讀 stage 範本新增、調整順序、停用、逐 stage 編輯 JSON 並即時檢查語法，預覽「到此 stage 為止」的前 20／100／500 筆輸出；$out／$merge（含巢狀）一律拒絕。可匯入既有 pipeline、複製 mongosh 語法或送到查詢視窗，查詢視窗也支援含 `pipeline` 陣列的 aggregation JSON。 |
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 🟡 | 第二期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視、SELECT／SHOW，以及查詢編輯器單一 DML／DDL；待補實機驗收、key-pair JWT、參數綁定、資料網格寫回、模型與 BI 能力。 |
-| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 已具備瀏覽、受限查詢、五種 key 型別安全編輯、TTL／刪除、list 依索引安全刪除、INFO 監控，以及使用接收專線的 channel／pattern Pub/Sub 工作區。待補 Cluster 與 Sentinel。 |
+| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 已具備瀏覽、受限查詢、五種 key 型別安全編輯、TTL／刪除、list 依索引安全刪除、INFO 監控，以及使用接收專線的 channel／pattern Pub/Sub 工作區。待補 Cluster 與 Sentinel。 Redis Cluster（CRC16 slot 路由、MOVED／ASK 重導、逐 master SCAN、DBSIZE 加總、交易固定在 key 所在節點）與 Sentinel（依序詢問 Sentinel 取得 master、以 ROLE 確認、容錯切換後重新連線即取得新 master）已完成並通過實機驗證；待補 Cluster 內的 Pub/Sub sharded channel 與 Sentinel 自動重新連線。 |
 | Linux ARM | ✅ | 已建立 .NET 8 Core 與 Avalonia 桌面預覽版；CI／Release 會在 `ubuntu-24.04` x64 與 `ubuntu-24.04-arm` ARM64 原生 runner 分別建立 self-contained 安裝壓縮檔，並完成安裝、Xvfb UI 啟動、安全更新、rollback 與解除安裝。跨平台 SQL Server 的 provider 實機 round-trip 保留在支援其容器映像的 Linux x64 runner。 |
 
 ## Navicat Premium 功能頁對照

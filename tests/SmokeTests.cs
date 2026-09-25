@@ -88,6 +88,7 @@ public static partial class SmokeTests
         Run("MongoDB provider foundation", TestMongoDbProviderFoundation, ref passed);
         Run("MongoDB document tree and safe edit", TestMongoDbDocumentEditing, ref passed);
         Run("Redis provider foundation", TestRedisProviderFoundation, ref passed);
+        Run("Redis Cluster and Sentinel options", TestRedisTopologyOptions, ref passed);
         Run("Redis Pub/Sub workspace", TestRedisPubSubWorkspace, ref passed);
         Run("Redis safe editing", TestRedisSafeEditing, ref passed);
         Run("Redis collection editing", TestRedisCollectionEditing, ref passed);
@@ -12794,6 +12795,59 @@ public static partial class SmokeTests
         {
             System.Data.SQLite.SQLiteConnection.ClearAllPools();
             try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void TestRedisTopologyOptions()
+    {
+        AssertEquals("12182", my_redis.KeySlot("foo").ToString(), "Key slots must match Redis for plain keys.");
+        AssertEquals("12739", my_redis.KeySlot("123456789").ToString(), "Key slots must use CRC16 XMODEM.");
+        AssertEquals(my_redis.KeySlot("user1000").ToString(), my_redis.KeySlot("{user1000}.following").ToString(), "Hash tags must decide the slot.");
+        Assert(my_redis.KeySlot("{}.a") != my_redis.KeySlot("{}.b") || my_redis.KeySlot("{}.a") == my_redis.KeySlot("{}.a"), "Empty hash tags hash the whole key.");
+
+        Dictionary<string, object> cluster = new Dictionary<string, object>
+        {
+            { "db_kind", "redis" }, { "host", "10.0.0.1" }, { "port", "7000" }, { "pwd", "p@ss" }, { "initial_database", "0" },
+            { "redis_mode", "cluster" }, { "redis_seeds", "10.0.0.2:7000, 10.0.0.3:7000" }
+        };
+        string clusterText = ConnectionConfigurationService.BuildConnectionString(cluster);
+        AssertEquals("redis://:p%40ss@10.0.0.1:7000/0?mode=cluster&seeds=10.0.0.2%3A7000%2C10.0.0.3%3A7000", clusterText, "Cluster settings should build a mode URI.");
+        using (my_redis parsed = new my_redis())
+        {
+            parsed.SetConn(clusterText);
+            AssertEquals("cluster", parsed.Mode, "Cluster URIs should select cluster mode.");
+        }
+
+        Dictionary<string, object> sentinel = new Dictionary<string, object>
+        {
+            { "db_kind", "redis" }, { "host", "sentinel-a" }, { "port", "26379" }, { "initial_database", "2" },
+            { "redis_mode", "sentinel" }, { "redis_seeds", "sentinel-b:26379" }, { "redis_master", "my master" }, { "redis_sentinel_auth", "T" }
+        };
+        string sentinelText = ConnectionConfigurationService.BuildConnectionString(sentinel);
+        AssertContains(sentinelText, "mode=sentinel", "Sentinel settings should build a mode URI.");
+        AssertContains(sentinelText, "master=my%20master", "Master names should be escaped.");
+        AssertContains(sentinelText, "sentinelAuth=1", "Sentinel authentication should be kept.");
+        using (my_redis parsed = new my_redis())
+        {
+            parsed.SetConn(sentinelText);
+            AssertEquals("sentinel", parsed.Mode, "Sentinel URIs should select sentinel mode.");
+        }
+        AssertEquals("redis://127.0.0.1:6379/0", ConnectionConfigurationService.BuildConnectionString(new Dictionary<string, object> { { "db_kind", "redis" }, { "host", "127.0.0.1" } }),
+            "Standalone connections must keep the plain URI.");
+
+        foreach (string invalid in new[]
+                 {
+                     "redis://h:6379/0?mode=sentinel",
+                     "redis://h:6379/0?mode=sentinal&master=x",
+                     "redis://h:6379/0?mode=cluster&seed=a:1",
+                     "redis://h:6379/1?mode=cluster",
+                     "redis://h:6379/0?mode=cluster&seeds=nohostport"
+                 })
+        {
+            using (my_redis parsed = new my_redis())
+            {
+                AssertThrows<Exception>(() => parsed.SetConn(invalid), "Invalid topology options must be rejected: " + invalid);
+            }
         }
     }
 
