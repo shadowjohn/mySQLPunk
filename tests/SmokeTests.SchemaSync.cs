@@ -78,7 +78,7 @@ public static partial class SmokeTests
         AssertStatement(sqlServer, "ALTER TABLE [parent] ALTER COLUMN [code] varchar(20) NOT NULL");
         AssertEquals("1", sqlServer.Statements.Count(item => item.IndexOf("ALTER COLUMN [code]", StringComparison.Ordinal) >= 0).ToString(),
             "A type and nullability change on one SQL Server column should produce a single ALTER COLUMN.");
-        AssertContains(sqlServer.Text, "\nGO\n", "SQL Server scripts should separate batches with GO.");
+        AssertContains(sqlServer.Text.Replace("\r\n", "\n"), "\nGO\n", "SQL Server scripts should separate batches with GO.");
         AssertContains(sqlServer.Text, "-- ALTER TABLE [child] DROP CONSTRAINT [fk_child_legacy];", "SQL Server foreign-key drops must stay commented.");
 
         SchemaSyncScript mysql = SchemaSyncScriptService.Generate(BuildSchemaSyncFixture("mysql"), fixedTime);

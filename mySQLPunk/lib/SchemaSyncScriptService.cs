@@ -91,7 +91,9 @@ namespace mySQLPunk.lib
                 text.AppendLine();
             }
 
-            return new SchemaSyncScript(builder.Provider, text.ToString().TrimEnd() + Environment.NewLine,
+            // 語句內部以 \n 分行、AppendLine 用系統換行；統一成系統換行，另存的 .sql 才不會混用 CRLF／LF。
+            string normalized = text.ToString().TrimEnd().Replace("\r\n", "\n").Replace("\n", Environment.NewLine) + Environment.NewLine;
+            return new SchemaSyncScript(builder.Provider, normalized,
                 builder.Statements, builder.Manual, builder.Destructive);
         }
 
