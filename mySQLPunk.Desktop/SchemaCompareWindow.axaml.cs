@@ -26,6 +26,7 @@ public sealed partial class SchemaCompareWindow : Window
     private readonly Button _loadDatabasesButton;
     private readonly Button _compareButton;
     private readonly Button _exportButton;
+    private readonly Button _syncScriptButton;
     private readonly DataGrid _differenceGrid;
     private readonly TextBlock _summaryText;
     private readonly TextBlock _statusText;
@@ -59,6 +60,7 @@ public sealed partial class SchemaCompareWindow : Window
         _loadDatabasesButton = this.FindControl<Button>("LoadDatabasesButton")!;
         _compareButton = this.FindControl<Button>("CompareButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
+        _syncScriptButton = this.FindControl<Button>("SyncScriptButton")!;
         _differenceGrid = this.FindControl<DataGrid>("DifferenceGrid")!;
         _summaryText = this.FindControl<TextBlock>("SummaryText")!;
         _statusText = this.FindControl<TextBlock>("StatusText")!;
@@ -223,9 +225,15 @@ public sealed partial class SchemaCompareWindow : Window
                 cancellationToken);
 
             _result = SchemaComparisonService.Compare(
-                new SchemaComparisonSide(_sourceSession.Profile.Name, _sourceSession.Profile.ProviderDisplayName, _sourceDatabase),
+                new SchemaComparisonSide(_sourceSession.Profile.Name, _sourceSession.Profile.ProviderDisplayName, _sourceDatabase)
+                {
+                    Provider = _sourceSession.Profile.Provider
+                },
                 source,
-                new SchemaComparisonSide(targetSession.Profile.Name, targetSession.Profile.ProviderDisplayName, targetDatabase),
+                new SchemaComparisonSide(targetSession.Profile.Name, targetSession.Profile.ProviderDisplayName, targetDatabase)
+                {
+                    Provider = targetSession.Profile.Provider
+                },
                 target);
             _summaryText.Text = _result.Warnings.Count == 0
                 ? _result.Summary
@@ -296,6 +304,33 @@ public sealed partial class SchemaCompareWindow : Window
         });
     }
 
+    private async void SyncScript_Click(object? sender, RoutedEventArgs e)
+    {
+        var result = _result;
+        if (result is null)
+        {
+            return;
+        }
+
+        if (!SchemaSyncScriptService.CanGenerate(result, out var reason))
+        {
+            SetStatus(reason);
+            return;
+        }
+
+        try
+        {
+            var script = SchemaSyncScriptService.Generate(result);
+            var target = $"{result.Target.ConnectionName}（{result.Target.ProviderName}）／{result.Target.Database}";
+            SetStatus($"已產生同步 SQL：{script.Summary}");
+            await new SyncScriptWindow(script, target).ShowDialog(this);
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"無法產生同步 SQL：{exception.Message}");
+        }
+    }
+
     private void Close_Click(object? sender, RoutedEventArgs e) => Close();
 
     private async Task RunAsync(string status, Func<CancellationToken, Task> operation)
@@ -338,6 +373,7 @@ public sealed partial class SchemaCompareWindow : Window
         _targetDatabaseCombo.IsEnabled = !_busy && _targetDatabaseCombo.ItemsSource is not null;
         _compareButton.IsEnabled = !_busy && _targetDatabaseCombo.SelectedItem is not null;
         _exportButton.IsEnabled = !_busy && _result is not null;
+        _syncScriptButton.IsEnabled = !_busy && _result is not null;
     }
 
     private void SetStatus(string text) => _statusText.Text = text;

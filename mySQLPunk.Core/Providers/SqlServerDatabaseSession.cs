@@ -650,7 +650,8 @@ internal sealed partial class SqlServerDatabaseSession : AdoDatabaseSession
         var objects = new List<DatabaseObjectInfo>();
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            var kind = string.Equals(reader.GetString(2), "V", StringComparison.OrdinalIgnoreCase)
+            // sys.objects.type is char(2): views come back as "V " with a trailing space.
+            var kind = string.Equals(reader.GetString(2).Trim(), "V", StringComparison.OrdinalIgnoreCase)
                 ? DatabaseObjectKind.View
                 : DatabaseObjectKind.Table;
             objects.Add(new DatabaseObjectInfo(reader.GetString(0), reader.GetString(1), kind));

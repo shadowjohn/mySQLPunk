@@ -28,6 +28,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("執行計畫解析與安全規則", QueryPlanParsingAsync),
     ("資料字典結構與 HTML 匯出", DataDictionaryAsync),
     ("結構比較差異與報告", SchemaComparisonAsync),
+    ("同步 SQL 預覽產生與套用", SchemaSyncScriptAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
@@ -558,6 +559,10 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
     tests.Add(("MariaDB 實機連線、metadata 與 SQL", MariaDbLiveRoundTripAsync));
     tests.Add(("PostgreSQL 實機連線、metadata 與 SQL", PostgreSqlLiveRoundTripAsync));
     tests.Add(("SQL Server 實機連線、metadata 與 SQL", SqlServerLiveRoundTripAsync));
+    tests.Add(("MySQL 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.MySql)));
+    tests.Add(("MariaDB 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.MariaDb)));
+    tests.Add(("PostgreSQL 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.PostgreSql)));
+    tests.Add(("SQL Server 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.SqlServer)));
     if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_TLS_PORT")))
     {
         tests.Add(("PostgreSQL 實機 TLS 憑證驗證與 SSH Tunnel", PostgreSqlTlsLiveAsync));
@@ -2537,6 +2542,305 @@ static async Task SchemaComparisonAsync()
         new[] { Entry("", "secret", Column("id", "int", false, true, "")) });
     Assert(unreadable.Differences.Count == 0 && unreadable.IdenticalObjects == 0 && unreadable.Warnings.Single().Contains("permission denied", StringComparison.Ordinal),
         "無法讀取的物件應列為警告，不可宣稱一致");
+}
+
+static async Task<SchemaComparisonResult> CompareDatabasesAsync(
+    IDatabaseSession sourceSession,
+    string sourceDatabase,
+    IDatabaseSession targetSession,
+    string targetDatabase)
+{
+    var source = await DataDictionaryService.CollectAsync(sourceSession, sourceDatabase, await sourceSession.GetObjectsAsync(sourceDatabase));
+    var target = await DataDictionaryService.CollectAsync(targetSession, targetDatabase, await targetSession.GetObjectsAsync(targetDatabase));
+    Assert(source.All(entry => entry.Error is null) && target.All(entry => entry.Error is null),
+        "比較前兩邊結構都應可讀取：" + string.Join("；", source.Concat(target).Where(entry => entry.Error is not null).Select(entry => entry.Error)));
+    return SchemaComparisonService.Compare(
+        new SchemaComparisonSide("來源", sourceSession.Profile.ProviderDisplayName, sourceDatabase) { Provider = sourceSession.Profile.Provider },
+        source,
+        new SchemaComparisonSide("目標", targetSession.Profile.ProviderDisplayName, targetDatabase) { Provider = targetSession.Profile.Provider },
+        target);
+}
+
+/// <summary>
+/// Generates the sync script, applies every executable statement to the target, compares again and requires
+/// that only the commented-out destructive differences (extra column child.legacy, table target_only) remain.
+/// </summary>
+static async Task AssertSyncRoundTripAsync(
+    IDatabaseSession sourceSession,
+    string sourceDatabase,
+    IDatabaseSession targetSession,
+    string targetDatabase,
+    string label)
+{
+    var before = await CompareDatabasesAsync(sourceSession, sourceDatabase, targetSession, targetDatabase);
+    Assert(SchemaSyncScriptService.CanGenerate(before, out var reason), $"{label} 應可產生同步 SQL：{reason}");
+    var script = SchemaSyncScriptService.Generate(before);
+    Assert(script.Statements.Count > 0 && script.DestructiveItems.Count == 2 &&
+           script.Text.Contains("-- DROP TABLE", StringComparison.Ordinal) &&
+           script.Text.Contains("DROP COLUMN", StringComparison.Ordinal) &&
+           !script.Statements.Any(statement => statement.Contains("target_only", StringComparison.Ordinal) ||
+                                               statement.Contains("legacy", StringComparison.Ordinal)),
+        $"{label} 破壞性變更只能以註解出現：\n{script.Text}");
+    foreach (var statement in script.Statements)
+    {
+        try
+        {
+            await targetSession.ExecuteAsync(targetDatabase, statement);
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException($"{label} 套用同步語句失敗：{statement}\n{exception.Message}\n完整腳本：\n{script.Text}", exception);
+        }
+    }
+
+    var after = await CompareDatabasesAsync(sourceSession, sourceDatabase, targetSession, targetDatabase);
+    var remaining = after.Differences
+        .Select(difference => $"{difference.ObjectName}/{difference.Area}/{difference.ItemName}/{difference.Kind}")
+        .OrderBy(text => text, StringComparer.Ordinal)
+        .ToList();
+    Assert(after.Differences.Count == 2 &&
+           after.Differences.Any(difference => difference.ObjectName.EndsWith("target_only", StringComparison.Ordinal) &&
+                                               difference.Area == SchemaDifferenceArea.Object &&
+                                               difference.Kind == SchemaDifferenceKind.OnlyInTarget) &&
+           after.Differences.Any(difference => difference.ObjectName.EndsWith("child", StringComparison.Ordinal) &&
+                                               difference.ItemName == "legacy" &&
+                                               difference.Kind == SchemaDifferenceKind.OnlyInTarget),
+        $"{label} 套用後只應剩下被註解的破壞性差異，實際：{string.Join("；", remaining)}\n腳本：\n{script.Text}");
+}
+
+static async Task SchemaSyncScriptAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var sourceProfile = CreateSqliteProfile(Path.Combine(directory, "sync-source.db"));
+        var targetProfile = CreateSqliteProfile(Path.Combine(directory, "sync-target.db"));
+        using var sourceSession = DatabaseProviderFactory.Create(sourceProfile);
+        using var targetSession = DatabaseProviderFactory.Create(targetProfile);
+        await sourceSession.ExecuteAsync(sourceProfile.Database, """
+            CREATE TABLE parent (id INTEGER PRIMARY KEY, code TEXT NOT NULL, note TEXT);
+            CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id) ON DELETE CASCADE, amount REAL NOT NULL DEFAULT 0);
+            CREATE INDEX ix_child_parent ON child(parent_id);
+            CREATE TABLE extra_table (id INTEGER PRIMARY KEY, label TEXT, parent_id INTEGER REFERENCES parent(id));
+            CREATE INDEX ix_extra_label ON extra_table(label);
+            CREATE VIEW v_child AS SELECT id, parent_id, amount FROM child;
+            """);
+        await targetSession.ExecuteAsync(targetProfile.Database, """
+            CREATE TABLE parent (id INTEGER PRIMARY KEY, code TEXT NOT NULL);
+            CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id) ON DELETE CASCADE, amount REAL NOT NULL DEFAULT 0, legacy INTEGER);
+            CREATE TABLE target_only (id INTEGER PRIMARY KEY);
+            CREATE VIEW v_child AS SELECT id FROM child;
+            """);
+        await AssertSyncRoundTripAsync(sourceSession, sourceProfile.Database, targetSession, targetProfile.Database, "SQLite");
+
+        // SQLite cannot alter columns or add foreign keys: those become manual items, never statements.
+        await targetSession.ExecuteAsync(targetProfile.Database, "CREATE TABLE manual_alter (id INTEGER PRIMARY KEY, value TEXT);");
+        await sourceSession.ExecuteAsync(sourceProfile.Database, "CREATE TABLE manual_alter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL DEFAULT 1);");
+        var manual = SchemaSyncScriptService.Generate(await CompareDatabasesAsync(sourceSession, sourceProfile.Database, targetSession, targetProfile.Database));
+        Assert(manual.ManualItems.Any(item => item.Contains("manual_alter.value", StringComparison.Ordinal) && item.Contains("SQLite 不支援修改欄位", StringComparison.Ordinal)) &&
+               !manual.Statements.Any(statement => statement.Contains("manual_alter", StringComparison.Ordinal)),
+            "SQLite 的欄位修改只能列為手動項目");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+
+    static DataDictionaryEntry Table(string name, params StructureColumnInfo[] columns)
+    {
+        var info = new DatabaseObjectInfo("public", name, DatabaseObjectKind.Table);
+        return new DataDictionaryEntry(info, new TableStructureInfo(info, columns, Array.Empty<StructureIndexInfo>(), Array.Empty<StructureForeignKeyInfo>(), "", ""), null);
+    }
+
+    var id = new StructureColumnInfo(0, "id", "integer", false, true, "", "", "", "");
+    var hostileName = "evil\nDROP TABLE victim;\r\n-- ";
+    var injected = SchemaComparisonService.Compare(
+        new SchemaComparisonSide("a\nDROP TABLE header_escape;", "PostgreSQL", "db") { Provider = DatabaseProviderKind.PostgreSql },
+        new[] { Table("keep", id) },
+        new SchemaComparisonSide("b", "PostgreSQL", "db") { Provider = DatabaseProviderKind.PostgreSql },
+        new[] { Table("keep", id), Table(hostileName, id) });
+    var injectedScript = SchemaSyncScriptService.Generate(injected);
+    var executableLines = injectedScript.Text.Split('\n')
+        .Select(line => line.TrimEnd('\r'))
+        .Where(line => line.Length > 0 && !line.StartsWith("--", StringComparison.Ordinal) && line != "GO")
+        .ToList();
+    Assert(executableLines.Count == 0 && injectedScript.Statements.Count == 0,
+        "含換行的物件或連線名稱不可逃出 SQL 註解：\n" + injectedScript.Text);
+
+    var crossProvider = SchemaComparisonService.Compare(
+        new SchemaComparisonSide("a", "MySQL", "db") { Provider = DatabaseProviderKind.MySql },
+        new[] { Table("only_here", id) },
+        new SchemaComparisonSide("b", "PostgreSQL", "db") { Provider = DatabaseProviderKind.PostgreSql },
+        Array.Empty<DataDictionaryEntry>());
+    Assert(!SchemaSyncScriptService.CanGenerate(crossProvider, out var crossReason) && crossReason.Contains("不同類型", StringComparison.Ordinal),
+        "跨 provider 比較不可產生同步 SQL");
+    AssertThrows<InvalidOperationException>(() => SchemaSyncScriptService.Generate(crossProvider));
+    var identical = SchemaComparisonService.Compare(
+        new SchemaComparisonSide("a", "PostgreSQL", "db") { Provider = DatabaseProviderKind.PostgreSql },
+        new[] { Table("same", id) },
+        new SchemaComparisonSide("b", "PostgreSQL", "db") { Provider = DatabaseProviderKind.PostgreSql },
+        new[] { Table("same", id) });
+    Assert(!SchemaSyncScriptService.CanGenerate(identical, out _), "結構一致時不應產生同步 SQL");
+}
+
+static async Task SchemaSyncLiveAsync(LiveSyncTarget target)
+{
+    var suffix = Guid.NewGuid().ToString("N")[..8];
+    var sourceDatabase = $"mysqlpunk_sync_src_{suffix}";
+    var targetDatabase = $"mysqlpunk_sync_dst_{suffix}";
+    ConnectionProfile profile;
+    string adminDatabase;
+    string[] create;
+    Func<string, string> drop;
+    string[] sourceSql;
+    string[] targetSql;
+    switch (target)
+    {
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb:
+        {
+            var prefix = target == LiveSyncTarget.MySql ? "MYSQLPUNK_MYSQL" : "MYSQLPUNK_MARIADB";
+            profile = new ConnectionProfile
+            {
+                Name = target.ToString(),
+                Provider = DatabaseProviderKind.MySql,
+                Host = ReadRequiredEnvironment($"{prefix}_HOST"),
+                Port = ReadRequiredIntEnvironment($"{prefix}_PORT"),
+                Username = Environment.GetEnvironmentVariable($"{prefix}_USER") ?? "root",
+                Password = ReadRequiredEnvironment($"{prefix}_PASSWORD"),
+                TlsMode = ConnectionTlsMode.Disabled,
+                TimeoutSeconds = 20
+            };
+            adminDatabase = string.Empty;
+            create = new[] { $"CREATE DATABASE `{sourceDatabase}`", $"CREATE DATABASE `{targetDatabase}`" };
+            drop = name => $"DROP DATABASE IF EXISTS `{name}`";
+            sourceSql = new[]
+            {
+                "CREATE TABLE parent (id INT PRIMARY KEY, code VARCHAR(20) NOT NULL, note VARCHAR(50) NULL)",
+                "CREATE TABLE child (id INT PRIMARY KEY, parent_id INT NOT NULL, amount DECIMAL(10,2) NOT NULL DEFAULT 0, KEY ix_child_parent (parent_id), CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parent(id) ON DELETE CASCADE)",
+                "CREATE TABLE extra_table (id INT PRIMARY KEY AUTO_INCREMENT, label VARCHAR(30) COLLATE utf8mb4_bin NULL, parent_id INT NULL, KEY ix_extra_label (label), CONSTRAINT fk_extra_parent FOREIGN KEY (parent_id) REFERENCES parent(id))",
+                "INSERT INTO extra_table (label) VALUES ('seed')",
+                "CREATE VIEW v_child AS SELECT id, parent_id, amount FROM child"
+            };
+            targetSql = new[]
+            {
+                "CREATE TABLE parent (id INT PRIMARY KEY, code VARCHAR(10) NULL)",
+                "CREATE TABLE child (id INT PRIMARY KEY, parent_id INT NOT NULL, amount DECIMAL(10,2) NOT NULL DEFAULT 0, legacy INT NULL)",
+                "CREATE TABLE target_only (id INT PRIMARY KEY)",
+                "CREATE VIEW v_child AS SELECT id FROM child"
+            };
+            break;
+        }
+
+        case LiveSyncTarget.PostgreSql:
+            profile = new ConnectionProfile
+            {
+                Name = "PostgreSQL",
+                Provider = DatabaseProviderKind.PostgreSql,
+                Host = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_HOST"),
+                Port = ReadRequiredIntEnvironment("MYSQLPUNK_POSTGRES_PORT"),
+                Username = Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_USER") ?? "postgres",
+                Password = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_PASSWORD"),
+                Database = "postgres",
+                TlsMode = ConnectionTlsMode.Disabled,
+                TimeoutSeconds = 20
+            };
+            adminDatabase = "postgres";
+            create = new[] { $"CREATE DATABASE \"{sourceDatabase}\"", $"CREATE DATABASE \"{targetDatabase}\"" };
+            drop = name => $"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)";
+            sourceSql = new[]
+            {
+                "CREATE TABLE parent (id INTEGER PRIMARY KEY, code VARCHAR(20) NOT NULL, note VARCHAR(50) NULL)",
+                "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL, amount NUMERIC(10,2) NOT NULL DEFAULT 0, CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parent(id) ON DELETE CASCADE)",
+                "CREATE INDEX ix_child_parent ON child (parent_id DESC)",
+                "CREATE TABLE extra_table (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, label TEXT COLLATE \"C\" NULL, parent_id INTEGER NULL REFERENCES parent(id), doubled INTEGER GENERATED ALWAYS AS (id * 2) STORED)",
+                "CREATE INDEX ix_extra_label ON extra_table (label) INCLUDE (parent_id)",
+                "CREATE VIEW v_child AS SELECT id, parent_id, amount FROM child"
+            };
+            targetSql = new[]
+            {
+                "CREATE TABLE parent (id INTEGER PRIMARY KEY, code VARCHAR(10) NULL)",
+                "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL, amount NUMERIC(10,2) NOT NULL DEFAULT 0, legacy INTEGER NULL)",
+                "CREATE TABLE target_only (id INTEGER PRIMARY KEY)",
+                "CREATE VIEW v_child AS SELECT id FROM child"
+            };
+            break;
+        default:
+            profile = new ConnectionProfile
+            {
+                Name = "SQL Server",
+                Provider = DatabaseProviderKind.SqlServer,
+                Host = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_HOST"),
+                Port = ReadRequiredIntEnvironment("MYSQLPUNK_SQLSERVER_PORT"),
+                Username = Environment.GetEnvironmentVariable("MYSQLPUNK_SQLSERVER_USER") ?? "sa",
+                Password = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_PASSWORD"),
+                Database = "master",
+                TlsMode = ConnectionTlsMode.Optional,
+                TimeoutSeconds = 30
+            };
+            adminDatabase = "master";
+            create = new[] { $"CREATE DATABASE [{sourceDatabase}]", $"CREATE DATABASE [{targetDatabase}]" };
+            drop = name => $"IF DB_ID(N'{name}') IS NOT NULL BEGIN ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{name}]; END";
+            sourceSql = new[]
+            {
+                "CREATE TABLE dbo.parent (id INT PRIMARY KEY, code VARCHAR(20) NOT NULL, note NVARCHAR(50) NULL)",
+                "CREATE TABLE dbo.child (id INT PRIMARY KEY, parent_id INT NOT NULL, amount DECIMAL(10,2) NOT NULL DEFAULT 0, CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES dbo.parent(id) ON DELETE CASCADE)",
+                "CREATE INDEX ix_child_parent ON dbo.child (parent_id DESC)",
+                "CREATE TABLE dbo.extra_table (id INT IDENTITY(1,1) PRIMARY KEY, label NVARCHAR(30) COLLATE Latin1_General_100_CI_AS NULL, parent_id INT NULL REFERENCES dbo.parent(id), doubled AS (id * 2))",
+                "CREATE INDEX ix_extra_label ON dbo.extra_table (label) INCLUDE (parent_id)",
+                "CREATE VIEW dbo.v_child AS SELECT id, parent_id, amount FROM dbo.child"
+            };
+            targetSql = new[]
+            {
+                "CREATE TABLE dbo.parent (id INT PRIMARY KEY, code VARCHAR(10) NULL)",
+                "CREATE TABLE dbo.child (id INT PRIMARY KEY, parent_id INT NOT NULL, amount DECIMAL(10,2) NOT NULL DEFAULT 0, legacy INT NULL)",
+                "CREATE TABLE dbo.target_only (id INT PRIMARY KEY)",
+                "CREATE VIEW dbo.v_child AS SELECT id FROM dbo.child"
+            };
+            break;
+    }
+
+    using var session = DatabaseProviderFactory.Create(profile);
+    try
+    {
+        foreach (var statement in create)
+        {
+            await session.ExecuteAsync(adminDatabase, statement);
+        }
+
+        foreach (var statement in sourceSql)
+        {
+            await session.ExecuteAsync(sourceDatabase, statement);
+        }
+
+        foreach (var statement in targetSql)
+        {
+            await session.ExecuteAsync(targetDatabase, statement);
+        }
+
+        foreach (var database in new[] { sourceDatabase, targetDatabase })
+        {
+            var objects = await session.GetObjectsAsync(database);
+            Assert(objects.Single(item => item.Name == "v_child").Kind == DatabaseObjectKind.View &&
+                   objects.Single(item => item.Name == "child").Kind == DatabaseObjectKind.Table,
+                $"{profile.Name} 物件清單應把檢視表歸類為 View，資料表歸類為 Table");
+        }
+
+        await AssertSyncRoundTripAsync(session, sourceDatabase, session, targetDatabase, profile.Name);
+    }
+    finally
+    {
+        foreach (var name in new[] { sourceDatabase, targetDatabase })
+        {
+            try
+            {
+                await session.ExecuteAsync(adminDatabase, drop(name));
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"  （無法清除 {name}：{exception.Message}）");
+            }
+        }
+    }
 }
 
 static async Task SqliteLoadsMetadataAsync()
@@ -10055,4 +10359,12 @@ sealed record ThrowawaySshd(
 
         Process.Dispose();
     }
+}
+
+enum LiveSyncTarget
+{
+    MySql,
+    MariaDb,
+    PostgreSql,
+    SqlServer
 }

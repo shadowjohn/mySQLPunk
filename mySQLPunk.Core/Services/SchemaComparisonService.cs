@@ -45,7 +45,11 @@ public sealed record SchemaDifference(
     };
 }
 
-public sealed record SchemaComparisonSide(string ConnectionName, string ProviderName, string Database);
+public sealed record SchemaComparisonSide(string ConnectionName, string ProviderName, string Database)
+{
+    /// <summary>Provider of this side; required for generating a synchronization script.</summary>
+    public DatabaseProviderKind? Provider { get; init; }
+}
 
 public sealed class SchemaComparisonResult
 {
@@ -58,6 +62,10 @@ public sealed class SchemaComparisonResult
     public int IdenticalObjects { get; init; }
 
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<DataDictionaryEntry> SourceEntries { get; init; } = Array.Empty<DataDictionaryEntry>();
+
+    public IReadOnlyList<DataDictionaryEntry> TargetEntries { get; init; } = Array.Empty<DataDictionaryEntry>();
 
     public int OnlyInSourceObjects => Differences.Count(d => d.Area == SchemaDifferenceArea.Object && d.Kind == SchemaDifferenceKind.OnlyInSource);
 
@@ -150,7 +158,9 @@ public static class SchemaComparisonService
             Target = targetSide,
             Differences = differences,
             IdenticalObjects = identical,
-            Warnings = warnings
+            Warnings = warnings,
+            SourceEntries = source,
+            TargetEntries = target
         };
     }
 
