@@ -81,6 +81,7 @@ public static partial class SmokeTests
         Run("MongoDB aggregation pipeline designer", AssertMongoPipelineSemantics, ref passed);
         Run("Visual query builder", TestQueryBuilder, ref passed);
         Run("Data transfer with checkpoints and verification", TestDataTransfer, ref passed);
+        Run("Automation import, transfer, retries and webhook", TestAutomationJobs, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12883,6 +12884,26 @@ public static partial class SmokeTests
                     AssertContains(form.BuildReport(), "extra_copy", "The report should list the transferred table.");
                 }
             }
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void TestAutomationJobs()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-automation-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            AssertAutomationSemantics(path =>
+            {
+                my_sqlite db = new my_sqlite();
+                db.SetConn("Data Source=" + path + ";Version=3;");
+                db.Open();
+                return db;
+            }, dir);
         }
         finally
         {

@@ -274,6 +274,146 @@ public static partial class SmokeTests
     }
 
     /// <summary>
+    /// Automation jobs: CSV import (quotes, embedded delimiters／newlines, empty → NULL, typed values), a failed import
+    /// after a written batch is not retried, a transfer job resumes via retry, the webhook receives the result JSON,
+    /// and validation rejects unsafe webhooks, unconfirmed replace transfers and malformed table lines.
+    /// </summary>
+    public static void AssertAutomationSemantics(Func<string, IDatabase> openSqlite, string directory)
+    {
+        Directory.CreateDirectory(directory);
+        ScheduledJobStore store = new ScheduledJobStore(Path.Combine(directory, "automation"));
+        string sourcePath = Path.Combine(directory, "auto-source.db");
+        string targetPath = Path.Combine(directory, "auto-target.db");
+        using (IDatabase setup = openSqlite(sourcePath))
+        {
+            AssertEquals("OK", setup.ExecSQL("CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT, note TEXT, score NUMERIC)")["status"], "Import fixture");
+            AssertEquals("OK", setup.ExecSQL("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)")["status"], "Transfer fixture");
+            for (int index = 1; index <= 12; index++) setup.ExecSQL("INSERT INTO customers VALUES (" + index + ", 'c" + index + "')");
+        }
+
+        string csv = Path.Combine(directory, "people.csv");
+        File.WriteAllText(csv, "id,name,note,score\r\n1,Alice,\"hello, world\",1.5\r\n2,\"Bob \"\"B\"\"\",\"line1\nline2\",\r\n3,Carol,,7\r\n", new System.Text.UTF8Encoding(false));
+        ScheduledJobDefinition import = new ScheduledJobDefinition
+        {
+            Name = "import people",
+            Type = ScheduledJobType.Import,
+            ConnectionName = "local",
+            DatabaseName = "main",
+            InputPath = csv,
+            TargetTable = "people",
+            RetryCount = 2,
+            RetryDelaySeconds = 0
+        };
+        ScheduledJobRunRecord imported = ScheduledJobExecutionService.Execute(import, store, () => openSqlite(sourcePath), null, _ => { });
+        AssertEquals("Success", imported.Status, "CSV import should succeed: " + imported.Message);
+        AssertEquals("3", imported.Rows.ToString(), "Every CSV row should be imported.");
+        using (IDatabase check = openSqlite(sourcePath))
+        {
+            System.Data.DataTable rows = check.SelectSQL("SELECT name, note, score FROM people ORDER BY id");
+            AssertEquals("hello, world", Convert.ToString(rows.Rows[0]["note"]), "Quoted delimiters should stay in the value.");
+            AssertEquals("Bob \"B\"", Convert.ToString(rows.Rows[1]["name"]), "Escaped quotes should be unescaped.");
+            AssertEquals("line1\nline2", Convert.ToString(rows.Rows[1]["note"]), "Quoted newlines should stay in the value.");
+            Assert(rows.Rows[1]["score"] is DBNull && rows.Rows[2]["note"] is DBNull, "Empty fields should be NULL.");
+        }
+
+        System.Text.StringBuilder big = new System.Text.StringBuilder("id,name\n");
+        for (int index = 100; index < 700; index++) big.Append(index == 650 ? "not-a-number" : index.ToString()).Append(",n").Append(index).Append('\n');
+        File.WriteAllText(csv, big.ToString());
+        ScheduledJobRunRecord partial = ScheduledJobExecutionService.Execute(import, store, () => openSqlite(sourcePath), null, _ => { });
+        Assert(partial.Status == "Failed" && partial.Attempts == 1 && partial.Message.Contains("500"), "A failure after a written batch must not be retried: " + partial.Message);
+
+        int opens = 0;
+        ScheduledJobDefinition transfer = new ScheduledJobDefinition
+        {
+            Name = "copy customers",
+            Type = ScheduledJobType.Transfer,
+            ConnectionName = "local",
+            DatabaseName = "main",
+            TargetConnectionName = "backup",
+            TargetDatabaseName = "main",
+            TransferTables = ScheduledTransferTableText.Parse("customers => customers_copy : create"),
+            RetryCount = 1,
+            RetryDelaySeconds = 0
+        };
+        System.Net.Sockets.TcpListener listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        string received = null;
+        System.Threading.Thread server = new System.Threading.Thread(() =>
+        {
+            using (System.Net.Sockets.TcpClient client = listener.AcceptTcpClient())
+            using (System.Net.Sockets.NetworkStream stream = client.GetStream())
+            {
+                byte[] buffer = new byte[16384];
+                MemoryStream request = new MemoryStream();
+                while (true)
+                {
+                    int read = stream.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+                    request.Write(buffer, 0, read);
+                    // Content-Length 是位元組數；訊息含中文時字元數會比較少。
+                    string headers = System.Text.Encoding.ASCII.GetString(request.ToArray());
+                    int split = headers.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+                    if (split < 0) continue;
+                    System.Text.RegularExpressions.Match length = System.Text.RegularExpressions.Regex.Match(headers.Substring(0, split), "Content-Length: (\\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (length.Success && request.Length - split - 4 >= int.Parse(length.Groups[1].Value)) break;
+                }
+                received = System.Text.Encoding.UTF8.GetString(request.ToArray());
+                byte[] response = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                stream.Write(response, 0, response.Length);
+            }
+        });
+        server.IsBackground = true;
+        server.Start();
+        transfer.WebhookUrl = "http://127.0.0.1:" + ((System.Net.IPEndPoint)listener.LocalEndpoint).Port + "/hook";
+        ScheduledJobRunRecord copied = ScheduledJobExecutionService.Execute(transfer, store, () => openSqlite(sourcePath), () =>
+        {
+            if (++opens == 1) throw new System.IO.IOException("target temporarily unavailable");
+            return openSqlite(targetPath);
+        }, _ => { });
+        server.Join(10000);
+        listener.Stop();
+        Assert(copied.Status == "Success" && copied.Attempts == 2 && copied.Rows == 12, "The transfer job should succeed on its retry: " + copied.Message);
+        using (IDatabase check = openSqlite(targetPath)) AssertEquals("12", check.CountRows("main", "customers_copy").ToString(), "The transfer job should copy every row.");
+        Assert(received != null && received.StartsWith("POST /hook", StringComparison.Ordinal) && received.Contains("\"status\":\"Success\"") &&
+               received.Contains("\"attempts\":2") && received.Contains("\"rows\":12"), "The webhook should receive the run result: " + received);
+        AssertContains(copied.Notification ?? string.Empty, "204", "The run record should keep the webhook outcome.");
+
+        Func<Action<ScheduledJobDefinition>, bool> rejects = change =>
+        {
+            ScheduledJobDefinition candidate = new ScheduledJobDefinition
+            {
+                Name = "x",
+                Type = ScheduledJobType.Transfer,
+                ConnectionName = "a",
+                DatabaseName = "db",
+                TargetConnectionName = "b",
+                TargetDatabaseName = "db2"
+            };
+            change(candidate);
+            try
+            {
+                ScheduledJobValidator.Validate(candidate);
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+        };
+        Assert(!rejects(job => { }), "A plain transfer job should validate.");
+        Assert(rejects(job => job.WebhookUrl = "http://example.com/hook"), "Plain http webhooks outside localhost must be rejected.");
+        Assert(rejects(job => job.WebhookUrl = "https://user:secret@example.com/hook"), "Webhooks with credentials must be rejected.");
+        Assert(!rejects(job => job.WebhookUrl = "https://example.com/hook"), "https webhooks should be accepted.");
+        Assert(rejects(job => job.TransferTables = ScheduledTransferTableText.Parse("a : replace")), "Replace transfers need the typed confirmation.");
+        Assert(!rejects(job => { job.TransferTables = ScheduledTransferTableText.Parse("a : replace"); job.ConfirmedTargetDatabase = "db2"; }), "A confirmed replace should validate.");
+        Assert(rejects(job => job.RetryCount = 9), "Retry counts above 5 must be rejected.");
+        Assert(rejects(job => { job.ConnectionName = "b"; job.DatabaseName = "db2"; }), "Transferring a database onto itself must be rejected.");
+        AssertEquals("a => b : create" + Environment.NewLine + "c : replace", ScheduledTransferTableText.Format(ScheduledTransferTableText.Parse("a => b : create\n\n# note\nc:replace")),
+            "Table lines should round-trip.");
+        AssertThrows<FormatException>(() => ScheduledTransferTableText.Parse("a => b : sideways"), "Unknown modes must be rejected.");
+    }
+
+    /// <summary>
     /// DataTransferService between two SQLite databases: append with automatic column mapping, create new, replace
     /// data, a stop in the middle of a table with a checkpoint and resume, row-count verification, the no-primary-key
     /// resume guard, a create-new conflict with continue-on-error, and HTML escaping in the report.

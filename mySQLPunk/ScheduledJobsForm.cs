@@ -442,6 +442,8 @@ namespace mySQLPunk
         {
             if (type == ScheduledJobType.Export) return Localization.T("Automation.TypeExport");
             if (type == ScheduledJobType.Backup) return Localization.T("Automation.TypeBackup");
+            if (type == ScheduledJobType.Import) return Localization.T("Automation.TypeImport");
+            if (type == ScheduledJobType.Transfer) return Localization.T("Automation.TypeTransfer");
             return Localization.T("Automation.TypeQuery");
         }
 
@@ -475,14 +477,30 @@ namespace mySQLPunk
         private readonly Button browseButton;
         private readonly TextBox sqlBox;
         private readonly Label hintLabel;
+        private readonly TabControl detailTabs;
+        private readonly TabPage sqlPage;
+        private readonly TabPage importPage;
+        private readonly TabPage transferPage;
+        private readonly TextBox inputBox;
+        private readonly TextBox targetTableBox;
+        private readonly ComboBox delimiterBox;
+        private readonly CheckBox headerBox;
+        private readonly ComboBox targetConnectionBox;
+        private readonly TextBox targetDatabaseBox;
+        private readonly TextBox transferTablesBox;
+        private readonly NumericUpDown retryCountBox;
+        private readonly NumericUpDown retryDelayBox;
+        private readonly TextBox webhookBox;
+        private readonly CheckBox failureOnlyBox;
+        private static readonly string[] Delimiters = { ",", ";", "\\t", "|" };
         private bool loading;
 
         public ScheduledJobEditForm(ScheduledJobDefinition job, string initialProfileName)
         {
             original = Clone(job);
             Text = job == null ? Localization.T("Automation.NewTitle") : Localization.T("Automation.EditTitle");
-            Width = 780;
-            Height = 680;
+            Width = 820;
+            Height = 720;
             MinimumSize = new Size(640, 560);
             StartPosition = FormStartPosition.CenterParent;
 
@@ -504,7 +522,7 @@ namespace mySQLPunk
             nameBox = AddTextBox(root, 0, Localization.T("Automation.Name"));
             AddLabel(root, 1, Localization.T("Automation.Type"));
             typeBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = FieldMargin() };
-            typeBox.Items.AddRange(new object[] { ScheduledJobType.Query, ScheduledJobType.Export, ScheduledJobType.Backup });
+            typeBox.Items.AddRange(new object[] { ScheduledJobType.Query, ScheduledJobType.Export, ScheduledJobType.Backup, ScheduledJobType.Import, ScheduledJobType.Transfer });
             Control typeField = UiField.Wrap(typeBox);
             typeField.Dock = DockStyle.Fill;
             typeField.Margin = FieldMargin();
@@ -557,7 +575,6 @@ namespace mySQLPunk
             root.Controls.Add(outputField, 1, 7);
             root.Controls.Add(browseButton, 2, 7);
 
-            AddLabel(root, 8, "SQL");
             sqlBox = new TextBox
             {
                 Dock = DockStyle.Fill,
@@ -571,9 +588,60 @@ namespace mySQLPunk
             };
             Control sqlField = UiField.Wrap(sqlBox);
             sqlField.Dock = DockStyle.Fill;
-            sqlField.Margin = FieldMargin();
-            root.Controls.Add(sqlField, 1, 8);
-            root.SetColumnSpan(sqlField, 2);
+            sqlPage = new TabPage("SQL");
+            sqlPage.Controls.Add(sqlField);
+
+            TableLayoutPanel importPanel = DetailPanel(4);
+            inputBox = AddDetailText(importPanel, 0, Localization.T("Automation.InputPath"));
+            Button browseInput = new Button { AutoSize = true, Text = Localization.T("Common.Browse"), Margin = new Padding(6, 3, 0, 5) };
+            importPanel.Controls.Add(browseInput, 2, 0);
+            targetTableBox = AddDetailText(importPanel, 1, Localization.T("Automation.TargetTable"));
+            delimiterBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 90, Margin = FieldMargin() };
+            delimiterBox.Items.AddRange(new object[] { ", (comma)", "; (semicolon)", "Tab", "| (pipe)" });
+            AddLabel(importPanel, 2, Localization.T("Automation.Delimiter"));
+            importPanel.Controls.Add(delimiterBox, 1, 2);
+            headerBox = new CheckBox { AutoSize = true, Text = Localization.T("Automation.HasHeader"), Margin = FieldMargin() };
+            importPanel.Controls.Add(headerBox, 1, 3);
+            importPage = new TabPage(Localization.T("Automation.Section.Import"));
+            importPage.Controls.Add(importPanel);
+
+            TableLayoutPanel transferPanel = DetailPanel(4);
+            AddLabel(transferPanel, 0, Localization.T("Automation.TargetConnection"));
+            targetConnectionBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = "DisplayName", Margin = FieldMargin() };
+            transferPanel.Controls.Add(targetConnectionBox, 1, 0);
+            transferPanel.SetColumnSpan(targetConnectionBox, 2);
+            targetDatabaseBox = AddDetailText(transferPanel, 1, Localization.T("Automation.TargetDatabase"));
+            AddLabel(transferPanel, 2, Localization.T("Automation.TransferTables"));
+            transferTablesBox = new TextBox { Dock = DockStyle.Fill, Multiline = true, AcceptsReturn = true, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 10f), Margin = FieldMargin() };
+            transferPanel.Controls.Add(transferTablesBox, 1, 2);
+            transferPanel.SetColumnSpan(transferTablesBox, 2);
+            transferPanel.RowStyles[2] = new RowStyle(SizeType.Percent, 100);
+            Label transferHint = new Label { AutoSize = true, ForeColor = Color.Gray, Text = Localization.T("Automation.TransferTablesHint"), Margin = new Padding(0, 3, 0, 3) };
+            transferPanel.Controls.Add(transferHint, 1, 3);
+            transferPanel.SetColumnSpan(transferHint, 2);
+            transferPage = new TabPage(Localization.T("Automation.Section.Transfer"));
+            transferPage.Controls.Add(transferPanel);
+
+            TableLayoutPanel reliabilityPanel = DetailPanel(3);
+            AddLabel(reliabilityPanel, 0, Localization.T("Automation.RetryCount"));
+            FlowLayoutPanel retryFlow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = FieldMargin() };
+            retryCountBox = new NumericUpDown { Minimum = 0, Maximum = 5, Width = 60 };
+            retryDelayBox = new NumericUpDown { Minimum = 0, Maximum = 3600, Width = 80, Increment = 30 };
+            retryFlow.Controls.Add(retryCountBox);
+            retryFlow.Controls.Add(new Label { AutoSize = true, Text = Localization.T("Automation.RetryDelay"), Margin = new Padding(14, 6, 6, 0) });
+            retryFlow.Controls.Add(retryDelayBox);
+            reliabilityPanel.Controls.Add(retryFlow, 1, 0);
+            webhookBox = AddDetailText(reliabilityPanel, 1, Localization.T("Automation.Webhook"));
+            failureOnlyBox = new CheckBox { AutoSize = true, Text = Localization.T("Automation.NotifyOnlyOnFailure"), Margin = FieldMargin() };
+            reliabilityPanel.Controls.Add(failureOnlyBox, 1, 2);
+            TabPage reliabilityPage = new TabPage(Localization.T("Automation.Section.Reliability"));
+            reliabilityPage.Controls.Add(reliabilityPanel);
+
+            detailTabs = new TabControl { Dock = DockStyle.Fill, Margin = FieldMargin() };
+            detailTabs.TabPages.AddRange(new[] { sqlPage, importPage, transferPage, reliabilityPage });
+            root.Controls.Add(detailTabs, 0, 8);
+            root.SetColumnSpan(detailTabs, 3);
+            browseInput.Click += (sender, args) => BrowseInputPath();
 
             hintLabel = new Label
             {
@@ -606,7 +674,7 @@ namespace mySQLPunk
             saveButton.Click += (sender, args) => SaveAndClose();
             browseButton.Click += (sender, args) => BrowseOutputPath();
             typeBox.SelectedIndexChanged += (sender, args) => UpdateTypeState(true);
-            profileBox.SelectedIndexChanged += (sender, args) => LoadConnections(null);
+            profileBox.SelectedIndexChanged += (sender, args) => { LoadConnections(null); LoadTargetConnections(null); };
             connectionBox.SelectedIndexChanged += (sender, args) => ApplyInitialDatabase();
             scheduleBox.CheckedChanged += (sender, args) => dailyTimePicker.Enabled = scheduleBox.Checked;
 
@@ -647,6 +715,18 @@ namespace mySQLPunk
                 formatBox.SelectedItem = value.ExportFormat;
                 outputBox.Text = value.OutputPath ?? string.Empty;
                 sqlBox.Text = value.Sql ?? string.Empty;
+                inputBox.Text = value.InputPath ?? string.Empty;
+                targetTableBox.Text = value.TargetTable ?? string.Empty;
+                int delimiter = Array.IndexOf(Delimiters, value.CsvDelimiter ?? ",");
+                delimiterBox.SelectedIndex = delimiter < 0 ? 0 : delimiter;
+                headerBox.Checked = value.CsvHasHeader;
+                LoadTargetConnections(value.TargetConnectionName);
+                targetDatabaseBox.Text = value.TargetDatabaseName ?? string.Empty;
+                transferTablesBox.Text = ScheduledTransferTableText.Format(value.TransferTables);
+                retryCountBox.Value = Math.Max(0, Math.Min(5, value.RetryCount));
+                retryDelayBox.Value = Math.Max(0, Math.Min(3600, value.RetryDelaySeconds));
+                webhookBox.Text = value.WebhookUrl ?? string.Empty;
+                failureOnlyBox.Checked = value.NotifyOnlyOnFailure;
             }
             finally
             {
@@ -680,6 +760,36 @@ namespace mySQLPunk
             }
         }
 
+        private void LoadTargetConnections(string selectedName)
+        {
+            if (profileBox.SelectedItem == null) return;
+            string prior = selectedName;
+            if (string.IsNullOrWhiteSpace(prior) && targetConnectionBox.SelectedItem is ScheduledJobConnectionOption current) prior = current.Name;
+            targetConnectionBox.Items.Clear();
+            try
+            {
+                foreach (ScheduledJobConnectionOption option in AutomationConnectionProfileService.LoadConnectionOptions(Convert.ToString(profileBox.SelectedItem)))
+                {
+                    targetConnectionBox.Items.Add(option);
+                }
+                ScheduledJobConnectionOption selected = targetConnectionBox.Items.Cast<ScheduledJobConnectionOption>()
+                    .FirstOrDefault(option => string.Equals(option.Name, prior, StringComparison.OrdinalIgnoreCase));
+                if (selected != null) targetConnectionBox.SelectedItem = selected;
+            }
+            catch (Exception)
+            {
+                // 連線清單讀取失敗已由主要連線欄位顯示原因。
+            }
+        }
+
+        private void BrowseInputPath()
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog { Title = Localization.T("Automation.SelectInputPath"), Filter = "CSV (*.csv;*.txt)|*.csv;*.txt|*.*|*.*" })
+            {
+                if (dialog.ShowDialog(this) == DialogResult.OK) inputBox.Text = dialog.FileName;
+            }
+        }
+
         private void ApplyInitialDatabase()
         {
             if (loading || !string.IsNullOrWhiteSpace(databaseBox.Text)) return;
@@ -692,11 +802,14 @@ namespace mySQLPunk
             ScheduledJobType type = typeBox.SelectedItem is ScheduledJobType ? (ScheduledJobType)typeBox.SelectedItem : ScheduledJobType.Query;
             bool export = type == ScheduledJobType.Export;
             bool output = export || type == ScheduledJobType.Backup;
-            bool sql = type != ScheduledJobType.Backup;
+            bool sql = type == ScheduledJobType.Query || type == ScheduledJobType.Export;
             formatBox.Enabled = export;
             outputBox.Enabled = output;
             browseButton.Enabled = output;
             sqlBox.Enabled = sql;
+            if (type == ScheduledJobType.Import) detailTabs.SelectedTab = importPage;
+            else if (type == ScheduledJobType.Transfer) detailTabs.SelectedTab = transferPage;
+            else if (sql) detailTabs.SelectedTab = sqlPage;
             if (provideDefaultOutput && output && string.IsNullOrWhiteSpace(outputBox.Text))
             {
                 outputBox.Text = type == ScheduledJobType.Backup
@@ -744,7 +857,28 @@ namespace mySQLPunk
                     ? (QueryResultExportFormat)formatBox.SelectedItem
                     : QueryResultExportFormat.Csv;
                 value.OutputPath = outputBox.Text;
-                value.Sql = sqlBox.Text;
+                value.Sql = value.Type == ScheduledJobType.Query || value.Type == ScheduledJobType.Export ? sqlBox.Text : string.Empty;
+                value.InputPath = inputBox.Text.Trim();
+                value.TargetTable = targetTableBox.Text.Trim();
+                value.CsvDelimiter = Delimiters[Math.Max(0, delimiterBox.SelectedIndex)];
+                value.CsvHasHeader = headerBox.Checked;
+                ScheduledJobConnectionOption targetConnection = targetConnectionBox.SelectedItem as ScheduledJobConnectionOption;
+                value.TargetConnectionName = targetConnection == null ? string.Empty : targetConnection.Name;
+                value.TargetDatabaseName = targetDatabaseBox.Text.Trim();
+                value.TransferTables = value.Type == ScheduledJobType.Transfer ? ScheduledTransferTableText.Parse(transferTablesBox.Text) : new List<ScheduledTransferTable>();
+                value.RetryCount = (int)retryCountBox.Value;
+                value.RetryDelaySeconds = (int)retryDelayBox.Value;
+                value.WebhookUrl = webhookBox.Text.Trim();
+                value.NotifyOnlyOnFailure = failureOnlyBox.Checked;
+                List<ScheduledTransferTable> replaced = value.TransferTables.Where(table => table.Mode == TransferMode.ReplaceData).ToList();
+                if (value.Type == ScheduledJobType.Transfer && replaced.Count > 0 &&
+                    !string.Equals(value.ConfirmedTargetDatabase, value.TargetDatabaseName, StringComparison.Ordinal))
+                {
+                    string typed = PromptConfirmation(Localization.Format("Automation.ConfirmReplace", value.TargetDatabaseName,
+                        string.Join(", ", replaced.Select(table => table.Target))));
+                    if (!string.Equals(typed, value.TargetDatabaseName, StringComparison.Ordinal)) return;
+                    value.ConfirmedTargetDatabase = typed;
+                }
                 ScheduledJobValidator.Validate(value);
                 Job = value;
                 DialogResult = DialogResult.OK;
@@ -774,8 +908,60 @@ namespace mySQLPunk
                 DailyTime = value.DailyTime,
                 ScheduleEnabled = value.ScheduleEnabled,
                 CreatedUtc = value.CreatedUtc,
-                UpdatedUtc = value.UpdatedUtc
+                UpdatedUtc = value.UpdatedUtc,
+                InputPath = value.InputPath,
+                TargetTable = value.TargetTable,
+                CsvDelimiter = value.CsvDelimiter,
+                CsvHasHeader = value.CsvHasHeader,
+                TargetConnectionName = value.TargetConnectionName,
+                TargetDatabaseName = value.TargetDatabaseName,
+                TransferTables = (value.TransferTables ?? new List<ScheduledTransferTable>())
+                    .Select(table => new ScheduledTransferTable { Source = table.Source, Target = table.Target, Mode = table.Mode }).ToList(),
+                ConfirmedTargetDatabase = value.ConfirmedTargetDatabase,
+                RetryCount = value.RetryCount,
+                RetryDelaySeconds = value.RetryDelaySeconds,
+                WebhookUrl = value.WebhookUrl,
+                NotifyOnlyOnFailure = value.NotifyOnlyOnFailure
             };
+        }
+
+        private string PromptConfirmation(string message)
+        {
+            using (Form dialog = new Form { Text = Text, Width = 560, Height = 260, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent })
+            {
+                Label label = new Label { Dock = DockStyle.Fill, Padding = new Padding(12, 12, 12, 0), Text = message };
+                TextBox input = new TextBox { Dock = DockStyle.Bottom };
+                Button ok = new Button { Text = Localization.T("Common.OK"), DialogResult = DialogResult.OK, AutoSize = true };
+                Button cancel = new Button { Text = Localization.T("Common.Cancel"), DialogResult = DialogResult.Cancel, AutoSize = true };
+                FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 40, Padding = new Padding(8) };
+                buttons.Controls.Add(ok);
+                buttons.Controls.Add(cancel);
+                dialog.Controls.Add(label);
+                dialog.Controls.Add(input);
+                dialog.Controls.Add(buttons);
+                dialog.AcceptButton = ok;
+                dialog.CancelButton = cancel;
+                ThemeManager.ApplyTo(dialog);
+                return dialog.ShowDialog(this) == DialogResult.OK ? input.Text : null;
+            }
+        }
+
+        private static TableLayoutPanel DetailPanel(int rows)
+        {
+            TableLayoutPanel panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = rows, Padding = new Padding(8) };
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            for (int row = 0; row < rows; row++) panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            return panel;
+        }
+
+        private static TextBox AddDetailText(TableLayoutPanel panel, int row, string label)
+        {
+            AddLabel(panel, row, label);
+            TextBox box = new TextBox { Dock = DockStyle.Fill, Margin = FieldMargin() };
+            panel.Controls.Add(box, 1, row);
+            return box;
         }
 
         private static TextBox AddTextBox(TableLayoutPanel panel, int row, string label)

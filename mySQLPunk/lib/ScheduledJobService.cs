@@ -17,7 +17,62 @@ namespace mySQLPunk.lib
     {
         Query,
         Export,
-        Backup
+        Backup,
+        Import,
+        Transfer
+    }
+
+    /// <summary>傳輸作業的一張表；Mode 為 create／append／replace。</summary>
+    public sealed class ScheduledTransferTable
+    {
+        public string Source { get; set; }
+        public string Target { get; set; }
+        [JsonConverter(typeof(StringEnumConverter))]
+        public TransferMode Mode { get; set; }
+    }
+
+    /// <summary>傳輸作業表格清單的文字格式：每行「來源 => 目標 : create／append／replace」，目標與方式可省略。</summary>
+    public static class ScheduledTransferTableText
+    {
+        public static List<ScheduledTransferTable> Parse(string text)
+        {
+            List<ScheduledTransferTable> tables = new List<ScheduledTransferTable>();
+            string[] lines = (text ?? string.Empty).Replace("\r\n", "\n").Split('\n');
+            for (int index = 0; index < lines.Length; index++)
+            {
+                string line = lines[index].Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+                TransferMode mode = TransferMode.Append;
+                bool explicitMode = false;
+                int colon = line.LastIndexOf(':');
+                if (colon > 0)
+                {
+                    string word = line.Substring(colon + 1).Trim().ToLowerInvariant();
+                    if (word == "create" || word == "建立") mode = TransferMode.CreateNew;
+                    else if (word == "append" || word == "附加") mode = TransferMode.Append;
+                    else if (word == "replace" || word == "取代") mode = TransferMode.ReplaceData;
+                    else throw new FormatException(Localization.Format("Automation.TransferLineInvalid", index + 1));
+                    explicitMode = true;
+                    line = line.Substring(0, colon).Trim();
+                }
+                string[] parts = line.Split(new[] { "=>" }, StringSplitOptions.None);
+                if (parts.Length > 2 || parts[0].Trim().Length == 0) throw new FormatException(Localization.Format("Automation.TransferLineInvalid", index + 1));
+                tables.Add(new ScheduledTransferTable
+                {
+                    Source = parts[0].Trim(),
+                    Target = parts.Length == 2 && parts[1].Trim().Length > 0 ? parts[1].Trim() : parts[0].Trim(),
+                    Mode = explicitMode ? mode : TransferMode.Append
+                });
+            }
+            return tables;
+        }
+
+        public static string Format(IEnumerable<ScheduledTransferTable> tables)
+        {
+            return string.Join(Environment.NewLine, (tables ?? Enumerable.Empty<ScheduledTransferTable>()).Select(table =>
+                table.Source + (string.Equals(table.Source, table.Target, StringComparison.Ordinal) ? string.Empty : " => " + table.Target) + " : " +
+                (table.Mode == TransferMode.CreateNew ? "create" : table.Mode == TransferMode.ReplaceData ? "replace" : "append")));
+        }
     }
 
     public sealed class ScheduledJobDefinition
@@ -39,6 +94,27 @@ namespace mySQLPunk.lib
         public bool ScheduleEnabled { get; set; }
         public string CreatedUtc { get; set; }
         public string UpdatedUtc { get; set; }
+
+        /// <summary>匯入：CSV 路徑（可用 {yyyyMMdd} 等替代文字）、目標資料表與格式。</summary>
+        public string InputPath { get; set; }
+        public string TargetTable { get; set; }
+        public string CsvDelimiter { get; set; } = ",";
+        public bool CsvHasHeader { get; set; } = true;
+
+        /// <summary>傳輸：目標連線（同一個設定檔）與資料表清單；空清單代表來源所有資料表。</summary>
+        public string TargetConnectionName { get; set; }
+        public string TargetDatabaseName { get; set; }
+        public List<ScheduledTransferTable> TransferTables { get; set; } = new List<ScheduledTransferTable>();
+        /// <summary>含「取代資料」時必須等於目標資料庫名稱，代表建立作業時已確認會刪除目標資料。</summary>
+        public string ConfirmedTargetDatabase { get; set; }
+
+        /// <summary>失敗後重試次數（0–5）與間隔秒數（0–3600）。</summary>
+        public int RetryCount { get; set; }
+        public int RetryDelaySeconds { get; set; } = 60;
+
+        /// <summary>完成後 POST 執行結果 JSON 的網址；https，或僅限本機的 http。</summary>
+        public string WebhookUrl { get; set; }
+        public bool NotifyOnlyOnFailure { get; set; }
     }
 
     public sealed class ScheduledJobConnectionOption
@@ -78,6 +154,8 @@ namespace mySQLPunk.lib
         public string OutputPath { get; set; }
         public string Message { get; set; }
         public string RecordPath { get; set; }
+        public int Attempts { get; set; }
+        public string Notification { get; set; }
     }
 
     public sealed class ScheduledJobStoreSnapshot
@@ -154,6 +232,57 @@ namespace mySQLPunk.lib
             if (job.Type == ScheduledJobType.Export && !Enum.IsDefined(typeof(QueryResultExportFormat), job.ExportFormat))
             {
                 throw new InvalidOperationException(Localization.T("Automation.InvalidExportFormat"));
+            }
+
+            if (job.Type == ScheduledJobType.Import)
+            {
+                if (string.IsNullOrWhiteSpace(job.InputPath)) throw new InvalidOperationException(Localization.T("Automation.InputPathRequired"));
+                if (string.IsNullOrWhiteSpace(job.TargetTable)) throw new InvalidOperationException(Localization.T("Automation.TargetTableRequired"));
+                job.TargetTable = job.TargetTable.Trim();
+                if (job.CsvDelimiter != "," && job.CsvDelimiter != ";" && job.CsvDelimiter != "\\t" && job.CsvDelimiter != "|")
+                {
+                    throw new InvalidOperationException(Localization.T("Automation.InvalidDelimiter"));
+                }
+            }
+
+            if (job.Type == ScheduledJobType.Transfer)
+            {
+                if (string.IsNullOrWhiteSpace(job.TargetConnectionName)) throw new InvalidOperationException(Localization.T("Automation.TargetConnectionRequired"));
+                if (string.IsNullOrWhiteSpace(job.TargetDatabaseName)) throw new InvalidOperationException(Localization.T("Automation.TargetDatabaseRequired"));
+                job.TargetConnectionName = job.TargetConnectionName.Trim();
+                job.TargetDatabaseName = job.TargetDatabaseName.Trim();
+                job.TransferTables = (job.TransferTables ?? new List<ScheduledTransferTable>())
+                    .Where(table => table != null && !string.IsNullOrWhiteSpace(table.Source)).ToList();
+                foreach (ScheduledTransferTable table in job.TransferTables)
+                {
+                    table.Source = table.Source.Trim();
+                    table.Target = string.IsNullOrWhiteSpace(table.Target) ? table.Source : table.Target.Trim();
+                    if (!Enum.IsDefined(typeof(TransferMode), table.Mode)) throw new InvalidOperationException(Localization.T("Automation.InvalidTransferMode"));
+                }
+                if (string.Equals(job.ConnectionName, job.TargetConnectionName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(job.DatabaseName, job.TargetDatabaseName, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(Localization.T("Automation.TransferSameDatabase"));
+                }
+                if (job.TransferTables.Any(table => table.Mode == TransferMode.ReplaceData) &&
+                    !string.Equals(job.ConfirmedTargetDatabase, job.TargetDatabaseName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(Localization.T("Automation.ReplaceNeedsConfirmation"));
+                }
+            }
+
+            if (job.RetryCount < 0 || job.RetryCount > 5) throw new InvalidOperationException(Localization.T("Automation.InvalidRetryCount"));
+            if (job.RetryDelaySeconds < 0 || job.RetryDelaySeconds > 3600) throw new InvalidOperationException(Localization.T("Automation.InvalidRetryDelay"));
+            if (!string.IsNullOrWhiteSpace(job.WebhookUrl))
+            {
+                job.WebhookUrl = job.WebhookUrl.Trim();
+                Uri webhook;
+                if (!Uri.TryCreate(job.WebhookUrl, UriKind.Absolute, out webhook) ||
+                    !(webhook.Scheme == Uri.UriSchemeHttps || webhook.Scheme == Uri.UriSchemeHttp && webhook.IsLoopback) ||
+                    !string.IsNullOrEmpty(webhook.UserInfo))
+                {
+                    throw new InvalidOperationException(Localization.T("Automation.InvalidWebhook"));
+                }
             }
         }
 
@@ -589,24 +718,36 @@ namespace mySQLPunk.lib
     {
         public static ScheduledJobRunRecord ExecuteFromProfile(ScheduledJobDefinition job, ScheduledJobStore store = null, string applicationDirectory = null)
         {
-            return Execute(job, store, () =>
+            Func<string, string, IDatabase> open = (connectionName, databaseName) =>
             {
-                Dictionary<string, object> connection = AutomationConnectionProfileService.LoadConnection(job.ProfileName, job.ConnectionName, applicationDirectory);
+                Dictionary<string, object> connection = AutomationConnectionProfileService.LoadConnection(job.ProfileName, connectionName, applicationDirectory);
                 string provider = ConnectionConfigurationService.NormalizeProvider(ConnectionConfigurationService.GetValue(connection, "db_kind"));
                 if (provider == "mysql" || provider == "postgresql" || provider == "mssql")
                 {
-                    connection["initial_database"] = job.DatabaseName;
+                    connection["initial_database"] = databaseName;
                 }
                 return ConnectionOpenService.Open(connection, false).Database;
-            });
+            };
+            return Execute(job, store, () => open(job.ConnectionName, job.DatabaseName), () => open(job.TargetConnectionName, job.TargetDatabaseName));
         }
 
         public static ScheduledJobRunRecord Execute(ScheduledJobDefinition job, ScheduledJobStore store, Func<IDatabase> databaseFactory)
+        {
+            return Execute(job, store, databaseFactory, null, null);
+        }
+
+        /// <summary>
+        /// 執行作業；失敗時依 RetryCount 重試（傳輸會從檢查點續傳；匯入若已寫入部分資料則不重試，以免重複），
+        /// 最後寫入執行紀錄並視設定呼叫 Webhook。delay 供測試略過等待。
+        /// </summary>
+        public static ScheduledJobRunRecord Execute(ScheduledJobDefinition job, ScheduledJobStore store, Func<IDatabase> databaseFactory,
+            Func<IDatabase> targetFactory, Action<TimeSpan> delay = null)
         {
             if (job == null) throw new ArgumentNullException("job");
             if (databaseFactory == null) throw new ArgumentNullException("databaseFactory");
             ScheduledJobValidator.Validate(job);
             store = store ?? new ScheduledJobStore();
+            delay = delay ?? System.Threading.Thread.Sleep;
             ScheduledJobRunRecord record = new ScheduledJobRunRecord
             {
                 ExecutionId = Guid.NewGuid().ToString("N"),
@@ -619,35 +760,159 @@ namespace mySQLPunk.lib
                 Message = Localization.T("Automation.RunStarted")
             };
             Stopwatch stopwatch = Stopwatch.StartNew();
+            try { store.SaveRun(record); } catch { }
+            for (int attempt = 1; ; attempt++)
+            {
+                record.Attempts = attempt;
+                try
+                {
+                    using (IDatabase database = databaseFactory())
+                    {
+                        if (database == null) throw new InvalidOperationException(Localization.T("Connection.DatabaseFactoryReturnedNull"));
+                        if (job.Type == ScheduledJobType.Transfer)
+                        {
+                            if (targetFactory == null) throw new InvalidOperationException(Localization.T("Automation.TargetConnectionRequired"));
+                            using (IDatabase target = targetFactory())
+                            {
+                                if (target == null) throw new InvalidOperationException(Localization.T("Connection.DatabaseFactoryReturnedNull"));
+                                ExecuteTransfer(job, database, target, store, record);
+                            }
+                        }
+                        else
+                        {
+                            ExecuteCore(job, database, record);
+                        }
+                    }
+                    record.Status = "Success";
+                    record.Message = attempt > 1
+                        ? Localization.Format("Automation.RunSucceededAfterRetry", attempt)
+                        : Localization.T("Automation.RunSucceeded");
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    record.Status = "Failed";
+                    record.Message = ExceptionMessageService.GetReason(ex);
+                    bool partialImport = ex.Data.Contains(CsvImportService.ImportedRowsKey) && Convert.ToInt64(ex.Data[CsvImportService.ImportedRowsKey], CultureInfo.InvariantCulture) > 0;
+                    if (partialImport)
+                    {
+                        record.Message = Localization.Format("Automation.ImportPartial", ex.Data[CsvImportService.ImportedRowsKey], record.Message);
+                        break;
+                    }
+                    if (attempt > job.RetryCount) break;
+                    record.Message = Localization.Format("Automation.RetryScheduled", attempt, job.RetryCount + 1, record.Message);
+                    try { store.SaveRun(record); } catch { }
+                    delay(TimeSpan.FromSeconds(job.RetryDelaySeconds));
+                }
+            }
+
+            stopwatch.Stop();
+            record.ElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+            record.FinishedUtc = DateTime.UtcNow.ToString("o");
+            record.Notification = Notify(job, record);
+            try { store.SaveRun(record); } catch { }
+            return record;
+        }
+
+        /// <summary>傳輸作業：同一作業未完成的檢查點會自動續傳；任何一張表失敗或列數不一致都視為失敗。</summary>
+        private static void ExecuteTransfer(ScheduledJobDefinition job, IDatabase source, IDatabase target, ScheduledJobStore store, ScheduledJobRunRecord record)
+        {
+            string checkpoints = Path.Combine(store.RootDirectory, "transfers", job.Id);
+            List<string> tables = job.TransferTables.Count > 0
+                ? job.TransferTables.Select(table => table.Source).ToList()
+                : source.GetTables(job.DatabaseName);
+            TransferPlan fresh = DataTransferService.BuildPlan(source, job.DatabaseName, job.ConnectionName, target, job.TargetDatabaseName, job.TargetConnectionName, tables);
+            foreach (ScheduledTransferTable setting in job.TransferTables)
+            {
+                TransferItem item = fresh.Items.First(entry => string.Equals(entry.SourceTable, setting.Source, StringComparison.OrdinalIgnoreCase));
+                item.TargetTable = setting.Target;
+                item.Mode = setting.Mode;
+            }
+            fresh.ContinueOnError = true;
+
+            TransferPlan plan = DataTransferService.LoadUnfinished(checkpoints, fresh);
+            // 作業設定改過之後，舊檢查點的表與模式不再適用，改用新的計畫。
+            if (plan == null || plan.Items.Count != fresh.Items.Count ||
+                plan.Items.Zip(fresh.Items, (left, right) => left.SourceTable == right.SourceTable && left.TargetTable == right.TargetTable && left.Mode == right.Mode).Any(same => !same))
+            {
+                plan = fresh;
+            }
+            else
+            {
+                foreach (TransferItem item in plan.Items.Where(item => item.Status == TransferItemStatus.Failed)) item.Status = TransferItemStatus.Pending;
+            }
+
+            HashSet<string> keyed = new HashSet<string>(
+                SchemaModelService.Load(source, job.DatabaseName).Tables.Where(table => table.Columns.Any(column => column.IsPrimaryKey)).Select(table => table.Name),
+                StringComparer.OrdinalIgnoreCase);
+            DataTransferService.Run(plan, source, target, keyed, null, current => DataTransferService.SaveCheckpoint(current, checkpoints), System.Threading.CancellationToken.None);
+            record.Rows = plan.Items.Where(item => item.Include).Sum(item => item.CopiedRows);
+            List<TransferItem> problems = plan.Items.Where(item => item.Include && (item.Status != TransferItemStatus.Done || item.Verified != true)).ToList();
+            if (problems.Count > 0)
+            {
+                throw new InvalidOperationException(Localization.Format("Automation.TransferProblems", problems.Count,
+                    string.Join("; ", problems.Select(item => item.SourceTable + ": " + (item.Error ?? item.Warning ?? DataTransferService.ResultText(item))))));
+            }
+            DataTransferService.DeleteCheckpoint(plan, checkpoints);
+        }
+
+        /// <summary>POST 執行結果到 Webhook；只送作業名稱、狀態、列數、訊息與時間，不含 SQL 或認證。</summary>
+        private static string Notify(ScheduledJobDefinition job, ScheduledJobRunRecord record)
+        {
+            if (string.IsNullOrWhiteSpace(job.WebhookUrl)) return null;
+            bool success = string.Equals(record.Status, "Success", StringComparison.OrdinalIgnoreCase);
+            if (job.NotifyOnlyOnFailure && success) return Localization.T("Automation.NotifySkipped");
+            JObject payload = new JObject
+            {
+                { "job", record.JobName },
+                { "jobId", record.JobId },
+                { "type", record.JobType.ToString() },
+                { "status", record.Status },
+                { "rows", record.Rows },
+                { "attempts", record.Attempts },
+                { "message", record.Message },
+                { "startedUtc", record.StartedUtc },
+                { "finishedUtc", record.FinishedUtc },
+                { "elapsedMs", record.ElapsedMilliseconds }
+            };
             try
             {
-                store.SaveRun(record);
-                using (IDatabase database = databaseFactory())
+                System.Net.HttpWebRequest request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(job.WebhookUrl);
+                request.Method = "POST";
+                request.ContentType = "application/json; charset=utf-8";
+                request.Timeout = 10000;
+                request.ReadWriteTimeout = 10000;
+                request.AllowAutoRedirect = false;
+                request.KeepAlive = false;
+                // 不等 100-continue：許多 Webhook 端點不回應它，會讓每次通知多等一段時間甚至逾時。
+                request.ServicePoint.Expect100Continue = false;
+                byte[] body = new UTF8Encoding(false).GetBytes(payload.ToString(Formatting.None));
+                request.ContentLength = body.Length;
+                using (Stream stream = request.GetRequestStream()) stream.Write(body, 0, body.Length);
+                using (System.Net.HttpWebResponse response = (System.Net.HttpWebResponse)request.GetResponse())
                 {
-                    if (database == null) throw new InvalidOperationException(Localization.T("Connection.DatabaseFactoryReturnedNull"));
-                    ExecuteCore(job, database, record);
+                    return Localization.Format("Automation.NotifySent", (int)response.StatusCode);
                 }
-                record.Status = "Success";
-                record.Message = Localization.T("Automation.RunSucceeded");
+            }
+            catch (System.Net.WebException ex)
+            {
+                System.Net.HttpWebResponse response = ex.Response as System.Net.HttpWebResponse;
+                return Localization.Format("Automation.NotifyFailed", response != null ? "HTTP " + (int)response.StatusCode : ex.Message);
             }
             catch (Exception ex)
             {
-                record.Status = "Failed";
-                record.Message = ExceptionMessageService.GetReason(ex);
+                return Localization.Format("Automation.NotifyFailed", ex.Message);
             }
-            finally
-            {
-                stopwatch.Stop();
-                record.ElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-                record.FinishedUtc = DateTime.UtcNow.ToString("o");
-                try { store.SaveRun(record); } catch { }
-            }
-            return record;
         }
 
         public static string ExpandOutputPath(ScheduledJobDefinition job, DateTime localTime)
         {
-            string value = job == null ? string.Empty : job.OutputPath ?? string.Empty;
+            return ExpandPath(job, job == null ? string.Empty : job.OutputPath, "automation-output", localTime);
+        }
+
+        public static string ExpandPath(ScheduledJobDefinition job, string template, string defaultFolder, DateTime localTime)
+        {
+            string value = template ?? string.Empty;
             string safeJobName = MakeSafeFileName(job == null ? string.Empty : job.Name);
             value = value.Replace("{yyyyMMdd_HHmmss}", localTime.ToString("yyyyMMdd_HHmmss"));
             value = value.Replace("{yyyyMMdd}", localTime.ToString("yyyyMMdd"));
@@ -656,7 +921,7 @@ namespace mySQLPunk.lib
             {
                 string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
                 if (string.IsNullOrWhiteSpace(documents)) documents = ScheduledJobStore.GetDefaultRootDirectory();
-                value = Path.Combine(documents, "mySQLPunk", "automation-output", value);
+                value = Path.Combine(documents, "mySQLPunk", defaultFolder, value);
             }
             return Path.GetFullPath(value);
         }
@@ -668,6 +933,17 @@ namespace mySQLPunk.lib
                 DataTable result = database.SelectSQL(job.Sql);
                 ThrowIfQueryFailed(result);
                 record.Rows = result == null ? 0 : result.Rows.Count;
+                return;
+            }
+
+            if (job.Type == ScheduledJobType.Import)
+            {
+                string inputPath = ExpandPath(job, job.InputPath, "automation-input", DateTime.Now);
+                if (!File.Exists(inputPath)) throw new FileNotFoundException(Localization.Format("Automation.InputMissing", inputPath), inputPath);
+                record.OutputPath = inputPath;
+                char delimiter = job.CsvDelimiter == "\\t" ? '\t' : job.CsvDelimiter[0];
+                CsvImportResult imported = CsvImportService.Import(database, job.DatabaseName, job.TargetTable, inputPath, delimiter, job.CsvHasHeader, true);
+                record.Rows = imported.Rows;
                 return;
             }
 
