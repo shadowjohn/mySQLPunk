@@ -1017,7 +1017,7 @@ namespace mySQLPunk.lib
         }
 
         /// <summary>唯一性比對用的正規化文字；大小寫不分，因 MySQL／SQL Server 預設定序視為重複。</summary>
-        internal static string Canonical(object value)
+        public static string Canonical(object value)
         {
             if (value == null || value is DBNull) return NullMarker;
             if (value is byte[]) return BitConverter.ToString((byte[])value);
