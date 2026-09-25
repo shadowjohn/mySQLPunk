@@ -373,6 +373,7 @@
     <Compile Include="lib\MongoPipelineService.cs" />
     <Compile Include="lib\DataTransferService.cs" />
     <Compile Include="lib\CsvImportService.cs" />
+    <Compile Include="lib\AutomationEmailService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />

@@ -274,6 +274,83 @@ public static partial class SmokeTests
     }
 
     /// <summary>
+    /// Automation email: SMTP settings persist without the password, plain SMTP is only allowed to localhost,
+    /// recipients are validated, and a notification reaches a loopback SMTP server with the run summary.
+    /// </summary>
+    public static void AssertAutomationEmailSemantics(string directory)
+    {
+        ScheduledJobStore store = new ScheduledJobStore(Path.Combine(directory, "automation-mail"));
+        System.Net.Sockets.TcpListener listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        List<string> commands = new List<string>();
+        System.Text.StringBuilder data = new System.Text.StringBuilder();
+        System.Threading.Thread server = new System.Threading.Thread(() =>
+        {
+            using (System.Net.Sockets.TcpClient client = listener.AcceptTcpClient())
+            using (System.Net.Sockets.NetworkStream stream = client.GetStream())
+            using (StreamReader reader = new StreamReader(stream, System.Text.Encoding.ASCII))
+            using (StreamWriter writer = new StreamWriter(stream, System.Text.Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true })
+            {
+                writer.WriteLine("220 localhost ESMTP test");
+                bool inData = false;
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (inData)
+                    {
+                        if (line == ".")
+                        {
+                            inData = false;
+                            writer.WriteLine("250 queued");
+                            continue;
+                        }
+                        data.AppendLine(line);
+                        continue;
+                    }
+                    commands.Add(line);
+                    string verb = line.Split(' ')[0].ToUpperInvariant();
+                    if (verb == "EHLO" || verb == "HELO") writer.WriteLine("250 localhost");
+                    else if (verb == "DATA") { inData = true; writer.WriteLine("354 go ahead"); }
+                    else if (verb == "QUIT") { writer.WriteLine("221 bye"); break; }
+                    else writer.WriteLine("250 ok");
+                }
+            }
+        });
+        server.IsBackground = true;
+        server.Start();
+
+        AutomationEmailService.Save(store, new AutomationSmtpSettings { Host = "127.0.0.1", Port = port, UseTls = false, From = "bot@example.com" }, null);
+        AutomationSmtpSettings loaded = AutomationEmailService.Load(store);
+        Assert(loaded.Port == port && !loaded.UseTls && loaded.From == "bot@example.com", "SMTP settings should round-trip.");
+        Assert(File.ReadAllText(AutomationEmailService.SettingsPath(store)).IndexOf("password", StringComparison.OrdinalIgnoreCase) < 0, "The SMTP password is never written to the settings file.");
+
+        ScheduledJobDefinition job = new ScheduledJobDefinition { Name = "nightly", Type = ScheduledJobType.Query, EmailTo = "ops@example.com; dev@example.com" };
+        ScheduledJobRunRecord record = new ScheduledJobRunRecord { JobName = "nightly", JobType = ScheduledJobType.Query, Status = "Failed", Attempts = 3, Rows = -1, Message = "boom", StartedUtc = "s", FinishedUtc = "f" };
+        string outcome = AutomationEmailService.Notify(store, job, record);
+        server.Join(10000);
+        listener.Stop();
+        Assert(outcome != null && outcome.Contains("2"), "The notification should report both recipients: " + outcome);
+        Assert(commands.Any(line => line.StartsWith("RCPT TO:<ops@example.com>", StringComparison.OrdinalIgnoreCase)) &&
+               commands.Any(line => line.StartsWith("RCPT TO:<dev@example.com>", StringComparison.OrdinalIgnoreCase)), "Every recipient should be addressed: " + string.Join(" | ", commands));
+        string message = data.ToString();
+        Assert(message.Contains("nightly") && message.IndexOf("Failed", StringComparison.Ordinal) >= 0, "The email should carry the job and status.");
+
+        job.NotifyOnlyOnFailure = true;
+        record.Status = "Success";
+        Assert(AutomationEmailService.Notify(store, job, record) != null && !AutomationEmailService.Notify(store, job, record).Contains("@"), "Successful runs are skipped when only failures notify.");
+        AssertThrows<InvalidOperationException>(() => AutomationEmailService.Validate(new AutomationSmtpSettings { Host = "smtp.example.com", Port = 25, UseTls = false, From = "a@example.com" }),
+            "Plain SMTP to a remote server must be rejected.");
+        AssertThrows<InvalidOperationException>(() => AutomationEmailService.ParseRecipients("ops@example.com, not an address"), "Invalid recipients must be rejected.");
+        AssertThrows<InvalidOperationException>(() => AutomationEmailService.ParseRecipients(string.Join(",", Enumerable.Range(0, 11).Select(index => "u" + index + "@example.com"))),
+            "More than ten recipients must be rejected.");
+        AssertThrows<InvalidOperationException>(() => ScheduledJobValidator.Validate(new ScheduledJobDefinition
+        {
+            Name = "x", Type = ScheduledJobType.Backup, ConnectionName = "a", DatabaseName = "b", OutputPath = "x.sql", EmailTo = "nope"
+        }), "Jobs with invalid recipients must not validate.");
+    }
+
+    /// <summary>
     /// Automation jobs: CSV import (quotes, embedded delimiters／newlines, empty → NULL, typed values), a failed import
     /// after a written batch is not retried, a transfer job resumes via retry, the webhook receives the result JSON,
     /// and validation rejects unsafe webhooks, unconfirmed replace transfers and malformed table lines.

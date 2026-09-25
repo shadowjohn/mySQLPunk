@@ -115,6 +115,9 @@ namespace mySQLPunk.lib
         /// <summary>完成後 POST 執行結果 JSON 的網址；https，或僅限本機的 http。</summary>
         public string WebhookUrl { get; set; }
         public bool NotifyOnlyOnFailure { get; set; }
+
+        /// <summary>通知信收件人（逗號分隔，最多 10 位）；SMTP 設定由所有作業共用。</summary>
+        public string EmailTo { get; set; }
     }
 
     public sealed class ScheduledJobConnectionOption
@@ -273,6 +276,10 @@ namespace mySQLPunk.lib
 
             if (job.RetryCount < 0 || job.RetryCount > 5) throw new InvalidOperationException(Localization.T("Automation.InvalidRetryCount"));
             if (job.RetryDelaySeconds < 0 || job.RetryDelaySeconds > 3600) throw new InvalidOperationException(Localization.T("Automation.InvalidRetryDelay"));
+            if (!string.IsNullOrWhiteSpace(job.EmailTo))
+            {
+                job.EmailTo = string.Join(", ", AutomationEmailService.ParseRecipients(job.EmailTo).Select(address => address.Address));
+            }
             if (!string.IsNullOrWhiteSpace(job.WebhookUrl))
             {
                 job.WebhookUrl = job.WebhookUrl.Trim();
@@ -809,7 +816,8 @@ namespace mySQLPunk.lib
             stopwatch.Stop();
             record.ElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
             record.FinishedUtc = DateTime.UtcNow.ToString("o");
-            record.Notification = Notify(job, record);
+            record.Notification = string.Join("；", new[] { Notify(job, record), AutomationEmailService.Notify(store, job, record) }.Where(item => item != null));
+            if (record.Notification.Length == 0) record.Notification = null;
             try { store.SaveRun(record); } catch { }
             return record;
         }

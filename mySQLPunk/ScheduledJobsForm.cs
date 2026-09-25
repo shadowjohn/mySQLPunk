@@ -49,6 +49,7 @@ namespace mySQLPunk
             removeButton = new ToolStripButton(Localization.T("Automation.RemoveSchedule"));
             ToolStripButton refreshButton = new ToolStripButton(Localization.T("Common.Refresh"));
             ToolStripButton openFolderButton = new ToolStripButton(Localization.T("Automation.OpenFolder"));
+            ToolStripButton smtpButton = new ToolStripButton(Localization.T("Automation.SmtpSettings"));
             floatButton = new ToolStripButton(Localization.T("Query.Float"));
             dockButton = new ToolStripButton(Localization.T("Query.Dock")) { Visible = false };
             toolbar.Items.AddRange(new ToolStripItem[]
@@ -64,6 +65,7 @@ namespace mySQLPunk
                 new ToolStripSeparator(),
                 refreshButton,
                 openFolderButton,
+                smtpButton,
                 new ToolStripSeparator(),
                 floatButton,
                 dockButton
@@ -130,6 +132,10 @@ namespace mySQLPunk
             removeButton.Click += (sender, args) => RemoveSelectedSchedule();
             refreshButton.Click += (sender, args) => ReloadJobs(SelectedJob == null ? null : SelectedJob.Id);
             openFolderButton.Click += (sender, args) => OpenStorageFolder();
+            smtpButton.Click += (sender, args) =>
+            {
+                using (AutomationSmtpSettingsForm form = new AutomationSmtpSettingsForm(store)) form.ShowDialog(this);
+            };
             floatButton.Click += (sender, args) => { if (mainHost != null) mainHost.FloatDockableForm(this); };
             dockButton.Click += (sender, args) => { if (mainHost != null) mainHost.DockDockableForm(this); };
             jobsGrid.SelectionChanged += (sender, args) => { LoadRuns(); UpdateActionState(); };
@@ -492,6 +498,7 @@ namespace mySQLPunk
         private readonly NumericUpDown retryDelayBox;
         private readonly TextBox webhookBox;
         private readonly CheckBox failureOnlyBox;
+        private readonly TextBox emailBox;
         private static readonly string[] Delimiters = { ",", ";", "\\t", "|" };
         private bool loading;
 
@@ -622,7 +629,7 @@ namespace mySQLPunk
             transferPage = new TabPage(Localization.T("Automation.Section.Transfer"));
             transferPage.Controls.Add(transferPanel);
 
-            TableLayoutPanel reliabilityPanel = DetailPanel(3);
+            TableLayoutPanel reliabilityPanel = DetailPanel(4);
             AddLabel(reliabilityPanel, 0, Localization.T("Automation.RetryCount"));
             FlowLayoutPanel retryFlow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = FieldMargin() };
             retryCountBox = new NumericUpDown { Minimum = 0, Maximum = 5, Width = 60 };
@@ -633,7 +640,8 @@ namespace mySQLPunk
             reliabilityPanel.Controls.Add(retryFlow, 1, 0);
             webhookBox = AddDetailText(reliabilityPanel, 1, Localization.T("Automation.Webhook"));
             failureOnlyBox = new CheckBox { AutoSize = true, Text = Localization.T("Automation.NotifyOnlyOnFailure"), Margin = FieldMargin() };
-            reliabilityPanel.Controls.Add(failureOnlyBox, 1, 2);
+            emailBox = AddDetailText(reliabilityPanel, 2, Localization.T("Automation.EmailTo"));
+            reliabilityPanel.Controls.Add(failureOnlyBox, 1, 3);
             TabPage reliabilityPage = new TabPage(Localization.T("Automation.Section.Reliability"));
             reliabilityPage.Controls.Add(reliabilityPanel);
 
@@ -727,6 +735,7 @@ namespace mySQLPunk
                 retryDelayBox.Value = Math.Max(0, Math.Min(3600, value.RetryDelaySeconds));
                 webhookBox.Text = value.WebhookUrl ?? string.Empty;
                 failureOnlyBox.Checked = value.NotifyOnlyOnFailure;
+                emailBox.Text = value.EmailTo ?? string.Empty;
             }
             finally
             {
@@ -870,6 +879,7 @@ namespace mySQLPunk
                 value.RetryDelaySeconds = (int)retryDelayBox.Value;
                 value.WebhookUrl = webhookBox.Text.Trim();
                 value.NotifyOnlyOnFailure = failureOnlyBox.Checked;
+                value.EmailTo = emailBox.Text.Trim();
                 List<ScheduledTransferTable> replaced = value.TransferTables.Where(table => table.Mode == TransferMode.ReplaceData).ToList();
                 if (value.Type == ScheduledJobType.Transfer && replaced.Count > 0 &&
                     !string.Equals(value.ConfirmedTargetDatabase, value.TargetDatabaseName, StringComparison.Ordinal))
@@ -921,7 +931,8 @@ namespace mySQLPunk
                 RetryCount = value.RetryCount,
                 RetryDelaySeconds = value.RetryDelaySeconds,
                 WebhookUrl = value.WebhookUrl,
-                NotifyOnlyOnFailure = value.NotifyOnlyOnFailure
+                NotifyOnlyOnFailure = value.NotifyOnlyOnFailure,
+                EmailTo = value.EmailTo
             };
         }
 
@@ -990,6 +1001,122 @@ namespace mySQLPunk
         private static Padding FieldMargin()
         {
             return new Padding(0, 3, 0, 5);
+        }
+    }
+
+    /// <summary>自動執行通知信的 SMTP 設定；密碼存進 Windows 認證管理員，可寄測試信。</summary>
+    public sealed class AutomationSmtpSettingsForm : Form
+    {
+        private readonly ScheduledJobStore store;
+        private readonly TextBox hostBox = new TextBox { Dock = DockStyle.Fill };
+        private readonly NumericUpDown portBox = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = 587, Width = 90 };
+        private readonly CheckBox tlsBox = new CheckBox { AutoSize = true, Checked = true };
+        private readonly TextBox userBox = new TextBox { Dock = DockStyle.Fill };
+        private readonly TextBox passwordBox = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
+        private readonly TextBox fromBox = new TextBox { Dock = DockStyle.Fill };
+        private readonly TextBox testToBox = new TextBox { Dock = DockStyle.Fill };
+        private readonly Label statusLabel = new Label { Dock = DockStyle.Fill, AutoSize = true, ForeColor = Color.Gray };
+
+        public AutomationSmtpSettingsForm(ScheduledJobStore store)
+        {
+            this.store = store;
+            Text = Localization.T("Automation.SmtpSettings");
+            Width = 560;
+            Height = 400;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterParent;
+            tlsBox.Text = Localization.T("Automation.SmtpUseTls");
+
+            TableLayoutPanel layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 9, Padding = new Padding(14) };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            AddRow(layout, 0, Localization.T("Automation.SmtpHost"), hostBox);
+            AddRow(layout, 1, Localization.T("Automation.SmtpPort"), portBox);
+            AddRow(layout, 2, string.Empty, tlsBox);
+            AddRow(layout, 3, Localization.T("Automation.SmtpUser"), userBox);
+            AddRow(layout, 4, Localization.T("Automation.SmtpPassword"), passwordBox);
+            AddRow(layout, 5, Localization.T("Automation.SmtpFrom"), fromBox);
+            AddRow(layout, 6, Localization.T("Automation.SmtpTestTo"), testToBox);
+            layout.Controls.Add(statusLabel, 0, 7);
+            layout.SetColumnSpan(statusLabel, 2);
+
+            FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
+            Button save = new Button { AutoSize = true, Text = Localization.T("Common.Save") };
+            Button cancel = new Button { AutoSize = true, Text = Localization.T("Common.Cancel"), DialogResult = DialogResult.Cancel };
+            Button test = new Button { AutoSize = true, Text = Localization.T("Automation.SmtpSendTest") };
+            buttons.Controls.Add(save);
+            buttons.Controls.Add(cancel);
+            buttons.Controls.Add(test);
+            layout.Controls.Add(buttons, 0, 8);
+            layout.SetColumnSpan(buttons, 2);
+            Controls.Add(layout);
+            AcceptButton = save;
+            CancelButton = cancel;
+
+            AutomationSmtpSettings current = null;
+            try { current = AutomationEmailService.Load(store); }
+            catch (Exception ex) { statusLabel.Text = ExceptionMessageService.GetReason(ex); }
+            if (current != null)
+            {
+                hostBox.Text = current.Host;
+                portBox.Value = Math.Max(1, Math.Min(65535, current.Port));
+                tlsBox.Checked = current.UseTls;
+                userBox.Text = current.UserName;
+                fromBox.Text = current.From;
+            }
+            statusLabel.Text = Localization.T("Automation.SmtpPasswordHint");
+
+            save.Click += (sender, args) =>
+            {
+                try
+                {
+                    AutomationEmailService.Save(store, Collect(), passwordBox.Text.Length == 0 ? null : passwordBox.Text);
+                    DialogResult = DialogResult.OK;
+                    Close();
+                }
+                catch (Exception ex)
+                {
+                    statusLabel.Text = ExceptionMessageService.GetReason(ex);
+                }
+            };
+            test.Click += (sender, args) =>
+            {
+                try
+                {
+                    string password = passwordBox.Text;
+                    if (password.Length == 0) WindowsCredentialService.TryReadPassword(AutomationEmailService.CredentialTarget, out password);
+                    AutomationEmailService.Send(Collect(), password, AutomationEmailService.ParseRecipients(testToBox.Text),
+                        "[mySQLPunk] " + Localization.T("Automation.SmtpTestSubject"), Localization.T("Automation.SmtpTestBody"));
+                    statusLabel.Text = Localization.T("Automation.SmtpTestSent");
+                }
+                catch (Exception ex)
+                {
+                    statusLabel.Text = ExceptionMessageService.GetReason(ex);
+                }
+            };
+            ThemeManager.ApplyTo(this);
+        }
+
+        private AutomationSmtpSettings Collect()
+        {
+            return new AutomationSmtpSettings
+            {
+                Host = hostBox.Text,
+                Port = (int)portBox.Value,
+                UseTls = tlsBox.Checked,
+                UserName = userBox.Text,
+                From = fromBox.Text
+            };
+        }
+
+        private static void AddRow(TableLayoutPanel layout, int row, string label, Control control)
+        {
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(new Label { AutoSize = true, Text = label, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 10, 6) }, 0, row);
+            control.Margin = new Padding(0, 3, 0, 5);
+            layout.Controls.Add(control, 1, row);
         }
     }
 }

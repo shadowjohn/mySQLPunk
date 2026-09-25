@@ -24,6 +24,10 @@ mySQLPunk 可以把常用的唯讀查詢、查詢結果匯出與資料庫 SQL �
 - 「失敗重試」可設 0–5 次與間隔秒數。傳輸作業重試時從檢查點續傳；CSV 匯入如果已經寫入部分資料就不會自動重試，避免重複匯入，執行紀錄會寫出已匯入的列數。
 - 「Webhook」會在作業結束後以 `POST` 送出 JSON：`job`、`jobId`、`type`、`status`、`rows`、`attempts`、`message`、`startedUtc`、`finishedUtc`、`elapsedMs`，不含 SQL、連線字串或密碼。網址必須是 https（http 只允許 localhost／127.0.0.1），且不可內含帳號密碼；可勾選「只在失敗時通知」。通知結果（HTTP 狀態或失敗原因）會寫入執行紀錄，通知失敗不影響作業本身的成功與否。
 
+## 郵件通知
+
+在自動執行作業畫面按「郵件設定」設定 SMTP 主機、連接埠、STARTTLS、帳號與寄件人，可先寄測試信確認。密碼存在 Windows 認證管理員（`mySQLPunk:automation:smtp`），`automation\smtp.json` 不含密碼；只有寄到 localhost／127.0.0.1 的伺服器可以關閉 STARTTLS。每個作業在「重試與通知」分頁填入收件人（逗號分隔，最多 10 位），作業結束後寄出純文字通知，內容與 Webhook 相同、不含 SQL 或認證；「只在失敗時通知」同時套用在郵件與 Webhook。
+
 ## 建立與排程
 
 1. 先在連線設定中保存可使用的連線與密碼。

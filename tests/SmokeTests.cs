@@ -12904,6 +12904,7 @@ public static partial class SmokeTests
                 db.Open();
                 return db;
             }, dir);
+            AssertAutomationEmailSemantics(dir);
         }
         finally
         {
