@@ -12489,6 +12489,14 @@ namespace mySQLPunk
                     openTableItem.Click += (s, ev) => OpenSelectedTableInQuery();
                     menu.Items.Add(openTableItem);
 
+                    if (IsMongoDbTarget(tableTarget))
+                    {
+                        string collectionName = pathParts[3];
+                        ToolStripMenuItem schemaAnalysisItem = new ToolStripMenuItem(Localization.T("Tool.MongoSchemaAnalysis"));
+                        schemaAnalysisItem.Click += (s, ev) => ShowMongoSchemaAnalysis(tableTarget, collectionName);
+                        menu.Items.Add(schemaAnalysisItem);
+                    }
+
                     if (!mongoDbTarget)
                     {
                         ToolStripMenuItem selectColumnsItem = new ToolStripMenuItem(Localization.T("Tool.SelectAllColumns"));
@@ -13000,6 +13008,16 @@ namespace mySQLPunk
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
             refreshItem.Click += (s, ev) => RefreshDatabaseGroupNode(node, "Tables");
             menu.Items.Add(refreshItem);
+        }
+
+        private void ShowMongoSchemaAnalysis(TreeDatabaseTarget target, string collectionName)
+        {
+            my_mongodb mongo = target == null ? null : target.Database as my_mongodb;
+            if (mongo == null) return;
+            using (MongoSchemaAnalysisForm form = new MongoSchemaAnalysisForm(mongo, target.DatabaseName, collectionName))
+            {
+                form.ShowDialog(this);
+            }
         }
 
         private void ShowDataGenerationDialog()

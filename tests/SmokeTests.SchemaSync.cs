@@ -184,6 +184,67 @@ public static partial class SmokeTests
     }
 
     /// <summary>
+    /// MongoSchemaAnalyzer on synthetic documents: nested and array paths, presence, type mix, numbers stored as
+    /// strings, IQR outliers, sparse and case-variant fields, empty strings, nulls, date ranges and the depth limit.
+    /// </summary>
+    public static void AssertMongoSchemaAnalyzerSemantics()
+    {
+        List<string> documents = new List<string>();
+        for (int index = 1; index <= 40; index++)
+        {
+            string ageJson = index == 7 ? "999" : index == 8 ? "\"42\"" : (20 + index).ToString();
+            List<string> fields = new List<string>
+            {
+                "\"_id\": " + index,
+                "\"name\": \"user" + index + "\"",
+                "\"age\": " + ageJson,
+                "\"tags\": [\"a\", \"b\"]",
+                "\"items\": [{ \"sku\": \"X" + index + "\", \"qty\": 1 }, { \"sku\": \"Y\", \"qty\": 2 }]",
+                "\"created\": { \"$date\": \"2024-01-" + (index % 28 + 1).ToString("00") + "T00:00:00Z\" }",
+                "\"nickname\": " + (index <= 5 ? "null" : "\"nick\""),
+                "\"note\": \"" + (index <= 3 ? string.Empty : "ok") + "\"",
+                (index == 1 ? "\"Email\"" : "\"email\"") + ": \"u" + index + "@example.com\""
+            };
+            if (index <= 30) fields.Add("\"address\": { \"city\": \"Taipei\", \"zip\": \"100\" }");
+            if (index <= 2) fields.Add("\"legacy\": true");
+            documents.Add("{ " + string.Join(", ", fields) + " }");
+        }
+        string deep = "1";
+        for (int level = 0; level < 25; level++) deep = "{ \"d\": " + deep + " }";
+        documents.Add("{ \"_id\": 99, \"deep\": " + deep + " }");
+
+        MongoSchemaReport report = MongoSchemaAnalyzer.AnalyzeJson(documents);
+        Func<string, MongoFieldStats> field = path => report.Fields.Single(item => item.Path == path);
+        AssertEquals("41", report.DocumentCount.ToString(), "Every sampled document should be counted.");
+        AssertEquals("_id", report.Fields[0].Path, "_id should be listed first.");
+        AssertEquals("30", field("address.city").DocumentCount.ToString(), "Nested paths should count the documents containing them.");
+        MongoFieldStats sku = field("items[].sku");
+        Assert(sku.InsideArray && sku.Occurrences == 80 && sku.DocumentCount == 40, "Array-of-document paths should count every element.");
+        Assert(field("tags[]").Occurrences == 80 && field("tags").ArrayMaxLength == 2, "Array element paths and array lengths should be tracked.");
+
+        MongoFieldStats age = field("age");
+        Assert(age.TypeCounts.ContainsKey("String") && age.TypeCounts.ContainsKey("Int32"), "Mixed types should be recorded.");
+        Assert(age.Anomalies.Count(item => item.StartsWith(mySQLPunk.Localization.Format("MongoSchema.Anomaly.MixedTypes", string.Empty), StringComparison.Ordinal)) == 1,
+            "A number/string mix should be reported as mixed types: " + string.Join(" | ", age.Anomalies));
+        Assert(age.OutlierCount == 1 && age.OutlierSamples.Single().StartsWith("999", StringComparison.Ordinal) && age.OutlierSamples.Single().Contains("_id 7"),
+            "999 should be the only IQR outlier and point at its document.");
+        Assert(age.NumericMax == 999 && age.NumericMin == 21, "Numeric range should include every number.");
+
+        Assert(field("legacy").Anomalies.Any(item => item.Contains("2") && item.Contains("41")), "Fields in under 10% of documents should be marked sparse.");
+        Assert(field("Email").Anomalies.Any() && field("email").Anomalies.Any(), "Field names that differ only by case should be flagged on both.");
+        AssertEquals("3", field("note").EmptyStringCount.ToString(), "Empty strings should be counted.");
+        Assert(field("note").Anomalies.Any(), "Empty strings should be reported.");
+        AssertEquals("5", field("nickname").NullCount.ToString(), "Nulls should be counted.");
+        Assert(field("created").DateMin.HasValue && field("created").DateMin.Value.Day == 1 && field("created").DateMax.Value.Day == 28,
+            "Date ranges should be tracked.");
+        Assert(field("name").TopValues.Count == 5 && field("name").DistinctValues == 40, "Top values and distinct counts should be tracked.");
+        Assert(!report.Fields.Any(item => item.Path.Split('.').Length > MongoSchemaAnalyzer.MaximumDepth) && report.Warnings.Count == 1,
+            "Nesting beyond the depth limit should stop with a warning.");
+        Assert(!field("_id").Anomalies.Any() && !field("address.city").Anomalies.Any(), "Consistent fields must not be flagged.");
+        AssertContains(MongoSchemaAnalyzer.BuildTextReport(report, "demo"), "items[].sku", "The text report should list nested paths.");
+    }
+
+    /// <summary>
     /// DataGeneratorCore on in-memory table definitions: foreign keys pick existing or generated parents
     /// (including self references), unique values skip existing ones, rules apply, the same seed repeats, and
     /// invalid rules fail before anything is written. The result is then written through DataSyncCore.Apply.

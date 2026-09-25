@@ -77,6 +77,7 @@ public static partial class SmokeTests
         Run("Schema sync execution on target", TestSchemaSyncExecution, ref passed);
         Run("Data comparison and sync", TestDataComparisonSync, ref passed);
         Run("Data generator rules, foreign keys and uniqueness", TestDataGeneration, ref passed);
+        Run("MongoDB schema analyzer", AssertMongoSchemaAnalyzerSemantics, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);

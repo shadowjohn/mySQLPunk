@@ -240,6 +240,21 @@ namespace mySQLPunk.lib
             return GetViews(databaseName).Contains(viewName, StringComparer.Ordinal);
         }
 
+        public const int MaximumSchemaSample = 100000;
+
+        /// <summary>
+        /// 抽樣文件供結構描述分析。random 為 true 時以 $sample 由伺服器隨機挑選，否則依自然順序取前 N 筆；只讀取。
+        /// </summary>
+        public List<BsonDocument> SampleDocuments(string databaseName, string collectionName, int size, bool random)
+        {
+            EnsureOpen();
+            if (size < 1 || size > MaximumSchemaSample) throw new ArgumentOutOfRangeException("size");
+            IMongoCollection<BsonDocument> collection = GetCollection(databaseName, collectionName);
+            return random
+                ? collection.Aggregate().Sample(size).ToList()
+                : collection.Find(FilterDefinition<BsonDocument>.Empty).Limit(size).ToList();
+        }
+
         public long CountRows(string databaseName, string tableName)
         {
             EnsureOpen();
