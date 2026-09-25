@@ -12979,6 +12979,10 @@ namespace mySQLPunk
             dataGeneratorItem.Click += (s, ev) => ShowDataGenerationDialog();
             menu.Items.Add(dataGeneratorItem);
 
+            ToolStripMenuItem queryBuilderItem = new ToolStripMenuItem(Localization.T("Tool.QueryBuilder"));
+            queryBuilderItem.Click += (s, ev) => ShowQueryBuilder();
+            menu.Items.Add(queryBuilderItem);
+
             TreeDatabaseTarget sqliteTarget = BuildTargetFromNode(node);
             if (IsSqliteTarget(sqliteTarget))
             {
@@ -13008,6 +13012,22 @@ namespace mySQLPunk
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
             refreshItem.Click += (s, ev) => RefreshDatabaseGroupNode(node, "Tables");
             menu.Items.Add(refreshItem);
+        }
+
+        private void ShowQueryBuilder()
+        {
+            TreeDatabaseTarget target = GetTargetFromCurrentSelection();
+            if (target == null)
+            {
+                MessageBox.Show(Localization.T("Status.SelectExpandedDatabase"), Localization.T("Tool.QueryBuilder"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (QueryBuilderForm form = new QueryBuilderForm(target.Database, target.DatabaseName,
+                       sql => OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), sql, true)))
+            {
+                form.ShowDialog(this);
+            }
         }
 
         private void ShowMongoSchemaAnalysis(TreeDatabaseTarget target, string collectionName)

@@ -184,6 +184,95 @@ public static partial class SmokeTests
     }
 
     /// <summary>
+    /// QueryBuilderService: provider-specific SQL for joins, aggregates, HAVING, ordering and row limits; value
+    /// escaping; SQL → model → SQL round trips; and explicit rejection of SQL the builder cannot represent.
+    /// </summary>
+    public static void AssertQueryBuilderSemantics()
+    {
+        Func<QueryBuilderModel> sample = () =>
+        {
+            QueryBuilderModel model = new QueryBuilderModel { Limit = 10 };
+            model.Tables.Add(new QueryBuilderTable { Name = "customers", Alias = "c" });
+            model.Tables.Add(new QueryBuilderTable { Name = "orders", Alias = "o" });
+            model.Joins.Add(new QueryBuilderJoin { LeftAlias = "c", LeftColumn = "id", RightAlias = "o", RightColumn = "customer_id", Type = QueryJoinType.Left });
+            model.Columns.Add(new QueryBuilderColumn { TableAlias = "c", Column = "name" });
+            model.Columns.Add(new QueryBuilderColumn { TableAlias = "o", Column = "id", Aggregate = QueryAggregate.Count, Alias = "order_count", Sort = QuerySort.Descending });
+            model.Conditions.Add(new QueryBuilderCondition { TableAlias = "o", Column = "status", Operator = "IN", Value = "paid, new" });
+            model.Conditions.Add(new QueryBuilderCondition { Connector = "OR", TableAlias = "c", Column = "city", Operator = "=", Value = "O'Brien" });
+            model.Conditions.Add(new QueryBuilderCondition { TableAlias = "o", Column = "id", Aggregate = QueryAggregate.Count, Operator = ">", Value = "1" });
+            return model;
+        };
+
+        string nl = Environment.NewLine;
+        AssertEquals(
+            "SELECT `c`.`name`," + nl + "       COUNT(`o`.`id`) AS `order_count`" + nl +
+            "FROM `customers` AS `c`" + nl +
+            "LEFT JOIN `orders` AS `o` ON `c`.`id` = `o`.`customer_id`" + nl +
+            "WHERE `o`.`status` IN ('paid', 'new') OR `c`.`city` = 'O''Brien'" + nl +
+            "GROUP BY `c`.`name`" + nl +
+            "HAVING COUNT(`o`.`id`) > 1" + nl +
+            "ORDER BY COUNT(`o`.`id`) DESC" + nl +
+            "LIMIT 10;",
+            QueryBuilderService.BuildSql("mysql", sample()), "MySQL SQL should use backticks, auto GROUP BY and LIMIT.");
+        string mssql = QueryBuilderService.BuildSql("mssql", sample());
+        Assert(mssql.StartsWith("SELECT TOP (10) [c].[name]", StringComparison.Ordinal) && mssql.Contains("N'O''Brien'") && !mssql.Contains("LIMIT"),
+            "SQL Server should use TOP, brackets and N'' literals: " + mssql);
+        AssertContains(QueryBuilderService.BuildSql("oracle", sample()), "FETCH FIRST 10 ROWS ONLY", "Oracle should use FETCH FIRST.");
+        AssertContains(QueryBuilderService.BuildSql("oracle", sample()), "\"customers\" \"c\"", "Oracle table aliases must not use AS.");
+
+        foreach (string provider in new[] { "mysql", "postgresql", "mssql", "sqlite", "oracle" })
+        {
+            string first = QueryBuilderService.BuildSql(provider, sample());
+            QueryBuilderModel parsed;
+            string error;
+            Assert(QueryBuilderService.TryParse(provider, first, new[] { "customers", "orders" }, out parsed, out error), provider + " SQL should parse back: " + error + nl + first);
+            AssertEquals(first, QueryBuilderService.BuildSql(provider, parsed), provider + " SQL → model → SQL should be stable.");
+        }
+
+        QueryBuilderModel reversed;
+        string parseError;
+        Assert(QueryBuilderService.TryParse("postgresql",
+                "select distinct o.total as amount from orders o join customers c on c.id = o.customer_id where o.total between 10 and 20 and c.name like 'A%' and c.zip = '007' order by amount desc",
+                new[] { "public.orders", "public.customers" }, out reversed, out parseError),
+            "Lower-case SQL with output-alias ordering should parse: " + parseError);
+        Assert(reversed.Distinct && reversed.Tables[0].Name == "public.orders" && reversed.Joins[0].LeftAlias == "o" && reversed.Joins[0].RightAlias == "c",
+            "Known table names and join direction (existing → joined table) should be kept.");
+        Assert(reversed.Columns.Single(column => column.Alias == "amount").Sort == QuerySort.Descending, "ORDER BY an output alias should sort that column.");
+        AssertContains(QueryBuilderService.BuildSql("postgresql", reversed), "\"c\".\"zip\" = '007'", "Quoted numeric-looking strings must stay strings.");
+
+        AssertEquals("'x'' OR ''1''=''1'", QueryBuilderService.Literal("postgresql", "x' OR '1'='1"), "Quotes in values must be escaped.");
+        AssertEquals("'a\\\\b'", QueryBuilderService.Literal("mysql", "a\\b"), "MySQL backslashes must be doubled.");
+        AssertEquals("12.5", QueryBuilderService.Literal("mysql", "12.5"), "Numbers should stay numbers.");
+        AssertEquals("'007'", QueryBuilderService.Literal("mysql", "007"), "Leading-zero codes should stay strings.");
+        AssertEquals("NULL", QueryBuilderService.Literal("mysql", "null"), "NULL should stay a keyword.");
+
+        foreach (string unsupported in new[]
+                 {
+                     "SELECT * FROM (SELECT 1) x",
+                     "SELECT UPPER(name) FROM customers",
+                     "SELECT name FROM customers -- note",
+                     "SELECT name FROM customers WHERE (city = 'a' OR city = 'b')",
+                     "SELECT name FROM customers UNION SELECT name FROM orders",
+                     "SELECT x.name FROM customers c",
+                     "SELECT name FROM customers c JOIN orders o ON c.id = o.customer_id",
+                     "SELECT name FROM customers WHERE city = other_column",
+                     "DELETE FROM customers"
+                 })
+        {
+            QueryBuilderModel ignored;
+            string reason;
+            Assert(!QueryBuilderService.TryParse("mysql", unsupported, new[] { "customers", "orders" }, out ignored, out reason) && !string.IsNullOrEmpty(reason),
+                "Unsupported SQL must be rejected with a reason: " + unsupported);
+        }
+
+        QueryBuilderModel aliases = new QueryBuilderModel();
+        aliases.Tables.Add(new QueryBuilderTable { Name = "sales.orders", Alias = "orders" });
+        AssertEquals("orders2", aliases.NextAlias("orders"), "Aliases should not repeat.");
+        aliases.Columns.Add(new QueryBuilderColumn { TableAlias = "orders", Column = "*" });
+        AssertEquals("SELECT \"orders\".*" + nl + "FROM \"sales\".\"orders\";", QueryBuilderService.BuildSql("postgresql", aliases), "Schema-qualified tables keep the implicit alias.");
+    }
+
+    /// <summary>
     /// MongoSchemaAnalyzer on synthetic documents: nested and array paths, presence, type mix, numbers stored as
     /// strings, IQR outliers, sparse and case-variant fields, empty strings, nulls, date ranges and the depth limit.
     /// </summary>

@@ -78,6 +78,7 @@ public static partial class SmokeTests
         Run("Data comparison and sync", TestDataComparisonSync, ref passed);
         Run("Data generator rules, foreign keys and uniqueness", TestDataGeneration, ref passed);
         Run("MongoDB schema analyzer", AssertMongoSchemaAnalyzerSemantics, ref passed);
+        Run("Visual query builder", TestQueryBuilder, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12728,6 +12729,64 @@ public static partial class SmokeTests
                     DataGenerationResult rejected = form.Generate(5);
                     Assert(!rejected.Succeeded && rejected.Tables.Count == 0, "A NULL rule on a NOT NULL column must be rejected before writing.");
                 }
+            }
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void TestQueryBuilder()
+    {
+        AssertQueryBuilderSemantics();
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-query-builder-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            using (my_sqlite db = new my_sqlite())
+            {
+                db.SetConn("Data Source=" + Path.Combine(dir, "builder.sqlite") + ";Version=3;New=True;");
+                db.Open();
+                foreach (string sql in new[]
+                         {
+                             "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, city TEXT);",
+                             "CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), total NUMERIC, status TEXT);",
+                             "INSERT INTO customers VALUES (1, 'Alice', 'Taipei'), (2, 'Bob', 'Tainan');",
+                             "INSERT INTO orders VALUES (10, 1, 50, 'paid'), (11, 1, 20, 'new'), (12, 2, 5, 'paid');"
+                         })
+                {
+                    AssertEquals("OK", db.ExecSQL(sql)["status"], "Query builder fixture should be created.");
+                }
+
+                string opened = null;
+                using (QueryBuilderForm form = new QueryBuilderForm(db, "main", sql => opened = sql))
+                {
+                    form.CreateControl();
+                    form.LoadTables();
+                    string customers = form.AddTable("customers");
+                    string orders = form.AddTable("orders");
+                    AssertEquals("1", form.Model.Joins.Count.ToString(), "Adding a related table should join it through the foreign key.");
+                    form.SetOutput(customers, "name", true);
+                    form.SetOutput(orders, "total", true);
+                    form.Model.Columns.Single(column => column.Column == "total").Aggregate = QueryAggregate.Sum;
+                    form.Model.Columns.Single(column => column.Column == "total").Sort = QuerySort.Descending;
+                    form.AddCondition(new QueryBuilderCondition { TableAlias = orders, Column = "status", Operator = "=", Value = "paid" });
+                    AssertContains(form.Sql, "INNER JOIN \"orders\" ON \"customers\".\"id\" = \"orders\".\"customer_id\"", "The foreign key join should be generated.");
+                    AssertContains(form.Sql, "GROUP BY \"customers\".\"name\"", "Aggregates should group by the plain output columns.");
+
+                    System.Data.DataTable rows = db.SelectSQL(form.Sql);
+                    Assert(rows.Rows.Count == 2 && Convert.ToString(rows.Rows[0][0]) == "Alice" && Convert.ToDecimal(rows.Rows[0][1]) == 50m,
+                        "The generated SQL should run and sum paid orders per customer.");
+
+                    Assert(form.ApplySql("SELECT c.name FROM customers c WHERE c.city = 'Taipei' LIMIT 1"), "Supported SQL should convert back to the diagram.");
+                    Assert(form.Model.Tables.Count == 1 && form.Model.Limit == 1 && form.Model.Conditions.Single().Value == "Taipei", "The diagram should follow the SQL.");
+                    string before = form.Sql;
+                    Assert(!form.ApplySql("SELECT UPPER(name) FROM customers"), "Unsupported SQL must be rejected.");
+                    AssertEquals(before, form.Sql, "A rejected SQL must leave the current diagram untouched.");
+                }
+                Assert(opened == null, "Nothing is sent to the query editor unless asked.");
             }
         }
         finally

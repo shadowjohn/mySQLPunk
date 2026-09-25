@@ -46,7 +46,7 @@
 | 自動完成程式碼 | ✅ | 已能解析目前 statement 的 FROM／JOIN／UPDATE／INTO 來源與 alias；支援欄位、`alias.column`、資料表、關鍵字與片段捷徑，並依 provider/database 快取資料表、View 與欄位 metadata。 |
 | 程式碼片段 | ✅ | `Ctrl+Shift+P` 開啟片段管理器；支援 8 組內建片段、自訂片段 CRUD、全文搜尋、`$CURSOR$` 定位、保留縮排插入，以及 JSON 匯入／匯出工作區格式。 |
 | 視覺化解釋 | ✅ | MySQL／MariaDB、PostgreSQL、SQL Server、Oracle、SQLite 都有原生唯讀計畫，可查看節點樹、屬性、原始資料、文字與可用成本。 |
-| 視覺查詢建構器 | 📋 | 待補拖拉資料表、JOIN、條件與 SQL 雙向更新。 |
+| 視覺查詢建構器 | 🟡 | Windows 版完成：資料庫右鍵「查詢建構器...」可把資料表加入畫布、依外鍵自動連接、拖曳欄位建立 INNER／LEFT／RIGHT／FULL 連接，設定輸出、別名、彙總、排序、分組、WHERE／HAVING 條件、DISTINCT 與筆數上限；SQL 即時產生（MySQL／PostgreSQL／SQL Server／SQLite／Oracle 各自的引號與 LIMIT／TOP／FETCH），也能把可表達的 SELECT 轉回圖形。Linux／macOS 預覽版待移植。 |
 | Procedure／Function 偵錯器（中斷點、逐步、變數、呼叫堆疊） | 📋 | 依 provider 能力分階段實作，優先 PostgreSQL／SQL Server。 |
 | AI 助理／詢問 AI | 🟡 | 核心聊天與 schema 上下文已完成，進階動作見上表。 |
 | 資料傳輸／遷移（跨 DBMS） | 🟡 | 已有 Table／View 跨 provider 複製；待補整庫精靈、mapping、續傳與驗證報告。 |
