@@ -12431,7 +12431,46 @@ public static partial class SmokeTests
             form.CreateControl();
             AssertContains(form.GetDisplayTitle(), "sample", "ER diagram workspace title should identify its database.");
             Assert(form.UsesDatabase(formDatabase), "ER diagram workspace should close with its database connection.");
-            Assert(!form.HasUnsavedChanges(), "Read-only ER diagrams should never block tab closing as unsaved.");
+            Assert(!form.HasUnsavedChanges(), "An unchanged ER diagram should not block tab closing as unsaved.");
+        }
+
+        string modelDir = Path.Combine(Path.GetTempPath(), "mysqlpunk-er-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(modelDir);
+        try
+        {
+            AssertErModelSemantics(modelDir);
+            using (my_sqlite sqlite = new my_sqlite())
+            {
+                sqlite.SetConn("Data Source=" + Path.Combine(modelDir, "er.sqlite") + ";Version=3;");
+                sqlite.Open();
+                sqlite.ExecSQL("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT);");
+                sqlite.ExecSQL("CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER REFERENCES customers(id));");
+                sqlite.ExecSQL("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT);");
+                using (ErDiagramForm form = new ErDiagramForm(sqlite, "main"))
+                {
+                    form.CreateControl();
+                    form.RefreshDiagram();
+                    Assert(form.CurrentDiagram.Find("customers").X < form.CurrentDiagram.Find("orders").X, "The default layout should place parents first.");
+                    form.ApplyGroups(new List<ErModelGroup> { new ErModelGroup { Name = "Core", Color = "#2563eb", Locked = true } });
+                    form.AssignGroup("orders", "Core");
+                    Assert(form.HasUnsavedChanges(), "Editing groups should mark the model as changed.");
+                    Assert(!form.Canvas.MoveTable("orders", 900, 900), "Tables in a locked group must not move.");
+                    Assert(form.Canvas.MoveTable("notes", 700, 520) && form.CurrentDiagram.Find("notes").X == 700, "Other tables should move.");
+                    AssertThrows<InvalidOperationException>(() => form.ApplyGroups(new List<ErModelGroup> { new ErModelGroup { Name = "Bad", Color = "blue" } }), "Invalid group colors must be rejected.");
+                    string modelPath = Path.Combine(modelDir, "saved.punkmodel");
+                    form.SaveModelTo(modelPath);
+                    Assert(!form.HasUnsavedChanges(), "Saving should clear the unsaved flag.");
+                    form.SetDiagramTables(new[] { "orders" });
+                    form.LoadModel(modelPath);
+                    Assert(form.CurrentDiagram.Find("notes") != null && form.CurrentDiagram.Find("notes").Y == 520 && form.Model.FindGroup("Core").Locked,
+                        "Loading a model should restore tables, positions and groups.");
+                }
+            }
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(modelDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }
 

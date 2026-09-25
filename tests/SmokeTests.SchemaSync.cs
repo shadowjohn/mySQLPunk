@@ -1024,6 +1024,69 @@ public static partial class SmokeTests
     }
 
     /// <summary>
+    /// ER model service: foreign-key layered layout (parents left, isolated tables last, cycles terminate), model
+    /// validation, save／load round trip with coordinate clamping, and SVG output that escapes names and hides
+    /// tables in hidden groups.
+    /// </summary>
+    public static void AssertErModelSemantics(string directory)
+    {
+        SchemaModelSnapshot snapshot = new SchemaModelSnapshot { DatabaseName = "shop", ProviderName = "sqlite" };
+        foreach (string name in new[] { "customers", "orders", "order_items", "products", "audit_log", "<script>x</script>", "a", "b" })
+        {
+            SchemaTableModel table = new SchemaTableModel { Name = name };
+            table.Columns.Add(new SchemaColumnModel { Name = "id", DataType = "INTEGER", IsPrimaryKey = true, Ordinal = 1 });
+            table.Columns.Add(new SchemaColumnModel { Name = "ref_id", DataType = "INTEGER", IsNullable = true, Ordinal = 2 });
+            snapshot.Tables.Add(table);
+        }
+        Action<string, string> fk = (from, to) => snapshot.Relationships.Add(new SchemaRelationshipModel { Name = from + "_" + to, FromTable = from, FromColumn = "ref_id", ToTable = to, ToColumn = "id", Ordinal = 1 });
+        fk("orders", "customers");
+        fk("order_items", "orders");
+        fk("order_items", "products");
+        fk("a", "b");
+        fk("b", "a");
+
+        ErModelDocument document = ErModelService.CreateDefault(snapshot, "Main");
+        ErModelDiagram diagram = document.Diagrams[0];
+        Func<string, int> x = name => diagram.Find(name).X;
+        Assert(x("customers") < x("orders") && x("orders") < x("order_items") && x("products") < x("order_items"), "Parents should be placed left of their children.");
+        Assert(x("audit_log") > x("order_items") && x("<script>x</script>") == x("audit_log"), "Tables without relationships should share the last column.");
+        Assert(diagram.Tables.Select(item => item.X + "," + item.Y).Distinct().Count() == diagram.Tables.Count, "No two tables may share a position.");
+
+        document.Groups.Add(new ErModelGroup { Name = "Sales", Color = "#16a34a" });
+        document.Groups.Add(new ErModelGroup { Name = "Hidden", Color = "#6b7280", Visible = false });
+        diagram.Find("orders").Group = "Sales";
+        diagram.Find("audit_log").Group = "Hidden";
+        diagram.Find("products").X = 999999;
+        diagram.Find("customers").Group = "Missing";
+        string path = Path.Combine(directory, "shop.punkmodel");
+        ErModelService.Save(document, path);
+        ErModelDocument loaded = ErModelService.Load(path);
+        Assert(loaded.Diagrams[0].Find("orders").Group == "Sales" && loaded.Diagrams[0].Find("customers").Group == null,
+            "Groups should round-trip and unknown group references should be dropped.");
+        AssertEquals(ErModelService.MaximumCoordinate.ToString(), loaded.Diagrams[0].Find("products").X.ToString(), "Coordinates should be clamped.");
+
+        string svg = ErModelService.BuildSvg(snapshot, loaded, loaded.Diagrams[0]);
+        Assert(svg.Contains("&lt;script&gt;x&lt;/script&gt;") && !svg.Contains("<script>"), "SVG names must be escaped.");
+        Assert(!svg.Contains(">audit_log<") && svg.Contains(">orders<"), "Tables in hidden groups must be left out of the SVG.");
+        AssertEquals("#c4e8d1", ErModelService.Tint("#16a34a"), "Group tints should blend three parts white.");
+
+        Func<Action<ErModelDocument>, bool> rejects = change =>
+        {
+            ErModelDocument candidate = ErModelService.CreateDefault(snapshot, "Main");
+            change(candidate);
+            try { ErModelService.Validate(candidate); return false; }
+            catch (InvalidOperationException) { return true; }
+        };
+        Assert(rejects(doc => doc.Groups.Add(new ErModelGroup { Name = "x", Color = "red" })), "Group colors must be #RRGGBB.");
+        Assert(rejects(doc => { doc.Groups.Add(new ErModelGroup { Name = "x" }); doc.Groups.Add(new ErModelGroup { Name = "X" }); }), "Group names must be unique.");
+        Assert(rejects(doc => doc.Diagrams.Clear()), "A model needs a diagram.");
+        Assert(rejects(doc => doc.Diagrams.Add(new ErModelDiagram { Name = "main" })), "Diagram names must be unique.");
+        Assert(rejects(doc => doc.Version = 2), "Unknown model versions must be rejected.");
+        File.WriteAllText(path, "{ not json");
+        AssertThrows<InvalidOperationException>(() => ErModelService.Load(path), "Corrupt model files must be rejected with a message.");
+    }
+
+    /// <summary>
     /// Data dictionary templates on SQLite: full output keeps CREATE statements behind a CSP, the compact template
     /// normalizes column details, the column list gathers every table, filters limit the objects, personal text is
     /// escaped, and invalid colors are rejected. A data dictionary automation job writes the file.
