@@ -137,6 +137,7 @@ namespace mySQLPunk
         private readonly ToolStripButton swapButton;
         private readonly ToolStripButton exportButton;
         private readonly ToolStripButton syncScriptButton;
+        private readonly ToolStripButton dataCompareButton;
         private readonly ToolStripButton floatButton;
         private readonly ToolStripButton dockButton;
         private readonly Label directionLabel;
@@ -164,6 +165,7 @@ namespace mySQLPunk
             swapButton = new ToolStripButton(Localization.T("SchemaComparison.Swap"));
             exportButton = new ToolStripButton(Localization.T("SchemaComparison.ExportHtml"));
             syncScriptButton = new ToolStripButton(Localization.T("SchemaSync.Button")) { Enabled = false };
+            dataCompareButton = new ToolStripButton(Localization.T("DataSync.Button"));
             floatButton = new ToolStripButton(Localization.T("Query.Float"));
             dockButton = new ToolStripButton(Localization.T("Query.Dock")) { Visible = false };
             toolStrip.Items.AddRange(new ToolStripItem[]
@@ -173,6 +175,7 @@ namespace mySQLPunk
                 new ToolStripSeparator(),
                 exportButton,
                 syncScriptButton,
+                dataCompareButton,
                 new ToolStripSeparator(),
                 floatButton,
                 dockButton
@@ -226,6 +229,10 @@ namespace mySQLPunk
             swapButton.Click += (sender, args) => SwapEndpoints();
             exportButton.Click += (sender, args) => ExportHtml();
             syncScriptButton.Click += (sender, args) => ShowSyncScript();
+            dataCompareButton.Click += (sender, args) =>
+            {
+                using (DataComparisonForm form = new DataComparisonForm(source, target)) form.ShowDialog(this);
+            };
             floatButton.Click += (sender, args) => { if (mainHost != null) mainHost.FloatDockableForm(this); };
             dockButton.Click += (sender, args) => { if (mainHost != null) mainHost.DockDockableForm(this); };
             Shown += (sender, args) =>

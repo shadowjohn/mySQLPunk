@@ -75,6 +75,7 @@ public static partial class SmokeTests
         Run("Database schema comparison", TestSchemaComparison, ref passed);
         Run("Schema sync SQL preview", TestSchemaSyncScript, ref passed);
         Run("Schema sync execution on target", TestSchemaSyncExecution, ref passed);
+        Run("Data comparison and sync", TestDataComparisonSync, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12586,6 +12587,75 @@ public static partial class SmokeTests
                 other.Open();
                 AssertThrows<InvalidOperationException>(() => SchemaSyncExecutionService.Execute(other, "main", new List<string>()),
                     "An empty batch must be rejected before touching the database.");
+            }
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void TestDataComparisonSync()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-data-sync-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            using (my_sqlite core = new my_sqlite())
+            {
+                core.SetConn("Data Source=" + Path.Combine(dir, "core.sqlite") + ";Version=3;New=True;");
+                core.Open();
+                AssertDataSyncCoreSemantics(core.MCT);
+            }
+
+            using (my_sqlite sourceDb = new my_sqlite())
+            using (my_sqlite targetDb = new my_sqlite())
+            {
+                sourceDb.SetConn("Data Source=" + Path.Combine(dir, "source.sqlite") + ";Version=3;New=True;");
+                targetDb.SetConn("Data Source=" + Path.Combine(dir, "target.sqlite") + ";Version=3;New=True;");
+                sourceDb.Open();
+                targetDb.Open();
+                string[] schema =
+                {
+                    "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, city TEXT NULL);",
+                    "CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), amount REAL NOT NULL);"
+                };
+                foreach (string sql in schema)
+                {
+                    AssertEquals("OK", sourceDb.ExecSQL(sql)["status"], "Source fixture should be created.");
+                    AssertEquals("OK", targetDb.ExecSQL(sql)["status"], "Target fixture should be created.");
+                }
+                AssertEquals("OK", sourceDb.ExecSQL("INSERT INTO customers VALUES (1,'Alice','Taipei'),(2,'Bob','Tainan'),(3,'Carol',NULL); INSERT INTO orders VALUES (10,1,99.5),(11,3,20);")["status"], "Source rows");
+                AssertEquals("OK", targetDb.ExecSQL("INSERT INTO customers VALUES (1,'Alice','Taipei'),(2,'Bob','Kaohsiung'),(4,'Dave','Hsinchu'); INSERT INTO orders VALUES (12,4,5);")["status"], "Target rows");
+
+                SchemaComparisonEndpoint source = new SchemaComparisonEndpoint { ConnectionName = "Source", DatabaseName = "main", ProviderName = "sqlite", Database = sourceDb };
+                SchemaComparisonEndpoint target = new SchemaComparisonEndpoint { ConnectionName = "Target", DatabaseName = "main", ProviderName = "sqlite", Database = targetDb };
+                using (DataComparisonForm form = new DataComparisonForm(source, target))
+                {
+                    form.CreateControl();
+                    form.LoadTables();
+                    AssertEquals("2", form.TableCount.ToString(), "Both common tables should be listed.");
+                    List<DataTableComparison> comparisons = form.CompareSelected();
+                    AssertEquals("customers,orders", string.Join(",", comparisons.Select(item => item.TableName)),
+                        "Referenced tables should be compared and applied first.");
+                    DataTableComparison customers = comparisons[0];
+                    Assert(customers.Inserts == 1 && customers.Updates == 1 && customers.Deletes == 1 && customers.IdenticalRows == 1,
+                        "customers should need one insert, update and delete: " + customers.StatusText);
+
+                    DataSyncResult withoutDeletes = form.ApplySync(false);
+                    Assert(withoutDeletes.Succeeded && withoutDeletes.Deleted == 0 && withoutDeletes.Inserted == 3,
+                        "Syncing without deletes should keep target-only rows: " + withoutDeletes.Summary);
+                    comparisons = form.CompareSelected();
+                    Assert(comparisons.All(item => item.Inserts == 0 && item.Updates == 0) && comparisons.Sum(item => item.Deletes) == 2,
+                        "Only the target-only rows should remain after syncing without deletes.");
+
+                    DataSyncResult withDeletes = form.ApplySync(true);
+                    Assert(withDeletes.Succeeded && withDeletes.Deleted == 2,
+                        "Deleting target-only child rows before parents should respect the foreign key: " + withDeletes.Summary);
+                    Assert(form.CompareSelected().All(item => item.Changes.Count == 0),
+                        "After a full sync, a new comparison should find no differences.");
+                }
             }
         }
         finally

@@ -183,6 +183,89 @@ public static partial class SmokeTests
             "Destructive statements must stay separate from the default executable statements.");
     }
 
+    /// <summary>
+    /// DataSyncCore on one SQLite connection holding src_* and dst_* tables: compare, apply in dependency order
+    /// (deletes children first), rollback on a concurrent change, and value equality rules.
+    /// </summary>
+    public static void AssertDataSyncCoreSemantics(DbConnection connection)
+    {
+        Action<string> exec = sql =>
+        {
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = sql;
+                command.ExecuteNonQuery();
+            }
+        };
+        Func<string, System.Data.DataTable> read = sql =>
+        {
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = sql;
+                System.Data.DataTable table = new System.Data.DataTable();
+                using (DbDataReader reader = command.ExecuteReader()) table.Load(reader);
+                return table;
+            }
+        };
+
+        exec("PRAGMA foreign_keys = ON");
+        exec("CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT NOT NULL, payload BLOB NULL)");
+        exec("CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id), note TEXT NULL)");
+        exec("INSERT INTO parent VALUES (1, 'same', X'00FF'), (2, 'old name', NULL), (4, 'target only', NULL)");
+        exec("INSERT INTO child VALUES (12, 4, 'orphan')");
+
+        System.Data.DataTable sourceParent = read("SELECT 1 AS id, 'same' AS name, X'00FF' AS payload UNION ALL SELECT 2, 'renamed ''quote''', NULL UNION ALL SELECT 3, 'new' || char(10) || 'line', X'01'");
+        System.Data.DataTable sourceChild = read("SELECT 10 AS id, 1 AS parent_id, 'a' AS note UNION ALL SELECT 11, 3, NULL");
+        Func<List<DataTableComparison>> compare = () => new List<DataTableComparison>
+        {
+            DataSyncCore.Compare("parent", sourceParent, read("SELECT id, name, payload FROM parent"), new List<string> { "id" }, null),
+            DataSyncCore.Compare("child", sourceChild, read("SELECT id, parent_id, note FROM child"), new List<string> { "id" }, null)
+        };
+
+        List<DataTableComparison> comparisons = compare();
+        Assert(comparisons[0].Inserts == 1 && comparisons[0].Updates == 1 && comparisons[0].Deletes == 1 && comparisons[0].IdenticalRows == 1,
+            "parent should need one insert, update and delete: " + comparisons[0].Inserts + "/" + comparisons[0].Updates + "/" + comparisons[0].Deletes);
+        Assert(comparisons[0].Changes.Single(item => item.Kind == DataRowChangeKind.Update).Values.Keys.SequenceEqual(new[] { "name" }),
+            "Updates should only carry the columns that differ.");
+        Assert(comparisons[1].Inserts == 2 && comparisons[1].Deletes == 1, "child should need two inserts and one delete.");
+
+        Func<string, string> quote = name => "\"" + name.Replace("\"", "\"\"") + "\"";
+        Func<List<DataTableComparison>, List<DataSyncTableRequest>> requests = items => items.Select(item => new DataSyncTableRequest
+        {
+            TableName = item.TableName,
+            KeyColumns = item.KeyColumns,
+            Changes = item.Changes,
+            AfterInsertStatements = new List<string>()
+        }).ToList();
+
+        exec("UPDATE parent SET name = 'changed behind' WHERE id = 2");
+        DataSyncResult stale = DataSyncCore.Apply(connection, requests(comparisons), quote, quote, "@", null);
+        Assert(!stale.Succeeded && stale.FailedTable == "parent", "A row changed after comparing must fail the whole batch: " + stale.Message);
+        Assert(read("SELECT id FROM child").Rows.Count == 1 && read("SELECT id FROM parent").Rows.Count == 3,
+            "A failed batch must roll back every earlier delete and insert.");
+
+        DataSyncResult ok = DataSyncCore.Apply(connection, requests(compare()), quote, quote, "@", null);
+        Assert(ok.Succeeded && ok.Inserted == 3 && ok.Updated == 1 && ok.Deleted == 2, "Sync should succeed: " + ok.Message);
+        List<DataTableComparison> after = compare();
+        Assert(after.All(item => item.Changes.Count == 0), "After syncing, a new comparison should find no differences.");
+
+        string preview = DataSyncCore.BuildPreviewSql(DataSyncCore.Compare("tags",
+            read("SELECT 'k1' AS code"), read("SELECT 'x' || char(10) || 'DELETE FROM parent;' AS code"), new List<string> { "code" }, null),
+            quote, quote, false);
+        Assert(preview.Split('\n').Where(line => line.Trim().Length > 0 && !line.StartsWith("INSERT", StringComparison.Ordinal))
+                   .All(line => line.StartsWith("--", StringComparison.Ordinal)),
+            "A commented DELETE must stay on one line even when the key contains a newline: " + preview);
+
+        Assert(DataSyncCore.ValuesEqual(1, 1L) && DataSyncCore.ValuesEqual(1.50m, 1.5m) && DataSyncCore.ValuesEqual(DBNull.Value, null) &&
+               DataSyncCore.ValuesEqual(new byte[] { 1, 2 }, new byte[] { 1, 2 }) && !DataSyncCore.ValuesEqual(new byte[] { 1 }, new byte[] { 2 }) &&
+               !DataSyncCore.ValuesEqual("a", "A") && !DataSyncCore.ValuesEqual(DBNull.Value, 0),
+            "Value equality should treat numbers numerically, bytes by content, NULLs alike, and text case-sensitively.");
+        Assert(DataSyncCore.Compare("x", read("SELECT 1 AS id"), read("SELECT 1 AS id UNION ALL SELECT 1"), new List<string> { "id" }, null).IsSkipped,
+            "Duplicate key values must skip the table rather than guess.");
+        Assert(DataSyncCore.Compare("x", read("SELECT 1 AS id"), read("SELECT 1 AS id"), new List<string>(), null).IsSkipped,
+            "Tables without a primary key must be skipped.");
+    }
+
     private static void AssertStatement(SchemaSyncScript script, string expected)
     {
         Assert(script.Statements.Contains(expected),
