@@ -173,12 +173,18 @@ namespace mySQLPunk.lib
             try
             {
                 JToken token = JToken.Parse(rawJson);
-                QueryPlanDocument document = normalizedProvider == "postgresql"
-                    ? ParsePostgreSql(token)
-                    : ParseMySql(token);
+                bool oceanBase = normalizedProvider == "mysql" && IsOceanBasePlan(token);
+                QueryPlanDocument document;
+                if (normalizedProvider == "postgresql") document = ParsePostgreSql(token);
+                else if (oceanBase)
+                {
+                    document = new QueryPlanDocument();
+                    document.Roots.Add(ParseOceanBaseOperator((JObject)token, 0));
+                }
+                else document = ParseMySql(token);
                 document.Provider = normalizedProvider;
                 document.ExplainSql = explainSql ?? string.Empty;
-                document.RawFormat = "JSON";
+                document.RawFormat = oceanBase ? "OceanBase JSON" : "JSON";
                 document.RawJson = token.ToString(Formatting.Indented);
                 CompleteDocument(document);
                 return document;
@@ -276,6 +282,56 @@ namespace mySQLPunk.lib
             return node;
         }
 
+        /// <summary>OceanBase（MySQL 模式）的 FORMAT=JSON：每個運算子有 ID、OPERATOR、NAME、EST.ROWS、EST.TIME(us) 與 CHILD_n。</summary>
+        private static bool IsOceanBasePlan(JToken token)
+        {
+            JObject obj = token as JObject;
+            return obj != null && obj["OPERATOR"] != null && obj["query_block"] == null;
+        }
+
+        private static QueryPlanNode ParseOceanBaseOperator(JObject obj, int depth)
+        {
+            if (depth > 128) throw new InvalidOperationException(Localization.T("Query.PlanMissingJson"));
+            string operation = (string)obj["OPERATOR"] ?? "Operator";
+            string name = (string)obj["NAME"] ?? string.Empty;
+            string index = string.Empty;
+            Match indexMatch = Regex.Match(name, @"^(?<table>[^(]+)\((?<index>[^)]*)\)$");
+            if (indexMatch.Success)
+            {
+                name = indexMatch.Groups["table"].Value;
+                index = indexMatch.Groups["index"].Value;
+            }
+            double number;
+            QueryPlanNode node = new QueryPlanNode
+            {
+                NodeType = operation,
+                RelationName = name,
+                Alias = name,
+                AccessType = operation.IndexOf("SCAN", StringComparison.OrdinalIgnoreCase) >= 0 || operation.IndexOf("GET", StringComparison.OrdinalIgnoreCase) >= 0 ? operation : string.Empty,
+                JoinType = operation.IndexOf("JOIN", StringComparison.OrdinalIgnoreCase) >= 0 ? operation : string.Empty,
+                EstimatedRows = double.TryParse(Convert.ToString(obj["EST.ROWS"], CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out number) ? number : (double?)null,
+                // EST.TIME 是含子節點的累計估計時間（微秒），拿來當成本比例標示高成本節點。
+                TotalCost = double.TryParse(Convert.ToString(obj["EST.TIME(us)"], CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out number) ? number : (double?)null
+            };
+            if (index.Length > 0) node.Details["index"] = index;
+            foreach (JProperty property in obj.Properties())
+            {
+                if (property.Name.StartsWith("CHILD_", StringComparison.OrdinalIgnoreCase) || property.Value is JContainer) continue;
+                node.Details[property.Name] = Convert.ToString(((JValue)property.Value).Value, CultureInfo.InvariantCulture);
+            }
+            foreach (JProperty child in obj.Properties()
+                .Where(property => property.Name.StartsWith("CHILD_", StringComparison.OrdinalIgnoreCase) && property.Value is JObject)
+                .OrderBy(property =>
+                {
+                    int order;
+                    return int.TryParse(property.Name.Substring(6), NumberStyles.Integer, CultureInfo.InvariantCulture, out order) ? order : int.MaxValue;
+                }))
+            {
+                node.Children.Add(ParseOceanBaseOperator((JObject)child.Value, depth + 1));
+            }
+            return node;
+        }
+
         public static string ExtractJson(DataTable result)
         {
             if (result == null || result.Rows.Count == 0 || result.Columns.Count == 0) return string.Empty;
@@ -284,7 +340,8 @@ namespace mySQLPunk.lib
                 string.Equals(column.ColumnName, "EXPLAIN", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(column.ColumnName, "QUERY PLAN", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(column.ColumnName, "QUERY_PLAN", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(column.ColumnName, TiDbJsonColumn, StringComparison.OrdinalIgnoreCase));
+                string.Equals(column.ColumnName, TiDbJsonColumn, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(column.ColumnName, "Query Plan", StringComparison.OrdinalIgnoreCase));
             int columnIndex = preferred == null ? 0 : preferred.Ordinal;
             List<string> fragments = new List<string>();
             foreach (DataRow row in result.Rows)

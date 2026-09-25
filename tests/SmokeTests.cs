@@ -9712,6 +9712,14 @@ public static partial class SmokeTests
                !tidbPlan.Roots[0].Children[1].EstimatedRows.HasValue,
             "A TiDB tidb_json plan should parse operators, build/probe roles, tables and estimated rows.");
 
+        QueryPlanDocument oceanBasePlan = QueryPlanService.ParseJson("mysql",
+            "{\"ID\":0,\"OPERATOR\":\"HASH JOIN\",\"NAME\":\"\",\"EST.ROWS\":10,\"EST.TIME(us)\":120,\"CHILD_1\":{\"ID\":1,\"OPERATOR\":\"TABLE FULL SCAN\",\"NAME\":\"o\",\"EST.ROWS\":10,\"EST.TIME(us)\":80}," +
+            "\"CHILD_2\":{\"ID\":2,\"OPERATOR\":\"TABLE RANGE SCAN\",\"NAME\":\"c(ix_child)\",\"EST.ROWS\":4,\"EST.TIME(us)\":30}}", "EXPLAIN FORMAT=JSON SELECT 1");
+        Assert(oceanBasePlan.RawFormat == "OceanBase JSON" && oceanBasePlan.NodeCount == 3 && oceanBasePlan.Roots[0].NodeType == "HASH JOIN" &&
+               oceanBasePlan.Roots[0].Children[0].RelationName == "o" && oceanBasePlan.Roots[0].Children[0].Severity == QueryPlanSeverity.High &&
+               oceanBasePlan.Roots[0].Children[1].RelationName == "c" && oceanBasePlan.Roots[0].Children[1].Details["index"] == "ix_child",
+            "An OceanBase JSON plan should follow CHILD_n, split alias and index, and flag expensive operators.");
+
         string mysqlSql = QueryPlanService.BuildExplainSql("mysql", "SELECT * FROM film;");
         AssertEquals("EXPLAIN FORMAT=JSON SELECT * FROM film", mysqlSql, "MySQL plan SQL should request JSON without executing ANALYZE.");
 

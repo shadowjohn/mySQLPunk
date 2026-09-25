@@ -83,7 +83,7 @@
 | Redis／Garnet | 🟡 | standalone 已具備 URI、ACL／密碼、TLS、logical db、key 瀏覽、受限查詢、五種型別安全編輯／TTL／刪除、list 依索引刪除、INFO 監控與 Pub/Sub 訊息工作區。Redis 6.2、Redis 7 與 Garnet 既有各 39 項實機矩陣通過，新增案例待重跑；Cluster／Sentinel 待補。 |
 | Snowflake | 🟡 | 第二期 provider 完成（SQL REST API、PAT／OAuth、metadata、分頁瀏覽、SELECT／SHOW 與查詢編輯器單一 DML／DDL）；真實帳戶實機矩陣、key-pair JWT、參數綁定、網格寫回與 bulk load 待補。 |
 | AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS、MongoDB 與 Redis 可先用標準主機連線；待補各家 IAM／SSO／MFA 與雲端專用驗證。 |
-| OceanBase、PingCAP／TiDB、Dameng、Fujitsu、Kingbase、HighGo | 🟡 | TiDB 8.5 已加入 Docker 實機矩陣（MySQL 協定）：連線、metadata、結構（註解、索引、外鍵）、安全編輯與樂觀並行衝突、結構同步、資料同步與資料產生器都通過；執行計畫改用 TiDB 原生 `tidb_json`（Windows 與 Linux／macOS 皆自動偵測）。已知差異：TiDB 解析但忽略索引 DESC。OceanBase 與其餘資料庫待建立矩陣。 |
+| OceanBase、PingCAP／TiDB、Dameng、Fujitsu、Kingbase、HighGo | 🟡 | TiDB 8.5 與 OceanBase CE 4.4（MySQL 模式）已加入 Docker 實機矩陣：連線、metadata、結構（註解、索引、外鍵）、安全編輯與樂觀並行衝突、結構同步、資料同步與資料產生器都通過；執行計畫會辨識 TiDB（改送 `tidb_json`）與 OceanBase 的 JSON 結構（Windows 與 Linux／macOS 皆支援）。已知差異：兩者都解析但忽略索引 DESC；OceanBase 帳號格式為 `user@tenant`。Dameng、Kingbase、HighGo、Fujitsu 需要專用驅動或授權映像，待建立矩陣。 |
 
 ## 接續順序
 

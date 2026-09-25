@@ -9,11 +9,15 @@ sqlserver_container="mysqlpunk-cross-sqlserver-test"
 postgres_tls_container="mysqlpunk-cross-postgres-tls-test"
 sqlserver_tls_container="mysqlpunk-cross-sqlserver-tls-test"
 tidb_container="mysqlpunk-cross-tidb-test"
+oceanbase_container="mysqlpunk-cross-oceanbase-test"
 mysql_image="${MYSQLPUNK_MYSQL_IMAGE:-mysql:8.0}"
 mariadb_image="${MYSQLPUNK_MARIADB_IMAGE:-mariadb:11.4}"
 postgres_image="${MYSQLPUNK_POSTGRES_IMAGE:-postgres:16-alpine}"
 sqlserver_image="${MYSQLPUNK_SQLSERVER_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}"
 tidb_image="${MYSQLPUNK_TIDB_IMAGE:-pingcap/tidb:v8.5.1}"
+oceanbase_image="${MYSQLPUNK_OCEANBASE_IMAGE:-oceanbase/oceanbase-ce:latest}"
+# OceanBase CE 需要約 3 GB 記憶體、開機數分鐘，預設不跑；設 MYSQLPUNK_LIVE_OCEANBASE=1 才加入矩陣。
+with_oceanbase="${MYSQLPUNK_LIVE_OCEANBASE:-0}"
 test_password="MySQLPunk_test_2026!"
 
 if docker inspect "$mysql_container" >/dev/null 2>&1 ||
@@ -22,6 +26,7 @@ if docker inspect "$mysql_container" >/dev/null 2>&1 ||
    docker inspect "$postgres_tls_container" >/dev/null 2>&1 ||
    docker inspect "$sqlserver_tls_container" >/dev/null 2>&1 ||
    docker inspect "$tidb_container" >/dev/null 2>&1 ||
+   docker inspect "$oceanbase_container" >/dev/null 2>&1 ||
    docker inspect "$sqlserver_container" >/dev/null 2>&1; then
     echo "Cross-platform test container name is already in use." >&2
     exit 2
@@ -29,7 +34,7 @@ fi
 
 tls_directory=$(mktemp -d)
 cleanup() {
-    docker rm -f "$mysql_container" "$mariadb_container" "$postgres_container" "$postgres_tls_container" "$sqlserver_container" "$sqlserver_tls_container" "$tidb_container" >/dev/null 2>&1 || true
+    docker rm -f "$mysql_container" "$mariadb_container" "$postgres_container" "$postgres_tls_container" "$sqlserver_container" "$sqlserver_tls_container" "$tidb_container" "$oceanbase_container" >/dev/null 2>&1 || true
     rm -rf "$tls_directory"
 }
 trap cleanup EXIT
@@ -121,6 +126,17 @@ docker run -d --rm \
     -p 127.0.0.1::4000 \
     "$tidb_image" >/dev/null
 
+if [[ "$with_oceanbase" == "1" ]]; then
+    docker run -d \
+        --name "$oceanbase_container" \
+        --ulimit nofile=65536:65536 \
+        --ulimit stack=-1:-1 \
+        -e MODE=mini \
+        -e OB_TENANT_PASSWORD="$test_password" \
+        -p 127.0.0.1::2881 \
+        "$oceanbase_image" >/dev/null
+fi
+
 mysql_ready=0
 mariadb_ready=0
 postgres_ready=0
@@ -184,6 +200,33 @@ fi
 docker cp "$mysql_container:/var/lib/mysql/ca.pem" "$tls_directory/mysql-ca.pem"
 chmod 644 "$tls_directory/mysql-ca.pem"
 
+oceanbase_environment=()
+if [[ "$with_oceanbase" == "1" ]]; then
+    oceanbase_ready=0
+    for _ in $(seq 1 180); do
+        if docker logs "$oceanbase_container" 2>&1 | grep -q "boot success"; then
+            oceanbase_ready=1
+            break
+        fi
+        if [[ "$(docker inspect -f '{{.State.Running}}' "$oceanbase_container" 2>/dev/null)" != "true" ]]; then
+            break
+        fi
+        sleep 5
+    done
+    if [[ "$oceanbase_ready" -ne 1 ]]; then
+        echo "OceanBase container did not boot." >&2
+        docker logs "$oceanbase_container" 2>&1 | tail -n 20 >&2 || true
+        exit 3
+    fi
+    oceanbase_port=$(docker port "$oceanbase_container" 2881/tcp | sed 's/.*://')
+    oceanbase_environment=(
+        MYSQLPUNK_OCEANBASE_HOST=127.0.0.1
+        MYSQLPUNK_OCEANBASE_PORT="$oceanbase_port"
+        MYSQLPUNK_OCEANBASE_USER=root@test
+        MYSQLPUNK_OCEANBASE_PASSWORD="$test_password"
+    )
+fi
+
 mysql_port=$(docker port "$mysql_container" 3306/tcp | sed 's/.*://')
 mariadb_port=$(docker port "$mariadb_container" 3306/tcp | sed 's/.*://')
 postgres_port=$(docker port "$postgres_container" 5432/tcp | sed 's/.*://')
@@ -193,6 +236,7 @@ sqlserver_tls_port=$(docker port "$sqlserver_tls_container" 1433/tcp | sed 's/.*
 tidb_port=$(docker port "$tidb_container" 4000/tcp | sed 's/.*://')
 
 cd "$repo_root"
+env "${oceanbase_environment[@]}" \
 MYSQLPUNK_LIVE_TESTS=1 \
 MYSQLPUNK_MYSQL_HOST=127.0.0.1 \
 MYSQLPUNK_MYSQL_PORT="$mysql_port" \

@@ -138,12 +138,16 @@ public static class QueryPlanService
             {
                 Provider = provider,
                 ExplainSql = explainSql,
-                RawFormat = "JSON",
+                RawFormat = provider == DatabaseProviderKind.MySql && IsOceanBasePlan(json.RootElement) ? "OceanBase JSON" : "JSON",
                 RawPlan = JsonSerializer.Serialize(json.RootElement, IndentedJson)
             };
             if (provider == DatabaseProviderKind.PostgreSql)
             {
                 ParsePostgreSql(document, json.RootElement);
+            }
+            else if (IsOceanBasePlan(json.RootElement))
+            {
+                document.Roots.Add(ParseOceanBaseOperator(json.RootElement, 0));
             }
             else
             {
@@ -267,6 +271,63 @@ public static class QueryPlanService
         return node;
     }
 
+    /// <summary>OceanBase（MySQL 模式）的 FORMAT=JSON：每個運算子有 ID、OPERATOR、NAME、EST.ROWS、EST.TIME(us) 與 CHILD_n。</summary>
+    private static bool IsOceanBasePlan(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object && root.TryGetProperty("OPERATOR", out _) && !root.TryGetProperty("query_block", out _);
+
+    private static QueryPlanNode ParseOceanBaseOperator(JsonElement obj, int depth)
+    {
+        if (depth > 128)
+        {
+            throw new InvalidOperationException("OceanBase 執行計畫巢狀過深。");
+        }
+
+        var operation = ReadText(obj, "OPERATOR", "Operator");
+        var name = ReadText(obj, "NAME");
+        var index = string.Empty;
+        var indexMatch = Regex.Match(name, @"^(?<table>[^(]+)\((?<index>[^)]*)\)$");
+        if (indexMatch.Success)
+        {
+            name = indexMatch.Groups["table"].Value;
+            index = indexMatch.Groups["index"].Value;
+        }
+
+        var node = new QueryPlanNode
+        {
+            NodeType = operation,
+            RelationName = name,
+            Alias = name,
+            AccessType = operation.Contains("SCAN", StringComparison.OrdinalIgnoreCase) || operation.Contains("GET", StringComparison.OrdinalIgnoreCase) ? operation : string.Empty,
+            JoinType = operation.Contains("JOIN", StringComparison.OrdinalIgnoreCase) ? operation : string.Empty,
+            EstimatedRows = ReadDouble(obj, "EST.ROWS"),
+            // EST.TIME 是含子節點的累計估計時間（微秒），拿來當成本比例標示高成本節點。
+            TotalCost = ReadDouble(obj, "EST.TIME(us)")
+        };
+        if (index.Length > 0)
+        {
+            node.Details["index"] = index;
+        }
+
+        foreach (var property in obj.EnumerateObject())
+        {
+            if (property.Name.StartsWith("CHILD_", StringComparison.OrdinalIgnoreCase) || property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            node.Details[property.Name] = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() ?? string.Empty : property.Value.GetRawText();
+        }
+
+        foreach (var child in obj.EnumerateObject()
+                     .Where(property => property.Name.StartsWith("CHILD_", StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.Object)
+                     .OrderBy(property => int.TryParse(property.Name[6..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var order) ? order : int.MaxValue))
+        {
+            node.Children.Add(ParseOceanBaseOperator(child.Value, depth + 1));
+        }
+
+        return node;
+    }
+
     public static string ExtractJson(QueryResult result)
     {
         if (result.Columns.Count == 0 || result.Rows.Count == 0)
@@ -281,7 +342,8 @@ public static class QueryPlanService
             if (name.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase) ||
                 name.Equals("QUERY PLAN", StringComparison.OrdinalIgnoreCase) ||
                 name.Equals("QUERY_PLAN", StringComparison.OrdinalIgnoreCase) ||
-                name.Equals(TiDbJsonColumn, StringComparison.OrdinalIgnoreCase))
+                name.Equals(TiDbJsonColumn, StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Query Plan", StringComparison.OrdinalIgnoreCase))
             {
                 columnIndex = index;
                 break;

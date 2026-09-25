@@ -65,7 +65,7 @@ dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.
 dotnet run --project mySQLPunk.Desktop/mySQLPunk.Desktop.csproj -c Release
 ```
 
-若已安裝 Docker，可再跑 MySQL 8 / MariaDB 11.4 / PostgreSQL 16 / SQL Server 2022 / TiDB 8.5 實機 round-trip；腳本只會建立並清理 `mysqlpunk-cross-*-test` 測試容器與測試自行建立的暫存 database。矩陣同時會匯出 MySQL 容器自動產生的 CA、另起一個以臨時 CA 簽發（SAN 127.0.0.1）伺服器憑證的 PostgreSQL TLS 容器，驗證 VerifyCA／VerifyFull／錯誤 CA 的 fail closed，再以同一張憑證起一個 `forceencryption` 的 SQL Server TLS 容器驗證伺服器憑證精確比對（Strict／TDS 8.0 需要伺服器端另行佈建憑證，測試容器不涵蓋），並在本機以非特權 sshd 建立 SSH Tunnel 實際查詢 MySQL、PostgreSQL 與 SQL Server。可設定 `MYSQLPUNK_TEST_FILTER=TiDB` 之類的文字只跑名稱相符的測試：
+若已安裝 Docker，可再跑 MySQL 8 / MariaDB 11.4 / PostgreSQL 16 / SQL Server 2022 / TiDB 8.5 實機 round-trip；腳本只會建立並清理 `mysqlpunk-cross-*-test` 測試容器與測試自行建立的暫存 database。矩陣同時會匯出 MySQL 容器自動產生的 CA、另起一個以臨時 CA 簽發（SAN 127.0.0.1）伺服器憑證的 PostgreSQL TLS 容器，驗證 VerifyCA／VerifyFull／錯誤 CA 的 fail closed，再以同一張憑證起一個 `forceencryption` 的 SQL Server TLS 容器驗證伺服器憑證精確比對（Strict／TDS 8.0 需要伺服器端另行佈建憑證，測試容器不涵蓋），並在本機以非特權 sshd 建立 SSH Tunnel 實際查詢 MySQL、PostgreSQL 與 SQL Server。可設定 `MYSQLPUNK_TEST_FILTER=TiDB` 之類的文字只跑名稱相符的測試，`MYSQLPUNK_LIVE_OCEANBASE=1` 另外啟動 OceanBase CE（MySQL 模式，約需 3 GB 記憶體）：
 
 ```bash
 ./tests/Run-CrossPlatformLiveTests.sh

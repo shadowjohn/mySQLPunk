@@ -575,10 +575,18 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
     tests.Add(("SQL Server 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.SqlServer)));
     if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_TIDB_PORT")))
     {
-        tests.Add(("TiDB 相容性：連線、metadata、編輯與執行計畫", TiDbLiveRoundTripAsync));
+        tests.Add(("TiDB 相容性：連線、metadata、編輯與執行計畫", () => MySqlCompatibleLiveRoundTripAsync(LiveSyncTarget.TiDb)));
         tests.Add(("TiDB 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.TiDb)));
         tests.Add(("TiDB 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.TiDb)));
         tests.Add(("TiDB 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.TiDb)));
+    }
+
+    if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_OCEANBASE_PORT")))
+    {
+        tests.Add(("OceanBase 相容性：連線、metadata、編輯與執行計畫", () => MySqlCompatibleLiveRoundTripAsync(LiveSyncTarget.OceanBase)));
+        tests.Add(("OceanBase 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.OceanBase)));
+        tests.Add(("OceanBase 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.OceanBase)));
+        tests.Add(("OceanBase 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.OceanBase)));
     }
 
     if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_TLS_PORT")))
@@ -2161,6 +2169,17 @@ static Task QueryPlanParsingAsync()
            tidbRoot.Children[1].EstimatedRows is null && tidbRoot.Children[1].RelationName == "a",
         "TiDB tidb_json 應解析運算子、Build／Probe 角色、資料表與估計列數");
     AssertThrows<InvalidOperationException>(() => QueryPlanService.ParseTiDbJson("{\"id\":\"x\"}"));
+    var oceanBase = QueryPlanService.ParseJson(
+        DatabaseProviderKind.MySql,
+        "{\"ID\":0,\"OPERATOR\":\"HASH JOIN\",\"NAME\":\"\",\"EST.ROWS\":10,\"EST.TIME(us)\":120,\"CHILD_1\":{\"ID\":1,\"OPERATOR\":\"TABLE FULL SCAN\",\"NAME\":\"o\",\"EST.ROWS\":10,\"EST.TIME(us)\":80}," +
+        "\"CHILD_2\":{\"ID\":2,\"OPERATOR\":\"TABLE RANGE SCAN\",\"NAME\":\"c(ix_child)\",\"EST.ROWS\":\"4\",\"EST.TIME(us)\":30,\"output\":\"output([c.id])\"}}",
+        "EXPLAIN FORMAT=JSON SELECT 1");
+    var oceanRoot = oceanBase.Roots.Single();
+    Assert(oceanBase.RawFormat == "OceanBase JSON" && oceanBase.NodeCount == 3 && oceanRoot.NodeType == "HASH JOIN" && oceanRoot.JoinType == "HASH JOIN" &&
+           oceanRoot.Children[0].RelationName == "o" && oceanRoot.Children[0].Severity == QueryPlanSeverity.High &&
+           oceanRoot.Children[1].RelationName == "c" && oceanRoot.Children[1].Details["index"] == "ix_child" &&
+           oceanRoot.Children[1].EstimatedRows == 4 && oceanRoot.Children[1].Details["output"] == "output([c.id])",
+        "OceanBase FORMAT=JSON 應依 CHILD_n 建立運算子樹，拆出別名與索引，並以 EST.TIME 標示高成本節點");
     var tidbResult = new QueryResult
     {
         Columns = new[] { "TiDB_JSON" },
@@ -2787,7 +2806,7 @@ static async Task SchemaSyncLiveAsync(LiveSyncTarget target)
     string[] targetSql;
     switch (target)
     {
-        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb:
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb or LiveSyncTarget.OceanBase:
         {
             var prefix = MySqlFamilyPrefix(target);
             profile = new ConnectionProfile
@@ -2920,8 +2939,8 @@ static async Task SchemaSyncLiveAsync(LiveSyncTarget target)
         {
             var parent = await session.GetTableStructureAsync(sourceDatabase, new DatabaseObjectInfo(sourceDatabase, "parent", DatabaseObjectKind.Table));
             var prefixIndex = parent.Indexes.Single(index => index.Name == "ix_parent_code");
-            // TiDB 解析但忽略索引的 DESC（官方文件列為相容性差異），因此只要求前綴長度。
-            var expectedIndex = target == LiveSyncTarget.TiDb ? new[] { "code(8)", "id" } : new[] { "code(8)", "id DESC" };
+            // TiDB 與 OceanBase 解析但忽略索引的 DESC（兩者的相容性差異），因此只要求前綴長度。
+            var expectedIndex = target is LiveSyncTarget.TiDb or LiveSyncTarget.OceanBase ? new[] { "code(8)", "id" } : new[] { "code(8)", "id DESC" };
             Assert(prefixIndex.Columns.SequenceEqual(expectedIndex),
                 $"{profile.Name} 索引應保留前綴長度與降冪：{string.Join("|", prefixIndex.Columns)}");
         }
@@ -3254,7 +3273,7 @@ static async Task DataGenerationLiveAsync(LiveSyncTarget target)
     string defaultInsert;
     switch (target)
     {
-        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb:
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb or LiveSyncTarget.OceanBase:
         {
             var prefix = MySqlFamilyPrefix(target);
             profile = new ConnectionProfile
@@ -3388,7 +3407,7 @@ static async Task DataSyncLiveAsync(LiveSyncTarget target)
     string defaultInsert, concurrentUpdate;
     switch (target)
     {
-        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb:
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb or LiveSyncTarget.OceanBase:
         {
             var prefix = MySqlFamilyPrefix(target);
             profile = new ConnectionProfile
@@ -5922,6 +5941,7 @@ static string MySqlFamilyPrefix(LiveSyncTarget target) => target switch
     LiveSyncTarget.MySql => "MYSQLPUNK_MYSQL",
     LiveSyncTarget.MariaDb => "MYSQLPUNK_MARIADB",
     LiveSyncTarget.TiDb => "MYSQLPUNK_TIDB",
+    LiveSyncTarget.OceanBase => "MYSQLPUNK_OCEANBASE",
     _ => throw new ArgumentOutOfRangeException(nameof(target))
 };
 
@@ -6060,27 +6080,29 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
 }
 
 /// <summary>
-/// TiDB 走 MySQL 協定：驗證連線、建表／外鍵／檢視、metadata、結構、分頁與安全編輯、樂觀並行衝突與執行計畫。
-/// 只使用 TiDB 支援的型別（不含空間型別、FLOAT(M,D) 等 MySQL 專屬語法）。
+/// MySQL 協定相容資料庫（TiDB、OceanBase MySQL 模式）：驗證連線、建表／外鍵／檢視、metadata、結構、分頁與安全編輯、
+/// 樂觀並行衝突與執行計畫。只使用兩者都支援的型別（不含空間型別、FLOAT(M,D) 等 MySQL 專屬語法）。
 /// </summary>
-static async Task TiDbLiveRoundTripAsync()
+static async Task MySqlCompatibleLiveRoundTripAsync(LiveSyncTarget target)
 {
-    var database = "mysqlpunk_tidb_" + Guid.NewGuid().ToString("N")[..10];
+    var prefix = MySqlFamilyPrefix(target);
+    var marker = target == LiveSyncTarget.TiDb ? "TiDB" : "OceanBase";
+    var database = "mysqlpunk_" + marker.ToLowerInvariant() + "_" + Guid.NewGuid().ToString("N")[..10];
     var profile = new ConnectionProfile
     {
-        Name = "TiDB live",
+        Name = marker + " live",
         Provider = DatabaseProviderKind.MySql,
-        Host = ReadRequiredEnvironment("MYSQLPUNK_TIDB_HOST"),
-        Port = ReadRequiredIntEnvironment("MYSQLPUNK_TIDB_PORT"),
-        Username = Environment.GetEnvironmentVariable("MYSQLPUNK_TIDB_USER") ?? "root",
-        Password = ReadRequiredEnvironment("MYSQLPUNK_TIDB_PASSWORD"),
+        Host = ReadRequiredEnvironment($"{prefix}_HOST"),
+        Port = ReadRequiredIntEnvironment($"{prefix}_PORT"),
+        Username = Environment.GetEnvironmentVariable($"{prefix}_USER") ?? "root",
+        Password = ReadRequiredEnvironment($"{prefix}_PASSWORD"),
         TlsMode = ConnectionTlsMode.Disabled,
         TimeoutSeconds = 20
     };
     var session = DatabaseProviderFactory.Create(profile);
     await session.TestConnectionAsync();
     var version = await session.ExecuteAsync(string.Empty, "SELECT VERSION();");
-    Assert(Convert.ToString(version.Rows[0][0], CultureInfo.InvariantCulture)!.Contains("TiDB", StringComparison.OrdinalIgnoreCase), "應連到 TiDB");
+    Assert(Convert.ToString(version.Rows[0][0], CultureInfo.InvariantCulture)!.Contains(marker, StringComparison.OrdinalIgnoreCase), $"應連到 {marker}");
     try
     {
         await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
@@ -6107,6 +6129,15 @@ static async Task TiDbLiveRoundTripAsync()
         var plan = await session.ExplainAsync(database, "SELECT s.id, COUNT(*) FROM sample s JOIN sample_child c ON c.sample_id = s.id GROUP BY s.id");
         static IEnumerable<QueryPlanNode> Flatten(QueryPlanNode node) => new[] { node }.Concat(node.Children.SelectMany(Flatten));
         var relations = plan.Roots.SelectMany(Flatten).Select(node => node.RelationName).ToList();
+        if (target == LiveSyncTarget.OceanBase)
+        {
+            // OceanBase 的 FORMAT=JSON 是 OPERATOR／NAME／EST.ROWS／EST.TIME(us)／CHILD_n 結構，NAME 為別名加索引。
+            Assert(plan.RawFormat == "OceanBase JSON" && plan.ExplainSql.StartsWith("EXPLAIN FORMAT=JSON", StringComparison.Ordinal) &&
+                   plan.NodeCount >= 2 && relations.Contains("c") && plan.TotalCost.HasValue,
+                $"OceanBase 執行計畫應解析出運算子樹、資料表與估計時間：{plan.TextPlan}");
+            return;
+        }
+
         // TiDB 的 accessObject 以查詢中的別名表示資料表（table:c）。
         Assert(plan.RawFormat == "TiDB JSON" && plan.ExplainSql.StartsWith("EXPLAIN FORMAT='tidb_json'", StringComparison.Ordinal) &&
                plan.NodeCount >= 3 && relations.Contains("s") && relations.Contains("c"),
@@ -11125,5 +11156,6 @@ enum LiveSyncTarget
     MariaDb,
     PostgreSql,
     SqlServer,
-    TiDb
+    TiDb,
+    OceanBase
 }
