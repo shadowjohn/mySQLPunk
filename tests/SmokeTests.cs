@@ -83,6 +83,7 @@ public static partial class SmokeTests
         Run("Data transfer with checkpoints and verification", TestDataTransfer, ref passed);
         Run("Automation import, transfer, retries and webhook", TestAutomationJobs, ref passed);
         Run("Data dictionary templates and automation", TestDataDictionaryTemplates, ref passed);
+        Run("Native backup SQL and tool arguments", AssertNativeBackupSemantics, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);

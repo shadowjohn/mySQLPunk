@@ -1024,6 +1024,56 @@ public static partial class SmokeTests
     }
 
     /// <summary>
+    /// Native backup builders: SQL Server BACKUP／VERIFY／RESTORE statements (COPY_ONLY, CHECKSUM, MOVE into the
+    /// server's default directories on Linux and Windows), tool arguments that never carry the password, the MongoDB
+    /// config file escaping, Windows argument quoting, and the new-database name guard.
+    /// </summary>
+    public static void AssertNativeBackupSemantics()
+    {
+        AssertEquals("BACKUP DATABASE [shop]]x] TO DISK = N'/var/opt/mssql/data/o''k.bak' WITH COPY_ONLY, CHECKSUM, INIT, FORMAT, COMPRESSION, STATS = 10",
+            NativeBackupService.BuildSqlServerBackupSql("shop]x", "/var/opt/mssql/data/o'k.bak", true), "Backups should be copy-only with checksums and escaped names.");
+        AssertEquals("RESTORE VERIFYONLY FROM DISK = N'C:\\backup\\a.bak' WITH CHECKSUM", NativeBackupService.BuildSqlServerVerifySql("C:\\backup\\a.bak"), "Verify should check checksums.");
+        System.Data.DataTable files = new System.Data.DataTable();
+        files.Columns.Add("LogicalName");
+        files.Columns.Add("Type");
+        files.Columns.Add("PhysicalName");
+        files.Rows.Add("shop", "D", "C:\\data\\shop.mdf");
+        files.Rows.Add("shop_2", "D", "C:\\data\\shop_2.ndf");
+        files.Rows.Add("shop_log", "L", "C:\\data\\shop_log.ldf");
+        string linux = NativeBackupService.BuildSqlServerRestoreSql("shop_copy", "/b/shop.bak", files, "/var/opt/mssql/data/", "/var/opt/mssql/log");
+        AssertContains(linux, "MOVE N'shop' TO N'/var/opt/mssql/data/shop_copy.mdf'", "Primary data files should move into the default data directory.");
+        AssertContains(linux, "MOVE N'shop_2' TO N'/var/opt/mssql/data/shop_copy_1.ndf'", "Secondary files should get unique names.");
+        AssertContains(linux, "MOVE N'shop_log' TO N'/var/opt/mssql/log/shop_copy_log.ldf'", "Log files should move into the default log directory.");
+        AssertContains(NativeBackupService.BuildSqlServerRestoreSql("shop_copy", "C:\\b.bak", files, "D:\\SQLData", "E:\\Logs\\"), "TO N'D:\\SQLData\\shop_copy.mdf'", "Windows paths should keep backslashes.");
+        AssertThrows<InvalidOperationException>(() => NativeBackupService.BuildSqlServerRestoreSql("x]; DROP DATABASE y --", "/b.bak", files, "/d", "/l"), "Unsafe database names must be refused.");
+        AssertThrows<InvalidOperationException>(() => NativeBackupService.BuildSqlServerBackupSql("shop", "/b.bak\n; DROP", false), "Paths with line breaks must be refused.");
+
+        NativeBackupEndpoint pg = new NativeBackupEndpoint { Provider = "postgresql", Host = "db.example.com", Port = 5432, User = "admin", Password = "s3cr3t!", Database = "shop" };
+        List<string> dump = NativeBackupService.BuildPgDumpArguments(pg, "C:\\backups\\shop.dump");
+        Assert(dump.Contains("--no-password") && dump.Contains("--format=custom") && !string.Join(" ", dump).Contains("s3cr3t"), "pg_dump arguments must never contain the password.");
+        List<string> restore = NativeBackupService.BuildPgRestoreArguments(pg, "shop_copy", "C:\\backups\\shop.dump");
+        Assert(restore.Contains("--exit-on-error") && restore.Contains("shop_copy") && !string.Join(" ", restore).Contains("s3cr3t"), "pg_restore should stop at the first error without the password.");
+        AssertEquals("verify-full", NativeBackupService.ToPgSslMode("VerifyFull"), "Npgsql TLS modes should map to libpq names.");
+        AssertEquals("prefer", NativeBackupService.ToPgSslMode(""), "Unknown TLS modes should fall back to prefer.");
+
+        NativeBackupEndpoint mongo = new NativeBackupEndpoint { Provider = "mongodb", Host = "::1", Port = 27017, User = "ad\"min", Password = "p@ss:w/rd", Database = "shop", AuthDatabase = "admin", UseTls = true };
+        string config = NativeBackupService.BuildMongoConfig(mongo);
+        AssertEquals("uri: \"mongodb://ad%22min:p%40ss%3Aw%2Frd@[::1]:27017/?directConnection=true&authSource=admin&tls=true\"\n", config, "The Mongo URI should be percent-encoded and quoted for YAML.");
+        List<string> mongodump = NativeBackupService.BuildMongoDumpArguments(mongo, "C:\\t\\c.yaml", "C:\\b\\shop.gz");
+        Assert(!string.Join(" ", mongodump).Contains("p@ss") && mongodump.Contains("--gzip"), "mongodump arguments must not contain the password.");
+        Assert(NativeBackupService.BuildMongoRestoreArguments(mongo, "c.yaml", "shop_copy", "b.gz").Contains("--nsTo=shop_copy.*"), "Restores should rename into the new database.");
+
+        AssertEquals("plain", NativeBackupService.QuoteArgument("plain"), "Plain arguments stay unquoted.");
+        AssertEquals("\"C:\\Program Files\\x\"", NativeBackupService.QuoteArgument("C:\\Program Files\\x"), "Spaces should be quoted.");
+        AssertEquals("\"a\\\\\\\"b\"", NativeBackupService.QuoteArgument("a\\\"b"), "Embedded quotes and preceding backslashes should be escaped.");
+        AssertEquals("\"C:\\my dir\\\\\"", NativeBackupService.QuoteArgument("C:\\my dir\\"), "Trailing backslashes before the closing quote should be doubled.");
+        Assert(NativeBackupService.FindTool("pg_dump", Path.Combine(Path.GetTempPath(), "missing-" + Guid.NewGuid().ToString("N"), "pg_dump.exe")) == null, "A missing preferred tool path should not be replaced silently.");
+        Assert(!NativeBackupService.RunTool(null, new List<string>(), null, null, null, "x").Succeeded, "Running without a tool should fail clearly.");
+        AssertThrows<InvalidOperationException>(() => NativeBackupService.ValidateNewDatabaseName("shop copy"), "Spaces are not allowed in new database names.");
+        NativeBackupService.ValidateNewDatabaseName("shop_copy-2");
+    }
+
+    /// <summary>
     /// ER model service: foreign-key layered layout (parents left, isolated tables last, cycles terminate), model
     /// validation, save／load round trip with coordinate clamping, and SVG output that escapes names and hides
     /// tables in hidden groups.

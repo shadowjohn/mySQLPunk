@@ -12991,6 +12991,14 @@ namespace mySQLPunk
             dataTransferItem.Click += (s, ev) => OpenDataTransfer(GetTargetFromCurrentSelection());
             menu.Items.Add(dataTransferItem);
 
+            TreeDatabaseTarget nativeTarget = BuildTargetFromNode(node);
+            if (nativeTarget != null && NativeBackupService.Supports(nativeTarget.ProviderName))
+            {
+                ToolStripMenuItem nativeBackupItem = new ToolStripMenuItem(Localization.T("Tool.NativeBackup"));
+                nativeBackupItem.Click += (s, ev) => OpenNativeBackup(nativeTarget);
+                menu.Items.Add(nativeBackupItem);
+            }
+
             TreeDatabaseTarget sqliteTarget = BuildTargetFromNode(node);
             if (IsSqliteTarget(sqliteTarget))
             {
@@ -13020,6 +13028,54 @@ namespace mySQLPunk
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
             refreshItem.Click += (s, ev) => RefreshDatabaseGroupNode(node, "Tables");
             menu.Items.Add(refreshItem);
+        }
+
+        private void OpenNativeBackup(TreeDatabaseTarget target)
+        {
+            if (target == null || target.Database == null) return;
+            string reason;
+            NativeBackupEndpoint endpoint = BuildNativeBackupEndpoint(target, out reason);
+            using (NativeBackupForm form = new NativeBackupForm(target.Database, target.DatabaseName, endpoint, reason))
+            {
+                form.ShowDialog(this);
+            }
+            RefreshDatabaseObjectNodes(target.DatabaseNode);
+        }
+
+        /// <summary>外部工具需要的連線資訊；SSH Tunnel 與 MongoDB SRV 連線無法交給外部工具，回傳 null 與原因。</summary>
+        private static NativeBackupEndpoint BuildNativeBackupEndpoint(TreeDatabaseTarget target, out string reason)
+        {
+            reason = null;
+            Dictionary<string, object> connection = target.ConnectionInfo;
+            if (connection == null) return null;
+            if (ConnectionSecuritySettingsService.IsTrue(connection, "ssh_enabled"))
+            {
+                reason = Localization.T("NativeBackup.SshUnsupported");
+                return null;
+            }
+            string provider = ConnectionConfigurationService.NormalizeProvider(GetConnectionValue(connection, "db_kind"));
+            if (provider == "mongodb" && ConnectionSecuritySettingsService.IsTrue(connection, "mongo_srv"))
+            {
+                reason = Localization.T("NativeBackup.SrvUnsupported");
+                return null;
+            }
+            int port;
+            if (!int.TryParse(GetConnectionValue(connection, "port"), out port) || port <= 0)
+            {
+                port = provider == "postgresql" ? 5432 : provider == "mongodb" ? 27017 : 1433;
+            }
+            return new NativeBackupEndpoint
+            {
+                Provider = provider,
+                Host = GetConnectionValue(connection, "host"),
+                Port = port,
+                User = GetConnectionValue(connection, "username"),
+                Password = GetConnectionValue(connection, "pwd"),
+                Database = target.DatabaseName,
+                UseTls = provider == "mongodb" && ConnectionSecuritySettingsService.IsTrue(connection, "mongo_tls"),
+                PgSslMode = provider == "postgresql" ? NativeBackupService.ToPgSslMode(GetConnectionValue(connection, "tls_mode")) : null,
+                AuthDatabase = GetConnectionValue(connection, "mongo_auth_source")
+            };
         }
 
         private void OpenDataTransfer(TreeDatabaseTarget sourceTarget)
@@ -13292,6 +13348,13 @@ namespace mySQLPunk
                 ToolStripMenuItem mongoDictionaryItem = new ToolStripMenuItem(Localization.T("Dict.MenuItem"));
                 mongoDictionaryItem.Click += (s, ev) => GenerateDataDictionaryForNode(node);
                 menu.Items.Add(mongoDictionaryItem);
+
+                if (IsMongoDbTarget(nonRelationalTarget))
+                {
+                    ToolStripMenuItem mongoNativeBackupItem = new ToolStripMenuItem(Localization.T("Tool.NativeBackup"));
+                    mongoNativeBackupItem.Click += (s, ev) => OpenNativeBackup(nonRelationalTarget);
+                    menu.Items.Add(mongoNativeBackupItem);
+                }
 
                 menu.Items.Add(new ToolStripSeparator());
                 ToolStripMenuItem mongoRefreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));

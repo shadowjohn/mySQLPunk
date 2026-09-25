@@ -239,6 +239,9 @@
     <Compile Include="DataDictionaryOptionsForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="NativeBackupForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ScheduledJobsForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -378,6 +381,7 @@
     <Compile Include="lib\CsvImportService.cs" />
     <Compile Include="lib\AutomationEmailService.cs" />
     <Compile Include="lib\ErModelService.cs" />
+    <Compile Include="lib\NativeBackupService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />
