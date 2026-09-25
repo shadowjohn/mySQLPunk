@@ -2576,24 +2576,21 @@ static async Task AssertSyncRoundTripAsync(
     Assert(SchemaSyncScriptService.CanGenerate(before, out var reason), $"{label} 應可產生同步 SQL：{reason}");
     var script = SchemaSyncScriptService.Generate(before);
     Assert(script.Statements.Count > 0 && script.DestructiveItems.Count == 2 &&
+           script.DestructiveStatements.Count == 2 &&
+           script.DestructiveStatements.Any(sql => sql.StartsWith("DROP TABLE", StringComparison.Ordinal) && sql.Contains("target_only", StringComparison.Ordinal)) &&
+           script.DestructiveStatements.Any(sql => sql.Contains("DROP COLUMN", StringComparison.Ordinal) && sql.Contains("legacy", StringComparison.Ordinal)) &&
            script.Text.Contains("-- DROP TABLE", StringComparison.Ordinal) &&
            script.Text.Contains("DROP COLUMN", StringComparison.Ordinal) &&
            !script.Statements.Any(statement => statement.Contains("target_only", StringComparison.Ordinal) ||
                                                statement.Contains("legacy", StringComparison.Ordinal)),
         $"{label} 破壞性變更只能以註解出現：\n{script.Text}");
-    foreach (var statement in script.Statements)
-    {
-        try
-        {
-            await targetSession.ExecuteAsync(targetDatabase, statement);
-        }
-        catch (Exception exception)
-        {
-            throw new InvalidOperationException($"{label} 套用同步語句失敗：{statement}\n{exception.Message}\n完整腳本：\n{script.Text}", exception);
-        }
-    }
+    var batch = await targetSession.ExecuteBatchAsync(targetDatabase, script.Statements);
+    Assert(batch.Succeeded && batch.Statements.Count == script.Statements.Count &&
+           batch.UsedTransaction == (targetSession.Profile.Provider != DatabaseProviderKind.MySql),
+        $"{label} 以 ExecuteBatchAsync 套用同步語句失敗：{batch.Summary}\n完整腳本：\n{script.Text}");
 
     var after = await CompareDatabasesAsync(sourceSession, sourceDatabase, targetSession, targetDatabase);
+    await AssertBatchFailureSemanticsAsync(targetSession, targetDatabase, label);
     var remaining = after.Differences
         .Select(difference => $"{difference.ObjectName}/{difference.Area}/{difference.ItemName}/{difference.Kind}")
         .OrderBy(text => text, StringComparer.Ordinal)
@@ -2606,6 +2603,43 @@ static async Task AssertSyncRoundTripAsync(
                                                difference.ItemName == "legacy" &&
                                                difference.Kind == SchemaDifferenceKind.OnlyInTarget),
         $"{label} 套用後只應剩下被註解的破壞性差異，實際：{string.Join("；", remaining)}\n腳本：\n{script.Text}");
+}
+
+/// <summary>
+/// A batch whose second statement fails: transactional providers must roll the first statement back, MySQL
+/// must report it as already applied. The probe table is cleaned up either way.
+/// </summary>
+static async Task AssertBatchFailureSemanticsAsync(IDatabaseSession session, string database, string label)
+{
+    var provider = session.Profile.Provider;
+    var probe = provider == DatabaseProviderKind.SqlServer ? "[batch_probe]" : provider == DatabaseProviderKind.MySql ? "`batch_probe`" : "\"batch_probe\"";
+    var result = await session.ExecuteBatchAsync(database, new[]
+    {
+        $"CREATE TABLE {probe} (id INTEGER PRIMARY KEY)",
+        "ALTER TABLE missing_table_for_batch_probe ADD COLUMN x INTEGER",
+        $"DROP TABLE {probe}"
+    });
+    Assert(!result.Succeeded && result.Failure?.Index == 1 &&
+           result.Statements[2].Outcome == StatementOutcome.NotRun,
+        $"{label} 批次應在第 2 句失敗並停止：{result.Summary}");
+    var objects = await session.GetObjectsAsync(database);
+    var probeExists = objects.Any(item => item.Name == "batch_probe");
+    if (provider == DatabaseProviderKind.MySql)
+    {
+        Assert(!result.UsedTransaction && result.Statements[0].Outcome == StatementOutcome.Succeeded && probeExists &&
+               result.Summary.Contains("已生效", StringComparison.Ordinal),
+            $"{label} 非交易式 DDL 應回報第 1 句已生效：{result.Summary}");
+        await session.ExecuteAsync(database, $"DROP TABLE {probe}");
+    }
+    else
+    {
+        Assert(result.UsedTransaction && result.Statements[0].Outcome == StatementOutcome.RolledBack && !probeExists &&
+               result.Summary.Contains("回滾", StringComparison.Ordinal),
+            $"{label} 交易式 DDL 失敗時應整批回滾：{result.Summary}");
+    }
+
+    await AssertThrowsAsync<InvalidOperationException>(() => session.ExecuteBatchAsync(database, Array.Empty<string>()));
+    await AssertThrowsAsync<InvalidOperationException>(() => session.ExecuteBatchAsync(database, new[] { "  " }));
 }
 
 static async Task SchemaSyncScriptAsync()

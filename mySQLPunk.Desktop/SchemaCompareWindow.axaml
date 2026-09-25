@@ -10,7 +10,7 @@
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <Border Grid.Row="0" Background="#1B2B4B" Padding="18,12">
       <StackPanel Spacing="4">
-        <TextBlock Text="結構比較（唯讀）" Foreground="White" FontSize="17" FontWeight="SemiBold" />
+        <TextBlock Text="結構比較" Foreground="White" FontSize="17" FontWeight="SemiBold" />
         <TextBlock x:Name="SourceText" Foreground="#B9C7E8" FontSize="12" />
       </StackPanel>
     </Border>
@@ -25,7 +25,7 @@
     </Grid>
 
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto,120" Margin="14,4,14,6">
-      <TextBlock Grid.Column="0" x:Name="SummaryText" Text="選擇目標連線與資料庫後按「開始比較」。只讀取結構 metadata，不讀資料列、不產生或執行任何 SQL。" TextWrapping="Wrap" VerticalAlignment="Center" />
+      <TextBlock Grid.Column="0" x:Name="SummaryText" Text="選擇目標連線與資料庫後按「開始比較」。比較只讀取結構 metadata、不讀資料列；只有在「同步 SQL 預覽」中勾選並確認後才會修改目標。" TextWrapping="Wrap" VerticalAlignment="Center" />
       <TextBlock Grid.Column="1" Text="顯示" VerticalAlignment="Center" Margin="12,0,8,0" />
       <ComboBox Grid.Column="2" x:Name="FilterCombo" SelectedIndex="0" SelectionChanged="Filter_SelectionChanged" HorizontalAlignment="Stretch">
         <ComboBoxItem Content="全部差異" />

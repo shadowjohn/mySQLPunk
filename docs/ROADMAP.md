@@ -51,7 +51,7 @@
 | AI 助理／詢問 AI | 🟡 | 核心聊天與 schema 上下文已完成，進階動作見上表。 |
 | 資料傳輸／遷移（跨 DBMS） | 🟡 | 已有 Table／View 跨 provider 複製；待補整庫精靈、mapping、續傳與驗證報告。 |
 | 資料同步 | 📋 | 先做唯讀資料差異、方向選擇與 SQL 預覽，再開放同步執行。 |
-| 結構同步 | 🟡 | 兩庫唯讀結構差異報告已完成，可跨 provider 比對 Table、Column、PK 與 FK 並匯出 HTML；Linux／macOS 預覽版另含索引與 FK 規則比對，並可為同類型資料庫產生同步 DDL 預覽（破壞性變更預設註解）；Windows 版也能依欄位／主鍵／外鍵快照產生同步 SQL 預覽。待補逐項勾選與受控執行。 |
+| 結構同步 | 🟡 | 兩庫唯讀結構差異報告已完成，可跨 provider 比對 Table、Column、PK 與 FK 並匯出 HTML；Linux／macOS 預覽版另含索引與 FK 規則比對，並可為同類型資料庫產生同步 DDL 預覽（破壞性變更預設註解）；Windows 版也能依欄位／主鍵／外鍵快照產生同步 SQL 預覽；Linux／macOS 預覽版可逐項勾選並在目標受控執行（交易回滾、破壞性變更輸入名稱確認）。待補 Windows 版受控執行。 |
 | 模型 | 🟡 | 已有五種 provider 共用的唯讀 ER 圖與兩庫結構差異報告；拖曳編排、多模型與雙向同步仍在後續排程。 |
 | BI | 📋 | 見 Navicat 17 BI 路線。 |
 | 匯入／匯出（Excel、Access、CSV、ODBC 等） | 🟡 | MySQL SQL 匯入／匯出完整，查詢結果有常用格式；待補五種 provider 精靈對等化、Access／ODBC。 |

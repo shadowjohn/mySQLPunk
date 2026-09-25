@@ -25,6 +25,16 @@ public interface IDatabaseSession : IDisposable
         DatabaseObjectInfo table,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Runs statements in order and stops at the first failure. Providers with transactional DDL (PostgreSQL,
+    /// SQL Server, SQLite) wrap the batch in one transaction and roll everything back on failure; MySQL／MariaDB
+    /// commit DDL implicitly, so earlier statements stay applied and the result says so.
+    /// </summary>
+    Task<StatementBatchResult> ExecuteBatchAsync(
+        string database,
+        IReadOnlyList<string> statements,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Produces the provider's execution plan for a single statement without executing it.</summary>
     Task<QueryPlanDocument> ExplainAsync(
         string database,

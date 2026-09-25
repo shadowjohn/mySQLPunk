@@ -150,6 +150,65 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         return await ReadResultAsync(connection, sql, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<StatementBatchResult> ExecuteBatchAsync(
+        string database,
+        IReadOnlyList<string> statements,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(statements);
+        if (statements.Count == 0 || statements.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new InvalidOperationException("沒有可執行的語句，或其中有空白語句。");
+        }
+
+        var useTransaction = Profile.Provider != DatabaseProviderKind.MySql;
+        var results = new List<StatementExecution>(statements.Count);
+        await using var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = useTransaction
+            ? await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false)
+            : null;
+        for (var index = 0; index < statements.Count; index++)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = statements[index];
+                command.CommandTimeout = Math.Max(1, Profile.TimeoutSeconds * 4);
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                results.Add(new StatementExecution(index, statements[index], StatementOutcome.Succeeded, string.Empty, stopwatch.Elapsed));
+            }
+            catch (Exception exception) when (exception is DbException or InvalidOperationException or OperationCanceledException)
+            {
+                results.Add(new StatementExecution(index, statements[index], StatementOutcome.Failed, exception.Message, stopwatch.Elapsed));
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    for (var done = 0; done < index; done++)
+                    {
+                        results[done] = results[done] with { Outcome = StatementOutcome.RolledBack };
+                    }
+                }
+
+                for (var rest = index + 1; rest < statements.Count; rest++)
+                {
+                    results.Add(new StatementExecution(rest, statements[rest], StatementOutcome.NotRun, string.Empty, TimeSpan.Zero));
+                }
+
+                return new StatementBatchResult(useTransaction, results);
+            }
+        }
+
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return new StatementBatchResult(useTransaction, results);
+    }
+
     public async Task<QueryPlanDocument> ExplainAsync(
         string database,
         string sql,

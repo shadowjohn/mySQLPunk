@@ -34,6 +34,7 @@ public sealed partial class SchemaCompareWindow : Window
     private IDatabaseSession? _targetSession;
     private Guid? _targetProfileId;
     private SchemaComparisonResult? _result;
+    private IDatabaseSession? _comparedTargetSession;
     private bool _busy;
 
     public SchemaCompareWindow()
@@ -173,7 +174,9 @@ public sealed partial class SchemaCompareWindow : Window
         return session;
     }
 
-    private async void Compare_Click(object? sender, RoutedEventArgs e)
+    private async void Compare_Click(object? sender, RoutedEventArgs e) => await CompareAsync();
+
+    private async Task CompareAsync()
     {
         if (_targetProfileCombo.SelectedItem is not ProfileOption option ||
             _targetDatabaseCombo.SelectedItem is not string targetDatabase)
@@ -224,6 +227,7 @@ public sealed partial class SchemaCompareWindow : Window
                     Report($"讀取目標 {report.Completed + 1}/{report.Total}：{report.Current.DisplayName}")),
                 cancellationToken);
 
+            _comparedTargetSession = targetSession;
             _result = SchemaComparisonService.Compare(
                 new SchemaComparisonSide(_sourceSession.Profile.Name, _sourceSession.Profile.ProviderDisplayName, _sourceDatabase)
                 {
@@ -323,7 +327,19 @@ public sealed partial class SchemaCompareWindow : Window
             var script = SchemaSyncScriptService.Generate(result);
             var target = $"{result.Target.ConnectionName}（{result.Target.ProviderName}）／{result.Target.Database}";
             SetStatus($"已產生同步 SQL：{script.Summary}");
-            await new SyncScriptWindow(script, target).ShowDialog(this);
+            var targetSession = _comparedTargetSession;
+            var targetDatabase = result.Target.Database;
+            Func<IReadOnlyList<string>, CancellationToken, Task<StatementBatchResult>>? execute =
+                targetSession is null || targetSession.Profile.Name != result.Target.ConnectionName
+                    ? null
+                    : (statements, cancellationToken) => targetSession.ExecuteBatchAsync(targetDatabase, statements, cancellationToken);
+            var window = new SyncScriptWindow(script, target, targetDatabase, execute);
+            await window.ShowDialog(this);
+            if (window.ExecutedOnTarget)
+            {
+                SetStatus("已在目標執行同步語句，正在重新比較…");
+                await CompareAsync();
+            }
         }
         catch (Exception exception)
         {

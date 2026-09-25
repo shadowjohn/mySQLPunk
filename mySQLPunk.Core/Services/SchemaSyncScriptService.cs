@@ -12,6 +12,9 @@ public sealed record SchemaSyncScript(
     IReadOnlyList<string> ManualItems,
     IReadOnlyList<string> DestructiveItems)
 {
+    /// <summary>The SQL behind each <see cref="DestructiveItems"/> entry (same order); never part of <see cref="Statements"/>.</summary>
+    public IReadOnlyList<string> DestructiveStatements { get; init; } = Array.Empty<string>();
+
     public string Summary =>
         $"{Statements.Count} 個可執行語句、{DestructiveItems.Count} 個破壞性變更（已註解）、{ManualItems.Count} 個需手動處理";
 }
@@ -79,7 +82,10 @@ public static class SchemaSyncScriptService
             text.AppendLine();
         }
 
-        return new SchemaSyncScript(provider, text.ToString().TrimEnd() + Environment.NewLine, builder.Statements, builder.Manual, builder.Destructive);
+        return new SchemaSyncScript(provider, text.ToString().TrimEnd() + Environment.NewLine, builder.Statements, builder.Manual, builder.Destructive)
+        {
+            DestructiveStatements = builder.DestructiveStatements
+        };
     }
 
     private static string OneLine(string value) => Regex.Replace(value, @"[\r\n\u0085\u2028\u2029]+", " ");
@@ -108,6 +114,8 @@ public static class SchemaSyncScriptService
         public List<string> Manual { get; } = new();
 
         public List<string> Destructive { get; } = new();
+
+        public List<string> DestructiveStatements { get; } = new();
 
         public IEnumerable<Section> Sections => new[] { _createTables, _addColumns, _alterColumns, _indexes, _foreignKeys, _views, _manual, _destructive };
 
@@ -723,6 +731,7 @@ public static class SchemaSyncScriptService
             // Everything written after "-- " must stay on one line, or a crafted object name could escape the comment.
             description = SingleLine(description);
             Destructive.Add(description);
+            DestructiveStatements.Add(statement);
             _destructive.Lines.Add($"-- {description}");
             foreach (var line in statement.Split('\n'))
             {
