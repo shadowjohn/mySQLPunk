@@ -230,6 +230,9 @@
     <Compile Include="QueryBuilderForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="MongoPipelineForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ScheduledJobsForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -363,6 +366,7 @@
     <Compile Include="lib\DataGeneratorService.cs" />
     <Compile Include="lib\MongoSchemaAnalyzer.cs" />
     <Compile Include="lib\QueryBuilderService.cs" />
+    <Compile Include="lib\MongoPipelineService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />

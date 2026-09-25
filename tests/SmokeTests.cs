@@ -78,6 +78,7 @@ public static partial class SmokeTests
         Run("Data comparison and sync", TestDataComparisonSync, ref passed);
         Run("Data generator rules, foreign keys and uniqueness", TestDataGeneration, ref passed);
         Run("MongoDB schema analyzer", AssertMongoSchemaAnalyzerSemantics, ref passed);
+        Run("MongoDB aggregation pipeline designer", AssertMongoPipelineSemantics, ref passed);
         Run("Visual query builder", TestQueryBuilder, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);

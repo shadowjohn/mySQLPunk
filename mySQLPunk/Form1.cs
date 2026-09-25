@@ -12495,6 +12495,10 @@ namespace mySQLPunk
                         ToolStripMenuItem schemaAnalysisItem = new ToolStripMenuItem(Localization.T("Tool.MongoSchemaAnalysis"));
                         schemaAnalysisItem.Click += (s, ev) => ShowMongoSchemaAnalysis(tableTarget, collectionName);
                         menu.Items.Add(schemaAnalysisItem);
+
+                        ToolStripMenuItem pipelineItem = new ToolStripMenuItem(Localization.T("Tool.MongoPipeline"));
+                        pipelineItem.Click += (s, ev) => ShowMongoPipeline(tableTarget, collectionName);
+                        menu.Items.Add(pipelineItem);
                     }
 
                     if (!mongoDbTarget)
@@ -13025,6 +13029,17 @@ namespace mySQLPunk
 
             using (QueryBuilderForm form = new QueryBuilderForm(target.Database, target.DatabaseName,
                        sql => OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), sql, true)))
+            {
+                form.ShowDialog(this);
+            }
+        }
+
+        private void ShowMongoPipeline(TreeDatabaseTarget target, string collectionName)
+        {
+            my_mongodb mongo = target == null ? null : target.Database as my_mongodb;
+            if (mongo == null) return;
+            using (MongoPipelineForm form = new MongoPipelineForm(mongo, target.DatabaseName, collectionName,
+                       json => OpenQuery(target.Database, target.DatabaseName, GetTargetHost(target), json, true)))
             {
                 form.ShowDialog(this);
             }

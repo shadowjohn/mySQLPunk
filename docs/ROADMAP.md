@@ -27,7 +27,7 @@
 | BI 圖表互連 | 📋 | 現有 BI 只有物件分佈／列數排名資料表；需新增儀表板與同來源聯動篩選。 |
 | BI 自訂運算式 | 📋 | 納入 BI 運算式引擎。 |
 | BI 連接 MongoDB／Snowflake | 📋 | 等對應 provider 與 BI 基礎儀表板完成。 |
-| MongoDB Aggregation Pipeline 視覺設計 | 📋 | MongoDB provider 後續階段：拖放 stage、逐步預覽與結果驗證。 |
+| MongoDB Aggregation Pipeline 視覺設計 | ✅ | collection 右鍵「Aggregation Pipeline...」可從 16 種唯讀 stage 範本新增、調整順序、停用、逐 stage 編輯 JSON 並即時檢查語法，預覽「到此 stage 為止」的前 20／100／500 筆輸出；$out／$merge（含巢狀）一律拒絕。可匯入既有 pipeline、複製 mongosh 語法或送到查詢視窗，查詢視窗也支援含 `pipeline` 陣列的 aggregation JSON。 |
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 🟡 | 第二期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視、SELECT／SHOW，以及查詢編輯器單一 DML／DDL；待補實機驗收、key-pair JWT、參數綁定、資料網格寫回、模型與 BI 能力。 |
 | Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 已具備瀏覽、受限查詢、五種 key 型別安全編輯、TTL／刪除、list 依索引安全刪除、INFO 監控，以及使用接收專線的 channel／pattern Pub/Sub 工作區。待補 Cluster 與 Sentinel。 |
@@ -79,7 +79,7 @@
 | --- | --- | --- |
 | MySQL／MariaDB | ✅ | 共用 MySQL provider，已有實機版本矩陣。 |
 | PostgreSQL、SQL Server、Oracle、SQLite | 🟡 | 核心 metadata／查詢／編輯／DDL／備份可用，進階功能持續對等化。 |
-| MongoDB | 🟡 | 第三期完成：連線、metadata、JSON find 查詢、文件樹、安全編輯與文件新增／刪除都已具備；standalone 4.4／7.0／8.0 實機矩陣通過。待補 Atlas／SRV 驗證環境矩陣與 Aggregation Pipeline。 |
+| MongoDB | 🟡 | 第三期完成：連線、metadata、JSON find 查詢、文件樹、安全編輯與文件新增／刪除都已具備；standalone 4.4／7.0／8.0 實機矩陣通過。待補 Atlas／SRV 驗證環境矩陣；Aggregation Pipeline 設計器與查詢視窗 pipeline 格式已完成。 |
 | Redis／Garnet | 🟡 | standalone 已具備 URI、ACL／密碼、TLS、logical db、key 瀏覽、受限查詢、五種型別安全編輯／TTL／刪除、list 依索引刪除、INFO 監控與 Pub/Sub 訊息工作區。Redis 6.2、Redis 7 與 Garnet 既有各 39 項實機矩陣通過，新增案例待重跑；Cluster／Sentinel 待補。 |
 | Snowflake | 🟡 | 第二期 provider 完成（SQL REST API、PAT／OAuth、metadata、分頁瀏覽、SELECT／SHOW 與查詢編輯器單一 DML／DDL）；真實帳戶實機矩陣、key-pair JWT、參數綁定、網格寫回與 bulk load 待補。 |
 | AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS、MongoDB 與 Redis 可先用標準主機連線；待補各家 IAM／SSO／MFA 與雲端專用驗證。 |

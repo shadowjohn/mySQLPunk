@@ -273,6 +273,70 @@ public static partial class SmokeTests
     }
 
     /// <summary>
+    /// MongoPipelineService: templates build, disabled stages are skipped, preview can stop at a stage, write stages
+    /// ($out／$merge, also nested in $facet／$lookup) and unknown stages are rejected with the stage number, and
+    /// pipelines round-trip through import and the mongosh／query-JSON exports.
+    /// </summary>
+    public static void AssertMongoPipelineSemantics()
+    {
+        List<MongoPipelineStage> stages = new List<MongoPipelineStage>
+        {
+            new MongoPipelineStage("$match", "{ \"status\": \"paid\" }"),
+            new MongoPipelineStage("$unwind", "\"$items\""),
+            new MongoPipelineStage("$group", "{ \"_id\": \"$items.sku\", \"qty\": { \"$sum\": \"$items.qty\" } }"),
+            new MongoPipelineStage("$sort", "{ \"qty\": -1 }", false),
+            new MongoPipelineStage("$limit", "5")
+        };
+        AssertEquals("4", MongoPipelineService.Build(stages).Count.ToString(), "Disabled stages should be skipped.");
+        AssertEquals("2", MongoPipelineService.Build(stages, 1).Count.ToString(), "Previews should stop at the selected stage.");
+        AssertEquals("5", MongoPipelineService.Build(stages).Last()["$limit"].ToString(), "Scalar stage bodies should parse.");
+        foreach (KeyValuePair<string, string> template in MongoPipelineService.Templates)
+        {
+            MongoPipelineService.ParseStage(new MongoPipelineStage(template.Key, template.Value), 1);
+        }
+
+        Func<string, string, string> reject = (name, body) =>
+        {
+            try
+            {
+                MongoPipelineService.Build(new List<MongoPipelineStage> { new MongoPipelineStage("$match", "{}"), new MongoPipelineStage(name, body) });
+                return null;
+            }
+            catch (FormatException exception)
+            {
+                return exception.Message;
+            }
+        };
+        AssertContains(reject("$out", "\"copy\""), "$out", "$out writes data and must be rejected.");
+        AssertContains(reject("$facet", "{ \"a\": [ { \"$merge\": \"copy\" } ] }"), "$merge", "Nested write stages must be rejected.");
+        AssertContains(reject("$lookup", "{ \"from\": \"x\", \"pipeline\": [ { \"$out\": \"copy\" } ], \"as\": \"y\" }"), "$out", "Write stages inside $lookup pipelines must be rejected.");
+        AssertContains(reject("$dropDatabase", "{}"), "2", "Unknown stages must be rejected with their position.");
+        AssertContains(reject("match", "{}"), "$", "Stage names must start with $.");
+        AssertContains(reject("$match", "{ oops"), "2", "Invalid JSON must name the stage.");
+
+        string shell = MongoPipelineService.ToShellText("sales \"2024\"", stages);
+        Assert(shell.StartsWith("db.getCollection(\"sales \\\"2024\\\"\").aggregate([", StringComparison.Ordinal), "mongosh syntax should escape the collection name: " + shell);
+        List<MongoPipelineStage> imported = MongoPipelineService.Import(shell.Substring(shell.IndexOf('['), shell.LastIndexOf(']') - shell.IndexOf('[') + 1));
+        AssertEquals("4", imported.Count.ToString(), "Exported pipelines should import again.");
+        AssertEquals("\"$items\"", imported[1].BodyJson, "String stage bodies should keep their quotes.");
+        AssertEquals("5", imported[3].BodyJson, "Numeric stage bodies should stay plain numbers.");
+        List<MongoPipelineStage> fromQuery = MongoPipelineService.Import(MongoPipelineService.ToQueryJson("sales", stages, 50));
+        AssertEquals("4", fromQuery.Count.ToString(), "Query JSON with a pipeline field should import.");
+        AssertContains(MongoPipelineService.ToQueryJson("sales", stages, 50), "\"limit\" : 50", "Query JSON should carry the row limit.");
+        foreach (string bad in new[] { "{ \"$match\": {} }", "[ { \"$match\": {}, \"$limit\": 1 } ]", "[ { \"$out\": \"x\" } ]", "not json" })
+        {
+            try
+            {
+                MongoPipelineService.Import(bad);
+                throw new Exception("Import should reject: " + bad);
+            }
+            catch (FormatException)
+            {
+            }
+        }
+    }
+
+    /// <summary>
     /// MongoSchemaAnalyzer on synthetic documents: nested and array paths, presence, type mix, numbers stored as
     /// strings, IQR outliers, sparse and case-variant fields, empty strings, nulls, date ranges and the depth limit.
     /// </summary>

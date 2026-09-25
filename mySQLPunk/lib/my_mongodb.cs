@@ -283,6 +283,11 @@ namespace mySQLPunk.lib
             if (string.IsNullOrWhiteSpace(effectiveDatabase))
                 throw new InvalidOperationException(Localization.T("MongoDB.DatabaseRequired"));
 
+            if (request.Pipeline != null)
+            {
+                return ConvertDocumentsToDataTable(RunPipeline(effectiveDatabase, request.Collection, request.Pipeline, request.Limit));
+            }
+
             IFindFluent<BsonDocument, BsonDocument> find = GetCollection(effectiveDatabase, request.Collection)
                 .Find(request.Filter);
             if (request.Projection != null && request.Projection.ElementCount > 0) find = find.Project<BsonDocument>(request.Projection);
@@ -290,6 +295,29 @@ namespace mySQLPunk.lib
             if (request.Skip > 0) find = find.Skip(request.Skip);
             find = find.Limit(request.Limit);
             return ConvertDocumentsToDataTable(find.ToList());
+        }
+
+        /// <summary>
+        /// 執行唯讀 aggregation pipeline 並只取前 limit 筆（在尾端加 $limit，伺服器端最多執行 30 秒）。
+        /// $out／$merge 等寫入 stage 會在送出前被拒絕。
+        /// </summary>
+        public List<BsonDocument> RunPipeline(string databaseName, string collectionName, IList<BsonDocument> pipeline, int limit)
+        {
+            EnsureOpen();
+            List<BsonDocument> stages = new List<BsonDocument>();
+            int number = 0;
+            foreach (BsonDocument stage in pipeline ?? new List<BsonDocument>())
+            {
+                number++;
+                if (stage.ElementCount != 1) throw new FormatException(Localization.Format("MongoPipeline.Error.StageShape", number));
+                BsonElement element = stage.GetElement(0);
+                stages.Add(MongoPipelineService.ParseStage(
+                    new MongoPipelineStage(element.Name, MongoPipelineService.BodyText(element.Value, new JsonWriterSettings { OutputMode = JsonOutputMode.CanonicalExtendedJson })),
+                    number));
+            }
+            stages.Add(new BsonDocument("$limit", NormalizeLimit(limit)));
+            AggregateOptions options = new AggregateOptions { MaxTime = TimeSpan.FromSeconds(30) };
+            return GetCollection(databaseName, collectionName).Aggregate<BsonDocument>(stages, options).ToList();
         }
 
         /// <summary>以 _id 過濾器重新讀取完整文件；文件不存在時回傳 null。</summary>
@@ -591,6 +619,7 @@ namespace mySQLPunk.lib
             public BsonDocument Sort;
             public int Skip;
             public int Limit;
+            public List<BsonDocument> Pipeline;
 
             public static MongoReadQuery Parse(string query)
             {
@@ -614,13 +643,26 @@ namespace mySQLPunk.lib
                 try { document = BsonDocument.Parse(trimmed); }
                 catch (Exception ex) { throw new FormatException(Localization.Format("MongoDB.InvalidJsonQuery", ex.Message), ex); }
 
-                HashSet<string> allowed = new HashSet<string>(new[] { "collection", "filter", "projection", "sort", "skip", "limit" }, StringComparer.OrdinalIgnoreCase);
+                HashSet<string> allowed = new HashSet<string>(new[] { "collection", "filter", "projection", "sort", "skip", "limit", "pipeline" }, StringComparer.OrdinalIgnoreCase);
                 string unsupported = document.Names.FirstOrDefault(name => !allowed.Contains(name));
                 if (!string.IsNullOrWhiteSpace(unsupported))
                     throw new FormatException(Localization.Format("MongoDB.UnsupportedQueryField", unsupported));
 
                 string collection = document.Contains("collection") && document["collection"].IsString ? document["collection"].AsString.Trim() : string.Empty;
                 if (string.IsNullOrWhiteSpace(collection)) throw new FormatException(Localization.T("MongoDB.CollectionRequired"));
+
+                if (document.Contains("pipeline"))
+                {
+                    string conflicting = new[] { "filter", "projection", "sort", "skip" }.FirstOrDefault(document.Contains);
+                    if (conflicting != null) throw new FormatException(Localization.Format("MongoDB.PipelineConflict", conflicting));
+                    if (!document["pipeline"].IsBsonArray) throw new FormatException(Localization.T("MongoPipeline.Error.ImportShape"));
+                    return new MongoReadQuery
+                    {
+                        Collection = collection,
+                        Pipeline = MongoPipelineService.Build(MongoPipelineService.Import(document["pipeline"].ToJson(new JsonWriterSettings { OutputMode = JsonOutputMode.CanonicalExtendedJson }))),
+                        Limit = NormalizeLimit(ReadNonNegativeInt(document, "limit", DefaultQueryLimit))
+                    };
+                }
 
                 return new MongoReadQuery
                 {
