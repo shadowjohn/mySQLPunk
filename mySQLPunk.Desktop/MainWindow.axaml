@@ -113,7 +113,7 @@
                            FontSize="12"
                            VerticalAlignment="Center" />
               </Grid>
-              <Grid Grid.Row="1" ColumnDefinitions="*,*" Margin="0,0,0,8">
+              <Grid Grid.Row="1" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" Margin="0,0,0,8">
                 <Button x:Name="DataDictionaryButton"
                         Grid.Column="0"
                         Content="資料字典…"
@@ -131,6 +131,16 @@
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
                         Margin="3,0,0,0"
+                        FontSize="12" />
+                <Button x:Name="DataGeneratorButton"
+                        Grid.Row="1"
+                        Grid.ColumnSpan="2"
+                        Content="資料產生器…"
+                        Click="DataGenerator_Click"
+                        IsEnabled="False"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Margin="0,6,0,0"
                         FontSize="12" />
               </Grid>
               <Grid Grid.Row="2" ColumnDefinitions="*,90" Margin="0,0,0,8">

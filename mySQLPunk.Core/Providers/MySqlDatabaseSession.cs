@@ -23,7 +23,10 @@ internal sealed partial class MySqlDatabaseSession : AdoDatabaseSession
             ConnectionTimeout = (uint)Profile.TimeoutSeconds,
             DefaultCommandTimeout = (uint)Math.Max(1, Profile.TimeoutSeconds * 4),
             SslMode = ConnectionTlsModeMapper.ToMySql(Profile.TlsMode),
-            AllowUserVariables = false
+            AllowUserVariables = false,
+            // CHAR(36)／BINARY(16) are ordinary string／binary columns in the catalog; the driver's default GUID
+            // mapping would make any non-GUID text in a CHAR(36) column unreadable.
+            GuidFormat = MySqlGuidFormat.None
         };
 
         if (!string.IsNullOrWhiteSpace(database))

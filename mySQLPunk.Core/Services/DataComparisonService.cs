@@ -258,7 +258,7 @@ public static class DataComparisonService
             $"{Quote(provider, name)} = {Literal(provider, new TableCellInput(name, TableCellInputMode.Value, index < parts.Length ? parts[index] : string.Empty))}"));
     }
 
-    private static string Literal(DatabaseProviderKind provider, TableCellInput value)
+    internal static string Literal(DatabaseProviderKind provider, TableCellInput value)
     {
         if (value.Mode == TableCellInputMode.Null)
         {
@@ -286,19 +286,19 @@ public static class DataComparisonService
         return (provider == DatabaseProviderKind.SqlServer ? "N'" : "'") + escaped + "'";
     }
 
-    private static string QualifiedName(DatabaseProviderKind provider, DatabaseObjectInfo table) =>
+    internal static string QualifiedName(DatabaseProviderKind provider, DatabaseObjectInfo table) =>
         provider is DatabaseProviderKind.MySql or DatabaseProviderKind.Sqlite || string.IsNullOrWhiteSpace(table.Schema)
             ? Quote(provider, table.Name)
             : $"{Quote(provider, table.Schema)}.{Quote(provider, table.Name)}";
 
-    private static string Quote(DatabaseProviderKind provider, string identifier) => provider switch
+    internal static string Quote(DatabaseProviderKind provider, string identifier) => provider switch
     {
         DatabaseProviderKind.MySql => "`" + identifier.Replace("`", "``", StringComparison.Ordinal) + "`",
         DatabaseProviderKind.SqlServer => "[" + identifier.Replace("]", "]]", StringComparison.Ordinal) + "]",
         _ => "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""
     };
 
-    private static string OneLine(string value) =>
+    internal static string OneLine(string value) =>
         System.Text.RegularExpressions.Regex.Replace(value, @"[\r\n\u0085  ]+", " ");
 
     private static TableCellInput ToInput(TableColumnInfo target, TableColumnInfo source, TableDataRow row)

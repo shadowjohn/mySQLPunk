@@ -161,7 +161,12 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         {
             ValidateTable(request.Table);
             var columns = await GetRequiredTableColumnsAsync(database, request.Table, cancellationToken).ConfigureAwait(false);
-            RequirePrimaryKey(columns);
+            if (request.Changes.Any(change => change.Kind != DataRowChangeKind.Insert))
+            {
+                // Inserts never touch existing rows; updates and deletes need a key to match exactly one row.
+                RequirePrimaryKey(columns);
+            }
+
             columnsByTable[request.Table] = columns;
         }
 
@@ -220,7 +225,19 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
                 if (identityColumns.Count > 0)
                 {
                     await ExecuteInTransactionAsync(connection, transaction, EndExplicitIdentityInsertSql(request.Table), cancellationToken).ConfigureAwait(false);
-                    await AfterExplicitIdentityInsertAsync(connection, transaction, request.Table, identityColumns, cancellationToken).ConfigureAwait(false);
+                }
+
+                // Explicit values in identity columns and in integer columns with a default (PostgreSQL serial uses
+                // DEFAULT nextval) do not advance their sequence; let the provider move it past the written keys.
+                var sequenceColumns = columns
+                    .Where(column => (column.IsIdentity ||
+                                      column.HasDefault && column.ValueKind is TableColumnValueKind.Integer or TableColumnValueKind.UnsignedInteger) &&
+                                     inserts[0].Values.Any(value => value.ColumnName.Equals(column.Name, StringComparison.OrdinalIgnoreCase) &&
+                                                                    value.Mode == TableCellInputMode.Value))
+                    .ToList();
+                if (sequenceColumns.Count > 0)
+                {
+                    await AfterExplicitIdentityInsertAsync(connection, transaction, request.Table, sequenceColumns, cancellationToken).ConfigureAwait(false);
                 }
             }
 

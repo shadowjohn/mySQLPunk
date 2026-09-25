@@ -222,44 +222,7 @@ internal sealed class DataCompareWindow : Window
         var text = "-- 預覽用的 SQL（實際同步以參數化語句在單一交易執行，不會執行這段文字）\n" +
                    (includeDeletes ? string.Empty : "-- 未勾選刪除：DELETE 以註解呈現\n") + "\n" +
                    string.Join("\n", comparisons.Select(item => DataComparisonService.BuildPreviewSql(_target.Profile.Provider, item, includeDeletes)));
-        var box = new TextBox
-        {
-            Text = text,
-            IsReadOnly = true,
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.NoWrap,
-            FontFamily = new FontFamily("Cascadia Mono, JetBrains Mono, Menlo, monospace"),
-            FontSize = 12,
-            Margin = new Thickness(12)
-        };
-        ScrollViewer.SetHorizontalScrollBarVisibility(box, Avalonia.Controls.Primitives.ScrollBarVisibility.Auto);
-        var preview = new Window
-        {
-            Title = "資料同步 SQL 預覽",
-            Width = 960,
-            Height = 640,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner
-        };
-        var closeButton = new Button { Content = "關閉", Padding = new Thickness(14, 6), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12, 0, 12, 12) };
-        closeButton.Click += (_, _) => preview.Close();
-        // Tunnel so the focused read-only TextBox cannot swallow Escape before the window sees it.
-        preview.AddHandler(
-            Avalonia.Input.InputElement.KeyDownEvent,
-            (_, args) =>
-            {
-                if (args.Key == Avalonia.Input.Key.Escape)
-                {
-                    args.Handled = true;
-                    preview.Close();
-                }
-            },
-            Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        var layout = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
-        layout.Children.Add(box);
-        Grid.SetRow(closeButton, 1);
-        layout.Children.Add(closeButton);
-        preview.Content = layout;
-        await preview.ShowDialog(this);
+        await SqlPreviewWindow.ShowAsync(this, "資料同步 SQL 預覽", text);
     }
 
     private async Task SyncAsync()

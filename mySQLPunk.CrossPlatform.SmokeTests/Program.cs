@@ -30,6 +30,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("結構比較差異與報告", SchemaComparisonAsync),
     ("同步 SQL 預覽產生與套用", SchemaSyncScriptAsync),
     ("資料比較與同步", DataSyncAsync),
+    ("資料產生器規則、外鍵與唯一性", DataGenerationAsync),
     ("SQLite metadata 與預覽 SQL", SqliteLoadsMetadataAsync),
     ("Table 資料安全編輯與衝突防護", TableDataEditingAsync),
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
@@ -568,6 +569,10 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
     tests.Add(("MariaDB 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.MariaDb)));
     tests.Add(("PostgreSQL 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.PostgreSql)));
     tests.Add(("SQL Server 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.SqlServer)));
+    tests.Add(("MySQL 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.MySql)));
+    tests.Add(("MariaDB 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.MariaDb)));
+    tests.Add(("PostgreSQL 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.PostgreSql)));
+    tests.Add(("SQL Server 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.SqlServer)));
     if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_TLS_PORT")))
     {
         tests.Add(("PostgreSQL 實機 TLS 憑證驗證與 SSH Tunnel", PostgreSqlTlsLiveAsync));
@@ -3052,6 +3057,282 @@ static async Task DataSyncAsync()
     finally
     {
         Directory.Delete(directory, true);
+    }
+}
+
+static async Task AssertDataGenerationAsync(
+    IDatabaseSession session,
+    string database,
+    string label,
+    Func<string, string> conflictingCustomerInsert,
+    string defaultCustomerInsert)
+{
+    async Task<long> ScalarAsync(string sql)
+    {
+        var result = await session.ExecuteAsync(database, sql);
+        return Convert.ToInt64(result.Rows[0][0], CultureInfo.InvariantCulture);
+    }
+
+    var objects = await session.GetObjectsAsync(database);
+    DatabaseObjectInfo Table(string name) => objects.Single(item => item.Name == name && item.Kind == DatabaseObjectKind.Table);
+    var rules = new Dictionary<string, IReadOnlyDictionary<string, DataGeneratorRule>>
+    {
+        ["customers"] = new Dictionary<string, DataGeneratorRule> { ["city"] = new(DataGeneratorRuleKind.Auto, NullPercent: 40) },
+        ["orders"] = new Dictionary<string, DataGeneratorRule>
+        {
+            ["status"] = new(DataGeneratorRuleKind.List, "new|paid|shipped"),
+            ["amount"] = new(DataGeneratorRuleKind.Range, "10..500.50"),
+            ["note"] = new(DataGeneratorRuleKind.Pattern, "ORD-{n}-{digits:3}", 30)
+        },
+        ["order_tags"] = new Dictionary<string, DataGeneratorRule> { ["tag"] = new(DataGeneratorRuleKind.List, "red|green|blue|gold") },
+        ["employees"] = new Dictionary<string, DataGeneratorRule>()
+    };
+    var counts = new Dictionary<string, int> { ["employees"] = 15, ["order_tags"] = 30, ["orders"] = 50, ["customers"] = 20 };
+    List<DataGeneratorTablePlan> Plans(Dictionary<string, int> rowCounts) => rowCounts
+        .Select(pair => new DataGeneratorTablePlan(Table(pair.Key), pair.Value, rules[pair.Key]))
+        .ToList();
+
+    var info = await DataGeneratorService.DescribeTableAsync(session, database, Table("orders"));
+    Assert(info.Columns.Single(column => column.Column.Name == "customer_id").IsForeignKey &&
+           info.Columns.Single(column => column.Column.Name == "customer_id").AutoDescription.Contains("customers", StringComparison.Ordinal),
+        $"{label} 外鍵欄位應說明會參照 customers：{string.Join("；", info.Columns.Select(column => column.Column.Name + "=" + column.AutoDescription))}");
+
+    var first = await DataGeneratorService.GenerateAsync(session, database, Plans(counts), seed: 7);
+    Assert(first.Succeeded, $"{label} 產生應成功：{first.Error}");
+    var generatedOrder = first.Tables.Select(table => table.Table.Name).ToList();
+    Assert(generatedOrder.IndexOf("customers") < generatedOrder.IndexOf("orders") &&
+           generatedOrder.IndexOf("orders") < generatedOrder.IndexOf("order_tags"),
+        $"{label} 應依外鍵相依順序產生：{string.Join(",", generatedOrder)}");
+    var again = await DataGeneratorService.GenerateAsync(session, database, Plans(counts), seed: 7);
+    var provider = session.Profile.Provider;
+    Assert(DataGeneratorService.BuildPreviewSql(provider, again) == DataGeneratorService.BuildPreviewSql(provider, first),
+        $"{label} 相同 seed 應產生相同資料");
+    var preview = DataGeneratorService.BuildPreviewSql(provider, first, maximumRowsPerTable: 5);
+    Assert(preview.Contains("INSERT INTO", StringComparison.Ordinal) && preview.Contains("以下只列出前 5 列", StringComparison.Ordinal),
+        $"{label} 預覽應列出 INSERT 並註明只顯示部分列：\n{preview}");
+
+    // A row that appears after generating must make the single transaction roll back as a whole.
+    var generatedEmail = first.Tables.Single(table => table.Table.Name == "customers").Rows[0].Values.Single(value => value.ColumnName == "email").Text;
+    await session.ExecuteAsync(database, conflictingCustomerInsert(generatedEmail));
+    var conflicted = await DataGeneratorService.ApplyAsync(session, database, first);
+    Assert(!conflicted.Succeeded, $"{label} 唯一值被搶先寫入時必須失敗");
+    Assert(await ScalarAsync("SELECT COUNT(*) FROM orders") == 1 && await ScalarAsync("SELECT COUNT(*) FROM employees") == 0,
+        $"{label} 失敗時不可留下任何產生的資料列");
+
+    var result = await DataGeneratorService.GenerateAsync(session, database, Plans(counts), seed: 11);
+    Assert(result.Succeeded, $"{label} 重新產生應成功：{result.Error}");
+    var applied = await DataGeneratorService.ApplyAsync(session, database, result);
+    Assert(applied.Succeeded && applied.Inserted == 115, $"{label} 寫入應成功：{applied.Summary}");
+    Assert(await ScalarAsync("SELECT COUNT(*) FROM customers") == 23 &&
+           await ScalarAsync("SELECT COUNT(DISTINCT email) FROM customers") == 23 &&
+           await ScalarAsync("SELECT COUNT(*) FROM orders") == 51 &&
+           await ScalarAsync("SELECT COUNT(*) FROM order_tags") == 30 &&
+           await ScalarAsync("SELECT COUNT(*) FROM employees") == 15,
+        $"{label} 產生後的列數或唯一性不正確");
+    Assert(await ScalarAsync("SELECT MAX(id) FROM customers") == 23,
+        $"{label} 重新產生時編號文字應接在既有資料之後，不因撞號重試而跳號");
+    Assert(await ScalarAsync("SELECT COUNT(*) FROM orders o WHERE NOT EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id)") == 0 &&
+           await ScalarAsync("SELECT COUNT(*) FROM order_tags t WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = t.order_id)") == 0 &&
+           await ScalarAsync("SELECT COUNT(*) FROM employees e WHERE e.manager_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM employees m WHERE m.id = e.manager_id)") == 0,
+        $"{label} 外鍵欄位必須都參照到存在的資料列");
+    foreach (var (sql, expectation) in new[]
+             {
+                 ("SELECT COUNT(*) FROM orders WHERE status NOT IN ('new', 'paid', 'shipped')", "清單規則只能產生 new／paid／shipped"),
+                 ("SELECT COUNT(*) FROM orders WHERE amount < 10 OR amount > 500.50", "範圍規則必須落在 10..500.50"),
+                 ("SELECT CASE WHEN COUNT(*) > 0 THEN 0 ELSE 1 END FROM orders WHERE note IS NULL", "NULL 比例 30% 應產生部分 NULL"),
+                 ("SELECT CASE WHEN COUNT(*) > 0 THEN 0 ELSE 1 END FROM orders WHERE note LIKE 'ORD-%'", "樣式規則應產生 ORD- 開頭的值"),
+                 ("SELECT CASE WHEN COUNT(*) > 0 THEN 0 ELSE 1 END FROM customers WHERE city IS NULL", "Auto 搭配 NULL 比例應產生部分 NULL")
+             })
+    {
+        var violations = await ScalarAsync(sql);
+        Assert(violations == 0, $"{label} {expectation}（{sql} → {violations}）");
+    }
+    Assert(await ScalarAsync("SELECT COUNT(*) FROM employees WHERE manager_id IS NOT NULL") > 0,
+        $"{label} 自我參照外鍵應能指向同批產生的資料列");
+
+    // Explicit keys written for referenced parents must not break later default inserts.
+    await session.ExecuteAsync(database, defaultCustomerInsert);
+
+    var notNull = await DataGeneratorService.GenerateAsync(session, database, new[]
+    {
+        new DataGeneratorTablePlan(Table("customers"), 1, new Dictionary<string, DataGeneratorRule> { ["name"] = new(DataGeneratorRuleKind.Null) })
+    });
+    Assert(!notNull.Succeeded && notNull.Error!.Contains("NOT NULL", StringComparison.Ordinal), $"{label} NOT NULL 欄位不可使用 NULL 規則");
+    var badPattern = await DataGeneratorService.GenerateAsync(session, database, new[]
+    {
+        new DataGeneratorTablePlan(Table("customers"), 1, new Dictionary<string, DataGeneratorRule> { ["name"] = new(DataGeneratorRuleKind.Pattern, "{bogus}") })
+    });
+    Assert(!badPattern.Succeeded && badPattern.Error!.Contains("bogus", StringComparison.Ordinal), $"{label} 未知樣式標記必須拒絕");
+    var exhausted = await DataGeneratorService.GenerateAsync(session, database, new[]
+    {
+        new DataGeneratorTablePlan(Table("order_tags"), 300, new Dictionary<string, DataGeneratorRule> { ["tag"] = new(DataGeneratorRuleKind.Fixed, "red") })
+    });
+    Assert(!exhausted.Succeeded && exhausted.Error!.Contains("重複", StringComparison.Ordinal),
+        $"{label} 唯一組合用盡時必須明確失敗：{exhausted.Error}");
+    var tooMany = await DataGeneratorService.GenerateAsync(session, database, new[]
+    {
+        new DataGeneratorTablePlan(Table("customers"), DataGeneratorService.MaximumRowsPerTable + 1, new Dictionary<string, DataGeneratorRule>())
+    });
+    Assert(!tooMany.Succeeded, $"{label} 超過筆數上限必須拒絕");
+}
+
+static async Task DataGenerationAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var profile = CreateSqliteProfile(Path.Combine(directory, "generator.db"));
+        using var session = DatabaseProviderFactory.Create(profile);
+        await session.ExecuteAsync(profile.Database, """
+            CREATE TABLE customers (id INTEGER PRIMARY KEY, email VARCHAR(60) NOT NULL UNIQUE, name VARCHAR(40) NOT NULL, city VARCHAR(30) NULL,
+                birth DATE NULL, score NUMERIC(6,2) NULL, created DATETIME NOT NULL, uid TEXT NULL);
+            CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), amount NUMERIC(10,2) NOT NULL,
+                status VARCHAR(10) NOT NULL, note VARCHAR(40) NULL);
+            CREATE TABLE order_tags (order_id INTEGER NOT NULL REFERENCES orders(id), tag VARCHAR(10) NOT NULL, PRIMARY KEY (order_id, tag));
+            CREATE TABLE employees (id INTEGER PRIMARY KEY, manager_id INTEGER NULL REFERENCES employees(id), name VARCHAR(40) NOT NULL);
+            INSERT INTO customers (id, email, name, created) VALUES (1, 'user1@example.com', 'Existing', '2024-01-01 00:00:00'),
+                (2, 'user2@example.com', 'Existing 2', '2024-01-01 00:00:00');
+            INSERT INTO orders VALUES (1, 1, 20, 'new', NULL);
+            """);
+        await AssertDataGenerationAsync(session, profile.Database, "SQLite",
+            email => $"INSERT INTO customers (email, name, created) VALUES ('{email}', 'late', '2024-01-01 00:00:00')",
+            "INSERT INTO customers (email, name, created) VALUES ('after@example.com', 'after', '2024-01-01 00:00:00')");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
+
+static async Task DataGenerationLiveAsync(LiveSyncTarget target)
+{
+    var database = $"mysqlpunk_gen_{Guid.NewGuid().ToString("N")[..8]}";
+    ConnectionProfile profile;
+    string adminDatabase, createDatabase, dropDatabase;
+    string[] schema;
+    Func<string, string> conflictingInsert;
+    string defaultInsert;
+    switch (target)
+    {
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb:
+        {
+            var prefix = target == LiveSyncTarget.MySql ? "MYSQLPUNK_MYSQL" : "MYSQLPUNK_MARIADB";
+            profile = new ConnectionProfile
+            {
+                Name = target.ToString(),
+                Provider = DatabaseProviderKind.MySql,
+                Host = ReadRequiredEnvironment($"{prefix}_HOST"),
+                Port = ReadRequiredIntEnvironment($"{prefix}_PORT"),
+                Username = Environment.GetEnvironmentVariable($"{prefix}_USER") ?? "root",
+                Password = ReadRequiredEnvironment($"{prefix}_PASSWORD"),
+                TlsMode = ConnectionTlsMode.Disabled,
+                TimeoutSeconds = 20
+            };
+            adminDatabase = string.Empty;
+            createDatabase = "CREATE DATABASE `{0}` CHARACTER SET utf8mb4";
+            dropDatabase = "DROP DATABASE IF EXISTS `{0}`";
+            schema = new[]
+            {
+                "CREATE TABLE customers (id INT AUTO_INCREMENT PRIMARY KEY, email VARCHAR(60) NOT NULL UNIQUE, name VARCHAR(40) NOT NULL, city VARCHAR(30) NULL, " +
+                "birth DATE NULL, score DECIMAL(6,2) NULL, active TINYINT(1) NOT NULL DEFAULT 1, tier ENUM('basic','gold') NOT NULL DEFAULT 'basic', " +
+                "created DATETIME NOT NULL, touched TIMESTAMP NULL, uid CHAR(36) NULL, joined YEAR NULL, code CHAR(8) NULL, rating FLOAT NULL, flags SET('a','b') NULL) ENGINE=InnoDB",
+                "CREATE TABLE orders (id INT PRIMARY KEY, customer_id INT NOT NULL, amount DECIMAL(10,2) NOT NULL, status VARCHAR(10) NOT NULL, note VARCHAR(40) NULL, " +
+                "total DECIMAL(12,2) AS (amount * 2) VIRTUAL, CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers(id)) ENGINE=InnoDB",
+                "CREATE TABLE order_tags (order_id INT NOT NULL, tag VARCHAR(10) NOT NULL, PRIMARY KEY (order_id, tag), CONSTRAINT fk_tags_order FOREIGN KEY (order_id) REFERENCES orders(id)) ENGINE=InnoDB",
+                "CREATE TABLE employees (id INT AUTO_INCREMENT PRIMARY KEY, manager_id INT NULL, name VARCHAR(40) NOT NULL, CONSTRAINT fk_emp_manager FOREIGN KEY (manager_id) REFERENCES employees(id)) ENGINE=InnoDB",
+                "INSERT INTO customers (email, name, created) VALUES ('user1@example.com', 'Existing', '2024-01-01 00:00:00'), ('user2@example.com', 'Existing 2', '2024-01-01 00:00:00')",
+                "INSERT INTO orders (id, customer_id, amount, status) VALUES (1, 1, 20, 'new')"
+            };
+            conflictingInsert = email => $"INSERT INTO customers (email, name, created) VALUES ('{email}', 'late', '2024-01-01 00:00:00')";
+            defaultInsert = "INSERT INTO customers (email, name, created) VALUES ('after@example.com', 'after', '2024-01-01 00:00:00')";
+            break;
+        }
+
+        case LiveSyncTarget.PostgreSql:
+            profile = new ConnectionProfile
+            {
+                Name = "PostgreSQL",
+                Provider = DatabaseProviderKind.PostgreSql,
+                Host = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_HOST"),
+                Port = ReadRequiredIntEnvironment("MYSQLPUNK_POSTGRES_PORT"),
+                Username = Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_USER") ?? "postgres",
+                Password = ReadRequiredEnvironment("MYSQLPUNK_POSTGRES_PASSWORD"),
+                Database = "postgres",
+                TlsMode = ConnectionTlsMode.Disabled,
+                TimeoutSeconds = 20
+            };
+            adminDatabase = "postgres";
+            createDatabase = "CREATE DATABASE \"{0}\"";
+            dropDatabase = "DROP DATABASE IF EXISTS \"{0}\" WITH (FORCE)";
+            schema = new[]
+            {
+                "CREATE TABLE customers (id SERIAL PRIMARY KEY, email VARCHAR(60) NOT NULL UNIQUE, name VARCHAR(40) NOT NULL, city VARCHAR(30) NULL, birth DATE NULL, " +
+                "score NUMERIC(6,2) NULL, active BOOLEAN NOT NULL DEFAULT true, created TIMESTAMPTZ NOT NULL, seen TIMESTAMP NULL, uid UUID NULL, ip INET NULL, " +
+                "details JSONB NULL, wake TIME NULL, price MONEY NULL, rating REAL NULL, code CHAR(8) NULL)",
+                "CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), amount NUMERIC(10,2) NOT NULL, " +
+                "status VARCHAR(10) NOT NULL, note VARCHAR(40) NULL, total NUMERIC(12,2) GENERATED ALWAYS AS (amount * 2) STORED)",
+                "CREATE TABLE order_tags (order_id INTEGER NOT NULL REFERENCES orders(id), tag VARCHAR(10) NOT NULL, PRIMARY KEY (order_id, tag))",
+                "CREATE TABLE employees (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, manager_id INTEGER NULL REFERENCES employees(id), name VARCHAR(40) NOT NULL)",
+                "INSERT INTO customers (email, name, created) VALUES ('user1@example.com', 'Existing', '2024-01-01 00:00:00+00'), ('user2@example.com', 'Existing 2', '2024-01-01 00:00:00+00')",
+                "INSERT INTO orders (id, customer_id, amount, status) VALUES (1, 1, 20, 'new')"
+            };
+            conflictingInsert = email => $"INSERT INTO customers (email, name, created) VALUES ('{email}', 'late', now())";
+            defaultInsert = "INSERT INTO customers (email, name, created) VALUES ('after@example.com', 'after', now()); INSERT INTO employees (name) VALUES ('after')";
+            break;
+        default:
+            profile = new ConnectionProfile
+            {
+                Name = "SQL Server",
+                Provider = DatabaseProviderKind.SqlServer,
+                Host = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_HOST"),
+                Port = ReadRequiredIntEnvironment("MYSQLPUNK_SQLSERVER_PORT"),
+                Username = Environment.GetEnvironmentVariable("MYSQLPUNK_SQLSERVER_USER") ?? "sa",
+                Password = ReadRequiredEnvironment("MYSQLPUNK_SQLSERVER_PASSWORD"),
+                Database = "master",
+                TlsMode = ConnectionTlsMode.Optional,
+                TimeoutSeconds = 30
+            };
+            adminDatabase = "master";
+            createDatabase = "CREATE DATABASE [{0}]";
+            dropDatabase = "IF DB_ID(N'{0}') IS NOT NULL BEGIN ALTER DATABASE [{0}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{0}]; END";
+            schema = new[]
+            {
+                "CREATE TABLE dbo.customers (id INT IDENTITY(1,1) PRIMARY KEY, email NVARCHAR(60) NOT NULL UNIQUE, name NVARCHAR(40) NOT NULL, city NVARCHAR(30) NULL, " +
+                "birth DATE NULL, score DECIMAL(6,2) NULL, active BIT NOT NULL DEFAULT 1, created DATETIME2 NOT NULL, stamp DATETIMEOFFSET NULL, legacy DATETIME NULL, " +
+                "small SMALLDATETIME NULL, uid UNIQUEIDENTIFIER NULL, price MONEY NULL, rating REAL NULL, code NCHAR(8) NULL, wake TIME NULL, tiny TINYINT NULL)",
+                "CREATE TABLE dbo.orders (id INT PRIMARY KEY, customer_id INT NOT NULL REFERENCES dbo.customers(id), amount DECIMAL(10,2) NOT NULL, " +
+                "status NVARCHAR(10) NOT NULL, note NVARCHAR(40) NULL, total AS (amount * 2))",
+                "CREATE TABLE dbo.order_tags (order_id INT NOT NULL REFERENCES dbo.orders(id), tag NVARCHAR(10) NOT NULL, PRIMARY KEY (order_id, tag))",
+                "CREATE TABLE dbo.employees (id INT IDENTITY(1,1) PRIMARY KEY, manager_id INT NULL REFERENCES dbo.employees(id), name NVARCHAR(40) NOT NULL)",
+                "INSERT INTO dbo.customers (email, name, created) VALUES (N'user1@example.com', N'Existing', '2024-01-01'), (N'user2@example.com', N'Existing 2', '2024-01-01')",
+                "INSERT INTO dbo.orders (id, customer_id, amount, status) VALUES (1, 1, 20, N'new')"
+            };
+            conflictingInsert = email => $"INSERT INTO dbo.customers (email, name, created) VALUES (N'{email}', N'late', SYSDATETIME())";
+            defaultInsert = "INSERT INTO dbo.customers (email, name, created) VALUES (N'after@example.com', N'after', SYSDATETIME()); INSERT INTO dbo.employees (name) VALUES (N'after')";
+            break;
+    }
+
+    using var session = DatabaseProviderFactory.Create(profile);
+    try
+    {
+        await session.ExecuteAsync(adminDatabase, string.Format(CultureInfo.InvariantCulture, createDatabase, database));
+        foreach (var statement in schema)
+        {
+            await session.ExecuteAsync(database, statement);
+        }
+
+        await AssertDataGenerationAsync(session, database, profile.Name, conflictingInsert, defaultInsert);
+    }
+    finally
+    {
+        try
+        {
+            await session.ExecuteAsync(adminDatabase, string.Format(CultureInfo.InvariantCulture, dropDatabase, database));
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"  （無法清除 {database}：{exception.Message}）");
+        }
     }
 }
 

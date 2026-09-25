@@ -56,7 +56,7 @@
 | BI | 📋 | 見 Navicat 17 BI 路線。 |
 | 匯入／匯出（Excel、Access、CSV、ODBC 等） | 🟡 | MySQL SQL 匯入／匯出完整，查詢結果有常用格式；待補五種 provider 精靈對等化、Access／ODBC。 |
 | 資料字典 | 🟡 | HTML 核心已完成（Windows 五種 provider；Linux／macOS 預覽版四種 provider 含索引／外鍵／註解），範本／直接 PDF／排程／郵件待補。 |
-| 資料產生器（規則、約束、參照完整性、大量資料） | 🟡 | 已能依欄位型別產生 INSERT；待補規則編輯、FK 順序、唯一性與大量批次。 |
+| 資料產生器（規則、約束、參照完整性、大量資料） | 🟡 | Linux／macOS 預覽版已完成多表規則編輯（自動、預設、NULL、固定、序列、範圍、清單、樣式、NULL 比例、seed）、依外鍵順序挑選真實父列、主鍵／唯一值不重複，並以單一交易寫入（每表 10 萬、每次 20 萬列）；Windows 版仍為單表依型別產生 INSERT，待對等化。 |
 | 備份／還原與原生工具介面 | 🟡 | 已有邏輯 SQL 備份、隔離還原、差異與完整性排程；待補 MongoDump、Oracle Data Pump、SQL Server native backup 介面。 |
 | 自動執行：查詢、匯入／匯出、傳輸、通知郵件 | 🟡 | 已有可攜式查詢／匯出／備份作業、立即執行、每日 Windows 工作排程與 JSON 紀錄；待補匯入、跨庫傳輸、郵件／Webhook、重試及更多觸發條件。 |
 | MongoDB 結構描述分析器 | 🟡 | 第一期會抽樣前 100 筆文件推斷欄位型別、NULL 與 `_id`；待補巢狀路徑統計、異常與極端值檢視。 |

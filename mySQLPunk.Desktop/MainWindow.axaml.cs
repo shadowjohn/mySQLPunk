@@ -60,6 +60,7 @@ public sealed partial class MainWindow : Window
     private readonly Button _explainButton;
     private readonly Button _dataDictionaryButton;
     private readonly Button _schemaCompareButton;
+    private readonly Button _dataGeneratorButton;
     private readonly Button _copyResultButton;
     private readonly Button _exportButton;
     private readonly Button _cancelButton;
@@ -98,6 +99,7 @@ public sealed partial class MainWindow : Window
         _explainButton = this.FindControl<Button>("ExplainButton")!;
         _dataDictionaryButton = this.FindControl<Button>("DataDictionaryButton")!;
         _schemaCompareButton = this.FindControl<Button>("SchemaCompareButton")!;
+        _dataGeneratorButton = this.FindControl<Button>("DataGeneratorButton")!;
         _copyResultButton = this.FindControl<Button>("CopyResultButton")!;
         _exportButton = this.FindControl<Button>("ExportButton")!;
         _cancelButton = this.FindControl<Button>("CancelButton")!;
@@ -745,6 +747,17 @@ public sealed partial class MainWindow : Window
         var version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "0.0.0.0";
         var window = new SchemaCompareWindow(_session, database, _profiles.ToList(), PrepareConnectionProfileAsync, version);
         await window.ShowDialog(this);
+    }
+
+    private async void DataGenerator_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_session is null || _databaseCombo.SelectedItem is not string database)
+        {
+            await MessageDialog.ShowAsync(this, "尚未連線", "請先選擇連線設定並連線。", showCancel: false);
+            return;
+        }
+
+        await new DataGeneratorWindow(_session, database).ShowDialog(this);
     }
 
     private async void ExportDataDictionary_Click(object? sender, RoutedEventArgs e)
@@ -1769,6 +1782,7 @@ public sealed partial class MainWindow : Window
         _explainButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _dataDictionaryButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
         _schemaCompareButton.IsEnabled = !busy && _session is not null && _databaseCombo.SelectedItem is not null;
+        _dataGeneratorButton.IsEnabled = _schemaCompareButton.IsEnabled;
         _copyResultButton.IsEnabled = !busy &&
                                       _lastResult is not null &&
                                       _resultsGrid.SelectedItems.OfType<ResultRow>().Any();
