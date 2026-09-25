@@ -55,6 +55,15 @@ public static class QueryPlanService
         };
     }
 
+    /// <summary>
+    /// TiDB 走 MySQL 協定但不支援 FORMAT=JSON；改用 TiDB 原生的 tidb_json（同樣不執行 statement）。
+    /// </summary>
+    public static string BuildTiDbExplainSql(string statement) => TiDbExplainPrefix + NormalizeSingleStatement(statement);
+
+    private const string MySqlExplainPrefix = "EXPLAIN FORMAT=JSON ";
+    private const string TiDbExplainPrefix = "EXPLAIN FORMAT='tidb_json' ";
+    private const string TiDbJsonColumn = "TiDB_JSON";
+
     /// <summary>Single statement with trailing separator／trivia removed; rejects multi-statement input.</summary>
     public static string NormalizeSingleStatement(string? sql)
     {
@@ -92,6 +101,10 @@ public static class QueryPlanService
         {
             DatabaseProviderKind.SqlServer => ParseSqlServer(result, explainSql),
             DatabaseProviderKind.Sqlite => ParseSqlite(result, explainSql),
+            DatabaseProviderKind.MySql when result.Columns.Count == 1 && result.Columns[0].Equals(TiDbJsonColumn, StringComparison.OrdinalIgnoreCase) =>
+                ParseTiDbJson(ExtractJson(result), explainSql.StartsWith(MySqlExplainPrefix, StringComparison.Ordinal)
+                    ? TiDbExplainPrefix + explainSql[MySqlExplainPrefix.Length..]
+                    : explainSql),
             DatabaseProviderKind.MySql or DatabaseProviderKind.PostgreSql => ParseJson(provider, ExtractJson(result), explainSql),
             _ => throw new NotSupportedException($"{provider} 尚未支援執行計畫。")
         };
@@ -142,6 +155,118 @@ public static class QueryPlanService
         }
     }
 
+    /// <summary>
+    /// TiDB tidb_json：陣列中每個運算子有 id（如 TableReader_6、IndexReader_34(Probe)）、estRows、taskType、
+    /// accessObject、operatorInfo 與 subOperators。TiDB 的 JSON 不含成本，因此只標示估計列數。
+    /// </summary>
+    public static QueryPlanDocument ParseTiDbJson(string? rawJson, string explainSql = "")
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            throw new InvalidOperationException("伺服器沒有回傳 TiDB 執行計畫。");
+        }
+
+        JsonDocument json;
+        try
+        {
+            json = JsonDocument.Parse(rawJson, new JsonDocumentOptions { MaxDepth = 256 });
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException($"TiDB 執行計畫 JSON 無法解析：{exception.Message}", exception);
+        }
+
+        using (json)
+        {
+            if (json.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("TiDB 執行計畫根節點不是陣列。");
+            }
+
+            var document = new QueryPlanDocument
+            {
+                Provider = DatabaseProviderKind.MySql,
+                ExplainSql = explainSql,
+                RawFormat = "TiDB JSON",
+                RawPlan = JsonSerializer.Serialize(json.RootElement, IndentedJson)
+            };
+            foreach (var item in json.RootElement.EnumerateArray())
+            {
+                document.Roots.Add(ParseTiDbOperator(item, 0));
+            }
+
+            if (document.Roots.Count == 0)
+            {
+                throw new InvalidOperationException("TiDB 執行計畫沒有任何運算子。");
+            }
+
+            CompleteDocument(document);
+            return document;
+        }
+    }
+
+    private static QueryPlanNode ParseTiDbOperator(JsonElement obj, int depth)
+    {
+        if (depth > 128)
+        {
+            throw new InvalidOperationException("TiDB 執行計畫巢狀過深。");
+        }
+
+        if (obj.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("TiDB 執行計畫運算子不是物件。");
+        }
+
+        var id = ReadText(obj, "id");
+        var role = string.Empty;
+        var roleMatch = Regex.Match(id, @"\((?<role>Build|Probe|Seq)\)$");
+        if (roleMatch.Success)
+        {
+            role = roleMatch.Groups["role"].Value;
+            id = id[..roleMatch.Index];
+        }
+
+        var operation = Regex.Replace(id, @"_\d+$", string.Empty);
+        var accessObject = ReadText(obj, "accessObject");
+        var relation = Regex.Match(accessObject, @"(?:^|,\s*)table:(?<table>[^,]+)");
+        var node = new QueryPlanNode
+        {
+            NodeType = operation.Length == 0 ? "Operator" : operation,
+            // TiDB 以查詢中的別名（沒有別名時是表名）標示資料表。
+            RelationName = relation.Success ? relation.Groups["table"].Value.Trim() : string.Empty,
+            Alias = relation.Success ? relation.Groups["table"].Value.Trim() : string.Empty,
+            AccessType = operation.Contains("Scan", StringComparison.OrdinalIgnoreCase) || operation.Contains("Get", StringComparison.OrdinalIgnoreCase)
+                ? operation
+                : string.Empty,
+            JoinType = operation.Contains("Join", StringComparison.OrdinalIgnoreCase) ? operation : string.Empty,
+            EstimatedRows = double.TryParse(ReadText(obj, "estRows"), NumberStyles.Float, CultureInfo.InvariantCulture, out var rows) ? rows : null
+        };
+        node.Details["id"] = ReadText(obj, "id");
+        foreach (var name in new[] { "taskType", "accessObject", "operatorInfo" })
+        {
+            var value = ReadText(obj, name);
+            if (value.Length > 0)
+            {
+                node.Details[name] = value;
+            }
+        }
+
+        if (role.Length > 0)
+        {
+            node.Details["role"] = role;
+        }
+
+        if (obj.TryGetProperty("subOperators", out var children) && children.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var child in children.EnumerateArray())
+            {
+                node.Children.Add(ParseTiDbOperator(child, depth + 1));
+            }
+        }
+
+        return node;
+    }
+
     public static string ExtractJson(QueryResult result)
     {
         if (result.Columns.Count == 0 || result.Rows.Count == 0)
@@ -155,7 +280,8 @@ public static class QueryPlanService
             var name = result.Columns[index];
             if (name.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase) ||
                 name.Equals("QUERY PLAN", StringComparison.OrdinalIgnoreCase) ||
-                name.Equals("QUERY_PLAN", StringComparison.OrdinalIgnoreCase))
+                name.Equals("QUERY_PLAN", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(TiDbJsonColumn, StringComparison.OrdinalIgnoreCase))
             {
                 columnIndex = index;
                 break;
@@ -698,7 +824,7 @@ public static class QueryPlanService
             PopulateAggregateCost(child);
         }
 
-        if (!node.TotalCost.HasValue && node.Children.Count > 0)
+        if (!node.TotalCost.HasValue && node.Children.Any(child => child.TotalCost.HasValue))
         {
             node.TotalCost = node.Children.Select(child => child.TotalCost ?? 0d).DefaultIfEmpty(0d).Max();
         }

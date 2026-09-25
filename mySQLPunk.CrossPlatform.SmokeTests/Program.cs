@@ -573,6 +573,14 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
     tests.Add(("MariaDB 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.MariaDb)));
     tests.Add(("PostgreSQL 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.PostgreSql)));
     tests.Add(("SQL Server 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.SqlServer)));
+    if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_TIDB_PORT")))
+    {
+        tests.Add(("TiDB 相容性：連線、metadata、編輯與執行計畫", TiDbLiveRoundTripAsync));
+        tests.Add(("TiDB 同步 SQL 實機往返", () => SchemaSyncLiveAsync(LiveSyncTarget.TiDb)));
+        tests.Add(("TiDB 資料同步實機往返", () => DataSyncLiveAsync(LiveSyncTarget.TiDb)));
+        tests.Add(("TiDB 資料產生器實機寫入", () => DataGenerationLiveAsync(LiveSyncTarget.TiDb)));
+    }
+
     if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MYSQLPUNK_POSTGRES_TLS_PORT")))
     {
         tests.Add(("PostgreSQL 實機 TLS 憑證驗證與 SSH Tunnel", PostgreSqlTlsLiveAsync));
@@ -582,6 +590,13 @@ if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1
     {
         tests.Add(("SQL Server 實機伺服器憑證驗證與 SSH Tunnel", SqlServerTlsLiveAsync));
     }
+}
+
+// 只跑名稱包含指定文字的測試，方便單獨驗證某個實機環境（例如 TiDB）。
+var testFilter = Environment.GetEnvironmentVariable("MYSQLPUNK_TEST_FILTER");
+if (!string.IsNullOrWhiteSpace(testFilter))
+{
+    tests = tests.Where(test => test.Name.Contains(testFilter, StringComparison.OrdinalIgnoreCase)).ToList();
 }
 
 var failures = new List<string>();
@@ -2133,6 +2148,29 @@ static async Task AssertExplainDoesNotExecuteAsync(IDatabaseSession session, str
 
 static Task QueryPlanParsingAsync()
 {
+    var tidb = QueryPlanService.ParseTiDbJson(
+        "[{\"id\":\"HashAgg_10\",\"estRows\":\"2666.67\",\"taskType\":\"root\",\"operatorInfo\":\"group by:t.a.id\",\"subOperators\":[" +
+        "{\"id\":\"IndexReader_41(Build)\",\"estRows\":\"9990.00\",\"taskType\":\"root\",\"operatorInfo\":\"index:IndexFullScan_40\",\"subOperators\":[" +
+        "{\"id\":\"IndexFullScan_40\",\"estRows\":\"9990.00\",\"taskType\":\"cop[tikv]\",\"accessObject\":\"table:b, index:a_id(a_id)\",\"operatorInfo\":\"keep order:true\"}]}," +
+        "{\"id\":\"Point_Get_1(Probe)\",\"estRows\":\"N/A\",\"taskType\":\"root\",\"accessObject\":\"table:a\",\"operatorInfo\":\"handle:1\"}]}]",
+        "EXPLAIN FORMAT='tidb_json' SELECT 1");
+    var tidbRoot = tidb.Roots.Single();
+    Assert(tidb.RawFormat == "TiDB JSON" && tidb.NodeCount == 4 && tidbRoot.NodeType == "HashAgg" && tidbRoot.EstimatedRows == 2666.67 &&
+           tidbRoot.Children[0].Details["role"] == "Build" && tidbRoot.Children[0].Children[0].RelationName == "b" &&
+           tidbRoot.Children[0].Children[0].AccessType == "IndexFullScan" && tidbRoot.Children[1].NodeType == "Point_Get" &&
+           tidbRoot.Children[1].EstimatedRows is null && tidbRoot.Children[1].RelationName == "a",
+        "TiDB tidb_json 應解析運算子、Build／Probe 角色、資料表與估計列數");
+    AssertThrows<InvalidOperationException>(() => QueryPlanService.ParseTiDbJson("{\"id\":\"x\"}"));
+    var tidbResult = new QueryResult
+    {
+        Columns = new[] { "TiDB_JSON" },
+        Rows = new[] { new object?[] { "[{\"id\":\"TableFullScan_5\",\"estRows\":\"10.00\",\"taskType\":\"cop[tikv]\",\"accessObject\":\"table:t\"}]" } }
+    };
+    var dispatched = QueryPlanService.Parse(DatabaseProviderKind.MySql, tidbResult, "EXPLAIN FORMAT=JSON SELECT * FROM t");
+    Assert(dispatched.RawFormat == "TiDB JSON" && dispatched.ExplainSql == "EXPLAIN FORMAT='tidb_json' SELECT * FROM t" &&
+           dispatched.Roots.Single().RelationName == "t",
+        "MySQL 執行計畫遇到 TiDB_JSON 欄位時應改用 TiDB 解析並顯示實際送出的語句");
+
     var sqlServerDate = new TableColumnInfo(0, "created", "date", true, false, false, false, TableColumnValueKind.SqlServerTemporal)
     {
         StorageDataTypeName = "date"
@@ -2749,9 +2787,9 @@ static async Task SchemaSyncLiveAsync(LiveSyncTarget target)
     string[] targetSql;
     switch (target)
     {
-        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb:
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb:
         {
-            var prefix = target == LiveSyncTarget.MySql ? "MYSQLPUNK_MYSQL" : "MYSQLPUNK_MARIADB";
+            var prefix = MySqlFamilyPrefix(target);
             profile = new ConnectionProfile
             {
                 Name = target.ToString(),
@@ -2882,7 +2920,9 @@ static async Task SchemaSyncLiveAsync(LiveSyncTarget target)
         {
             var parent = await session.GetTableStructureAsync(sourceDatabase, new DatabaseObjectInfo(sourceDatabase, "parent", DatabaseObjectKind.Table));
             var prefixIndex = parent.Indexes.Single(index => index.Name == "ix_parent_code");
-            Assert(prefixIndex.Columns.SequenceEqual(new[] { "code(8)", "id DESC" }),
+            // TiDB 解析但忽略索引的 DESC（官方文件列為相容性差異），因此只要求前綴長度。
+            var expectedIndex = target == LiveSyncTarget.TiDb ? new[] { "code(8)", "id" } : new[] { "code(8)", "id DESC" };
+            Assert(prefixIndex.Columns.SequenceEqual(expectedIndex),
                 $"{profile.Name} 索引應保留前綴長度與降冪：{string.Join("|", prefixIndex.Columns)}");
         }
 
@@ -3214,9 +3254,9 @@ static async Task DataGenerationLiveAsync(LiveSyncTarget target)
     string defaultInsert;
     switch (target)
     {
-        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb:
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb:
         {
-            var prefix = target == LiveSyncTarget.MySql ? "MYSQLPUNK_MYSQL" : "MYSQLPUNK_MARIADB";
+            var prefix = MySqlFamilyPrefix(target);
             profile = new ConnectionProfile
             {
                 Name = target.ToString(),
@@ -3348,9 +3388,9 @@ static async Task DataSyncLiveAsync(LiveSyncTarget target)
     string defaultInsert, concurrentUpdate;
     switch (target)
     {
-        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb:
+        case LiveSyncTarget.MySql or LiveSyncTarget.MariaDb or LiveSyncTarget.TiDb:
         {
-            var prefix = target == LiveSyncTarget.MySql ? "MYSQLPUNK_MYSQL" : "MYSQLPUNK_MARIADB";
+            var prefix = MySqlFamilyPrefix(target);
             profile = new ConnectionProfile
             {
                 Name = target.ToString(),
@@ -5877,6 +5917,14 @@ static Task ProviderFactoryValidatesProfilesAsync()
 static Task MySqlLiveRoundTripAsync() =>
     MySqlFamilyLiveRoundTripAsync("MYSQLPUNK_MYSQL", isMariaDb: false);
 
+static string MySqlFamilyPrefix(LiveSyncTarget target) => target switch
+{
+    LiveSyncTarget.MySql => "MYSQLPUNK_MYSQL",
+    LiveSyncTarget.MariaDb => "MYSQLPUNK_MARIADB",
+    LiveSyncTarget.TiDb => "MYSQLPUNK_TIDB",
+    _ => throw new ArgumentOutOfRangeException(nameof(target))
+};
+
 static Task MariaDbLiveRoundTripAsync() =>
     MySqlFamilyLiveRoundTripAsync("MYSQLPUNK_MARIADB", isMariaDb: true);
 
@@ -6004,6 +6052,65 @@ static async Task MySqlFamilyLiveRoundTripAsync(string environmentPrefix, bool i
             table!,
             id => $"UPDATE sample SET integer_value = 1 WHERE id = {id};");
         await VerifyMySqlMutationWarningsRollbackAsync(session, database, table!);
+    }
+    finally
+    {
+        await session.ExecuteAsync(string.Empty, $"DROP DATABASE IF EXISTS `{database}`;");
+    }
+}
+
+/// <summary>
+/// TiDB 走 MySQL 協定：驗證連線、建表／外鍵／檢視、metadata、結構、分頁與安全編輯、樂觀並行衝突與執行計畫。
+/// 只使用 TiDB 支援的型別（不含空間型別、FLOAT(M,D) 等 MySQL 專屬語法）。
+/// </summary>
+static async Task TiDbLiveRoundTripAsync()
+{
+    var database = "mysqlpunk_tidb_" + Guid.NewGuid().ToString("N")[..10];
+    var profile = new ConnectionProfile
+    {
+        Name = "TiDB live",
+        Provider = DatabaseProviderKind.MySql,
+        Host = ReadRequiredEnvironment("MYSQLPUNK_TIDB_HOST"),
+        Port = ReadRequiredIntEnvironment("MYSQLPUNK_TIDB_PORT"),
+        Username = Environment.GetEnvironmentVariable("MYSQLPUNK_TIDB_USER") ?? "root",
+        Password = ReadRequiredEnvironment("MYSQLPUNK_TIDB_PASSWORD"),
+        TlsMode = ConnectionTlsMode.Disabled,
+        TimeoutSeconds = 20
+    };
+    var session = DatabaseProviderFactory.Create(profile);
+    await session.TestConnectionAsync();
+    var version = await session.ExecuteAsync(string.Empty, "SELECT VERSION();");
+    Assert(Convert.ToString(version.Rows[0][0], CultureInfo.InvariantCulture)!.Contains("TiDB", StringComparison.OrdinalIgnoreCase), "應連到 TiDB");
+    try
+    {
+        await session.ExecuteAsync(string.Empty, $"CREATE DATABASE `{database}` CHARACTER SET utf8mb4;");
+        await session.ExecuteAsync(database, "CREATE TABLE sample (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL, quantity INT NULL, note VARCHAR(80) NULL, payload BLOB NULL, metadata JSON NULL, status ENUM('draft','published','archived') NULL, event_date DATE NULL, recorded_at DATETIME(3) NULL, amount DECIMAL(12,2) NULL, single_value FLOAT NULL, fixed_text CHAR(6) NULL);");
+        await session.ExecuteAsync(database, "INSERT INTO sample (name) VALUES ('Punky'), ('Linux');");
+        await session.ExecuteAsync(database, "CREATE TABLE sample_child (id INT PRIMARY KEY, sample_id BIGINT UNSIGNED NOT NULL COMMENT 'parent <ref>', INDEX ix_child_sample (sample_id, id), CONSTRAINT fk_child_sample FOREIGN KEY (sample_id) REFERENCES sample(id) ON DELETE CASCADE) COMMENT = 'child <table>';");
+        await session.ExecuteAsync(database, "CREATE VIEW sample_view AS SELECT id, name FROM sample WHERE quantity IS NULL;");
+
+        var objects = await session.GetObjectsAsync(database);
+        Assert(objects.Any(item => item.Name == "sample" && item.Kind == DatabaseObjectKind.Table) &&
+               objects.Any(item => item.Name == "sample_view" && item.Kind == DatabaseObjectKind.View), "TiDB metadata 應列出資料表與檢視");
+        var child = await session.GetTableStructureAsync(database, new DatabaseObjectInfo(database, "sample_child", DatabaseObjectKind.Table));
+        Assert(child.Comment == "child <table>" &&
+               child.Columns.Single(column => column.Name == "sample_id").Comment == "parent <ref>" &&
+               child.Indexes.Single(index => index.Name == "ix_child_sample").Columns.SequenceEqual(new[] { "sample_id", "id" }) &&
+               child.ForeignKeys.Single().Name == "fk_child_sample" && child.ForeignKeys.Single().OnDelete == "CASCADE" &&
+               child.Definition.Contains("CREATE TABLE", StringComparison.Ordinal), "TiDB 結構應回報註解、索引、外鍵與 SHOW CREATE TABLE");
+        var view = await session.GetTableStructureAsync(database, new DatabaseObjectInfo(database, "sample_view", DatabaseObjectKind.View));
+        Assert(view.Columns.Select(column => column.Name).SequenceEqual(new[] { "id", "name" }), "TiDB 檢視結構應含欄位");
+
+        var table = objects.Single(item => item.Name == "sample" && item.Kind == DatabaseObjectKind.Table);
+        await VerifySafeTableEditingAsync(session, database, table, id => $"UPDATE sample SET name = 'Concurrent' WHERE id = {id};");
+        await AssertExplainDoesNotExecuteAsync(session, database, "sample", "SELECT id, name FROM sample WHERE id = 1;");
+        var plan = await session.ExplainAsync(database, "SELECT s.id, COUNT(*) FROM sample s JOIN sample_child c ON c.sample_id = s.id GROUP BY s.id");
+        static IEnumerable<QueryPlanNode> Flatten(QueryPlanNode node) => new[] { node }.Concat(node.Children.SelectMany(Flatten));
+        var relations = plan.Roots.SelectMany(Flatten).Select(node => node.RelationName).ToList();
+        // TiDB 的 accessObject 以查詢中的別名表示資料表（table:c）。
+        Assert(plan.RawFormat == "TiDB JSON" && plan.ExplainSql.StartsWith("EXPLAIN FORMAT='tidb_json'", StringComparison.Ordinal) &&
+               plan.NodeCount >= 3 && relations.Contains("s") && relations.Contains("c"),
+            $"TiDB 執行計畫應使用 tidb_json 並解析出含資料表的運算子樹：{plan.TextPlan}");
     }
     finally
     {
@@ -11017,5 +11124,6 @@ enum LiveSyncTarget
     MySql,
     MariaDb,
     PostgreSql,
-    SqlServer
+    SqlServer,
+    TiDb
 }

@@ -122,6 +122,15 @@ namespace mySQLPunk.lib
             if (provider == "sqlserver") return ExecuteSqlServer(database, statement, previewSql);
             if (provider == "oracle") return ExecuteOracle(database, statement);
 
+            if (provider == "mysql" && IsTiDb(database))
+            {
+                // TiDB 走 MySQL 協定但不支援 FORMAT=JSON，改用 TiDB 原生的 tidb_json（同樣不執行 statement）。
+                string tidbSql = TiDbExplainPrefix + statement;
+                DataTable tidbResult = database.SelectSQL(tidbSql);
+                ThrowIfQueryFailed(tidbResult);
+                return Parse(provider, tidbResult, tidbSql);
+            }
+
             DataTable result = database.SelectSQL(previewSql);
             ThrowIfQueryFailed(result);
             return Parse(provider, result, previewSql);
@@ -138,6 +147,11 @@ namespace mySQLPunk.lib
             if (normalizedProvider == "sqlserver") return ParseSqlServer(result, explainSql);
             if (normalizedProvider == "oracle") return ParseOracle(result, explainSql);
             if (normalizedProvider == "sqlite") return ParseSqlite(result, explainSql);
+            if (normalizedProvider == "mysql" && result != null && result.Columns.Count == 1 &&
+                string.Equals(result.Columns[0].ColumnName, TiDbJsonColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseTiDbJson(ExtractJson(result), explainSql);
+            }
 
             string rawJson = ExtractJson(result);
             if (string.IsNullOrWhiteSpace(rawJson))
@@ -175,6 +189,93 @@ namespace mySQLPunk.lib
             }
         }
 
+        private const string TiDbExplainPrefix = "EXPLAIN FORMAT='tidb_json' ";
+        private const string TiDbJsonColumn = "TiDB_JSON";
+
+        private static bool IsTiDb(IDatabase database)
+        {
+            try
+            {
+                DataTable version = database.SelectSQL("SELECT VERSION()");
+                return version != null && version.Rows.Count > 0 && version.Columns.Count > 0 &&
+                    Convert.ToString(version.Rows[0][0], CultureInfo.InvariantCulture).IndexOf("TiDB", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// TiDB tidb_json：陣列中每個運算子有 id（如 TableReader_6、IndexReader_34(Probe)）、estRows、taskType、
+        /// accessObject（以查詢別名標示資料表）、operatorInfo 與 subOperators；不含成本，只標示估計列數。
+        /// </summary>
+        public static QueryPlanDocument ParseTiDbJson(string rawJson, string explainSql = null)
+        {
+            if (string.IsNullOrWhiteSpace(rawJson)) throw new InvalidOperationException(Localization.T("Query.PlanMissingJson"));
+            JToken token;
+            try
+            {
+                token = JToken.Parse(rawJson);
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidOperationException(Localization.Format("Query.PlanInvalidJson", ex.Message), ex);
+            }
+            JArray operators = token as JArray;
+            if (operators == null || operators.Count == 0) throw new InvalidOperationException(Localization.T("Query.PlanMissingJson"));
+            QueryPlanDocument document = new QueryPlanDocument
+            {
+                Provider = "mysql",
+                ExplainSql = explainSql ?? string.Empty,
+                RawFormat = "TiDB JSON",
+                RawJson = token.ToString(Formatting.Indented)
+            };
+            foreach (JToken item in operators) document.Roots.Add(ParseTiDbOperator(item, 0));
+            CompleteDocument(document);
+            return document;
+        }
+
+        private static QueryPlanNode ParseTiDbOperator(JToken token, int depth)
+        {
+            JObject obj = token as JObject;
+            if (obj == null || depth > 128) throw new InvalidOperationException(Localization.T("Query.PlanMissingJson"));
+            string id = (string)obj["id"] ?? string.Empty;
+            string role = string.Empty;
+            Match roleMatch = Regex.Match(id, @"\((?<role>Build|Probe|Seq)\)$");
+            if (roleMatch.Success)
+            {
+                role = roleMatch.Groups["role"].Value;
+                id = id.Substring(0, roleMatch.Index);
+            }
+            string operation = Regex.Replace(id, @"_\d+$", string.Empty);
+            string accessObject = (string)obj["accessObject"] ?? string.Empty;
+            Match relation = Regex.Match(accessObject, @"(?:^|,\s*)table:(?<table>[^,]+)");
+            double rows;
+            QueryPlanNode node = new QueryPlanNode
+            {
+                NodeType = operation.Length == 0 ? "Operator" : operation,
+                RelationName = relation.Success ? relation.Groups["table"].Value.Trim() : string.Empty,
+                Alias = relation.Success ? relation.Groups["table"].Value.Trim() : string.Empty,
+                AccessType = operation.IndexOf("Scan", StringComparison.OrdinalIgnoreCase) >= 0 || operation.IndexOf("Get", StringComparison.OrdinalIgnoreCase) >= 0 ? operation : string.Empty,
+                JoinType = operation.IndexOf("Join", StringComparison.OrdinalIgnoreCase) >= 0 ? operation : string.Empty,
+                EstimatedRows = double.TryParse((string)obj["estRows"], NumberStyles.Float, CultureInfo.InvariantCulture, out rows) ? rows : (double?)null
+            };
+            node.Details["id"] = (string)obj["id"] ?? string.Empty;
+            foreach (string name in new[] { "taskType", "accessObject", "operatorInfo" })
+            {
+                string value = (string)obj[name];
+                if (!string.IsNullOrEmpty(value)) node.Details[name] = value;
+            }
+            if (role.Length > 0) node.Details["role"] = role;
+            JArray children = obj["subOperators"] as JArray;
+            if (children != null)
+            {
+                foreach (JToken child in children) node.Children.Add(ParseTiDbOperator(child, depth + 1));
+            }
+            return node;
+        }
+
         public static string ExtractJson(DataTable result)
         {
             if (result == null || result.Rows.Count == 0 || result.Columns.Count == 0) return string.Empty;
@@ -182,7 +283,8 @@ namespace mySQLPunk.lib
             DataColumn preferred = result.Columns.Cast<DataColumn>().FirstOrDefault(column =>
                 string.Equals(column.ColumnName, "EXPLAIN", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(column.ColumnName, "QUERY PLAN", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(column.ColumnName, "QUERY_PLAN", StringComparison.OrdinalIgnoreCase));
+                string.Equals(column.ColumnName, "QUERY_PLAN", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(column.ColumnName, TiDbJsonColumn, StringComparison.OrdinalIgnoreCase));
             int columnIndex = preferred == null ? 0 : preferred.Ordinal;
             List<string> fragments = new List<string>();
             foreach (DataRow row in result.Rows)
@@ -739,7 +841,7 @@ namespace mySQLPunk.lib
         private static void PopulateAggregateCost(QueryPlanNode node)
         {
             foreach (QueryPlanNode child in node.Children) PopulateAggregateCost(child);
-            if (!node.TotalCost.HasValue && node.Children.Count > 0)
+            if (!node.TotalCost.HasValue && node.Children.Any(child => child.TotalCost.HasValue))
             {
                 node.TotalCost = node.Children.Select(child => child.TotalCost ?? 0d).DefaultIfEmpty(0d).Max();
             }

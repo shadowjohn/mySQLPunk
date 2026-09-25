@@ -41,6 +41,26 @@ internal sealed partial class MySqlDatabaseSession : AdoDatabaseSession
 
     protected override string QuoteIdentifier(string value) => $"`{value.Replace("`", "``")}`";
 
+    /// <summary>TiDB 回報 MySQL 相容版本字串但不支援 FORMAT=JSON，改送 tidb_json。</summary>
+    protected override async Task<QueryResult> ReadPlanRowsAsync(
+        DbConnection connection,
+        string statement,
+        string explainSql,
+        CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT VERSION()";
+            var version = Convert.ToString(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            if (version is not null && version.Contains("TiDB", StringComparison.OrdinalIgnoreCase))
+            {
+                return await ReadResultAsync(connection, QueryPlanService.BuildTiDbExplainSql(statement), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return await ReadResultAsync(connection, explainSql, cancellationToken).ConfigureAwait(false);
+    }
+
     protected override async Task ValidateMutationDiagnosticsAsync(
         DbConnection connection,
         DbTransaction transaction,

@@ -8,10 +8,12 @@ postgres_container="mysqlpunk-cross-postgres-test"
 sqlserver_container="mysqlpunk-cross-sqlserver-test"
 postgres_tls_container="mysqlpunk-cross-postgres-tls-test"
 sqlserver_tls_container="mysqlpunk-cross-sqlserver-tls-test"
+tidb_container="mysqlpunk-cross-tidb-test"
 mysql_image="${MYSQLPUNK_MYSQL_IMAGE:-mysql:8.0}"
 mariadb_image="${MYSQLPUNK_MARIADB_IMAGE:-mariadb:11.4}"
 postgres_image="${MYSQLPUNK_POSTGRES_IMAGE:-postgres:16-alpine}"
 sqlserver_image="${MYSQLPUNK_SQLSERVER_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}"
+tidb_image="${MYSQLPUNK_TIDB_IMAGE:-pingcap/tidb:v8.5.1}"
 test_password="MySQLPunk_test_2026!"
 
 if docker inspect "$mysql_container" >/dev/null 2>&1 ||
@@ -19,6 +21,7 @@ if docker inspect "$mysql_container" >/dev/null 2>&1 ||
    docker inspect "$postgres_container" >/dev/null 2>&1 ||
    docker inspect "$postgres_tls_container" >/dev/null 2>&1 ||
    docker inspect "$sqlserver_tls_container" >/dev/null 2>&1 ||
+   docker inspect "$tidb_container" >/dev/null 2>&1 ||
    docker inspect "$sqlserver_container" >/dev/null 2>&1; then
     echo "Cross-platform test container name is already in use." >&2
     exit 2
@@ -26,7 +29,7 @@ fi
 
 tls_directory=$(mktemp -d)
 cleanup() {
-    docker rm -f "$mysql_container" "$mariadb_container" "$postgres_container" "$postgres_tls_container" "$sqlserver_container" "$sqlserver_tls_container" >/dev/null 2>&1 || true
+    docker rm -f "$mysql_container" "$mariadb_container" "$postgres_container" "$postgres_tls_container" "$sqlserver_container" "$sqlserver_tls_container" "$tidb_container" >/dev/null 2>&1 || true
     rm -rf "$tls_directory"
 }
 trap cleanup EXIT
@@ -112,12 +115,20 @@ docker run -d --rm \
     -p 127.0.0.1::1433 \
     "$sqlserver_image" >/dev/null
 
+# TiDB（MySQL 協定相容）：單機模式啟動，root 預設無密碼，就緒後透過 MySQL 容器的用戶端設定密碼。
+docker run -d --rm \
+    --name "$tidb_container" \
+    -p 127.0.0.1::4000 \
+    "$tidb_image" >/dev/null
+
 mysql_ready=0
 mariadb_ready=0
 postgres_ready=0
 postgres_tls_ready=0
 sqlserver_ready=0
 sqlserver_tls_ready=0
+tidb_ready=0
+tidb_address=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$tidb_container")
 for _ in $(seq 1 120); do
     if [[ "$mysql_ready" -eq 0 ]] &&
        docker exec --env MYSQL_PWD="$test_password" "$mysql_container" sh -c '
@@ -151,14 +162,19 @@ for _ in $(seq 1 120); do
        docker logs "$sqlserver_tls_container" 2>&1 | grep -F "was successfully loaded for encryption" >/dev/null; then
         sqlserver_tls_ready=1
     fi
-    if [[ "$mysql_ready" -eq 1 && "$mariadb_ready" -eq 1 && "$postgres_ready" -eq 1 && "$postgres_tls_ready" -eq 1 && "$sqlserver_ready" -eq 1 && "$sqlserver_tls_ready" -eq 1 ]]; then
+    if [[ "$tidb_ready" -eq 0 && "$mysql_ready" -eq 1 ]] &&
+       docker exec "$mysql_container" mysql -h "$tidb_address" -P 4000 -uroot \
+           -e "ALTER USER 'root'@'%' IDENTIFIED BY '$test_password';" >/dev/null 2>&1; then
+        tidb_ready=1
+    fi
+    if [[ "$mysql_ready" -eq 1 && "$mariadb_ready" -eq 1 && "$postgres_ready" -eq 1 && "$postgres_tls_ready" -eq 1 && "$sqlserver_ready" -eq 1 && "$sqlserver_tls_ready" -eq 1 && "$tidb_ready" -eq 1 ]]; then
         break
     fi
     sleep 1
 done
 
-if [[ "$mysql_ready" -ne 1 || "$mariadb_ready" -ne 1 || "$postgres_ready" -ne 1 || "$postgres_tls_ready" -ne 1 || "$sqlserver_ready" -ne 1 || "$sqlserver_tls_ready" -ne 1 ]]; then
-    echo "Database containers did not become ready: MySQL=$mysql_ready MariaDB=$mariadb_ready PostgreSQL=$postgres_ready PostgreSQL-TLS=$postgres_tls_ready SQLServer=$sqlserver_ready SQLServer-TLS=$sqlserver_tls_ready" >&2
+if [[ "$mysql_ready" -ne 1 || "$mariadb_ready" -ne 1 || "$postgres_ready" -ne 1 || "$postgres_tls_ready" -ne 1 || "$sqlserver_ready" -ne 1 || "$sqlserver_tls_ready" -ne 1 || "$tidb_ready" -ne 1 ]]; then
+    echo "Database containers did not become ready: MySQL=$mysql_ready MariaDB=$mariadb_ready PostgreSQL=$postgres_ready PostgreSQL-TLS=$postgres_tls_ready SQLServer=$sqlserver_ready SQLServer-TLS=$sqlserver_tls_ready TiDB=$tidb_ready" >&2
     docker logs "$postgres_tls_container" 2>&1 | tail -n 20 >&2 || true
     docker logs "$sqlserver_tls_container" 2>&1 | tail -n 20 >&2 || true
     exit 3
@@ -174,6 +190,7 @@ postgres_port=$(docker port "$postgres_container" 5432/tcp | sed 's/.*://')
 postgres_tls_port=$(docker port "$postgres_tls_container" 5432/tcp | sed 's/.*://')
 sqlserver_port=$(docker port "$sqlserver_container" 1433/tcp | sed 's/.*://')
 sqlserver_tls_port=$(docker port "$sqlserver_tls_container" 1433/tcp | sed 's/.*://')
+tidb_port=$(docker port "$tidb_container" 4000/tcp | sed 's/.*://')
 
 cd "$repo_root"
 MYSQLPUNK_LIVE_TESTS=1 \
@@ -199,6 +216,10 @@ MYSQLPUNK_SQLSERVER_USER=sa \
 MYSQLPUNK_SQLSERVER_PASSWORD="$test_password" \
 MYSQLPUNK_SQLSERVER_TLS_PORT="$sqlserver_tls_port" \
 MYSQLPUNK_SQLSERVER_CERT_PATH="$tls_directory/pg/server.crt" \
+MYSQLPUNK_TIDB_HOST=127.0.0.1 \
+MYSQLPUNK_TIDB_PORT="$tidb_port" \
+MYSQLPUNK_TIDB_USER=root \
+MYSQLPUNK_TIDB_PASSWORD="$test_password" \
 dotnet run \
     --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj \
     -c Release

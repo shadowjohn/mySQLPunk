@@ -9700,6 +9700,18 @@ public static partial class SmokeTests
 
     private static void TestQueryExecutionPlanService()
     {
+        System.Data.DataTable tidbRows = new System.Data.DataTable();
+        tidbRows.Columns.Add("TiDB_JSON", typeof(string));
+        tidbRows.Rows.Add("[{\"id\":\"HashJoin_8\",\"estRows\":\"12.50\",\"taskType\":\"root\",\"operatorInfo\":\"inner join\",\"subOperators\":[" +
+            "{\"id\":\"TableReader_11(Build)\",\"estRows\":\"10.00\",\"taskType\":\"root\",\"subOperators\":[{\"id\":\"TableFullScan_10\",\"estRows\":\"10.00\",\"taskType\":\"cop[tikv]\",\"accessObject\":\"table:f\"}]}," +
+            "{\"id\":\"Point_Get_12(Probe)\",\"estRows\":\"N/A\",\"taskType\":\"root\",\"accessObject\":\"table:a, index:PRIMARY(id)\"}]}]");
+        QueryPlanDocument tidbPlan = QueryPlanService.Parse("mysql", tidbRows, "EXPLAIN FORMAT='tidb_json' SELECT 1");
+        Assert(tidbPlan.RawFormat == "TiDB JSON" && tidbPlan.NodeCount == 4 && tidbPlan.Roots[0].NodeType == "HashJoin" &&
+               tidbPlan.Roots[0].Children[0].Details["role"] == "Build" && tidbPlan.Roots[0].Children[0].Children[0].RelationName == "f" &&
+               tidbPlan.Roots[0].Children[1].NodeType == "Point_Get" && tidbPlan.Roots[0].Children[1].RelationName == "a" &&
+               !tidbPlan.Roots[0].Children[1].EstimatedRows.HasValue,
+            "A TiDB tidb_json plan should parse operators, build/probe roles, tables and estimated rows.");
+
         string mysqlSql = QueryPlanService.BuildExplainSql("mysql", "SELECT * FROM film;");
         AssertEquals("EXPLAIN FORMAT=JSON SELECT * FROM film", mysqlSql, "MySQL plan SQL should request JSON without executing ANALYZE.");
 
