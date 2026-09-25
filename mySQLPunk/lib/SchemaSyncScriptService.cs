@@ -16,6 +16,7 @@ namespace mySQLPunk.lib
             Statements = statements;
             ManualItems = manualItems;
             DestructiveItems = destructiveItems;
+            DestructiveStatements = new List<string>();
         }
 
         public string Provider { get; private set; }
@@ -23,6 +24,9 @@ namespace mySQLPunk.lib
         public List<string> Statements { get; private set; }
         public List<string> ManualItems { get; private set; }
         public List<string> DestructiveItems { get; private set; }
+
+        /// <summary>與 DestructiveItems 同順序的刪除類語句；永遠不會出現在 Statements。</summary>
+        public List<string> DestructiveStatements { get; private set; }
 
         public string Summary
         {
@@ -93,8 +97,10 @@ namespace mySQLPunk.lib
 
             // 語句內部以 \n 分行、AppendLine 用系統換行；統一成系統換行，另存的 .sql 才不會混用 CRLF／LF。
             string normalized = text.ToString().TrimEnd().Replace("\r\n", "\n").Replace("\n", Environment.NewLine) + Environment.NewLine;
-            return new SchemaSyncScript(builder.Provider, normalized,
+            SchemaSyncScript script = new SchemaSyncScript(builder.Provider, normalized,
                 builder.Statements, builder.Manual, builder.Destructive);
+            script.DestructiveStatements.AddRange(builder.DestructiveStatements);
+            return script;
         }
 
         public static string NormalizeProvider(string provider)
@@ -135,12 +141,14 @@ namespace mySQLPunk.lib
                 Statements = new List<string>();
                 Manual = new List<string>();
                 Destructive = new List<string>();
+                DestructiveStatements = new List<string>();
             }
 
             public string Provider { get; private set; }
             public List<string> Statements { get; private set; }
             public List<string> Manual { get; private set; }
             public List<string> Destructive { get; private set; }
+            public List<string> DestructiveStatements { get; private set; }
 
             public IEnumerable<KeyValuePair<string, List<string>>> Sections
             {
@@ -353,6 +361,7 @@ namespace mySQLPunk.lib
             {
                 description = SingleLine(description);
                 Destructive.Add(description);
+                DestructiveStatements.Add(statement);
                 destructive.Add("-- " + description);
                 string[] lines = statement.Split('\n');
                 for (int index = 0; index < lines.Length; index++)

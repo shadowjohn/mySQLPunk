@@ -350,7 +350,9 @@ namespace mySQLPunk
 
             SchemaSyncScript script = SchemaSyncScriptService.Generate(ComparisonResult);
             statusLabel.Text = script.Summary;
-            return new SchemaSyncScriptForm(script, target.DisplayName);
+            SchemaComparisonEndpoint executionTarget = target;
+            return new SchemaSyncScriptForm(script, target.DisplayName, target.DatabaseName,
+                statements => SchemaSyncExecutionService.Execute(executionTarget.Database, executionTarget.DatabaseName, statements));
         }
 
         private void ShowSyncScript()
@@ -366,6 +368,11 @@ namespace mySQLPunk
                     }
 
                     form.ShowDialog(this);
+                    if (form.ExecutedOnTarget)
+                    {
+                        statusLabel.Text = Localization.T("SchemaSync.Exec.Recomparing");
+                        RefreshComparison();
+                    }
                 }
             }
             catch (Exception ex)

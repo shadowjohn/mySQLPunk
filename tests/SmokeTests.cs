@@ -74,6 +74,7 @@ public static partial class SmokeTests
         Run("Schema model and ER diagram", TestSchemaModelAndErDiagram, ref passed);
         Run("Database schema comparison", TestSchemaComparison, ref passed);
         Run("Schema sync SQL preview", TestSchemaSyncScript, ref passed);
+        Run("Schema sync execution on target", TestSchemaSyncExecution, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12520,6 +12521,77 @@ public static partial class SmokeTests
             syncForm.CreateControl();
             Assert(ReferenceEquals(syncForm.Script, syncScript), "The sync preview form should show the generated script.");
             AssertContains(syncForm.Text, Localization.T("SchemaSync.WindowTitle"), "The sync preview form should say it never executes automatically.");
+        }
+    }
+
+    private static void TestSchemaSyncExecution()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-sync-exec-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            using (my_sqlite semantics = new my_sqlite())
+            {
+                semantics.SetConn("Data Source=" + Path.Combine(dir, "semantics.sqlite") + ";Version=3;New=True;");
+                semantics.Open();
+                AssertSchemaSyncExecutionSemantics(semantics.MCT);
+            }
+
+            using (my_sqlite target = new my_sqlite())
+            {
+                target.SetConn("Data Source=" + Path.Combine(dir, "target.sqlite") + ";Version=3;New=True;");
+                target.Open();
+                foreach (string sql in new[]
+                {
+                    "CREATE TABLE parent (id INTEGER PRIMARY KEY, code VARCHAR(10) NULL);",
+                    "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL, amount REAL NOT NULL, legacy INTEGER NULL);",
+                    "CREATE TABLE target_only (id INTEGER PRIMARY KEY);"
+                })
+                {
+                    AssertEquals("OK", target.ExecSQL(sql)["status"], "SQLite sync target fixture should be created.");
+                }
+
+                SchemaSyncScript script = SchemaSyncScriptService.Generate(BuildSchemaSyncFixture("sqlite"));
+                using (SchemaSyncScriptForm form = new SchemaSyncScriptForm(script, "Target / main", "main",
+                    statements => SchemaSyncExecutionService.Execute(target, "main", statements)))
+                {
+                    form.CreateControl();
+                    AssertEquals((script.Statements.Count + script.DestructiveStatements.Count).ToString(), form.ExecutableRowCount.ToString(),
+                        "The execution tab should list executable and destructive statements.");
+                    AssertEquals(string.Join("\n", script.Statements), string.Join("\n", form.GetSelectedStatements()),
+                        "Only non-destructive statements should be ticked by default.");
+
+                    int dropTableRow = script.Statements.Count + script.DestructiveStatements.FindIndex(sql => sql.StartsWith("DROP TABLE", StringComparison.Ordinal));
+                    form.SetStatementChecked(dropTableRow, true);
+                    List<string> selected = form.GetSelectedStatements();
+                    Assert(selected.Last().StartsWith("DROP TABLE", StringComparison.Ordinal),
+                        "Destructive statements run after the additive ones.");
+
+                    SchemaSyncBatchResult result = form.RunSelected();
+                    Assert(result.Succeeded && result.UsedTransaction && form.ExecutedOnTarget,
+                        "Running the selected statements on SQLite should succeed in one transaction: " + result.Summary);
+                }
+
+                DataTable tables = target.SelectSQL("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;");
+                string names = string.Join(",", tables.Rows.Cast<DataRow>().Select(row => Convert.ToString(row[0])));
+                AssertEquals("child,extra_table,parent", names, "extra_table should be created and target_only dropped.");
+                DataTable parentColumns = target.SelectSQL("PRAGMA table_info(parent);");
+                Assert(parentColumns.Rows.Cast<DataRow>().Any(row => Convert.ToString(row["name"]) == "note"),
+                    "parent.note should be added on the target.");
+            }
+
+            using (my_sqlite other = new my_sqlite())
+            {
+                other.SetConn("Data Source=" + Path.Combine(dir, "other.sqlite") + ";Version=3;New=True;");
+                other.Open();
+                AssertThrows<InvalidOperationException>(() => SchemaSyncExecutionService.Execute(other, "main", new List<string>()),
+                    "An empty batch must be rejected before touching the database.");
+            }
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }
 

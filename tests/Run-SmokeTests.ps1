@@ -123,6 +123,7 @@ $preferencesSource = Join-Path $PSScriptRoot "SmokeTests.Preferences.cs"
 $schemaSyncSource = Join-Path $PSScriptRoot "SmokeTests.SchemaSync.cs"
 $appExe = Join-Path $outputDir "mySQLPunk.exe"
 $newtonsoft = Join-Path $outputDir "Newtonsoft.Json.dll"
+$systemDataSqlite = Join-Path $outputDir "System.Data.SQLite.dll"
 $mysqlConnector = Join-Path $outputDir "MySqlConnector.dll"
 if (!(Test-Path -LiteralPath $mysqlConnector)) {
     $mysqlConnector = Join-Path $repoRoot "packages\MySqlConnector.2.3.7\lib\net471\MySqlConnector.dll"
@@ -131,6 +132,7 @@ if (!(Test-Path -LiteralPath $mysqlConnector)) {
 & $csc /nologo /platform:anycpu "/out:$testExe" `
     "/r:$appExe" `
     "/r:$newtonsoft" `
+    "/r:$systemDataSqlite" `
     "/r:$mysqlConnector" `
     /r:System.Windows.Forms.dll `
     /r:System.Drawing.dll `

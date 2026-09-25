@@ -149,7 +149,7 @@
   - 跨 provider：常見等價型別別名會先正規化，例如 `INT`／`INTEGER`、`BOOLEAN`／`BOOL`，但長度或精度不同仍會列為差異；單邊 metadata 讀取警告會保留在報告內，避免把不完整資料誤當成完全一致。
   - 安全：目前只讀取 metadata、顯示及匯出報告，可產生同步 SQL 預覽但從不自動執行；逐項勾選與受控執行仍在後續排程。
   - 驗證：smoke test 覆蓋來源／目標獨有資料表與欄位、型別、NULL、PK、FK、metadata 警告、固定排序、HTML 編碼，以及唯讀 dockable workspace 行為。
-  - 同步 SQL 預覽：結構差異頁的「同步 SQL 預覽」可為同類型資料庫（MySQL／MariaDB、PostgreSQL、SQL Server、SQLite）產生讓目標跟上來源的腳本，涵蓋建表、加欄位、PostgreSQL／SQL Server 型別與 NULL 變更、補外鍵；刪除類變更一律註解，MySQL MODIFY 與主鍵、SQLite 限制列為手動項目。只能複製或另存，不自動執行；腳本實際在 MySQL 8、PostgreSQL 16、SQL Server 2022、SQLite 套用驗證。
+  - 同步 SQL 預覽：結構差異頁的「同步 SQL 預覽」可為同類型資料庫（MySQL／MariaDB、PostgreSQL、SQL Server、SQLite）產生讓目標跟上來源的腳本，涵蓋建表、加欄位、PostgreSQL／SQL Server 型別與 NULL 變更、補外鍵；刪除類變更一律註解，MySQL MODIFY 與主鍵、SQLite 限制列為手動項目。可複製、另存，或在「在目標執行」分頁勾選後於目標執行（刪除類預設不勾且需輸入資料庫名稱；交易式 provider 失敗整批回滾、MySQL 遇錯即停並標示已生效），完成後自動重比；腳本實際在 MySQL 8、PostgreSQL 16、SQL Server 2022、SQLite 套用驗證。
 
 - **Navicat 對齊：物件 URI 分享與直接定位 ✅ 已完成**
   - 操作：database 與 Table、View、Function、User、Event、Model、BI、內建工具、Report 可從左側樹或物件清單右鍵複製 `mysqlpunk://object` URI；接收方開啟 URI 後會清除暫時的連線搜尋條件、找到目前設定檔的同名連線並定位物件。

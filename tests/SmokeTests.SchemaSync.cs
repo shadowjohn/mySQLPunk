@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using mySQLPunk.lib;
 
@@ -121,6 +122,65 @@ public static partial class SmokeTests
             new SchemaModelSnapshot { DatabaseName = "a", ProviderName = "mysql" },
             new SchemaModelSnapshot { DatabaseName = "b", ProviderName = "mysql" })),
             "Identical schemas have nothing to synchronize.");
+    }
+
+    /// <summary>
+    /// Transaction semantics of the execution core on an open SQLite connection: success commits, a failure in
+    /// statement 2 rolls statement 1 back and leaves statement 3 unrun, and the non-transactional mode (MySQL
+    /// behaviour) reports statement 1 as applied.
+    /// </summary>
+    public static void AssertSchemaSyncExecutionSemantics(DbConnection connection)
+    {
+        Func<string, bool> tableExists = name =>
+        {
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '" + name + "'";
+                return Convert.ToInt64(command.ExecuteScalar()) > 0;
+            }
+        };
+
+        SchemaSyncBatchResult ok = SchemaSyncExecutionService.ExecuteOnConnection(connection, true, new List<string>
+        {
+            "CREATE TABLE sync_ok (id INTEGER PRIMARY KEY)",
+            "ALTER TABLE sync_ok ADD COLUMN note TEXT NULL"
+        });
+        Assert(ok.Succeeded && ok.UsedTransaction && ok.SucceededCount == 2 && tableExists("sync_ok"),
+            "A successful transactional batch should commit every statement: " + ok.Summary);
+
+        SchemaSyncBatchResult rolledBack = SchemaSyncExecutionService.ExecuteOnConnection(connection, true, new List<string>
+        {
+            "CREATE TABLE sync_rollback (id INTEGER PRIMARY KEY)",
+            "ALTER TABLE sync_missing_table ADD COLUMN x INTEGER",
+            "CREATE TABLE sync_never (id INTEGER PRIMARY KEY)"
+        });
+        Assert(!rolledBack.Succeeded && rolledBack.Failure != null && rolledBack.Failure.Index == 1,
+            "The batch should stop at the failing statement: " + rolledBack.Summary);
+        Assert(rolledBack.Statements[0].Outcome == SchemaSyncStatementOutcome.RolledBack &&
+               rolledBack.Statements[2].Outcome == SchemaSyncStatementOutcome.NotRun &&
+               !tableExists("sync_rollback") && !tableExists("sync_never"),
+            "A failed transactional batch must roll back earlier statements and skip later ones.");
+
+        SchemaSyncBatchResult partial = SchemaSyncExecutionService.ExecuteOnConnection(connection, false, new List<string>
+        {
+            "CREATE TABLE sync_partial (id INTEGER PRIMARY KEY)",
+            "ALTER TABLE sync_missing_table ADD COLUMN x INTEGER"
+        });
+        Assert(!partial.UsedTransaction && partial.Statements[0].Outcome == SchemaSyncStatementOutcome.Succeeded &&
+               tableExists("sync_partial") && partial.SucceededCount == 1,
+            "Without a transaction the result must report which statements were already applied: " + partial.Summary);
+
+        AssertThrows<InvalidOperationException>(() => SchemaSyncExecutionService.ExecuteOnConnection(connection, true, new List<string>()),
+            "An empty batch must be rejected.");
+        AssertThrows<InvalidOperationException>(() => SchemaSyncExecutionService.ExecuteOnConnection(connection, true, new List<string> { "  " }),
+            "A blank statement must be rejected.");
+
+        SchemaSyncScript script = SchemaSyncScriptService.Generate(BuildSchemaSyncFixture("postgresql"));
+        AssertEquals(script.DestructiveItems.Count.ToString(), script.DestructiveStatements.Count.ToString(),
+            "Every destructive description should keep its SQL for optional execution.");
+        Assert(script.DestructiveStatements.All(sql => sql.StartsWith("DROP", StringComparison.Ordinal) || sql.IndexOf(" DROP ", StringComparison.Ordinal) > 0) &&
+               !script.Statements.Intersect(script.DestructiveStatements).Any(),
+            "Destructive statements must stay separate from the default executable statements.");
     }
 
     private static void AssertStatement(SchemaSyncScript script, string expected)
