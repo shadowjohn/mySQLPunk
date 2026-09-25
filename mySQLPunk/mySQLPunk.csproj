@@ -221,6 +221,9 @@
     <Compile Include="DataComparisonForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="DataGenerationForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ScheduledJobsForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -350,6 +353,8 @@
     <Compile Include="lib\SchemaSyncExecutionService.cs" />
     <Compile Include="lib\DataSyncCore.cs" />
     <Compile Include="lib\DataSyncService.cs" />
+    <Compile Include="lib\DataGeneratorCore.cs" />
+    <Compile Include="lib\DataGeneratorService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />

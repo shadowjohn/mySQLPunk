@@ -76,6 +76,7 @@ public static partial class SmokeTests
         Run("Schema sync SQL preview", TestSchemaSyncScript, ref passed);
         Run("Schema sync execution on target", TestSchemaSyncExecution, ref passed);
         Run("Data comparison and sync", TestDataComparisonSync, ref passed);
+        Run("Data generator rules, foreign keys and uniqueness", TestDataGeneration, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12655,6 +12656,76 @@ public static partial class SmokeTests
                         "Deleting target-only child rows before parents should respect the foreign key: " + withDeletes.Summary);
                     Assert(form.CompareSelected().All(item => item.Changes.Count == 0),
                         "After a full sync, a new comparison should find no differences.");
+                }
+            }
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void TestDataGeneration()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-data-gen-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            using (my_sqlite core = new my_sqlite())
+            {
+                core.SetConn("Data Source=" + Path.Combine(dir, "core.sqlite") + ";Version=3;New=True;");
+                core.Open();
+                AssertDataGeneratorCoreSemantics(core.MCT);
+            }
+
+            using (my_sqlite db = new my_sqlite())
+            {
+                db.SetConn("Data Source=" + Path.Combine(dir, "generator.sqlite") + ";Version=3;New=True;");
+                db.Open();
+                string[] schema =
+                {
+                    "CREATE TABLE customers (id INTEGER PRIMARY KEY, email VARCHAR(60) NOT NULL UNIQUE, name VARCHAR(40) NOT NULL, created DATETIME NOT NULL, active BOOLEAN NOT NULL DEFAULT 1);",
+                    "CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), amount NUMERIC(10,2) NOT NULL, status TEXT NOT NULL);",
+                    "INSERT INTO customers (email, name, created) VALUES ('user1@example.com', 'Existing', '2024-01-01 00:00:00'), ('user2@example.com', 'Existing 2', '2024-01-01 00:00:00');"
+                };
+                foreach (string sql in schema)
+                {
+                    AssertEquals("OK", db.ExecSQL(sql)["status"], "Generator fixture should be created.");
+                }
+
+                using (DataGenerationForm form = new DataGenerationForm(db, "main", "Test"))
+                {
+                    form.CreateControl();
+                    form.LoadTables();
+                    AssertEquals("2", form.TableCount.ToString(), "Both tables should be listed.");
+                    AssertEquals("4", form.ShowColumns("orders").ToString(), "orders should show its four columns.");
+                    SchemaModelSnapshot snapshot = SchemaModelService.Load(db, "main");
+                    DataGeneratorTable customersInfo = DataGeneratorService.LoadTable(db, "main", snapshot, "customers", false);
+                    Assert(customersInfo.UniqueSets.Any(set => set.Length == 1 && set[0] == "email"), "The UNIQUE index on email should be detected.");
+                    Assert(customersInfo.Columns.Single(column => column.Name == "id").IsAutoNumber, "INTEGER PRIMARY KEY should be treated as auto-numbered.");
+
+                    form.SetTable("customers", true, 10);
+                    form.SetTable("orders", true, 25);
+                    form.SetRule("orders", "status", new DataGeneratorRule(DataGeneratorRuleKind.List, "open|closed"));
+                    DataGenerationResult result = form.Generate(5);
+                    Assert(result.Succeeded, "Generation should succeed: " + result.Error);
+                    AssertEquals("customers,orders", string.Join(",", result.Tables.Select(table => table.TableName)), "Parents should be generated first.");
+                    DataSyncResult written = form.Write(result);
+                    Assert(written.Succeeded && written.Inserted == 35, "Generated rows should be written: " + written.Summary);
+
+                    Func<string, long> scalar = sql => Convert.ToInt64(db.SelectSQL(sql).Rows[0][0]);
+                    Assert(scalar("SELECT COUNT(*) FROM customers") == 12 && scalar("SELECT COUNT(DISTINCT email) FROM customers") == 12,
+                        "Customers should be added with unique emails.");
+                    Assert(scalar("SELECT COUNT(*) FROM orders o WHERE NOT EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id)") == 0,
+                        "Every order must reference an existing customer.");
+                    Assert(scalar("SELECT COUNT(*) FROM orders WHERE status NOT IN ('open', 'closed')") == 0, "The list rule should be applied.");
+                    AssertEquals("OK", db.ExecSQL("INSERT INTO customers (email, name, created) VALUES ('after@example.com', 'after', '2024-01-01 00:00:00');")["status"],
+                        "A default insert after generating must not collide with generated keys.");
+
+                    form.SetRule("customers", "name", new DataGeneratorRule(DataGeneratorRuleKind.Null));
+                    DataGenerationResult rejected = form.Generate(5);
+                    Assert(!rejected.Succeeded && rejected.Tables.Count == 0, "A NULL rule on a NOT NULL column must be rejected before writing.");
                 }
             }
         }

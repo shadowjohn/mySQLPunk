@@ -184,6 +184,165 @@ public static partial class SmokeTests
     }
 
     /// <summary>
+    /// DataGeneratorCore on in-memory table definitions: foreign keys pick existing or generated parents
+    /// (including self references), unique values skip existing ones, rules apply, the same seed repeats, and
+    /// invalid rules fail before anything is written. The result is then written through DataSyncCore.Apply.
+    /// </summary>
+    public static void AssertDataGeneratorCoreSemantics(DbConnection connection)
+    {
+        Action<string> exec = sql =>
+        {
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = sql;
+                command.ExecuteNonQuery();
+            }
+        };
+        Func<string, long> scalar = sql =>
+        {
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = sql;
+                return Convert.ToInt64(command.ExecuteScalar());
+            }
+        };
+
+        exec("PRAGMA foreign_keys = ON");
+        exec("CREATE TABLE customers (id INTEGER PRIMARY KEY, email VARCHAR(40) NOT NULL UNIQUE, name VARCHAR(40) NOT NULL, city VARCHAR(30) NULL, birth DATE NULL)");
+        exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), amount NUMERIC(10,2) NOT NULL, status VARCHAR(10) NOT NULL, note VARCHAR(40) NULL)");
+        exec("CREATE TABLE employees (id INTEGER PRIMARY KEY, manager_id INTEGER NULL REFERENCES employees(id), name VARCHAR(40) NOT NULL)");
+        exec("INSERT INTO customers (id, email, name) VALUES (1, 'user1@example.com', 'Existing'), (2, 'user2@example.com', 'Existing 2')");
+
+        System.Data.DataTable existingCustomers = new System.Data.DataTable();
+        existingCustomers.Columns.Add("id", typeof(long));
+        existingCustomers.Columns.Add("email", typeof(string));
+        existingCustomers.Rows.Add(1L, "user1@example.com");
+        existingCustomers.Rows.Add(2L, "user2@example.com");
+
+        Func<string, DataGeneratorTable> load = name =>
+        {
+            DataGeneratorTable table = new DataGeneratorTable { Name = name, ExistingRows = new System.Data.DataTable() };
+            Func<string, GeneratedValueKind, bool, DataGeneratorColumn> add = (column, kind, nullable) =>
+            {
+                DataGeneratorColumn item = new DataGeneratorColumn
+                {
+                    Name = column,
+                    TypeText = kind.ToString(),
+                    Kind = kind,
+                    IsNullable = nullable,
+                    Ordinal = table.Columns.Count + 1,
+                    IntegerMinimum = long.MinValue,
+                    IntegerMaximum = long.MaxValue,
+                    TemporalAsText = true,
+                    BooleanAsInteger = true
+                };
+                table.Columns.Add(item);
+                return item;
+            };
+            DataGeneratorColumn id = add("id", GeneratedValueKind.Integer, false);
+            id.IsPrimaryKey = true;
+            id.IsAutoNumber = true;
+            table.UniqueSets.Add(new[] { "id" });
+            switch (name)
+            {
+                case "customers":
+                    add("email", GeneratedValueKind.String, false).MaxLength = 40;
+                    add("name", GeneratedValueKind.String, false).MaxLength = 40;
+                    add("city", GeneratedValueKind.String, true).MaxLength = 30;
+                    add("birth", GeneratedValueKind.Date, true);
+                    table.UniqueSets.Add(new[] { "email" });
+                    table.ExistingRows = existingCustomers;
+                    break;
+                case "orders":
+                    id.IsAutoNumber = false;
+                    add("customer_id", GeneratedValueKind.Integer, false);
+                    DataGeneratorColumn amount = add("amount", GeneratedValueKind.Decimal, false);
+                    amount.Precision = 10;
+                    amount.Scale = 2;
+                    add("status", GeneratedValueKind.String, false).MaxLength = 10;
+                    add("note", GeneratedValueKind.String, true).MaxLength = 40;
+                    table.ForeignKeys.Add(new DataGeneratorForeignKey { Name = "fk_orders", Columns = new List<string> { "customer_id" }, ParentTable = "customers", ParentColumns = new List<string> { "id" } });
+                    break;
+                case "employees":
+                    add("manager_id", GeneratedValueKind.Integer, true);
+                    add("name", GeneratedValueKind.String, false).MaxLength = 40;
+                    table.ForeignKeys.Add(new DataGeneratorForeignKey { Name = "fk_manager", Columns = new List<string> { "manager_id" }, ParentTable = "employees", ParentColumns = new List<string> { "id" } });
+                    break;
+                default:
+                    return null;
+            }
+            return table;
+        };
+
+        Func<List<DataGeneratorPlan>> plans = () => new List<DataGeneratorPlan>
+        {
+            new DataGeneratorPlan("customers", 20, new Dictionary<string, DataGeneratorRule> { { "city", new DataGeneratorRule(DataGeneratorRuleKind.Auto, "", 40) } }),
+            new DataGeneratorPlan("orders", 50, new Dictionary<string, DataGeneratorRule>
+            {
+                { "status", new DataGeneratorRule(DataGeneratorRuleKind.List, "new|paid|shipped") },
+                { "amount", new DataGeneratorRule(DataGeneratorRuleKind.Range, "10..500.50") },
+                { "note", new DataGeneratorRule(DataGeneratorRuleKind.Pattern, "ORD-{n}-{digits:3}", 30) }
+            }),
+            new DataGeneratorPlan("employees", 15, null)
+        };
+
+        DataGenerationResult first = DataGeneratorCore.Generate(plans(), load, 7);
+        Assert(first.Succeeded, "Generation should succeed: " + first.Error);
+        DataGenerationResult again = DataGeneratorCore.Generate(plans(), load, 7);
+        Func<DataGenerationResult, string> dump = result => string.Join("|", result.Tables.SelectMany(table => table.Changes)
+            .Select(change => string.Join(",", change.Values.Select(pair => pair.Key + "=" + DataGeneratorCore.Canonical(pair.Value)))));
+        AssertEquals(dump(first), dump(again), "The same seed should generate the same rows.");
+
+        DataTableComparison customers = first.Tables.Single(table => table.TableName == "customers");
+        List<object> customerIds = customers.Changes.Select(change => change.Values["id"]).ToList();
+        AssertEquals("3", Convert.ToString(customerIds.First()), "Referenced auto-number keys should continue after the existing maximum.");
+        Assert(customers.Changes.All(change => !((string)change.Values["email"]).StartsWith("user1@", StringComparison.Ordinal) &&
+                                               !((string)change.Values["email"]).StartsWith("user2@", StringComparison.Ordinal)),
+            "Unique emails must not repeat existing ones.");
+        HashSet<string> allowedParents = new HashSet<string>(customerIds.Select(value => Convert.ToString(value)).Concat(new[] { "1", "2" }));
+        DataTableComparison orders = first.Tables.Single(table => table.TableName == "orders");
+        Assert(orders.Changes.All(change => allowedParents.Contains(Convert.ToString(change.Values["customer_id"]))), "Foreign keys must reference existing or generated parents.");
+        Assert(orders.Changes.All(change => new[] { "new", "paid", "shipped" }.Contains((string)change.Values["status"])), "List rule values only.");
+        Assert(orders.Changes.All(change => (decimal)change.Values["amount"] >= 10m && (decimal)change.Values["amount"] <= 500.50m), "Range rule bounds.");
+        Assert(orders.Changes.Any(change => change.Values["note"] is DBNull) && orders.Changes.Any(change => Convert.ToString(change.Values["note"]).StartsWith("ORD-", StringComparison.Ordinal)),
+            "Pattern rule with a NULL percentage should produce both values and NULLs.");
+        DataTableComparison employees = first.Tables.Single(table => table.TableName == "employees");
+        Assert(employees.Changes.First().Values["manager_id"] is DBNull, "The first self-referencing row has no parent yet and must be NULL.");
+        Assert(employees.Changes.Skip(1).Any(change => !(change.Values["manager_id"] is DBNull)), "Later rows should reference earlier generated rows.");
+
+        Func<string, string> quote = name => "\"" + name.Replace("\"", "\"\"") + "\"";
+        DataSyncResult applied = DataSyncCore.Apply(connection, first.Tables.Select(table => new DataSyncTableRequest
+        {
+            TableName = table.TableName,
+            KeyColumns = table.KeyColumns,
+            Changes = table.Changes,
+            AfterInsertStatements = new List<string>()
+        }).ToList(), quote, quote, "@", null);
+        Assert(applied.Succeeded && applied.Inserted == 85, "Generated rows should be written: " + applied.Message);
+        Assert(scalar("SELECT COUNT(*) FROM orders o WHERE NOT EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id)") == 0 &&
+               scalar("SELECT COUNT(DISTINCT email) FROM customers") == 22,
+            "Written rows must keep foreign keys and unique emails.");
+
+        Func<string, DataGeneratorRule, DataGenerationResult> single = (column, rule) =>
+            DataGeneratorCore.Generate(new List<DataGeneratorPlan> { new DataGeneratorPlan("customers", 1, new Dictionary<string, DataGeneratorRule> { { column, rule } }) }, load, 1);
+        AssertContains(single("name", new DataGeneratorRule(DataGeneratorRuleKind.Null)).Error, "NOT NULL", "NOT NULL columns cannot use the NULL rule.");
+        AssertContains(single("name", new DataGeneratorRule(DataGeneratorRuleKind.Pattern, "{bogus}")).Error, "{bogus}", "Unknown pattern tokens must be rejected.");
+        AssertContains(single("birth", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, "not a date")).Error, "not a date", "Values that do not fit the type must fail before writing.");
+        AssertContains(single("name", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, new string('x', 41))).Error, "40", "Values longer than the column must fail before writing.");
+        Assert(single("missing", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, "x")).Error != null, "Rules for unknown columns must be rejected.");
+        DataGenerationResult exhausted = DataGeneratorCore.Generate(new List<DataGeneratorPlan>
+        {
+            new DataGeneratorPlan("customers", 3, new Dictionary<string, DataGeneratorRule> { { "email", new DataGeneratorRule(DataGeneratorRuleKind.Fixed, "same@example.com") } })
+        }, load, 1);
+        Assert(exhausted.Error != null && exhausted.Tables.Count == 0, "A unique column with a fixed value must fail instead of writing duplicates.");
+        DataGenerationResult orphan = DataGeneratorCore.Generate(new List<DataGeneratorPlan> { new DataGeneratorPlan("orders", 1, null) },
+            name => { DataGeneratorTable table = load(name); if (name == "customers") table.ExistingRows = new System.Data.DataTable(); return table; }, 1);
+        Assert(orphan.Error != null, "A NOT NULL foreign key without any parent rows must fail.");
+        Assert(DataGeneratorCore.Generate(new List<DataGeneratorPlan> { new DataGeneratorPlan("customers", DataGeneratorCore.MaximumRowsPerTable + 1, null) }, load, 1).Error != null,
+            "Row counts above the limit must be rejected.");
+    }
+
+    /// <summary>
     /// DataSyncCore on one SQLite connection holding src_* and dst_* tables: compare, apply in dependency order
     /// (deletes children first), rollback on a concurrent change, and value equality rules.
     /// </summary>

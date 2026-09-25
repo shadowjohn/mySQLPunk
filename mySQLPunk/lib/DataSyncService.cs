@@ -142,12 +142,18 @@ namespace mySQLPunk.lib
                         request.IdentityInsertOn = "SET IDENTITY_INSERT " + Qualify(provider, comparison.TableName) + " ON";
                         request.IdentityInsertOff = "SET IDENTITY_INSERT " + Qualify(provider, comparison.TableName) + " OFF";
                     }
-                    else if (identity.Count > 0 && provider == "postgresql")
+                    if (identity.Count > 0 && provider == "postgresql")
                     {
                         request.InsertClause = " OVERRIDING SYSTEM VALUE";
-                        foreach (string column in identity)
+                    }
+
+                    if (provider == "postgresql")
+                    {
+                        List<string> sequences = GetSequenceColumns(target, targetDatabase, comparison.TableName)
+                            .Where(column => firstInsert.Values.ContainsKey(column)).ToList();
+                        foreach (string column in sequences)
                         {
-                            // 明確寫入 identity 值不會推進序列；移到最大值之後，避免之後的預設新增撞主鍵。
+                            // 明確寫入 identity／SERIAL 值不會推進序列；移到最大值之後，避免之後的預設新增撞主鍵。
                             request.AfterInsertStatements.Add(
                                 "SELECT pg_catalog.setval(pg_catalog.pg_get_serial_sequence('" + Qualify(provider, comparison.TableName).Replace("'", "''") +
                                 "', '" + column.Replace("'", "''") + "'), COALESCE(MAX(" + Quote(provider, column) + "), 1), MAX(" + Quote(provider, column) +
@@ -246,7 +252,7 @@ namespace mySQLPunk.lib
             }
         }
 
-        private static void ThrowIfQueryFailed(DataTable table)
+        internal static void ThrowIfQueryFailed(DataTable table)
         {
             if (table == null) throw new InvalidOperationException(Localization.T("DataSync.Error.ReadFailed"));
             if (table.ExtendedProperties.ContainsKey(my_sqlite.QueryErrorExtendedProperty))
@@ -255,7 +261,7 @@ namespace mySQLPunk.lib
             }
         }
 
-        private static IEnumerable<string> GetComputedColumns(IDatabase database, string databaseName, string tableName)
+        internal static IEnumerable<string> GetComputedColumns(IDatabase database, string databaseName, string tableName)
         {
             string provider = SchemaSyncScriptService.NormalizeProvider(database.ProviderName);
             SplitName(provider, tableName, out string schema, out string table);
@@ -288,7 +294,19 @@ namespace mySQLPunk.lib
             return rows.Rows.Cast<DataRow>().Select(row => Convert.ToString(row[0])).ToList();
         }
 
-        private static IEnumerable<string> GetIdentityColumns(IDatabase database, string databaseName, string tableName)
+        /// <summary>PostgreSQL identity 與 SERIAL（DEFAULT nextval）欄位；明確寫入後需推進序列。</summary>
+        private static IEnumerable<string> GetSequenceColumns(IDatabase database, string databaseName, string tableName)
+        {
+            SplitName("postgresql", tableName, out string schema, out string table);
+            DataTable rows = database.SelectSQL(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = :schema AND table_name = :tableName " +
+                "AND (is_identity = 'YES' OR column_default LIKE 'nextval(%')",
+                new Dictionary<string, object> { { "schema", schema }, { "tableName", table } });
+            ThrowIfQueryFailed(rows);
+            return rows.Rows.Cast<DataRow>().Select(row => Convert.ToString(row[0])).ToList();
+        }
+
+        internal static IEnumerable<string> GetIdentityColumns(IDatabase database, string databaseName, string tableName)
         {
             string provider = SchemaSyncScriptService.NormalizeProvider(database.ProviderName);
             SplitName(provider, tableName, out string schema, out string table);
@@ -312,7 +330,7 @@ namespace mySQLPunk.lib
             return rows.Rows.Cast<DataRow>().Select(row => Convert.ToString(row[0])).ToList();
         }
 
-        private static void SplitName(string provider, string name, out string schema, out string table)
+        internal static void SplitName(string provider, string name, out string schema, out string table)
         {
             string value = name ?? string.Empty;
             int dot = value.IndexOf('.');
