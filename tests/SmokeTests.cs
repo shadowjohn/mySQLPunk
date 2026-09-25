@@ -12370,6 +12370,19 @@ public static partial class SmokeTests
             DataProfileColumnResult sqliteAmount = sqliteReport.Columns.First(column => column.ColumnName == "amount");
             AssertEquals("1", sqliteAmount.NullCount.ToString(), "SQLite live profiling should calculate NULL numeric values.");
             Assert(sqliteAmount.HasAverage, "SQLite live profiling should calculate numeric averages.");
+
+            AssertDataFormatSemantics();
+            sqlite.ExecSQL("CREATE TABLE contacts (id INTEGER PRIMARY KEY, email TEXT, code TEXT);");
+            for (int i = 1; i <= 12; i++) sqlite.ExecSQL("INSERT INTO contacts (email, code) VALUES ('user" + i + "@example.com', 'SKU-" + (1000 + i) + "');");
+            sqlite.ExecSQL("INSERT INTO contacts (email, code) VALUES ('broken-address', 'sku_x'), ('N/A', 'SKU-2000');");
+            DataProfileReport contactsReport = DataProfilingService.AnalyzeAsync(sqlite, "main", "contacts", 0, 10, null, System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+            DataFormatReport emailFormat = contactsReport.Columns.First(column => column.ColumnName == "email").Format;
+            Assert(emailFormat != null && emailFormat.DominantFormat == "Email" && emailFormat.Anomalies.Any(item => item.Value == "broken-address") && emailFormat.Anomalies.Any(item => item.Value == "N/A"),
+                "Profiling should detect the dominant email format and list the anomalies.");
+            DataFormatReport codeFormat = contactsReport.Columns.First(column => column.ColumnName == "code").Format;
+            Assert(codeFormat != null && codeFormat.DominantFormat == "AAA-9+" && codeFormat.Anomalies.Single().Value == "sku_x", "Profiling should detect code shapes: " + (codeFormat == null ? "null" : codeFormat.DominantFormat));
+            Assert(contactsReport.Columns.First(column => column.ColumnName == "id").Format == null, "Numeric columns are not format-analyzed.");
+            AssertContains(DataProfileForm.DescribeFormat(emailFormat), "broken-address", "The profile form should describe the anomalies.");
         }
     }
 

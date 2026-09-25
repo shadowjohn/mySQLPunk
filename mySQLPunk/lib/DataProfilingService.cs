@@ -29,6 +29,8 @@ namespace mySQLPunk.lib
         public bool HasAverage { get; set; }
         public List<DataProfileValueBucket> TopValues { get; } = new List<DataProfileValueBucket>();
         public List<string> Warnings { get; } = new List<string>();
+        /// <summary>文字欄位的格式分析；非文字欄位為 null。</summary>
+        public DataFormatReport Format { get; set; }
 
         public long NullCount
         {
@@ -136,6 +138,7 @@ namespace mySQLPunk.lib
                 await LoadCountsAsync(db, sourceSql, quotedColumn, result, cancellationToken).ConfigureAwait(false);
                 await LoadRangeAsync(db, sourceSql, quotedColumn, metadataColumn.DataType, result, cancellationToken).ConfigureAwait(false);
                 await LoadTopValuesAsync(db, sourceSql, metadataColumn.DataType, topValueLimit, result, cancellationToken).ConfigureAwait(false);
+                await LoadFormatAsync(db, sourceSql, metadataColumn.DataType, result, cancellationToken).ConfigureAwait(false);
                 report.Columns.Add(result);
 
                 if (progress != null)
@@ -176,7 +179,11 @@ namespace mySQLPunk.lib
             if (db == null) throw new ArgumentNullException(nameof(db));
             if (string.IsNullOrWhiteSpace(sourceSql)) throw new ArgumentException("Source SQL is required.", nameof(sourceSql));
 
-            topValueLimit = Math.Max(1, Math.Min(MaximumTopValueLimit, topValueLimit));
+            return BuildGroupedValuesSql(db, sourceSql, columnName, Math.Max(1, Math.Min(MaximumTopValueLimit, topValueLimit)));
+        }
+
+        private static string BuildGroupedValuesSql(IDatabase db, string sourceSql, string columnName, int topValueLimit)
+        {
             string column = DatabaseDumpService.QuoteIdentifier(db, columnName);
             string provider = (db.ProviderName ?? string.Empty).Trim().ToLowerInvariant();
             if (provider == "oracle")
@@ -392,6 +399,49 @@ namespace mySQLPunk.lib
                 "geometry", "geography", "spatial", "array", "object", "cursor"
             };
             return !unsupported.Any(normalized.Contains);
+        }
+
+        /// <summary>格式分析只看最常見的 2,000 個相異值（含次數），避免把整欄資料搬到用戶端。</summary>
+        public const int FormatValueLimit = 2000;
+
+        private static async Task LoadFormatAsync(
+            IDatabase db,
+            string sourceSql,
+            string dataType,
+            DataProfileColumnResult result,
+            CancellationToken cancellationToken)
+        {
+            if (!IsTextType(dataType) || result.NonNullCount == 0) return;
+            string sql = BuildGroupedValuesSql(db, sourceSql, result.ColumnName, FormatValueLimit);
+            try
+            {
+                DataTable values = await db.SelectSQLAsync(sql).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (values == null) return;
+                List<KeyValuePair<string, long>> pairs = new List<KeyValuePair<string, long>>();
+                foreach (DataRow row in values.Rows)
+                {
+                    if (row.ItemArray.Length < 2 || row[0] == null || row[0] is DBNull) continue;
+                    pairs.Add(new KeyValuePair<string, long>(Convert.ToString(row[0], CultureInfo.InvariantCulture), ToLong(row[1])));
+                }
+                result.Format = DataFormatAnalyzer.Analyze(pairs);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                result.Warnings.Add(ex.Message);
+            }
+        }
+
+        public static bool IsTextType(string dataType)
+        {
+            string normalized = (dataType ?? string.Empty).ToLowerInvariant();
+            string[] text = { "char", "text", "string", "varchar", "clob" };
+            return text.Any(normalized.Contains) && SupportsGrouping(normalized) || normalized.Length == 0;
         }
 
         private static bool SupportsGrouping(string dataType)

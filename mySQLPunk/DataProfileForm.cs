@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
@@ -27,6 +28,7 @@ namespace mySQLPunk
         private readonly DataGridView _summaryGrid;
         private readonly DataGridView _distributionGrid;
         private readonly Label _distributionTitle;
+        private readonly TextBox _formatDetails;
         private readonly Label _statusLabel;
         private readonly ProgressBar _progressBar;
         private CancellationTokenSource _analysisCancellation;
@@ -143,7 +145,17 @@ namespace mySQLPunk
                 if (args.RowIndex >= 0) OpenSelectedBucket();
             };
             _distributionGrid.CellPainting += DistributionGridCellPainting;
+            _formatDetails = new TextBox
+            {
+                Dock = DockStyle.Bottom,
+                Height = 96,
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BorderStyle = BorderStyle.None
+            };
             distributionPanel.Controls.Add(_distributionGrid);
+            distributionPanel.Controls.Add(_formatDetails);
             distributionPanel.Controls.Add(_distributionTitle);
 
             SplitContainer split = new SplitContainer
@@ -345,12 +357,17 @@ namespace mySQLPunk
                     column.HasRange ? FormatValue(column.Maximum) : string.Empty,
                     column.HasAverage ? FormatValue(column.Average) : string.Empty,
                     topValue,
+                    column.Format == null ? string.Empty : column.Format.Summary,
                     column.IsPartial ? Localization.T("DataProfile.Partial") : Localization.T("DataProfile.Complete"));
                 DataGridViewRow row = _summaryGrid.Rows[rowIndex];
                 row.Tag = column;
+                if (column.Format != null && (column.Format.AnomalyCount > 0 || column.Format.Issues.Count > 0))
+                {
+                    row.Cells[9].Style.ForeColor = ThemeManager.WarningColor;
+                }
                 if (column.Warnings.Count > 0)
                 {
-                    row.Cells[9].ToolTipText = string.Join(Environment.NewLine, column.Warnings.Distinct().ToArray());
+                    row.Cells[10].ToolTipText = string.Join(Environment.NewLine, column.Warnings.Distinct().ToArray());
                 }
             }
 
@@ -371,10 +388,12 @@ namespace mySQLPunk
             if (column == null)
             {
                 _distributionTitle.Text = Localization.T("DataProfile.TopValues");
+                _formatDetails.Text = string.Empty;
                 return;
             }
 
             _distributionTitle.Text = Localization.Format("DataProfile.TopValuesForColumn", column.ColumnName);
+            _formatDetails.Text = DescribeFormat(column.Format);
             long maximum = column.TopValues.Count == 0 ? 0L : column.TopValues.Max(bucket => bucket.Count);
             foreach (DataProfileValueBucket bucket in column.TopValues)
             {
@@ -395,6 +414,24 @@ namespace mySQLPunk
                 _distributionGrid.CurrentCell = _distributionGrid.Rows[0].Cells[0];
             }
             UpdateDrilldownButton();
+        }
+
+        /// <summary>格式分析的文字說明：佔多數格式、各格式分布、不符的值與其他問題。</summary>
+        public static string DescribeFormat(DataFormatReport format)
+        {
+            if (format == null) return Localization.T("DataProfile.FormatNotApplicable");
+            List<string> lines = new List<string>();
+            lines.Add(format.DominantFormat == null
+                ? Localization.T("DataProfile.FormatNoDominant")
+                : Localization.Format("DataFormat.Summary", format.DominantFormat, format.Coverage.ToString("P1", CultureInfo.CurrentCulture)));
+            lines.Add(Localization.T("DataProfile.FormatDistribution") + string.Join("、", format.Formats.Take(6).Select(item => item.Format + " × " + FormatLong(item.Count))));
+            foreach (DataFormatAnomaly anomaly in format.Anomalies.Take(8))
+            {
+                lines.Add("  ⚠ " + FormatValue(anomaly.Value) + " × " + FormatLong(anomaly.Count) + " — " + anomaly.Reason);
+            }
+            if (format.Anomalies.Count > 8) lines.Add("  " + Localization.Format("DataProfile.FormatMore", format.Anomalies.Count - 8));
+            lines.AddRange(format.Issues.Select(issue => "  • " + issue));
+            return string.Join(Environment.NewLine, lines);
         }
 
         private DataProfileColumnResult GetSelectedColumn()
@@ -480,6 +517,7 @@ namespace mySQLPunk
             AddTextColumn(_summaryGrid, "Maximum", Localization.T("DataProfile.Maximum"), 105, DataGridViewAutoSizeColumnMode.None);
             AddTextColumn(_summaryGrid, "Average", Localization.T("DataProfile.Average"), 95, DataGridViewAutoSizeColumnMode.None);
             AddTextColumn(_summaryGrid, "Top", Localization.T("DataProfile.TopValue"), 160, DataGridViewAutoSizeColumnMode.Fill);
+            AddTextColumn(_summaryGrid, "Format", Localization.T("DataProfile.Format"), 190, DataGridViewAutoSizeColumnMode.None);
             AddTextColumn(_summaryGrid, "Status", Localization.T("DataProfile.Status"), 90, DataGridViewAutoSizeColumnMode.None);
         }
 

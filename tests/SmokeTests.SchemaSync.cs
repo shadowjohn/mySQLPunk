@@ -1083,6 +1083,38 @@ public static partial class SmokeTests
         NativeBackupService.ValidateNewDatabaseName("shop_copy-2");
     }
 
+    /// <summary>格式異常偵測：語意格式、字元樣式、佔多數格式與不符的值、空白／占位值／大小寫提醒。</summary>
+    public static void AssertDataFormatSemantics()
+    {
+        AssertEquals("Email", DataFormatAnalyzer.Classify("a.b+c@example.co"), "Email format.");
+        AssertEquals("Date yyyy-MM-dd", DataFormatAnalyzer.Classify("2025-02-28"), "ISO date format.");
+        AssertEquals("DateTime yyyy-MM-dd HH:mm:ss", DataFormatAnalyzer.Classify("2025-02-28T13:45:00Z"), "ISO datetime format.");
+        AssertEquals("UUID", DataFormatAnalyzer.Classify("123e4567-e89b-12d3-a456-426614174000"), "UUID format.");
+        AssertEquals("Integer", DataFormatAnalyzer.Classify("0912345678"), "Digits only are integers.");
+        AssertEquals("Phone", DataFormatAnalyzer.Classify("+886 912-345-678"), "Phone with separators.");
+        AssertEquals("IPv4", DataFormatAnalyzer.Classify("192.168.0.1"), "IPv4 format.");
+        AssertEquals("AAA-9+", DataFormatAnalyzer.Shape("SKU-12345"), "Shape collapses long runs.");
+        AssertEquals("Aa+_Aaaa", DataFormatAnalyzer.Shape("Taipei City"), "Shape maps case and spaces.");
+
+        List<KeyValuePair<string, long>> emails = Enumerable.Range(1, 20).Select(i => new KeyValuePair<string, long>("user" + i + "@example.com", 2)).ToList();
+        emails.Add(new KeyValuePair<string, long>("not-an-email", 3));
+        emails.Add(new KeyValuePair<string, long>(" padded@example.com ", 1));
+        emails.Add(new KeyValuePair<string, long>("N/A", 4));
+        emails.Add(new KeyValuePair<string, long>("Bob@example.com", 1));
+        emails.Add(new KeyValuePair<string, long>("bob@example.com", 1));
+        emails.Add(new KeyValuePair<string, long>(string.Empty, 2));
+        DataFormatReport report = DataFormatAnalyzer.Analyze(emails);
+        Assert(report.DominantFormat == "Email" && report.Coverage > 0.8 && report.Coverage < 1, "Email dominates: " + report.DominantFormat + " " + report.Coverage);
+        Assert(report.Anomalies.Any(item => item.Value == "not-an-email" && item.Count == 3) && report.Anomalies.Any(item => item.Value == "N/A"), "Non-matching and placeholder values are anomalies.");
+        Assert(report.Anomalies.First().Value == "N/A", "Anomalies are ordered by frequency.");
+        Assert(report.Issues.Count == 4 && report.Issues.Any(issue => issue.Contains("Bob@example.com")), "Empty, whitespace, placeholder and case issues are reported: " + string.Join(" | ", report.Issues));
+        Assert(report.Summary.Contains("Email"), "Summary names the dominant format.");
+
+        DataFormatReport mixed = DataFormatAnalyzer.Analyze(new[] { new KeyValuePair<string, long>("a", 1), new KeyValuePair<string, long>("1", 1), new KeyValuePair<string, long>("x@y.io", 1) });
+        Assert(mixed.DominantFormat == null && mixed.Anomalies.Count == 0, "Without a dominant format nothing is flagged as an anomaly.");
+        Assert(DataFormatAnalyzer.Analyze(null).ValueCount == 0, "Empty input is handled.");
+    }
+
     /// <summary>資料產生器字典：解析、權重、內建字典保護、儲存／列出／刪除與 CSV 匯入。</summary>
     public static void AssertDataGeneratorDictionarySemantics(string directory)
     {
