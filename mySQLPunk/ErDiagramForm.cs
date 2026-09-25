@@ -121,7 +121,7 @@ namespace mySQLPunk
                 if (switchingDiagram || document == null || diagramBox.SelectedIndex < 0) return;
                 diagram = document.Diagrams[diagramBox.SelectedIndex];
                 canvas.SetModel(snapshot, document, diagram);
-                BeginInvoke(new Action(canvas.FitToWindow));
+                FitWhenReady();
             };
             floatButton.Click += (sender, args) => { if (mainHost != null) mainHost.FloatDockableForm(this); };
             dockButton.Click += (sender, args) => { if (mainHost != null) mainHost.DockDockableForm(this); };
@@ -216,7 +216,7 @@ namespace mySQLPunk
                     snapshot.Tables.Count,
                     snapshot.Relationships.Count,
                     snapshot.Warnings.Count) + (missing > 0 ? " " + Localization.Format("ErModel.MissingTables", missing) : string.Empty);
-                BeginInvoke(new Action(canvas.FitToWindow));
+                FitWhenReady();
             }
             catch (Exception ex)
             {
@@ -287,6 +287,13 @@ namespace mySQLPunk
                 switchingDiagram = false;
             }
             canvas.SetModel(snapshot, document, diagram);
+        }
+
+        /// <summary>視窗顯示後再縮放到適合大小；尚未建立視窗（例如測試直接呼叫）時立即縮放。</summary>
+        private void FitWhenReady()
+        {
+            if (IsHandleCreated) BeginInvoke(new Action(canvas.FitToWindow));
+            else canvas.FitToWindow();
         }
 
         private void MarkDirty()
