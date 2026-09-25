@@ -913,6 +913,12 @@ namespace mySQLPunk
             Add("Redis.PubSubReady", "請選擇 channel 或 pattern 開始接收訊息。", "Choose a channel or pattern to start receiving messages.");
             Add("Redis.PubSubConnecting", "正在建立訂閱專線…", "Opening a dedicated subscription connection…");
             Add("Redis.PubSubSubscribed", "正在訂閱：{0}", "Subscribed to: {0}");
+            Add("Redis.PubSubShardMode", "分片 channel（Redis 7）", "Shard channel (Redis 7)");
+            Add("Redis.PubSubShardedPublish", "分片發布（SPUBLISH）", "Sharded (SPUBLISH)");
+            Add("Redis.PubSubSubscribedAt", "正在訂閱：{0}（節點 {1}）", "Subscribed to: {0} (node {1})");
+            Add("Redis.PubSubReconnecting", "接收連線中斷（{0}），正在重新訂閱（第 {1}/{2} 次）…", "The subscription connection dropped ({0}); resubscribing (attempt {1}/{2})…");
+            Add("Redis.PubSubResubscribed", "已重新訂閱 {0}（節點 {1}）；中斷期間發布的訊息不會補收。", "Resubscribed to {0} (node {1}); messages published while disconnected are not recovered.");
+            Add("Redis.SentinelFailedOver", "Sentinel 已切換到新的 master {0}；{1} 沒有自動重送（寫入或交易結果未知），請重新整理後再試。", "Sentinel failed over to the new master {0}; {1} was not retried automatically (writes and transactions may or may not have applied). Refresh and try again.");
             Add("Redis.PubSubStopped", "已停止訂閱。", "Subscription stopped.");
             Add("Redis.PubSubReceived", "目前保留 {0} 則訊息（上限 1,000 則）。", "Keeping {0} messages (maximum 1,000).");
             Add("Redis.PubSubPublished", "訊息已發布，伺服器回報 {0} 個接收端。", "Message published; the server reported {0} receivers.");

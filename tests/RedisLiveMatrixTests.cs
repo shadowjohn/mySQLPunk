@@ -102,6 +102,25 @@ internal static class RedisLiveMatrixTests
                     && patternMessage.Message == label + " pattern",
                     "pattern message preserves pattern, channel and payload");
             }
+            string version;
+            int major;
+            if (info.TryGetValue("redis_version", out version) && int.TryParse(version.Split('.')[0], out major) && major >= 7)
+            {
+                RedisPubSubMessageEventArgs shardMessage = null;
+                using (ManualResetEvent received = new ManualResetEvent(false))
+                using (RedisPubSubSubscription subscription = provider.CreatePubSubSubscription("db0", "mtx:shard", RedisPubSubKind.Shard))
+                {
+                    subscription.MessageReceived += (sender, eventArgs) =>
+                    {
+                        shardMessage = eventArgs;
+                        received.Set();
+                    };
+                    subscription.Start();
+                    Check(provider.Publish("mtx:shard", label + " shard", true) == 1, "SPUBLISH reaches a shard subscription");
+                    Check(received.WaitOne(3000) && shardMessage.Channel == "mtx:shard" && shardMessage.Message == label + " shard",
+                        "shard subscription receives smessage with channel and payload");
+                }
+            }
             Check(provider.CountRows("db0", "keys") >= 6,
                 "closing subscriptions leaves the provider connection usable");
             Check(provider.CountRows("db0", "keys") >= 6, "DBSIZE counts the seeded keys");

@@ -30,7 +30,7 @@
 | MongoDB Aggregation Pipeline 視覺設計 | ✅ | collection 右鍵「Aggregation Pipeline...」可從 16 種唯讀 stage 範本新增、調整順序、停用、逐 stage 編輯 JSON 並即時檢查語法，預覽「到此 stage 為止」的前 20／100／500 筆輸出；$out／$merge（含巢狀）一律拒絕。可匯入既有 pipeline、複製 mongosh 語法或送到查詢視窗，查詢視窗也支援含 `pipeline` 陣列的 aggregation JSON。 |
 | 專注模式 | ✅ | F11／檢視選單可隱藏工具列、導覽與資訊窗格。 |
 | Snowflake | 🟡 | 第二期完成：SQL REST API 直連（PAT／OAuth token）、SHOW DATABASES 與 INFORMATION_SCHEMA metadata、schema.table 瀏覽、分頁資料檢視、SELECT／SHOW，以及查詢編輯器單一 DML／DDL；待補實機驗收、key-pair JWT、參數綁定、資料網格寫回、模型與 BI 能力。 |
-| Redis standalone／Cluster／Sentinel、Microsoft Garnet | 🟡 | RESP2 standalone 已具備瀏覽、受限查詢、五種 key 型別安全編輯、TTL／刪除、list 依索引安全刪除、INFO 監控，以及使用接收專線的 channel／pattern Pub/Sub 工作區。待補 Cluster 與 Sentinel。 Redis Cluster（CRC16 slot 路由、MOVED／ASK 重導、逐 master SCAN、DBSIZE 加總、交易固定在 key 所在節點）與 Sentinel（依序詢問 Sentinel 取得 master、以 ROLE 確認、容錯切換後重新連線即取得新 master）已完成並通過實機驗證；待補 Cluster 內的 Pub/Sub sharded channel 與 Sentinel 自動重新連線。 |
+| Redis standalone／Cluster／Sentinel、Microsoft Garnet | ✅ | Windows 版：RESP2 standalone 瀏覽、受限查詢、五種 key 型別安全編輯、TTL／刪除、list 依索引安全刪除、INFO 監控與 Pub/Sub；Redis Cluster（CRC16 slot 路由、MOVED／ASK、逐 master SCAN、交易固定在 key 所在節點、分片 channel 連到 slot 所屬 master）；Sentinel（解析 master 並以 ROLE 確認、訂閱 +switch-master 主動換線、連線中斷自動重連：唯讀命令透明重送、寫入與交易不重送並明確回報）。全部通過實機驗證。 |
 | Linux ARM | ✅ | 已建立 .NET 8 Core 與 Avalonia 桌面預覽版；CI／Release 會在 `ubuntu-24.04` x64 與 `ubuntu-24.04-arm` ARM64 原生 runner 分別建立 self-contained 安裝壓縮檔，並完成安裝、Xvfb UI 啟動、安全更新、rollback 與解除安裝。跨平台 SQL Server 的 provider 實機 round-trip 保留在支援其容器映像的 Linux x64 runner。 |
 
 ## Navicat Premium 功能頁對照
@@ -60,7 +60,7 @@
 | 備份／還原與原生工具介面 | 🟡 | 已有邏輯 SQL 備份、隔離還原、差異與完整性排程；Windows 版另有原生備份／還原：SQL Server BACKUP／RESTORE（COPY_ONLY、CHECKSUM、驗證、還原為新資料庫）、PostgreSQL pg_dump／pg_restore 與 MongoDB mongodump／mongorestore。Oracle Data Pump 待補（需 Oracle 實機環境）。 |
 | 自動執行：查詢、匯入／匯出、傳輸、通知郵件 | ✅ | Windows 版支援查詢、匯出、備份、CSV 匯入與跨庫傳輸（檢查點續傳）作業，失敗重試（匯入寫入部分資料後不重試）、Webhook 與郵件通知（SMTP 密碼存 Windows 認證管理員）、立即執行、每天／每週指定星期／每 N 小時／登入時的 Windows 工作排程與 JSON 紀錄。 |
 | MongoDB 結構描述分析器 | ✅ | collection 右鍵「結構描述分析...」可抽樣 100～100,000 筆（前 N 筆或 `$sample` 隨機），展開巢狀文件與陣列路徑，統計出現率、型別分佈、NULL、數值／字串長度／日期／陣列長度範圍、常見值與 1.5×IQR 極端值（附 `_id`），並標出混合型別、數字存成字串、稀疏欄位、只差大小寫的欄位名稱、空字串與全為 NULL 等異常。 |
-| Redis Pub/Sub | 🆕 | 停靠式訊息工作區可用 channel 或 pattern 訂閱、查看最近 1,000 筆訊息，並以明確動作發布；接收使用專線，關閉頁籤不影響一般 provider 連線。 |
+| Redis Pub/Sub | 🆕 | 停靠式訊息工作區可用 channel、pattern 或 Redis 7 分片 channel（SSUBSCRIBE／SPUBLISH）訂閱與發布、查看最近 1,000 筆訊息；接收使用專線，連線中斷（含 Sentinel 容錯切換）時自動重新訂閱最多 5 次。 |
 | 協同合作：同步連線、查詢、pipeline、片段、模型、BI、群組 | 📋 | 先做本機可匯出／匯入的工作區格式與 Git 版控，再補可自架同步服務與權限。 |
 | SSH tunnel、SSL/TLS | ✅ | 四種網路 provider 已有共用安全設定 UI、憑證驗證、SSH SHA256 主機金鑰固定與隧道生命週期；Linux／macOS 預覽版也具備 provider 原生 TLS 模式、憑證檔案與指紋固定的 SSH Tunnel。SQLite 為本機檔案，不適用網路層設定。 |
 | PAM／LDAP／Kerberos／MFA／SSO | 📋 | 依 provider 驗證能力分階段加入，不保存明文祕密。 |
@@ -80,7 +80,7 @@
 | MySQL／MariaDB | ✅ | 共用 MySQL provider，已有實機版本矩陣。 |
 | PostgreSQL、SQL Server、Oracle、SQLite | 🟡 | 核心 metadata／查詢／編輯／DDL／備份可用，進階功能持續對等化。 |
 | MongoDB | 🟡 | 第三期完成：連線、metadata、JSON find 查詢、文件樹、安全編輯與文件新增／刪除都已具備；standalone 4.4／7.0／8.0 實機矩陣通過。待補 Atlas／SRV 驗證環境矩陣；Aggregation Pipeline 設計器與查詢視窗 pipeline 格式已完成。 |
-| Redis／Garnet | 🟡 | standalone 已具備 URI、ACL／密碼、TLS、logical db、key 瀏覽、受限查詢、五種型別安全編輯／TTL／刪除、list 依索引刪除、INFO 監控與 Pub/Sub 訊息工作區。Redis 6.2、Redis 7 與 Garnet 既有各 39 項實機矩陣通過，新增案例待重跑；Cluster／Sentinel 待補。 |
+| Redis／Garnet | 🟡 | standalone、Cluster 與 Sentinel 皆已完成（URI、ACL／密碼、TLS、logical db、key 瀏覽、受限查詢、五種型別安全編輯、INFO 監控、Pub/Sub 含分片 channel、Sentinel 自動換線）。Windows 實機矩陣 Redis 6.2（53 項）、Redis 7.4（55 項）通過；Garnet 待重跑新增案例，Linux／macOS 版待補。 |
 | Snowflake | 🟡 | 第二期 provider 完成（SQL REST API、PAT／OAuth、metadata、分頁瀏覽、SELECT／SHOW 與查詢編輯器單一 DML／DDL）；真實帳戶實機矩陣、key-pair JWT、參數綁定、網格寫回與 bulk load 待補。 |
 | AWS、Microsoft Azure、Google Cloud、Oracle Cloud、MongoDB Atlas、Redis Enterprise Cloud、Alibaba Cloud、Tencent Cloud、Huawei Cloud | 🟡 | RDBMS、MongoDB 與 Redis 可先用標準主機連線；待補各家 IAM／SSO／MFA 與雲端專用驗證。 |
 | OceanBase、PingCAP／TiDB、Dameng、Fujitsu、Kingbase、HighGo | 🟡 | TiDB 8.5 與 OceanBase CE 4.4（MySQL 模式）已加入 Docker 實機矩陣：連線、metadata、結構（註解、索引、外鍵）、安全編輯與樂觀並行衝突、結構同步、資料同步與資料產生器都通過；執行計畫會辨識 TiDB（改送 `tidb_json`）與 OceanBase 的 JSON 結構（Windows 與 Linux／macOS 皆支援）。已知差異：兩者都解析但忽略索引 DESC；OceanBase 帳號格式為 `user@tenant`。Dameng、Kingbase、HighGo、Fujitsu 需要專用驅動或授權映像，待建立矩陣。 |

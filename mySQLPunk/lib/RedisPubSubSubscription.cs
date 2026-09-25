@@ -12,6 +12,14 @@ namespace mySQLPunk.lib
         public string Message { get; internal set; }
     }
 
+    /// <summary>訂閱種類：一般 channel、pattern，或 Redis 7 的分片 channel（SSUBSCRIBE，只送到負責該 slot 的節點）。</summary>
+    public enum RedisPubSubKind
+    {
+        Channel,
+        Pattern,
+        Shard
+    }
+
     public sealed class RedisPubSubErrorEventArgs : EventArgs
     {
         public Exception Error { get; internal set; }
@@ -28,32 +36,46 @@ namespace mySQLPunk.lib
         private Thread _reader;
         private volatile bool _disposed;
 
-        private RedisPubSubSubscription(RedisRespClient client, string topic, bool pattern)
+        private RedisPubSubSubscription(RedisRespClient client, string topic, RedisPubSubKind kind, string endpoint)
         {
             _client = client;
             Topic = topic;
-            IsPattern = pattern;
+            Kind = kind;
+            Endpoint = endpoint;
         }
 
         public string Topic { get; private set; }
-        public bool IsPattern { get; private set; }
+        public RedisPubSubKind Kind { get; private set; }
+        public bool IsPattern { get { return Kind == RedisPubSubKind.Pattern; } }
+        /// <summary>接收連線所連的節點（host:port）。</summary>
+        public string Endpoint { get; private set; }
 
         public event EventHandler<RedisPubSubMessageEventArgs> MessageReceived;
         public event EventHandler<RedisPubSubErrorEventArgs> Failed;
 
-        internal static RedisPubSubSubscription Create(RedisRespClient client, string topic, bool pattern)
+        internal static RedisPubSubSubscription Create(RedisRespClient client, string topic, RedisPubSubKind kind, string endpoint)
         {
             if (client == null) throw new ArgumentNullException("client");
             if (string.IsNullOrWhiteSpace(topic)) throw new ArgumentException(Localization.T("Redis.PubSubTopicRequired"), "topic");
 
-            string command = pattern ? "PSUBSCRIBE" : "SUBSCRIBE";
+            string command = SubscribeCommand(kind);
             object[] acknowledgement = client.Execute(command, topic) as object[];
             if (acknowledgement == null || acknowledgement.Length != 3 ||
                 !string.Equals(Convert.ToString(acknowledgement[0], CultureInfo.InvariantCulture), command.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(Convert.ToString(acknowledgement[1], CultureInfo.InvariantCulture), topic, StringComparison.Ordinal))
                 throw new FormatException(Localization.T("Redis.PubSubInvalidReply"));
 
-            return new RedisPubSubSubscription(client, topic, pattern);
+            return new RedisPubSubSubscription(client, topic, kind, endpoint ?? string.Empty);
+        }
+
+        internal static string SubscribeCommand(RedisPubSubKind kind)
+        {
+            switch (kind)
+            {
+                case RedisPubSubKind.Pattern: return "PSUBSCRIBE";
+                case RedisPubSubKind.Shard: return "SSUBSCRIBE";
+                default: return "SUBSCRIBE";
+            }
         }
 
         public void Start()
@@ -96,7 +118,7 @@ namespace mySQLPunk.lib
         {
             if (reply == null || reply.Length < 3) return null;
             string kind = Convert.ToString(reply[0], CultureInfo.InvariantCulture);
-            if (string.Equals(kind, "message", StringComparison.OrdinalIgnoreCase) && reply.Length == 3)
+            if ((string.Equals(kind, "message", StringComparison.OrdinalIgnoreCase) || string.Equals(kind, "smessage", StringComparison.OrdinalIgnoreCase)) && reply.Length == 3)
             {
                 return new RedisPubSubMessageEventArgs
                 {

@@ -222,7 +222,10 @@ namespace mySQLPunk.lib
                     try
                     {
                         if (mode == ModeSentinel) EnsureMasterRole(candidate, target);
-                        client = RedisCommandRouter.ForStandalone(candidate);
+                        client = mode == ModeSentinel
+                            ? RedisCommandRouter.ForSentinel(candidate, ReconnectToCurrentMaster, () => RedisCommandRouter.FormatAddress(connectedHost, connectedPort), ConsumeMasterSwitch)
+                            : RedisCommandRouter.ForStandalone(candidate);
+                        if (mode == ModeSentinel) StartSentinelWatcher();
                         connectedHost = target.Key;
                         connectedPort = target.Value;
                     }
@@ -301,6 +304,124 @@ namespace mySQLPunk.lib
             throw new InvalidOperationException(Localization.Format("Redis.SentinelUnreachable", masterName, string.Join("; ", failures)));
         }
 
+        private volatile bool masterSwitchPending;
+        private RedisRespClient sentinelWatcher;
+        private System.Threading.Thread sentinelWatcherThread;
+
+        /// <summary>
+        /// 背景訂閱 Sentinel 的 +switch-master：Sentinel 宣布切換後，下一個命令前就改連新 master，
+        /// 避免在舊 master 被降級前的空窗寫進即將被覆蓋的舊節點。Sentinel 無法連線時不影響一般操作。
+        /// </summary>
+        private void StartSentinelWatcher()
+        {
+            StopSentinelWatcher();
+            List<string> sentinels = new List<string> { RedisCommandRouter.FormatAddress(host, port) };
+            sentinels.AddRange(seeds.Where(item => !sentinels.Contains(item, StringComparer.OrdinalIgnoreCase)));
+            foreach (string address in sentinels)
+            {
+                KeyValuePair<string, int> endpoint = RedisCommandRouter.SplitAddress(address);
+                RedisRespClient watcher = null;
+                try
+                {
+                    watcher = RedisRespClient.Connect(endpoint.Key, endpoint.Value, useTls, ConnectTimeoutMs);
+                    if (sentinelAuth)
+                    {
+                        if (!string.IsNullOrEmpty(username)) watcher.Execute("AUTH", username, password ?? string.Empty);
+                        else if (!string.IsNullOrEmpty(password)) watcher.Execute("AUTH", password);
+                    }
+                    watcher.Execute("SUBSCRIBE", "+switch-master");
+                    watcher.SetReceiveTimeout(0);
+                }
+                catch (Exception exception) when (exception is RedisServerException || exception is System.IO.IOException ||
+                                                  exception is System.Net.Sockets.SocketException || exception is TimeoutException)
+                {
+                    if (watcher != null) watcher.Dispose();
+                    continue;
+                }
+
+                RedisRespClient active = watcher;
+                sentinelWatcher = active;
+                sentinelWatcherThread = new System.Threading.Thread(() => WatchSentinel(active)) { IsBackground = true, Name = "mySQLPunk Redis Sentinel watcher" };
+                sentinelWatcherThread.Start();
+                return;
+            }
+        }
+
+        private void WatchSentinel(RedisRespClient watcher)
+        {
+            try
+            {
+                while (ReferenceEquals(sentinelWatcher, watcher))
+                {
+                    object[] reply = watcher.ReadReply() as object[];
+                    if (reply == null || reply.Length != 3 || !string.Equals(Convert.ToString(reply[0], CultureInfo.InvariantCulture), "message", StringComparison.OrdinalIgnoreCase)) continue;
+                    // 內容為「master 名稱 舊 IP 舊 port 新 IP 新 port」。
+                    string[] parts = Convert.ToString(reply[2], CultureInfo.InvariantCulture).Split(' ');
+                    if (parts.Length >= 1 && string.Equals(parts[0], masterName, StringComparison.Ordinal)) masterSwitchPending = true;
+                }
+            }
+            catch (Exception)
+            {
+                // 監看連線中斷時退回「命令失敗才換線」的行為。
+            }
+        }
+
+        private void StopSentinelWatcher()
+        {
+            RedisRespClient watcher = sentinelWatcher;
+            sentinelWatcher = null;
+            sentinelWatcherThread = null;
+            masterSwitchPending = false;
+            if (watcher != null) watcher.Dispose();
+        }
+
+        private bool ConsumeMasterSwitch()
+        {
+            if (!masterSwitchPending) return false;
+            masterSwitchPending = false;
+            return true;
+        }
+
+        /// <summary>容錯切換後重新向 Sentinel 解析 master，連上並確認角色，沿用目前選取的 logical database。</summary>
+        private RedisRespClient ReconnectToCurrentMaster()
+        {
+            List<string> failures = new List<string>();
+            // 切換剛發生時 Sentinel 可能還回報舊 master，短暫重試幾次。
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                KeyValuePair<string, int> target;
+                try
+                {
+                    target = ResolveSentinelMaster();
+                }
+                catch (InvalidOperationException exception)
+                {
+                    failures.Add(exception.Message);
+                    System.Threading.Thread.Sleep(500 * (attempt + 1));
+                    continue;
+                }
+
+                RedisRespClient candidate = null;
+                try
+                {
+                    candidate = ConnectNode(target.Key, target.Value, Math.Max(0, selectedDatabase));
+                    EnsureMasterRole(candidate, target);
+                    connectedHost = target.Key;
+                    connectedPort = target.Value;
+                    return candidate;
+                }
+                catch (Exception exception) when (exception is RedisServerException || exception is System.IO.IOException ||
+                                                  exception is System.Net.Sockets.SocketException || exception is TimeoutException ||
+                                                  exception is InvalidOperationException)
+                {
+                    if (candidate != null) candidate.Dispose();
+                    failures.Add(RedisCommandRouter.FormatAddress(target.Key, target.Value) + ": " + exception.Message);
+                    System.Threading.Thread.Sleep(500 * (attempt + 1));
+                }
+            }
+            throw new InvalidOperationException(Localization.Format("Redis.SentinelUnreachable", masterName, string.Join("; ", failures)));
+        }
+
         /// <summary>Sentinel 回報的位址可能落後於實際切換；連上後以 ROLE 確認真的是 master。</summary>
         private static void EnsureMasterRole(RedisRespClient candidate, KeyValuePair<string, int> target)
         {
@@ -334,6 +455,7 @@ namespace mySQLPunk.lib
         {
             lock (_sync)
             {
+                StopSentinelWatcher();
                 if (client != null) client.Dispose();
                 client = null;
                 selectedDatabase = -1;
@@ -577,8 +699,16 @@ namespace mySQLPunk.lib
             }
         }
 
-        /// <summary>以專用連線訂閱 channel 或 pattern；呼叫端掛上事件後需呼叫 Start。</summary>
         public RedisPubSubSubscription CreatePubSubSubscription(string databaseName, string topic, bool pattern)
+        {
+            return CreatePubSubSubscription(databaseName, topic, pattern ? RedisPubSubKind.Pattern : RedisPubSubKind.Channel);
+        }
+
+        /// <summary>
+        /// 以專用連線訂閱 channel、pattern 或分片 channel；呼叫端掛上事件後需呼叫 Start。
+        /// Sentinel 模式每次都重新解析目前的 master（容錯切換後可直接重新訂閱）；Cluster 的分片 channel 連到負責該 slot 的 master。
+        /// </summary>
+        public RedisPubSubSubscription CreatePubSubSubscription(string databaseName, string topic, RedisPubSubKind kind)
         {
             if (string.IsNullOrWhiteSpace(topic))
                 throw new ArgumentException(Localization.T("Redis.PubSubTopicRequired"), "topic");
@@ -589,10 +719,35 @@ namespace mySQLPunk.lib
                 int databaseIndex = string.IsNullOrWhiteSpace(databaseName)
                     ? initialDatabaseIndex
                     : ParseDatabaseIndex(databaseName);
-                RedisRespClient subscriptionClient = OpenAuthenticatedClient(databaseIndex);
+                KeyValuePair<string, int> endpoint;
+                RedisRespClient subscriptionClient;
+                if (mode == ModeSentinel)
+                {
+                    endpoint = ResolveSentinelMaster();
+                    subscriptionClient = ConnectNode(endpoint.Key, endpoint.Value, databaseIndex);
+                    try
+                    {
+                        EnsureMasterRole(subscriptionClient, endpoint);
+                    }
+                    catch
+                    {
+                        subscriptionClient.Dispose();
+                        throw;
+                    }
+                }
+                else if (mode == ModeCluster && kind == RedisPubSubKind.Shard)
+                {
+                    endpoint = RedisCommandRouter.SplitAddress(client.OwnerAddress(topic));
+                    subscriptionClient = ConnectNode(endpoint.Key, endpoint.Value, 0);
+                }
+                else
+                {
+                    endpoint = new KeyValuePair<string, int>(connectedHost, connectedPort);
+                    subscriptionClient = OpenAuthenticatedClient(databaseIndex);
+                }
                 try
                 {
-                    RedisPubSubSubscription subscription = RedisPubSubSubscription.Create(subscriptionClient, topic, pattern);
+                    RedisPubSubSubscription subscription = RedisPubSubSubscription.Create(subscriptionClient, topic, kind, RedisCommandRouter.FormatAddress(endpoint.Key, endpoint.Value));
                     subscriptionClient.SetReceiveTimeout(0);
                     return subscription;
                 }
@@ -604,15 +759,27 @@ namespace mySQLPunk.lib
             }
         }
 
-        /// <summary>在一般 provider 連線發布訊息，不會占用訂閱連線。</summary>
-        public long Publish(string channel, string message)
+        /// <summary>在一般 provider 連線發布訊息，不會占用訂閱連線；sharded 為 Redis 7 的 SPUBLISH（Cluster 送到負責該 slot 的 master）。</summary>
+        public long Publish(string channel, string message, bool sharded = false)
         {
             if (string.IsNullOrWhiteSpace(channel))
                 throw new ArgumentException(Localization.T("Redis.PubSubChannelRequired"), "channel");
             lock (_sync)
             {
                 EnsureOpen();
-                return Convert.ToInt64(client.Execute("PUBLISH", channel, message ?? string.Empty), CultureInfo.InvariantCulture);
+                return Convert.ToInt64(client.Execute(sharded ? "SPUBLISH" : "PUBLISH", channel, message ?? string.Empty), CultureInfo.InvariantCulture);
+            }
+        }
+
+        /// <summary>Sentinel 模式下發生過的容錯切換次數。</summary>
+        public int FailoverCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return client == null ? 0 : client.Failovers;
+                }
             }
         }
 

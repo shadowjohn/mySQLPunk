@@ -22,10 +22,14 @@ namespace mySQLPunk
         private readonly TextBox _publishChannelText;
         private readonly TextBox _publishMessageText;
         private readonly Button _publishButton;
+        private readonly CheckBox _shardedPublish;
         private readonly Label _statusLabel;
         private Form1 _mainHost;
         private RedisPubSubSubscription _subscription;
         private bool _busy;
+        private int _resubscribeGeneration;
+        private bool _reconnecting;
+        private const int MaximumResubscribeAttempts = 5;
 
         public RedisPubSubForm(my_redis database, string databaseName)
         {
@@ -63,9 +67,11 @@ namespace mySQLPunk
             };
             _modeCombo.Items.Add(Localization.T("Redis.PubSubChannelMode"));
             _modeCombo.Items.Add(Localization.T("Redis.PubSubPatternMode"));
+            _modeCombo.Items.Add(Localization.T("Redis.PubSubShardMode"));
             _modeCombo.SelectedIndex = 0;
+            _modeCombo.Width = 170;
             Control modeField = UiField.Wrap(_modeCombo);
-            modeField.Width = 120;
+            modeField.Width = 170;
             modeField.Margin = new Padding(0, 1, UiMetrics.Space3, 0);
             subscriptionBar.Controls.Add(modeField);
 
@@ -167,8 +173,13 @@ namespace mySQLPunk
             _publishButton.Click += async (sender, args) => await PublishAsync();
             ThemeManager.MarkAsPrimary(_publishButton);
             publisher.Controls.Add(_publishButton, 2, 0);
+            _shardedPublish = new CheckBox { Text = Localization.T("Redis.PubSubShardedPublish"), AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
 
-            publisher.Controls.Add(CreateComposerLabel(Localization.T("Redis.PubSubPayload")), 0, 1);
+            FlowLayoutPanel payloadLabel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+            payloadLabel.Controls.Add(new Label { Text = Localization.T("Redis.PubSubPayload"), AutoSize = true, Margin = new Padding(0, 4, 0, 0) });
+            payloadLabel.Controls.Add(_shardedPublish);
+            publisher.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, 150);
+            publisher.Controls.Add(payloadLabel, 0, 1);
             _publishMessageText = new TextBox
             {
                 Dock = DockStyle.Fill,
@@ -229,7 +240,7 @@ namespace mySQLPunk
         private async Task ToggleSubscriptionAsync()
         {
             if (_busy) return;
-            if (_subscription != null)
+            if (_subscription != null || _reconnecting)
             {
                 StopSubscription(Localization.T("Redis.PubSubStopped"));
                 return;
@@ -243,26 +254,23 @@ namespace mySQLPunk
                 return;
             }
 
-            bool pattern = _modeCombo.SelectedIndex == 1;
+            RedisPubSubKind kind = SelectedKind;
             SetBusy(true);
             _statusLabel.Text = Localization.T("Redis.PubSubConnecting");
             try
             {
                 RedisPubSubSubscription created = await Task.Run(
-                    () => _database.CreatePubSubSubscription(_databaseName, topic, pattern));
+                    () => _database.CreatePubSubSubscription(_databaseName, topic, kind));
                 if (IsDisposed)
                 {
                     created.Dispose();
                     return;
                 }
-                created.MessageReceived += SubscriptionMessageReceived;
-                created.Failed += SubscriptionFailed;
-                _subscription = created;
-                created.Start();
+                Attach(created);
                 _modeCombo.Enabled = false;
                 _topicText.ReadOnly = true;
                 _subscribeButton.Text = Localization.T("Redis.PubSubStop");
-                _statusLabel.Text = Localization.Format("Redis.PubSubSubscribed", topic);
+                _statusLabel.Text = Localization.Format("Redis.PubSubSubscribedAt", topic, created.Endpoint);
             }
             catch (Exception ex)
             {
@@ -290,7 +298,8 @@ namespace mySQLPunk
             try
             {
                 string payload = _publishMessageText.Text;
-                long receivers = await Task.Run(() => _database.Publish(channel, payload));
+                bool sharded = _shardedPublish.Checked;
+                long receivers = await Task.Run(() => _database.Publish(channel, payload, sharded));
                 if (!IsDisposed)
                     _statusLabel.Text = Localization.Format("Redis.PubSubPublished", receivers);
             }
@@ -330,18 +339,93 @@ namespace mySQLPunk
             if (IsDisposed || !ReferenceEquals(sender, _subscription)) return;
             try
             {
-                BeginInvoke(new Action(() =>
+                BeginInvoke(new Action(async () =>
                 {
                     if (IsDisposed || !ReferenceEquals(sender, _subscription)) return;
                     string reason = args.Error == null ? string.Empty : args.Error.Message;
-                    StopSubscription(Localization.Format("Redis.PubSubDisconnected", reason));
+                    await ResubscribeAsync(_subscription.Topic, _subscription.Kind, reason);
                 }));
             }
             catch (InvalidOperationException) { }
         }
 
+        public RedisPubSubKind SelectedKind
+        {
+            get { return _modeCombo.SelectedIndex == 1 ? RedisPubSubKind.Pattern : _modeCombo.SelectedIndex == 2 ? RedisPubSubKind.Shard : RedisPubSubKind.Channel; }
+        }
+
+        /// <summary>目前的訂閱（測試用）。</summary>
+        public RedisPubSubSubscription Subscription { get { return _subscription; } }
+
+        private void Attach(RedisPubSubSubscription created)
+        {
+            created.MessageReceived += SubscriptionMessageReceived;
+            created.Failed += SubscriptionFailed;
+            _subscription = created;
+            created.Start();
+        }
+
+        /// <summary>
+        /// 接收連線中斷（例如 Sentinel 容錯切換或伺服器重啟）後自動重新訂閱，最多 5 次、間隔遞增；
+        /// 中斷期間發布的訊息不會補收（Pub/Sub 不保存訊息）。
+        /// </summary>
+        public async Task<bool> ResubscribeAsync(string topic, RedisPubSubKind kind, string reason)
+        {
+            int generation = ++_resubscribeGeneration;
+            RedisPubSubSubscription broken = _subscription;
+            _subscription = null;
+            if (broken != null)
+            {
+                broken.MessageReceived -= SubscriptionMessageReceived;
+                broken.Failed -= SubscriptionFailed;
+                broken.Dispose();
+            }
+
+            _reconnecting = true;
+            try
+            {
+                return await ResubscribeLoopAsync(generation, topic, kind, reason);
+            }
+            finally
+            {
+                if (generation == _resubscribeGeneration) _reconnecting = false;
+            }
+        }
+
+        private async Task<bool> ResubscribeLoopAsync(int generation, string topic, RedisPubSubKind kind, string reason)
+        {
+            for (int attempt = 1; attempt <= MaximumResubscribeAttempts; attempt++)
+            {
+                if (IsDisposed || generation != _resubscribeGeneration) return false;
+                _statusLabel.Text = Localization.Format("Redis.PubSubReconnecting", reason, attempt, MaximumResubscribeAttempts);
+                await Task.Delay(Math.Min(4000, 500 * (1 << (attempt - 1))));
+                if (IsDisposed || generation != _resubscribeGeneration) return false;
+                try
+                {
+                    RedisPubSubSubscription created = await Task.Run(() => _database.CreatePubSubSubscription(_databaseName, topic, kind));
+                    if (IsDisposed || generation != _resubscribeGeneration)
+                    {
+                        created.Dispose();
+                        return false;
+                    }
+                    Attach(created);
+                    _statusLabel.Text = Localization.Format("Redis.PubSubResubscribed", topic, created.Endpoint);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    reason = ex.Message;
+                }
+            }
+
+            if (!IsDisposed && generation == _resubscribeGeneration) StopSubscription(Localization.Format("Redis.PubSubDisconnected", reason));
+            return false;
+        }
+
         private void StopSubscription(string status)
         {
+            _resubscribeGeneration++;
+            _reconnecting = false;
             RedisPubSubSubscription current = _subscription;
             _subscription = null;
             if (current != null)

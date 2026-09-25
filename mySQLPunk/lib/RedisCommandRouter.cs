@@ -16,16 +16,34 @@ namespace mySQLPunk.lib
         public const int SlotCount = 16384;
         private const int MaximumRedirects = 5;
 
-        private readonly RedisRespClient standalone;
+        /// <summary>容錯切換後可以安全重送的唯讀命令；寫入與交易不自動重送，避免重複或半套執行。</summary>
+        private static readonly HashSet<string> ReadOnlyCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "GET", "MGET", "STRLEN", "GETRANGE", "EXISTS", "TYPE", "TTL", "PTTL", "EXPIRETIME", "PEXPIRETIME", "DUMP",
+            "HGET", "HGETALL", "HMGET", "HLEN", "HKEYS", "HVALS", "HSCAN", "HSTRLEN", "HEXISTS",
+            "LRANGE", "LLEN", "LINDEX", "SMEMBERS", "SCARD", "SISMEMBER", "SSCAN",
+            "ZRANGE", "ZCARD", "ZSCORE", "ZSCAN", "ZRANGEBYSCORE", "ZREVRANGE", "ZREVRANGEBYSCORE", "ZCOUNT", "ZRANK",
+            "XRANGE", "XREVRANGE", "XLEN", "XINFO", "SCAN", "KEYS", "DBSIZE", "INFO", "PING", "ROLE", "TIME",
+            "MEMORY", "OBJECT", "COMMAND", "SELECT", "ECHO"
+        };
+
+        private RedisRespClient standalone;
+        private readonly Func<RedisRespClient> reconnect;
+        private readonly Func<string> describeEndpoint;
+        private readonly Func<bool> consumeMasterSwitch;
+        private bool inTransaction;
         private readonly Func<string, int, RedisRespClient> connect;
         private readonly Dictionary<string, RedisRespClient> nodes = new Dictionary<string, RedisRespClient>(StringComparer.OrdinalIgnoreCase);
         private readonly string[] slotOwners = new string[SlotCount];
         private readonly string seedHost;
         private string pinned;
 
-        private RedisCommandRouter(RedisRespClient standalone)
+        private RedisCommandRouter(RedisRespClient standalone, Func<RedisRespClient> reconnect = null, Func<string> describeEndpoint = null, Func<bool> consumeMasterSwitch = null)
         {
             this.standalone = standalone;
+            this.reconnect = reconnect;
+            this.describeEndpoint = describeEndpoint;
+            this.consumeMasterSwitch = consumeMasterSwitch;
         }
 
         private RedisCommandRouter(string seedAddress, RedisRespClient seed, Func<string, int, RedisRespClient> connect)
@@ -43,6 +61,19 @@ namespace mySQLPunk.lib
             return new RedisCommandRouter(client);
         }
 
+        /// <summary>
+        /// Sentinel 模式：連線中斷或寫到已降級的舊 master（READONLY）時重新向 Sentinel 解析 master 並換線；
+        /// 唯讀命令在新 master 上重送一次，寫入與交易中的命令則回報已切換、不自動重送。
+        /// </summary>
+        public static RedisCommandRouter ForSentinel(RedisRespClient client, Func<RedisRespClient> reconnect, Func<string> describeEndpoint, Func<bool> consumeMasterSwitch = null)
+        {
+            if (reconnect == null) throw new ArgumentNullException("reconnect");
+            return new RedisCommandRouter(client, reconnect, describeEndpoint, consumeMasterSwitch);
+        }
+
+        /// <summary>容錯切換的次數（測試與狀態列使用）。</summary>
+        public int Failovers { get; private set; }
+
         public static RedisCommandRouter ForCluster(string seedHost, int seedPort, RedisRespClient seed, Func<string, int, RedisRespClient> connect)
         {
             return new RedisCommandRouter(FormatAddress(seedHost, seedPort), seed, connect);
@@ -56,9 +87,16 @@ namespace mySQLPunk.lib
 
         public int CoveredSlots { get { return slotOwners.Count(owner => owner != null); } }
 
+        /// <summary>Cluster 模式中負責這個 key（或分片 channel）slot 的 master 位址。</summary>
+        public string OwnerAddress(string key)
+        {
+            if (!IsCluster) throw new InvalidOperationException();
+            return OwnerOf(key);
+        }
+
         public object Execute(params string[] args)
         {
-            if (!IsCluster) return standalone.Execute(args);
+            if (!IsCluster) return reconnect == null ? standalone.Execute(args) : ExecuteWithFailover(args);
             if (args == null || args.Length == 0) throw new ArgumentException("args");
             string command = args[0].ToUpperInvariant();
             switch (command)
@@ -141,6 +179,60 @@ namespace mySQLPunk.lib
             if (standalone != null) standalone.Dispose();
             foreach (RedisRespClient node in nodes.Values) node.Dispose();
             nodes.Clear();
+        }
+
+        private object ExecuteWithFailover(string[] args)
+        {
+            string command = args == null || args.Length == 0 ? string.Empty : args[0].ToUpperInvariant();
+            bool transactional = inTransaction || command == "WATCH" || command == "MULTI" || command == "EXEC" || command == "DISCARD" || command == "UNWATCH";
+            if (consumeMasterSwitch != null && consumeMasterSwitch())
+            {
+                // Sentinel 已宣布切換：先換到新 master 再送命令。交易進行中則中止，因為 WATCH 綁在舊連線上。
+                bool wasInTransaction = inTransaction;
+                SwitchConnection();
+                if (wasInTransaction)
+                {
+                    throw new RedisFailoverException(Localization.Format("Redis.SentinelFailedOver", describeEndpoint == null ? string.Empty : describeEndpoint(), command), null);
+                }
+            }
+            try
+            {
+                object result = standalone.Execute(args);
+                if (command == "WATCH" || command == "MULTI") inTransaction = true;
+                else if (command == "EXEC" || command == "DISCARD" || command == "UNWATCH") inTransaction = false;
+                return result;
+            }
+            catch (Exception exception) when (IsFailoverError(exception))
+            {
+                SwitchConnection();
+
+                if (ReadOnlyCommands.Contains(command) && !transactional) return standalone.Execute(args);
+                throw new RedisFailoverException(Localization.Format("Redis.SentinelFailedOver", describeEndpoint == null ? string.Empty : describeEndpoint(), command), exception);
+            }
+        }
+
+        private void SwitchConnection()
+        {
+            inTransaction = false;
+            RedisRespClient replacement = reconnect();
+            RedisRespClient previous = standalone;
+            standalone = replacement;
+            Failovers++;
+            try
+            {
+                previous.Dispose();
+            }
+            catch (Exception)
+            {
+                // 舊連線可能已經斷掉，釋放失敗不影響換線。
+            }
+        }
+
+        private static bool IsFailoverError(Exception exception)
+        {
+            if (exception is System.IO.IOException || exception is System.Net.Sockets.SocketException || exception is ObjectDisposedException) return true;
+            RedisServerException server = exception as RedisServerException;
+            return server != null && (server.Message ?? string.Empty).StartsWith("READONLY", StringComparison.Ordinal);
         }
 
         private object ExecuteWithRedirects(string address, string[] args)
@@ -268,5 +360,11 @@ namespace mySQLPunk.lib
             }
             return crc;
         }
+    }
+
+    /// <summary>Sentinel 已把連線切到新的 master，但這個命令沒有重送（寫入或交易），結果未知，請重新整理後再試。</summary>
+    public sealed class RedisFailoverException : InvalidOperationException
+    {
+        public RedisFailoverException(string message, Exception inner) : base(message, inner) { }
     }
 }
