@@ -277,6 +277,38 @@ public static partial class SmokeTests
     /// Automation email: SMTP settings persist without the password, plain SMTP is only allowed to localhost,
     /// recipients are validated, and a notification reaches a loopback SMTP server with the run summary.
     /// </summary>
+    /// <summary>取出 DATA 內容的本文並依 Content-Transfer-Encoding（base64／quoted-printable）解碼。</summary>
+    private static string DecodeMailBody(string raw)
+    {
+        string text = raw.Replace("\r\n", "\n");
+        int split = text.IndexOf("\n\n", StringComparison.Ordinal);
+        string headers = split < 0 ? text : text.Substring(0, split);
+        string body = split < 0 ? string.Empty : text.Substring(split + 2);
+        if (headers.IndexOf("Content-Transfer-Encoding: base64", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(body.Replace("\n", string.Empty).Trim()));
+        }
+        if (headers.IndexOf("Content-Transfer-Encoding: quoted-printable", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            body = body.Replace("=\n", string.Empty);
+            List<byte> bytes = new List<byte>();
+            for (int index = 0; index < body.Length; index++)
+            {
+                if (body[index] == '=' && index + 2 < body.Length && Uri.IsHexDigit(body[index + 1]) && Uri.IsHexDigit(body[index + 2]))
+                {
+                    bytes.Add(Convert.ToByte(body.Substring(index + 1, 2), 16));
+                    index += 2;
+                }
+                else
+                {
+                    bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(body[index].ToString()));
+                }
+            }
+            return System.Text.Encoding.UTF8.GetString(bytes.ToArray());
+        }
+        return body;
+    }
+
     public static void AssertAutomationEmailSemantics(string directory)
     {
         ScheduledJobStore store = new ScheduledJobStore(Path.Combine(directory, "automation-mail"));
@@ -333,8 +365,9 @@ public static partial class SmokeTests
         Assert(outcome != null && outcome.Contains("2"), "The notification should report both recipients: " + outcome);
         Assert(commands.Any(line => line.StartsWith("RCPT TO:<ops@example.com>", StringComparison.OrdinalIgnoreCase)) &&
                commands.Any(line => line.StartsWith("RCPT TO:<dev@example.com>", StringComparison.OrdinalIgnoreCase)), "Every recipient should be addressed: " + string.Join(" | ", commands));
-        string message = data.ToString();
-        Assert(message.Contains("nightly") && message.IndexOf("Failed", StringComparison.Ordinal) >= 0, "The email should carry the job and status.");
+        string message = DecodeMailBody(data.ToString());
+        Assert(message.Contains("nightly") && message.IndexOf("Failed", StringComparison.Ordinal) >= 0 && message.Contains("boom"),
+            "The email should carry the job, status and message: " + message);
 
         job.NotifyOnlyOnFailure = true;
         record.Status = "Success";
