@@ -37,9 +37,9 @@ namespace mySQLPunk
     {
         private readonly ComboBox targetComboBox;
 
-        public SchemaComparisonTargetDialog(SchemaComparisonEndpoint source, IEnumerable<SchemaComparisonEndpoint> targets)
+        public SchemaComparisonTargetDialog(SchemaComparisonEndpoint source, IEnumerable<SchemaComparisonEndpoint> targets, string title = null)
         {
-            Text = Localization.T("SchemaComparison.SelectTargetTitle");
+            Text = title ?? Localization.T("SchemaComparison.SelectTargetTitle");
             Width = 600;
             Height = 230;
             MinimumSize = new Size(480, 230);

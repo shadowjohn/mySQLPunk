@@ -12987,6 +12987,10 @@ namespace mySQLPunk
             queryBuilderItem.Click += (s, ev) => ShowQueryBuilder();
             menu.Items.Add(queryBuilderItem);
 
+            ToolStripMenuItem dataTransferItem = new ToolStripMenuItem(Localization.T("Tool.DataTransfer"));
+            dataTransferItem.Click += (s, ev) => OpenDataTransfer(GetTargetFromCurrentSelection());
+            menu.Items.Add(dataTransferItem);
+
             TreeDatabaseTarget sqliteTarget = BuildTargetFromNode(node);
             if (IsSqliteTarget(sqliteTarget))
             {
@@ -13016,6 +13020,35 @@ namespace mySQLPunk
             ToolStripMenuItem refreshItem = new ToolStripMenuItem(Localization.T("Query.Refresh"));
             refreshItem.Click += (s, ev) => RefreshDatabaseGroupNode(node, "Tables");
             menu.Items.Add(refreshItem);
+        }
+
+        private void OpenDataTransfer(TreeDatabaseTarget sourceTarget)
+        {
+            if (sourceTarget == null)
+            {
+                MessageBox.Show(Localization.T("Status.SelectExpandedDatabase"), Localization.T("Tool.DataTransfer"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            SchemaComparisonEndpoint source = BuildSchemaComparisonEndpoint(sourceTarget);
+            List<SchemaComparisonEndpoint> targets = GetOpenSchemaComparisonEndpoints()
+                .Where(candidate => !(ReferenceEquals(candidate.Database, source.Database) &&
+                                      string.Equals(candidate.DatabaseName, source.DatabaseName, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(candidate => candidate.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            if (targets.Count == 0)
+            {
+                MessageBox.Show(Localization.T("Transfer.NoTargets"), Localization.T("Tool.DataTransfer"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SchemaComparisonTargetDialog dialog = new SchemaComparisonTargetDialog(source, targets, Localization.T("Transfer.SelectTarget")))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK || dialog.SelectedTarget == null) return;
+                DataTransferForm form = new DataTransferForm(source, dialog.SelectedTarget);
+                form.FormClosed += (s, e) => form.Dispose();
+                form.Show(this);
+            }
         }
 
         private void ShowQueryBuilder()

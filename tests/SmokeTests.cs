@@ -80,6 +80,7 @@ public static partial class SmokeTests
         Run("MongoDB schema analyzer", AssertMongoSchemaAnalyzerSemantics, ref passed);
         Run("MongoDB aggregation pipeline designer", AssertMongoPipelineSemantics, ref passed);
         Run("Visual query builder", TestQueryBuilder, ref passed);
+        Run("Data transfer with checkpoints and verification", TestDataTransfer, ref passed);
         Run("Database group visibility service", TestDatabaseGroupVisibilityService, ref passed);
         Run("View column preference service", TestViewColumnPreferenceService, ref passed);
         Run("Binary cell streaming service", TestBinaryCellStreamingService, ref passed);
@@ -12848,6 +12849,45 @@ public static partial class SmokeTests
             {
                 AssertThrows<Exception>(() => parsed.SetConn(invalid), "Invalid topology options must be rejected: " + invalid);
             }
+        }
+    }
+
+    private static void TestDataTransfer()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-transfer-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            using (my_sqlite source = new my_sqlite())
+            using (my_sqlite target = new my_sqlite())
+            {
+                source.SetConn("Data Source=" + Path.Combine(dir, "source.sqlite") + ";Version=3;New=True;");
+                target.SetConn("Data Source=" + Path.Combine(dir, "target.sqlite") + ";Version=3;New=True;");
+                source.Open();
+                target.Open();
+                AssertDataTransferSemantics(source, target, Path.Combine(dir, "checkpoints"));
+
+                AssertEquals("OK", source.ExecSQL("CREATE TABLE extra (id INTEGER PRIMARY KEY, note TEXT); INSERT INTO extra VALUES (1, 'a'), (2, 'b');")["status"], "Form fixture");
+                SchemaComparisonEndpoint from = new SchemaComparisonEndpoint { ConnectionName = "Source", DatabaseName = "main", ProviderName = "sqlite", Database = source };
+                SchemaComparisonEndpoint to = new SchemaComparisonEndpoint { ConnectionName = "Target", DatabaseName = "main", ProviderName = "sqlite", Database = target };
+                using (DataTransferForm form = new DataTransferForm(from, to, Path.Combine(dir, "form-checkpoints")))
+                {
+                    form.CreateControl();
+                    form.LoadTables();
+                    Assert(!form.ResumeAvailable, "A new route has nothing to resume.");
+                    foreach (TransferItem item in form.Plan.Items.ToList()) form.SetItem(item.SourceTable, item.SourceTable == "extra", TransferMode.CreateNew, "extra_copy");
+                    form.Execute(System.Threading.CancellationToken.None);
+                    TransferItem copied = form.Plan.Items.Single(item => item.Include);
+                    Assert(copied.Status == TransferItemStatus.Done && copied.Verified == true, "The form should run the selected table: " + copied.Error);
+                    AssertEquals("2", target.CountRows("main", "extra_copy").ToString(), "The copy should contain every row.");
+                    AssertContains(form.BuildReport(), "extra_copy", "The report should list the transferred table.");
+                }
+            }
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }
 

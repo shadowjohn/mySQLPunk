@@ -49,7 +49,7 @@
 | 視覺查詢建構器 | 🟡 | Windows 版完成：資料庫右鍵「查詢建構器...」可把資料表加入畫布、依外鍵自動連接、拖曳欄位建立 INNER／LEFT／RIGHT／FULL 連接，設定輸出、別名、彙總、排序、分組、WHERE／HAVING 條件、DISTINCT 與筆數上限；SQL 即時產生（MySQL／PostgreSQL／SQL Server／SQLite／Oracle 各自的引號與 LIMIT／TOP／FETCH），也能把可表達的 SELECT 轉回圖形。Linux／macOS 預覽版待移植。 |
 | Procedure／Function 偵錯器（中斷點、逐步、變數、呼叫堆疊） | 📋 | 依 provider 能力分階段實作，優先 PostgreSQL／SQL Server。 |
 | AI 助理／詢問 AI | 🟡 | 核心聊天與 schema 上下文已完成，進階動作見上表。 |
-| 資料傳輸／遷移（跨 DBMS） | 🟡 | 已有 Table／View 跨 provider 複製；待補整庫精靈、mapping、續傳與驗證報告。 |
+| 資料傳輸／遷移（跨 DBMS） | ✅ | Windows 版資料庫右鍵「資料傳輸...」可選任一已展開的目標資料庫（可跨 provider），逐表選擇建立新表／附加／取代資料、目標名稱與欄位對應，每批寫入後記錄檢查點，停止或失敗後可續傳（有主鍵的表從中斷處接續），完成後以列數驗證並匯出 HTML 報告；另保留 Table／View 單一物件複製。 |
 | 資料同步 | 🟡 | Windows 與 Linux／macOS 皆可逐列比較同類型資料庫（MySQL／MariaDB、PostgreSQL、SQL Server、SQLite）的同名資料表、預覽 SQL，並在目標以單一交易受控同步（相依排序、並行衝突回滾、刪除需確認）；待補大表串流比較與跨類型資料庫。 |
 | 結構同步 | 🟡 | 兩庫唯讀結構差異報告已完成，可跨 provider 比對 Table、Column、PK 與 FK 並匯出 HTML；Linux／macOS 預覽版另含索引與 FK 規則比對，並可為同類型資料庫產生同步 DDL 預覽（破壞性變更預設註解）；Windows 版也能依欄位／主鍵／外鍵快照產生同步 SQL 預覽；Windows 與 Linux／macOS 都可逐項勾選並在目標受控執行（交易回滾、破壞性變更輸入名稱確認、完成後自動重比）。 |
 | 模型 | 🟡 | 已有五種 provider 共用的唯讀 ER 圖與兩庫結構差異報告；拖曳編排、多模型與雙向同步仍在後續排程。 |

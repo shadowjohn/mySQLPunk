@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.IO;
 using System.Linq;
 using mySQLPunk.lib;
 
@@ -270,6 +271,76 @@ public static partial class SmokeTests
         AssertEquals("orders2", aliases.NextAlias("orders"), "Aliases should not repeat.");
         aliases.Columns.Add(new QueryBuilderColumn { TableAlias = "orders", Column = "*" });
         AssertEquals("SELECT \"orders\".*" + nl + "FROM \"sales\".\"orders\";", QueryBuilderService.BuildSql("postgresql", aliases), "Schema-qualified tables keep the implicit alias.");
+    }
+
+    /// <summary>
+    /// DataTransferService between two SQLite databases: append with automatic column mapping, create new, replace
+    /// data, a stop in the middle of a table with a checkpoint and resume, row-count verification, the no-primary-key
+    /// resume guard, a create-new conflict with continue-on-error, and HTML escaping in the report.
+    /// </summary>
+    public static void AssertDataTransferSemantics(IDatabase source, IDatabase target, string checkpointDirectory)
+    {
+        Action<IDatabase, string> exec = (db, sql) => AssertEquals("OK", db.ExecSQL(sql)["status"], "Transfer fixture: " + sql);
+        exec(source, "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, city TEXT)");
+        exec(source, "CREATE TABLE logs (msg TEXT)");
+        exec(source, "CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT)");
+        for (int index = 1; index <= 25; index++) exec(source, "INSERT INTO customers VALUES (" + index + ", 'name" + index + "', 'city')");
+        for (int index = 1; index <= 7; index++) exec(source, "INSERT INTO logs VALUES ('log " + index + "')");
+        for (int index = 1; index <= 5; index++) exec(source, "INSERT INTO items VALUES (" + index + ", 'item" + index + "')");
+        exec(target, "CREATE TABLE customers_archive (id INTEGER PRIMARY KEY, name TEXT NOT NULL, extra TEXT)");
+        exec(target, "INSERT INTO customers_archive VALUES (1000, 'old', NULL), (1001, 'old2', NULL)");
+        exec(target, "CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT)");
+        exec(target, "INSERT INTO items VALUES (7, 'stale'), (8, 'stale'), (9, 'stale')");
+        exec(target, "CREATE TABLE taken (id INTEGER PRIMARY KEY)");
+
+        TransferPlan plan = DataTransferService.BuildPlan(source, "main", "Source", target, "main", "Target", new[] { "customers", "logs", "items" });
+        AssertEquals("CreateNew,CreateNew,Append", string.Join(",", plan.Items.Select(item => item.Mode.ToString())), "Existing target tables should default to append.");
+        plan.Items[0].TargetTable = "customers_archive";
+        plan.Items[0].Mode = TransferMode.Append;
+        plan.Items[2].Mode = TransferMode.ReplaceData;
+        plan.BatchSize = 10;
+        HashSet<string> keyed = new HashSet<string>(new[] { "customers", "items" }, StringComparer.OrdinalIgnoreCase);
+        Action<TransferPlan> save = current => DataTransferService.SaveCheckpoint(current, checkpointDirectory);
+
+        System.Threading.CancellationTokenSource stop = new System.Threading.CancellationTokenSource();
+        int batches = 0;
+        try
+        {
+            DataTransferService.Run(plan, source, target, keyed, progress => { if (++batches == 2) stop.Cancel(); }, save, stop.Token);
+            throw new Exception("The transfer should stop when cancelled.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        TransferPlan resumed = DataTransferService.LoadUnfinished(checkpointDirectory, plan);
+        Assert(resumed != null && resumed.Id == plan.Id, "The stopped transfer should be found as an unfinished checkpoint.");
+        AssertEquals("20", resumed.Items[0].CopiedRows.ToString(), "The checkpoint should record the rows already written.");
+        AssertEquals("Running", resumed.Items[0].Status.ToString(), "The interrupted table should stay resumable.");
+
+        DataTransferService.Run(resumed, source, target, keyed, null, save, System.Threading.CancellationToken.None);
+        Assert(resumed.IsFinished && resumed.Items.All(item => item.Verified == true), "Every table should finish and verify: " +
+            string.Join("; ", resumed.Items.Select(item => item.SourceTable + " " + item.Status + " " + item.Error + " " + item.Warning)));
+        AssertEquals("27", target.CountRows("main", "customers_archive").ToString(), "Append should keep existing rows and add every source row once.");
+        AssertEquals("7", target.CountRows("main", "logs").ToString(), "Create new should copy every row.");
+        AssertEquals("5", target.CountRows("main", "items").ToString(), "Replace data should leave exactly the source rows.");
+        Assert(DataTransferService.LoadUnfinished(checkpointDirectory, plan) == null, "A finished transfer is no longer offered for resume.");
+        string json = File.ReadAllText(Path.Combine(checkpointDirectory, plan.Id + ".json"));
+        Assert(json.Contains("customers_archive") && json.IndexOf("pwd", StringComparison.OrdinalIgnoreCase) < 0, "Checkpoints only keep names, never secrets.");
+
+        TransferPlan guard = DataTransferService.BuildPlan(source, "main", "Source", target, "main", "Target2", new[] { "logs", "customers" });
+        guard.Items[0].Mode = TransferMode.Append;
+        guard.Items[0].CopiedRows = 3;
+        guard.Items[1].TargetTable = "taken";
+        guard.Items[1].Mode = TransferMode.CreateNew;
+        guard.ContinueOnError = true;
+        DataTransferService.Run(guard, source, target, keyed, null, null, System.Threading.CancellationToken.None);
+        Assert(guard.Items.All(item => item.Status == TransferItemStatus.Failed), "Unsafe resumes and existing create-new targets must fail explicitly.");
+        AssertEquals("7", target.CountRows("main", "logs").ToString(), "A refused append resume must not write anything.");
+
+        guard.Items[0].SourceTable = "<script>alert(1)</script>";
+        string report = DataTransferService.BuildHtmlReport(guard, "test");
+        Assert(report.Contains("&lt;script&gt;") && !report.Contains("<script>alert"), "Report content must be HTML-escaped.");
+        AssertContains(report, "Content-Security-Policy", "The report should forbid scripts.");
     }
 
     /// <summary>
