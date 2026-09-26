@@ -1228,6 +1228,25 @@ public static partial class SmokeTests
     /// <summary>模型內結構：型別白名單、驗證、擷取／轉快照往返、改名與刪表連帶更新外鍵及圖表。</summary>
     public static void AssertErModelSchemaSemantics()
     {
+        SchemaModelSnapshot routed = new SchemaModelSnapshot { DatabaseName = "r", ProviderName = "sqlite" };
+        SchemaTableModel parentTable = new SchemaTableModel { Name = "p" };
+        parentTable.Columns.Add(new SchemaColumnModel { Name = "id", DataType = "INTEGER", IsPrimaryKey = true, Ordinal = 1 });
+        SchemaTableModel childTable = new SchemaTableModel { Name = "c" };
+        childTable.Columns.Add(new SchemaColumnModel { Name = "pid", DataType = "INTEGER", Ordinal = 1 });
+        routed.Tables.Add(parentTable);
+        routed.Tables.Add(childTable);
+        SchemaRelationshipModel link = new SchemaRelationshipModel { Name = "fk", FromTable = "c", FromColumn = "pid", ToTable = "p", ToColumn = "id", Ordinal = 1 };
+        routed.Relationships.Add(link);
+        ErModelDocument routedDocument = ErModelService.CreateDefault(routed, "Main");
+        routedDocument.Diagrams[0].Routes.Add(new ErModelRoute { Key = ErModelService.RouteKey(link), X = 777 });
+        routedDocument.Diagrams[0].Routes.Add(new ErModelRoute { Key = ErModelService.RouteKey(link), X = -5 });
+        ErModelService.Validate(routedDocument);
+        Assert(routedDocument.Diagrams[0].Routes.Single().X == 0, "Duplicate routes collapse and coordinates are clamped.");
+        routedDocument.Diagrams[0].Routes.Single().X = 777;
+        Assert(ErModelService.BuildSvg(routed, routedDocument, routedDocument.Diagrams[0]).Contains(" 777,"), "SVG export follows the manual route.");
+        ErModelService.ApplyLayeredLayout(routedDocument.Diagrams[0], routed);
+        Assert(routedDocument.Diagrams[0].Routes.Count == 0, "Layered layout clears manual routes.");
+
         foreach (string type in new[] { "", "int", "INTEGER", "varchar(20)", "numeric(10, 2)", "int unsigned", "decimal(10,2) unsigned zerofill", "enum('a','in progress')", "enum('it''s')", "text[]", "character varying(50)", "timestamp(6) with time zone", "nvarchar(max)", "VARCHAR2(20 BYTE)", "VARCHAR (20)", "double precision" })
         {
             Assert(ErModelService.IsSafeDataType(type), "Model data type should be accepted: " + type);

@@ -29,19 +29,34 @@ namespace mySQLPunk.lib
         public string Group { get; set; }
     }
 
+    /// <summary>手動調整的連接線：垂直段落放在指定的 X（邏輯座標）。</summary>
+    public sealed class ErModelRoute
+    {
+        /// <summary>來源表|來源欄|目標表|目標欄。</summary>
+        public string Key { get; set; }
+        public int X { get; set; }
+    }
+
     public sealed class ErModelDiagram
     {
         public ErModelDiagram()
         {
             Tables = new List<ErModelTablePlacement>();
+            Routes = new List<ErModelRoute>();
         }
 
         public string Name { get; set; }
         public List<ErModelTablePlacement> Tables { get; set; }
+        public List<ErModelRoute> Routes { get; set; }
 
         public ErModelTablePlacement Find(string table)
         {
             return Tables.FirstOrDefault(item => string.Equals(item.Table, table, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public ErModelRoute FindRoute(string key)
+        {
+            return Routes == null ? null : Routes.FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
         }
     }
 
@@ -135,6 +150,11 @@ namespace mySQLPunk.lib
         public const int Margin = 48;
         public const int MaximumCoordinate = 200000;
 
+        public static string RouteKey(SchemaRelationshipModel relationship)
+        {
+            return relationship.FromTable + "|" + relationship.FromColumn + "|" + relationship.ToTable + "|" + relationship.ToColumn;
+        }
+
         public static int CardHeight(int columnCount)
         {
             int visible = Math.Min(MaximumVisibleColumns, columnCount);
@@ -159,6 +179,8 @@ namespace mySQLPunk.lib
         /// </summary>
         public static void ApplyLayeredLayout(ErModelDiagram diagram, SchemaModelSnapshot snapshot)
         {
+            // 自動排列會重新擺放資料表，手動調整的連接線一併清除。
+            if (diagram.Routes != null) diagram.Routes.Clear();
             List<string> names = diagram.Tables.Select(item => item.Table).ToList();
             HashSet<string> present = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, HashSet<string>> parents = names.ToDictionary(name => name, name => new HashSet<string>(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
@@ -248,6 +270,10 @@ namespace mySQLPunk.lib
                 diagram.Tables = (diagram.Tables ?? new List<ErModelTablePlacement>())
                     .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Table))
                     .GroupBy(item => item.Table, StringComparer.OrdinalIgnoreCase).Select(group => group.First()).ToList();
+                diagram.Routes = (diagram.Routes ?? new List<ErModelRoute>())
+                    .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Key) && item.Key.Length <= 1200)
+                    .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase).Select(group => group.Last()).ToList();
+                foreach (ErModelRoute route in diagram.Routes) route.X = Math.Max(0, Math.Min(MaximumCoordinate, route.X));
                 foreach (ErModelTablePlacement placement in diagram.Tables)
                 {
                     placement.X = Math.Max(0, Math.Min(MaximumCoordinate, placement.X));
@@ -550,7 +576,8 @@ namespace mySQLPunk.lib
                 bool leftToRight = from.Key.X <= to.Key.X;
                 float startX = leftToRight ? from.Key.X + CardWidth : from.Key.X;
                 float endX = leftToRight ? to.Key.X : to.Key.X + CardWidth;
-                float middle = (startX + endX) / 2f;
+                ErModelRoute route = diagram.FindRoute(RouteKey(relation));
+                float middle = route != null ? route.X : (startX + endX) / 2f;
                 svg.AppendLine("<polyline fill=\"none\" stroke=\"#2563eb\" stroke-width=\"1.6\" points=\"" +
                                n(startX) + "," + n(startY) + " " + n(middle) + "," + n(startY) + " " + n(middle) + "," + n(endY) + " " + n(endX) + "," + n(endY) + "\"/>");
             }

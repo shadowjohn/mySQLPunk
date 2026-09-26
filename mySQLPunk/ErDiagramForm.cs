@@ -147,6 +147,16 @@ namespace mySQLPunk
             canvas.LayoutChanged += (sender, args) => MarkDirty();
             canvas.LockedTableDragAttempted += table => statusLabel.Text = Localization.Format("ErModel.Locked", table);
             canvas.TableContextRequested += ShowTableMenu;
+            canvas.RouteContextRequested += (key, screen) =>
+            {
+                ContextMenuStrip menu = new ContextMenuStrip();
+                ToolStripMenuItem reset = new ToolStripMenuItem(Localization.T("ErModel.ResetRoute")) { Enabled = diagram != null && diagram.FindRoute(key) != null };
+                reset.Click += (sender, args) => canvas.ResetRoute(key);
+                menu.Items.Add(reset);
+                menu.Closed += (sender, args) => BeginInvoke(new Action(menu.Dispose));
+                ThemeManager.ApplyTo(menu);
+                menu.Show(screen);
+            };
 
             Shown += (sender, args) =>
             {
@@ -926,6 +936,8 @@ namespace mySQLPunk
         private Point scrollStart;
         private TableCard dragging;
         private Point dragOffset;
+        private readonly List<RouteSegment> segments = new List<RouteSegment>();
+        private string routeDragging;
 
         public ErDiagramCanvas()
         {
@@ -949,6 +961,57 @@ namespace mySQLPunk
 
         /// <summary>嘗試拖曳鎖定群組中的資料表時觸發。</summary>
         public event Action<string> LockedTableDragAttempted;
+
+        /// <summary>在連接線上按右鍵；參數為連接線鍵值與螢幕座標。</summary>
+        public event Action<string, Point> RouteContextRequested;
+
+        /// <summary>目前畫出的連接線鍵值（測試用）。</summary>
+        public IList<string> RouteKeys { get { return segments.Select(item => item.Key).ToList(); } }
+
+        /// <summary>以邏輯座標找出可拖曳的連接線垂直段落。</summary>
+        public string RouteHitTest(Point logical)
+        {
+            float tolerance = 5f / Math.Max(0.1f, zoom);
+            RouteSegment hit = segments.LastOrDefault(item => Math.Abs(logical.X - item.X) <= tolerance && logical.Y >= item.Top - tolerance && logical.Y <= item.Bottom + tolerance);
+            return hit == null ? null : hit.Key;
+        }
+
+        /// <summary>把連接線的垂直段落移到指定 X；也供測試直接呼叫。</summary>
+        public bool MoveRoute(string key, int x)
+        {
+            if (diagram == null || string.IsNullOrEmpty(key)) return false;
+            ErModelRoute route = diagram.FindRoute(key);
+            if (route == null)
+            {
+                route = new ErModelRoute { Key = key };
+                diagram.Routes.Add(route);
+            }
+            route.X = Math.Max(0, Math.Min(ErModelService.MaximumCoordinate, x));
+            Invalidate();
+            EventHandler changed = LayoutChanged;
+            if (changed != null) changed(this, EventArgs.Empty);
+            return true;
+        }
+
+        /// <summary>取消手動調整，改回自動路徑。</summary>
+        public bool ResetRoute(string key)
+        {
+            if (diagram == null || diagram.Routes.RemoveAll(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase)) == 0) return false;
+            Invalidate();
+            EventHandler changed = LayoutChanged;
+            if (changed != null) changed(this, EventArgs.Empty);
+            return true;
+        }
+
+        /// <summary>重新計算連接線（不繪製），供測試在視窗尚未顯示時取得段落。</summary>
+        public void MeasureRoutes()
+        {
+            using (Bitmap bitmap = new Bitmap(1, 1))
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            {
+                DrawRelationships(graphics);
+            }
+        }
 
         public float Zoom
         {
@@ -1100,7 +1163,22 @@ namespace mySQLPunk
 
             Point logical = ToLogical(e.Location);
             TableCard hit = cards.LastOrDefault(card => card.Bounds.Contains(logical));
-            if (hit == null) return;
+            if (hit == null)
+            {
+                string routeKey = RouteHitTest(logical);
+                if (routeKey == null) return;
+                if (e.Button == MouseButtons.Right)
+                {
+                    Action<string, Point> routeHandler = RouteContextRequested;
+                    if (routeHandler != null) routeHandler(routeKey, PointToScreen(e.Location));
+                    return;
+                }
+                if (e.Button != MouseButtons.Left) return;
+                routeDragging = routeKey;
+                Capture = true;
+                Cursor = Cursors.SizeWE;
+                return;
+            }
             if (e.Button == MouseButtons.Right)
             {
                 Action<string, Point> handler = TableContextRequested;
@@ -1132,7 +1210,25 @@ namespace mySQLPunk
                     Math.Max(0, scrollStart.Y - (e.Y - panStart.Y)));
                 return;
             }
-            if (dragging == null) return;
+            if (routeDragging != null)
+            {
+                ErModelRoute route = diagram.FindRoute(routeDragging);
+                if (route == null)
+                {
+                    route = new ErModelRoute { Key = routeDragging };
+                    diagram.Routes.Add(route);
+                }
+                route.X = Math.Max(0, Math.Min(ErModelService.MaximumCoordinate, ToLogical(e.Location).X));
+                Invalidate();
+                return;
+            }
+            if (dragging == null)
+            {
+                Cursor = e.Button == MouseButtons.None && !cards.Any(card => card.Bounds.Contains(ToLogical(e.Location))) && RouteHitTest(ToLogical(e.Location)) != null
+                    ? Cursors.SizeWE
+                    : Cursors.Default;
+                return;
+            }
             Point logical = ToLogical(e.Location);
             dragging.Placement.X = Math.Max(0, logical.X - dragOffset.X);
             dragging.Placement.Y = Math.Max(0, logical.Y - dragOffset.Y);
@@ -1148,6 +1244,15 @@ namespace mySQLPunk
                 panning = false;
                 Capture = false;
                 Cursor = Cursors.Default;
+                return;
+            }
+            if (routeDragging != null && e.Button == MouseButtons.Left)
+            {
+                routeDragging = null;
+                Capture = false;
+                Cursor = Cursors.Default;
+                EventHandler routed = LayoutChanged;
+                if (routed != null) routed(this, EventArgs.Empty);
                 return;
             }
             if (dragging == null || e.Button != MouseButtons.Left) return;
@@ -1217,6 +1322,7 @@ namespace mySQLPunk
 
         private void DrawRelationships(Graphics graphics)
         {
+            segments.Clear();
             if (snapshot == null) return;
             Dictionary<string, TableCard> byName = cards.ToDictionary(card => card.Table.Name, StringComparer.OrdinalIgnoreCase);
             using (Pen pen = new Pen(ThemeManager.AccentColor, 1.6f))
@@ -1231,9 +1337,12 @@ namespace mySQLPunk
 
                     PointF start = GetColumnAnchor(from, relationship.FromColumn, true);
                     PointF end = GetColumnAnchor(to, relationship.ToColumn, false);
+                    string key = ErModelService.RouteKey(relationship);
+                    ErModelRoute route = diagram == null ? null : diagram.FindRoute(key);
                     if (ReferenceEquals(from, to))
                     {
-                        float loopX = from.Bounds.Right + 34;
+                        float loopX = route != null ? route.X : from.Bounds.Right + 34;
+                        segments.Add(new RouteSegment { Key = key, X = loopX, Top = Math.Min(start.Y, end.Y + 18), Bottom = Math.Max(start.Y, end.Y + 18) });
                         graphics.DrawLines(pen, new[]
                         {
                             start,
@@ -1248,7 +1357,8 @@ namespace mySQLPunk
                     bool leftToRight = from.Bounds.Left <= to.Bounds.Left;
                     start.X = leftToRight ? from.Bounds.Right : from.Bounds.Left;
                     end.X = leftToRight ? to.Bounds.Left : to.Bounds.Right;
-                    float middleX = (start.X + end.X) / 2f;
+                    float middleX = route != null ? route.X : (start.X + end.X) / 2f;
+                    segments.Add(new RouteSegment { Key = key, X = middleX, Top = Math.Min(start.Y, end.Y), Bottom = Math.Max(start.Y, end.Y) });
                     graphics.DrawLines(pen, new[]
                     {
                         start,
@@ -1337,6 +1447,14 @@ namespace mySQLPunk
                 Trimming = StringTrimming.EllipsisCharacter,
                 FormatFlags = StringFormatFlags.NoWrap
             };
+        }
+
+        private sealed class RouteSegment
+        {
+            public string Key;
+            public float X;
+            public float Top;
+            public float Bottom;
         }
 
         private sealed class TableCard

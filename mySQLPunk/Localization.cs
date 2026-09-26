@@ -1327,6 +1327,7 @@ namespace mySQLPunk
             Add("ErModel.Error.Relationship", "外鍵名稱無效。", "Invalid foreign-key name.");
             Add("ErModel.Error.RelationshipTarget", "外鍵 {0} → {1} 參照的資料表或欄位不存在。", "Foreign key {0} → {1} references a table or column that does not exist.");
             Add("ErModel.Error.UnknownTable", "模型中沒有資料表「{0}」。", "The model has no table \"{0}\".");
+            Add("ErModel.ResetRoute", "重設連接線路徑", "Reset Line Route");
             Add("ErModel.Routines", "函式／預存程序...", "Functions / Procedures...");
             Add("ErModel.RoutinesCaptured", "{0} 個函式／預存程序。", "{0} functions / procedures.");
             Add("ErModel.RoutinesUpdated", "模型的函式／預存程序已更新（{0} 個）。", "Model functions / procedures updated ({0}).");

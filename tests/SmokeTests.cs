@@ -12512,6 +12512,7 @@ public static partial class SmokeTests
                 {
                     form.CreateControl();
                     form.RefreshDiagram();
+                    AssertErRouteFlow(form, Path.Combine(modelDir, "routes.punkmodel"));
                     AssertErModelSchemaFlow(form, sqlite, Path.Combine(modelDir, "schema.punkmodel"));
                 }
             }
