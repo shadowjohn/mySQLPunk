@@ -1173,6 +1173,72 @@ public static partial class SmokeTests
         AssertEquals("4,1,1", string.Join(",", fromCsv.Weights), "A numeric second column becomes the weight.");
     }
 
+    /// <summary>工作區匯出／匯入：移除祕密、輸出穩定、預覽狀態與合併（保留本機 Webhook）。</summary>
+    public static void AssertWorkspaceSemantics(string directory)
+    {
+        string source = Path.Combine(directory, "source");
+        string target = Path.Combine(directory, "target");
+        string bundle = Path.Combine(directory, "bundle");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(source, "snippets.json"), "[{\"Id\":\"a\",\"Name\":\"Select all\",\"Shortcut\":\"sel\",\"Sql\":\"SELECT * FROM $CURSOR$\"},{\"Id\":\"b\",\"Name\":\"Count\",\"Shortcut\":\"cnt\",\"Sql\":\"SELECT COUNT(*) FROM x\"}]");
+        File.WriteAllText(Path.Combine(source, "ai.json"), "[{\"Id\":\"x1\",\"Name\":\"Explain joins\",\"Instruction\":\"Explain the joins\",\"Pinned\":true}]");
+        ScheduledJobStore sourceJobs = new ScheduledJobStore(Path.Combine(source, "automation"));
+        sourceJobs.SaveJob(new ScheduledJobDefinition { Name = "nightly export", Type = ScheduledJobType.Query, ConnectionName = "prod", DatabaseName = "shop", Sql = "SELECT 1", WebhookUrl = "https://hooks.example.com/T0KEN" });
+        DataGeneratorDictionaryStore.Save(Path.Combine(source, "dict"), "regions", "north\t2\nsouth\n");
+        string connections = "{\"connections\":[{\"conn_name\":\"prod\",\"conn_group\":\"Team\",\"host\":\"db.internal\",\"port\":\"5432\",\"db_kind\":\"postgresql\",\"username\":\"ENCRYPTED\",\"pwd\":\"hunter2\",\"credential_target\":\"mySQLPunk/default/pg/prod\",\"ssh_password\":\"s\",\"ssl_key_passphrase\":\"p\",\"api_token\":\"t\",\"isConnect\":\"T\"}],\"groups\":[\"Team\"]}";
+        WorkspaceSources sources = new WorkspaceSources
+        {
+            ConnectionsJson = connections,
+            SnippetsPath = Path.Combine(source, "snippets.json"),
+            AiActionsPath = Path.Combine(source, "ai.json"),
+            JobStore = sourceJobs,
+            DictionaryDirectory = Path.Combine(source, "dict")
+        };
+        Dictionary<string, int> counts = WorkspaceBundleService.Export(bundle, sources, new WorkspaceExportOptions());
+        Assert(counts["connections"] == 1 && counts["snippets"] == 2 && counts["aiActions"] == 1 && counts["jobs"] == 1 && counts["dictionaries"] == 1, "Every category is exported.");
+        string exportedConnections = File.ReadAllText(Path.Combine(bundle, "connections.json"));
+        foreach (string secret in new[] { "hunter2", "credential_target", "ssh_password", "passphrase", "api_token", "ENCRYPTED", "isConnect" })
+        {
+            Assert(!exportedConnections.Contains(secret), "Workspace connections must not contain " + secret);
+        }
+        Assert(exportedConnections.Contains("db.internal") && !exportedConnections.Contains("\r"), "Connections keep their settings with LF line endings.");
+        string jobFile = Directory.GetFiles(Path.Combine(bundle, "automation")).Single();
+        Assert(Path.GetFileName(jobFile) == "nightly-export.json" && !File.ReadAllText(jobFile).Contains("T0KEN"), "Jobs use readable file names and drop webhook URLs by default.");
+        Assert(File.Exists(Path.Combine(bundle, ".gitattributes")) && File.Exists(Path.Combine(bundle, "datagen-dictionaries", "regions.txt")), "Git attributes and dictionaries are written.");
+        Dictionary<string, string> first = Directory.GetFiles(bundle, "*", SearchOption.AllDirectories).ToDictionary(file => file, File.ReadAllText);
+        WorkspaceBundleService.Export(bundle, sources, new WorkspaceExportOptions());
+        Assert(first.All(pair => File.ReadAllText(pair.Key) == pair.Value) && Directory.GetFiles(bundle, "*", SearchOption.AllDirectories).Length == first.Count,
+            "Exporting twice produces identical files (stable for Git).");
+        WorkspaceBundleService.Export(Path.Combine(directory, "with-users"), sources, new WorkspaceExportOptions { IncludeUserNames = true, IncludeWebhooks = true });
+        Assert(File.ReadAllText(Path.Combine(directory, "with-users", "connections.json")).Contains("ENCRYPTED") &&
+               File.ReadAllText(Directory.GetFiles(Path.Combine(directory, "with-users", "automation")).Single()).Contains("T0KEN"), "User names and webhooks are exported only on request.");
+
+        File.WriteAllText(Path.Combine(target, "snippets.json"), "[{\"Id\":\"local\",\"Name\":\"Select all\",\"Shortcut\":\"sel\",\"Sql\":\"SELECT * FROM $CURSOR$\"},{\"Id\":\"l2\",\"Name\":\"Count\",\"Shortcut\":\"cnt\",\"Sql\":\"SELECT COUNT(1) FROM x\"}]");
+        ScheduledJobStore targetJobs = new ScheduledJobStore(Path.Combine(target, "automation"));
+        targetJobs.SaveJob(new ScheduledJobDefinition { Name = "nightly export", Type = ScheduledJobType.Query, ConnectionName = "prod", DatabaseName = "shop", Sql = "SELECT 0", WebhookUrl = "https://hooks.example.com/LOCAL" });
+        WorkspaceSources targetSources = new WorkspaceSources
+        {
+            SnippetsPath = Path.Combine(target, "snippets.json"),
+            AiActionsPath = Path.Combine(target, "ai.json"),
+            JobStore = targetJobs,
+            DictionaryDirectory = Path.Combine(target, "dict")
+        };
+        WorkspaceImportPlan plan = WorkspaceBundleService.Plan(bundle, targetSources);
+        Func<string, string> state = name => plan.Items.Single(item => item.Name.Contains(name)).State.ToString();
+        Assert(plan.ConnectionsPath != null && state("sel") == "Same" && state("cnt") == "Changed" && state("Explain joins") == "New" &&
+               state("nightly export") == "Changed" && state("regions") == "New", "The import plan compares every item: " + string.Join(", ", plan.Items.Select(item => item.Name + "=" + item.State)));
+        List<string> errors = new List<string>();
+        AssertEquals("4", WorkspaceBundleService.Apply(plan.Items, errors).ToString(), "Changed and new items are applied: " + string.Join("; ", errors));
+        Assert(File.ReadAllText(Path.Combine(target, "snippets.json")).Contains("COUNT(*)"), "Changed snippets take the workspace version.");
+        ScheduledJobDefinition merged = targetJobs.LoadJobs().Jobs.Single();
+        Assert(merged.Sql == "SELECT 1" && merged.WebhookUrl == "https://hooks.example.com/LOCAL", "Jobs are replaced but keep the local webhook when the workspace has none.");
+        Assert(new QueryAiActionService(Path.Combine(target, "ai.json")).Load().Single().Name == "Explain joins" && DataGeneratorDictionaryStore.Load(Path.Combine(target, "dict"), "regions") != null,
+            "AI actions and dictionaries are added.");
+        Assert(WorkspaceBundleService.Plan(bundle, targetSources).Items.All(item => item.State == WorkspaceItemState.Same), "After applying, everything is the same.");
+        AssertThrows<InvalidOperationException>(() => WorkspaceBundleService.Plan(source, targetSources), "Folders without workspace.json are rejected.");
+    }
+
     /// <summary>維度／Data Vault：角色推測、角色存讀與 Data Vault 2.0 產生。</summary>
     public static void AssertErModelPatternSemantics()
     {

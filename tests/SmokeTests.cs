@@ -85,6 +85,12 @@ public static partial class SmokeTests
         Run("Data dictionary templates and automation", TestDataDictionaryTemplates, ref passed);
         Run("Native backup SQL and tool arguments", AssertNativeBackupSemantics, ref passed);
         Run("BI dashboard with calculated fields and cross-filtering", TestBiDashboard, ref passed);
+        Run("Workspace export and import", () =>
+        {
+            string workspaceDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk-workspace-" + Guid.NewGuid().ToString("N"));
+            try { AssertWorkspaceSemantics(workspaceDirectory); }
+            finally { if (Directory.Exists(workspaceDirectory)) Directory.Delete(workspaceDirectory, true); }
+        }, ref passed);
         Run("Data generator dictionaries", () =>
         {
             string dictionaryDirectory = Path.Combine(Path.GetTempPath(), "mysqlpunk-dict-" + Guid.NewGuid().ToString("N"));

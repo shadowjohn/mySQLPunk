@@ -197,6 +197,9 @@
     <Compile Include="AiAgentDangerConfirmForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="Form1.Workspace.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Form1.AiAgentHost.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -404,6 +407,7 @@
     <Compile Include="lib\DataFormatAnalyzer.cs" />
     <Compile Include="lib\RoutineModelService.cs" />
     <Compile Include="lib\ErModelPatternService.cs" />
+    <Compile Include="lib\WorkspaceBundleService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />

@@ -1962,38 +1962,50 @@ namespace mySQLPunk
                 dialog.Title = Localization.T("Connection.ImportTitle");
                 dialog.Filter = Localization.T("Connection.JsonFilter");
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                ImportConnectionsWithPreview(dialog.FileName);
+            }
+        }
 
-                try
+        /// <summary>預覽並匯入連線檔（取代全部或逐筆合併）；工作區匯入也使用。回傳是否有匯入。</summary>
+        private bool ImportConnectionsWithPreview(string path, bool mergeOnly = false)
+        {
+            try
+            {
+                ConnectionImportPreviewReport preview = BuildConnectionImportPreview(path, myN.connections);
+                ConnectionImportDecision decision = ShowConnectionImportPreviewDialog(preview);
+                if (decision == null || decision.Mode == ConnectionImportMode.Cancel) return false;
+
+                if (mergeOnly && decision.Mode == ConnectionImportMode.Replace)
                 {
-                    ConnectionImportPreviewReport preview = BuildConnectionImportPreview(dialog.FileName, myN.connections);
-                    ConnectionImportDecision decision = ShowConnectionImportPreviewDialog(preview);
-                    if (decision == null || decision.Mode == ConnectionImportMode.Cancel) return;
-
-                    if (decision.Mode == ConnectionImportMode.Replace)
-                    {
-                        ImportConnectionsFromFile(dialog.FileName);
-                    }
-                    else
-                    {
-                        MergeImportedConnections(preview, decision.SelectedImportedIndexes);
-                    }
-
-                    string reviewLogPath = TryWriteConnectionImportReviewLog(preview, decision);
-                    int savedPasswords = PromptForImportedConnectionPasswords();
-                    string message = savedPasswords > 0
-                        ? Localization.Format("Status.ConnectionsImportedWithPasswords", savedPasswords)
-                        : Localization.T("Status.ConnectionsImported");
-                    if (!string.IsNullOrWhiteSpace(reviewLogPath))
-                    {
-                        message += Environment.NewLine + Localization.Format("Connection.ImportReviewLogWritten", reviewLogPath);
-                    }
-                    UpdateMainStatus(message);
-                    MessageBox.Show(message, Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // 工作區不含密碼與憑證參照：「取代全部」會讓本機連線的密碼消失，一律改成合併全部。
+                    MergeImportedConnections(preview, new HashSet<int>(Enumerable.Range(0, preview.ImportedConnections.Count)));
                 }
-                catch (Exception ex)
+                else if (decision.Mode == ConnectionImportMode.Replace)
                 {
-                    MessageBox.Show(BuildStatusExceptionMessage("Status.ImportFailed", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    ImportConnectionsFromFile(path);
                 }
+                else
+                {
+                    MergeImportedConnections(preview, decision.SelectedImportedIndexes);
+                }
+
+                string reviewLogPath = TryWriteConnectionImportReviewLog(preview, decision);
+                int savedPasswords = PromptForImportedConnectionPasswords();
+                string message = savedPasswords > 0
+                    ? Localization.Format("Status.ConnectionsImportedWithPasswords", savedPasswords)
+                    : Localization.T("Status.ConnectionsImported");
+                if (!string.IsNullOrWhiteSpace(reviewLogPath))
+                {
+                    message += Environment.NewLine + Localization.Format("Connection.ImportReviewLogWritten", reviewLogPath);
+                }
+                UpdateMainStatus(message);
+                MessageBox.Show(message, Localization.T("Common.Success"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(BuildStatusExceptionMessage("Status.ImportFailed", ex), Localization.T("Common.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
             }
         }
 
@@ -3010,6 +3022,7 @@ namespace mySQLPunk
             exportToolStripMenuItem.Click += ExportToolStripMenuItem_Click;
             importConnectionsToolStripMenuItem.Click -= ImportConnectionsToolStripMenuItem_Click;
             importConnectionsToolStripMenuItem.Click += ImportConnectionsToolStripMenuItem_Click;
+            EnsureWorkspaceMenu();
             closeToolStripMenuItem.Click -= CloseToolStripMenuItem_Click;
             closeToolStripMenuItem.Click += CloseToolStripMenuItem_Click;
 
@@ -3373,6 +3386,7 @@ namespace mySQLPunk
             closeConnectionToolStripMenuItem.Text = Localization.T("Menu.CloseConnection");
             exportToolStripMenuItem.Text = Localization.T("Menu.ExportConnections");
             importConnectionsToolStripMenuItem.Text = Localization.T("Menu.ImportConnections");
+            ApplyWorkspaceMenuText();
             closeToolStripMenuItem.Text = Localization.T("Menu.Close");
             exitToolStripMenuItem.Text = Localization.T("Menu.Exit");
             ttToolStripMenuItem.Text = Localization.T("Menu.Window");
@@ -14102,6 +14116,7 @@ namespace mySQLPunk
             for (int i = 0; i < report.ImportedConnections.Count; i++)
             {
                 Dictionary<string, object> imported = report.ImportedConnections[i];
+                FillImportedUserNameFromExisting(imported, existing);
                 string key = BuildConnectionImportKey(imported);
                 int existingIndex;
                 bool hasExisting = existingIndexByKey.TryGetValue(key, out existingIndex);
@@ -14495,6 +14510,24 @@ namespace mySQLPunk
             if (string.IsNullOrEmpty(value)) return "";
             try { return Crypto.Decrypt(value); }
             catch { return value; }
+        }
+
+        /// <summary>
+        /// 工作區匯出的連線可能不含帳號：若其他欄位都與本機某個連線相同，沿用本機帳號，
+        /// 讓預覽與合併視為同一個連線而不是新增重複項目。
+        /// </summary>
+        private static void FillImportedUserNameFromExisting(Dictionary<string, object> imported, IEnumerable<Dictionary<string, object>> existing)
+        {
+            if (!string.IsNullOrEmpty(GetConnectionValue(imported, "username"))) return;
+            string wanted = BuildConnectionImportKey(imported);
+            foreach (Dictionary<string, object> candidate in existing)
+            {
+                Dictionary<string, object> withoutUser = new Dictionary<string, object>(candidate);
+                withoutUser["username"] = string.Empty;
+                if (!string.Equals(BuildConnectionImportKey(withoutUser), wanted, StringComparison.OrdinalIgnoreCase)) continue;
+                imported["username"] = GetConnectionValue(candidate, "username");
+                return;
+            }
         }
 
         private static string BuildConnectionImportKey(Dictionary<string, object> conn)
