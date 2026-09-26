@@ -1173,6 +1173,69 @@ public static partial class SmokeTests
         AssertEquals("4,1,1", string.Join(",", fromCsv.Weights), "A numeric second column becomes the weight.");
     }
 
+    /// <summary>維度／Data Vault：角色推測、角色存讀與 Data Vault 2.0 產生。</summary>
+    public static void AssertErModelPatternSemantics()
+    {
+        SchemaModelSnapshot star = new SchemaModelSnapshot { DatabaseName = "dw", ProviderName = "postgresql" };
+        Func<string, SchemaTableModel> table = name => { SchemaTableModel t = new SchemaTableModel { Name = name }; star.Tables.Add(t); return t; };
+        SchemaTableModel sales = table("sales");
+        sales.Columns.Add(new SchemaColumnModel { Name = "id", DataType = "integer", IsPrimaryKey = true, Ordinal = 1 });
+        sales.Columns.Add(new SchemaColumnModel { Name = "product_id", DataType = "integer", Ordinal = 2 });
+        sales.Columns.Add(new SchemaColumnModel { Name = "store_id", DataType = "integer", Ordinal = 3 });
+        sales.Columns.Add(new SchemaColumnModel { Name = "amount", DataType = "numeric(10,2)", Ordinal = 4 });
+        table("product").Columns.Add(new SchemaColumnModel { Name = "id", DataType = "integer", IsPrimaryKey = true, Ordinal = 1 });
+        table("store").Columns.Add(new SchemaColumnModel { Name = "id", DataType = "integer", IsPrimaryKey = true, Ordinal = 1 });
+        table("audit").Columns.Add(new SchemaColumnModel { Name = "id", DataType = "integer", IsPrimaryKey = true, Ordinal = 1 });
+        star.Relationships.Add(new SchemaRelationshipModel { Name = "fk1", FromTable = "sales", FromColumn = "product_id", ToTable = "product", ToColumn = "id", Ordinal = 1 });
+        star.Relationships.Add(new SchemaRelationshipModel { Name = "fk2", FromTable = "sales", FromColumn = "store_id", ToTable = "store", ToColumn = "id", Ordinal = 1 });
+        Dictionary<string, string> roles = ErModelPatternService.SuggestRoles(star);
+        Assert(roles["sales"] == ErTableRoles.Fact && roles["product"] == ErTableRoles.Dimension && roles["store"] == ErTableRoles.Dimension && !roles.ContainsKey("audit"),
+            "Star schema roles are inferred from foreign keys and measures.");
+        SchemaModelSnapshot vault = new SchemaModelSnapshot { ProviderName = "mysql" };
+        foreach (string name in new[] { "hub_customer", "lnk_order_customer", "sat_customer", "dim_date", "fact_orders", "plain" }) vault.Tables.Add(new SchemaTableModel { Name = name });
+        Dictionary<string, string> named = ErModelPatternService.SuggestRoles(vault);
+        Assert(named["hub_customer"] == ErTableRoles.Hub && named["lnk_order_customer"] == ErTableRoles.Link && named["sat_customer"] == ErTableRoles.Satellite &&
+               named["dim_date"] == ErTableRoles.Dimension && named["fact_orders"] == ErTableRoles.Fact && !named.ContainsKey("plain"), "Name prefixes map to roles.");
+
+        SchemaModelSnapshot shop = new SchemaModelSnapshot { DatabaseName = "shop", ProviderName = "sqlite" };
+        SchemaTableModel customers = new SchemaTableModel { Name = "customers" };
+        customers.Columns.Add(new SchemaColumnModel { Name = "id", DataType = "INTEGER", IsPrimaryKey = true, Ordinal = 1 });
+        customers.Columns.Add(new SchemaColumnModel { Name = "email", DataType = "TEXT", IsNullable = false, Ordinal = 2 });
+        SchemaTableModel orders = new SchemaTableModel { Name = "orders" };
+        orders.Columns.Add(new SchemaColumnModel { Name = "id", DataType = "INTEGER", IsPrimaryKey = true, Ordinal = 1 });
+        orders.Columns.Add(new SchemaColumnModel { Name = "customer_id", DataType = "INTEGER", Ordinal = 2 });
+        orders.Columns.Add(new SchemaColumnModel { Name = "total", DataType = "NUMERIC", Ordinal = 3 });
+        SchemaTableModel logs = new SchemaTableModel { Name = "logs" };
+        logs.Columns.Add(new SchemaColumnModel { Name = "message", DataType = "TEXT", Ordinal = 1 });
+        shop.Tables.AddRange(new[] { customers, orders, logs });
+        shop.Relationships.Add(new SchemaRelationshipModel { Name = "fk_orders_customers", FromTable = "orders", FromColumn = "customer_id", ToTable = "customers", ToColumn = "id", Ordinal = 1 });
+        ErModelDocument document = ErModelService.CreateDefault(shop, "Main");
+        document.Schema = ErModelService.CaptureSchema(shop);
+        DataVaultResult result = ErModelPatternService.AddDataVault(document, new[] { "customers", "orders", "logs" }, "Data Vault");
+        Assert(result.Hubs.SequenceEqual(new[] { "hub_customers", "hub_orders" }) && result.Satellites.SequenceEqual(new[] { "sat_customers", "sat_orders" }) &&
+               result.Links.SequenceEqual(new[] { "lnk_orders_customers" }) && result.Skipped.Single().Contains("logs"), "Hubs, satellites and one link are generated; tables without keys are skipped.");
+        ErModelTable satOrders = document.Schema.Find("sat_orders");
+        Assert(satOrders.Columns.Where(column => column.PrimaryKey).Select(column => column.Name).SequenceEqual(new[] { "hk_orders", "load_dts" }) &&
+               satOrders.Columns.Any(column => column.Name == "total") && !satOrders.Columns.Any(column => column.Name == "customer_id"),
+            "Satellites keep descriptive attributes keyed by hash key and load time, without foreign-key columns.");
+        ErModelTable link = document.Schema.Find("lnk_orders_customers");
+        Assert(link.Columns.Select(column => column.Name).SequenceEqual(new[] { "hk_lnk_orders_customers", "hk_orders", "hk_customers", "load_dts", "record_source" }) &&
+               document.Schema.Relationships.Count(item => item.FromTable == "lnk_orders_customers") == 2, "Links reference both hubs.");
+        Assert(ErModelPatternService.RoleOf(document, "hub_orders") == ErTableRoles.Hub && document.Diagrams.Last().Name == "Data Vault" && document.Diagrams.Last().Tables.Count == 5,
+            "Generated tables get roles and a new diagram.");
+        DataVaultResult again = ErModelPatternService.AddDataVault(document, new[] { "customers", "orders" }, "Data Vault");
+        Assert(again.AllTables.Count() == 0 && document.Schema.Tables.Count == 8, "Running again does not duplicate tables.");
+        SchemaComparisonResult toEmpty = SchemaComparisonService.Compare(ErModelService.ToSnapshot(document.Schema, "shop"), new SchemaModelSnapshot { DatabaseName = "shop", ProviderName = "sqlite" });
+        SchemaSyncScript script = SchemaSyncScriptService.Generate(toEmpty);
+        AssertContains(script.Text, "CREATE TABLE \"sat_orders\"", "The Data Vault tables produce CREATE TABLE statements.");
+        string json = Newtonsoft.Json.JsonConvert.SerializeObject(document);
+        ErModelDocument reloaded = Newtonsoft.Json.JsonConvert.DeserializeObject<ErModelDocument>(json);
+        reloaded.Roles.Add(new ErModelTableRole { Table = "x", Role = "bogus" });
+        ErModelService.Validate(reloaded);
+        Assert(reloaded.Roles.Count == 5 && ErModelPatternService.RoleOf(reloaded, "lnk_orders_customers") == ErTableRoles.Link, "Roles survive the model file and invalid roles are dropped.");
+        Assert(ErModelService.BuildSvg(ErModelService.ToSnapshot(reloaded.Schema, "shop"), reloaded, reloaded.Diagrams.Last()).Contains(">HUB<"), "SVG shows role badges.");
+    }
+
     /// <summary>模型中的函式／預存程序：定義比較、差異語句、合併進同步腳本與驗證。</summary>
     public static void AssertRoutineModelSemantics()
     {

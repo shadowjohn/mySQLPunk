@@ -403,6 +403,7 @@
     <Compile Include="lib\BiReportService.cs" />
     <Compile Include="lib\DataFormatAnalyzer.cs" />
     <Compile Include="lib\RoutineModelService.cs" />
+    <Compile Include="lib\ErModelPatternService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />

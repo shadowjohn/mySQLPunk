@@ -98,4 +98,30 @@ public static partial class SmokeTests
         form.AutoArrange();
         Assert(form.CurrentDiagram.Routes.Count == 0, "Auto arrange clears manual routes.");
     }
+
+    /// <summary>Data Vault 2.0：從模型中的資料表產生 Hub／Link／Satellite，並同步建立到 SQLite。</summary>
+    public static void AssertErDataVaultFlow(ErDiagramForm form, IDatabase db)
+    {
+        Assert(form.IsModelFirst, "Data Vault generation needs a model schema.");
+        DataVaultResult result = form.GenerateDataVault(new List<string> { "customers", "orders" });
+        Assert(result.Hubs.Count == 2 && result.Links.Count == 1 && result.Satellites.SequenceEqual(new[] { "sat_customers" }) && form.CurrentDiagram.Name.StartsWith("Data Vault"),
+            "Data Vault tables are generated into a new diagram (orders has no descriptive attributes, so no satellite): " + string.Join(",", result.AllTables));
+        Assert(form.SuggestRoles() >= 0 && ErModelPatternService.RoleOf(form.Model, "hub_orders") == ErTableRoles.Hub, "Generated tables carry their roles.");
+        using (SchemaSyncScriptForm sync = form.CreateModelSyncForm())
+        {
+            Assert(sync != null, "Data Vault tables produce a sync script.");
+            sync.CreateControl();
+            SchemaSyncBatchResult applied = sync.RunSelected();
+            Assert(applied.Succeeded, "Creating the Data Vault tables succeeds: " + applied.Summary);
+        }
+        foreach (string table in result.AllTables)
+        {
+            Assert(db.SelectSQL("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '" + table + "'").Rows.Count == 1, table + " exists after syncing.");
+        }
+        Assert(db.SelectSQL("PRAGMA table_info('sat_customers')").Rows.Cast<System.Data.DataRow>().Count(row => Convert.ToInt32(row["pk"]) > 0) == 2, "Satellites use a composite key.");
+        form.SetTableRole("orders", ErTableRoles.Fact);
+        Assert(ErModelPatternService.RoleOf(form.Model, "orders") == ErTableRoles.Fact, "Roles can be set by hand.");
+        form.SetTableRole("orders", null);
+        Assert(ErModelPatternService.RoleOf(form.Model, "orders") == null, "Roles can be cleared.");
+    }
 }

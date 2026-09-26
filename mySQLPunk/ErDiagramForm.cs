@@ -29,6 +29,7 @@ namespace mySQLPunk
         private readonly ToolStripMenuItem syncModelItem;
         private readonly ToolStripMenuItem detachModelItem;
         private readonly ToolStripMenuItem routinesItem;
+        private readonly ToolStripMenuItem dataVaultItem;
         private readonly ToolStripLabel zoomLabel;
         private readonly ToolStripStatusLabel statusLabel;
         private Form1 mainHost;
@@ -75,7 +76,11 @@ namespace mySQLPunk
             syncModelItem = new ToolStripMenuItem(Localization.T("ErModel.SyncToDatabase"));
             detachModelItem = new ToolStripMenuItem(Localization.T("ErModel.DetachSchema"));
             routinesItem = new ToolStripMenuItem(Localization.T("ErModel.Routines"));
-            modelMenu.DropDownItems.AddRange(new ToolStripItem[] { captureItem, addModelTableItem, routinesItem, syncModelItem, new ToolStripSeparator(), detachModelItem });
+            ToolStripMenuItem suggestRolesItem = new ToolStripMenuItem(Localization.T("ErModel.SuggestRoles"));
+            dataVaultItem = new ToolStripMenuItem(Localization.T("ErModel.DataVault"));
+            suggestRolesItem.Click += (sender, args) => GuardModel(() => SuggestRoles());
+            dataVaultItem.Click += (sender, args) => GuardModel(ShowDataVaultDialog);
+            modelMenu.DropDownItems.AddRange(new ToolStripItem[] { captureItem, addModelTableItem, routinesItem, syncModelItem, new ToolStripSeparator(), suggestRolesItem, dataVaultItem, new ToolStripSeparator(), detachModelItem });
             floatButton = new ToolStripButton(Localization.T("Query.Float"));
             dockButton = new ToolStripButton(Localization.T("Query.Dock")) { Visible = false };
 
@@ -341,6 +346,7 @@ namespace mySQLPunk
             syncModelItem.Enabled = IsModelFirst;
             detachModelItem.Enabled = IsModelFirst;
             routinesItem.Enabled = IsModelFirst;
+            dataVaultItem.Enabled = IsModelFirst;
         }
 
         private void ShowTableMenu(string table, Point screen)
@@ -369,6 +375,19 @@ namespace mySQLPunk
             };
             groupMenu.DropDownItems.Add(newGroup);
             menu.Items.Add(groupMenu);
+            ToolStripMenuItem roleMenu = new ToolStripMenuItem(Localization.T("ErModel.Role"));
+            string currentRole = ErModelPatternService.RoleOf(document, table);
+            ToolStripMenuItem noRole = new ToolStripMenuItem(Localization.T("ErModel.Role.None")) { Checked = currentRole == null };
+            noRole.Click += (sender, args) => SetTableRole(table, null);
+            roleMenu.DropDownItems.Add(noRole);
+            foreach (string role in ErTableRoles.All)
+            {
+                string current = role;
+                ToolStripMenuItem item = new ToolStripMenuItem(Localization.T("ErModel.Role." + role)) { Checked = currentRole == role };
+                item.Click += (sender, args) => SetTableRole(table, current);
+                roleMenu.DropDownItems.Add(item);
+            }
+            menu.Items.Add(roleMenu);
             ToolStripMenuItem remove = new ToolStripMenuItem(Localization.T("ErModel.RemoveFromDiagram"));
             remove.Click += (sender, args) =>
             {
@@ -621,6 +640,79 @@ namespace mySQLPunk
                     int remaining = after.Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning) + CompareRoutinesToDatabase().Count;
                     statusLabel.Text = remaining == 0 ? Localization.T("ErModel.InSync") : Localization.Format("ErModel.RemainingDifferences", remaining);
                 }
+            }
+        }
+
+        /// <summary>設定資料表角色（null 為清除）；也供測試直接呼叫。</summary>
+        public void SetTableRole(string table, string role)
+        {
+            if (document == null) return;
+            ErModelPatternService.SetRole(document, table, role);
+            canvas.ReloadLayout();
+            MarkDirty();
+        }
+
+        /// <summary>依名稱與結構推測事實／維度或 Data Vault 角色，只補上還沒有角色的資料表；回傳新增的數量。</summary>
+        public int SuggestRoles()
+        {
+            if (snapshot == null) return 0;
+            int added = 0;
+            foreach (KeyValuePair<string, string> pair in ErModelPatternService.SuggestRoles(snapshot))
+            {
+                if (ErModelPatternService.RoleOf(document, pair.Key) != null) continue;
+                ErModelPatternService.SetRole(document, pair.Key, pair.Value);
+                added++;
+            }
+            if (added > 0)
+            {
+                canvas.ReloadLayout();
+                MarkDirty();
+            }
+            statusLabel.Text = Localization.Format("ErModel.RolesSuggested", added);
+            return added;
+        }
+
+        /// <summary>把資料表轉成 Data Vault 2.0 結構並開啟新的圖表；也供測試直接呼叫。</summary>
+        public DataVaultResult GenerateDataVault(IList<string> tables)
+        {
+            DataVaultResult result = ErModelPatternService.AddDataVault(document, tables, "Data Vault");
+            if (result.Hubs.Count + result.Links.Count + result.Satellites.Count > 0)
+            {
+                diagram = document.Diagrams.Last();
+                snapshot = CurrentSnapshot();
+                ShowDocument();
+                MarkDirty();
+                FitWhenReady();
+            }
+            statusLabel.Text = Localization.Format("ErModel.DataVault.Done", result.Hubs.Count, result.Links.Count, result.Satellites.Count) +
+                (result.Skipped.Count > 0 ? " " + string.Join(" ", result.Skipped) : string.Empty);
+            return result;
+        }
+
+        private void ShowDataVaultDialog()
+        {
+            if (!IsModelFirst) return;
+            using (Form dialog = new Form { Text = Localization.T("ErModel.DataVault"), Width = 460, Height = 560, StartPosition = FormStartPosition.CenterParent, MinimizeBox = false })
+            {
+                Label hint = new Label { Dock = DockStyle.Top, Height = 54, Padding = new Padding(8, 8, 8, 0), Text = Localization.T("ErModel.DataVault.Hint") };
+                CheckedListBox list = new CheckedListBox { Dock = DockStyle.Fill, CheckOnClick = true, IntegralHeight = false };
+                foreach (ErModelTable table in document.Schema.Tables.Where(item => ErModelPatternService.RoleOf(document, item.Name) == null))
+                {
+                    list.Items.Add(table.Name, table.Columns.Any(column => column.PrimaryKey));
+                }
+                Button ok = new Button { Text = Localization.T("Common.OK"), DialogResult = DialogResult.OK, AutoSize = true };
+                Button cancel = new Button { Text = Localization.T("Common.Cancel"), DialogResult = DialogResult.Cancel, AutoSize = true };
+                FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 40, Padding = new Padding(8) };
+                buttons.Controls.Add(cancel);
+                buttons.Controls.Add(ok);
+                dialog.Controls.Add(list);
+                dialog.Controls.Add(hint);
+                dialog.Controls.Add(buttons);
+                dialog.AcceptButton = ok;
+                dialog.CancelButton = cancel;
+                ThemeManager.ApplyTo(dialog);
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                GenerateDataVault(list.CheckedItems.Cast<string>().ToList());
             }
         }
 
@@ -1383,12 +1475,16 @@ namespace mySQLPunk
         {
             Rectangle bounds = card.Bounds;
             ErModelGroup group = document == null ? null : document.FindGroup(card.Placement.Group);
-            Color header = group == null ? ThemeManager.AccentSoftColor : ColorTranslator.FromHtml(ErModelService.Tint(group.Color));
+            string role = ErModelPatternService.RoleOf(document, card.Table.Name);
+            string roleColor = ErTableRoles.Color(role);
+            Color header = group != null ? ColorTranslator.FromHtml(ErModelService.Tint(group.Color))
+                : roleColor != null ? ColorTranslator.FromHtml(ErModelService.Tint(roleColor))
+                : ThemeManager.AccentSoftColor;
             using (Brush cardBrush = new SolidBrush(ThemeManager.ElevatedColor))
             using (Brush headerBrush = new SolidBrush(header))
             using (Pen borderPen = new Pen(group == null ? ThemeManager.BorderStrongColor : ColorTranslator.FromHtml(group.Color), group == null ? 1f : 1.6f))
             using (Pen rowPen = new Pen(ThemeManager.GridColor))
-            using (Brush textBrush = new SolidBrush(group == null ? ThemeManager.TextColor : Color.FromArgb(17, 24, 39)))
+            using (Brush textBrush = new SolidBrush(group == null && roleColor == null ? ThemeManager.TextColor : Color.FromArgb(17, 24, 39)))
             using (Brush bodyTextBrush = new SolidBrush(ThemeManager.TextColor))
             using (Brush mutedBrush = new SolidBrush(ThemeManager.MutedTextColor))
             using (Brush keyBrush = new SolidBrush(ThemeManager.AccentColor))
@@ -1402,8 +1498,22 @@ namespace mySQLPunk
                 graphics.FillRectangle(headerBrush, new Rectangle(bounds.Left, bounds.Top, bounds.Width, ErModelService.HeaderHeight));
                 graphics.DrawRectangle(borderPen, bounds);
                 string title = card.Table.Name + (ErModelService.IsLocked(document, card.Placement) ? Localization.T("ErModel.LockedSuffix") : string.Empty);
+                string badge = ErTableRoles.Badge(role);
+                int badgeWidth = 0;
+                if (badge != null)
+                {
+                    badgeWidth = 40;
+                    using (Brush badgeBrush = new SolidBrush(ColorTranslator.FromHtml(roleColor)))
+                    using (Brush badgeText = new SolidBrush(Color.White))
+                    using (StringFormat centered = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                    {
+                        RectangleF badgeBounds = new RectangleF(bounds.Right - 48, bounds.Top + 10, 38, 18);
+                        graphics.FillRectangle(badgeBrush, badgeBounds);
+                        graphics.DrawString(badge, keyFont, badgeText, badgeBounds, centered);
+                    }
+                }
                 graphics.DrawString(title, headerFont, textBrush,
-                    new RectangleF(bounds.Left + 12, bounds.Top + 9, bounds.Width - 24, ErModelService.HeaderHeight - 12), headerFormat);
+                    new RectangleF(bounds.Left + 12, bounds.Top + 9, bounds.Width - 24 - badgeWidth, ErModelService.HeaderHeight - 12), headerFormat);
 
                 int visible = Math.Min(ErModelService.MaximumVisibleColumns, card.Table.Columns.Count);
                 if (visible == 0)

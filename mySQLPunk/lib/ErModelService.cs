@@ -132,6 +132,8 @@ namespace mySQLPunk.lib
         public List<ErModelDiagram> Diagrams { get; set; }
         /// <summary>模型內的結構；null 代表圖表直接顯示資料庫目前的結構。</summary>
         public ErModelSchema Schema { get; set; }
+        /// <summary>資料表角色（事實／維度、Hub／Link／Satellite）。</summary>
+        public List<ErModelTableRole> Roles { get; set; }
 
         public ErModelGroup FindGroup(string name)
         {
@@ -285,6 +287,10 @@ namespace mySQLPunk.lib
             {
                 throw new InvalidOperationException(Localization.T("ErModel.Error.DuplicateDiagram"));
             }
+            document.Roles = (document.Roles ?? new List<ErModelTableRole>())
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Table) && ErTableRoles.Normalize(item.Role) != null)
+                .GroupBy(item => item.Table, StringComparer.OrdinalIgnoreCase).Select(group => group.Last()).ToList();
+            foreach (ErModelTableRole role in document.Roles) role.Role = ErTableRoles.Normalize(role.Role);
             if (document.Schema != null) ValidateSchema(document.Schema);
         }
 
@@ -584,12 +590,15 @@ namespace mySQLPunk.lib
             foreach (KeyValuePair<ErModelTablePlacement, SchemaTableModel> card in cards)
             {
                 ErModelGroup group = document.FindGroup(card.Key.Group);
-                string header = group == null ? "#dbeafe" : Tint(group.Color);
+                string roleColor = ErTableRoles.Color(ErModelPatternService.RoleOf(document, card.Key.Table));
+                string header = group != null ? Tint(group.Color) : roleColor != null ? Tint(roleColor) : "#dbeafe";
+                string badge = ErTableRoles.Badge(ErModelPatternService.RoleOf(document, card.Key.Table));
                 int cardHeight = CardHeight(card.Value.Columns.Count);
                 svg.AppendLine("<g>");
                 svg.AppendLine("<rect x=\"" + card.Key.X + "\" y=\"" + card.Key.Y + "\" width=\"" + CardWidth + "\" height=\"" + cardHeight + "\" fill=\"#ffffff\" stroke=\"#94a3b8\"/>");
                 svg.AppendLine("<rect x=\"" + card.Key.X + "\" y=\"" + card.Key.Y + "\" width=\"" + CardWidth + "\" height=\"" + HeaderHeight + "\" fill=\"" + header + "\" stroke=\"#94a3b8\"/>");
                 svg.AppendLine("<text x=\"" + (card.Key.X + 12) + "\" y=\"" + (card.Key.Y + 24) + "\" font-weight=\"bold\">" + x(card.Value.Name) + "</text>");
+                if (badge != null) svg.AppendLine("<text x=\"" + (card.Key.X + CardWidth - 10) + "\" y=\"" + (card.Key.Y + 24) + "\" text-anchor=\"end\" font-size=\"10\" font-weight=\"bold\" fill=\"#374151\">" + badge + "</text>");
                 int visible = Math.Min(MaximumVisibleColumns, card.Value.Columns.Count);
                 for (int index = 0; index < visible; index++)
                 {

@@ -12482,6 +12482,7 @@ public static partial class SmokeTests
             AssertErModelSemantics(modelDir);
             AssertErModelSchemaSemantics();
             AssertRoutineModelSemantics();
+            AssertErModelPatternSemantics();
             using (my_sqlite sqlite = new my_sqlite())
             {
                 sqlite.SetConn("Data Source=" + Path.Combine(modelDir, "er.sqlite") + ";Version=3;");
@@ -12514,6 +12515,7 @@ public static partial class SmokeTests
                     form.RefreshDiagram();
                     AssertErRouteFlow(form, Path.Combine(modelDir, "routes.punkmodel"));
                     AssertErModelSchemaFlow(form, sqlite, Path.Combine(modelDir, "schema.punkmodel"));
+                    AssertErDataVaultFlow(form, sqlite);
                 }
             }
         }

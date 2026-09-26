@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **維度與 Data Vault 2.0 模型（Windows）**：ER 圖的資料表右鍵新增「角色」：事實表、維度表、Hub、Link、Satellite，表頭改用角色顏色並顯示 FACT／DIM／HUB／LNK／SAT 標籤（群組顏色優先），角色隨 `.punkmodel` 保存、SVG 匯出同步。「模型結構 > 推測資料表角色」依名稱前綴（fact_／dim_／hub_／lnk_／sat_ 等）或結構（兩個以上外鍵且含數值欄位為事實表、被事實表參照為維度表）補上角色。「產生 Data Vault 2.0...」把勾選的資料表轉成 Hub（雜湊鍵＋業務鍵＋load_dts＋record_source）、Satellite（雜湊鍵＋load_dts 複合主鍵、hash_diff 與描述屬性，不含外鍵欄位）與每個外鍵一個 Link（連接兩個 Hub 的雜湊鍵），型別依資料庫選擇，放進新的「Data Vault」圖表；沒有主鍵的表會略過，重複執行不會產生重複的表。產生後可用「同步模型到資料庫」逐句審核建立；smoke test 在 SQLite 完成產生與建立（含 Satellite 複合主鍵）。
 - **ER 圖連接線手動重導（Windows）**：滑鼠移到連接線的垂直段落會顯示左右調整游標，拖曳即可改變線的走向（自我參照的迴圈也可以），位置隨圖表存進 `.punkmodel`，SVG 匯出使用相同路徑；在連接線上按右鍵可「重設連接線路徑」，「自動排列」會清除所有手動路徑。
 - **ER 模型的函式與預存程序（Windows）**：「從資料庫更新模型結構」現在也擷取函式與預存程序的完整定義（MySQL `SHOW CREATE`、PostgreSQL `pg_get_functiondef` 並以參數簽章區分多載、SQL Server `sys.sql_modules`、Oracle `ALL_SOURCE`），隨 `.punkmodel` 保存。「模型結構 > 函式／預存程序...」可在模型中新增、修改或移除。「同步模型到資料庫」會把差異併進同一份逐句審核的腳本：新增的直接建立；PostgreSQL 以 CREATE OR REPLACE、SQL Server 以 ALTER 更新；MySQL 沒有 CREATE OR REPLACE，改為同一批次先刪除再重建並列為需確認的變更；資料庫多出的函式列為刪除（預設不執行）。比較時忽略伺服器重新排版造成的空白、關鍵字大小寫、MySQL DEFINER 與 PostgreSQL 的 $tag$ 差異，字串常值與函式本體內容仍逐字比較。實機驗證 MySQL 8、PostgreSQL 16、SQL Server 2022：擷取後無差異、更新／新增（含多載）／確認刪除後資料庫與模型一致，函式回傳新值。
 - **資料產生器運算式規則（跨欄位條件，Windows）**：新增「運算式」規則，以 BI 計算欄位的語法依同一列其他欄位計算值，例如 `IF([status] = 'paid', [amount], NULL)` 或 `CONCAT(LOWER([first_name]), '.', LOWER([last_name]), '@example.com')`。運算式欄位在其他欄位之後依欄位順序計算，只能參照本次會寫入的欄位（一般規則、外鍵或前面的運算式欄位）；參照交給資料庫預設的欄位、未知欄位、語法錯誤、型別不符或把 NULL 寫進 NOT NULL 欄位，都會在寫入前明確失敗。
