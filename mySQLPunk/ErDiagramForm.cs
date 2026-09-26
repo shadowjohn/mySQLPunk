@@ -28,6 +28,7 @@ namespace mySQLPunk
         private readonly ToolStripMenuItem addModelTableItem;
         private readonly ToolStripMenuItem syncModelItem;
         private readonly ToolStripMenuItem detachModelItem;
+        private readonly ToolStripMenuItem routinesItem;
         private readonly ToolStripLabel zoomLabel;
         private readonly ToolStripStatusLabel statusLabel;
         private Form1 mainHost;
@@ -73,7 +74,8 @@ namespace mySQLPunk
             addModelTableItem = new ToolStripMenuItem(Localization.T("ErModel.AddTable"));
             syncModelItem = new ToolStripMenuItem(Localization.T("ErModel.SyncToDatabase"));
             detachModelItem = new ToolStripMenuItem(Localization.T("ErModel.DetachSchema"));
-            modelMenu.DropDownItems.AddRange(new ToolStripItem[] { captureItem, addModelTableItem, syncModelItem, new ToolStripSeparator(), detachModelItem });
+            routinesItem = new ToolStripMenuItem(Localization.T("ErModel.Routines"));
+            modelMenu.DropDownItems.AddRange(new ToolStripItem[] { captureItem, addModelTableItem, routinesItem, syncModelItem, new ToolStripSeparator(), detachModelItem });
             floatButton = new ToolStripButton(Localization.T("Query.Float"));
             dockButton = new ToolStripButton(Localization.T("Query.Dock")) { Visible = false };
 
@@ -131,6 +133,7 @@ namespace mySQLPunk
             addModelTableItem.Click += (sender, args) => EditModelTable(null);
             syncModelItem.Click += (sender, args) => GuardModel(ShowModelSync);
             detachModelItem.Click += (sender, args) => GuardModel(DetachSchema);
+            routinesItem.Click += (sender, args) => GuardModel(EditRoutines);
             diagramBox.SelectedIndexChanged += (sender, args) =>
             {
                 if (switchingDiagram || document == null || diagramBox.SelectedIndex < 0) return;
@@ -327,6 +330,7 @@ namespace mySQLPunk
             addModelTableItem.Enabled = IsModelFirst;
             syncModelItem.Enabled = IsModelFirst;
             detachModelItem.Enabled = IsModelFirst;
+            routinesItem.Enabled = IsModelFirst;
         }
 
         private void ShowTableMenu(string table, Point screen)
@@ -501,23 +505,29 @@ namespace mySQLPunk
         public SchemaComparisonResult CaptureFromDatabase(bool confirm)
         {
             SchemaModelSnapshot live = SchemaModelService.Load(database, databaseName);
+            List<ErModelRoutine> liveRoutines = LoadRoutines();
             SchemaComparisonResult differences = null;
             if (IsModelFirst)
             {
                 differences = SchemaComparisonService.Compare(live, ErModelService.ToSnapshot(document.Schema, databaseName));
-                int count = differences.Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning);
+                // 以資料庫為目標比較：模型沒有、資料庫有的函式在這裡是「新增到模型」。
+                List<RoutineChange> routineChanges = RoutineModelService.Compare(live.ProviderName, liveRoutines, document.Schema.Routines);
+                int count = differences.Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning) + routineChanges.Count;
                 if (count == 0)
                 {
                     statusLabel.Text = Localization.T("ErModel.CaptureNoChanges");
                     return differences;
                 }
-                if (confirm && MessageBox.Show(this, Localization.Format("ErModel.ConfirmCapture", count, DescribeDifferences(differences)), Text,
+                string described = DescribeDifferences(differences);
+                if (routineChanges.Count > 0) described += Environment.NewLine + Localization.Format("ErModel.RoutineDifferences", routineChanges.Count);
+                if (confirm && MessageBox.Show(this, Localization.Format("ErModel.ConfirmCapture", count, described), Text,
                         MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 {
                     return differences;
                 }
             }
             ErModelSchema captured = ErModelService.CaptureSchema(live);
+            captured.Routines = liveRoutines;
             ErModelService.ValidateSchema(captured);
             if (document == null)
             {
@@ -534,7 +544,8 @@ namespace mySQLPunk
             ShowDocument();
             MarkDirty();
             UpdateTitle();
-            statusLabel.Text = Localization.Format("ErModel.Captured", captured.Tables.Count, captured.Relationships.Count) + ModeSuffix();
+            statusLabel.Text = Localization.Format("ErModel.Captured", captured.Tables.Count, captured.Relationships.Count) + " " +
+                Localization.Format("ErModel.RoutinesCaptured", captured.Routines.Count) + ModeSuffix();
             return differences;
         }
 
@@ -546,17 +557,39 @@ namespace mySQLPunk
             return SchemaComparisonService.Compare(ErModelService.ToSnapshot(document.Schema, databaseName), liveSnapshot);
         }
 
+        /// <summary>模型與資料庫的函式／程序差異（讓資料庫跟上模型）。</summary>
+        public List<RoutineChange> CompareRoutinesToDatabase()
+        {
+            if (!IsModelFirst) throw new InvalidOperationException(Localization.T("ErModel.Error.NoSchema"));
+            return RoutineModelService.Compare(database.ProviderName, document.Schema.Routines, LoadRoutines());
+        }
+
+        private List<ErModelRoutine> LoadRoutines()
+        {
+            try
+            {
+                return RoutineModelService.Load(database, databaseName);
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = Localization.Format("ErModel.RoutinesUnavailable", ExceptionMessageService.GetReason(ex));
+                return new List<ErModelRoutine>();
+            }
+        }
+
         /// <summary>產生讓資料庫跟上模型的同步視窗（逐句審核、破壞性變更需確認後才執行）；沒有差異時回傳 null。</summary>
         public SchemaSyncScriptForm CreateModelSyncForm()
         {
             SchemaComparisonResult result = CompareModelToDatabase();
+            List<RoutineChange> routineChanges = CompareRoutinesToDatabase();
             string reason;
-            if (!SchemaSyncScriptService.CanGenerate(result, out reason))
+            bool tableChanges = SchemaSyncScriptService.CanGenerate(result, out reason);
+            if (!tableChanges && (routineChanges.Count == 0 || !RoutineModelService.SupportsSync(database.ProviderName)))
             {
                 statusLabel.Text = reason;
                 return null;
             }
-            SchemaSyncScript script = SchemaSyncScriptService.Generate(result);
+            SchemaSyncScript script = RoutineModelService.Merge(database.ProviderName, tableChanges ? SchemaSyncScriptService.Generate(result) : null, routineChanges);
             statusLabel.Text = script.Summary;
             return new SchemaSyncScriptForm(script, Localization.Format("ErModel.SyncTarget", databaseName, database.ProviderName), databaseName,
                 statements => SchemaSyncExecutionService.Execute(database, databaseName, statements));
@@ -575,10 +608,30 @@ namespace mySQLPunk
                 if (form.ExecutedOnTarget)
                 {
                     SchemaComparisonResult after = CompareModelToDatabase();
-                    int remaining = after.Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning);
+                    int remaining = after.Differences.Count(item => item.Kind != SchemaDifferenceKind.MetadataWarning) + CompareRoutinesToDatabase().Count;
                     statusLabel.Text = remaining == 0 ? Localization.T("ErModel.InSync") : Localization.Format("ErModel.RemainingDifferences", remaining);
                 }
             }
+        }
+
+        private void EditRoutines()
+        {
+            if (!IsModelFirst) return;
+            using (ErRoutinesForm form = new ErRoutinesForm(document.Schema.Routines, database.ProviderName))
+            {
+                if (form.ShowDialog(this) != DialogResult.OK) return;
+                ApplyRoutines(form.Result);
+            }
+        }
+
+        /// <summary>取代模型中的函式／程序清單；也供測試直接呼叫。</summary>
+        public void ApplyRoutines(IList<ErModelRoutine> routines)
+        {
+            List<ErModelRoutine> copy = routines.Select(item => new ErModelRoutine { Name = item.Name, Kind = item.Kind, ReturnType = item.ReturnType, Definition = item.Definition }).ToList();
+            RoutineModelService.Validate(copy);
+            document.Schema.Routines = copy;
+            MarkDirty();
+            statusLabel.Text = Localization.Format("ErModel.RoutinesUpdated", copy.Count);
         }
 
         private void DetachSchema()

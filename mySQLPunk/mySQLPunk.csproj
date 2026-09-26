@@ -245,6 +245,9 @@
     <Compile Include="BiChartControl.cs">
       <SubType>Component</SubType>
     </Compile>
+    <Compile Include="ErRoutinesForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ErModelTableEditorForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -399,6 +402,7 @@
     <Compile Include="lib\BiDashboardService.cs" />
     <Compile Include="lib\BiReportService.cs" />
     <Compile Include="lib\DataFormatAnalyzer.cs" />
+    <Compile Include="lib\RoutineModelService.cs" />
     <Compile Include="lib\TableDesignerConstraintService.cs" />
     <Compile Include="lib\ScheduledJobService.cs" />
     <Compile Include="lib\WindowsScheduledTaskService.cs" />

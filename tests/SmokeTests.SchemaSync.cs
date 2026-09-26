@@ -1173,6 +1173,58 @@ public static partial class SmokeTests
         AssertEquals("4,1,1", string.Join(",", fromCsv.Weights), "A numeric second column becomes the weight.");
     }
 
+    /// <summary>模型中的函式／預存程序：定義比較、差異語句、合併進同步腳本與驗證。</summary>
+    public static void AssertRoutineModelSemantics()
+    {
+        AssertEquals(
+            RoutineModelService.NormalizeDefinition("mysql", "CREATE DEFINER=`root`@`%` FUNCTION `f`(v decimal(10,2)) RETURNS decimal(10,2)\n    DETERMINISTIC\nRETURN v * 1.10"),
+            RoutineModelService.NormalizeDefinition("mysql", "create function `f` ( v DECIMAL(10,2) ) returns DECIMAL(10,2) deterministic return v * 1.10;"),
+            "MySQL definitions compare without DEFINER, whitespace or keyword case differences.");
+        Assert(RoutineModelService.NormalizeDefinition("mysql", "RETURN 'Hi'") != RoutineModelService.NormalizeDefinition("mysql", "RETURN 'hi'"), "String literals stay case-sensitive.");
+        AssertEquals(
+            RoutineModelService.NormalizeDefinition("postgresql", "CREATE OR REPLACE FUNCTION public.f(v numeric)\n RETURNS numeric\n LANGUAGE sql\nAS $function$ SELECT v * 2 $function$\n"),
+            RoutineModelService.NormalizeDefinition("postgresql", "create or replace function public.f(v numeric) returns numeric language sql as $$SELECT v * 2$$"),
+            "PostgreSQL dollar-quote tags and layout are normalized.");
+        Assert(RoutineModelService.NormalizeDefinition("postgresql", "AS $$ SELECT 'A' $$") != RoutineModelService.NormalizeDefinition("postgresql", "AS $$ select 'A' $$"), "Dollar-quoted bodies keep their case.");
+
+        List<ErModelRoutine> live = new List<ErModelRoutine>
+        {
+            new ErModelRoutine { Name = "f", Kind = "Function", Definition = "CREATE FUNCTION f() RETURNS int RETURN 1" },
+            new ErModelRoutine { Name = "old_proc", Kind = "Procedure", Definition = "CREATE PROCEDURE old_proc() SELECT 1" }
+        };
+        List<ErModelRoutine> model = new List<ErModelRoutine>
+        {
+            new ErModelRoutine { Name = "f", Kind = "Function", Definition = "CREATE DEFINER=`x`@`%` FUNCTION f() RETURNS int RETURN 2" },
+            new ErModelRoutine { Name = "new_proc", Kind = "Procedure", Definition = "CREATE PROCEDURE new_proc() BEGIN SELECT 1; SELECT 2; END" }
+        };
+        List<RoutineChange> mysql = RoutineModelService.Compare("mysql", model, live);
+        Assert(mysql.Count == 3 && mysql.Single(c => c.Change == RoutineChangeKind.Replace).Destructive &&
+               mysql.Single(c => c.Change == RoutineChangeKind.Replace).Statement.StartsWith("DROP FUNCTION IF EXISTS `f`;") &&
+               !mysql.Single(c => c.Change == RoutineChangeKind.Replace).Statement.Contains("DEFINER") &&
+               !mysql.Single(c => c.Change == RoutineChangeKind.Create).Destructive && mysql.Single(c => c.Change == RoutineChangeKind.Drop).Destructive,
+            "MySQL routine changes: drop+create replace needs confirmation, creates run, drops need confirmation.");
+        List<RoutineChange> sqlServer = RoutineModelService.Compare("mssql", new List<ErModelRoutine> { new ErModelRoutine { Name = "dbo.f", Kind = "Function", Definition = "/* v2 */ CREATE FUNCTION dbo.f() RETURNS INT AS BEGIN RETURN 2 END" } },
+            new List<ErModelRoutine> { new ErModelRoutine { Name = "dbo.f", Kind = "Function", Definition = "CREATE FUNCTION dbo.f() RETURNS INT AS BEGIN RETURN 1 END" } });
+        Assert(sqlServer.Single().Statement.StartsWith("/* v2 */ ALTER FUNCTION dbo.f()") && !sqlServer.Single().Destructive, "SQL Server replaces with ALTER.");
+        Assert(RoutineModelService.Compare("sqlite", model, live).Count == 0, "Providers without routine sync report nothing.");
+
+        SchemaSyncScript merged = RoutineModelService.Merge("mysql", null, mysql);
+        Assert(merged.Statements.Count == 1 && merged.DestructiveStatements.Count == 2 && merged.DestructiveItems.Count == 2 &&
+               merged.Text.Contains("DELIMITER $$") && merged.Text.Contains("-- DROP PROCEDURE IF EXISTS `old_proc`"),
+            "Merged scripts keep creates runnable, drops commented and use DELIMITER for MySQL text.");
+
+        AssertThrows<InvalidOperationException>(() => RoutineModelService.Validate(new List<ErModelRoutine> { new ErModelRoutine { Name = "f", Kind = "Function", Definition = " " } }), "Routines need a definition.");
+        AssertThrows<InvalidOperationException>(() => RoutineModelService.Validate(new List<ErModelRoutine> { new ErModelRoutine { Name = "f", Definition = "x" }, new ErModelRoutine { Name = "F", Kind = "function", Definition = "y" } }), "Duplicate routines are rejected.");
+        ErModelSchema schema = new ErModelSchema { Provider = "mysql" };
+        schema.Tables.Add(new ErModelTable { Name = "t", Columns = { new ErModelColumn { Name = "id", DataType = "int" } } });
+        schema.Routines.AddRange(model);
+        ErModelDocument document = new ErModelDocument { Schema = schema };
+        document.Diagrams.Add(new ErModelDiagram { Name = "d" });
+        ErModelDocument reloaded = Newtonsoft.Json.JsonConvert.DeserializeObject<ErModelDocument>(Newtonsoft.Json.JsonConvert.SerializeObject(document));
+        ErModelService.Validate(reloaded);
+        Assert(reloaded.Schema.Routines.Count == 2 && reloaded.Schema.Routines[1].Kind == "Procedure", "Routines survive the model file round trip.");
+    }
+
     /// <summary>模型內結構：型別白名單、驗證、擷取／轉快照往返、改名與刪表連帶更新外鍵及圖表。</summary>
     public static void AssertErModelSchemaSemantics()
     {

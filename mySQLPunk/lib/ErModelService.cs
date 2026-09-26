@@ -83,11 +83,14 @@ namespace mySQLPunk.lib
         {
             Tables = new List<ErModelTable>();
             Relationships = new List<ErModelRelationship>();
+            Routines = new List<ErModelRoutine>();
         }
 
         public string Provider { get; set; }
         public List<ErModelTable> Tables { get; set; }
         public List<ErModelRelationship> Relationships { get; set; }
+        /// <summary>函式與預存程序（完整 CREATE 定義）。</summary>
+        public List<ErModelRoutine> Routines { get; set; }
 
         public ErModelTable Find(string name)
         {
@@ -282,6 +285,8 @@ namespace mySQLPunk.lib
             if (schema.Provider.Length == 0) throw new InvalidOperationException(Localization.T("ErModel.Error.SchemaProvider"));
             schema.Tables = schema.Tables ?? new List<ErModelTable>();
             schema.Relationships = schema.Relationships ?? new List<ErModelRelationship>();
+            schema.Routines = schema.Routines ?? new List<ErModelRoutine>();
+            RoutineModelService.Validate(schema.Routines);
             if (schema.Tables.Count > MaximumSchemaTables) throw new InvalidOperationException(Localization.Format("ErModel.Error.TooManyTables", MaximumSchemaTables));
             HashSet<string> tableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (ErModelTable table in schema.Tables)
@@ -421,7 +426,8 @@ namespace mySQLPunk.lib
             {
                 Provider = schema.Provider,
                 Tables = schema.Tables.Select(item => item).ToList(),
-                Relationships = new List<ErModelRelationship>()
+                Relationships = new List<ErModelRelationship>(),
+                Routines = schema.Routines
             };
             int index = originalName == null ? -1 : candidate.Tables.FindIndex(item => string.Equals(item.Name, originalName, StringComparison.OrdinalIgnoreCase));
             if (originalName != null && index < 0) throw new InvalidOperationException(Localization.Format("ErModel.Error.UnknownTable", originalName));

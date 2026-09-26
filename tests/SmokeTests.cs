@@ -12481,6 +12481,7 @@ public static partial class SmokeTests
         {
             AssertErModelSemantics(modelDir);
             AssertErModelSchemaSemantics();
+            AssertRoutineModelSemantics();
             using (my_sqlite sqlite = new my_sqlite())
             {
                 sqlite.SetConn("Data Source=" + Path.Combine(modelDir, "er.sqlite") + ";Version=3;");
