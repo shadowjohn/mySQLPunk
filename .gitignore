@@ -357,3 +357,10 @@ setting.ini
 connection-profile.txt
 connection_profiles/
 *.ini
+
+# Local-only report export design intermediates
+/snapshot/punky_loading_clean.apng
+/docs/design/report-export/samples/_qa/
+
+# Generated native report verification evidence
+/docs/design/report-export/implementation-qa/

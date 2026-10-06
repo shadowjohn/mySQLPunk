@@ -1,0 +1,28 @@
+{
+  "schema": "demo_shop",
+  "notice": "樣版示例／示範結構；完全虛構，未包含資料列。",
+  "tables": [
+    {"name":"customers","comment":"客戶基本資料","fields":[
+      ["customer_id","客戶編號","bigint unsigned","PK","NO","未設定","auto_increment"],
+      ["display_name","顯示名稱","varchar(80)","-","NO","未設定","-"],
+      ["email","電子郵件","varchar(160)","UK","YES","NULL","-"],
+      ["status","帳號狀態","varchar(16)","-","NO","'active'","-"],
+      ["created_at","建立時間","datetime","-","NO","CURRENT_TIMESTAMP","-"]
+    ]},
+    {"name":"orders","comment":"訂單主檔","fields":[
+      ["order_id","訂單編號","bigint unsigned","PK","NO","未設定","auto_increment"],
+      ["customer_id","訂購客戶","bigint unsigned","FK","NO","未設定","customers.customer_id"],
+      ["ordered_at","訂購時間","datetime","-","NO","CURRENT_TIMESTAMP","-"],
+      ["status","訂單狀態","varchar(16)","-","NO","'pending'","-"],
+      ["total_amount","訂單金額","decimal(12,2)","-","NO","0.00","-"]
+    ]},
+    {"name":"order_items","comment":"訂單明細","fields":[
+      ["item_id","明細編號","bigint unsigned","PK","NO","未設定","auto_increment"],
+      ["order_id","所屬訂單","bigint unsigned","FK","NO","未設定","orders.order_id"],
+      ["product_name","商品名稱快照","varchar(120)","-","NO","未設定","-"],
+      ["quantity","訂購數量","int unsigned","-","NO","1","-"],
+      ["unit_price","商品單價","decimal(12,2)","-","NO","0.00","-"],
+      ["note","明細備註","varchar(255)","-","YES","NULL","-"]
+    ]}
+  ]
+}

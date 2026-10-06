@@ -60,3 +60,17 @@ this directory, such as `add.png`, `delete.png`, `save.png`, `table.png`,
 These icons are treated as mySQLPunk project assets. They should be distributed
 under the same project license as mySQLPunk unless a future replacement adds a
 more specific third-party notice here.
+
+
+## Report Export Punky Animation
+
+`punky_report_loading_atlas.png` (73 RGBA frames, 384px, 8 columns) and
+`punky_report_loading.png` derive from the user-provided project animation
+`snapshot/punky_loading.mp4` and its repaired transparent matte. They follow
+the project mascot asset terms above. The PNG atlas preserves alpha for both
+application themes; no video decoder or external runtime is needed. The local
+lossless APNG master is not included in application packages.
+
+The accompanying `punky_report_loading.wav` is the original six-second audio
+from the same user-provided MP4, converted to PCM for Windows playback. It
+plays once per export and follows the same project asset terms.

@@ -13355,6 +13355,23 @@ namespace mySQLPunk
             }
         }
 
+        private void ExportSchemaReportForNode(TreeNode node)
+        {
+            TreeNode root = node;
+            while (root.Parent != null && !IsConnectionGroupNode(root.Parent)) root = root.Parent;
+            int index = GetConnectionIndex(root);
+            var parts = GetTreePathParts(node);
+            if (index < 0 || index >= myN.connections.Count || parts.Length < 2) return;
+            var connection = myN.connections[index];
+            if (GetConnectionValue(connection, "isConnect") != "T")
+            {
+                MessageBox.Show(Localization.T("Object.OpenConnectionFirst"), ReportText.Get("匯出報表", "Export report"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            using (var wizard = new ReportExportWizardForm(connection, parts[1])) wizard.ShowDialog(this);
+        }
+
         private void AddDatabaseNodeMenuItems(ContextMenuStrip menu, TreeNode node)
         {
             ToolStripMenuItem closeItem = new ToolStripMenuItem(Localization.T("Tool.CloseDatabase"));
@@ -13434,6 +13451,10 @@ namespace mySQLPunk
             ToolStripMenuItem dataDictionaryItem = new ToolStripMenuItem(Localization.T("Dict.MenuItem"));
             dataDictionaryItem.Click += (s, ev) => GenerateDataDictionaryForNode(node);
             menu.Items.Add(dataDictionaryItem);
+
+            var reportItem = new ToolStripMenuItem(ReportText.Get("匯出報表…", "Export report…"));
+            reportItem.Click += (s, ev) => ExportSchemaReportForNode(node);
+            menu.Items.Add(reportItem);
 
             ToolStripMenuItem executeSqlFileItem = new ToolStripMenuItem(Localization.T("Tool.ExecuteSqlFile"));
             executeSqlFileItem.Click += (s, ev) => ImportSqlWithDialog();

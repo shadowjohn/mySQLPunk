@@ -1,0 +1,92 @@
+{
+  "schema": "demo_shop",
+  "tables": 3,
+  "fields": 16,
+  "notice": "樣版示例／示範結構；完全虛構，未包含資料列。",
+  "templates": [
+    {
+      "id": "docx-schema-specification",
+      "name": "系統資料庫規格書",
+      "format": "docx",
+      "sample": "docx-schema-specification.docx",
+      "thumbnail": "docx-schema-specification.png",
+      "thumbnailKind": "native-word-render",
+      "thumbnailNote": "Word 實際轉出範例第 2 頁；範例由 Python 產生器製作，非 C# 匯出器驗收結果。",
+      "pageOrSheetCount": 4,
+      "bytes": 39430,
+      "verification": "Open XML SDK 0 errors；本機 Word 唯讀轉出 4 頁並檢視。原生應用程式匯出尚待執行驗收。"
+    },
+    {
+      "id": "docx-classic",
+      "name": "經典資料字典",
+      "format": "docx",
+      "sample": "docx-classic.docx",
+      "thumbnail": "docx-classic.png",
+      "thumbnailKind": "illustration",
+      "thumbnailNote": "設計示意，非 Office 實際轉檔畫面",
+      "pageOrSheetCount": 1,
+      "bytes": 38560,
+      "verification": "NULL 欄寬修正為 1.4 cm；Open XML SDK 0 errors。本機 Word 唯讀轉出 1 頁並檢視；原生 C# 匯出器尚待執行驗收。"
+    },
+    {
+      "id": "docx-delivery",
+      "name": "專案交付文件",
+      "format": "docx",
+      "sample": "docx-delivery.docx",
+      "thumbnail": "docx-delivery.png",
+      "thumbnailKind": "illustration",
+      "thumbnailNote": "設計示意，非 Office 實際轉檔畫面",
+      "pageOrSheetCount": 2,
+      "bytes": 38715,
+      "verification": "NULL 欄寬修正為 1.4 cm；Open XML SDK 0 errors。本機 Word 唯讀轉出 2 頁並檢視；原生 C# 匯出器尚待執行驗收。"
+    },
+    {
+      "id": "xlsx-tables",
+      "name": "一表一工作表",
+      "format": "xlsx",
+      "sample": "xlsx-tables.xlsx",
+      "thumbnail": "xlsx-tables.png",
+      "thumbnailKind": "artifact-tool-render",
+      "thumbnailNote": "Artifact Tool 工作表預覽，非 Excel 截圖",
+      "pageOrSheetCount": 3,
+      "bytes": 9872,
+      "verification": "OOXML ZIP 與 openpyxl 重新讀取通過；16 欄定義逐格吻合；Artifact Tool 各工作表預覽已檢視。未啟動 Excel。"
+    },
+    {
+      "id": "xlsx-inventory",
+      "name": "欄位總覽清冊",
+      "format": "xlsx",
+      "sample": "xlsx-inventory.xlsx",
+      "thumbnail": "xlsx-inventory.png",
+      "thumbnailKind": "artifact-tool-render",
+      "thumbnailNote": "Artifact Tool 工作表預覽，非 Excel 截圖",
+      "pageOrSheetCount": 1,
+      "bytes": 6213,
+      "verification": "OOXML ZIP 與 openpyxl 重新讀取通過；16 欄定義逐格吻合；Artifact Tool 各工作表預覽已檢視。未啟動 Excel。"
+    },
+    {
+      "id": "pdf-standard",
+      "name": "標準結構手冊",
+      "format": "pdf",
+      "sample": "pdf-standard.pdf",
+      "thumbnail": "pdf-standard.png",
+      "thumbnailKind": "pdf-render",
+      "thumbnailNote": "由最終 PDF 實際渲染",
+      "pageOrSheetCount": 3,
+      "bytes": 86677,
+      "verification": "pypdf 重新讀取 3 頁；3 表與 16 欄名稱俱全；Poppler 最終 PDF 全頁影像已檢視。"
+    },
+    {
+      "id": "pdf-compact",
+      "name": "精簡審閱版",
+      "format": "pdf",
+      "sample": "pdf-compact.pdf",
+      "thumbnail": "pdf-compact.png",
+      "thumbnailKind": "pdf-render",
+      "thumbnailNote": "由最終 PDF 實際渲染",
+      "pageOrSheetCount": 1,
+      "bytes": 78526,
+      "verification": "pypdf 重新讀取 1 頁；3 表與 16 欄名稱俱全；Poppler 最終 PDF 全頁影像已檢視。"
+    }
+  ]
+}

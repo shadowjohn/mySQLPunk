@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "full_frame_count": 145,
+  "preview_frame_count": 49,
+  "apng_duration_ms": 6042.0,
+  "webp_duration_ms": 6042.0,
+  "alpha": "all 145 APNG frames have fully transparent corners and fully opaque subject pixels; six VP9 frames decode real alpha with libvpx-vp9",
+  "source_loop_seam_rgb_mae": 28.703939365268166,
+  "source_adjacent_rgb_mae_median": 8.035841082756633,
+  "source_adjacent_rgb_mae_p95": 25.071904341929784,
+  "cleaned_alpha_loop_seam_mae": 22.383295712586506,
+  "cleaned_alpha_adjacent_mae_median": 2.287660169766436,
+  "recomposite_black_rgb_mae_mean": 0.02465262759515571,
+  "recomposite_black_rgb_mae_worst": 0.06762498197808535,
+  "opaque_dark_pixels_preserved_per_frame_min": 1985,
+  "opaque_dark_pixels_preserved_per_frame_max": 9300,
+  "loop_note": "The original poses at frame 0 and 144 differ. No frame reordering, crossfade or fabricated seamless loop was introduced."
+}

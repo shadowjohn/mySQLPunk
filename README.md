@@ -155,7 +155,20 @@ PostgreSQL `timestamp(p)`、`timestamptz(p)`、`time(p)` 與 `timetz(p)` 會依�
 - Target Framework: `.NET Framework 4.7.2`
 - Output Type: `WinExe`
 
-建置：
+建置與啟動（在專案根目錄執行）：
+
+```powershell
+.\build.bat          # 預設編譯 Debug
+.\build.bat release  # 編譯 Release
+.\run.bat            # 先編譯 Debug，成功後啟動
+.\run.bat release    # 先編譯 Release，成功後啟動
+```
+
+兩支腳本都接受 `debug` / `release`（不分大小寫），省略時使用 Debug；無效或多餘參數會顯示用法並回傳非零結束碼。輸出位於 `mySQLPunk/bin/Debug` 或 `mySQLPunk/bin/Release`。`run.bat` 以執行檔目錄作為工作目錄，建置失敗時不會啟動舊版程式。
+
+`build.bat` 依序尋找 `MSBUILD_EXE` 指定路徑、PATH、Visual Studio Installer 的 `vswhere` 與 `C:\BuildTools`，使用 MSBuild 16.5 以上（Visual Studio / Build Tools 2019 以上）還原 `packages.config` 套件並建置。若安裝在自訂位置，可設定 `MSBUILD_EXE` 為 `MSBuild.exe` 的完整路徑；套件仍依 `NuGet.Config` 還原至專案的 `packages/`。
+
+也可沿用手動建置：
 
 ```powershell
 nuget restore .\mySQLPunk.sln

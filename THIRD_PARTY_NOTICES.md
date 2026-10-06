@@ -23,6 +23,8 @@ cross-platform SDK projects, including:
 - ZstdSharp.Port 0.7.3 - MIT
 - MySqlConnector 2.3.7 (Windows project) - MIT
 - Newtonsoft.Json 13.0.4 - MIT
+- PDFsharp-GDI 6.2.4 - MIT
+- System.Security.Cryptography.Pkcs 8.0.1 - MIT
 - Npgsql 8.0.3 (Windows project) - PostgreSQL License
 - Oracle.ManagedDataAccess 23.26.200 - Oracle Free Distribution, Hosting, and Use Terms
 - BouncyCastle.Cryptography 2.7.0 - MIT

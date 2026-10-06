@@ -109,7 +109,8 @@ function Copy-ReleaseFiles {
     $_.Name -notmatch '\.log$' -and
     $_.Name -notmatch '\.corrupt-' -and
         $_.Name -notmatch '\.xml$' -and
-        $_.Name -ne "CodexVerify"
+        $_.Name -ne "CodexVerify" -and
+        $_.Name -notmatch '^(ReportExportTests|SmokeTests|mySQLPunk\.SmokeTests|ValidateReportOpenXml)(\.|$)'
     }
 
     foreach ($item in $items) {
