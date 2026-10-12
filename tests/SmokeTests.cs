@@ -32,6 +32,9 @@ public static partial class SmokeTests
         Run("MSSQL export metadata startup cancellation", Metadata_CancelsBeforeAndDuringReaderStartup, ref passed);
         Run("MSSQL export metadata reader ownership", Metadata_DisposesReaderAndCancellationBeforeCommand, ref passed);
         Run("MSSQL export metadata native reader", Metadata_RequiresNativeReader, ref passed);
+        Run("MSSQL export artifact pipeline", Artifact_Pipeline, ref passed);
+        Run("MSSQL export artifact failures", Artifact_Adversarial, ref passed);
+        Run("MSSQL export artifact cooperative gates", Artifact_CooperativeGates, ref passed);
         Run("MSSQL export session owner", Session_DisposesOwnerOnce, ref passed);
         Run("MSSQL export session request", Request_CopiesSelectionAndRejectsInvalidMode, ref passed);
         Run("Geometry WKB 轉 WKT", TestGeometryWktConverter, ref passed);
