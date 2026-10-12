@@ -228,5 +228,33 @@ namespace mySQLPunk.lib.MssqlExport
         public bool CanStart => Issues.Count == 0;
         internal MssqlExportPreflight(MssqlExportSchema schema, IEnumerable<MssqlExportIssue> issues) { Schema = schema; Issues = MssqlNativeFacts.Copy(issues); }
     }
+    internal sealed class MssqlTableRowCount
+    {
+        public MssqlObjectKey Key { get; }
+        public long Rows { get; }
+        public MssqlTableRowCount(MssqlObjectKey key, long rows)
+        {
+            if (key == null) throw new ArgumentNullException(nameof(key));
+            if (rows < 0) throw new ArgumentOutOfRangeException(nameof(rows));
+            Key = key; Rows = rows;
+        }
+    }
+    internal sealed class MssqlArtifactReceipt
+    {
+        public Guid JobId { get; }
+        public string TemporaryPath { get; }
+        public string IntendedTargetPath { get; }
+        public long Bytes { get; }
+        public string Sha256 { get; }
+        public IReadOnlyList<MssqlTableRowCount> Tables { get; }
+        public long TotalRows { get; }
+        public string CompletionMarker { get; }
+        internal MssqlArtifactReceipt(Guid jobId, string temporaryPath, string publishedPath, long bytes, string sha256, IReadOnlyList<MssqlTableRowCount> tables, string marker)
+        {
+            JobId = jobId; TemporaryPath = temporaryPath; IntendedTargetPath = publishedPath; Bytes = bytes; Sha256 = sha256;
+            Tables = new List<MssqlTableRowCount>(tables).AsReadOnly(); CompletionMarker = marker;
+            long total = 0; foreach (var table in Tables) total = checked(total + table.Rows); TotalRows = total;
+        }
+    }
 
 }

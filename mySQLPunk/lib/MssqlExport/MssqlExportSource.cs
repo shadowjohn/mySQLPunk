@@ -74,7 +74,7 @@ namespace mySQLPunk.lib.MssqlExport
                 cancellation.ThrowIfCancellationRequested();
                 var columns = table.Columns.Where(c => !c.Computed && !c.RowVersion).OrderBy(c => c.Ordinal).ToList();
                 // A rowversion/computed-only table still needs a row count for DEFAULT VALUES.
-                string projection = columns.Count == 0 ? "CAST(1 AS bit) AS [__mysqlpunk_row]" : string.Join(",", columns.Select(c => MssqlExportMetadataReader.Quote(c.Name)));
+                string projection = columns.Count == 0 ? "CAST(1 AS bit) AS [__mysqlpunk_row]" : string.Join(",", columns.Select(MssqlValueCodec.SourceExpression));
                 var command = new SqlCommand("SELECT " + projection + " FROM " + MssqlExportMetadataReader.Qualified(table.Key), session.Connection, transaction) { CommandTimeout = 0 };
                 var owner = new MssqlCommandOwner(command, cancellation);
                 try { activeReader = new MssqlRowReader(owner.ExecuteReader(CommandBehavior.SequentialAccess), owner); return activeReader; }
