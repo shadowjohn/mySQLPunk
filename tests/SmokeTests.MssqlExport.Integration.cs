@@ -21,10 +21,11 @@ public static partial class SmokeTests
     {
         string profile = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION");
         if (string.IsNullOrEmpty(profile)) { Console.WriteLine("SKIP live integration (explicit runner -Run required)"); return; }
-        Assert(new[] { "Core", "Large", "Concurrency", "ClientProbe" }.Contains(profile), "Known integration profile");
+        Assert(new[] { "Core", "Large", "Concurrency", "ClientProbe", "FinalFix" }.Contains(profile), "Known integration profile");
         using (var fixture = new IntegrationFixture(profile))
         {
             if (profile == "ClientProbe") IntegrationClientProbe(fixture);
+            else if (profile == "FinalFix") IntegrationFinalFix(fixture);
             else if (profile == "Core") IntegrationCore(fixture);
             else if (profile == "Large") IntegrationLarge(fixture);
             else IntegrationConcurrency(fixture);
@@ -190,6 +191,41 @@ public static partial class SmokeTests
         private void Sample() { using(var p=Process.GetCurrentProcess()) { p.Refresh(); lock(peaks) { long[] pair; if(!peaks.TryGetValue(Stage,out pair))peaks[Stage]=pair=new long[3]; pair[0]=Math.Max(pair[0],p.WorkingSet64);pair[1]=Math.Max(pair[1],p.PrivateMemorySize64);pair[2]++; } } }
         internal object Snapshot() { Sample(); lock(peaks)return peaks.ToDictionary(x=>x.Key,x=>new {workingSet=x.Value[0],privateBytes=x.Value[1],samples=x.Value[2]}); }
         public void Dispose() { using(var done=new ManualResetEvent(false)){timer.Dispose(done);done.WaitOne();} }
+    }
+
+    private static void IntegrationFinalFix(IntegrationFixture f)
+    {
+        const string table = "dbo.IndexedComputed";
+        const string ddl = "CREATE TABLE dbo.IndexedComputed(id int NOT NULL, value int NOT NULL, doubled AS (value * 2) PERSISTED); CREATE UNIQUE INDEX IX_IndexedComputed_doubled ON dbo.IndexedComputed(doubled);";
+        using (var c = f.Open(f.Source))
+            IntegrationFixture.Exec(c, ddl + " INSERT dbo.IndexedComputed(id,value) VALUES(1,7),(2,19);");
+        using (var c = f.Open(f.Source))
+            IntegrationFixture.Exec(c, "CREATE TABLE dbo.WideEstimate(id int NOT NULL, pad char(4000) NOT NULL); INSERT dbo.WideEstimate SELECT TOP (40) ROW_NUMBER() OVER (ORDER BY object_id), REPLICATE('X',4000) FROM sys.all_objects;");
+        using (var c = f.Open(f.Target)) IntegrationFixture.Exec(c, ddl);
+        var catalog = f.Service().LoadCatalog(f.Source, CancellationToken.None);
+        var selected = catalog.Tables.Single(t => t.Key.Schema == "dbo" && t.Key.Name == "IndexedComputed");
+        var wide = catalog.Tables.Single(t => t.Key.Schema == "dbo" && t.Key.Name == "WideEstimate");
+        Assert(selected.EstimatedRows.HasValue && selected.EstimatedBytes.HasValue && selected.EstimatedBytes.Value > 0 && wide.EstimatedBytes > selected.EstimatedBytes, "Real native catalog differentiates table storage");
+        var estimateSchema = new MssqlExportSchema(new[] { selected, wide }, null, null, 1, null);
+        var progress = new MssqlExportProgressEstimator(Guid.NewGuid(), estimateSchema, false).Sample(MssqlExportStage.Data, selected.Key, 1, 100, 1000, TimeSpan.FromSeconds(3), true);
+        Assert(progress.EstimatedBytes == selected.EstimatedBytes + wide.EstimatedBytes && progress.Percent.HasValue, "Actual metadata flows into weighted estimator");
+        f.Evidence["actualStorageEstimate"] = new { selected.EstimatedRows, selected.EstimatedBytes, wideBytes = wide.EstimatedBytes, progress.Percent };
+        var request = f.Request("data-only-indexed-computed.sql", false, MssqlExportMode.DataOnly, t => t.Key.Name == "IndexedComputed");
+        var result = f.Export(request);
+        Assert(result.Stage == MssqlExportStage.Completed, "DataOnly service artifact: " + result.ErrorMessage);
+        string script = File.ReadAllText(result.PublishedPath);
+        AssertContains(script, "SET QUOTED_IDENTIFIER ON;", "DataOnly artifact carries session preamble");
+        AssertNotContains(script, "CREATE TABLE", "DataOnly artifact has no object creation");
+        AssertNotContains(script, "ALTER TABLE", "DataOnly artifact has no object alteration");
+        Assert(Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_CLIENT") == "Classic", "Exact classic sqlcmd required");
+        f.RecordArtifact(result.PublishedPath);
+        f.Restore(result.PublishedPath);
+        using (var c = f.Open(f.Target))
+        {
+            Assert(Convert.ToInt32(IntegrationFixture.Scalar(c, "SELECT COUNT(*) FROM " + table + " WHERE doubled=value*2")) == 2, "Indexed computed target contains both restored rows");
+            Assert(Convert.ToInt32(IntegrationFixture.Scalar(c, "SELECT COUNT(*) FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.IndexedComputed') AND name=N'IX_IndexedComputed_doubled'")) == 1, "Compatible computed-column index remains");
+        }
+        f.Pass("Real DataOnly service artifact restored through documented classic one-session sqlcmd -E -b -x -f 65001 -i");
     }
 
     private static void IntegrationCore(IntegrationFixture f)

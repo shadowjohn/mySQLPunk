@@ -1,7 +1,7 @@
 param(
     [switch]$Run,
     [string]$Server,
-    [ValidateSet('Core','Large','Concurrency','ClientProbe','Ssh')][string]$Profile = 'Core',
+    [ValidateSet('Core','Large','Concurrency','ClientProbe','FinalFix','Ssh')][string]$Profile = 'Core',
     [string]$OutputDirectory,
     [ValidateSet('Classic','Go')][string]$Client = 'Classic',
     [string]$SqlcmdPath,

@@ -75,7 +75,9 @@ public static partial class SmokeTests
         var schema=SchemaFixture(); var writer=new MssqlSchemaScriptWriter();
         var output=new StringWriter(); var request=SchemaRequest(schema,MssqlExportMode.DataOnly);
         writer.WriteBeforeData(schema,request,output,CancellationToken.None); writer.WriteAfterData(schema,request,output,CancellationToken.None);
-        AssertEquals("",output.ToString(),"Data only has no DDL");
+        AssertContains(output.ToString(),"SET QUOTED_IDENTIFIER ON;","Data only supplies indexed-computed-column DML session settings");
+        AssertNotContains(output.ToString(),"CREATE TABLE","Data only does not create objects");
+        AssertNotContains(output.ToString(),"ALTER TABLE","Data only does not alter objects");
         output=new StringWriter(); request=SchemaRequest(schema,MssqlExportMode.SchemaOnly);
         writer.WriteBeforeData(schema,request,output,CancellationToken.None);writer.WriteAfterData(schema,request,output,CancellationToken.None);
         AssertContains(output.ToString(),"FOREIGN KEY","Schema only includes complete constraints");

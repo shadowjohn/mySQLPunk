@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 using System.IO;
+using System.Linq;
 using mySQLPunk.lib;
 using mySQLPunk.lib.MssqlExport;
 
@@ -47,6 +48,41 @@ public static partial class SmokeTests
         Assert(schema.Fingerprint != changed.Fingerprint, "Definition fingerprint includes comments");
         var estimated = new MssqlExportSchema(new[] { new MssqlTableDefinition(a, new Dictionary<string, object> { { "estimated_rows", 123L } }, new[] { shape, xml, udt }, null, null), tables[1] }, null, schema.Dependencies, 0, null);
         Assert(schema.Fingerprint == estimated.Fingerprint, "Changing row estimate is not schema drift");
+    }
+
+    private static void Metadata_StorageAndCapability()
+    {
+        var rows = new[] {
+            new Dictionary<string, object> { { "object_id", 1 }, { "schema_name", "dbo" }, { "name", "wide" }, { "estimated_rows", 100L } },
+            new Dictionary<string, object> { { "object_id", 2 }, { "schema_name", "sales" }, { "name", "narrow" }, { "estimated_rows", 100L } },
+            new Dictionary<string, object> { { "object_id", 3 }, { "schema_name", "dbo" }, { "name", "unavailable" }, { "estimated_rows", 100L } }
+        };
+        var storage = new[] {
+            new Dictionary<string, object> { { "object_id", 1 }, { "estimated_bytes", 819200L } },
+            new Dictionary<string, object> { { "object_id", 2 }, { "estimated_bytes", 8192L } }
+        };
+        var tables = MssqlExportMetadataReader.MapTables(rows, storage);
+        Assert(tables[0].EstimatedBytes == 819200 && tables[1].EstimatedBytes == 8192 && tables[2].EstimatedBytes == null, "Catalog storage estimates map by object and preserve unavailable");
+        Assert(MssqlExportMetadataReader.MapTables(rows, null).All(t => !t.EstimatedBytes.HasValue), "Optional storage query failure keeps estimates unavailable");
+        var schema = new MssqlExportSchema(tables.Take(2), null, null, 1, null);
+        var estimator = new MssqlExportProgressEstimator(Guid.NewGuid(), schema, false);
+        var progress = estimator.Sample(MssqlExportStage.Data, tables[0].Key, 10, 81920, 1000, TimeSpan.FromSeconds(3), true);
+        Assert(progress.EstimatedBytes == 827392 && progress.Percent.HasValue && progress.Percent.Value < 85, "Native mapped sizes feed non-authoritative estimator");
+        var unknown = new MssqlExportProgressEstimator(Guid.NewGuid(), new MssqlExportSchema(tables, null, null, 1, null), false).Sample(MssqlExportStage.Data, tables[0].Key, 10, 81920, 1000, TimeSpan.FromSeconds(3), true);
+        Assert(!unknown.Percent.HasValue, "Unavailable storage keeps indeterminate data percent");
+        var changedStorage = MssqlExportMetadataReader.MapTables(rows, new[] {
+            new Dictionary<string, object> { { "object_id", 1 }, { "estimated_bytes", 1638400L } },
+            new Dictionary<string, object> { { "object_id", 2 }, { "estimated_bytes", 16384L } }
+        });
+        Assert(schema.Fingerprint == new MssqlExportSchema(changedStorage.Take(2), null, null, 1, null).Fingerprint, "Mutable storage estimates cannot cause schema drift");
+        AssertContains(MssqlExportMetadataReader.OptionalProjection("i", "optimize_for_sequential_key", new string[0]), "CAST(NULL AS int)", "Absent index capability remains unknown");
+        var key = new MssqlObjectKey(1, "dbo", "ordinary");
+        var column = new MssqlColumnDefinition(new Dictionary<string, object> { { "column_id", 1 }, { "name", "id" }, { "type_name", "int" } });
+        var index = new MssqlIndexDefinition(new Dictionary<string, object> { { "index_id", 1 }, { "name", "pk" }, { "type", 1 }, { "is_primary_key", true }, { "optimize_for_sequential_key", null } }, new[] { new MssqlNativeFacts(new Dictionary<string, object> { { "index_column_id", 1 }, { "name", "id" }, { "key_ordinal", 1 } }) });
+        var ddl = new StringWriter();
+        var oldSchema = new MssqlExportSchema(new[] { new MssqlTableDefinition(key, new Dictionary<string, object>(), new[] { column }, new[] { index }, null) }, null, null, 1, null);
+        new MssqlSchemaScriptWriter().WriteAfterData(oldSchema, new MssqlExportRequest(Guid.NewGuid(), "db", new[] { key }, MssqlExportMode.SchemaAndData, false, Path.Combine(Path.GetTempPath(), "unused.sql"), null, null), ddl, System.Threading.CancellationToken.None);
+        AssertNotContains(ddl.ToString(), "OPTIMIZE_FOR_SEQUENTIAL_KEY", "Unavailable old-engine index option omitted from DDL");
     }
 
     private static void Metadata_CancelsBeforeAndDuringReaderStartup()

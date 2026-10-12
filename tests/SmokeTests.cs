@@ -35,6 +35,7 @@ public static partial class SmokeTests
         Run("MSSQL export routing result status", Routing_ResultStatus, ref passed);
         Run("MSSQL export wizard selection", Wizard_Selection, ref passed);
         Run("MSSQL export wizard preflight", Wizard_Preflight, ref passed);
+        Run("MSSQL export wizard issues scope and duration", Wizard_IssueScopeAndDuration, ref passed);
         Run("MSSQL export wizard lifecycle", Wizard_Lifecycle, ref passed);
         Run("MSSQL export wizard raw identity and reset", Wizard_RawSelectionAndReset, ref passed);
         Run("MSSQL export wizard inspection close", Wizard_InspectionClose, ref passed);
@@ -54,6 +55,7 @@ public static partial class SmokeTests
         Run("MSSQL export schema modes and failures", Schema_ModesCancellationAndFailures, ref passed);
         Run("MSSQL export schema native writer", Schema_RequiresWriter, ref passed);
         Run("MSSQL export metadata mapping and validation", Metadata_MapsNativeFactsAndValidates, ref passed);
+        Run("MSSQL export metadata storage and capability", Metadata_StorageAndCapability, ref passed);
         Run("MSSQL export metadata startup cancellation", Metadata_CancelsBeforeAndDuringReaderStartup, ref passed);
         Run("MSSQL export metadata reader ownership", Metadata_DisposesReaderAndCancellationBeforeCommand, ref passed);
         Run("MSSQL export metadata native reader", Metadata_RequiresNativeReader, ref passed);

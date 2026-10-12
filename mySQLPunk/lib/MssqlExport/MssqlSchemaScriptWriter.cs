@@ -14,8 +14,8 @@ namespace mySQLPunk.lib.MssqlExport
         internal void WriteBeforeData(MssqlExportSchema schema, MssqlExportRequest request, TextWriter output, CancellationToken cancellation)
         {
             Validate(schema, request, output, cancellation);
-            if (request.Mode == MssqlExportMode.DataOnly) return;
             Settings(output);
+            if (request.Mode == MssqlExportMode.DataOnly) return;
             output.WriteLine("-- Restore into an empty, compatible target selected by the caller; existing objects fail.");
             output.WriteLine("-- Named filegroups must already exist. Rowversion values are regenerated.");
             output.WriteLine("-- Identity preserves seed/increment and inserted values, not historical allocation gaps.");

@@ -159,20 +159,55 @@ FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.refer
             string sql = @"SELECT t.object_id,SCHEMA_NAME(t.schema_id) schema_name,t.name,t.uses_ansi_nulls,t.lock_escalation_desc,t.text_in_row_limit,t.large_value_types_out_of_row,CONVERT(nvarchar(max),ep.value) comment,
 HAS_PERMS_BY_NAME(QUOTENAME(SCHEMA_NAME(t.schema_id))+'.'+QUOTENAME(t.name),'OBJECT','SELECT') can_select,
 (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id=t.object_id AND p.index_id IN(0,1)) estimated_rows,
-CAST(NULL AS bigint) estimated_bytes,
 (SELECT COUNT(*) FROM sys.triggers tr WHERE tr.parent_id=t.object_id) trigger_count,
 (SELECT COUNT(*) FROM sys.fulltext_indexes f WHERE f.object_id=t.object_id) fulltext_count,
 (SELECT COUNT(*) FROM sys.extended_properties e WHERE e.class=1 AND e.major_id=t.object_id AND e.name<>N'MS_Description') unsupported_properties," +
 (security ? "(SELECT COUNT(*) FROM sys.security_predicates sp WHERE sp.target_object_id=t.object_id)" : "0") + " security_policy_count," + optional + @"
 FROM sys.tables t LEFT JOIN sys.extended_properties ep ON ep.class=1 AND ep.major_id=t.object_id AND ep.minor_id=0 AND ep.name=N'MS_Description'
 WHERE t.is_ms_shipped=0 ORDER BY t.object_id";
-            return Query(c, t, sql, token).Select(r => { var f = new MssqlNativeFacts(r); return new MssqlTableDefinition(new MssqlObjectKey(f.Number("object_id"), f.Text("schema_name"), f.Text("name")), r, null, null, null); }).ToList();
+            var rows = Query(c, t, sql, token);
+            // Allocation metadata is a bounded catalog read. It is advisory and must not
+            // make catalog loading depend on a new permission or a table scan.
+            IReadOnlyList<Dictionary<string, object>> storage = null;
+            try
+            {
+                storage = Query(c, t, @"SELECT p.object_id,
+SUM(CONVERT(bigint, a.used_pages)) * CONVERT(bigint, 8192) estimated_bytes
+FROM sys.partitions p JOIN sys.allocation_units a
+ON (a.type IN (1,3) AND a.container_id=p.hobt_id)
+OR (a.type=2 AND a.container_id=p.partition_id)
+WHERE p.index_id IN (0,1)
+GROUP BY p.object_id", token);
+            }
+            catch (SqlException) { /* Optional estimate unavailable; actual export can continue. */ }
+            return MapTables(rows, storage);
+        }
+        internal static List<MssqlTableDefinition> MapTables(IReadOnlyList<Dictionary<string, object>> rows, IReadOnlyList<Dictionary<string, object>> storage)
+        {
+            var sizes = (storage ?? new Dictionary<string, object>[0])
+                .Where(r => r.ContainsKey("object_id") && r.ContainsKey("estimated_bytes"))
+                .ToDictionary(r => Convert.ToInt32(r["object_id"], CultureInfo.InvariantCulture), r => r["estimated_bytes"]);
+            return rows.Select(row =>
+            {
+                var values = new Dictionary<string, object>(row, StringComparer.Ordinal);
+                int id = Convert.ToInt32(values["object_id"], CultureInfo.InvariantCulture);
+                object size;
+                values["estimated_bytes"] = sizes.TryGetValue(id, out size) ? size : null;
+                var facts = new MssqlNativeFacts(values);
+                return new MssqlTableDefinition(new MssqlObjectKey(id, facts.Text("schema_name"), facts.Text("name")), values, null, null, null);
+            }).ToList();
         }
         // Probe catalog columns first: SQL Server still compiles a missing column inside CASE.
         private static string Optional(SqlConnection c, SqlTransaction t, string catalog, string alias, CancellationToken token, params string[] names)
         {
             var available = new HashSet<string>(Query(c, t, "SELECT name FROM sys.all_columns WHERE object_id=OBJECT_ID(N'" + catalog + "')", token).Select(r => Convert.ToString(r["name"], CultureInfo.InvariantCulture)), StringComparer.OrdinalIgnoreCase);
-            return string.Join(",", names.Select(n => available.Contains(n) ? alias + "." + Quote(n) : "CAST(0 AS int) " + Quote(n)));
+            return string.Join(",", names.Select(n => OptionalProjection(alias, n, available)));
+        }
+        internal static string OptionalProjection(string alias, string name, IEnumerable<string> available)
+        {
+            return available.Contains(name, StringComparer.OrdinalIgnoreCase)
+                ? alias + "." + Quote(name)
+                : "CAST(" + (name == "optimize_for_sequential_key" || name == "suppress_dup_key_messages" ? "NULL" : "0") + " AS int) " + Quote(name);
         }
         internal static List<Dictionary<string, object>> Query(SqlConnection connection, SqlTransaction transaction, string sql, CancellationToken token)
         {

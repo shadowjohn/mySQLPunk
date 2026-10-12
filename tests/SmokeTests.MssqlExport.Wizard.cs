@@ -47,6 +47,7 @@ public static partial class SmokeTests
         internal MssqlExportRequest Seen;
         internal IProgress<MssqlExportProgress> Progress;
         internal bool Exporting, Canceled, Block, Deny, Preview, BlockCatalog, BlockPreflight, Inspecting;
+        internal MssqlExportIssue[] IssueOverride;
         internal MssqlTableDefinition[] CatalogOverride;
         internal int UiThread, CatalogThread, PreflightThread;
         internal WizardService() : base(() =>
@@ -76,7 +77,7 @@ public static partial class SmokeTests
             if (BlockPreflight)
                 WaitInspection(token);
             Seen = request;
-            return new MssqlExportPreflight(new MssqlExportSchema(request.Tables.Select(k => Table(k.ObjectId, k.Schema, "")), null, null, Deny ? 0 : 1, null), Deny ? new[] { new MssqlExportIssue("snapshot", null, null, "SNAPSHOT unavailable") } : null);
+            return new MssqlExportPreflight(new MssqlExportSchema(request.Tables.Select(k => Table(k.ObjectId, k.Schema, "")), null, null, Deny ? 0 : 1, null), IssueOverride ?? (Deny ? new[] { new MssqlExportIssue("snapshot", null, null, "SNAPSHOT unavailable") } : null));
         }
 
         internal override MssqlExportResult Export(MssqlExportRequest request, IProgress<MssqlExportProgress> progress, CancellationToken token)
@@ -198,6 +199,31 @@ public static partial class SmokeTests
         }
     }
 
+    private static void Wizard_IssueScopeAndDuration()
+    {
+        var service = new WizardService { IssueOverride = new[] {
+            new MssqlExportIssue("UnsupportedSpatial", new MssqlObjectKey(2, "sales", "orders"), "shape", "Native spatial values require a future codec."),
+            new MssqlExportIssue("SnapshotUnavailable", null, null, "SNAPSHOT must be ON.")
+        }};
+        using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql")))
+        {
+            form.Show();
+            WPump(() => WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 2);
+            WClick(form, "mssqlStart");
+            WClick(form, "mssqlStart");
+            WPump(() => WControl<Label>(form, "mssqlConfirmation").Text.Contains("UnsupportedSpatial"));
+            string confirmation = WControl<Label>(form, "mssqlConfirmation").Text;
+            AssertContains(confirmation, "sales.orders", "Issue identifies same-name table by schema");
+            AssertContains(confirmation, "shape", "Issue identifies exact column");
+            AssertContains(confirmation, "UnsupportedSpatial", "Issue displays safe code");
+            Assert(confirmation.Contains("Database") || confirmation.Contains("資料庫"), "Database-level issue fallback");
+            Assert(confirmation.Contains("Views") || confirmation.Contains("檢視表"), "Scope includes views");
+            AssertContains(confirmation, "rowversion", "Scope explains regenerated values");
+            form.Close();
+        }
+        AssertEquals("25:02:03", MssqlExportWizardForm.FormatDuration(TimeSpan.FromHours(25) + TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(3)), "Duration keeps total hours");
+    }
+
     private static void Wizard_Lifecycle()
     {
         var service = new WizardService
@@ -216,6 +242,8 @@ public static partial class SmokeTests
             WPump(() => WControl<ProgressBar>(form, "mssqlOverallProgress").Value == 43);
             Assert(WControl<Label>(form, "mssqlStatus").Text == WControl<Label>(form, "mssqlStage").Text, "Running footer follows actual export stage");
             Assert(WControl<ProgressBar>(form, "mssqlTableProgress").Value == 50, "True separate table progress");
+            Assert(WControl<Label>(form, "mssqlPercent").Text.Contains("估計") || WControl<Label>(form, "mssqlPercent").Text.Contains("Estimated"), "Numeric percent is explicitly estimated");
+            Assert(WControl<Label>(form, "mssqlWritten").Text.Contains("50") && WControl<Label>(form, "mssqlWritten").Text.Contains(" / 2"), "Rows and completed/total table counters visible");
             service.Frame(service.Seen.JobId, 1234, true);
             WPump(() => WControl<Label>(form, "mssqlSpeed").Text.EndsWith("—"));
             Assert(WControl<ProgressBar>(form, "mssqlOverallProgress").Value == 43, "Stalled time does not fabricate progress");
@@ -261,6 +289,9 @@ public static partial class SmokeTests
                     WClick(form, "mssqlStart");
                     WPump(() => form.Result != null);
                     WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+                    string result = WControl<Label>(form, "mssqlResult").Text;
+                    Assert(result.Contains("rowversion") && (result.Contains("Views") || result.Contains("檢視表")), "Result repeats included/excluded view scope and regenerated values");
+                    Assert(result.Contains(" / 1"), "Result includes completed/total table count");
                     WClick(form, "mssqlStart");
                     Assert(form.Result == null && WControl<Label>(form, "mssqlResult").Text == "", "Reset clears previous result");
                 }
