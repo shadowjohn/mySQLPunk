@@ -128,17 +128,17 @@ internal SqlConnection Connection { get; }
 public void Dispose();
 ```
 
-- [ ] **1. 寫失敗測試，group `session`。** `Session_DisposesOwnerOnce` 以 fake IDatabase 計次；`Request_CopiesSelectionAndRejectsInvalidMode` 修改輸入 List 後 request 不變；測試 core assertions：
+- [x] **1. 寫失敗測試，group `session`。** `Session_DisposesOwnerOnce` 以 fake IDatabase 計次；`Request_CopiesSelectionAndRejectsInvalidMode` 修改輸入 List 後 request 不變；測試 core assertions：
   ```csharp
   session.Dispose(); session.Dispose();
   Assert(owner.DisposeCount == 1, "SQL provider and SSH lease have one owner");
   Assert(request.Tables.Count == 1, "Request must not retain mutable selection");
   Assert(MssqlExportLimits.SmallRowBytes == 262144, "Row buffer budget");
   ```
-- [ ] **2. 跑 session group，確認紅燈。** 編譯／註冊 wiring 與 friend assembly 併入這個可測 deliverable，不另做空 scaffolding task。
-- [ ] **3. 實作上述介面與 Models。** `ConnectionOpenResult` 加 internal native SqlConnection property／constructor，在既有 raw provider 建立點傳入；public constructor 保留。factory 使用 `Open(settings,false)`，驗證 MSSQL；失敗 dispose owner。session 不獨立 Dispose 同一 SqlConnection，command／transaction 留來源層管理。不得使用 ConnectionString 另開第二條連線。
-- [ ] **4. 跑 session group 為綠，確認既有 connection tests 仍過。** 只用 fake owner／未開啟連線完成生命週期單元測試；真 SSH 另列 Task 10。
-- [ ] **5. 檢查 diff 與提交。** 僅 stage 本 task 明確檔案；建議訊息 `feat(mssql-export): own export session and immutable requests`。不 push。
+- [x] **2. 跑 session group，確認紅燈。** 編譯／註冊 wiring 與 friend assembly 併入這個可測 deliverable，不另做空 scaffolding task。
+- [x] **3. 實作上述介面與 Models。** `ConnectionOpenResult` 加 internal native SqlConnection property／constructor，在既有 raw provider 建立點傳入；public constructor 保留。factory 使用 `Open(settings,false)`，驗證 MSSQL；失敗 dispose owner。session 不獨立 Dispose 同一 SqlConnection，command／transaction 留來源層管理。不得使用 ConnectionString 另開第二條連線。
+- [x] **4. 跑 session group 為綠，確認既有 connection tests 仍過。** 只用 fake owner／未開啟連線完成生命週期單元測試；真 SSH 另列 Task 10。
+- [x] **5. 檢查 diff 與提交。** 僅 stage 本 task 明確檔案；建議訊息 `feat(mssql-export): own export session and immutable requests`。不 push。
 
 ## Task 2：原生 metadata、預檢與快照來源
 
