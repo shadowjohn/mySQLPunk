@@ -10,6 +10,8 @@
 
 **Spec:** [design.md](design.md)，2026-10-12 修訂版；使用者已回覆「照修訂版進入實作計畫（建議）」。
 
+**Geometry 延伸：** 下列十個 task 記錄初版實作；使用者後續核准的 native Geometry Serialize／binary／Deserialize 擴充另見 [Geometry 計畫](geometry-implementation-plan.md)，取代下列初版對 geometry 值的拒絕範圍，geography 與 spatial index 仍不支援。
+
 **Status:** 使用者於 2026-10-12 核准計畫並選擇「分工實作並逐項覆核」；十個工作單元已整合；合併後完整 smoke、Debug／Release 通過，最終整體覆核與六項修正複核已完成。checkbox 依各項實際證據更新。畫面原型及規格核准不表示 SQL 還原、效能或正式程式已完成。
 
 ## Global Constraints

@@ -27,7 +27,7 @@ Native scalar types retain precision and temporal offsets, raw ANSI/Unicode/bina
 
 Large values are streamed in bounded chunks; a row may span multiple GO batches. The importer validates ordered chunks, totals and completion before its one target INSERT. Replaying a consumed row's terminal batch does not insert it twice. A failed row is not replaced with NULL, even if a client continues after errors. **Earlier successfully inserted rows may remain:** restoration of the whole file is not all-or-nothing. Stop and investigate any sqlcmd error.
 
-Legacy `text` rows use typed staging even for small values because direct varbinary assignment to text is rejected by SQL Server. This preserves the source codepage but increases script size and restore work for those rows. `ntext`, `image`, untyped XML and ordinary WKT text are supported within the documented tests; native geometry/geography are blocked. Spatial, alias/CLR types, typed XML, sql_variant, unsupported dependencies/table/column/index features and unreadable definitions are rejected rather than silently omitted. Refer to the current preflight details for the affected object/column.
+Legacy `text` rows use typed staging even for small values because direct varbinary assignment to text is rejected by SQL Server. This preserves the source codepage but increases script size and restore work for those rows. `ntext`, `image`, untyped XML and ordinary WKT text are supported within the documented tests; native SQL Server `sys.geometry` now uses `Serialize()` -> bounded binary chunks -> `geometry::Deserialize()`, with small values optionally inline. Native geometry DDL, NULL/empty, serialized bytes, SRID and Z/M are retained without WKT conversion, simplification or MakeValid. Geography, user-defined/alias CLR types, spatial indexes, typed XML, sql_variant, unsupported dependencies/table/column/index features and unreadable definitions are rejected rather than silently omitted. Tables with spatial indexes remain blocked in all modes, including data-only; geometry value support does not imply spatial-index scripting. Refer to the current preflight details for the affected object/column.
 
 The transaction remains open while source rows are exported, retaining snapshot versions. It is released before local hash verification and mirror work. Allow disk space for source version store, SQL hex expansion (often more than twice binary payload), partial output, verified local output and optional mirror copies. Progress reports actual source bytes/rows and separate file verification/mirror work; estimates can remain unknown. More bytes in an export do not mean rows have been successfully restored.
 
@@ -40,7 +40,7 @@ The opt-in runner defaults to instructions only:
 ```powershell
 .\tests\Run-MssqlExportIntegration.ps1
 .\tests\Run-MssqlExportIntegration.ps1 -Run -Server '(localdb)\mySQLPunkExportTest_20261012' -Profile Core -OutputDirectory '<new-empty-directory-under-authorized-FixtureRoot>'
-# Profiles Large and Concurrency use the same explicit arguments.
+# Profiles Geometry, Large and Concurrency use the same explicit arguments.
 # Official portable Go client is opt-in: -Client Go -SqlcmdPath <verified-exe>.
 # Profile ClientProbe verifies client semantics before a large restore.
 # Large -RestoreArtifact <prior-owned-export.sql> validates prior SHA/token, then restores it in a new fixture.
@@ -51,3 +51,9 @@ This task's runner deliberately accepts only its authorized dedicated instance a
 Core uses actual service artifacts, catalog comparison and streaming SHA-256 row digests. Large uses independent 1×/10× processes, actual file length, single-session restore and 25 ms memory sampling by service phase. Concurrency uses actual source connections with controlled second-connection updates, DDL, blocking/cancellation, disconnect and filesystem faults. The verifier retains only per-row digests, never whole field values. SQL fixture setup batching is separate from actual artifact restoration.
 
 See [verification evidence](design/mssql-export/verification.md) for exact PASS/FAIL/PENDING scope. Native wizard/device sound/long-job UI, SSH lifecycle and GUI import require their own evidence; local engine acceptance does not establish those, production, IIS or user-account acceptance.
+
+## Geometry restore compatibility
+
+The Geometry profile verifies native geometry on SQL Server 2025 (17.0.4025.3), including a 17,600,048-byte serialized value, with real service output restored through one classic sqlcmd session. It compares streamed Serialize() hashes plus catalog, SRID, Z/M and empty/validity observations; invalid but storable shapes remain invalid and unchanged. Malformed serialized bytes or invalid chunk ordering fail the guarded row without inserting a partial value.
+
+This is SQL Server's internal spatial serialization format, not portable OGC WKB. Cross-version engine compatibility and theoretical maximum-size geometries require their own restore acceptance. The client remains bounded; source Serialize(), target Deserialize() and staging still require SQL Server memory/tempdb/log/disk resources. See [Geometry design](design/mssql-export/geometry-design.md) and [verification](design/mssql-export/verification.md) for exact tested boundaries.

@@ -27,3 +27,9 @@ These decisions resolve implementation details within the approved design. Liste
 12. For Go sqlcmd, validate native UTF-8 input and use its supported equivalent command instead of requiring the classic-only -f65001 switch — the binding contract is UTF-8, variable substitution disabled, fail-on-error and one session, not an unsupported flag spelling — cost if wrong: non-ASCII metadata or client parsing could differ; require native Unicode/parser/temp-session probes and full large restore before acceptance. Preserve classic client FAIL evidence.
 
 13. Retain this plan's ignored SDD workspace as local operational evidence until the authorized fixture is retired — the acceptance runner intentionally consumes its fixture-environment.json authorization manifest, so deleting the workspace would break repeatable isolated verification — cost if wrong: untracked local reports remain and require later explicit cleanup; none are published, no raw bulk artifact is added to Git. Public rulings and final verification still live in Git.
+
+## Geometry extension rulings (2026-10-12)
+
+1. Support native sys.geometry only, keeping geography and spatial indexes blocked in all modes — the requested extension concerns Geometry value serialization and no spatial-index DDL exists — cost if wrong: spatial-indexed tables require a later index extension rather than receiving incomplete scripts.
+2. Use one consolidated implementation unit and one independent full extension review as both task and final gate — codec, continuation and restore acceptance form one coherent change — cost if wrong: no duplicate broad pass; the reviewer must receive the complete extension and actual evidence.
+3. Retain the ignored extension ledger/report alongside the authorized fixture evidence under original ruling13 — preserves repeatable acceptance and continuity — cost if wrong: local reports remain for later explicit cleanup; bulk data stays outside Git.

@@ -133,7 +133,7 @@ SQL Server 的 batch 長度受 network packet size 影響，總檔案可達數 G
 
 - MSSQL 長文字主要是 `varchar(max)`／`nvarchar(max)`，亦可能有既有 `text/ntext`；`longtext` 是 MySQL 的型別名稱。本版只處理 MSSQL。
 - 若 WKT 或其他內容實際存在一般文字／binary 欄位，依原欄位型別串流保存，不解析、縮短或簡化其中內容。
-- 原生 `geometry`／`geography` 本版在 metadata 預檢指出表與欄位，列為尚未支援；保留未來專用 codec 擴充點。後續需驗證原生內容、SRID、空間維度等還原資訊，不直接改成 nvarchar 來繞過。
+- 原生 `sys.geometry` 依 [Geometry 擴充規格](geometry-design.md) 支援 `Serialize → 分段 binary → Deserialize`，保留 native DDL、序列化 bytes、NULL／empty、SRID 與 Z/M；不轉成 WKT／nvarchar，也不修復或簡化圖形。`geography`、user CLR／alias 型別及 spatial index 仍在預檢明確阻擋；含 spatial index 的表連僅資料模式也維持拒絕。跨引擎版本與理論容量上限仍須額外還原驗證。
 - 使用者接受遇到極端型別再擴充，因此本版不要求同時支援所有空間／自訂型別，也不把未測試的多 GiB 邊界宣稱為已通過。真正超過型別容量、物件無法保真或環境資源不足時才明確停止，保留原正式檔案。
 
 ### 支援與預檢
@@ -148,7 +148,7 @@ v1 以一般 disk-based user tables 為主，從 `sys.*` 收集原生定義；�
 - 一般 rowstore PK/UQ/index，保留名稱、key 次序、ASC/DESC、INCLUDE、filter 與適用屬性。FK/CHECK 在資料之後建立，保留其有效／信任狀態。
 - 檢視定義用獨立 batch，保留必要 SET 選項、處理所選範圍內的依賴順序。無法讀取／加密／依賴未包含物件時預檢提出，不產生看似完整的結果。
 
-第一版不支援的特殊型別／表／索引特性須在預檢明列並阻擋受影響選取，不可默默轉成其他型別或省略。包含 temporal/ledger、memory-optimized、FILESTREAM、CLR/alias UDT、Always Encrypted、sql_variant、spatial、typed XML、partition／特殊索引等。新增支援必須有對應還原證據。
+第一版不支援的特殊型別／表／索引特性須在預檢明列並阻擋受影響選取，不可默默轉成其他型別或省略。包含 temporal/ledger、memory-optimized、FILESTREAM、user CLR/alias UDT、Always Encrypted、sql_variant、geography／spatial index、typed XML、partition／特殊索引等；原生 sys.geometry 值已由專用 binary codec 支援。新增支援必須有對應還原證據。
 
 依賴自訂 function、sequence、trigger 或未匯出物件的定義需要具體列出；不猜測可用性。結構模式若選取不完整 FK／view 依賴，要求調整範圍，不用 NOCHECK 隱藏缺漏。僅資料模式明示需要相容且已建立的目標結構，不保證任意既有資料庫都能直接匯入。
 
@@ -201,7 +201,7 @@ Idle → Preflight → Reading/Writing → Verifying → Publishing → Mirrorin
 | 畫面 | WinForms 真正選表、查詢中不凍結、雙層進度、DPI／小工作區、深淺色、取消／關閉生命週期 |
 | 大資料 | 超過 2 GiB 的實際產物；來源擴大至少 10 倍時記憶體不按匯出總量線性增加，记录 peak、rows、bytes、elapsed |
 | 大欄位 | 跨過舊 16 MiB 門檻的文字／binary 必須走分段且可還原，核心案例至少 64 MiB binary 及超過 16 MiB 的 Unicode 文字；比對 bytes／雜湊、NULL／空值、尾空白、跨 chunk 引號與 surrogate、無 PK、多 LOB 同列。缺段／重複／故意轉型或空間失敗後不得插入半列。超過 1 GiB 與接近型別理論上限的壓力測試另列環境條件與結果，未測不得宣稱通過 |
-| 空間欄位 | 原生 geometry／geography 在預檢具體指出並阻擋受影響選取；一般文字欄位中的大型 WKT 保留原文字，不自動轉型、截斷或簡化 |
+| 空間欄位 | 原生 sys.geometry 走 Serialize／bounded binary／Deserialize，比對還原前後 raw bytes、SRID、Z/M、NULL／empty，含 >16 MiB 單值；geography 與 spatial index 仍明確預檢拒絕。一般文字中的大型 WKT 保留原文字，不自動轉型、截斷或簡化 |
 | 型別與結構 | 在獨立測試 DB 匯入實際產物，驗證精度、offset、Unicode、binary、identity 後續新增、computed、rowversion 語意、constraints／indexes／view |
 | 持續寫入 | 用另一連線交易性修改父子表，匯出仍對應同一快照，不混用不同時間點；版本條件不足時預檢停止 |
 | 取消與競態 | 讀取／寫入／驗證／鏡像時取消、關閉窗、查詢等待、DB 中斷、磁碟滿、覆寫競態；原檔與結果狀態符合發布契約 |
@@ -218,3 +218,7 @@ Idle → Preflight → Reading/Writing → Verifying → Publishing → Mirrorin
 - 本文件已獲同意，具體實作步驟與測試安排見 [implementation-plan.md](implementation-plan.md)。規格核准不擴張為 merge、push 或 release 授權。
 - 舊版入口相容、metadata／SQL writer、worker／取消／發布、精靈與進度、實機 fixture 是同一功能的必要工作，不能只接好畫面就宣布完成。
 - 開發過程保留既有檔案 BOM／換行、未相關工作樹內容；重要結果追加 `history.md`。
+
+## 2026-10-12 Geometry 擴充
+
+使用者明確要求繼續推進 Geometry `Serialize → 分段 binary → Deserialize`，取代初版對 geometry 值的延後決策。範圍與驗收見 [Geometry 規格](geometry-design.md)／[實作計畫](geometry-implementation-plan.md)；實際 SQL2025 還原、完整回歸與 Debug／Release 編譯已通過，獨立覆核進行中。其餘 provider、geography、spatial index 與既有未驗證環境邊界維持不變。
