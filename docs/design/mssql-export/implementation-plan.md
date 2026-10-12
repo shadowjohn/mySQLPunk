@@ -361,11 +361,11 @@ private void OpenMssqlExportWizard(TreeDatabaseTarget target,
     MssqlExportMode mode, string initialSchema, string initialTable, bool backupEntry);
 ```
 
-- [ ] **1. 寫失敗測試，group `routing`。** 用mode/options捕獲 seam驗證四個handler在MSSQL時只開一次wizard、單表只預選指定schema/name、DataOnly保留、backup才帶mirror，view單物件不變成全庫；MySQL/SQLite/PostgreSQL仍走既有路徑。
-- [ ] **2. 跑routing group為紅。** 測到真正handler分流／options，不只搜尋source中的方法名字。
-- [ ] **3. 在既有SaveFileDialog／同步dump之前分流。** 使用target.ProviderName識別MSSQL，不能 `target.Database is my_mssql`，SSH會包wrapper。target.ConnectionInfo剔除runtime物件後交form，backup入口捕獲Directory/RetainCount並使用_backup_檔名；其餘export傳null mirror。指定單表按metadata解析原始schema/name，object_id由catalog確認，不從顯示comment反推。
-- [ ] **4. 收斂完成訊息。** handler根據wizard.Result更新main status，不無條件再跳「SQL已匯出」；使用者取消設定時無成功訊息。本機完成但mirror未完成顯示精確狀態。維持view-only舊入口、非互動backup caller及其他provider不變。
-- [ ] **5. 跑routing、wizard與既有dump/native-backup/connection groups，再Debug/Release build後提交。** 建議訊息 `feat(mssql-export): route MSSQL interactive SQL exports through wizard`。
+- [x] **1. 寫失敗測試，group `routing`。** 用mode/options捕獲 seam驗證四個handler在MSSQL時只開一次wizard、單表只預選指定schema/name、DataOnly保留、backup才帶mirror，view單物件不變成全庫；MySQL/SQLite/PostgreSQL仍走既有路徑。
+- [x] **2. 跑routing group為紅。** 測到真正handler分流／options，不只搜尋source中的方法名字。
+- [x] **3. 在既有SaveFileDialog／同步dump之前分流。** 使用target.ProviderName識別MSSQL，不能 `target.Database is my_mssql`，SSH會包wrapper。target.ConnectionInfo剔除runtime物件後交form，backup入口捕獲Directory/RetainCount並使用_backup_檔名；其餘export傳null mirror。指定單表按metadata解析原始schema/name，object_id由catalog確認，不從顯示comment反推。
+- [x] **4. 收斂完成訊息。** handler根據wizard.Result更新main status，不無條件再跳「SQL已匯出」；使用者取消設定時無成功訊息。本機完成但mirror未完成顯示精確狀態。維持view-only舊入口、非互動backup caller及其他provider不變。
+- [x] **5. 跑routing、wizard與既有dump/native-backup/connection groups，再Debug/Release build後提交。** 建議訊息 `feat(mssql-export): route MSSQL interactive SQL exports through wizard`。
 
 ## Task 10：隔離 DB 還原、大資料與交付證據
 
