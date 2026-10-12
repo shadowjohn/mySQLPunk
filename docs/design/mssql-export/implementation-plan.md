@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，2026-10-12 修訂版；使用者已回覆「照修訂版進入實作計畫（建議）」。
 
-**Status:** 使用者於 2026-10-12 核准計畫並選擇「分工實作並逐項覆核」；十個工作單元已整合；合併後完整 smoke、Debug／Release 通過，最終整體覆核進行中。checkbox 依各項實際證據更新。畫面原型及規格核准不表示 SQL 還原、效能或正式程式已完成。
+**Status:** 使用者於 2026-10-12 核准計畫並選擇「分工實作並逐項覆核」；十個工作單元已整合；合併後完整 smoke、Debug／Release 通過，最終整體覆核與六項修正複核已完成。checkbox 依各項實際證據更新。畫面原型及規格核准不表示 SQL 還原、效能或正式程式已完成。
 
 ## Global Constraints
 
@@ -390,9 +390,9 @@ runner要求明確server及全新／空output目錄，Integrated Security為第�
 - [ ] **6. Ssh與人工UI。** 明確測試SSH端點提供後驗證同job tunnel成功／取消／失敗釋放且main connection仍可用；缺環境保持pending。Native UI實際大資料作業、聲音一次／mute、長時間回應性另外列結果，不用HTML模擬截圖替代。
 - [x] **7. 正式本機檢查。** 所有定向cases通過後，保存／清除既有filter跑一次完整既有smoke、`build.bat Debug`、`build.bat Release`、`git diff --check`。檢查release既有CodexVerify／test EXE排除，fixture只在ignored全新目錄；必要時增filename正反案例，不為本功能執行packaging／release。任何AV攔截均停止該測試管道並記pending。
 - [x] **8. 文件與證據。** 操作文件寫實際已測sqlcmd命令、SNAPSHOT前提、支援／不支援能力、部分restore語意／資源成本、GUI匯入未驗證範圍、結果與取消文案。verification逐項填PASS/FAIL/PENDING、命令、版本、產物hash、記憶體記錄與未驗證理由；保留大檔local-only。history追加精準結果。
-- [ ] **9. 最終review及提交。** 依選定執行方式進行一次整體review，修正實質問題後只重跑受影響檢查；不循環產生無實質發現的review。建議訊息 `test(mssql-export): verify isolated restore and large export behavior`。未完成的DB／SSH／UI驗收保持明列，不宣稱功能全數驗收；merge/push/tag/release需另外授權。
+- [x] **9. 最終review及提交。** 依選定執行方式進行一次整體review，修正實質問題後只重跑受影響檢查；不循環產生無實質發現的review。建議訊息 `test(mssql-export): verify isolated restore and large export behavior`。未完成的DB／SSH／UI驗收保持明列，不宣稱功能全數驗收；merge/push/tag/release需另外授權。
 
-已完成的隔離還原與合併後檢查見 [verification.md](verification.md)。第 6 項的 SSH、實際長作業 UI／聲音及實體 DPI 仍待環境／人工驗收；第 9 項整體覆核進行中。
+已完成的隔離還原與合併後檢查見 [verification.md](verification.md)。第 6 項的 SSH、實際長作業 UI／聲音及實體 DPI 仍待環境／人工驗收；第 9 項已完成整體覆核及單次修正複核（4 Important、2 Minor 均已修正）；最後新增提示的原生畫面檢視因 Computer Use 停止狀態仍待驗證。
 
 ### 驗收命令（實際執行結果見 verification.md）
 
