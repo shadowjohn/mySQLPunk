@@ -143,7 +143,7 @@ if (!(Test-Path -LiteralPath $mysqlConnector)) {
     /r:System.Core.dll `
     /r:System.IO.Compression.dll `
     /r:System.IO.Compression.FileSystem.dll `
-    $source $preferencesSource $schemaSyncSource $erModelSource
+    $source $preferencesSource $schemaSyncSource $erModelSource (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.cs")
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
