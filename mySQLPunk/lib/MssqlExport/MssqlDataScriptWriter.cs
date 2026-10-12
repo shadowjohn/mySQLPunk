@@ -99,6 +99,9 @@ namespace mySQLPunk.lib.MssqlExport
             if (capacity < 1024) throw new NotSupportedException("Column metadata exceeds row buffer budget.");
             var buffer = new char[capacity]; var chunk = new byte[4096];
             var starts = new int[columns.Count]; var lengths = new int[columns.Count];
+            // Legacy text rejects direct varbinary assignment even for tiny values.
+            // Typed staging preserves its source codepage without a default-collation cast.
+            bool requiresTypedStage = columns.Any(c => c.NativeType == "text");
             long rows = 0, sourceBytes = 0; bool identity = columns.Any(c => c.Identity), identityOn = false;
             cancellation.ThrowIfCancellationRequested();
             while (reader.Read())
@@ -106,7 +109,7 @@ namespace mySQLPunk.lib.MssqlExport
                 cancellation.ThrowIfCancellationRequested();
                 if (identity && !identityOn) { batches.WriteStatement("SET IDENTITY_INSERT " + target + " ON;"); identityOn = true; }
                 int used = 0; bool handedOff = false;
-                if (columns.Count > 0 && batches.Bytes(header) + 4 > MssqlExportLimits.StatementBytes)
+                if (columns.Count > 0 && (requiresTypedStage || batches.Bytes(header) + 4 > MssqlExportLimits.StatementBytes))
                 {
                     sourceBytes += Handoff(reader, table, columns, new MssqlRowContinuation(buffer, starts, lengths, 0, 0, false, false), batches, cancellation, rows, sourceBytes, onRowsAndSourceBytes);
                     handedOff = true;

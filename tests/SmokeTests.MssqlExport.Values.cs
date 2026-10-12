@@ -36,6 +36,7 @@ public static partial class SmokeTests
     }
     private static void Values_ProjectionAndStreaming()
     {
+        Values_TinyLegacyText();
         AssertEquals("CONVERT(varbinary(max),CONVERT(varchar(max),[v]))", MssqlValueCodec.SourceExpression(ValueColumn("text")), "Legacy ANSI bytes");
         AssertEquals("CONVERT(varbinary(max),CONVERT(nvarchar(max),[v]))", MssqlValueCodec.SourceExpression(ValueColumn("xml")), "XML serialized UTF16");
         var data = new byte[] { 0x47,0,0x4f,0,0x0a,0,0x3a,0,0x72,0,0,0,0x24,0,0x28,0,0x78,0,0x29,0,0,0xd8 };
@@ -56,6 +57,18 @@ public static partial class SmokeTests
         using(var output = new StringWriter()) {
             new MssqlDataScriptWriter().WriteTable(reader,ValueTable(ValueColumn("varchar",1,"a"),ValueColumn("nvarchar",2,"b")),output,null,CancellationToken.None);
             Assert(output.ToString().Contains("VALUES (NULL,CONVERT(nvarchar(max),0x));") && output.ToString().Contains("VALUES (0x,NULL);"),"Empty differs from NULL");
+        }
+    }
+    private static void Values_TinyLegacyText()
+    {
+        var text = new MssqlColumnDefinition(new Dictionary<string,object> { {"type_name","text"}, {"column_id",1}, {"name","v"}, {"collation_name","Chinese_Taiwan_Stroke_CI_AS"}, {"max_length",-1} });
+        using(var reader = new ValueReader(new[] { new object[] { new byte[] { 0xA4,0xA4,0,32,32 } }, new object[] { new byte[0] }, new object[] { null } }))
+        using(var output = new StringWriter()) {
+            long bytes=0;
+            Assert(new MssqlDataScriptWriter().WriteTable(reader,ValueTable(text),output,(r,b)=>bytes=b,CancellationToken.None)==3,"Tiny legacy text rows consumed once");
+            string sql=output.ToString();
+            Assert(sql.Contains("varchar(max) COLLATE Chinese_Taiwan_Stroke_CI_AS") && sql.Contains(".WRITE(0xA4A4002020,"),"Tiny text uses typed raw-byte staging instead of illegal varbinary assignment");
+            Assert(bytes==5,"Legacy text exact bytes, empty and NULL accounting");
         }
     }
     private static void Values_BudgetsAndHandoff()
