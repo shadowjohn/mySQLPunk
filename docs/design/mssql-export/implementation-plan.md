@@ -165,16 +165,16 @@ internal MssqlExportSchema ReadSchema(SqlConnection connection, SqlTransaction t
 internal IReadOnlyList<MssqlExportIssue> Validate(MssqlExportSchema schema, MssqlExportRequest request);
 ```
 
-- [ ] **1. 寫失敗測試，group `metadata`。** 覆蓋同名不同 schema／名稱含 `]`、spatial 明列、依賴缺漏、snapshot OFF／過渡狀態、estimate 缺失不是 0、typed XML／UDT 拒絕；assert：
+- [x] **1. 寫失敗測試，group `metadata`。** 覆蓋同名不同 schema／名稱含 `]`、spatial 明列、依賴缺漏、snapshot OFF／過渡狀態、estimate 缺失不是 0、typed XML／UDT 拒絕；assert：
   ```csharp
   Assert(catalog.Tables.Count == 2, "dbo.orders and sales.orders are distinct");
   Assert(catalog.Tables[0].EstimatedRows == null, "Unavailable estimate is unknown");
   Assert(issues.Any(x => x.Code == "UnsupportedSpatial" && x.ColumnName == "shape"), "Name rejected column");
   ```
-- [ ] **2. 跑 metadata group 為紅。** metadata mapping 以 fixture rows 測純轉換；SQL查詢本身的證據留 Task 10，不能把 fake 當 live query 驗證。
-- [ ] **3. 實作版本／能力感知 sys queries。** metadata 需涵蓋 tables/columns/types/schemas、extended properties、identity/computed/default、rowstore indexes/index_columns、FK/check、view definition/SET/dependencies。用可用 catalog 欄位／版本選查詢，舊版本缺少 ledger／temporal 欄位時不查不存在欄位。看不到 definition 或權限錯誤明確報錯，不以空集合替代。針對 spec 特殊表／型別／索引完整列出阻擋原因。
-- [ ] **4. 實作 Source transaction／reader。** 改變 owned connection 的 database；Inspect以無transaction的ReadSchema供確認頁預檢，完畢dispose source，不在使用者思考時持有快照。含資料開始時再確認 snapshot ON，BeginRead 開一個 Snapshot transaction 並重新凍結／驗證 schema；SchemaOnly 不開資料快照。OpenRows 明確欄位、無排序／OFFSET需求、SequentialAccess；command timeout 直接設為 0 並登記 Cancel，dispose 登記先於 command。CompleteRead 核對 object IDs／完整 definition fingerprint，再結束交易；例外／取消 rollback 並 dispose。schema改變中途不得 retry 續跑。
-- [ ] **5. 跑 metadata group 為綠並提交。** 加 reader/command/dispose 次序 fake 驗證；實際 snapshot／DDL race 在 Task 10。建議訊息 `feat(mssql-export): collect native metadata and preflight snapshot export`。
+- [x] **2. 跑 metadata group 為紅。** metadata mapping 以 fixture rows 測純轉換；SQL查詢本身的證據留 Task 10，不能把 fake 當 live query 驗證。
+- [x] **3. 實作版本／能力感知 sys queries。** metadata 需涵蓋 tables/columns/types/schemas、extended properties、identity/computed/default、rowstore indexes/index_columns、FK/check、view definition/SET/dependencies。用可用 catalog 欄位／版本選查詢，舊版本缺少 ledger／temporal 欄位時不查不存在欄位。看不到 definition 或權限錯誤明確報錯，不以空集合替代。針對 spec 特殊表／型別／索引完整列出阻擋原因。
+- [x] **4. 實作 Source transaction／reader。** 改變 owned connection 的 database；Inspect以無transaction的ReadSchema供確認頁預檢，完畢dispose source，不在使用者思考時持有快照。含資料開始時再確認 snapshot ON，BeginRead 開一個 Snapshot transaction 並重新凍結／驗證 schema；SchemaOnly 不開資料快照。OpenRows 明確欄位、無排序／OFFSET需求、SequentialAccess；command timeout 直接設為 0 並登記 Cancel，dispose 登記先於 command。CompleteRead 核對 object IDs／完整 definition fingerprint，再結束交易；例外／取消 rollback 並 dispose。schema改變中途不得 retry 續跑。
+- [x] **5. 跑 metadata group 為綠並提交。** 加 reader/command/dispose 次序 fake 驗證；實際 snapshot／DDL race 在 Task 10。建議訊息 `feat(mssql-export): collect native metadata and preflight snapshot export`。
 
 ## Task 3：原生結構腳本與依賴順序
 
@@ -196,7 +196,7 @@ internal void WriteAfterData(MssqlExportSchema schema, MssqlExportRequest reques
   ```
 - [ ] **2. 跑 schema group 為紅。** 加 circular FK、未包含 view/function/sequence／trigger、不可見 definition 的失敗案例；不能生成成功卻遺漏物件。
 - [ ] **3. 實作前後兩階段 writer。** 前段 schema/table、原生欄位與 default/computed；後段 keys/indexes、FK/CHECK、comments、依賴排序 views。自參照／循环 FK 留資料後建立。資料來源不含 computed／rowversion 值，摘要說明 rowversion 重生。僅資料兩段皆不建立物件；僅結構仍產生完整兩段。型別／identifier 不經 DatabaseDumpService mapper。
-- [ ] **4. 明定 restore 語意與 identity 處理。** 結構模式預期空白／無衝突目標，存在物件應明確失敗，不產生 DROP DATABASE/TABLE；DataOnly 要求相容既有表。identity 的 seed/increment/last value 與空表、負 increment 情況須能供 Task 4 資料段及 Task 10 後續新增驗證，避免「已插最大值」被誤當全部規則。
+- [ ] **4. 明定 restore 語意與 identity 處理。** 結構模式預期空白／無衝突目標，存在物件應明確失敗，不產生 DROP DATABASE/TABLE；DataOnly 要求相容既有表。identity 的 seed/increment 與匯入值，以及空表、負 increment 的後續新增須能供 Task 4 資料段及 Task 10 驗證；依設計不承諾來源配號間隙或完整 last_value 歷史，避免「已插最大值」被誤當全部規則。
 - [ ] **5. 跑 schema group 為綠並提交。** SQL tokens 測試不是還原證據；native execution 留 Task 10。建議訊息 `feat(mssql-export): script native schema and ordered dependencies`。
 
 ## Task 4：一般列串流、型別及批次預算
