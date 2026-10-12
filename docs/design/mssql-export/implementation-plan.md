@@ -392,7 +392,7 @@ runner要求明確server及全新／空output目錄，Integrated Security為第�
 - [x] **8. 文件與證據。** 操作文件寫實際已測sqlcmd命令、SNAPSHOT前提、支援／不支援能力、部分restore語意／資源成本、GUI匯入未驗證範圍、結果與取消文案。verification逐項填PASS/FAIL/PENDING、命令、版本、產物hash、記憶體記錄與未驗證理由；保留大檔local-only。history追加精準結果。
 - [x] **9. 最終review及提交。** 依選定執行方式進行一次整體review，修正實質問題後只重跑受影響檢查；不循環產生無實質發現的review。建議訊息 `test(mssql-export): verify isolated restore and large export behavior`。未完成的DB／SSH／UI驗收保持明列，不宣稱功能全數驗收；merge/push/tag/release需另外授權。
 
-已完成的隔離還原與合併後檢查見 [verification.md](verification.md)。第 6 項的 SSH、實際長作業 UI／聲音及實體 DPI 仍待環境／人工驗收；第 9 項已完成整體覆核及單次修正複核（4 Important、2 Minor 均已修正）；最後新增提示的原生畫面檢視因 Computer Use 停止狀態仍待驗證。
+已完成的隔離還原與合併後檢查見 [verification.md](verification.md)。第 6 項的 SSH、實際長作業 UI／聲音及實體 DPI 仍待環境／人工驗收；第 9 項已完成整體覆核及單次修正複核（4 Important、2 Minor 均已修正）；最後新增提示的深／淺色原生 fixture 畫面檢視已於 2026-10-12 重驗通過，包含統計、停滯 ETA、取消結果及等待清理後關閉；模擬服務不代表真實長作業 UI 驗收。
 
 ### 驗收命令（實際執行結果見 verification.md）
 
